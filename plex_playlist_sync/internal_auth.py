@@ -30,6 +30,10 @@ MAX_CLOCK_SKEW_SECONDS = 60
 NONCE_TTL_SECONDS = 120
 MIN_SECRET_LENGTH = 32
 
+# Gateway<->core contract version. Independent of the package version; bump on any breaking change to
+# the signed-call scheme, the allowlists or the internal endpoints.
+PROTOCOL_VERSION = 1
+
 logger = logging.getLogger(__name__)
 
 

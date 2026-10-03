@@ -220,6 +220,7 @@ class Database:
                 (27, self._migration_v27),
                 (28, self._migration_v28),
                 (29, self._migration_v29),
+                (30, self._migration_v30),
             ]
 
             for version, migration_fn in migrations:
@@ -1160,6 +1161,22 @@ class Database:
     def _migration_v29(self, cur: sqlite3.Cursor) -> None:
         """Index ``login_attempts.attempted_at`` so the periodic prune is a range scan, not a table scan."""
         cur.execute("CREATE INDEX IF NOT EXISTS idx_login_attempts_at ON login_attempts(attempted_at);")
+
+    def _migration_v30(self, cur: sqlite3.Cursor) -> None:
+        """DMZ ergonomics: role-change tracking, a stable instance id and a small key-value table.
+
+        Everything is column/table-existence guarded so it is idempotent across role flips and re-runs.
+        """
+        cur.execute("INSERT OR IGNORE INTO general_settings (id, application_url) VALUES (1, '')")
+        cur.execute("PRAGMA table_info(general_settings);")
+        gs_cols = {row[1] for row in cur.fetchall()}
+        for col in ("last_role", "instance_id", "role_change_notice"):
+            if col not in gs_cols:
+                cur.execute(f"ALTER TABLE general_settings ADD COLUMN {col} TEXT NOT NULL DEFAULT '';")
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS kv_store (key TEXT PRIMARY KEY, value TEXT NOT NULL, "
+            "updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP))"
+        )
 
     def _migration_v28(self, cur: sqlite3.Cursor) -> None:
         """Discography batch markers, legacy single-quota migration and per-type auto-approve bits.
@@ -3236,6 +3253,86 @@ class Database:
                 self.conn.commit()
 
         return self.get_general_settings()
+
+    # -------------------------------------------------------------------------
+    # Deployment role / instance identity / key-value (migration v30)
+    # -------------------------------------------------------------------------
+
+    def get_instance_id(self) -> str:
+        """Random id for this database, created on first use and then stable."""
+        with self._lock:
+            self.conn.execute("INSERT OR IGNORE INTO general_settings (id, application_url) VALUES (1, '')")
+            row = self.conn.execute("SELECT instance_id FROM general_settings WHERE id = 1").fetchone()
+            current = str(row["instance_id"] or "") if row else ""
+            if not current:
+                current = uuid.uuid4().hex
+                self.conn.execute(
+                    "UPDATE general_settings SET instance_id = ? WHERE id = 1 AND instance_id = ''", (current,)
+                )
+                self.conn.commit()
+                row = self.conn.execute("SELECT instance_id FROM general_settings WHERE id = 1").fetchone()
+                current = str(row["instance_id"])
+            return current
+
+    def get_last_role(self) -> str:
+        with self._lock:
+            row = self.conn.execute("SELECT last_role FROM general_settings WHERE id = 1").fetchone()
+            return str(row["last_role"] or "") if row else ""
+
+    def set_last_role(self, role: str) -> None:
+        with self._lock:
+            self.conn.execute("INSERT OR IGNORE INTO general_settings (id, application_url) VALUES (1, '')")
+            self.conn.execute("UPDATE general_settings SET last_role = ? WHERE id = 1", (str(role),))
+            self.conn.commit()
+
+    def get_role_change_notice(self) -> Optional[dict[str, Any]]:
+        """The pending role-change record ({from_role, to_role, changed_at, dismissed}) or None."""
+        with self._lock:
+            row = self.conn.execute("SELECT role_change_notice FROM general_settings WHERE id = 1").fetchone()
+            raw = str(row["role_change_notice"] or "") if row else ""
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            return None
+        return data if isinstance(data, dict) else None
+
+    def set_role_change_notice(self, notice: Optional[dict[str, Any]]) -> None:
+        with self._lock:
+            self.conn.execute("INSERT OR IGNORE INTO general_settings (id, application_url) VALUES (1, '')")
+            self.conn.execute(
+                "UPDATE general_settings SET role_change_notice = ? WHERE id = 1",
+                (json.dumps(notice) if notice else "",),
+            )
+            self.conn.commit()
+
+    def has_any_users(self) -> bool:
+        with self._lock:
+            return self.conn.execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None
+
+    def get_kv(self, key: str) -> Optional[str]:
+        with self._lock:
+            row = self.conn.execute("SELECT value FROM kv_store WHERE key = ?", (str(key),)).fetchone()
+            return str(row["value"]) if row else None
+
+    def set_kv(self, key: str, value: str) -> None:
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO kv_store (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+                (str(key), str(value)),
+            )
+            self.conn.commit()
+
+    def count_active_sessions(self) -> int:
+        """Number of unexpired sessions (a count only; nothing identifying)."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) AS n FROM sessions WHERE expires_at IS NULL OR expires_at > ?", (now_iso,)
+            ).fetchone()
+            return int(row["n"]) if row else 0
 
     def get_api_key(self) -> str:
         """Fetches api_key from general_settings. If empty, generates secrets.token_hex(16), saves it, and returns it."""

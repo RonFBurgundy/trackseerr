@@ -5,7 +5,11 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from plex_playlist_sync.api.dependencies import get_db, require_service_principal
+from plex_playlist_sync import __version__
+from plex_playlist_sync.api.dependencies import get_config, get_db, require_service_principal, tier_of
+from plex_playlist_sync.config import Config
+from plex_playlist_sync.gateway_link import record_heartbeat
+from plex_playlist_sync.internal_auth import PROTOCOL_VERSION
 from plex_playlist_sync.api.routes.auth import LocalLoginRequest, _login_http_error
 from plex_playlist_sync.local_login import LoginError, verify_local_login
 from plex_playlist_sync.storage import Database
@@ -70,3 +74,37 @@ def session_status(
     elif state["auth_type"] == "local" and not state["mfa_enabled"] and db.get_account_settings()["require_mfa_local"]:
         reason = "mfa_enrollment_required"
     return {"valid": reason is None} if reason is None else {"valid": False, "reason": reason}
+
+
+@router.get("/hello")
+def hello(
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+    _principal: dict[str, Any] = Depends(require_service_principal),
+) -> dict[str, Any]:
+    """Version/protocol handshake for the gateway. Service principal only; 404 for everyone else."""
+    return {
+        "protocol": PROTOCOL_VERSION,
+        "version": __version__,
+        "role": tier_of(config),
+        "instance_id": db.get_instance_id(),
+    }
+
+
+class GatewayHeartbeat(BaseModel):
+    version: str = Field(..., max_length=64)
+    protocol: int = Field(..., ge=0, le=1_000_000)
+    gateway_id: str = Field(..., min_length=1, max_length=64)
+    started_at: float = Field(..., ge=0)
+    active_sessions: int = Field(..., ge=0, le=10_000_000)
+
+
+@router.post("/gateway-heartbeat")
+def gateway_heartbeat(
+    req: GatewayHeartbeat,
+    db: Database = Depends(get_db),
+    _principal: dict[str, Any] = Depends(require_service_principal),
+) -> dict[str, Any]:
+    """Records the gateway's liveness (in memory and in the ``gateway_status`` kv row)."""
+    record_heartbeat(db, req.model_dump())
+    return {"ok": True, "protocol": PROTOCOL_VERSION, "version": __version__}

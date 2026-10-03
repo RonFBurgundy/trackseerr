@@ -115,9 +115,84 @@ The default homelab configuration. The web UI, API, sync scheduler, and download
 For exposed environments, TrackSeerr can be deployed across two isolated network tiers:
 
 - **Tier 1 (Public Gateway - `trackseerr-gateway`)**: Placed on the reverse proxy network (`proxynet`). Completely stateless with zero volume mounts, zero media storage access, and zero downloader credentials. Handles public ingress, Plex OAuth, discovery queries, and request submissions.
-- **Tier 2 (Internal Core - `trackseerr-core`)**: Isolated on `internal-net` with no public port exposure. Mounts `/data`, `/music`, and `/downloads`. Manages downloader credentials, indexers, file organization, Mutagen inspection, and Plex library refresh pings.
+- **Tier 2 (Internal Core - `trackseerr-core`)**: Isolated on the internal network with no public port exposure. Mounts `/data`, `/music`, and `/downloads`. Manages downloader credentials, indexers, file organization, Mutagen inspection, and Plex library refresh pings.
 
 *For complete details on threat boundaries and configuration, see the [Architecture and Security Reference](docs/ARCHITECTURE_AND_SECURITY.md).*
+
+---
+
+### Choosing a deployment
+
+Use **all-in-one** (`ROLE=all-in-one`) when TrackSeerr is only reachable over your LAN, a VPN, or Tailscale. Use **TrackSeerr Core + TrackSeerr Requests** whenever the request app faces the internet (reverse proxy, Cloudflare Tunnel, port forward).
+
+In all-in-one mode the public web process shares a container with your Plex token, downloader credentials, Last.fm keys, and read/write access to your library, so any exploit of the web layer reaches all of it. In the split setup the public container (Requests) holds none of that: no volumes, no secrets beyond a signing key, and it can only perform requester actions on Core. A compromise of Requests exposes request data, not your library or admin controls.
+
+| Template | `ROLE` | Holds | Faces |
+|---|---|---|---|
+| `unraid/trackseerr.xml` | `all-in-one` | Everything | LAN/VPN only |
+| `unraid/trackseerr-core.xml` | `core` | DB, `/config`, `/data`, Plex, Last.fm, downloaders | LAN admin port only |
+| `unraid/trackseerr-requests.xml` | `gateway` | Core URL, shared secret, public URL | Internet via proxy/tunnel |
+
+### Networking
+
+The two containers talk over a dedicated **internal network** (default name `trackseerr-internal`, override with `TRACKSEERR_INTERNAL_NETWORK` in the compose file; on Unraid just pick any name and use it on both containers). It coexists with your existing networks rather than replacing them:
+
+- **Requests** joins the internal network *and* the network your reverse proxy lives on (`proxynet` or a custom bridge; `PROXY_NETWORK` in the compose file, declared `external: true`).
+- **Core** joins the internal network *and* its normal LAN/bridge/`br0` network so it can reach Plex and your downloaders and publish its admin port (`CORE_LAN_BIND`, default `127.0.0.1`).
+- **Cloudflare Tunnel:** `cloudflared` must share a network with **Requests**, never with Core. Point the tunnel at `http://trackseerr-gateway:5250` (your Requests container name).
+- **Reverse proxies** (SWAG, NPM, Traefik, Caddy) only need to reach Requests. Set `TRUSTED_PROXIES` on Requests to the proxy's IP/CIDR.
+
+On Unraid, create the network once (`docker network create trackseerr-internal`), then add `--network=trackseerr-internal` to Extra Parameters of both containers (needs Docker 25+, Unraid 7). On older versions, run `docker network connect trackseerr-internal <container>` after the container starts.
+
+#### Multi-network verification
+
+Verified on Docker 29.8.1 with `alpine`. This was not tested on Unraid itself.
+
+```bash
+docker network create --internal ts-verify-internal
+docker network create ts-verify-lan
+# core-like container on BOTH networks in a single `docker run` (Docker 25+)
+docker run -d --name ts-verify-core --network ts-verify-internal --network ts-verify-lan alpine:latest \
+  sh -c 'while true; do printf "HTTP/1.0 200 OK\r\n\r\ncore-ok\n" | nc -l -p 5251; done'
+# gateway-like container on the internal network only
+docker run -d --name ts-verify-gw --network ts-verify-internal alpine:latest sleep 300
+
+docker exec ts-verify-gw wget -q -T5 -O- http://ts-verify-core:5251/   # -> core-ok (name resolution + traffic over internal net)
+docker exec ts-verify-gw wget -q -T5 -O- http://1.1.1.1/               # -> fails: Network unreachable (no egress)
+docker exec ts-verify-core wget -q -T5 -O- http://1.1.1.1/             # -> succeeds (core egress via LAN network)
+
+# fallback for hosts whose UI allows only one network:
+docker run -d --name ts-verify-late --network ts-verify-lan alpine:latest sleep 300
+docker network connect ts-verify-internal ts-verify-late                # -> ts-verify-late can now reach ts-verify-core:5251
+```
+
+### Migrating from all-in-one
+
+The core is your existing container with a role change: same image, `/config` and database, nothing to export or import.
+
+1. Generate a secret: `openssl rand -hex 32`.
+2. Edit the existing container (or its compose service): set `ROLE=core`, `INTERNAL_CORE_SECRET=<secret>`, and `APPLICATION_URL` to the **public Requests URL**. Map the admin port (5251) and add the internal network.
+3. Apply. On first boot as core, TrackSeerr logs a one-time checklist and shows it as a dismissible banner in the admin UI.
+4. Create the **TrackSeerr Requests** container (template or compose) with the same secret, `TRACKSEERR_CORE_URL=http://<core container>:5251`, the same `APPLICATION_URL`, on the proxy network and the internal network.
+5. Point your reverse proxy or tunnel at Requests instead of the old container.
+6. The Plex webhook URL is unchanged. Users sign in once more on Requests. Reverting is the same edit back to `ROLE=all-in-one`.
+
+### `init-dmz`
+
+`init-dmz` generates the secret, a `docker-compose.dmz.yml` and a `.env` (mode 0600) and prints the exact Unraid values for both templates. It never overwrites existing files (it writes `<name>.new` instead) and makes no network calls.
+
+```bash
+python -m plex_playlist_sync init-dmz \
+  [--from-existing] [--env-file PATH] [--public-url URL] \
+  [--core-lan-bind IP] [--network NAME] [--out DIR]
+```
+
+- `--from-existing`: carry non-secret settings from the running all-in-one container's environment (or `--env-file PATH`) into the core service; secrets such as `PLEX_TOKEN` are referenced as `${PLEX_TOKEN}` with the value only in `.env`.
+- `--env-file PATH`: read the existing settings from this file instead.
+- `--public-url URL`: the public Requests URL (`APPLICATION_URL`).
+- `--core-lan-bind IP`: LAN IP for Core's admin port (default `127.0.0.1`; `0.0.0.0` is rejected).
+- `--network NAME`: internal network name (default `trackseerr-internal`).
+- `--out DIR`: output directory (default `.`).
 
 ---
 
@@ -131,6 +206,8 @@ Open your Unraid Terminal and download the template:
 curl -o /boot/config/plugins/dockerMan/templates-user/my-trackseerr.xml \
   https://raw.githubusercontent.com/RonFBurgundy/trackseerr/main/unraid/trackseerr.xml
 ```
+
+For the split setup, install `trackseerr-core.xml` and `trackseerr-requests.xml` the same way (see [Choosing a deployment](#choosing-a-deployment)). They create containers named `TrackSeerr-Core` and `TrackSeerr-Requests` (Docker names cannot contain spaces), so on Unraid `TRACKSEERR_CORE_URL` is `http://TrackSeerr-Core:5251`. The compose file names them `trackseerr-core` / `trackseerr-gateway` instead, so there it is `http://trackseerr-core:5251`. If you rename either container, update the URL to match.
 
 Navigate to **Docker** -> **Add Container** -> select **my-trackseerr** from the **Template** dropdown, verify your Plex server IP address, and click **Apply**.
 
@@ -182,8 +259,6 @@ Access the dashboard at `http://<your-server-ip>:5250`.
 ### Docker Compose: Hardened Two-Tier DMZ Mode
 
 ```yaml
-version: '3.8'
-
 services:
   trackseerr-gateway:
     image: ghcr.io/ronfburgundy/trackseerr:latest
@@ -203,7 +278,7 @@ services:
       - LOG_LEVEL=INFO
     networks:
       - proxynet
-      - internal-net
+      - internal
 
   trackseerr-core:
     image: ghcr.io/ronfburgundy/trackseerr:latest
@@ -216,6 +291,7 @@ services:
       - /path/to/data:/data
     environment:
       - ROLE=core
+      - CORE_LAN_BIND=${CORE_LAN_BIND:-127.0.0.1}
       - INTERNAL_CORE_SECRET=${INTERNAL_CORE_SECRET:?set a 32+ char secret (openssl rand -hex 32)}
       - PORT=5251
       - PUID=1000
@@ -229,15 +305,15 @@ services:
       - SEARCH_SIMILARITY_THRESHOLD=0.9
       - LOG_LEVEL=INFO
     networks:
-      - internal-net
+      - internal
       - core-lan
 
 networks:
   proxynet:
-    name: proxynet
-    driver: bridge
-  internal-net:
-    name: trackseerr-internal-net
+    name: ${PROXY_NETWORK:-proxynet}
+    external: true
+  internal:
+    name: ${TRACKSEERR_INTERNAL_NETWORK:-trackseerr-internal}
     internal: true
   core-lan:
     name: trackseerr-core-lan

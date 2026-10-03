@@ -3,8 +3,6 @@
 # Two-Tier DMZ Architecture: Stateless Gateway (DMZ) + Core Acquisition Engine
 # =============================================================================
 
-version: '3.8'
-
 services:
   # ---------------------------------------------------------------------------
   # Tier 1: Public Gateway (DMZ Ingress)
@@ -34,7 +32,7 @@ services:
       - LOG_LEVEL=INFO
     networks:
       - proxynet
-      - internal-net
+      - internal
     # Zero filesystem volumes mounted into gateway tier
 
   # ---------------------------------------------------------------------------
@@ -60,6 +58,8 @@ services:
       - /path/to/data:/data
     environment:
       - ROLE=core
+      # Informational: tells core which LAN IP its admin port is published on (suppresses the exposure warning).
+      - CORE_LAN_BIND=${CORE_LAN_BIND:-127.0.0.1}
       - INTERNAL_CORE_SECRET=${INTERNAL_CORE_SECRET:?set a 32+ char secret (openssl rand -hex 32)}
       - APPLICATION_URL=https://trackseerr.yourdomain.com
       - PORT=5251
@@ -78,15 +78,18 @@ services:
       # - LASTFM_API_KEY=your_lastfm_api_key
       # - LASTFM_API_SECRET=your_lastfm_api_secret
     networks:
-      - internal-net
+      - internal
       - core-lan
 
 networks:
+  # Your EXISTING reverse-proxy / cloudflared network (create it first or change PROXY_NETWORK).
+  # Cloudflare Tunnel's cloudflared must share this network with the gateway, never with core.
   proxynet:
-    name: proxynet
-    driver: bridge
-  internal-net:
-    name: trackseerr-internal-net
+    name: ${PROXY_NETWORK:-proxynet}
+    external: true
+  # Private gateway<->core link: no egress, no published ports.
+  internal:
+    name: ${TRACKSEERR_INTERNAL_NETWORK:-trackseerr-internal}
     internal: true
   # Non-internal bridge so core can publish its admin port and reach Plex on the LAN.
   core-lan:

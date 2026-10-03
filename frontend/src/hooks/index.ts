@@ -11,3 +11,6 @@ export * from './useIssues';
 export * from './useLocalLogin';
 export * from './useAccount';
 export * from './useAdminUsers';
+export * from './useDeploymentIdentity';
+export * from './useGatewayStatus';
+export * from './useRoleChangeNotice';

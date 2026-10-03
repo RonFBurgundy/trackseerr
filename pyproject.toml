@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trackseerr"
-version = "0.1.0.dev1"
+version = "1.0.0"
 description = "The music request, discovery, and playlist sync suite for Plex, Plexamp & Lidarr."
 readme = "README.md"
 requires-python = ">=3.10"

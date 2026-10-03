@@ -14,3 +14,4 @@ export * from './issueService';
 export * from './localAuthService';
 export * from './accountService';
 export * from './adminUsersService';
+export * from './deploymentService';

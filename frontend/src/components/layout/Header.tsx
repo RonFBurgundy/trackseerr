@@ -12,7 +12,7 @@ import {
   Menu,
   X,
 } from 'lucide-react';
-import type { User, UserQuota } from '@/types/models';
+import type { DeploymentTier, User, UserQuota } from '@/types/models';
 import type { MainTab } from './Navigation';
 import { TapeDeckButton, TapeTransportBay, QuotaBadge } from '@/components/ui';
 
@@ -26,6 +26,7 @@ export interface HeaderProps {
   activeTab?: MainTab;
   onTabChange?: (tab: MainTab) => void;
   isAdmin?: boolean;
+  tier?: DeploymentTier;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -38,7 +39,16 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   onTabChange,
   isAdmin = false,
+  tier = 'all-in-one',
 }) => {
+  const isGateway = tier === 'gateway';
+  const brandSuffix = isGateway ? <span className="text-white"> Requests</span> : null;
+  const coreBadge =
+    tier === 'core' ? (
+      <span className="ml-2 px-1.5 py-0.5 text-[9px] font-mono font-bold uppercase border border-[var(--border-default)] rounded-[3px] text-[var(--accent-amber)] align-middle">
+        Core
+      </span>
+    ) : null;
   const navItems: Array<{ id: MainTab; label: string; icon: React.ReactNode; adminOnly?: boolean }> = [
     { id: 'discover', label: 'Discover', icon: <Compass className="h-4 w-4" /> },
     { id: 'requests', label: 'Requests', icon: <Inbox className="h-4 w-4" /> },
@@ -72,6 +82,8 @@ export const Header: React.FC<HeaderProps> = ({
           />
           <span className="text-base sm:text-lg font-black tracking-wider uppercase text-white font-mono leading-none">
             Track<span className="text-[#e5a00d]">Seerr</span>
+            {brandSuffix}
+            {coreBadge}
           </span>
         </div>
 
@@ -105,6 +117,8 @@ export const Header: React.FC<HeaderProps> = ({
             />
             <span className="text-base font-black tracking-wider uppercase text-white font-mono leading-none">
               Track<span className="text-[#e5a00d]">Seerr</span>
+              {brandSuffix}
+              {coreBadge}
             </span>
           </div>
         )}

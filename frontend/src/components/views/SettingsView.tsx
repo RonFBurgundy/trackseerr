@@ -59,6 +59,7 @@ import { ScrobblingSettings } from '@/components/scrobbling';
 import { NamingFormatsEditor } from '@/components/naming/NamingFormatsEditor';
 import { AccountPanel } from '@/components/account';
 import { UsersPanel } from '@/components/admin';
+import { RequestPortalCard, RoleChangeBanner } from '@/components/deployment';
 import type { UseAccountReturn } from '@/hooks/useAccount';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import {
@@ -83,6 +84,8 @@ export type SettingsTab =
 export interface SettingsViewProps {
   isAdmin?: boolean;
   showGatewayNote?: boolean;
+  /** Core tier only: shows the Request portal card under System. */
+  isCore?: boolean;
   accountHook: UseAccountReturn;
   currentUserId?: string | number;
   /** Local sign-in succeeded but MFA enrollment is mandatory: only the Account tab is usable. */
@@ -92,6 +95,7 @@ export interface SettingsViewProps {
 export const SettingsView: React.FC<SettingsViewProps> = ({
   isAdmin = false,
   showGatewayNote = false,
+  isCore = false,
   accountHook,
   currentUserId,
   mfaEnrollmentRequired = false,
@@ -459,6 +463,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <span>{toastMessage}</span>
         </div>
       )}
+
+      <RoleChangeBanner enabled={isAdmin && !mfaEnrollmentRequired} />
 
       {showGatewayNote && (
         <div className="bg-[#121212] border border-[#2a2a2a] rounded-[4px] px-4 py-3 text-xs font-mono text-neutral-400">
@@ -1285,6 +1291,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       {/* System Status Subtab */}
       {!isLoading && activeTab === 'status' && (
+        <div className="space-y-6">
+        {isAdmin && isCore && <RequestPortalCard />}
         <MachinedCard className="p-6 max-w-2xl space-y-4">
           <h4 className="text-sm font-bold uppercase font-mono text-white">System Diagnostics</h4>
           <div className="divide-y divide-[#1f1f1f] text-xs font-mono">
@@ -1310,6 +1318,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
         </MachinedCard>
+        </div>
       )}
     </div>
   );

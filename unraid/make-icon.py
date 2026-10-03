@@ -113,13 +113,33 @@ def render_svg_to_png(
     return False
 
 
+REQUESTS_BODY_STOPS = {
+    "#2d5594": "#0f766e",
+    "#1e3a6d": "#115e59",
+    "#152747": "#134e4a",
+    "#0e1b33": "#0a2e2b",
+}
+
+
+def write_requests_variant(src: Path, dst: Path) -> None:
+    """Write the teal "TrackSeerr Requests" variant SVG (recoloured body, same artwork)."""
+    svg = src.read_text(encoding="utf-8")
+    for old, new in REQUESTS_BODY_STOPS.items():
+        svg = svg.replace(f'stop-color="{old}"', f'stop-color="{new}"')
+    svg = svg.replace("#38bdf8", "#5eead4")
+    dst.write_text(svg, encoding="utf-8")
+
+
 def build_all_icons() -> bool:
     """Build all TrackSeerr branding icons."""
     repo_root = find_repo_root()
+    requests_svg = repo_root / "unraid" / "trackseerr-requests.svg"
+    write_requests_variant(repo_root / "unraid" / "trackseerr.svg", requests_svg)
     svg_source = repo_root / "unraid" / "trackseerr.svg"
     targets = [
         (svg_source, repo_root / "unraid" / "trackseerr.png", 512, 512),
         (svg_source, repo_root / "plex_playlist_sync" / "static" / "favicon.png", 64, 64),
+        (requests_svg, repo_root / "unraid" / "trackseerr-requests.png", 512, 512),
     ]
 
     success = True

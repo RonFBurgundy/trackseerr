@@ -2,6 +2,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 from plex_playlist_sync.cli import main
+from plex_playlist_sync.gateway_link import HANDSHAKE_OK, HandshakeResult
 
 
 def test_cli_missing_plex_vars():
@@ -121,17 +122,24 @@ def test_cli_web_mode_database_permission_error(mock_plex_class, mock_db_class, 
         assert code == 1
 
 
+@patch("plex_playlist_sync.gateway_link.GatewayLinkWorker.start")
+@patch(
+    "plex_playlist_sync.gateway_link.perform_handshake",
+    return_value=HandshakeResult(HANDSHAKE_OK, "1.0.0"),
+)
 @patch("plex_playlist_sync.cli.uvicorn.Server")
 @patch("plex_playlist_sync.cli.SyncCoordinator")
 @patch("plex_playlist_sync.cli.PlexClient")
 def test_cli_gateway_role_starts_without_plex_vars(
-    mock_plex_class, mock_coord_class, mock_server_class, tmp_path
+    mock_plex_class, mock_coord_class, mock_server_class, _hs, _worker, tmp_path
 ):
     mock_server = MagicMock()
     mock_server_class.return_value = mock_server
 
     env = {
         "ROLE": "gateway",
+        "APPLICATION_URL": "https://requests.example.com",
+        "TRACKSEERR_CORE_URL": "http://core.internal:5251",
         "INTERNAL_CORE_SECRET": "g" * 40,
         "PORT": "5250",
         "DATA_DIR": str(tmp_path),
@@ -145,12 +153,17 @@ def test_cli_gateway_role_starts_without_plex_vars(
         mock_server.run.assert_called_once()
 
 
+@patch("plex_playlist_sync.gateway_link.GatewayLinkWorker.start")
+@patch(
+    "plex_playlist_sync.gateway_link.perform_handshake",
+    return_value=HandshakeResult(HANDSHAKE_OK, "1.0.0"),
+)
 @patch("plex_playlist_sync.cli.uvicorn.Server")
 @patch("plex_playlist_sync.cli.Database")
 @patch("plex_playlist_sync.cli.SyncCoordinator")
 @patch("plex_playlist_sync.cli.PlexClient")
 def test_cli_gateway_role_fallback_to_ephemeral_db(
-    mock_plex_class, mock_coord_class, mock_db_class, mock_server_class
+    mock_plex_class, mock_coord_class, mock_db_class, mock_server_class, _hs, _worker
 ):
     mock_server = MagicMock()
     mock_server_class.return_value = mock_server
@@ -167,6 +180,8 @@ def test_cli_gateway_role_fallback_to_ephemeral_db(
 
     env = {
         "ROLE": "gateway",
+        "APPLICATION_URL": "https://requests.example.com",
+        "TRACKSEERR_CORE_URL": "http://core.internal:5251",
         "INTERNAL_CORE_SECRET": "g" * 40,
         "PORT": "5250",
         "DATA_DIR": "/data",

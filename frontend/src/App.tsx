@@ -11,6 +11,7 @@ import {
   useQueue,
   useAccount,
   useLocalLogin,
+  useDeploymentIdentity,
 } from '@/hooks';
 import {
   Header,
@@ -54,6 +55,7 @@ export function parseInviteToken(pathname: string): string | null {
 
 const MainApp: React.FC = () => {
   const auth = useAuth();
+  const identity = useDeploymentIdentity(auth.tier, auth.isAuthenticated);
   const accountHook = useAccount(auth.isAuthenticated);
   const localLogin = useLocalLogin({ onSignedIn: auth.completeLocalSignIn });
   const [showLocalLogin, setShowLocalLogin] = useState<boolean>(false);
@@ -207,6 +209,7 @@ const MainApp: React.FC = () => {
         activeTab={activeTab}
         onTabChange={handleTabChange}
         isAdmin={auth.canUseAdminUi}
+        tier={identity.tier}
         onLogin={() => setIsAuthModalOpen(true)}
         onLogout={auth.logout}
         isMobileMenuOpen={isMobileMenuOpen}
@@ -222,6 +225,7 @@ const MainApp: React.FC = () => {
         user={auth.user}
         quota={requestsHook.quota}
         isAdmin={auth.canUseAdminUi}
+        tier={identity.tier}
         onLogout={auth.logout}
       />
 
@@ -255,8 +259,11 @@ const MainApp: React.FC = () => {
               <div className="space-y-1">
                 <h2 className="text-2xl font-black tracking-tight text-white uppercase font-mono">
                   Track<span className="text-[#e5a00d]">Seerr</span>
+                  {identity.isGateway && ' Requests'}
                 </h2>
-                <p className="text-neutral-400 text-xs font-mono">Music Discovery &amp; Request Suite</p>
+                <p className="text-neutral-400 text-xs font-mono">
+                  {identity.isGateway ? 'Music Requests' : 'Music Discovery & Request Suite'}
+                </p>
               </div>
 
               {auth.authError && (
@@ -374,10 +381,16 @@ const MainApp: React.FC = () => {
               <SettingsView
                 isAdmin={auth.canUseAdminUi}
                 showGatewayNote={auth.isAdmin && auth.tier === 'gateway'}
+                isCore={identity.isCore}
                 accountHook={accountHook}
                 currentUserId={auth.user?.id}
                 mfaEnrollmentRequired={mfaEnrollmentRequired}
               />
+            )}
+            {identity.isGateway && (
+              <p className="mt-10 text-center text-[10px] font-mono text-[var(--text-muted)]">
+                Settings are managed in TrackSeerr Core
+              </p>
             )}
           </div>
         )}

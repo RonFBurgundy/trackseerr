@@ -9,3 +9,4 @@ export * from './auth';
 export * from './account';
 export * from './admin';
 export * from './discovery';
+export * from './deployment';

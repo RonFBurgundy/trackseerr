@@ -93,7 +93,7 @@ class TestSecurityHeadersAndCORS:
         _, client = app_and_client
         resp = client.get("/api/health")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "ok"}
+        assert resp.json() == {"status": "ok", "tier": "all-in-one"}
         assert resp.headers["X-Content-Type-Options"] == "nosniff"
         assert resp.headers["X-Frame-Options"] == "DENY"
         assert "frame-ancestors 'none'" in resp.headers["Content-Security-Policy"]

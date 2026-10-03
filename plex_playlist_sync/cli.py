@@ -10,6 +10,7 @@ from typing import Optional, Union
 
 import uvicorn
 
+from . import __version__
 from .api.app import create_app
 from .api.routes.sync import sync_state
 from .api.routes.system import get_log_file_path, log_ring_buffer
@@ -138,7 +139,7 @@ def main() -> int:
     config = Config.from_env()
     setup_logging(config.log_level, config=config)
 
-    logger.info("Initializing TrackSeerr v1.0.0")
+    logger.info("Initializing TrackSeerr v%s", __version__)
 
     role = os.getenv("ROLE", "all-in-one").lower().strip()
 
@@ -151,6 +152,20 @@ def main() -> int:
                 role,
                 MIN_SECRET_LENGTH,
             )
+            return 1
+
+    if role in ("gateway", "core"):
+        from plex_playlist_sync.role_guard import README_HINT, check_role_environment
+
+        problems = check_role_environment(role, os.environ)
+        for problem in problems:
+            if not problem.fatal:
+                logger.warning("ROLE=%s: %s", role, problem.message)
+        fatal = [p for p in problems if p.fatal]
+        if fatal:
+            for problem in fatal:
+                print(f"ERROR: ROLE={role}: {problem.message}", file=sys.stderr)
+            print(f"ERROR: refusing to start. {README_HINT}", file=sys.stderr)
             return 1
 
     if role != "gateway" and (not config.plex_url or not config.plex_token):
@@ -260,6 +275,29 @@ def main() -> int:
                 db_base_dir,
             )
             return 1
+
+    # Remember the role this database last ran as; on a flip (all-in-one <-> core) log the one-time checklist.
+    try:
+        from .role_change import record_boot_role
+
+        record_boot_role(db, role)
+    except sqlite3.Error as e:
+        logger.warning("Could not record the deployment role: %s", safe_exc(e))
+
+    link_client = None
+    if role == "gateway":
+        from .clients.core_client import CoreClient
+        from .gateway_link import HANDSHAKE_OK, ProtocolMismatch, gateway_link_worker, perform_handshake
+
+        link_client = CoreClient(config.trackseerr_core_url or "", config.internal_core_secret)
+        try:
+            handshake = perform_handshake(link_client, should_stop=lambda: _shutdown_requested)
+        except ProtocolMismatch as e:
+            logger.error("%s", e)
+            print(f"ERROR: {e}", file=sys.stderr)
+            db.close()
+            return 1
+        gateway_link_worker.start(link_client, db.count_active_sessions, handshaken=handshake.state == HANDSHAKE_OK)
 
     # Auto-discover Plex Home users and populate database
     if role != "gateway" and plex_client is not None:
@@ -470,6 +508,10 @@ def main() -> int:
         logger.debug("Web server traceback", exc_info=True)
         return 1
     finally:
+        if role == "gateway":
+            from .gateway_link import gateway_link_worker
+
+            gateway_link_worker.stop()
         if role != "gateway":
             try:
                 from .acquisition_worker import acquisition_worker
@@ -508,5 +550,15 @@ def main() -> int:
     return 0
 
 
+def run(argv: Optional[list[str]] = None) -> int:
+    """Entry point for ``python -m plex_playlist_sync``: ``init-dmz`` is a subcommand; no args runs the server."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] == "init-dmz":
+        from .init_dmz import main as init_dmz_main
+
+        return init_dmz_main(args[1:])
+    return main()
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())

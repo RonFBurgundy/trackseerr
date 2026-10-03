@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <Container version="2">
-  <Name>trackseerr</Name>
+  <Name>TrackSeerr-Core</Name>
   <Repository>ghcr.io/ronfburgundy/trackseerr:latest</Repository>
   <Registry>https://github.com/RonFBurgundy/trackseerr/pkgs/container/trackseerr</Registry>
   <Network>bridge</Network>
@@ -10,26 +10,28 @@
   <Support>https://github.com/RonFBurgundy/trackseerr/issues</Support>
   <Project>https://github.com/RonFBurgundy/trackseerr</Project>
   <Overview>
-TrackSeerr is a self-hosted, multi-user music request, discovery, and library management suite combining an Overseerr-style frontend with an Arr-style media management and acquisition backend for Plex Media Server and Plexamp.
+TrackSeerr Core: the internal half of the two-tier setup. Pair with TrackSeerr Requests, the public request portal.
 
-Key Capabilities:
-- Music Discovery &amp; Audio Previews: Zero-key discovery of trending charts, new releases, and deep search via public Apple Music and Deezer APIs with 30-second audio previews.
-- Multi-User Request Engine: Plex Home user integration, per-user request quotas, and administrative approval queues.
-- Dual Acquisition Engine: Fulfill requests using your existing Lidarr server via batched trickle automation, or use native acquisition drivers (slskd / Soulseek P2P for single-track and album surgical matching, SABnzbd for Usenet, qBittorrent for torrents, Torznab/Newznab indexers).
-- Real-Time Activity Queue: Live transfer progress, speed monitoring, cancellation, and retry controls.
-- Arr-Grade Media Management: Mutagen audio inspection, token template naming engine ({Artist Name}/{Album Title} ({Release Year})/{track:00} - {Track Title}), collision protection, and automated Plex library refresh pings.
-- Playlist Synchronization: Import and synchronize Spotify and Deezer playlists directly into personal Plexamp profiles with keyless scraping and 1-click browser bookmarklets.
-- Two-Tier DMZ Option: split into TrackSeerr Requests (public, stateless) and TrackSeerr Core (internal) for exposure behind reverse proxies and Cloudflare Tunnels.
+Core holds your database, Plex token, Last.fm keys, download clients, indexers and media library. Admins use its WebUI on the LAN. Never expose this container's port to the internet; point your reverse proxy or Cloudflare Tunnel at TrackSeerr Requests instead. Requests signs every call to Core with INTERNAL_CORE_SECRET and can only perform requester actions, never admin ones.
 
-Exposing to the internet? Use TrackSeerr Core + TrackSeerr Requests instead (two separate templates). The public container then holds no Plex token, no downloader credentials and no volumes.
+Set APPLICATION_URL to the PUBLIC URL of TrackSeerr Requests (e.g. https://requests.yourdomain.com).
 
-This all-in-one template is intended for LAN, VPN and Tailscale use. Moving to the split setup later only means changing this container to ROLE=core (same appdata, no data migration) and adding TrackSeerr Requests.
+Keep this container's name as TrackSeerr-Core (Docker DNS resolves containers by name, and Requests defaults to http://TrackSeerr-Core:5251).
 
-Note: Lidarr automation, Plex settings, download clients, indexers, media management paths, quotas, and Application URL are configured dynamically in the WebUI Settings.
+Unraid publishes the admin port on all host interfaces. Never forward this port on your router; restrict it to your LAN or VPN with your firewall. Set LAN Bind IP to the LAN IP you use.
+
+Network setup (one time):
+1. In the Unraid terminal run: docker network create trackseerr-internal
+2. In this container's Extra Parameters (Advanced view) add: --network=trackseerr-internal
+   This second --network flag needs Docker 25+ (Unraid 7). On older versions, leave it out and run after the container starts: docker network connect trackseerr-internal TrackSeerr-Core
+3. Use the same INTERNAL_CORE_SECRET on TrackSeerr Requests (generate with: openssl rand -hex 32).
+The network name is your choice; keep it identical on both containers. Core keeps its normal bridge/br0 network so it can reach Plex and your downloaders, and its admin port stays on your LAN.
+
+Migrating from all-in-one: edit your existing TrackSeerr container, set ROLE to core, add INTERNAL_CORE_SECRET and set APPLICATION_URL, then apply. Or install this template pointing at the same appdata path. No data migration is needed. Users sign in once more on TrackSeerr Requests. The Plex webhook URL is unchanged.
   </Overview>
   <Category>MediaApp:Music MediaServer:Music Tools:Utilities</Category>
-  <WebUI>http://[IP]:[PORT:5250]</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/RonFBurgundy/trackseerr/main/unraid/trackseerr.xml</TemplateURL>
+  <WebUI>http://[IP]:[PORT:5251]</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/RonFBurgundy/trackseerr/main/unraid/trackseerr-core.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/RonFBurgundy/trackseerr/main/unraid/trackseerr.png</Icon>
   <ExtraParams/>
   <PostArgs/>
@@ -40,16 +42,20 @@ Note: Lidarr automation, Plex settings, download clients, indexers, media manage
   <Requires/>
   <License>GPL-3.0</License>
   
-  <Config Name="WebUI &amp; API Port" Target="5250" Default="5250" Mode="tcp" Description="Web Dashboard and REST API port. Accessible in your browser." Type="Port" Display="always" Required="true" Mask="false">5250</Config>
+  <Config Name="Core Admin Port" Target="5251" Default="5251" Mode="tcp" Description="LAN admin WebUI, API and Plex webhook port. Keep this on your LAN; never forward it to the internet." Type="Port" Display="always" Required="true" Mask="false">5251</Config>
 
-  <Config Name="Application URL" Target="APPLICATION_URL" Default="" Mode="" Description="The public URL used to reach TrackSeerr from outside your network (e.g. https://trackseerr.yourdomain.com). Used for notification links, Plex OAuth redirects and proxy routing. Exposing to the internet? Use TrackSeerr Core + TrackSeerr Requests instead." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="LAN Bind IP" Target="CORE_LAN_BIND" Default="" Mode="" Description="The LAN IP the admin port is published on (e.g. 192.168.1.10); informational, used to suppress the exposure warning." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <Config Name="Listen Port" Target="PORT" Default="5251" Mode="" Description="DO NOT CHANGE. Internal listen port for Core (must match the Core Admin Port target and the Requests Core URL)." Type="Variable" Display="advanced-hide" Required="true" Mask="false">5251</Config>
+
+  <Config Name="Application URL" Target="APPLICATION_URL" Default="" Mode="" Description="PUBLIC URL of TrackSeerr Requests (e.g. https://requests.yourdomain.com), NOT this container. Used for notification links and Plex OAuth redirects." Type="Variable" Display="always" Required="false" Mask="false"></Config>
 
   <Config Name="AppData Storage" Target="/config" Default="/mnt/user/appdata/trackseerr" Mode="rw" Description="Persistent configuration directory for the SQLite database, sessions, and logs." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/trackseerr</Config>
 
   <Config Name="Data Storage (TRaSH Guides)" Target="/data" Default="/mnt/user/data" Mode="rw" Description="Unified host data share containing both library (/data/media/music) and download staging (/data/downloads) on a single filesystem to enable instant atomic moves and hardlinks." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/data</Config>
 
-  <Config Name="Execution Role" Target="ROLE" Default="all-in-one" Mode="" Description="Leave as all-in-one for LAN/VPN use. To split for internet exposure, use the TrackSeerr Core and TrackSeerr Requests templates (core/gateway); do not hand-edit unless migrating." Type="Variable" Display="advanced" Required="false" Mask="false">all-in-one</Config>
-  <Config Name="Internal Core Secret" Target="INTERNAL_CORE_SECRET" Default="" Mode="" Description="Only used in split mode (ROLE=core). Leave blank for all-in-one." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Execution Role" Target="ROLE" Default="core" Mode="" Description="DO NOT CHANGE. This template must run as ROLE=core." Type="Variable" Display="advanced-hide" Required="true" Mask="false">core</Config>
+  <Config Name="Internal Core Secret" Target="INTERNAL_CORE_SECRET" Default="" Mode="" Description="REQUIRED. 32+ characters, identical on TrackSeerr Requests. Signs gateway-to-core requests. Generate with: openssl rand -hex 32" Type="Variable" Display="always" Required="true" Mask="true"></Config>
 
   <Config Name="Plex Server URL" Target="PLEX_URL" Default="http://192.168.1.100:32400" Mode="" Description="Base URL of your Plex Media Server, using your server's LAN IP and port 32400. IMPORTANT: Do NOT use localhost on bridge networking." Type="Variable" Display="always" Required="true" Mask="false">http://192.168.1.100:32400</Config>
 

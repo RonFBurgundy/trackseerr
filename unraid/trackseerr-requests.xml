@@ -1,0 +1,62 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>TrackSeerr-Requests</Name>
+  <Repository>ghcr.io/ronfburgundy/trackseerr:latest</Repository>
+  <Registry>https://github.com/RonFBurgundy/trackseerr/pkgs/container/trackseerr</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/RonFBurgundy/trackseerr/issues</Support>
+  <Project>https://github.com/RonFBurgundy/trackseerr</Project>
+  <Overview>
+TrackSeerr Requests: the public, stateless request portal. Pair with TrackSeerr Core, which holds your library, Plex token and downloaders.
+
+Requests has no volumes, no Plex token and no download credentials. It signs every call to Core with INTERNAL_CORE_SECRET and can only perform requester actions (discover, request, sign in), so a compromised Requests container can never act as admin. Settings are managed in TrackSeerr Core.
+
+Networking: put this container on the same network as your reverse proxy or cloudflared (e.g. proxynet or a custom bridge), and ALSO on the internal network shared with Core. Cloudflare Tunnel's cloudflared must share a network with Requests, never with Core.
+
+Network setup (one time):
+1. In the Unraid terminal run: docker network create trackseerr-internal
+2. In this container's Extra Parameters (Advanced view) add: --network=trackseerr-internal
+   This second --network flag needs Docker 25+ (Unraid 7). On older versions, remove it and run after the container starts: docker network connect trackseerr-internal TrackSeerr-Requests
+3. Set TRACKSEERR_CORE_URL to Core's container name on that network (the Docker name of the Core container, default http://TrackSeerr-Core:5251; if you rename Core, change this) and use the same INTERNAL_CORE_SECRET as Core.
+The network name is your choice; keep it identical on both containers.
+
+If this container refuses to start, check the log: it will not run with a Plex token, Last.fm key, volumes or a missing secret.
+  </Overview>
+  <Category>MediaApp:Music MediaServer:Music Tools:Utilities</Category>
+  <WebUI>http://[IP]:[PORT:5250]</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/RonFBurgundy/trackseerr/main/unraid/trackseerr-requests.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/RonFBurgundy/trackseerr/main/unraid/trackseerr-requests.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <License>GPL-3.0</License>
+  
+    <Config Name="Web Port" Target="5250" Default="5250" Mode="tcp" Description="Public web port for the request portal. Point your reverse proxy or Cloudflare Tunnel here." Type="Port" Display="always" Required="true" Mask="false">5250</Config>
+
+  <Config Name="Execution Role" Target="ROLE" Default="gateway" Mode="" Description="DO NOT CHANGE. This template must run as ROLE=gateway." Type="Variable" Display="advanced-hide" Required="true" Mask="false">gateway</Config>
+
+  <Config Name="Core URL" Target="TRACKSEERR_CORE_URL" Default="http://TrackSeerr-Core:5251" Mode="" Description="Internal URL of TrackSeerr Core on the shared internal network (container name, port 5251), e.g. http://TrackSeerr-Core:5251." Type="Variable" Display="always" Required="true" Mask="false">http://TrackSeerr-Core:5251</Config>
+
+  <Config Name="Internal Core Secret" Target="INTERNAL_CORE_SECRET" Default="" Mode="" Description="REQUIRED. 32+ characters, identical on TrackSeerr Core. Generate with: openssl rand -hex 32" Type="Variable" Display="always" Required="true" Mask="true"></Config>
+
+  <Config Name="Application URL" Target="APPLICATION_URL" Default="" Mode="" Description="REQUIRED. The PUBLIC URL of this request portal (e.g. https://requests.yourdomain.com)." Type="Variable" Display="always" Required="true" Mask="false"></Config>
+
+  <Config Name="Trusted Proxies" Target="TRUSTED_PROXIES" Default="" Mode="" Description="Comma-separated IPs/CIDRs of your reverse proxy or cloudflared (e.g. 172.18.0.0/16). Needed so login throttling sees real client IPs." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <Config Name="Timezone" Target="TZ" Default="Etc/UTC" Mode="" Description="Container timezone (e.g. America/New_York)." Type="Variable" Display="advanced" Required="false" Mask="false">Etc/UTC</Config>
+
+  <Config Name="Log Level" Target="LOG_LEVEL" Default="INFO" Mode="" Description="DEBUG, INFO, WARNING or ERROR." Type="Variable" Display="advanced" Required="false" Mask="false">INFO</Config>
+
+  <Config Name="User ID (PUID)" Target="PUID" Default="99" Mode="" Description="Unraid nobody user ID." Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
+
+  <Config Name="Group ID (PGID)" Target="PGID" Default="100" Mode="" Description="Unraid users group ID." Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
+
+  <Config Name="Umask" Target="UMASK" Default="022" Mode="" Description="Standard umask." Type="Variable" Display="advanced" Required="false" Mask="false">022</Config>
+</Container>

@@ -3,6 +3,7 @@
 import logging
 import hmac
 import os
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -68,6 +69,11 @@ def get_db() -> Database:
     with _db_lock:
         if db_path not in _db_instances:
             _db_instances[db_path] = Database(db_path)
+            if config.role == "gateway":
+                try:
+                    _db_instances[db_path].set_last_role("gateway")
+                except sqlite3.Error as exc:
+                    logger.warning("Could not record the gateway role: %s", type(exc).__name__)
         return _db_instances[db_path]
 
 

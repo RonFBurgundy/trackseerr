@@ -12,7 +12,7 @@ import {
   User as UserIcon,
 } from 'lucide-react';
 import type { MainTab } from './Navigation';
-import type { User, UserQuota } from '@/types/models';
+import type { DeploymentTier, User, UserQuota } from '@/types/models';
 import { TapeDeckButton, QuotaBadge } from '@/components/ui';
 
 export interface MobileDrawerProps {
@@ -24,6 +24,7 @@ export interface MobileDrawerProps {
   quota: UserQuota | null;
   isAdmin?: boolean;
   onLogout?: () => void;
+  tier?: DeploymentTier;
 }
 
 export const MobileDrawer: React.FC<MobileDrawerProps> = ({
@@ -35,6 +36,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
   quota,
   isAdmin = false,
   onLogout,
+  tier = 'all-in-one',
 }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -133,6 +135,12 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
             <div>
               <span className="text-base font-black tracking-wider uppercase text-white font-mono leading-none">
                 Track<span className="text-[#e5a00d]">Seerr</span>
+                {tier === 'gateway' && ' Requests'}
+                {tier === 'core' && (
+                  <span className="ml-2 px-1.5 py-0.5 text-[9px] font-mono font-bold uppercase border border-[var(--border-default)] rounded-[3px] text-[var(--accent-amber)] align-middle">
+                    Core
+                  </span>
+                )}
               </span>
               <p className="text-[10px] text-neutral-400 font-mono tracking-tight uppercase">
                 Deck Controls

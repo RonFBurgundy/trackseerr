@@ -1,6 +1,8 @@
 """FastAPI Application factory with security middleware and router registration."""
 
+import json
 import logging
+import sqlite3
 import os
 import sys
 from pathlib import Path
@@ -8,14 +10,16 @@ from typing import Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
 
+from plex_playlist_sync import __version__
 from plex_playlist_sync.api.routes import (
     account,
     acquisition,
     admin_users,
     auth,
+    deployment,
     discovery,
     download_clients,
     indexers,
@@ -39,9 +43,25 @@ from plex_playlist_sync.api.routes import (
 from plex_playlist_sync.api.tier_middleware import INVITE_TOKEN_PATH_RE, GatewayGuardMiddleware, SignedBodyMiddleware
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.internal_auth import MIN_SECRET_LENGTH, validate_secret_strength
+from plex_playlist_sync.role_guard import (
+    CODE_APP_URL_MISSING,
+    CODE_CORE_URL,
+    CODE_DB_PRESENT,
+    CODE_SECRET_WEAK,
+    README_HINT,
+    check_role_environment,
+)
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
+
+
+class StartupRefusal(RuntimeError):
+    """A startup guardrail refusal; ``lines`` holds one message per problem for clean stderr output."""
+
+    def __init__(self, lines: list[str]) -> None:
+        super().__init__(" ".join(lines))
+        self.lines = lines
 
 
 def _enforce_internal_secret(config: Optional[Config]) -> None:
@@ -53,9 +73,38 @@ def _enforce_internal_secret(config: Optional[Config]) -> None:
         role = os.getenv("ROLE", "all-in-one").lower().strip()
         secret = os.getenv("INTERNAL_CORE_SECRET", "").strip() or None
     if role in ("gateway", "core") and not validate_secret_strength(secret):
-        raise RuntimeError(
-            f"ROLE={role} requires INTERNAL_CORE_SECRET of at least {MIN_SECRET_LENGTH} characters"
+        raise StartupRefusal(
+            [f"ROLE={role} requires INTERNAL_CORE_SECRET of at least {MIN_SECRET_LENGTH} characters", README_HINT]
         )
+
+
+# With an explicit Config the caller validated the process environment (URLs, on-disk
+# databases) and ``_enforce_internal_secret`` checks the Config's secret; only the forbidden-env rule is
+# re-checked here. ``create_app()`` with no Config (the ``uvicorn plex_playlist_sync.api.app:app`` path) runs every rule.
+_CLI_OWNED_CODES = frozenset({CODE_APP_URL_MISSING, CODE_CORE_URL, CODE_DB_PRESENT, CODE_SECRET_WEAK})
+
+
+def _enforce_role_environment(config: Optional[Config]) -> None:
+    """Refuses to build a gateway/core app whose environment breaks the DMZ guardrails."""
+    role = ((config.role if config is not None else None) or os.getenv("ROLE", "all-in-one")).lower().strip()
+    if role not in ("gateway", "core"):
+        return
+    problems = [p for p in check_role_environment(role, os.environ) if p.fatal]
+    if config is not None:
+        problems = [p for p in problems if p.code not in _CLI_OWNED_CODES]
+    if problems:
+        raise StartupRefusal([f"ROLE={role} refused to start: {p.message}" for p in problems] + [README_HINT])
+
+
+def _load_manifest(dist_dir: Path, static_dir: Path) -> Optional[dict]:
+    for candidate in (dist_dir / "manifest.json", static_dir / "manifest.json"):
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
 
 
 def _setup_logging_or_fail(config: Config) -> None:
@@ -73,16 +122,23 @@ def _setup_logging_or_fail(config: Config) -> None:
         print(f"WARNING: logging setup failed ({exc!r}); continuing without it (all-in-one)", file=sys.stderr)
 
 
+def _role_of(app: FastAPI) -> str:
+    cfg = getattr(app.state, "config", None)
+    role = ((cfg.role if cfg is not None else None) or os.getenv("ROLE", "all-in-one")).lower().strip()
+    return role if role in ("gateway", "core") else "all-in-one"
+
+
 def create_app(
     db: Optional[Database] = None,
     config: Optional[Config] = None,
 ) -> FastAPI:
     """Creates and configures a FastAPI application instance."""
     _enforce_internal_secret(config)
+    _enforce_role_environment(config)
     docs_enabled = os.getenv("ENABLE_API_DOCS", "").strip() == "1"
     app = FastAPI(
         title="TrackSeerr API",
-        version="1.0.0",
+        version=__version__,
         docs_url="/api/docs" if docs_enabled else None,
         redoc_url="/api/redoc" if docs_enabled else None,
         openapi_url="/api/openapi.json" if docs_enabled else None,
@@ -91,6 +147,12 @@ def create_app(
     # Attach instances to app state if provided
     if db is not None:
         app.state.db = db
+        role = ((config.role if config is not None else None) or os.getenv("ROLE", "all-in-one")).lower().strip()
+        if role == "gateway":
+            try:
+                db.set_last_role("gateway")
+            except sqlite3.Error as exc:
+                logger.warning("Could not record the gateway role: %s", type(exc).__name__)
     if config is not None:
         app.state.config = config
         _setup_logging_or_fail(config)
@@ -149,6 +211,7 @@ def create_app(
     api_router.include_router(internal.router, prefix="/internal", tags=["internal"])
     api_router.include_router(users.router, prefix="/users", tags=["users"])
     api_router.include_router(admin_users.router, prefix="/admin", tags=["admin-users"])
+    api_router.include_router(deployment.router, prefix="/admin", tags=["deployment"])
     api_router.include_router(playlists.router, prefix="/playlists", tags=["playlists"])
     api_router.include_router(plex_playlists.router, prefix="/plex-playlists", tags=["plex_playlists"])
     api_router.include_router(sync.router, prefix="/sync", tags=["sync"])
@@ -176,7 +239,8 @@ def create_app(
 
     @api_router.api_route("/health", methods=["GET", "HEAD"], tags=["health"])
     def health_check() -> dict[str, str]:
-        return {"status": "ok"}
+        # Deliberately minimal and unauthenticated: tier only, never a version.
+        return {"status": "ok", "tier": _role_of(app)}
 
     app.include_router(api_router)
 
@@ -196,8 +260,23 @@ def create_app(
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
     # Serve root public PWA assets
+    base_manifest = _load_manifest(dist_dir, static_dir)
+
+    @app.api_route("/manifest.json", methods=["GET", "HEAD"], include_in_schema=False)
+    def serve_manifest() -> Response:
+        """Role-aware PWA manifest: the gateway installs as "TrackSeerr Requests"."""
+        if base_manifest is None:
+            raise HTTPException(status_code=404, detail="Not Found")
+        manifest = dict(base_manifest)
+        if _role_of(app) == "gateway":
+            manifest["name"] = "TrackSeerr Requests"
+            manifest["short_name"] = "Requests"
+        else:
+            manifest["name"] = "TrackSeerr"
+            manifest["short_name"] = "TrackSeerr"
+        return JSONResponse(manifest, media_type="application/manifest+json")
+
     for public_name in [
-        "manifest.json",
         "favicon.svg",
         "favicon.png",
         "apple-touch-icon.png",
@@ -251,4 +330,18 @@ def create_app(
     return app
 
 
-app = create_app()
+def __getattr__(name: str) -> FastAPI:
+    """Builds the module-level ``app`` lazily (PEP 562) so importing this module never runs the guardrails.
+
+    ``uvicorn plex_playlist_sync.api.app:app`` triggers this; a refusal prints clean lines and exits 1.
+    """
+    if name != "app":
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    try:
+        built = create_app()
+    except StartupRefusal as exc:
+        for line in exc.lines:
+            print(f"ERROR: {line}", file=sys.stderr)
+        raise SystemExit(1) from None
+    globals()["app"] = built
+    return built
