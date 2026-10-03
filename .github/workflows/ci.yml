@@ -37,4 +37,4 @@ jobs:
           npm run build
 
       - name: Run Pytest
-        run: pytest -q
+        run: pytest -q -n auto
