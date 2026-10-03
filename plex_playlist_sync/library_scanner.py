@@ -23,6 +23,7 @@ from plex_playlist_sync.models import (
     LibraryTrack,
 )
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
+from plex_playlist_sync.redaction import safe_exc
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -198,11 +199,12 @@ class LibraryScanner:
                 _is_background=True,
             )
         except Exception as exc:
-            logger.exception("LibraryScanner: Unhandled exception in background scan thread: %s", exc)
+            logger.error("LibraryScanner: Unhandled exception in background scan thread: %s", safe_exc(exc))
+            logger.debug("LibraryScanner background scan traceback", exc_info=True)
             with self._lock:
                 self._status["is_scanning"] = False
                 self._status["status"] = "failed"
-                self._status["error"] = str(exc)
+                self._status["error"] = safe_exc(exc)
                 self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
 
     def scan(
@@ -725,10 +727,11 @@ class LibraryScanner:
                 return dict(self._status)
 
         except Exception as exc:
-            logger.exception("LibraryScanner: Fatal error during scan execution: %s", exc)
+            logger.error("LibraryScanner: Fatal error during scan execution: %s", safe_exc(exc))
+            logger.debug("LibraryScanner scan traceback", exc_info=True)
             with self._lock:
                 self._status["status"] = "failed"
-                self._status["error"] = str(exc)
+                self._status["error"] = safe_exc(exc)
                 self._status["is_scanning"] = False
                 self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
                 return dict(self._status)

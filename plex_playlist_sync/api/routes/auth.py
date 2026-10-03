@@ -42,6 +42,7 @@ from plex_playlist_sync.auth import (
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.storage import Database
+from plex_playlist_sync.redaction import redact_text
 
 logger = logging.getLogger(__name__)
 
@@ -87,10 +88,10 @@ def generate_pin(
             pin_data = create_plex_pin()
         return pin_data
     except PlexAuthError as e:
-        logger.error("Failed to generate Plex PIN: %s", e)
+        logger.error("Failed to generate Plex PIN: %s", redact_text(str(e)))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to generate Plex PIN: {e}",
+            detail=f"Failed to generate Plex PIN: {redact_text(str(e))}",
         )
     except Exception as e:
         logger.error("Unexpected error generating Plex PIN: %s", e)
@@ -117,10 +118,10 @@ def verify_pin(
     try:
         auth_token = check_plex_pin(req.pin_id)
     except (PlexAuthError, ValueError) as e:
-        logger.warning("Error checking Plex PIN %d: %s", req.pin_id, e)
+        logger.warning("Error checking Plex PIN %d: %s", req.pin_id, redact_text(str(e)))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to verify Plex PIN: {e}",
+            detail=f"Failed to verify Plex PIN: {redact_text(str(e))}",
         )
     except Exception as e:
         logger.error("Unexpected error querying Plex PIN %d: %s", req.pin_id, e)
@@ -167,10 +168,10 @@ def verify_pin(
     try:
         plex_user = get_plex_user(auth_token)
     except PlexAuthError as e:
-        logger.error("Failed to fetch user details from Plex: %s", e)
+        logger.error("Failed to fetch user details from Plex: %s", redact_text(str(e)))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to retrieve user details from Plex: {e}",
+            detail=f"Failed to retrieve user details from Plex: {redact_text(str(e))}",
         )
     except Exception as e:
         logger.error("Unexpected error getting user details: %s", e)

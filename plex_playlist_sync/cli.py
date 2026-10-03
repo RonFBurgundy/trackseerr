@@ -1,7 +1,6 @@
 import logging
 from logging.handlers import RotatingFileHandler
 import os
-import re
 import signal
 import sqlite3
 import sys
@@ -19,23 +18,13 @@ from .clients.plex import PlexClient
 from .clients.spotify import SpotifyClient
 from .clients.spotify_scraper import SpotifyWebScraper
 from .config import Config
+from .redaction import redact_sensitive_query, redact_text, safe_exc
 from .security import safe_data_path
 from .storage import Database
 from .sync import SyncCoordinator
 
 logger = logging.getLogger("plex_playlist_sync")
 _shutdown_requested = False
-
-
-_SENSITIVE_QUERY_RE = re.compile(r"(?i)([?&](?:token|apikey|api_key|state|sk|api_sig)=)[^&#\s\"]*")
-
-
-_INVITE_TOKEN_RE = re.compile(r"(/(?:api/auth/)?invite/)[^/?#\s\"']+")
-
-
-def redact_sensitive_query(text: str) -> str:
-    """Replace token/apikey/api_key/state query values, and invite/reset link tokens (``[REDACTED]``), with ``REDACTED``."""
-    return _INVITE_TOKEN_RE.sub(r"\1[REDACTED]", _SENSITIVE_QUERY_RE.sub(r"\1REDACTED", text))
 
 
 class RedactAccessLogFilter(logging.Filter):
@@ -57,7 +46,7 @@ class RedactLogFilter(logging.Filter):
             message = record.getMessage()
         except (TypeError, ValueError):
             return True
-        redacted = redact_sensitive_query(message)
+        redacted = redact_text(message)
         if redacted != message:
             record.msg = redacted
             record.args = None
@@ -69,9 +58,9 @@ class RedactLogFilter(logging.Filter):
             except (TypeError, ValueError, AttributeError):
                 record.exc_text = None
         if record.exc_text:
-            record.exc_text = redact_sensitive_query(record.exc_text)
+            record.exc_text = redact_text(record.exc_text)
         if record.stack_info:
-            record.stack_info = redact_sensitive_query(record.stack_info)
+            record.stack_info = redact_text(record.stack_info)
         return True
 
 
@@ -181,13 +170,14 @@ def main() -> int:
             )
         except Exception as e:
             if config.run_once or config.headless:
-                logger.error("Failed to connect to Plex Media Server: %s", e)
+                logger.error("Failed to connect to Plex Media Server: %s", safe_exc(e))
+                logger.debug("Plex connect traceback", exc_info=True)
                 return 1
             logger.warning(
                 "Could not connect to Plex Server at %s on startup: %s. "
                 "Starting Web Server; connection will be retried during sync.",
-                config.plex_url,
-                e,
+                redact_text(config.plex_url),
+                safe_exc(e),
             )
 
         if config.has_spotify:
@@ -230,7 +220,8 @@ def main() -> int:
                 try:
                     coordinator.run_sync_cycle()
                 except Exception as e:
-                    logger.exception("Unexpected error occurred during sync cycle: %s", e)
+                    logger.error("Unexpected error occurred during sync cycle: %s", safe_exc(e))
+                    logger.debug("Sync cycle traceback", exc_info=True)
                 slept = 0
                 while slept < config.wait_seconds and not _shutdown_requested:
                     time.sleep(min(1, config.wait_seconds - slept))
@@ -289,7 +280,7 @@ def main() -> int:
                 )
             logger.info("Successfully discovered %d Plex Home users", len(home_users))
         except Exception as e:
-            logger.warning("Could not auto-discover Plex Home users on startup: %s", e)
+            logger.warning("Could not auto-discover Plex Home users on startup: %s", safe_exc(e))
 
     # Sync legacy config playlist IDs to DB if any
     if role != "gateway":
@@ -321,7 +312,8 @@ def main() -> int:
                         deezer_client=deezer_client,
                     )
                 except Exception as e:
-                    logger.exception("Error in scheduled background sync: %s", e)
+                    logger.error("Error in scheduled background sync: %s", safe_exc(e))
+                    logger.debug("Scheduled sync traceback", exc_info=True)
 
         bg_thread = threading.Thread(
             target=background_sync_worker, daemon=True, name="ScheduledSyncWorker"
@@ -408,7 +400,8 @@ def main() -> int:
                                 batch_size=batch_size,
                             )
                 except Exception as e:
-                    logger.exception("Error in scheduled Lidarr auto-trickle: %s", e)
+                    logger.error("Error in scheduled Lidarr auto-trickle: %s", safe_exc(e))
+                    logger.debug("Auto-trickle traceback", exc_info=True)
 
         lidarr_bg_thread = threading.Thread(
             target=background_lidarr_trickle_worker, daemon=True, name="ScheduledLidarrTrickleWorker"
@@ -473,7 +466,8 @@ def main() -> int:
     try:
         server.run()
     except Exception as e:
-        logger.exception("Web server error: %s", e)
+        logger.error("Web server error: %s", safe_exc(e))
+        logger.debug("Web server traceback", exc_info=True)
         return 1
     finally:
         if role != "gateway":
@@ -501,13 +495,13 @@ def main() -> int:
 
                 scrobble_worker.stop()
             except Exception as e:
-                logger.warning("Failed to stop ScrobbleWorker cleanly: %s", e)
+                logger.warning("Failed to stop ScrobbleWorker cleanly: %s", safe_exc(e))
             try:
                 from .mix_worker import mix_worker
 
                 mix_worker.stop()
             except Exception as e:
-                logger.warning("Failed to stop MixWorker cleanly: %s", e)
+                logger.warning("Failed to stop MixWorker cleanly: %s", safe_exc(e))
         db.close()
 
     logger.info("TrackSeerr server terminated cleanly.")

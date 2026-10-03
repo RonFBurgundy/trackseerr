@@ -20,6 +20,7 @@ from plex_playlist_sync.clients.plex import (
 )
 from plex_playlist_sync.api.routes.playlists import _guard_existing_playlist
 from plex_playlist_sync.storage import Database
+from plex_playlist_sync.redaction import redact_text, safe_exc
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +75,10 @@ def _plex_errors() -> Iterator[None]:
     try:
         yield
     except NotFound as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e) or "Not found in Plex") from e
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=redact_text(str(e)) or "Not found in Plex") from e
     except (BadRequest, Unauthorized, requests.exceptions.RequestException) as e:
-        logger.warning("Plex request failed: %s", e)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Plex error: {e}") from e
+        logger.warning("Plex request failed: %s", safe_exc(e))
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Plex error: {safe_exc(e)}") from e
 
 
 def _require_plex(plex: Optional[PlexClient]) -> PlexClient:
@@ -118,9 +119,9 @@ def _server_for(plex: PlexClient, username: str) -> Any:
     try:
         return plex.get_user_server(username)
     except (NotFound, BadRequest, Unauthorized, requests.exceptions.RequestException) as e:
-        logger.warning("Could not switch to Plex user '%s': %s", username, e)
+        logger.warning("Could not switch to Plex user '%s': %s", username, safe_exc(e))
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not access Plex profile for '{username}': {e}"
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not access Plex profile for '{username}': {safe_exc(e)}"
         ) from e
 
 
@@ -302,9 +303,9 @@ def create_snapshot(
         with _plex_errors():
             playlist = client.save_mix_as_playlist(db, username, req.mix_key, playlist_title, server=server)
     except PlaylistProtectedError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=redact_text(str(e))) from e
     except MixNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=redact_text(str(e))) from e
     snap = db.upsert_mix_snapshot(
         username,
         req.mix_key,
@@ -435,7 +436,7 @@ def add_playlist_items(
         try:
             client.add_tracks_to_playlist(server, pl, req.track_rating_keys)
         except ValueError as e:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=redact_text(str(e))) from e
         return _items_response(client, server, rating_key)
 
 
@@ -521,12 +522,19 @@ def copy_playlist(
             )
         except PlaylistProtectedError as e:
             results.append(
-                {"username": canonical, "success": False, "error": str(e), "copied_tracks": 0, "omitted_tracks": 0}
+                {
+                    "username": canonical,
+                    "success": False,
+                    "error": redact_text(str(e)),
+                    "copied_tracks": 0,
+                    "omitted_tracks": 0,
+                }
             )
         except (PlexApiException, requests.exceptions.RequestException, ValueError) as e:
-            logger.warning("Copy of playlist %s to '%s' failed: %s", rating_key, canonical, e)
+            error_text = safe_exc(e, safe_types=(ValueError,))
+            logger.warning("Copy of playlist %s to '%s' failed: %s", rating_key, canonical, error_text)
             results.append(
-                {"username": canonical, "success": False, "error": str(e), "copied_tracks": 0, "omitted_tracks": 0}
+                {"username": canonical, "success": False, "error": error_text, "copied_tracks": 0, "omitted_tracks": 0}
             )
     return results
 

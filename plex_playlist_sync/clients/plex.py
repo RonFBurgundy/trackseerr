@@ -15,6 +15,7 @@ from plexapi.server import PlexServer
 
 from ..models import Playlist, SyncResult, Track
 from ..security import is_safe_image_url, safe_data_path
+from ..redaction import redact_text, safe_exc
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ class PlexClient:
             self.server = PlexServer(base_url, token, session=session, timeout=timeout)
             logger.info("Successfully connected to Plex Server: %s", getattr(self.server, "friendlyName", base_url))
         except Exception as e:
-            logger.error("Failed to connect to Plex Server at %s: %s", base_url, e)
+            logger.error("Failed to connect to Plex Server at %s: %s", redact_text(base_url), safe_exc(e))
             raise
 
     @property
@@ -141,7 +142,7 @@ class PlexClient:
         try:
             account = self.server.myPlexAccount()
         except Exception as e:
-            logger.warning("Could not access myPlexAccount (non-PlexPass or offline): %s", e)
+            logger.warning("Could not access myPlexAccount (non-PlexPass or offline): %s", safe_exc(e))
             admin_name = str(getattr(self.server, "friendlyName", "Admin") or "Admin")
             return [
                 {
@@ -202,7 +203,7 @@ class PlexClient:
                     }
                 )
         except Exception as e:
-            logger.warning("Could not retrieve home users from myPlexAccount: %s", e)
+            logger.warning("Could not retrieve home users from myPlexAccount: %s", safe_exc(e))
 
         return home_users
 
@@ -221,13 +222,13 @@ class PlexClient:
                         logger.debug("Applied match memory override for '%s - %s'", track.artist, track.title)
                         return fetched
             except Exception as e:
-                logger.debug("Failed match override fetch for '%s': %s", track.title, e)
+                logger.debug("Failed match override fetch for '%s': %s", track.title, safe_exc(e))
 
         candidates = []
         try:
             candidates = self.server.search(track.title, mediatype="track", limit=10)
         except BadRequest as e:
-            logger.debug("BadRequest searching for %s: %s", track.title, e)
+            logger.debug("BadRequest searching for %s: %s", track.title, safe_exc(e))
 
         # Check initial search results
         matched = self._eval_candidates(candidates, track, threshold)
@@ -244,7 +245,7 @@ class PlexClient:
                 if matched:
                     return matched
             except BadRequest as e:
-                logger.debug("BadRequest searching for sanitized title %s: %s", stripped_title, e)
+                logger.debug("BadRequest searching for sanitized title %s: %s", stripped_title, safe_exc(e))
 
         return None
 
@@ -264,7 +265,7 @@ class PlexClient:
                 if album_ratio >= threshold:
                     return candidate
             except (AttributeError, IndexError, Exception) as e:
-                logger.debug("Candidate comparison error for track '%s': %s", track.title, e)
+                logger.debug("Candidate comparison error for track '%s': %s", track.title, safe_exc(e))
                 continue
 
         return None
@@ -379,7 +380,7 @@ class PlexClient:
                 plex_playlist.edit(summary=clean_desc)
                 logger.debug("Updated summary for playlist '%s'", name)
             except Exception as e:
-                logger.warning("Failed to update summary for '%s': %s", name, e)
+                logger.warning("Failed to update summary for '%s': %s", name, safe_exc(e))
 
         if add_poster and poster_url and is_safe_image_url(poster_url):
             try:
@@ -405,7 +406,7 @@ class PlexClient:
                         logger.warning(
                             "Failed to inject poster for '%s' via admin fallback: %s",
                             name,
-                            admin_err,
+                            safe_exc(admin_err),
                         )
 
         return plex_playlist
@@ -501,14 +502,15 @@ class PlexClient:
                 success=True,
             )
         except Exception as e:
-            logger.error("Error creating/updating playlist '%s': %s", playlist.name, e)
+            logger.error("Error creating/updating playlist '%s': %s", playlist.name, safe_exc(e))
+            logger.debug("Playlist create/update traceback", exc_info=True)
             return SyncResult(
                 playlist_name=playlist.name,
                 total_tracks=len(playlist.tracks),
                 matched_tracks=len(matched),
                 missing_tracks=len(missing),
                 success=False,
-                error=str(e),
+                error=safe_exc(e),
             )
 
     def sync_playlist_to_users(
@@ -607,7 +609,7 @@ class PlexClient:
                     )
                 )
             except PlaylistProtectedError as e:
-                logger.warning("Playlist '%s' not synced to '%s': %s", playlist.name, username, e)
+                logger.warning("Playlist '%s' not synced to '%s': %s", playlist.name, username, redact_text(str(e)))
                 results.append(
                     SyncResult(
                         playlist_name=playlist.name,
@@ -615,11 +617,12 @@ class PlexClient:
                         matched_tracks=len(matched),
                         missing_tracks=len(missing),
                         success=False,
-                        error=str(e),
+                        error=redact_text(str(e)),
                     )
                 )
             except Exception as e:
-                logger.error("Failed to sync playlist '%s' to user '%s': %s", playlist.name, username, e)
+                logger.error("Failed to sync playlist '%s' to user '%s': %s", playlist.name, username, safe_exc(e))
+                logger.debug("Playlist user-sync traceback", exc_info=True)
                 results.append(
                     SyncResult(
                         playlist_name=playlist.name,
@@ -627,7 +630,7 @@ class PlexClient:
                         matched_tracks=len(matched),
                         missing_tracks=len(missing),
                         success=False,
-                        error=f"User {username}: {e}",
+                        error=f"User {username}: {safe_exc(e)}",
                     )
                 )
 
@@ -643,7 +646,7 @@ class PlexClient:
             account = self.server.myPlexAccount()
             return str(getattr(account, "username", "") or "")
         except Exception as e:  # myPlexAccount raises assorted plexapi/requests/Unauthorized errors
-            logger.warning("Could not determine admin username from myPlexAccount: %s", e)
+            logger.warning("Could not determine admin username from myPlexAccount: %s", safe_exc(e))
             return ""
 
     def is_admin_username(self, username: str, admin_username: Optional[str] = None) -> bool:
@@ -819,13 +822,13 @@ class PlexClient:
         try:
             sections = [s for s in server.library.sections() if getattr(s, "type", "") == "artist"]
         except PLEX_ERRORS as e:
-            logger.warning("Could not list Plex library sections for mixes: %s", e)
+            logger.warning("Could not list Plex library sections for mixes: %s", safe_exc(e))
             return pairs
         for section in sections:
             try:
                 hubs = section.hubs()
             except PLEX_ERRORS as e:
-                logger.warning("Could not load hubs for section '%s': %s", getattr(section, "title", "?"), e)
+                logger.warning("Could not load hubs for section '%s': %s", getattr(section, "title", "?"), safe_exc(e))
                 continue
             for hub in hubs:
                 ident = str(getattr(hub, "hubIdentifier", "") or "").lower()
@@ -835,7 +838,7 @@ class PlexClient:
                 try:
                     hub_items = list(getattr(hub, "items", []) or [])
                 except PLEX_ERRORS as e:
-                    logger.warning("Could not read items of hub '%s': %s", hub_title, e)
+                    logger.warning("Could not read items of hub '%s': %s", hub_title, safe_exc(e))
                     continue
                 for item in hub_items:
                     pairs.append((hub, item))
@@ -846,7 +849,7 @@ class PlexClient:
         try:
             srv = server if server is not None else self.get_user_server(username)
         except PLEX_ERRORS as e:
-            logger.warning("Could not resolve Plex server for '%s' while listing mixes: %s", username, e)
+            logger.warning("Could not resolve Plex server for '%s' while listing mixes: %s", username, safe_exc(e))
             return []
         mixes: List[dict] = []
         seen: set = set()
@@ -872,7 +875,7 @@ class PlexClient:
         try:
             srv = server if server is not None else self.get_user_server(username)
         except PLEX_ERRORS as e:
-            raise MixNotFoundError(f"Could not open Plex profile for '{username}': {e}") from e
+            raise MixNotFoundError(f"Could not open Plex profile for '{username}': {safe_exc(e)}") from e
         for _hub, item in self._iter_mix_items(srv):
             if str(getattr(item, "key", "") or "") != mix_key:
                 continue
@@ -883,7 +886,7 @@ class PlexClient:
                 else:
                     tracks = list(srv.fetchItems(item.key))
             except PLEX_ERRORS as e:
-                raise MixNotFoundError(f"Could not load tracks for mix '{mix_key}': {e}") from e
+                raise MixNotFoundError(f"Could not load tracks for mix '{mix_key}': {safe_exc(e)}") from e
             tracks = [t for t in tracks if getattr(t, "type", "track") == "track"]
             if not tracks:
                 raise MixNotFoundError(f"Mix '{mix_key}' has no tracks")
@@ -919,11 +922,11 @@ class PlexClient:
                 db.mark_mix_snapshot_refreshed(snap["id"], str(getattr(pl, "ratingKey", "") or "") or None)
                 refreshed += 1
             except MixNotFoundError as e:
-                logger.warning("Mix snapshot '%s' not refreshed: %s", snap["playlist_title"], e)
+                logger.warning("Mix snapshot '%s' not refreshed: %s", snap["playlist_title"], redact_text(str(e)))
             except PlaylistProtectedError as e:
-                logger.warning("Mix snapshot '%s' not refreshed: %s", snap["playlist_title"], e)
+                logger.warning("Mix snapshot '%s' not refreshed: %s", snap["playlist_title"], redact_text(str(e)))
             except PLEX_ERRORS as e:
-                logger.warning("Mix snapshot '%s' refresh failed: %s", snap["playlist_title"], e)
+                logger.warning("Mix snapshot '%s' refresh failed: %s", snap["playlist_title"], safe_exc(e))
         return refreshed
 
     def search_library_tracks(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -963,7 +966,7 @@ class PlexClient:
                 )
             return tracks_out
         except Exception as e:
-            logger.error("Error searching Plex library tracks for '%s': %s", clean_query, e)
+            logger.error("Error searching Plex library tracks for '%s': %s", clean_query, safe_exc(e))
             return []
 
     def get_smart_mix_tracks(self, mix_type: str, limit: int = 50) -> list[dict[str, Any]]:
@@ -982,7 +985,7 @@ class PlexClient:
             else:
                 music_section = self.server.library.section("Music")
         except Exception as e:
-            logger.warning("Could not access music library section: %s", e)
+            logger.warning("Could not access music library section: %s", safe_exc(e))
             return []
 
         out: list[dict[str, Any]] = []
@@ -1027,7 +1030,7 @@ class PlexClient:
             else:
                 logger.warning("Unknown smart mix type: %s", mix_type)
         except Exception as e:
-            logger.error("Error generating smart mix '%s': %s", mix_type, e)
+            logger.error("Error generating smart mix '%s': %s", mix_type, safe_exc(e))
 
         return out
 
@@ -1074,7 +1077,7 @@ class PlexClient:
                     logger.info("Triggered general Plex library update")
                     return True
         except Exception as e:
-            logger.warning("Could not refresh Plex library '%s': %s", sec_name, e)
+            logger.warning("Could not refresh Plex library '%s': %s", sec_name, safe_exc(e))
         return False
 
     def test_connection(self) -> tuple[bool, str]:
@@ -1086,6 +1089,6 @@ class PlexClient:
             version = getattr(self.server, "version", "unknown")
             return True, f"Connected to {friendly_name} (v{version})"
         except Exception as e:
-            logger.warning("Plex connection test failed: %s", e)
-            return False, str(e)
+            logger.warning("Plex connection test failed: %s", safe_exc(e))
+            return False, safe_exc(e)
 

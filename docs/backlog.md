@@ -14,5 +14,25 @@
 4. (done) **Expanded request quotas**:
    - separate limits for albums, tracks and discographies
    - per-user auto-approve vs admin approval, per request type
-5. **Leak hardening in `clients/plex.py`**: `sync_playlist_to_users` / `update_or_create_playlist` build `SyncResult.error` strings and log lines from `str(e)`. These can carry Plex URLs. Mixes redact them downstream, but the sync route and the CLI do not.
+5. (done) **Leak hardening in `clients/plex.py`**: `sync_playlist_to_users` / `update_or_create_playlist` build `SyncResult.error` strings and log lines from `str(e)`. These can carry Plex URLs. Mixes redact them downstream, but the sync route and the CLI do not.
 6. **Split-port single-container mode**, a middle ground between all-in-one and the two-container setup. The public port gets the gateway deny-by-default allowlist; admin is reachable only on a LAN-bound port. README guidance: all-in-one for LAN/VPN only; two containers whenever the request app faces the internet.
+7. **DMZ setup ergonomics** (agreed 2026-10-03; next after the leak fix):
+   - (1) gateway/core startup guardrails
+   - (2) gateway↔core version/protocol handshake
+   - (3) "Request portal" status panel in the core admin UI
+   - (4) distinct gateway identity ("TrackSeerr Requests") plus three Unraid templates:
+     - all-in-one
+     - Core (ROLE=core fixed)
+     - Requests (ROLE=gateway fixed; no Plex, Last.fm or volume fields)
+   - (5) `trackseerr init-dmz`, which generates the secret plus a filled-in compose file
+   - Acceptance criteria (added 2026-10-03):
+     - The internal network is additive and isolated. It never replaces proxynet, br0 or tunnel networks, and its name is configurable.
+     - The gateway stays on the user's proxy or tunnel network.
+     - Core stays on br0/LAN and also joins the internal network.
+     - Verify multi-network attachment on real Docker (Unraid: a repeated `--network` in Extra Parameters needs Docker 25+). If it doesn't work, document `docker network connect` as the fallback.
+     - All-in-one → DMZ is a ROLE change on the existing container: same image, same /config and DB, with library, users and config intact.
+       - Test that an all-in-one DB boots unchanged as core, and back again.
+       - `init-dmz --from-existing`.
+       - A first-boot-as-core checklist.
+       - A README migration section, noting that users sign in once more on the gateway.
+8. **Low: admin-only connection-test errors.** Lidarr (`settings.py` ~508), download-client, indexer and quality-profile/settings DB errors return `str(e)` to the admin. Route them through `redaction.safe_exc`/`redact_text` for consistency (logs are already redacted by the root filter).

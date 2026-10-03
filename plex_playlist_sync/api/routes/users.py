@@ -19,6 +19,7 @@ from plex_playlist_sync.api.routes.admin_users import MAX_QUOTA, MAX_WINDOW_DAYS
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.models import UserPermission
+from plex_playlist_sync.redaction import safe_exc
 from plex_playlist_sync.request_submission import effective_quota_limits, quota_snapshot
 from plex_playlist_sync.storage import Database
 
@@ -161,10 +162,10 @@ def refresh_users(
     try:
         discovered_users = plex_client.get_home_users()
     except Exception as e:
-        logger.error("Failed to discover Plex Home users: %s", e)
+        logger.error("Failed to discover Plex Home users: %s", safe_exc(e))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to query Plex users: {e}",
+            detail=f"Failed to query Plex users: {safe_exc(e)}",
         )
 
     for u in discovered_users:

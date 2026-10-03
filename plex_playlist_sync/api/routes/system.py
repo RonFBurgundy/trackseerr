@@ -35,6 +35,7 @@ from plex_playlist_sync.api.dependencies import (
 )
 from plex_playlist_sync.api.routes.sync import sync_state
 from plex_playlist_sync.auth import get_or_create_secret_key, verify_session_token
+from plex_playlist_sync.redaction import redact_text, safe_exc
 from plex_playlist_sync.backlog_worker import backlog_worker, rss_worker
 from plex_playlist_sync.clients.acquisition import (
     get_acquisition_driver,
@@ -572,7 +573,7 @@ def _ping_plex(
             res = plex_client.test_connection()
             if isinstance(res, tuple):
                 online = bool(res[0])
-                msg = str(res[1])
+                msg = redact_text(str(res[1]))
             elif isinstance(res, bool):
                 online = res
                 msg = "Connected to Plex" if online else "Plex unreachable"
@@ -591,10 +592,10 @@ def _ping_plex(
             msg = "Connected to Plex"
         latency_ms = round((time.perf_counter() - t0) * 1000.0, 2) if online else None
     except Exception as e:
-        logger.warning("Error testing connection to Plex: %s", e)
+        logger.warning("Error testing connection to Plex: %s", safe_exc(e))
         online = False
         latency_ms = None
-        msg = str(e)
+        msg = safe_exc(e)
 
     try:
         user_count = len(db.list_users())

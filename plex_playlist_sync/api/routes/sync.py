@@ -27,6 +27,7 @@ from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.models import Playlist, RequestStatus, Track
 from plex_playlist_sync.storage import Database
+from plex_playlist_sync.redaction import redact_text, safe_exc
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,8 @@ class BroadcastLogHandler(logging.Handler):
         self.listeners: list[tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = []
 
     def emit(self, record: logging.LogRecord) -> None:
-        msg = self.format(record)
+        # This handler sits on the package logger, ahead of the root redaction filters: redact here too.
+        msg = redact_text(self.format(record))
         with self._lock:
             active_listeners = list(self.listeners)
 
@@ -108,7 +110,7 @@ class SyncState:
             items = plex_client.get_playlist_items(source)
         except (NotFound, BadRequest, Unauthorized, requests.exceptions.RequestException) as e:
             logger.warning(
-                "Source Plex playlist for adopted '%s' unavailable (%s); using stored snapshot", pl["name"], e
+                "Source Plex playlist for adopted '%s' unavailable (%s); using stored snapshot", pl["name"], safe_exc(e)
             )
             return skip
         snapshot = [
@@ -152,7 +154,7 @@ class SyncState:
                     if refreshed:
                         logger.info("Refreshed %d Plexamp mix snapshot(s)", refreshed)
                 except (NotFound, BadRequest, Unauthorized, requests.exceptions.RequestException) as e:
-                    logger.warning("Mix snapshot refresh failed: %s", e)
+                    logger.warning("Mix snapshot refresh failed: %s", safe_exc(e))
             playlists = db.list_playlists(enabled_only=True)
             stats["total_playlists"] = len(playlists)
 
@@ -198,7 +200,7 @@ class SyncState:
                     elif service == "deezer" and deezer_client:
                         tracks = deezer_client.get_playlist_tracks(pl_id)
                 except Exception as e:
-                    logger.error("Failed to fetch tracks for playlist '%s' (%s): %s", pl["name"], pl_id, e)
+                    logger.error("Failed to fetch tracks for playlist '%s' (%s): %s", pl["name"], pl_id, safe_exc(e))
                     db.record_sync_result(pl_id, status="error")
                     continue
 
@@ -238,7 +240,8 @@ class SyncState:
                         stats["total_matched"] += len(matched)
                         stats["total_missing"] += len(missing)
                     except Exception as e:
-                        logger.error("Error syncing playlist '%s' to Plex: %s", pl["name"], e)
+                        logger.error("Error syncing playlist '%s' to Plex: %s", pl["name"], safe_exc(e))
+                        logger.debug("Playlist sync traceback", exc_info=True)
                         db.record_sync_result(playlist_id=pl_id, status="failed")
                 else:
                     logger.warning("Plex client not available; recorded simulated sync for '%s'", pl["name"])
@@ -264,8 +267,9 @@ class SyncState:
                 logger.warning("Failed to record sync_completed event: %s", ev_err)
             return {"status": "success", "stats": stats}
         except Exception as e:
-            logger.error("Unexpected error during sync cycle: %s", e)
-            return {"status": "error", "error": str(e)}
+            logger.error("Unexpected error during sync cycle: %s", safe_exc(e))
+            logger.debug("Sync cycle traceback", exc_info=True)
+            return {"status": "error", "error": safe_exc(e)}
         finally:
             self.is_syncing = False
 

@@ -23,6 +23,7 @@ from plex_playlist_sync.clients.spotify_scraper import SpotifyWebScraper
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.m3u import parse_m3u
 from plex_playlist_sync.models import Playlist, Track
+from plex_playlist_sync.redaction import safe_exc
 from plex_playlist_sync.security import (
     extract_deezer_id,
     extract_spotify_id,
@@ -548,7 +549,8 @@ def import_playlist_tracks(
                     missing_tracks=missing,
                 )
             except Exception as e:
-                logger.error("Error during direct import sync to Plex: %s", e)
+                logger.error("Error during direct import sync to Plex: %s", safe_exc(e))
+                logger.debug("Direct import sync traceback", exc_info=True)
                 db.record_sync_result(import_id, status="error")
 
     return {

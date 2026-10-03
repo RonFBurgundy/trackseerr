@@ -224,7 +224,9 @@ def test_plex_offline_and_online(test_db, test_config):
     assert offline_stat.configured is True
     assert offline_stat.online is False
     assert offline_stat.latency_ms is None
-    assert "Connection refused by Plex" in offline_stat.message
+    # Exception text is not echoed (it may embed X-Plex-Token URLs); only the type name is shown.
+    assert "ConnectionError" in offline_stat.message
+    assert "Connection refused by Plex" not in offline_stat.message
 
     # 4. Plex returning boolean
     mock_plex.test_connection.side_effect = None

@@ -16,6 +16,7 @@ from typing import Any, Optional, Tuple
 import requests
 
 from plex_playlist_sync.security import safe_data_path
+from plex_playlist_sync.redaction import safe_exc
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def create_plex_pin(
         resp.raise_for_status()
         data = resp.json()
     except (requests.RequestException, ValueError) as e:
-        raise PlexAuthError(f"Failed to create Plex PIN: {e}") from e
+        raise PlexAuthError(f"Failed to create Plex PIN: {safe_exc(e)}") from e
 
     pin_id = data.get("id")
     pin_code = data.get("code")
@@ -133,9 +134,9 @@ def check_plex_pin(
     except requests.HTTPError as e:
         if getattr(e.response, "status_code", None) == 404:
             return None
-        raise PlexAuthError(f"Error querying Plex PIN: {e}") from e
+        raise PlexAuthError(f"Error querying Plex PIN: {safe_exc(e)}") from e
     except (requests.RequestException, ValueError) as e:
-        raise PlexAuthError(f"Network error querying Plex PIN: {e}") from e
+        raise PlexAuthError(f"Network error querying Plex PIN: {safe_exc(e)}") from e
 
     token = data.get("authToken") or data.get("auth_token")
     return str(token) if token else None
@@ -162,7 +163,7 @@ def get_plex_user(
         resp.raise_for_status()
         data = resp.json()
     except (requests.RequestException, ValueError) as e:
-        raise PlexAuthError(f"Failed to fetch Plex user info: {e}") from e
+        raise PlexAuthError(f"Failed to fetch Plex user info: {safe_exc(e)}") from e
 
     return {
         "id": str(data.get("id", "")),

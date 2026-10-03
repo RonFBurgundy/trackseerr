@@ -2,7 +2,6 @@
 
 import json
 import logging
-import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -12,6 +11,7 @@ from plexapi.exceptions import BadRequest, NotFound, Unauthorized
 
 from plex_playlist_sync.library_availability import get_item_availability
 from plex_playlist_sync.models import Playlist, RequestStatus, Track
+from plex_playlist_sync.redaction import redact_text, safe_exc
 from plex_playlist_sync.request_submission import (
     RequestRejected,
     RequestSubmission,
@@ -221,14 +221,6 @@ def compile_user_mix(
 # ---------------------------------------------------------------------------
 
 
-_TOKEN_RE = re.compile(r"(X-Plex-Token|token)=[^&\s'\")]+", re.IGNORECASE)
-
-
-def _redact_tokens(text: str) -> str:
-    """Strip token query values from client-reported error text before it is stored or shown."""
-    return _TOKEN_RE.sub(r"\1=[redacted]", str(text))
-
-
 def _queue_acquisition(
     db: Any, app_config: Any, config_row: dict[str, Any], user: dict[str, Any], track: MixTrack
 ) -> Optional[RequestSubmission]:
@@ -354,13 +346,14 @@ def generate_and_sync(
             result.synced = any(r.success for r in sync_results)
             errors = [r.error for r in sync_results if getattr(r, "error", "")]
             if errors:
-                result.sync_error = _redact_tokens(errors[0])
+                result.sync_error = redact_text(str(errors[0]))
             elif not result.synced:
                 result.sync_error = "Plex sync did not complete"
         except (NotFound, BadRequest, Unauthorized, requests.RequestException) as exc:
-            # Plex/requests exception text can embed the X-Plex-Token URL: log only the type.
-            logger.warning("Tailored mix %s Plex sync failed (%s)", mix_id, type(exc).__name__)
-            result.sync_error = f"Plex sync failed ({type(exc).__name__})"
+            # Plex/requests exception text can embed the X-Plex-Token URL: safe_exc redacts or drops it.
+            logger.warning("Tailored mix %s Plex sync failed (%s)", mix_id, safe_exc(exc))
+            logger.debug("Tailored mix Plex sync traceback", exc_info=True)
+            result.sync_error = f"Plex sync failed ({safe_exc(exc)})"
 
     db.record_mix_result(mix_id, json.dumps(result.to_dict()))
     return result
