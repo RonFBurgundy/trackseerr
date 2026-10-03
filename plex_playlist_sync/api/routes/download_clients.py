@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from plex_playlist_sync.api.dependencies import get_db, require_admin
+from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver
 from plex_playlist_sync.models import DownloadClientConfig, DownloadDriverType
 from plex_playlist_sync.security import is_safe_service_url, mask_secret
@@ -227,8 +228,8 @@ def test_download_client_connection(
         success, msg = driver.test_connection()
         return TestConnectionResponse(success=success, message=msg)
     except Exception as e:
-        logger.warning("Download client connection test failed: %s", e)
-        return TestConnectionResponse(success=False, message=str(e))
+        logger.warning("Download client connection test failed: %s", redact_text(str(e)))
+        return TestConnectionResponse(success=False, message=f"Connection failed: {redact_text(str(e))}")
 
 
 @router.delete("/{client_id}", summary="Delete download client")

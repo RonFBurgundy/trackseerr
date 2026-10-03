@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from plex_playlist_sync.acquisition_coordinator import acquisition_coordinator
+from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.api.dependencies import (
     get_config,
     get_current_user,
@@ -517,8 +518,8 @@ def retry_request(
                     msg,
                 )
         except Exception as e:
-            logger.error("Error in native acquisition for retried request %s: %s", request_id, e)
-            msg = f"Acquisition error: {str(e)}"
+            logger.error("Error in native acquisition for retried request %s: %s", request_id, redact_text(str(e)))
+            msg = f"Acquisition error: {redact_text(str(e))}"
 
     if not grabbed and lidarr_client is not None:
         try:

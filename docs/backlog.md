@@ -35,4 +35,4 @@
        - `init-dmz --from-existing`.
        - A first-boot-as-core checklist.
        - A README migration section, noting that users sign in once more on the gateway.
-8. **Low: admin-only connection-test errors.** Lidarr (`settings.py` ~508), download-client, indexer and quality-profile/settings DB errors return `str(e)` to the admin. Route them through `redaction.safe_exc`/`redact_text` for consistency (logs are already redacted by the root filter).
+8. ~~**Low: admin-only connection-test errors.** Lidarr (`settings.py` ~508), download-client, indexer and quality-profile/settings DB errors return `str(e)` to the admin. Route them through `redaction.safe_exc`/`redact_text` for consistency (logs are already redacted by the root filter).~~ (done 2026-10-03)

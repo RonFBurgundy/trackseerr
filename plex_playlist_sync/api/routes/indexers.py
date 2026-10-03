@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from plex_playlist_sync.api.dependencies import get_db, require_admin
+from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.clients.acquisition import get_indexer_driver
 from plex_playlist_sync.models import IndexerConfig
 from plex_playlist_sync.security import is_safe_service_url, mask_secret
@@ -138,8 +139,8 @@ def test_indexer_connection(
         success, msg = driver.test_connection()
         return TestIndexerResponse(success=success, message=msg)
     except Exception as e:
-        logger.warning("Indexer test failed: %s", e)
-        return TestIndexerResponse(success=False, message=str(e))
+        logger.warning("Indexer test failed: %s", redact_text(str(e)))
+        return TestIndexerResponse(success=False, message=f"Connection failed: {redact_text(str(e))}")
 
 
 @router.delete("/{indexer_id}", summary="Delete indexer")

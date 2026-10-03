@@ -12,6 +12,7 @@ from plex_playlist_sync.acquisition_coordinator import (
     acquisition_coordinator,
 )
 from plex_playlist_sync.api.dependencies import get_db, require_admin
+from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver
 from plex_playlist_sync.models import (
     AcquisitionSearchResult,
@@ -96,17 +97,17 @@ def search_releases(
             logger.warning(
                 "Error retrieving quality profile '%s': %s; falling back to default",
                 query.quality_profile_id,
-                e,
+                redact_text(str(e)),
             )
 
     if not profile_dict:
         try:
             profile_dict = db.get_default_quality_profile()
         except Exception as e:
-            logger.error("Failed to retrieve default quality profile: %s", e)
+            logger.error("Failed to retrieve default quality profile: %s", redact_text(str(e)))
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"No valid quality profile configured: {str(e)}",
+                detail=f"No valid quality profile configured: {redact_text(str(e))}",
             )
 
     profile: QualityProfile = _to_quality_profile(profile_dict)
@@ -125,7 +126,7 @@ def search_releases(
             clean_artist,
             clean_title,
             clean_album,
-            e,
+            redact_text(str(e)),
         )
         candidates = []
 
@@ -253,22 +254,22 @@ def grab_release(
         logger.error(
             "Validation error dispatching download to '%s': %s",
             client.get("name"),
-            e,
+            redact_text(str(e)),
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Download dispatch failed: {str(e)}",
+            detail=f"Download dispatch failed: {redact_text(str(e))}",
         )
     except Exception as e:
         logger.error(
             "Failed dispatching download on client '%s' for '%s': %s",
             client.get("name"),
             payload.release.title,
-            e,
+            redact_text(str(e)),
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Download client error: {str(e)}",
+            detail=f"Download client error: {redact_text(str(e))}",
         )
 
     # 4. Insert active download record
@@ -300,7 +301,7 @@ def grab_release(
             logger.warning(
                 "Failed to update request '%s' to processing: %s",
                 payload.request_id,
-                e,
+                redact_text(str(e)),
             )
 
     client_name = client.get("name", "download client")

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from plex_playlist_sync.api.dependencies import get_db, require_admin
+from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.models import (
     QualityProfile,
     QualityProfileItem,
@@ -129,7 +130,7 @@ def create_or_update_quality_profile(
     except sqlite3.IntegrityError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Profile name already exists or violates constraint: {e}",
+            detail=f"Profile name already exists or violates constraint: {redact_text(str(e))}",
         )
 
 

@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 import httpx
 
 from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
+from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.acquisition_worker import (
     place_audio_file,
     reconcile_audio_file_to_track,
@@ -2149,12 +2150,12 @@ def manual_import_commit(
             })
 
         except Exception as exc:
-            logger.exception("Failed to import %s: %s", source_str, exc)
+            logger.exception("Failed to import %s: %s", source_str, redact_text(str(exc)))
             failed_count += 1
             results.append({
                 "source_path": source_str,
                 "status": "failed",
-                "error": str(exc),
+                "error": redact_text(str(exc)),
             })
 
     if plex_client and hasattr(plex_client, "refresh_music_library"):
@@ -2371,8 +2372,8 @@ def rename_apply(
                 pass
 
         except Exception as exc:
-            logger.exception("Failed to rename file ID %s: %s", fid, exc)
-            errors.append(f"Error renaming file '{fid}': {str(exc)}")
+            logger.exception("Failed to rename file ID %s: %s", fid, redact_text(str(exc)))
+            errors.append(f"Error renaming file '{fid}': {redact_text(str(exc))}")
 
     if plex_client and hasattr(plex_client, "refresh_music_library"):
         try:

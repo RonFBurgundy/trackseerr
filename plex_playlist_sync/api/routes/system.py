@@ -434,7 +434,7 @@ def _ping_download_clients(db: Database) -> list[ServicePingResult]:
                 )
             )
         except Exception as e:
-            logger.warning("Error testing connection to download client %s: %s", c_name, e)
+            logger.warning("Error testing connection to download client %s: %s", c_name, redact_text(str(e)))
             results.append(
                 ServicePingResult(
                     id=c_id,
@@ -444,7 +444,7 @@ def _ping_download_clients(db: Database) -> list[ServicePingResult]:
                     enabled=True,
                     online=False,
                     latency_ms=None,
-                    message=str(e),
+                    message=redact_text(str(e)),
                 )
             )
 
@@ -527,7 +527,7 @@ def _ping_indexers(db: Database) -> list[ServicePingResult]:
                 )
             )
         except Exception as e:
-            logger.warning("Error testing connection to indexer %s: %s", i_name, e)
+            logger.warning("Error testing connection to indexer %s: %s", i_name, redact_text(str(e)))
             results.append(
                 ServicePingResult(
                     id=i_id,
@@ -537,7 +537,7 @@ def _ping_indexers(db: Database) -> list[ServicePingResult]:
                     enabled=True,
                     online=False,
                     latency_ms=None,
-                    message=str(e),
+                    message=redact_text(str(e)),
                 )
             )
 
@@ -627,8 +627,8 @@ def _get_worker_statuses() -> WorkerStatus:
 
         acq_status = {"running": acquisition_worker.is_running()}
     except Exception as e:
-        logger.warning("Failed to query acquisition worker: %s", e)
-        acq_status = {"running": False, "error": str(e)}
+        logger.warning("Failed to query acquisition worker: %s", redact_text(str(e)))
+        acq_status = {"running": False, "error": redact_text(str(e))}
 
     # 2. Lidarr trickle worker status
     try:
@@ -636,8 +636,8 @@ def _get_worker_statuses() -> WorkerStatus:
 
         lidarr_status = lidarr_worker.get_status()
     except Exception as e:
-        logger.warning("Failed to query lidarr worker: %s", e)
-        lidarr_status = {"running": False, "error": str(e)}
+        logger.warning("Failed to query lidarr worker: %s", redact_text(str(e)))
+        lidarr_status = {"running": False, "error": redact_text(str(e))}
 
     # 3. Sync coordinator status
     try:
@@ -649,8 +649,8 @@ def _get_worker_statuses() -> WorkerStatus:
             "last_run_stats": sync_state.last_run_stats,
         }
     except Exception as e:
-        logger.warning("Failed to query sync state: %s", e)
-        sync_status = {"is_syncing": False, "error": str(e)}
+        logger.warning("Failed to query sync state: %s", redact_text(str(e)))
+        sync_status = {"is_syncing": False, "error": redact_text(str(e))}
 
     # 4. Wanted backlog worker status
     try:
@@ -658,8 +658,8 @@ def _get_worker_statuses() -> WorkerStatus:
 
         backlog_status = backlog_worker.get_status()
     except Exception as e:
-        logger.warning("Failed to query backlog worker: %s", e)
-        backlog_status = {"running": False, "error": str(e)}
+        logger.warning("Failed to query backlog worker: %s", redact_text(str(e)))
+        backlog_status = {"running": False, "error": redact_text(str(e))}
 
     # 5. RSS sync worker status
     try:
@@ -667,8 +667,8 @@ def _get_worker_statuses() -> WorkerStatus:
 
         rss_status = rss_worker.get_status()
     except Exception as e:
-        logger.warning("Failed to query rss worker: %s", e)
-        rss_status = {"running": False, "error": str(e)}
+        logger.warning("Failed to query rss worker: %s", redact_text(str(e)))
+        rss_status = {"running": False, "error": redact_text(str(e))}
 
     return WorkerStatus(
         acquisition_worker=acq_status,

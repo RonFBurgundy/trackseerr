@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from plex_playlist_sync.api.dependencies import get_db, require_admin
+from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.naming import (
     PRESET_DESCRIPTIONS,
@@ -361,10 +362,10 @@ def update_media_management_settings(
         updated = db.update_media_management_settings(updates)
         return MediaManagementSettingsModel(**updated)
     except Exception as e:
-        logger.error("Failed to update media management settings: %s", e)
+        logger.error("Failed to update media management settings: %s", redact_text(str(e)))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database update failed: {e}",
+            detail=f"Database update failed: {redact_text(str(e))}",
         ) from e
 
 
@@ -461,10 +462,10 @@ def update_lidarr_settings(
         masked = _mask_lidarr_settings(updated)
         return LidarrSettingsModel(**masked)
     except Exception as e:
-        logger.error("Failed to update Lidarr settings: %s", e)
+        logger.error("Failed to update Lidarr settings: %s", redact_text(str(e)))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database update failed: {e}",
+            detail=f"Database update failed: {redact_text(str(e))}",
         ) from e
 
 
@@ -498,14 +499,14 @@ def test_lidarr_connection(
         return LidarrTestConnectionResponse(
             online=bool(result.get("online", False)),
             version=result.get("version"),
-            error=result.get("error"),
+            error=redact_text(str(result["error"])) if result.get("error") else None,
         )
     except Exception as e:
-        logger.warning("Lidarr connection test failed with exception: %s", e)
+        logger.warning("Lidarr connection test failed with exception: %s", redact_text(str(e)))
         return LidarrTestConnectionResponse(
             online=False,
             version=None,
-            error=str(e),
+            error=redact_text(str(e)),
         )
 
 
@@ -554,10 +555,10 @@ def update_general_settings(
         updated = db.update_general_settings(updates)
         return GeneralSettingsModel(**updated)
     except Exception as e:
-        logger.error("Failed to update general settings: %s", e)
+        logger.error("Failed to update general settings: %s", redact_text(str(e)))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database update failed: {e}",
+            detail=f"Database update failed: {redact_text(str(e))}",
         ) from e
 
 
