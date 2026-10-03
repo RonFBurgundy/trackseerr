@@ -15,7 +15,7 @@
    - separate limits for albums, tracks and discographies
    - per-user auto-approve vs admin approval, per request type
 5. (done) **Leak hardening in `clients/plex.py`**: `sync_playlist_to_users` / `update_or_create_playlist` build `SyncResult.error` strings and log lines from `str(e)`. These can carry Plex URLs. Mixes redact them downstream, but the sync route and the CLI do not.
-6. **Split-port single-container mode**, a middle ground between all-in-one and the two-container setup. The public port gets the gateway deny-by-default allowlist; admin is reachable only on a LAN-bound port. README guidance: all-in-one for LAN/VPN only; two containers whenever the request app faces the internet.
+6. ~~Split-port single-container mode~~ (dropped 2026-10-03, owner decision: all-in-one for LAN/VPN, two containers for internet exposure)
 7. (done) **DMZ setup ergonomics** (agreed 2026-10-03; next after the leak fix):
    - (1) gateway/core startup guardrails
    - (2) gateway↔core version/protocol handshake
