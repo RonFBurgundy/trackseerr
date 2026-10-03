@@ -11,9 +11,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
-from typing import Any
+import re
+from typing import Any, Optional
 from urllib.parse import unquote, urlsplit
 
 import httpx
@@ -23,7 +25,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from plex_playlist_sync.clients.core_client import CoreClient
+from plex_playlist_sync.api.sessions import start_session
+from plex_playlist_sync.clients.core_client import SESSION_ISSUED_AT_KEY, CoreClient
 from plex_playlist_sync.internal_auth import HEADER_SIGNATURE
 
 logger = logging.getLogger(__name__)
@@ -42,6 +45,7 @@ GATEWAY_LOCAL_ALLOWLIST: tuple[tuple[frozenset[str], str], ...] = (
     (READ, "/api/health"),  # container/orchestrator health check
     (frozenset({"POST"}), "/api/auth/plex/pin"),  # sign-in: start the Plex PIN flow
     (frozenset({"POST"}), "/api/auth/plex/verify"),  # sign-in: claim the PIN and create the session
+    (frozenset({"POST"}), "/api/auth/local/login"),  # sign-in: local account (core verifies the credentials)
     (frozenset({"POST"}), "/api/auth/logout"),  # sign-out
     (READ, "/api/auth/me"),  # session user + tier
     (READ, "/api/users/me"),  # profile, permissions and quota telemetry
@@ -55,6 +59,12 @@ GATEWAY_LOCAL_ALLOWLIST: tuple[tuple[frozenset[str], str], ...] = (
     (READ, "/api/library/availability"),  # availability lookup (route forwards to core)
 )
 
+# Pre-login endpoints the gateway relays to core as the SERVICE principal (no user session exists yet).
+# Rate-limited per end-user IP at the gateway.
+GATEWAY_FORWARD_SERVICE_ALLOWLIST: tuple[tuple[frozenset[str], str], ...] = (
+    (frozenset({"GET", "POST"}), "/api/auth/invite/{}"),  # invite / password-reset link
+)
+
 # User-scoped endpoints the gateway relays to core as the signed-in user.
 GATEWAY_FORWARD_ALLOWLIST: tuple[tuple[frozenset[str], str], ...] = (
     (READ, "/api/requests"),  # list the signed-in user's own requests (state lives on core)
@@ -64,11 +74,24 @@ GATEWAY_FORWARD_ALLOWLIST: tuple[tuple[frozenset[str], str], ...] = (
     (READ, "/api/issues/{}"),  # view own issue (core returns 404 for others')
     (ALL_METHODS, "/api/plex-playlists/**"),  # user's own Plex playlists (core enforces ownership)
     (ALL_METHODS, "/api/mixes/**"),  # tailored mixes
+    (ALL_METHODS, "/api/account/**"),  # own profile, quotas, password and MFA (core enforces)
     (frozenset({"GET", "PUT"}), "/api/scrobbles/config"),  # own scrobble settings
     (READ, "/api/scrobbles/listens"),  # own listen history
     (READ, "/api/scrobbles/lastfm/auth-url"),  # begin Last.fm connect
     (READ, "/api/scrobbles/lastfm/callback"),  # Last.fm return; core's 303 Location is passed through
 )
+
+
+# Static SPA route for the invite / reset link. It lives outside /api so the gateway guard passes it
+# through to the app; the route itself accepts only this exact shape (no catch-all).
+INVITE_TOKEN_PATH_RE = re.compile(r"[A-Za-z0-9_-]{16,128}")
+
+_INVITE_PATH_RE = re.compile(r"(/api/auth/invite/)[^/?]+")
+
+
+def _redact_path(path: str) -> str:
+    """Hides invite/reset tokens so they never reach the logs."""
+    return _INVITE_PATH_RE.sub(r"\1<token>", path)
 
 
 def _template_matches(template: str, path: str) -> bool:
@@ -240,6 +263,10 @@ class GatewayGuardMiddleware:
         if _allowed(GATEWAY_LOCAL_ALLOWLIST, method, match_path):
             await self.app(scope, receive, send)
             return
+        if _allowed(GATEWAY_FORWARD_SERVICE_ALLOWLIST, method, match_path):
+            response = await self._forward(scope, receive, config, fastapi_app, method, raw_path, service=True)
+            await response(scope, receive, send)
+            return
         if _allowed(GATEWAY_FORWARD_ALLOWLIST, method, match_path):
             response = await self._forward(scope, receive, config, fastapi_app, method, raw_path)
             await response(scope, receive, send)
@@ -248,9 +275,17 @@ class GatewayGuardMiddleware:
         await _not_found()(scope, receive, send)
 
     async def _forward(
-        self, scope: Scope, receive: Receive, config: Any, app: Any, method: str, raw_path: str
+        self,
+        scope: Scope,
+        receive: Receive,
+        config: Any,
+        app: Any,
+        method: str,
+        raw_path: str,
+        service: bool = False,
     ) -> Response:
         request = Request(scope, receive)
+        log_path = _redact_path(raw_path)
 
         declared = request.headers.get("content-length")
         if declared is not None:
@@ -268,15 +303,25 @@ class GatewayGuardMiddleware:
             chunks.append(chunk)
         body = b"".join(chunks)
 
-        try:
-            user = await run_in_threadpool(self._session_user, request, app, config)
-        except HTTPException as exc:
-            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+        user: Optional[dict[str, Any]] = None
+        if service:
+            limited = await run_in_threadpool(self._invite_rate_limited, request, app, config)
+            if limited:
+                return JSONResponse(
+                    {"detail": "Too many attempts. Please try again later."},
+                    status_code=429,
+                    headers={"Retry-After": "900"},
+                )
+        else:
+            try:
+                user = await run_in_threadpool(self._session_user, request, app, config)
+            except HTTPException as exc:
+                return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
 
         core_url = getattr(config, "trackseerr_core_url", None)
         secret = getattr(config, "internal_core_secret", None)
         if not core_url or not secret:
-            logger.error("Gateway cannot forward %s %s: TRACKSEERR_CORE_URL / INTERNAL_CORE_SECRET not set", method, raw_path)
+            logger.error("Gateway cannot forward %s %s: TRACKSEERR_CORE_URL / INTERNAL_CORE_SECRET not set", method, log_path)
             return JSONResponse({"detail": "TrackSeerr Core is not configured"}, status_code=503)
 
         client = CoreClient(core_url=core_url, secret=secret)
@@ -288,14 +333,22 @@ class GatewayGuardMiddleware:
                 raw_path,
                 query,
                 body,
-                {"id": user["id"], "username": user.get("username")},
+                (
+                    None
+                    if user is None
+                    else {
+                        "id": user["id"],
+                        "username": user.get("username"),
+                        SESSION_ISSUED_AT_KEY: user.get(SESSION_ISSUED_AT_KEY),
+                    }
+                ),
                 request.headers.get("content-type"),
             )
         except ValueError as exc:
-            logger.error("Gateway could not sign %s %s: %s", method, raw_path, exc)
+            logger.error("Gateway could not sign %s %s: %s", method, log_path, exc)
             return JSONResponse({"detail": "Request could not be forwarded"}, status_code=400)
         except httpx.HTTPError as exc:
-            logger.error("Gateway proxy to core failed for %s %s: %s", method, raw_path, exc)
+            logger.error("Gateway proxy to core failed for %s %s: %s", method, log_path, type(exc).__name__)
             return JSONResponse({"detail": "Unable to communicate with TrackSeerr Core engine"}, status_code=502)
 
         headers: dict[str, str] = {}
@@ -304,16 +357,57 @@ class GatewayGuardMiddleware:
                 continue
             safe = _safe_location(v, core_url)
             if safe is None:
-                logger.warning("Dropped non-relative redirect Location from core for %s %s", method, raw_path)
+                logger.warning("Dropped non-relative redirect Location from core for %s %s", method, log_path)
             else:
                 headers["Location"] = safe
         content_type = relayed.headers.get("Content-Type")
-        return Response(
-            content=relayed.body,
+        body_out = relayed.body
+        out = Response(
+            content=body_out,
             status_code=relayed.status_code,
             headers=headers,
             media_type=content_type,
         )
+        if user is not None and method == "POST" and raw_path.rstrip("/") == "/api/account/password":
+            reissued = await run_in_threadpool(self._reissue_after_password_change, request, app, config, user, relayed)
+            if reissued is not None:
+                return reissued
+        return out
+
+    @staticmethod
+    def _reissue_after_password_change(
+        request: Request, app: Any, config: Any, user: dict[str, Any], relayed: Any
+    ) -> Optional[Response]:
+        """Core revoked every session; mint this browser a fresh gateway session and strip the marker."""
+        if relayed.status_code != 200:
+            return None
+        try:
+            data = json.loads(relayed.body or b"{}")
+        except ValueError:
+            return None
+        if not isinstance(data, dict) or not data.get("reissue_session"):
+            return None
+        floor = data.get("session_floor_us")
+        public = {k: v for k, v in data.items() if k not in ("reissue_session", "session_floor_us")}
+        out = JSONResponse(public, status_code=200)
+        db = _resolve_db(app)
+        db.delete_user_sessions(user["id"])
+        start_session(
+            db, config, request, out, {**user, "is_admin": False},
+            floor_us=int(floor) if isinstance(floor, int) else 0,
+        )
+        return out
+
+    @staticmethod
+    def _invite_rate_limited(request: Request, app: Any, config: Any) -> bool:
+        """Records one invite-endpoint hit for the end user's IP; True once over 10 per 15 minutes."""
+        from plex_playlist_sync.api.dependencies import get_client_ip
+        from plex_playlist_sync.local_login import check_rate, throttle_key
+
+        db = _resolve_db(app)
+        key = throttle_key("invite", get_client_ip(request, config))
+        db.record_login_attempt(key, max_rows=11)
+        return check_rate(db, key, 11)
 
     @staticmethod
     def _session_user(request: Request, app: Any, config: Any) -> dict[str, Any]:
@@ -324,6 +418,7 @@ class GatewayGuardMiddleware:
 
 __all__ = [
     "GATEWAY_FORWARD_ALLOWLIST",
+    "GATEWAY_FORWARD_SERVICE_ALLOWLIST",
     "GATEWAY_LOCAL_ALLOWLIST",
     "GatewayGuardMiddleware",
     "MAX_PROXY_BODY_BYTES",

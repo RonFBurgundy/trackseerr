@@ -15,7 +15,7 @@ from plex_playlist_sync.models import Playlist, RequestStatus, Track
 from plex_playlist_sync.request_submission import (
     RequestRejected,
     RequestSubmission,
-    effective_request_quota,
+    effective_quota_limits,
     run_submission_followups,
     submit_track_request,
     user_request_lock,
@@ -277,7 +277,7 @@ def generate_and_sync(
     user = db.get_user(user_id)
     max_weekly = int(config_row.get("max_weekly_acquisitions") or 0)
     if user is not None and not user.get("is_admin"):
-        max_weekly = min(max_weekly, effective_request_quota(user, app_config))
+        max_weekly = min(max_weekly, effective_quota_limits(db, user_id)["tracks"])
     auto_acquire = bool(config_row.get("auto_acquire_missing")) and user is not None
     since_iso = (now - timedelta(days=QUOTA_WINDOW_DAYS)).isoformat(timespec="seconds")
     used = db.count_mix_acquisitions_since(user_id, since_iso)

@@ -24,6 +24,8 @@ services:
       # It only holds the signing secret, so a compromised gateway can never act as admin.
       - TRACKSEERR_CORE_URL=http://trackseerr-core:5251
       - APPLICATION_URL=https://trackseerr.yourdomain.com
+      # Reverse-proxy IPs/CIDRs whose X-Forwarded-For is trusted for login throttling (unset = use the peer address).
+      # - TRUSTED_PROXIES=172.18.0.0/16
       - PORT=5250
       - PUID=1000
       - PGID=1000

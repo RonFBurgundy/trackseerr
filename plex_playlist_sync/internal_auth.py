@@ -24,6 +24,7 @@ HEADER_USER_NAME = "X-TS-User-Name"
 HEADER_TIMESTAMP = "X-TS-Timestamp"
 HEADER_NONCE = "X-TS-Nonce"
 HEADER_SIGNATURE = "X-TS-Signature"
+HEADER_SESSION_ISSUED_AT = "X-TS-Session-Issued-At"
 
 MAX_CLOCK_SKEW_SECONDS = 60
 NONCE_TTL_SECONDS = 120
@@ -42,6 +43,7 @@ class VerifiedAssertion:
 
     user_id: str
     user_name: str
+    session_issued_at: Optional[int] = None  # epoch microseconds the gateway session was created; None if absent
 
 
 def body_sha256_hex(body: bytes) -> str:
@@ -61,9 +63,16 @@ def canonical_string(
     timestamp: str,
     nonce: str,
     body_sha256: str,
+    session_issued_at: str = "",
 ) -> str:
-    """METHOD \\n PATH?QUERY \\n user_id \\n user_name \\n timestamp \\n nonce \\n sha256_hex(body)."""
-    return "\n".join([method.upper(), target, user_id, user_name, timestamp, nonce, body_sha256])
+    """METHOD \\n PATH?QUERY \\n user_id \\n user_name \\n timestamp \\n nonce \\n sha256_hex(body) \\n session_issued_at.
+
+    ``session_issued_at`` is the gateway session's creation time in epoch microseconds ("" when
+    there is no session, e.g. a service call). It is signed so core can enforce revocation.
+    """
+    return "\n".join(
+        [method.upper(), target, user_id, user_name, timestamp, nonce, body_sha256, session_issued_at]
+    )
 
 
 def _compute(secret: str, canonical: str) -> str:
@@ -85,6 +94,7 @@ def sign_assertion(
     *,
     timestamp: Optional[int] = None,
     nonce: Optional[str] = None,
+    session_issued_at: Optional[int] = None,
 ) -> dict[str, str]:
     """Returns the X-TS-* headers authenticating one request. ``target`` is path plus ``?query``."""
     if not secret:
@@ -98,13 +108,15 @@ def sign_assertion(
     _reject_control(target, "target")
     ts = str(int(time.time()) if timestamp is None else int(timestamp))
     nonce_val = nonce or secrets.token_hex(16)
-    canonical = canonical_string(method, target, user_id, wire_name, ts, nonce_val, body_sha256_hex(body))
+    issued = "" if session_issued_at is None else str(int(session_issued_at))
+    canonical = canonical_string(method, target, user_id, wire_name, ts, nonce_val, body_sha256_hex(body), issued)
     return {
         HEADER_USER_ID: user_id,
         HEADER_USER_NAME: wire_name,
         HEADER_TIMESTAMP: ts,
         HEADER_NONCE: nonce_val,
         HEADER_SIGNATURE: _compute(secret, canonical),
+        HEADER_SESSION_ISSUED_AT: issued,
     }
 
 
@@ -177,7 +189,10 @@ def verify_assertion(
     if "\n" in user_id or "\r" in user_id or "\n" in target or "\r" in target:
         raise InvalidAssertion("illegal characters in assertion")
 
-    expected = _compute(secret, canonical_string(method, target, user_id, wire_name, ts_raw, nonce, body_sha256))
+    issued_raw = headers.get(HEADER_SESSION_ISSUED_AT, "")
+    expected = _compute(
+        secret, canonical_string(method, target, user_id, wire_name, ts_raw, nonce, body_sha256, issued_raw)
+    )
     if not hmac.compare_digest(expected.encode("ascii"), signature.strip().lower().encode("utf-8", "replace")):
         raise InvalidAssertion("signature mismatch")
 
@@ -194,7 +209,12 @@ def verify_assertion(
         if not fresh:
             raise InvalidAssertion("nonce replayed")
 
-    return VerifiedAssertion(user_id=user_id, user_name=unquote(wire_name))
+    issued_at: Optional[int] = None
+    if issued_raw:
+        if not (issued_raw.isascii() and issued_raw.isdigit()) or len(issued_raw) > 20:
+            raise InvalidAssertion("malformed session issue time")
+        issued_at = int(issued_raw)
+    return VerifiedAssertion(user_id=user_id, user_name=unquote(wire_name), session_issued_at=issued_at)
 
 
 def validate_secret_strength(secret: Optional[str]) -> bool:

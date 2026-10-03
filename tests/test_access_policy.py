@@ -177,6 +177,52 @@ def test_log_stream_refuses_non_admin_session_token(env):
     assert res.status_code == 403
 
 
+def _tok(headers):
+    return headers["Authorization"].split(" ", 1)[1]
+
+
+@pytest.fixture
+def stream_ok():
+    """Replaces the endless SSE body so an authorised stream returns immediately."""
+    from fastapi.responses import PlainTextResponse
+
+    with patch(
+        "plex_playlist_sync.api.routes.system.StreamingResponse",
+        lambda *a, **k: PlainTextResponse("ok"),
+    ):
+        yield
+
+
+def test_log_stream_admin_token_streams(env, stream_ok):
+    token = _tok(env["admin"])
+    assert env["client"].get(f"/api/system/logs/stream?token={token}").status_code == 200
+    assert env["client"].get("/api/system/logs/stream", headers=env["admin"]).status_code == 200
+
+
+def test_log_stream_refuses_missing_token(env, stream_ok):
+    assert env["client"].get("/api/system/logs/stream").status_code == 401
+
+
+def test_log_stream_refuses_logged_out_session_token(env, stream_ok):
+    token = _tok(env["admin"])
+    env["db"].delete_session(token)
+    assert env["client"].get(f"/api/system/logs/stream?token={token}").status_code == 401
+
+
+def test_log_stream_refuses_disabled_admin(env, stream_ok):
+    token = _tok(env["admin"])
+    env["db"].set_disabled("admin-1", True)
+    assert env["client"].get(f"/api/system/logs/stream?token={token}").status_code in (401, 403)
+
+
+def test_log_stream_refuses_session_issued_before_revocation(env, stream_ok):
+    token = _tok(env["admin"])
+    env["db"].revoke_sessions("admin-1")
+    # the session row is kept so only the sessions_revoked_at check can reject it
+    env["db"].create_session(token, "admin-1", {"auth": "test"}, issued_at_us=1_000_000)
+    assert env["client"].get(f"/api/system/logs/stream?token={token}").status_code == 401
+
+
 # --------------------------------------------------------------------------- user-level routes: 200
 
 
@@ -352,7 +398,8 @@ def test_gateway_forwards_user_endpoints_to_core(gateway, method, path):
     assert res.status_code == 200
     args = proxy.call_args.args
     assert args[0] == method and args[1] == path
-    assert args[4] == {"id": "user-alice", "username": "alice"}
+    assert args[4]["id"] == "user-alice" and args[4]["username"] == "alice"
+    assert args[4]["_session_issued_at_us"] > 0
 
 
 @pytest.mark.parametrize(

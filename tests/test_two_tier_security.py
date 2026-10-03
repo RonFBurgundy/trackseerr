@@ -268,7 +268,7 @@ def test_gateway_role_never_accepts_signatures(db, tmp_path):
 def test_forwarded_request_attributed_to_real_user_and_quota_enforced(core, db):
     client, _ = core
     with db._lock:
-        db.conn.execute("UPDATE users SET request_limit_quota = 1 WHERE id = '1001'")
+        db.conn.execute("UPDATE users SET quota_tracks = 1 WHERE id = '1001'")
         db.conn.commit()
 
     def post(title: str):
@@ -419,7 +419,8 @@ def test_gateway_forwards_with_session_user(gateway):
     assert args[0] == "GET"
     assert args[1] == "/api/plex-playlists"
     assert args[2] == "kind=regular"
-    assert args[4] == {"id": "1001", "username": "alice"}
+    assert args[4]["id"] == "1001" and args[4]["username"] == "alice"
+    assert isinstance(args[4]["_session_issued_at_us"], int) and args[4]["_session_issued_at_us"] > 0
 
 
 def test_gateway_forward_passes_body_and_all_methods(gateway):

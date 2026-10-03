@@ -27,12 +27,15 @@ logger = logging.getLogger("plex_playlist_sync")
 _shutdown_requested = False
 
 
-_SENSITIVE_QUERY_RE = re.compile(r"(?i)([?&](?:token|apikey|api_key|state)=)[^&#\s\"]*")
+_SENSITIVE_QUERY_RE = re.compile(r"(?i)([?&](?:token|apikey|api_key|state|sk|api_sig)=)[^&#\s\"]*")
+
+
+_INVITE_TOKEN_RE = re.compile(r"(/(?:api/auth/)?invite/)[^/?#\s\"']+")
 
 
 def redact_sensitive_query(text: str) -> str:
-    """Replace the values of token/apikey/api_key/state query parameters with ``REDACTED``."""
-    return _SENSITIVE_QUERY_RE.sub(r"\1REDACTED", text)
+    """Replace token/apikey/api_key/state query values, and invite/reset link tokens (``[REDACTED]``), with ``REDACTED``."""
+    return _INVITE_TOKEN_RE.sub(r"\1[REDACTED]", _SENSITIVE_QUERY_RE.sub(r"\1REDACTED", text))
 
 
 class RedactAccessLogFilter(logging.Filter):
@@ -44,6 +47,39 @@ class RedactAccessLogFilter(logging.Filter):
         if isinstance(record.msg, str):
             record.msg = redact_sensitive_query(record.msg)
         return True
+
+
+class RedactLogFilter(logging.Filter):
+    """Handler-level filter: renders the record and redacts invite/reset tokens and secret query params."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except (TypeError, ValueError):
+            return True
+        redacted = redact_sensitive_query(message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = None
+        # Exception text and stack dumps are rendered later by Formatter.format; pre-render and redact
+        # them here (Formatter reuses a cached ``exc_text``) so tracebacks cannot leak tokens either.
+        if record.exc_info and not record.exc_text:
+            try:
+                record.exc_text = logging.Formatter().formatException(record.exc_info)
+            except (TypeError, ValueError, AttributeError):
+                record.exc_text = None
+        if record.exc_text:
+            record.exc_text = redact_sensitive_query(record.exc_text)
+        if record.stack_info:
+            record.stack_info = redact_sensitive_query(record.stack_info)
+        return True
+
+
+def install_log_redaction(root_logger: logging.Logger) -> None:
+    """Attaches :class:`RedactLogFilter` to every root handler (stdout, ring buffer, rotating file)."""
+    for handler in root_logger.handlers:
+        if not any(isinstance(f, RedactLogFilter) for f in handler.filters):
+            handler.addFilter(RedactLogFilter())
 
 
 def install_access_log_redaction() -> None:
@@ -98,6 +134,12 @@ def setup_logging(level_name: str, config: Optional[Config] = None) -> None:
             root_logger.addHandler(rfh)
     except Exception as ex:
         logger.warning("Could not initialize RotatingFileHandler: %s", ex)
+
+    # httpx/httpcore log every request URL at INFO, which would carry invite/reset tokens
+    # relayed by the gateway. Keep them quiet, and redact whatever else reaches a handler.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    install_log_redaction(root_logger)
 
 
 def main() -> int:
@@ -235,6 +277,10 @@ def main() -> int:
             for u in home_users:
                 uname = u.get("username") or u.get("name") or "Unknown"
                 admin_flag = bool(u.get("is_admin", u.get("admin", False)))
+                if db.is_tombstoned(str(u["id"])):
+                    continue  # deleted by an admin; only an explicit restore lets them back in
+                known = db.get_user(str(u["id"]))
+                admin_flag = admin_flag or bool(known and known["is_admin"])
                 db.upsert_user(
                     user_id=str(u["id"]),
                     username=str(uname),

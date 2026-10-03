@@ -457,7 +457,7 @@ class TestRollingQuotaAndRequestPermissions:
             headers=headers,
         )
         assert r3.status_code == 400
-        assert "quota exceeded" in r3.json()["detail"].lower()
+        assert "quota reached" in r3.json()["detail"].lower()
 
     def test_batch_requests_rolling_quota_enforcement(self, app_and_client, test_db, test_config, seeded_users):
         """Batch request checks remaining quota against rolling active count."""
@@ -491,7 +491,7 @@ class TestRollingQuotaAndRequestPermissions:
             headers=headers,
         )
         assert resp_batch.status_code == 400
-        assert "quota exceeded" in resp_batch.json()["detail"].lower()
+        assert "quota reached" in resp_batch.json()["detail"].lower()
 
         # Batch of 1 succeeds
         resp_batch_ok = client.post(

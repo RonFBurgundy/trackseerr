@@ -24,6 +24,7 @@ from plex_playlist_sync.acquisition_worker import acquisition_worker
 from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
 from plex_playlist_sync.api.dependencies import (
     get_config,
+    authenticate_request,
     get_current_user,
     get_db,
     get_deezer_client,
@@ -773,45 +774,10 @@ async def stream_system_logs(
     config: Config = Depends(get_config),
 ):
     """Server-Sent Events endpoint streaming real-time log records."""
-    secret = get_or_create_secret_key(data_dir=config.data_dir)
-    auth_token = None
-
-    cookie_token = request.cookies.get("session_token")
-    if cookie_token:
-        auth_token = cookie_token
-    elif token:
-        auth_token = token
-    else:
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            auth_token = auth_header[7:].strip()
-
-    if not auth_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
-        )
-
-    session = verify_session_token(auth_token, secret)
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid session",
-        )
-
-    user = db.get_user(session["user_id"])
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-        )
-
-    user_perms = int(user.get("permissions") if user.get("permissions") is not None else 0)
-    if not (user.get("is_admin") or (user_perms & int(UserPermission.ADMIN))):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Administrator access required",
-        )
+    # Same session resolution as get_current_user (session row, disabled/tombstoned,
+    # sessions_revoked_at, gateway status); ?token= only because EventSource cannot set headers.
+    user = authenticate_request(request, db, config, query_token=token)
+    require_admin(user)
 
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue(maxsize=200)

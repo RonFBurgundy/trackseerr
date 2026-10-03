@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, LogIn } from 'lucide-react';
-import type { Playlist, User } from '@/types/models';
+import type { ArtistDiscographyAlbum, Playlist, User } from '@/types/models';
 import {
   useAuth,
   useAudioPlayer,
@@ -9,6 +9,8 @@ import {
   useIssues,
   useLibrary,
   useQueue,
+  useAccount,
+  useLocalLogin,
 } from '@/hooks';
 import {
   Header,
@@ -23,6 +25,8 @@ import {
   ObsidianModal,
   TapeDeckButton,
   MachinedCard,
+  InvitePage,
+  LocalLoginForm,
 } from '@/components';
 import type { MainTab } from '@/components/layout/Navigation';
 import {
@@ -34,9 +38,36 @@ import {
   importPlaylist,
 } from '@/services/playlistService';
 import { apiRequest } from '@/services/apiClient';
+import { createDiscographyRequest, MAX_BATCH_ITEMS } from '@/services/requestService';
 
-export const App: React.FC = () => {
+/** Manual path routing: only /invite/:token is a distinct page; everything else is the SPA shell. */
+export function parseInviteToken(pathname: string): string | null {
+  const match = /^\/invite\/([^/]+)\/?$/.exec(pathname);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch (err: unknown) {
+    if (err instanceof URIError) return null;
+    throw err;
+  }
+}
+
+const MainApp: React.FC = () => {
   const auth = useAuth();
+  const accountHook = useAccount(auth.isAuthenticated);
+  const localLogin = useLocalLogin({ onSignedIn: auth.completeLocalSignIn });
+  const [showLocalLogin, setShowLocalLogin] = useState<boolean>(false);
+  // Mandatory MFA enrollment: the server returns 403 for everything but /api/account*,
+  // so confine the UI to Settings -> Account until it is done.
+  const mfaEnrollmentRequired =
+    auth.isAuthenticated &&
+    (auth.mfaEnrollmentRequired ||
+      Boolean(
+        accountHook.account &&
+          accountHook.account.auth_type === 'local' &&
+          accountHook.account.mfa_required &&
+          !accountHook.account.mfa_enabled
+      ));
   const audioPlayer = useAudioPlayer();
   const discovery = useDiscovery();
   const requestsHook = useRequests();
@@ -49,8 +80,9 @@ export const App: React.FC = () => {
     return q.has('connected') || q.has('scrobble_error') ? 'settings' : 'discover';
   });
   // Library and Activity are admin-only: any other source of those tabs falls back to Discover.
-  const activeTab: MainTab =
-    !auth.canUseAdminUi && (requestedTab === 'library' || requestedTab === 'activity')
+  const activeTab: MainTab = mfaEnrollmentRequired
+    ? 'settings'
+    : !auth.canUseAdminUi && (requestedTab === 'library' || requestedTab === 'activity')
       ? 'discover'
       : requestedTab;
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
@@ -113,6 +145,27 @@ export const App: React.FC = () => {
       type: item.type,
     });
     setRequestedIds((prev) => new Set([...prev, item.id]));
+    void accountHook.refresh();
+  };
+
+  // Discography batch: the albums fill one discography quota unit.
+  const handleRequestDiscography = async (artist: string, albums: ArtistDiscographyAlbum[]) => {
+    await createDiscographyRequest({
+      kind: 'discography',
+      artist,
+      requests: albums.slice(0, MAX_BATCH_ITEMS).map((a) => ({
+        item_type: 'album' as const,
+        title: a.title,
+        artist: a.artist || artist,
+        album: a.title,
+        cover_url: a.cover_url,
+        release_date: a.release_date,
+        foreign_id: a.id,
+      })),
+    });
+    setRequestedIds((prev) => new Set([...prev, ...albums.map((a) => a.id)]));
+    void requestsHook.refresh();
+    void accountHook.refresh();
   };
 
   const handleSyncPlaylists = async () => {
@@ -232,15 +285,33 @@ export const App: React.FC = () => {
                     </TapeDeckButton>
                   </div>
                 ) : (
-                  <TapeDeckButton
-                    size="lg"
-                    variant="amber"
-                    onClick={auth.loginWithPlex}
-                    icon={<LogIn className="h-5 w-5" />}
-                    className="w-full"
-                  >
-                    Sign In with Plex
-                  </TapeDeckButton>
+                  <>
+                    <TapeDeckButton
+                      size="lg"
+                      variant="amber"
+                      onClick={auth.loginWithPlex}
+                      icon={<LogIn className="h-5 w-5" />}
+                      className="w-full"
+                    >
+                      Sign In with Plex
+                    </TapeDeckButton>
+                    <div className="flex items-center gap-3 text-[10px] font-mono uppercase text-[var(--text-muted)]">
+                      <span className="h-px flex-1 bg-[var(--border-default)]" />
+                      or
+                      <span className="h-px flex-1 bg-[var(--border-default)]" />
+                    </div>
+                    {showLocalLogin ? (
+                      <LocalLoginForm login={localLogin} />
+                    ) : (
+                      <TapeDeckButton
+                        size="md"
+                        className="w-full"
+                        onClick={() => setShowLocalLogin(true)}
+                      >
+                        Sign in with username
+                      </TapeDeckButton>
+                    )}
+                  </>
                 )}
               </div>
             </MachinedCard>
@@ -255,6 +326,7 @@ export const App: React.FC = () => {
                 currentPreviewTrackId={audioPlayer.currentTrack?.id}
                 isPreviewPlaying={audioPlayer.isPlaying}
                 onRequest={handleRequestItem}
+                onRequestDiscography={handleRequestDiscography}
                 requestedIds={requestedIds}
                 issuesHook={issuesHook}
               />
@@ -266,6 +338,7 @@ export const App: React.FC = () => {
                 isAdmin={auth.canUseAdminUi}
                 issuesHook={issuesHook}
                 currentUserId={auth.user?.id}
+                account={accountHook.account}
               />
             )}
 
@@ -301,6 +374,9 @@ export const App: React.FC = () => {
               <SettingsView
                 isAdmin={auth.canUseAdminUi}
                 showGatewayNote={auth.isAdmin && auth.tier === 'gateway'}
+                accountHook={accountHook}
+                currentUserId={auth.user?.id}
+                mfaEnrollmentRequired={mfaEnrollmentRequired}
               />
             )}
           </div>
@@ -387,6 +463,12 @@ export const App: React.FC = () => {
       </ObsidianModal>
     </div>
   );
+};
+
+export const App: React.FC = () => {
+  const inviteToken = parseInviteToken(window.location.pathname);
+  // The invite page must work without a session, so it bypasses auth (and its hooks) entirely.
+  return inviteToken ? <InvitePage token={inviteToken} /> : <MainApp />;
 };
 
 export default App;

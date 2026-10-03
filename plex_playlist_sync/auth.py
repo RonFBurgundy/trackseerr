@@ -314,6 +314,9 @@ def create_session_token(
         "is_admin": bool(is_admin),
         "iat": now,
         "exp": now + expires_in_seconds,
+        # Unique per issuance: two sessions minted in the same second must not share a token,
+        # otherwise logging out / revoking one would silently act on the other.
+        "jti": secrets.token_hex(8),
     }
     payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     payload_b64 = base64.urlsafe_b64encode(payload_json).decode("ascii").rstrip("=")

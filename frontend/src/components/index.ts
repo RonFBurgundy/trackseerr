@@ -5,3 +5,7 @@ export * from './plex';
 export * from './scrobbling';
 export * from './mixes';
 export * from './issues';
+export * from './auth';
+export * from './account';
+export * from './admin';
+export * from './discovery';

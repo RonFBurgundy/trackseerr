@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -11,11 +12,14 @@ from fastapi.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 
 from plex_playlist_sync.api.routes import (
+    account,
     acquisition,
+    admin_users,
     auth,
     discovery,
     download_clients,
     indexers,
+    internal,
     issues,
     library,
     missing,
@@ -32,7 +36,7 @@ from plex_playlist_sync.api.routes import (
     system,
     users,
 )
-from plex_playlist_sync.api.tier_middleware import GatewayGuardMiddleware, SignedBodyMiddleware
+from plex_playlist_sync.api.tier_middleware import INVITE_TOKEN_PATH_RE, GatewayGuardMiddleware, SignedBodyMiddleware
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.internal_auth import MIN_SECRET_LENGTH, validate_secret_strength
 from plex_playlist_sync.storage import Database
@@ -52,6 +56,21 @@ def _enforce_internal_secret(config: Optional[Config]) -> None:
         raise RuntimeError(
             f"ROLE={role} requires INTERNAL_CORE_SECRET of at least {MIN_SECRET_LENGTH} characters"
         )
+
+
+def _setup_logging_or_fail(config: Config) -> None:
+    """Runs ``setup_logging``. A gateway/core must never run without log redaction, so it re-raises there."""
+    try:
+        from plex_playlist_sync.cli import setup_logging
+
+        setup_logging(config.log_level, config=config)
+    except (OSError, ImportError, ValueError, TypeError, AttributeError, RuntimeError) as exc:
+        # Logging itself may be what failed, so report on stderr rather than through the logger.
+        role = str(getattr(config, "role", "all-in-one") or "all-in-one")
+        if role in ("gateway", "core"):
+            print(f"FATAL: logging/redaction setup failed for ROLE={role}: {exc!r}", file=sys.stderr)
+            raise
+        print(f"WARNING: logging setup failed ({exc!r}); continuing without it (all-in-one)", file=sys.stderr)
 
 
 def create_app(
@@ -74,11 +93,7 @@ def create_app(
         app.state.db = db
     if config is not None:
         app.state.config = config
-        try:
-            from plex_playlist_sync.cli import setup_logging
-            setup_logging(config.log_level, config=config)
-        except Exception:
-            pass
+        _setup_logging_or_fail(config)
 
     # 0. Two-tier security: hash signed bodies (all roles); deny-by-default guard (gateway role only, checked per request)
     # Added last = outermost: forged X-TS-* headers are refused on a gateway before the guard forwards anything.
@@ -130,7 +145,10 @@ def create_app(
     # 3. Mount Routers under /api
     api_router = APIRouter(prefix="/api")
     api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+    api_router.include_router(account.router, prefix="/account", tags=["account"])
+    api_router.include_router(internal.router, prefix="/internal", tags=["internal"])
     api_router.include_router(users.router, prefix="/users", tags=["users"])
+    api_router.include_router(admin_users.router, prefix="/admin", tags=["admin-users"])
     api_router.include_router(playlists.router, prefix="/playlists", tags=["playlists"])
     api_router.include_router(plex_playlists.router, prefix="/plex-playlists", tags=["plex_playlists"])
     api_router.include_router(sync.router, prefix="/sync", tags=["sync"])
@@ -213,6 +231,22 @@ def create_app(
         if not use_legacy and dist_index.is_file():
             return FileResponse(str(dist_index), media_type="text/html")
         return FileResponse(str(static_dir / "index.html"), media_type="text/html")
+
+    @app.api_route(
+        "/invite/{token}",
+        methods=["GET", "HEAD"],
+        response_class=FileResponse,
+        include_in_schema=False,
+    )
+    def serve_invite_page(token: str) -> FileResponse:
+        """SPA entry for the invite / password-reset link. Only the exact ``/invite/<urlsafe token>`` shape."""
+        if not INVITE_TOKEN_PATH_RE.fullmatch(token):
+            raise HTTPException(status_code=404, detail="Not Found")
+        dist_index = dist_dir / "index.html"
+        use_legacy = os.environ.get("TRACKSEERR_LEGACY_UI") == "1"
+        target = dist_index if (not use_legacy and dist_index.is_file()) else static_dir / "index.html"
+        # The URL carries a secret: keep the page out of caches.
+        return FileResponse(str(target), media_type="text/html", headers={"Cache-Control": "no-store"})
 
     return app
 

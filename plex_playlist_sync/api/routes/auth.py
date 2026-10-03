@@ -2,24 +2,40 @@
 
 import logging
 import os
+import time
 from typing import Any, Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
+from plex_playlist_sync import local_auth
 from plex_playlist_sync.api.dependencies import (
-    tier_of,
+    HEADER_SIGNATURE,
+    get_client_ip,
     get_config,
     get_current_user,
     get_db,
+    core_session_status,
     get_plex_client,
+    require_service_principal,
+    tier_of,
+)
+from plex_playlist_sync.api.sessions import start_session
+from plex_playlist_sync.clients.core_client import CoreClient
+from plex_playlist_sync.local_login import (
+    DETAIL_INVALID,
+    DETAIL_THROTTLED,
+    PUBLIC_LOGIN_DETAILS,
+    LoginError,
+    check_rate,
+    throttle_key,
+    verify_local_login,
 )
 from plex_playlist_sync.auth import (
     PlexAuthError,
     check_plex_pin,
     create_plex_pin,
-    create_session_token,
-    get_or_create_secret_key,
     get_plex_user,
     verify_server_access,
 )
@@ -167,6 +183,34 @@ def verify_pin(
     username = plex_user["username"]
     email = plex_user.get("email")
 
+    # Disabled and removed (tombstoned) accounts can never sign in, on any tier.
+    prior = db.get_auth_state(user_id)
+    if prior["tombstoned"] or prior["disabled"]:
+        logger.warning("Refused Plex login for a disabled or removed account")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: this account is not permitted to sign in",
+        )
+
+    # On the gateway core owns disabled / removed state: ask it before any session is created.
+    if tier_of(config) == "gateway":
+        verdict = core_session_status(config, str(user_id), int(time.time() * 1_000_000), use_cache=False)
+        if not verdict["valid"] and verdict.get("reason") in ("disabled", "deleted"):
+            logger.warning("Refused Plex login for a disabled or removed account (per core)")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: this account is not permitted to sign in",
+            )
+
+    # A Plex name may not shadow a local account's username (impersonation).
+    shadowed = db.get_user_by_username(username)
+    if shadowed is not None and shadowed["id"] != str(user_id) and shadowed.get("auth_type") == "local":
+        logger.warning("Refused Plex login: username collides with a local account")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: this account is not permitted to sign in",
+        )
+
     # 5. Upsert user in database (preserve existing admin status if already granted)
     existing_user = db.get_user(user_id)
     is_admin = is_owner or (bool(existing_user["is_admin"]) if existing_user else False)
@@ -177,25 +221,9 @@ def verify_pin(
         is_admin=is_admin,
     )
 
-    # 6. Create signed session token and store in DB
-    secret_key = get_or_create_secret_key(data_dir=config.data_dir)
-    token = create_session_token(
-        user_id=user["id"],
-        username=user["username"],
-        is_admin=user["is_admin"],
-        secret_key=secret_key,
-    )
-    db.create_session(session_id=token, user_id=user["id"])
-
-    # 7. Set HttpOnly, SameSite=Lax cookie with dynamic Secure flag for HTTPS
-    is_secure = (request.url.scheme == "https") or (request.headers.get("x-forwarded-proto", "").lower() == "https")
-    response.set_cookie(
-        key="session_token",
-        value=token,
-        httponly=True,
-        samesite="lax",
-        secure=is_secure,
-    )
+    # 6. Create signed session token, store it, and set the HttpOnly, SameSite=Lax cookie
+    #    (Secure flag follows HTTPS).
+    token = start_session(db, config, request, response, user)
 
     return {"token": token, "user": user}
 
@@ -232,4 +260,151 @@ def get_me(
     config: Config = Depends(get_config),
 ) -> dict[str, Any]:
     """Returns current user info, role and the deployment tier."""
-    return {"user": current_user, "tier": tier_of(config)}
+    public = {k: v for k, v in current_user.items() if not str(k).startswith("_")}
+    return {"user": public, "tier": tier_of(config)}
+
+
+# --------------------------------------------------------------------------- local (password) accounts
+
+INVITE_LIMIT = 10
+INVALID_INVITE = "Invite link is invalid or has expired"
+
+
+class LocalLoginRequest(BaseModel):
+    username: str = Field(..., max_length=64)
+    password: str = Field(..., max_length=256)
+    totp_code: Optional[str] = Field(default=None, max_length=16)
+    recovery_code: Optional[str] = Field(default=None, max_length=32)
+
+
+class InviteAcceptRequest(BaseModel):
+    password: str = Field(..., max_length=256)
+
+
+def _login_http_error(exc: LoginError) -> HTTPException:
+    headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after else None
+    return HTTPException(status_code=exc.status_code, detail=exc.detail, headers=headers)
+
+
+@router.post("/local/login")
+def local_login(
+    req: LocalLoginRequest,
+    request: Request,
+    response: Response,
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+) -> dict[str, Any]:
+    """Signs in a local (non-Plex) account. On the gateway the credentials are verified by core."""
+    client_ip = get_client_ip(request, config)
+    if tier_of(config) == "gateway":
+        if not config.trackseerr_core_url or not config.internal_core_secret:
+            logger.error("Gateway cannot verify local login: TRACKSEERR_CORE_URL / INTERNAL_CORE_SECRET not set")
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="TrackSeerr Core is not configured")
+        client = CoreClient(core_url=config.trackseerr_core_url, secret=config.internal_core_secret)
+        payload = {**req.model_dump(), "client_ip": client_ip}
+        try:
+            code, body = client.local_verify(payload)
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.error("Gateway local-login verification failed: %s", type(exc).__name__)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unable to communicate with TrackSeerr Core engine",
+            ) from exc
+        if code != 200:
+            detail = body.get("detail")
+            if code in (401, 423, 429) and detail in PUBLIC_LOGIN_DETAILS:
+                raise HTTPException(status_code=code, detail=detail)
+            logger.error("Core returned unexpected status %s for local-login verification", code)
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to sign in right now")
+        core_user = body.get("user") if isinstance(body.get("user"), dict) else {}
+        core_id, core_name = str(core_user.get("id") or ""), str(core_user.get("username") or "")
+        if not core_id or not core_name:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to sign in right now")
+        try:
+            user = db.mirror_local_user(core_id, core_name)
+        except PermissionError as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=DETAIL_INVALID) from exc
+        floor = body.get("session_floor_us")
+        start_session(
+            db, config, request, response, {**user, "is_admin": False},
+            floor_us=int(floor) if isinstance(floor, int) else 0,
+        )
+        return {
+            "user": {"id": user["id"], "username": user["username"], "is_admin": False},
+            "mfa_enrollment_required": bool(body.get("mfa_enrollment_required")),
+        }
+
+    try:
+        result = verify_local_login(
+            db,
+            username=req.username,
+            password=req.password,
+            totp_code=req.totp_code,
+            recovery_code=req.recovery_code,
+            client_ip=client_ip,
+        )
+    except LoginError as exc:
+        raise _login_http_error(exc) from exc
+    user = db.get_user(result.user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=DETAIL_INVALID)
+    start_session(db, config, request, response, user, floor_us=result.session_floor_us)
+    return {"user": user, "mfa_enrollment_required": result.mfa_enrollment_required}
+
+
+def _invite_guard(request: Request, db: Database, config: Config) -> None:
+    """Direct callers are limited to 10 invite lookups per IP per 15 minutes.
+
+    A call relayed by the gateway is authenticated as the service principal and was already
+    limited per end-user IP at the gateway (core only sees the gateway's address).
+    """
+    if tier_of(config) == "gateway":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    if request.headers.get(HEADER_SIGNATURE) is not None:
+        require_service_principal(request, db, config)
+        return
+    key = throttle_key("invite", get_client_ip(request, config))
+    db.record_login_attempt(key, max_rows=INVITE_LIMIT + 1)
+    if check_rate(db, key, INVITE_LIMIT + 1):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=DETAIL_THROTTLED,
+            headers={"Retry-After": "900"},
+        )
+
+
+@router.get("/invite/{token}")
+def get_invite(
+    token: str,
+    request: Request,
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+) -> dict[str, Any]:
+    """Describes a valid invite or reset link; 404 for anything unknown, used or expired."""
+    _invite_guard(request, db, config)
+    info = db.get_valid_token(token)
+    if info is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVALID_INVITE)
+    return {"username": info["username"], "purpose": info["purpose"], "expires_at": info["expires_at"]}
+
+
+@router.post("/invite/{token}")
+def accept_invite(
+    token: str,
+    req: InviteAcceptRequest,
+    request: Request,
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+) -> dict[str, Any]:
+    """Sets the user's password from a valid invite/reset token (single use) and revokes sessions."""
+    _invite_guard(request, db, config)
+    info = db.get_valid_token(token)
+    if info is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVALID_INVITE)
+    problem = local_auth.validate_password(req.password, info["username"])
+    if problem:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=problem)
+    user_id = db.consume_token_set_password(token, local_auth.hash_password(req.password))
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVALID_INVITE)
+    return {"status": "success", "username": info["username"]}

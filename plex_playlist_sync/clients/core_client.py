@@ -16,6 +16,9 @@ from plex_playlist_sync.internal_auth import sign_assertion
 
 logger = logging.getLogger(__name__)
 
+# Key under which the gateway attaches its session's creation time (epoch microseconds) to a user dict.
+SESSION_ISSUED_AT_KEY = "_session_issued_at_us"
+
 _PATH_SAFE = "/:@+-._~!$&'()*,;=%"
 
 
@@ -65,8 +68,18 @@ class CoreClient:
             headers["Content-Type"] = content_type
         user_id = str((user_info or {}).get("id") or "")
         user_name = str((user_info or {}).get("username") or "")
+        raw_issued = (user_info or {}).get(SESSION_ISSUED_AT_KEY)
+        issued_at = int(raw_issued) if raw_issued else None
         headers.update(
-            sign_assertion(self.secret or "", method, target, user_id, user_name, body)
+            sign_assertion(
+                self.secret or "",
+                method,
+                target,
+                user_id,
+                user_name,
+                body,
+                session_issued_at=issued_at,
+            )
         )
         return headers
 
@@ -155,6 +168,35 @@ class CoreClient:
         """Forwards deletion of a request to TrackSeerr Core as the asserted user."""
         resp = self._json_call("DELETE", f"/api/requests/{request_id}", user_info=user_info)
         return resp.is_success
+
+    def local_verify(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """Asks core to verify local-account credentials, signed as the service principal.
+
+        Returns ``(status_code, json_body)``. The body is ``{}`` when core's reply is not JSON.
+        Never logs the payload (it carries the password).
+        """
+        resp = self._json_call("POST", "/api/internal/auth/local/verify", payload)
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {}
+        return resp.status_code, data if isinstance(data, dict) else {}
+
+    def session_status(self, user_id: str, session_issued_at_us: int) -> tuple[int, dict[str, Any]]:
+        """Asks core whether a gateway session is still allowed, signed as the service principal.
+
+        Returns ``(status_code, json_body)``; the body is ``{}`` when core's reply is not JSON.
+        """
+        resp = self._json_call(
+            "POST",
+            "/api/internal/auth/session-status",
+            {"user_id": str(user_id), "session_issued_at": int(session_issued_at_us)},
+        )
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {}
+        return resp.status_code, data if isinstance(data, dict) else {}
 
     def proxy(
         self,

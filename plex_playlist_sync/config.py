@@ -78,7 +78,7 @@ class Config:
     lidarr_auto_trickle_interval_minutes: int = 30
     feed_token: Optional[str] = None
     auto_approve_requests: bool = False
-    user_request_quota: int = 25
+    user_request_quota: int = 25  # deprecated: per-type quotas live in general_settings; only seeds them once (migration v28)
     enable_backlog_search: bool = True
     backlog_search_interval_minutes: int = 60
     enable_rss_sync: bool = True
@@ -87,6 +87,7 @@ class Config:
     role: str = "all-in-one"
     trackseerr_core_url: Optional[str] = None
     internal_core_secret: Optional[str] = None
+    trusted_proxies: Optional[str] = None
     lastfm_api_key: Optional[str] = None
     lastfm_api_secret: Optional[str] = None
 
@@ -181,6 +182,7 @@ class Config:
             role=os.getenv("ROLE", "all-in-one").lower().strip() or "all-in-one",
             trackseerr_core_url=os.getenv("TRACKSEERR_CORE_URL", "").rstrip("/") or None,
             internal_core_secret=os.getenv("INTERNAL_CORE_SECRET", "").strip() or None,
+            trusted_proxies=os.getenv("TRUSTED_PROXIES", "").strip() or None,
             lastfm_api_key=os.getenv("LASTFM_API_KEY", "").strip() or None,
             lastfm_api_secret=os.getenv("LASTFM_API_SECRET", "").strip() or None,
         )

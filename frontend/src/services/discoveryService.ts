@@ -1,5 +1,5 @@
 import { apiRequest } from './apiClient';
-import type { DiscoveryItem } from '@/types/models';
+import type { ArtistDetail, DiscoveryItem } from '@/types/models';
 
 export async function getTrending(): Promise<DiscoveryItem[]> {
   const res = await apiRequest<{ items: DiscoveryItem[] }>('/api/discovery/trending');
@@ -24,6 +24,6 @@ export async function getDiscoveryAlbumDetail(albumId: string): Promise<Record<s
   return apiRequest<Record<string, unknown>>(`/api/discovery/album/${encodeURIComponent(albumId)}`);
 }
 
-export async function getDiscoveryArtistDetail(artistId: string): Promise<Record<string, unknown>> {
-  return apiRequest<Record<string, unknown>>(`/api/discovery/artist/${encodeURIComponent(artistId)}`);
+export async function getDiscoveryArtistDetail(artistId: string): Promise<ArtistDetail> {
+  return apiRequest<ArtistDetail>(`/api/discovery/artist/${encodeURIComponent(artistId)}`);
 }

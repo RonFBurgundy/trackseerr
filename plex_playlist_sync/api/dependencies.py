@@ -4,9 +4,11 @@ import logging
 import hmac
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any, Optional, Union
 
+import httpx
 from fastapi import Depends, HTTPException, Request, status
 
 from plex_playlist_sync.auth import get_or_create_secret_key, verify_session_token
@@ -17,6 +19,7 @@ from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.clients.spotify_scraper import SpotifyWebScraper
+from plex_playlist_sync.clients.core_client import SESSION_ISSUED_AT_KEY, CoreClient
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.internal_auth import (
     HEADER_SIGNATURE,
@@ -25,7 +28,8 @@ from plex_playlist_sync.internal_auth import (
 )
 from plex_playlist_sync.models import UserPermission
 from plex_playlist_sync.security import safe_data_path
-from plex_playlist_sync.storage import Database
+from plex_playlist_sync.local_auth import parse_trusted_proxies, resolve_client_ip
+from plex_playlist_sync.storage import Database, ts_to_us
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +153,112 @@ def _forwarded_principal(user: dict[str, Any]) -> dict[str, Any]:
     return principal
 
 
+REVOKED_DETAIL = "Session has expired or was revoked"
+MFA_ENROLLMENT_DETAIL = "mfa_enrollment_required"
+
+
+def get_client_ip(request: Request, config: Config) -> str:
+    """Client address for throttling: the peer, or ``X-Forwarded-For`` only via a TRUSTED_PROXIES peer."""
+    peer = request.client.host if request.client else None
+    trusted = parse_trusted_proxies(config.trusted_proxies or os.getenv("TRUSTED_PROXIES"))
+    return resolve_client_ip(peer, request.headers.get("X-Forwarded-For"), trusted)
+
+
+def _mfa_exempt_path(path: str) -> bool:
+    return path == "/api/account" or path.startswith("/api/account/") or path.startswith("/api/auth/")
+
+
+def _enforce_account_state(
+    request: Request, db: Database, user_id: str, session_issued_at_us: Optional[int]
+) -> None:
+    """Rejects disabled, tombstoned and revoked sessions (401), and un-enrolled MFA sessions (403)."""
+    state = db.get_auth_state(user_id)
+    if (
+        state["tombstoned"]
+        or state["disabled"]
+        or int(state["sessions_revoked_at_us"]) > int(session_issued_at_us or 0)
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=REVOKED_DETAIL)
+    if state["auth_type"] == "local" and not state["mfa_enabled"] and not _mfa_exempt_path(request.url.path):
+        if db.get_account_settings()["require_mfa_local"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=MFA_ENROLLMENT_DETAIL)
+
+
+SESSION_STATUS_TTL_SECONDS = 60.0
+_SESSION_STATUS_MAX_ENTRIES = 4096
+_session_status_lock = threading.Lock()
+# (user_id, session_issued_at_us) -> (expires_at_monotonic, result). Gateway-only, in memory.
+_session_status_cache: dict[tuple[str, int], tuple[float, dict[str, Any]]] = {}
+CORE_UNAVAILABLE_DETAIL = "Core unavailable"
+
+
+def _monotonic() -> float:
+    return time.monotonic()
+
+
+def clear_session_status_cache() -> None:
+    with _session_status_lock:
+        _session_status_cache.clear()
+
+
+def core_session_status(
+    config: Config, user_id: str, session_issued_at_us: int, *, use_cache: bool = True
+) -> dict[str, Any]:
+    """Core's verdict on a gateway session, cached for 60 s per (user, issue time) unless ``use_cache`` is off.
+
+    Fails CLOSED: if core is unconfigured, unreachable or answers anything unexpected, raises 503.
+    """
+    key = (str(user_id), int(session_issued_at_us))
+    now = _monotonic()
+    if use_cache:
+        with _session_status_lock:
+            hit = _session_status_cache.get(key)
+            if hit is not None and hit[0] > now:
+                return hit[1]
+    unavailable = HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=CORE_UNAVAILABLE_DETAIL)
+    if not config.trackseerr_core_url or not config.internal_core_secret:
+        logger.error("Gateway cannot check session status: TRACKSEERR_CORE_URL / INTERNAL_CORE_SECRET not set")
+        raise unavailable
+    client = CoreClient(core_url=config.trackseerr_core_url, secret=config.internal_core_secret)
+    try:
+        code, body = client.session_status(str(user_id), int(session_issued_at_us))
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.error("Gateway session-status check failed: %s", type(exc).__name__)
+        raise unavailable from exc
+    if code != 200 or not isinstance(body.get("valid"), bool):
+        logger.error("Core returned unexpected status %s for session-status", code)
+        raise unavailable
+    result: dict[str, Any] = {"valid": body["valid"]}
+    if not body["valid"]:
+        reason = body.get("reason")
+        result["reason"] = reason if reason in ("disabled", "deleted", "revoked", "mfa_enrollment_required") else "revoked"
+    if not use_cache:
+        return result
+    with _session_status_lock:
+        if len(_session_status_cache) >= _SESSION_STATUS_MAX_ENTRIES:
+            for stale in [k for k, (exp, _r) in _session_status_cache.items() if exp <= now]:
+                del _session_status_cache[stale]
+            if len(_session_status_cache) >= _SESSION_STATUS_MAX_ENTRIES:
+                _session_status_cache.clear()
+        _session_status_cache[key] = (now + SESSION_STATUS_TTL_SECONDS, result)
+    return result
+
+
+def _enforce_core_session_status(
+    request: Request, db: Database, config: Config, token: str, user_id: str, issued_us: int
+) -> None:
+    """Gateway only: core owns disable / delete / revoke / MFA state, so ask it for every session request."""
+    verdict = core_session_status(config, user_id, issued_us)
+    if verdict["valid"]:
+        return
+    if verdict.get("reason") == "mfa_enrollment_required":
+        if not _mfa_exempt_path(request.url.path):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=MFA_ENROLLMENT_DETAIL)
+        return
+    db.delete_session(token)
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=REVOKED_DETAIL)
+
+
 def resolve_signed_principal(
     request: Request,
     db: Database,
@@ -212,6 +322,7 @@ def resolve_signed_principal(
     except PermissionError as exc:
         logger.warning("Gateway assertion rejected: %s", exc)
         raise unauthorized from exc
+    _enforce_account_state(request, db, user["id"], asserted.session_issued_at)
     return _forwarded_principal(user)
 
 
@@ -223,6 +334,19 @@ def get_current_user(
     """Reads signed HttpOnly session cookie 'session_token' or Authorization Bearer header,
 
     validates signature and expiration, retrieves user from DB. Raises 401 if invalid or expired.
+    """
+    return authenticate_request(request, db, config)
+
+
+def authenticate_request(
+    request: Request,
+    db: Database,
+    config: Config,
+    query_token: Optional[str] = None,
+) -> dict[str, Any]:
+    """Shared session resolution for get_current_user.
+
+    query_token is a last-resort fallback for EventSource clients, which cannot set headers.
     """
     if request.headers.get(HEADER_SIGNATURE) is not None:
         return resolve_signed_principal(request, db, config)
@@ -238,6 +362,9 @@ def get_current_user(
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header[7:].strip()
+
+    if not token and query_token:
+        token = query_token
 
     if not token:
         raise HTTPException(
@@ -269,6 +396,13 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
+
+    # 5b. Disabled, tombstoned or revoked users are rejected on direct sessions as well
+    issued_us = ts_to_us(session_row.get("created_at"))
+    _enforce_account_state(request, db, user["id"], issued_us)
+    if tier_of(config) == "gateway":
+        _enforce_core_session_status(request, db, config, token, user["id"], issued_us)
+    user[SESSION_ISSUED_AT_KEY] = issued_us
 
     # Ensure permissions and is_admin are synchronized
     if user.get("permissions") is None:
@@ -310,6 +444,24 @@ def get_current_user_or_api_key(
 
     # 2. Fall back to standard session token validation
     return get_current_user(request=request, db=db, config=config)
+
+
+def require_service_principal(
+    request: Request,
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+) -> dict[str, Any]:
+    """Accepts ONLY the signed gateway service principal; every other caller gets 404."""
+    not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    if request.headers.get(HEADER_SIGNATURE) is None:
+        raise not_found
+    try:
+        principal = resolve_signed_principal(request, db, config)
+    except HTTPException as exc:
+        raise not_found from exc
+    if principal.get("id") != GATEWAY_SERVICE_ID:
+        raise not_found
+    return principal
 
 
 def require_user(current_user: dict[str, Any] = Depends(get_current_user_or_api_key)) -> dict[str, Any]:

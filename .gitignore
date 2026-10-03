@@ -156,6 +156,7 @@ active_handoff.md
 
 # Runtime data & testing caches
 data/
+!plex_playlist_sync/data/
 *.log
 .coverage
 .pytest_cache/

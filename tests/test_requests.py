@@ -365,7 +365,7 @@ class TestMusicRequestsAPI:
 
     def test_quota_enforcement(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client
-        test_config.user_request_quota = 2
+        test_db.update_account_settings({"default_quota_albums": 2})
         alice = seeded_users["alice"]
         headers = _auth_headers(alice, test_db, test_config)
 
@@ -392,7 +392,7 @@ class TestMusicRequestsAPI:
             headers=headers,
         )
         assert resp3.status_code == 400
-        assert "quota exceeded" in resp3.json()["detail"].lower()
+        assert "quota reached" in resp3.json()["detail"].lower()
 
     def test_duplicate_request_rejected(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client

@@ -22,6 +22,10 @@ export interface UseAuthReturn {
   cancelLogin: () => void;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  /** True right after a local sign-in that must enroll in MFA before anything else works. */
+  mfaEnrollmentRequired: boolean;
+  /** Call after POST /api/auth/local/login succeeded: loads the session user. */
+  completeLocalSignIn: (opts: { mfaEnrollmentRequired: boolean }) => Promise<void>;
 }
 
 export function useAuth(): UseAuthReturn {
@@ -30,6 +34,7 @@ export function useAuth(): UseAuthReturn {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [mfaEnrollmentRequired, setMfaEnrollmentRequired] = useState<boolean>(false);
 
   const pollTimerRef = useRef<number | null>(null);
   const popupRef = useRef<Window | null>(null);
@@ -129,7 +134,16 @@ export function useAuth(): UseAuthReturn {
     }
   }, [cancelLogin]);
 
+  const completeLocalSignIn = useCallback(
+    async (opts: { mfaEnrollmentRequired: boolean }) => {
+      setMfaEnrollmentRequired(opts.mfaEnrollmentRequired);
+      await refreshUser();
+    },
+    [refreshUser]
+  );
+
   const logout = useCallback(async () => {
+    setMfaEnrollmentRequired(false);
     setIsLoading(true);
     try {
       await apiLogout();
@@ -157,5 +171,7 @@ export function useAuth(): UseAuthReturn {
     cancelLogin,
     logout,
     refreshUser,
+    mfaEnrollmentRequired,
+    completeLocalSignIn,
   };
 }

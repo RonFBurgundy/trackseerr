@@ -6,12 +6,22 @@ from plex_playlist_sync.security import mask_channel_config
 
 
 class UserPermission(IntFlag):
+    """User permission bits.
+
+    Auto-approve is per request type: ``AUTO_APPROVE`` (4) approves single tracks,
+    ``AUTO_APPROVE_ALBUM`` (8) approves albums, ``AUTO_APPROVE_DISCOGRAPHY`` (64) approves discography
+    batches. Without the bit for its type a request is PENDING until an admin approves it. Before
+    migration v28 bit 4 approved every type; v28 grants 8 and 64 to existing bit-4 holders so nobody
+    loses approval. Admins and the global ``AUTO_APPROVE_REQUESTS`` setting approve every type.
+    """
+
     ADMIN = 1
     REQUEST = 2
     AUTO_APPROVE = 4
     AUTO_APPROVE_ALBUM = 8
     MANAGE_REQUESTS = 16
     REPORT_ISSUE = 32
+    AUTO_APPROVE_DISCOGRAPHY = 64
     DEFAULT = 34  # REQUEST | REPORT_ISSUE
 
 
@@ -89,6 +99,8 @@ class MusicRequest:
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     username: Optional[str] = None  # Joined for display
+    batch_id: Optional[str] = None  # set on every album of a discography batch
+    batch_kind: Optional[str] = None  # "discography" for those albums, otherwise None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -109,6 +121,8 @@ class MusicRequest:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "username": self.username,
+            "batch_id": self.batch_id,
+            "batch_kind": self.batch_kind,
         }
 
 

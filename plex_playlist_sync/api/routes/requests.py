@@ -2,8 +2,7 @@
 
 import logging
 import os
-import uuid
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import httpx
 
@@ -25,13 +24,17 @@ from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.lidarr_queue import lidarr_worker
 from plex_playlist_sync.models import (
-    MusicRequest,
     NotificationEvent,
     RequestStatus,
     UserPermission,
 )
 from plex_playlist_sync.notifications import notification_dispatcher
-from plex_playlist_sync.request_submission import RequestRejected, submit_track_request, user_request_lock
+from plex_playlist_sync.request_submission import (
+    MAX_BATCH_ITEMS,
+    RequestRejected,
+    submit_batch_requests,
+    submit_track_request,
+)
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -51,7 +54,11 @@ class CreateMusicRequestBody(BaseModel):
 
 
 class BatchCreateMusicRequestBody(BaseModel):
-    requests: list[CreateMusicRequestBody] = Field(..., min_length=1)
+    """Up to 50 requests. ``kind="discography"`` (with ``artist``) makes it one discography request."""
+
+    requests: list[CreateMusicRequestBody] = Field(..., min_length=1, max_length=MAX_BATCH_ITEMS)
+    kind: Optional[Literal["discography"]] = None
+    artist: Optional[str] = Field(default=None, max_length=512)
 
 
 @router.get("")
@@ -168,10 +175,10 @@ def create_batch_requests(
     current_user: dict[str, Any] = Depends(require_user),
     lidarr_client: Optional[LidarrClient] = Depends(get_lidarr_client),
 ) -> dict[str, Any]:
-    """Creates multiple music requests in a single transaction within configured user quotas.
+    """Creates multiple music requests (at most 50) within the user's per-type quotas.
 
-    Non-admin user requests are validated against remaining quota.
-    Duplicates against active requests or within the batch are handled idempotently.
+    A ``kind="discography"`` batch of one artist's albums consumes one discography unit; otherwise each item
+    consumes its own type's quota. Duplicates against active requests or within the batch are skipped.
     Approved requests attempt native grab, falling back to Lidarr trickle worker.
     """
     if not has_permission(current_user, UserPermission.REQUEST):
@@ -201,88 +208,20 @@ def create_batch_requests(
                 detail="Unable to communicate with TrackSeerr Core engine",
             ) from exc
 
-    # Hold the per-user lock across quota count + every insert so concurrent batches cannot exceed quota.
-    # Network follow-ups (notifications, grabs) run after release.
-    with user_request_lock(current_user["id"]):
-        if not current_user.get("is_admin"):
-            rolling_days = current_user.get("request_limit_days") if current_user.get("request_limit_days") is not None else 7
-            quota_limit = current_user.get("request_limit_quota") or config.user_request_quota
-            active_count = db.get_user_active_request_count(current_user["id"], days=rolling_days)
-            remaining_quota = max(0, quota_limit - active_count)
-            if len(body.requests) > remaining_quota:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Active request quota exceeded: batch size ({len(body.requests)}) exceeds remaining allowance ({remaining_quota} remaining of {quota_limit} allowed)",
-                )
-            existing_user_reqs = db.list_requests(user_id=current_user["id"])
-            existing_active_keys = {
-                ((r.get("artist") or "").lower().strip(), (r.get("title") or "").lower().strip())
-                for r in existing_user_reqs
-                if r.get("status") in ("pending", "processing", "approved")
-            }
-            existing_active_foreign_ids = {
-                r.get("foreign_id")
-                for r in existing_user_reqs
-                if r.get("foreign_id") and r.get("status") in ("pending", "processing", "approved")
-            }
-        else:
-            existing_active_keys = set()
-            existing_active_foreign_ids = set()
-
-        seen_keys: set[tuple[str, str]] = set()
-        seen_fids: set[str] = set()
-
-        is_auto_approved = bool(
-            current_user.get("is_admin")
-            or has_permission(current_user, UserPermission.AUTO_APPROVE)
-            or config.auto_approve_requests
+    # Quota, duplicate handling, approval and the inserts all run under the per-user lock inside
+    # submit_batch_requests; network follow-ups (notifications, grabs) below run after it is released.
+    try:
+        submissions = submit_batch_requests(
+            db,
+            config,
+            current_user,
+            [item.model_dump() for item in body.requests],
+            kind=body.kind,
+            artist=body.artist,
         )
-
-        created_items: list[dict[str, Any]] = []
-
-        for req_item in body.requests:
-            clean_title = req_item.title.strip()
-            clean_artist = req_item.artist.strip()
-            clean_album = req_item.album.strip() if req_item.album else None
-            item_key = (clean_artist.lower(), clean_title.lower())
-            fid = req_item.foreign_id.strip() if req_item.foreign_id else None
-
-            # Idempotent deduplication against existing active user requests
-            if not current_user.get("is_admin"):
-                if item_key in existing_active_keys or (fid and fid in existing_active_foreign_ids):
-                    continue
-
-            # Idempotent deduplication within the batch
-            if item_key in seen_keys or (fid and fid in seen_fids):
-                continue
-
-            seen_keys.add(item_key)
-            if fid:
-                seen_fids.add(fid)
-
-            item_auto_approved = is_auto_approved or (
-                req_item.item_type == "album"
-                and has_permission(current_user, UserPermission.AUTO_APPROVE_ALBUM)
-            )
-            item_status = RequestStatus.PROCESSING if item_auto_approved else RequestStatus.PENDING
-
-            req_id = f"req-{uuid.uuid4().hex[:12]}"
-            new_request = MusicRequest(
-                id=req_id,
-                user_id=current_user["id"],
-                item_type=req_item.item_type,
-                title=clean_title,
-                artist=clean_artist,
-                album=clean_album,
-                cover_url=req_item.cover_url,
-                status=item_status,
-                release_date=req_item.release_date,
-                foreign_id=fid,
-                preview_url=req_item.preview_url,
-            )
-
-            created = db.create_request(new_request)
-            created_items.append(created)
+    except RequestRejected as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    created_items: list[dict[str, Any]] = [sub.request for sub in submissions]
 
     for created in created_items:
         # Dispatch notification events
@@ -362,7 +301,7 @@ def create_batch_requests(
                     delay_seconds=config.lidarr_trickle_rate_seconds,
                     auto_search=config.lidarr_auto_search,
                 )
-                logger.info("Enqueued %d batch requests to Lidarr worker", len(lidarr_trickle_items))
+                logger.info("Enqueued %d batch requests to Lidarr worker", len(lidarr_items))
             except Exception as e:
                 logger.error("Failed to enqueue batch requests to Lidarr worker: %s", e)
 

@@ -282,6 +282,7 @@ TrackSeerr includes a first-class **Application URL** setting (configurable in t
 | `ROLE` | `all-in-one` | Container execution mode: `all-in-one`, `gateway`, or `core` |
 | `APPLICATION_URL` | *Optional* | Canonical external URL (e.g. `https://trackseerr.yourdomain.com`) for notifications, Plex OAuth redirects, and reverse proxies |
 | `TRACKSEERR_CORE_URL` | *None* | Core endpoint URL required when running in `gateway` mode |
+| `TRUSTED_PROXIES` | *None* | Comma-separated IPs/CIDRs of reverse proxies (e.g. `172.18.0.0/16,10.0.0.5`). `X-Forwarded-For` is used for the client IP (local-login throttling and lockout) only when the direct peer is in this list; otherwise the peer address is used. Set it on the gateway (or all-in-one) when running behind a proxy, otherwise every user shares the proxy's IP |
 | `INTERNAL_CORE_SECRET` | *Required for gateway/core* | Shared secret (at least 32 characters, e.g. `openssl rand -hex 32`) used to sign gateway-to-core requests. Must be identical on both tiers |
 | `CORE_LAN_BIND` | `127.0.0.1` | Compose-only: host address core publishes port `5251` on. Set to the host's LAN IP; never expose to the internet |
 | `LIBRARY_MODE` | `native` | Operational mode: `native` for full TrackSeerr catalog & library management, or `lidarr` for external Lidarr delegation |

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Play, Pause, Plus, Check, Disc, Music, Loader2 } from 'lucide-react';
-import type { DiscoveryItem, AudioPreviewTrack } from '@/types/models';
+import type { ArtistDiscographyAlbum, DiscoveryItem, AudioPreviewTrack } from '@/types/models';
+import { ArtistDiscographyModal } from '@/components/discovery';
 import type { UseDiscoveryReturn } from '@/hooks/useDiscovery';
 import {
   TapeTransportBay,
@@ -19,6 +20,8 @@ export interface DiscoverViewProps {
   currentPreviewTrackId?: string;
   isPreviewPlaying?: boolean;
   onRequest: (item: DiscoveryItem) => Promise<void>;
+  /** POST /api/requests/batch with kind=discography. Throws the server's quota/duplicate message. */
+  onRequestDiscography: (artist: string, albums: ArtistDiscographyAlbum[]) => Promise<void>;
   requestedIds: Set<string>;
   issuesHook: UseIssuesReturn;
 }
@@ -29,10 +32,12 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
   currentPreviewTrackId,
   isPreviewPlaying = false,
   onRequest,
+  onRequestDiscography,
   requestedIds,
   issuesHook,
 }) => {
   const [selectedAlbum, setSelectedAlbum] = useState<DiscoveryItem | null>(null);
+  const [selectedArtist, setSelectedArtist] = useState<DiscoveryItem | null>(null);
   const [albumDetails, setAlbumDetails] = useState<{
     tracks?: Array<{ id: string; title: string; duration_ms?: number; preview_url?: string }>;
   } | null>(null);
@@ -40,6 +45,10 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
   const [requestingId, setRequestingId] = useState<string | null>(null);
 
   const handleOpenAlbum = async (item: DiscoveryItem) => {
+    if (item.type === 'artist') {
+      setSelectedArtist(item);
+      return;
+    }
     setSelectedAlbum(item);
     setIsLoadingAlbum(true);
     try {
@@ -259,6 +268,12 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
           })}
         </div>
       )}
+
+      <ArtistDiscographyModal
+        artist={selectedArtist}
+        onClose={() => setSelectedArtist(null)}
+        onRequestDiscography={onRequestDiscography}
+      />
 
       {/* Album Tracklist Modal */}
       {selectedAlbum && (

@@ -1,5 +1,6 @@
 import { apiRequest } from './apiClient';
 import type { RequestItem, UserQuota } from '@/types/models';
+import type { DiscographyBatchPayload } from '@/types/account';
 
 export async function getRequests(status?: string): Promise<RequestItem[]> {
   const url = status && status !== 'all' ? `/api/requests?status=${encodeURIComponent(status)}` : '/api/requests';
@@ -56,4 +57,17 @@ export async function getUserQuota(): Promise<UserQuota> {
     limit: res.quota_limit ?? 10,
     period_days: res.rolling_days ?? 7,
   };
+}
+
+/** Maximum number of albums the backend accepts in one batch. */
+export const MAX_BATCH_ITEMS = 50;
+
+/** POST /api/requests/batch with kind=discography: consumes one discography quota unit. */
+export async function createDiscographyRequest(
+  payload: DiscographyBatchPayload
+): Promise<unknown> {
+  return apiRequest<unknown>('/api/requests/batch', {
+    method: 'POST',
+    body: { ...payload, requests: payload.requests.slice(0, MAX_BATCH_ITEMS) },
+  });
 }

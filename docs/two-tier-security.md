@@ -109,3 +109,18 @@ Everything else is **admin-only** and returns 403 for non-admins (404 on the gat
 Rules for user-scoped routes:
 - **Ownership is checked on the server.** A non-admin acting on another user's object gets **404**, not 403, so the response does not reveal that the object exists.
 - **The UI mirrors the policy.** Non-admins see only the tabs Discover, Requests, Playlists and Account/Settings → Scrobbling.
+
+## Accepted residual risks (documented 2026-10-03)
+
+- **A compromised gateway can impersonate any non-admin user.**
+  - The gateway signs assertions, so it can claim any user id and send a fresh `X-TS-Session-Issued-At`. That lets it evade `sessions_revoked_at`.
+  - Core still enforces `disabled` and tombstones on every forwarded call.
+  - Admin accounts are always refused through the gateway.
+- **Targeted lockout.** Anyone who knows a username can keep that local account locked: 5 failures per 15 minutes trips the lockout. This is inherent to lockout-based throttling. Plex sign-in is unaffected, and the admin works on the core LAN UI.
+- **TOTP secrets are stored unencrypted in the core DB.** They are never returned after enrollment. The DB is reachable only on core, which sits on the internal network. Encrypting them with a key held in the same environment would add little.
+- **The gateway checks the session with core and caches the answer for up to 60 s.**
+  - Disabling, deleting or revoking a user takes effect on gateway-local routes within 60 seconds.
+  - Forwarded routes reject immediately.
+  - The gateway fails closed: when core can't be reached, it returns 503.
+- **The Plex server owner is always admin** (owner decision). This matches Overseerr and Jellyseerr.
+- **Run one worker process per tier.** Per-username login serialization and the per-IP in-flight cap are in-process. With several uvicorn workers, those two limits multiply by the worker count. The DB-backed failure counts and the lockout still hold.

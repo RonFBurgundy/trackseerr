@@ -50,7 +50,7 @@ where = ["."]
 include = ["plex_playlist_sync*"]
 
 [tool.setuptools.package-data]
-plex_playlist_sync = ["static/*"]
+plex_playlist_sync = ["static/*", "data/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

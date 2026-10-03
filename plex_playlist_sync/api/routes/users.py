@@ -15,9 +15,11 @@ from plex_playlist_sync.api.dependencies import (
     require_admin,
     require_user,
 )
+from plex_playlist_sync.api.routes.admin_users import MAX_QUOTA, MAX_WINDOW_DAYS, apply_user_changes
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.models import UserPermission
+from plex_playlist_sync.request_submission import effective_quota_limits, quota_snapshot
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -43,10 +45,14 @@ def get_current_user_profile(
     user = db.get_user(user_id) or current_user
 
     permissions = int(user.get("permissions") if user.get("permissions") is not None else UserPermission.DEFAULT)
-    quota_limit = user.get("request_limit_quota") or config.user_request_quota
-    rolling_days = user.get("request_limit_days") if user.get("request_limit_days") is not None else 7
-
-    active_requests = db.get_user_active_request_count(user_id, days=rolling_days)
+    # Per-type quotas (tracks / albums / discographies) are the source of truth: see ``quotas``. The legacy
+    # single-number fields mirror the ALBUM quota (``request_limit_quota`` is the album override), the type the
+    # UI has always requested by default, over the same rolling window.
+    quotas = quota_snapshot(db, {**user, "forwarded": bool(current_user.get("forwarded"))})
+    limits = effective_quota_limits(db, user_id)
+    quota_limit = limits["albums"]
+    rolling_days = quotas["window_days"]
+    active_requests = quotas["used"]["albums"]
     remaining_quota = max(0, quota_limit - active_requests)
 
     return {
@@ -62,6 +68,7 @@ def get_current_user_profile(
         "active_requests": active_requests,
         "active_request_count": active_requests,
         "remaining_quota": remaining_quota,
+        "quotas": quotas,
         "created_at": user.get("created_at"),
         "updated_at": user.get("updated_at"),
         "tier": tier_of(config),
@@ -81,41 +88,61 @@ def list_users(
 def update_user_governance_route(
     user_id: str,
     body: UpdateUserGovernanceBody,
-    _admin: dict[str, Any] = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: Database = Depends(get_db),
 ) -> dict[str, Any]:
-    """Updates user governance, permissions, and request quotas (admin only)."""
-    existing = db.get_user(user_id)
-    if not existing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User {user_id} not found",
-        )
+    """Updates user governance, permissions, and request quotas (admin only).
 
-    fields_set = getattr(body, "model_fields_set", getattr(body, "__fields_set__", set()))
-    clear_quota = "request_limit_quota" in fields_set and body.request_limit_quota is None
-
-    try:
-        updated = db.update_user_governance(
-            user_id=user_id,
-            permissions=body.permissions if "permissions" in fields_set else None,
-            request_limit_quota=body.request_limit_quota if ("request_limit_quota" in fields_set and not clear_quota) else None,
-            request_limit_days=body.request_limit_days if "request_limit_days" in fields_set else None,
-            is_admin=body.is_admin if "is_admin" in fields_set else None,
-            clear_quota=clear_quota,
-        )
-        return updated
-    except KeyError:
+    Legacy shape kept for compatibility. It delegates to the same guarded update as
+    ``PATCH /api/admin/users/{id}``: ``request_limit_quota`` sets the user's track and album overrides,
+    ``request_limit_days`` the window override, and ``is_admin`` the ADMIN permission bit.
+    """
+    if str(admin.get("id")) == "api_key_user":
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User {user_id} not found",
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User management requires an administrator session, not an API key",
         )
-    except Exception as e:
-        logger.error("Failed to update user %s governance: %s", user_id, e)
+    fields_set = body.model_fields_set
+    fields: dict[str, Any] = {}
+    if "permissions" in fields_set and body.permissions is not None:
+        fields["permissions"] = body.permissions
+    if "request_limit_quota" in fields_set:
+        fields["quota_tracks"] = body.request_limit_quota
+        fields["quota_albums"] = body.request_limit_quota
+    if "request_limit_days" in fields_set:
+        fields["quota_window_days"] = body.request_limit_days
+    if "is_admin" in fields_set and body.is_admin is not None:
+        current = db.get_user(user_id)
+        if current is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found")
+        base = fields.get("permissions", current["permissions"])
+        base = (base | int(UserPermission.ADMIN)) if body.is_admin else (base & ~int(UserPermission.ADMIN))
+        fields["permissions"] = base
+    for column in ("quota_tracks", "quota_albums"):
+        if fields.get(column) is not None and not 0 <= fields[column] <= MAX_QUOTA:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Quota must be between 0 and {MAX_QUOTA}"
+            )
+    window = fields.get("quota_window_days")
+    if window is not None and not 1 <= window <= MAX_WINDOW_DAYS:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update user: {e}",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Window must be between 1 and {MAX_WINDOW_DAYS} days"
         )
+    if not fields:
+        existing = db.get_user(user_id)
+        if existing is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found")
+        return existing
+    if "permissions" in fields and str(admin.get("id")) == "api_key_user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Changing permissions requires an administrator session, not an API key",
+        )
+    apply_user_changes(db, admin, user_id, fields)
+    updated = db.get_user(user_id)
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found")
+    return updated
 
 
 @router.post("/refresh")
@@ -141,11 +168,16 @@ def refresh_users(
         )
 
     for u in discovered_users:
+        uid = str(u["id"])
+        if db.is_tombstoned(uid):
+            continue  # deleted by an admin; only an explicit restore lets them back in
+        existing = db.get_user(uid)
         db.upsert_user(
-            user_id=str(u["id"]),
+            user_id=uid,
             username=str(u["username"]),
             email=u.get("email") or None,
-            is_admin=bool(u.get("is_admin", False)),
+            # Never silently demote an admin that was granted in the UI.
+            is_admin=bool(u.get("is_admin", False)) or bool(existing and existing["is_admin"]),
         )
 
     return db.list_users()

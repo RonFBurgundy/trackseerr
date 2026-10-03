@@ -21,7 +21,7 @@ from plex_playlist_sync.api.dependencies import (
 from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.config import Config
-from plex_playlist_sync.request_submission import effective_request_quota
+from plex_playlist_sync.request_submission import effective_quota_limits
 from plex_playlist_sync.storage import Database
 from plex_playlist_sync.tailored_mixes import (
     InsufficientHistoryError,
@@ -109,11 +109,11 @@ def _create_lock(user_id: str) -> threading.Lock:
 
 
 def _clamp_weekly(db: Database, config: Config, owner: str, value: int) -> int:
-    """Non-admin owners may not set a weekly acquisition cap above their request quota."""
+    """Non-admin owners may not set a weekly acquisition cap above their track quota."""
     owner_row = db.get_user(owner)
     if owner_row is None or owner_row.get("is_admin"):
         return value
-    return min(value, effective_request_quota(owner_row, config))
+    return min(value, effective_quota_limits(db, owner)["tracks"])
 
 
 def _seconds_since_iso(raw: Optional[str]) -> Optional[float]:

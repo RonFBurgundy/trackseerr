@@ -15,6 +15,8 @@ import {
   Play,
   Square,
   RotateCw,
+  UserRound,
+  Users,
 } from 'lucide-react';
 import type {
   GeneralSettings,
@@ -55,6 +57,10 @@ import {
 } from '@/services/settingsService';
 import { ScrobblingSettings } from '@/components/scrobbling';
 import { NamingFormatsEditor } from '@/components/naming/NamingFormatsEditor';
+import { AccountPanel } from '@/components/account';
+import { UsersPanel } from '@/components/admin';
+import type { UseAccountReturn } from '@/hooks/useAccount';
+import { useAdminUsers } from '@/hooks/useAdminUsers';
 import {
   getScheduledTasks,
   triggerScheduledTask,
@@ -70,23 +76,35 @@ export type SettingsTab =
   | 'profiles'
   | 'tasks'
   | 'status'
-  | 'scrobbling';
+  | 'scrobbling'
+  | 'account'
+  | 'users';
 
 export interface SettingsViewProps {
   isAdmin?: boolean;
   showGatewayNote?: boolean;
+  accountHook: UseAccountReturn;
+  currentUserId?: string | number;
+  /** Local sign-in succeeded but MFA enrollment is mandatory: only the Account tab is usable. */
+  mfaEnrollmentRequired?: boolean;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   isAdmin = false,
   showGatewayNote = false,
+  accountHook,
+  currentUserId,
+  mfaEnrollmentRequired = false,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(() =>
-    !isAdmin || new URLSearchParams(window.location.search).has('connected') ||
+    mfaEnrollmentRequired
+      ? 'account'
+      : !isAdmin || new URLSearchParams(window.location.search).has('connected') ||
     new URLSearchParams(window.location.search).has('scrobble_error')
       ? 'scrobbling'
       : 'general'
   );
+  const adminUsersHook = useAdminUsers(isAdmin && activeTab === 'users' && !mfaEnrollmentRequired);
   const [generalSettings, setGeneralSettings] = useState<GeneralSettings | null>(null);
   const [mediaSettings, setMediaSettings] = useState<MediaManagementSettings | null>(null);
   const [lidarrSettings, setLidarrSettings] = useState<LidarrSettings | null>(null);
@@ -200,6 +218,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     if (isAdmin) void loadData();
     else setIsLoading(false);
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (mfaEnrollmentRequired) setActiveTab('account');
+  }, [mfaEnrollmentRequired]);
 
   useEffect(() => {
     if (activeTab === 'tasks') {
@@ -419,7 +441,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     { id: 'status', label: 'Status', icon: <Activity className="h-3.5 w-3.5" /> },
   ];
   const scrobblingTab = { id: 'scrobbling' as const, label: 'Scrobbling', icon: <Radio className="h-3.5 w-3.5" /> };
-  const visibleTabs = isAdmin ? [...subTabs, scrobblingTab] : [scrobblingTab];
+  const accountTab = { id: 'account' as const, label: 'Account', icon: <UserRound className="h-3.5 w-3.5" /> };
+  const usersTab = { id: 'users' as const, label: 'Users', icon: <Users className="h-3.5 w-3.5" /> };
+  const visibleTabs = mfaEnrollmentRequired
+    ? [accountTab]
+    : isAdmin
+    ? [...subTabs, scrobblingTab, accountTab, usersTab]
+    : [scrobblingTab, accountTab];
+  const isSelfServiceTab = activeTab === 'scrobbling' || activeTab === 'account' || activeTab === 'users';
 
   return (
     <div className="space-y-6">
@@ -452,10 +481,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         ))}
       </TapeTransportBay>
 
-      {activeTab === 'scrobbling' && <ScrobblingSettings isAdmin={isAdmin} />}
+      {activeTab === 'scrobbling' && !mfaEnrollmentRequired && <ScrobblingSettings isAdmin={isAdmin} />}
+
+      {activeTab === 'account' && (
+        <AccountPanel
+          accountHook={accountHook}
+          isAdmin={isAdmin}
+          enrollmentBlocking={mfaEnrollmentRequired}
+        />
+      )}
+
+      {activeTab === 'users' && isAdmin && !mfaEnrollmentRequired && (
+        <UsersPanel adminHook={adminUsersHook} currentUserId={currentUserId} />
+      )}
 
       {/* Loading state */}
-      {isLoading && activeTab !== 'scrobbling' && (
+      {isLoading && !isSelfServiceTab && (
         <div className="flex flex-col items-center justify-center py-16 gap-3">
           <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
           <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">

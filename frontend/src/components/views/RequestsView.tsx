@@ -10,12 +10,16 @@ import {
 } from '@/components/ui';
 import { IssueReportButton, MyIssuesList } from '@/components/issues';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
+import type { AccountInfo } from '@/types/account';
+import { QuotaBars } from '@/components/account';
 
 export interface RequestsViewProps {
   requestsHook: UseRequestsReturn;
   isAdmin?: boolean;
   issuesHook: UseIssuesReturn;
   currentUserId?: string | number;
+  /** From GET /api/account; drives the per-type remaining-quota panel. */
+  account?: AccountInfo | null;
 }
 
 export const RequestsView: React.FC<RequestsViewProps> = ({
@@ -23,6 +27,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
   isAdmin = false,
   issuesHook,
   currentUserId,
+  account = null,
 }) => {
   const {
     requests,
@@ -132,8 +137,17 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
           </TapeDeckButton>
         </TapeTransportBay>
 
-        {quota && <QuotaBadge quota={quota} />}
+        {!account && quota && <QuotaBadge quota={quota} />}
       </div>
+
+      {account && (
+        <MachinedCard className="p-4">
+          <QuotaBars account={account} isAdmin={isAdmin} compact />
+          <p className="mt-2 text-[11px] font-mono text-[var(--text-muted)]">
+            Remaining requests per type over a rolling {account.quotas.window_days} days.
+          </p>
+        </MachinedCard>
+      )}
 
       {section === 'issues' && <MyIssuesList issuesHook={issuesHook} />}
 

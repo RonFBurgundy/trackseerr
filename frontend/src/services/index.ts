@@ -11,3 +11,6 @@ export * from './plexPlaylistService';
 export * from './scrobbleService';
 export * from './mixService';
 export * from './issueService';
+export * from './localAuthService';
+export * from './accountService';
+export * from './adminUsersService';

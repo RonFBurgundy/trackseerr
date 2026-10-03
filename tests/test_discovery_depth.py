@@ -690,7 +690,7 @@ class TestBatchRequestsAPI:
         self, app_and_client, test_db, test_config, seeded_users
     ):
         _, client = app_and_client
-        test_config.user_request_quota = 2
+        test_db.update_account_settings({"default_quota_tracks": 1})  # per-type quota (was one shared cap of 2)
         alice = seeded_users["alice"]
         headers = _auth_headers(alice, test_db, test_config)
 
@@ -715,13 +715,13 @@ class TestBatchRequestsAPI:
         }
         resp = client.post("/api/requests/batch", json=payload, headers=headers)
         assert resp.status_code == 400
-        assert "quota exceeded" in resp.json()["detail"].lower()
+        assert "quota reached" in resp.json()["detail"].lower()
 
     def test_batch_create_admin_bypasses_quota_and_auto_approves(
         self, app_and_client, test_db, test_config, seeded_users
     ):
         _, client = app_and_client
-        test_config.user_request_quota = 1
+        test_db.update_account_settings({"default_quota_tracks": 1})
         admin = seeded_users["admin"]
         headers = _auth_headers(admin, test_db, test_config)
 
@@ -744,7 +744,7 @@ class TestBatchRequestsAPI:
         self, app_and_client, test_db, test_config, seeded_users
     ):
         _, client = app_and_client
-        test_config.user_request_quota = 5
+        test_db.update_account_settings({"default_quota_tracks": 5, "default_quota_albums": 5})
         alice = seeded_users["alice"]
         headers = _auth_headers(alice, test_db, test_config)
 
@@ -874,7 +874,7 @@ def test_concurrent_batches_cannot_exceed_quota(app_and_client, test_db, test_co
     import time
 
     _, client = app_and_client
-    test_config.user_request_quota = 3
+    test_db.update_account_settings({"default_quota_tracks": 3})
     headers = _auth_headers(seeded_users["alice"], test_db, test_config)
     real_create = test_db.create_request
 

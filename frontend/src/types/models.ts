@@ -6,8 +6,11 @@
 export type DeploymentTier = 'gateway' | 'core' | 'all-in-one';
 
 export interface User {
-  id: number;
+  id: number | string;
   plex_username: string;
+  /** Present for local accounts (and mirrored for Plex users on newer backends). */
+  username?: string;
+  auth_type?: 'plex' | 'local';
   plex_id?: string;
   email?: string;
   thumb?: string;
@@ -651,3 +654,22 @@ export const ISSUE_STATUS_LABELS: Record<IssueStatus, string> = {
 
 export const ISSUE_MAX_TITLE = 300;
 export const ISSUE_MAX_DETAILS = 2000;
+
+/** One release in an artist's discography (GET /api/discovery/artist/{id}). */
+export interface ArtistDiscographyAlbum {
+  id: string;
+  title: string;
+  artist: string;
+  cover_url?: string;
+  release_date?: string;
+  record_type?: string;
+}
+
+export interface ArtistDetail {
+  id?: string;
+  name: string;
+  image_url?: string;
+  albums?: ArtistDiscographyAlbum[];
+  singles_eps?: ArtistDiscographyAlbum[];
+  compilations?: ArtistDiscographyAlbum[];
+}

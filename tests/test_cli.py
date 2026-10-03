@@ -57,6 +57,8 @@ def test_cli_web_mode_default(mock_plex_class, mock_db_class, mock_server_class,
     mock_plex_class.return_value = mock_plex
 
     mock_db = MagicMock()
+    mock_db.is_tombstoned.return_value = False  # discovery skips admin-deleted (tombstoned) users
+    mock_db.get_user.return_value = None
     mock_db_class.return_value = mock_db
 
     mock_server = MagicMock()

@@ -19,6 +19,12 @@ export function setAuthToken(token: string | null): void {
 
 export interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown;
+  /**
+   * When true, a 401 is surfaced as an ApiError (status 401 + server detail) instead of
+   * firing the global "unauthorized" session-drop event. Used by login, invite and
+   * credential-confirming account calls, where 401 is an expected, displayable outcome.
+   */
+  passthroughUnauthorized?: boolean;
 }
 
 /** Error carrying the HTTP status so callers can map specific failures. */
@@ -34,8 +40,9 @@ export class ApiError extends Error {
 
 export async function apiRequest<T>(
   endpoint: string,
-  options: ApiRequestOptions = {}
+  rawOptions: ApiRequestOptions = {}
 ): Promise<T> {
+  const { passthroughUnauthorized = false, ...options } = rawOptions;
   const headers: Record<string, string> = {
     Accept: 'application/json',
   };
@@ -82,7 +89,7 @@ export async function apiRequest<T>(
     credentials: 'same-origin',
   });
 
-  if (response.status === 401) {
+  if (response.status === 401 && !passthroughUnauthorized) {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('trackseerr:unauthorized'));
     }
@@ -109,4 +116,9 @@ export async function apiRequest<T>(
   }
 
   return data as T;
+}
+
+/** Extracts a displayable message from an unknown thrown value. */
+export function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
 }

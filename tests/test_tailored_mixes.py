@@ -602,7 +602,7 @@ class TestMixRequestPolicy:
         db.update_user_governance(gen_env.uid, request_limit_quota=1)
         from plex_playlist_sync.models import MusicRequest
 
-        db.create_request(MusicRequest(id="req-pre", user_id=gen_env.uid, item_type="album", title="Z",
+        db.create_request(MusicRequest(id="req-pre", user_id=gen_env.uid, item_type="track", title="Z",
                                        artist="Z", status=RequestStatus.PENDING))
         mix = make_mix(db, gen_env.uid, track_count=10, discovery_ratio=0.0, auto_acquire_missing=True)
         res, _ = run_generate(gen_env, mix, fake_plex(), missing=_missing(gen_env))
