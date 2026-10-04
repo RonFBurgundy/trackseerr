@@ -161,3 +161,10 @@ data/
 .coverage
 .pytest_cache/
 .ruff_cache/
+
+# Local-media test conventions (copyrighted audio must never be committed; see docs/LOCAL_MEDIA_TESTS.md)
+tests/local_media/media/
+tests/local_media/**/*.mp3
+tests/local_media/**/*.m4a
+tests/local_media/**/*.flac
+local-media/
