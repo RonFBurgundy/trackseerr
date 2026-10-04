@@ -47,7 +47,8 @@ class FakeLidarr:
         self.quality_profiles = [{"id": 1, "name": "Any"}, {"id": 4, "name": "Lossless"}]
         self.metadata_profiles = [metadata_profile(1, "Standard"), metadata_profile(6, "Everything")]
         self.tags = [{"id": 7, "label": "family"}]
-        self.lookup: list[dict[str, Any]] = [{"id": 0, "artistName": "Queen", "foreignArtistId": "mb-queen"}]
+        # A real lookup row for an artist not yet in Lidarr carries no "id" key (the client treats that as new).
+        self.lookup: list[dict[str, Any]] = [{"artistName": "Queen", "foreignArtistId": "mb-queen"}]
         self.albums: list[dict[str, Any]] = []  # what Lidarr lists for the artist once loaded
         self.tracks: list[dict[str, Any]] = []
         self.empty_album_polls = 0  # album?artistId= answers [] this many times first (async load after an add)
@@ -60,6 +61,14 @@ class FakeLidarr:
         self.commands: list[dict[str, Any]] = []
         self.command_list_supported = True  # False: GET /command answers 404 (the client must fall back to counts)
         # Successive snapshots of the artist's albums Lidarr serves while it loads them (the last one repeats).
+        # Real Lidarr (3.1.0.4875): after POST artist with addOptions.monitor "none", the artist's albums list as
+        # monitored=true and GET artist/{id} carries addOptions until the refresh has completed AND one more artist
+        # read has happened; only then are the albums unmonitored and addOptions null. Opt-in (existing tests predate it).
+        self.model_add_window = False
+        self.add_window_open = False
+        self.add_window_extra_polls = 1
+        self.add_options: Optional[dict[str, Any]] = None
+        self.new_artist_profile_id: Optional[int] = None
         self.album_snapshots: Optional[list[list[dict[str, Any]]]] = None
         self._visible_album_ids: Optional[set[int]] = None
 
@@ -79,6 +88,13 @@ class FakeLidarr:
 
     def paths(self, method: str) -> list[str]:
         return [p for m, p, _ in self.calls if m == method]
+
+    def _close_add_window(self) -> None:
+        """Lidarr applies addOptions.monitor: "none" unmonitors every album and clears addOptions."""
+        self.add_window_open = False
+        self.add_options = None
+        for album in self.albums:
+            album["monitored"] = False
 
     def _album(self, album_id: int) -> Optional[dict[str, Any]]:
         return next((a for a in self.albums if a.get("id") == album_id), None)
@@ -107,6 +123,19 @@ class FakeLidarr:
                 return httpx.Response(200, json=self.tags)
             if path == "artist/lookup":
                 return httpx.Response(200, json=self.lookup)
+            if path.startswith("artist/") and path.split("/")[1].isdigit():
+                if int(path.split("/")[1]) != self.NEW_ARTIST_ID or not self.model_add_window:
+                    return httpx.Response(404, json={})
+                if self.add_window_open and not any(c["status"] in ("queued", "started") for c in self.commands):
+                    if self.add_window_extra_polls > 0:
+                        self.add_window_extra_polls -= 1
+                    else:
+                        self._close_add_window()
+                return httpx.Response(
+                    200,
+                    json={"id": self.NEW_ARTIST_ID, "metadataProfileId": self.new_artist_profile_id,
+                          "addOptions": copy.deepcopy(self.add_options)},
+                )
             if path == "album" and "artistId" in query:
                 if self.empty_album_polls > 0:
                     self.empty_album_polls -= 1
@@ -115,6 +144,8 @@ class FakeLidarr:
                     snapshot = self.album_snapshots.pop(0) if len(self.album_snapshots) > 1 else self.album_snapshots[0]
                     self._visible_album_ids = {int(a["id"]) for a in snapshot}
                     return httpx.Response(200, json=copy.deepcopy(snapshot))
+                if self.add_window_open:
+                    return httpx.Response(200, json=[{**copy.deepcopy(a), "monitored": True} for a in self.albums])
                 return httpx.Response(200, json=copy.deepcopy(self.albums))
             if path == "command":
                 if not self.command_list_supported:
@@ -129,6 +160,8 @@ class FakeLidarr:
                 return httpx.Response(200, json=copy.deepcopy(self.commands))
             if path.startswith("album/"):
                 album = self._album(int(path.split("/")[1]))
+                if album is not None and self.add_window_open:
+                    album = {**album, "monitored": True}
                 return httpx.Response(200 if album else 404, json=copy.deepcopy(album) if album else {})
             if path == "track":
                 if "artistId" in query:
@@ -154,6 +187,10 @@ class FakeLidarr:
                         "body": {"artistIds": [self.NEW_ARTIST_ID], "isNewArtist": True, "name": "RefreshArtist"},
                     }
                 )
+                if self.model_add_window:
+                    self.add_window_open = True
+                    self.add_options = copy.deepcopy(body.get("addOptions"))
+                    self.new_artist_profile_id = body.get("metadataProfileId")
                 return httpx.Response(201, json={**body, "id": self.NEW_ARTIST_ID})
             if path == "command":
                 return httpx.Response(201, json={"id": 1, "name": body.get("name")})

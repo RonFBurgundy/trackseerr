@@ -8,6 +8,9 @@ os.environ["TRACKSEERR_LEGACY_UI"] = "1"
 
 import pytest
 
+# The Lidarr contract tests need a real Lidarr: not even collected unless RUN_INTEGRATION=1 (docs/INTEGRATION_TESTS.md).
+collect_ignore_glob = [] if os.environ.get("RUN_INTEGRATION") == "1" else ["integration/*"]
+
 
 def pytest_configure(config):
     config.addinivalue_line(

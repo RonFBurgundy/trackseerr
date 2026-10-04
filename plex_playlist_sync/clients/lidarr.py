@@ -101,6 +101,17 @@ def _singles_allowed(profile: Any) -> Optional[bool]:
     return None
 
 
+def _any_primary_type_allowed(profile: Any) -> Optional[bool]:
+    """Whether a metadata profile resource allows at least one primary album type; None when the shape is unexpected."""
+    items = profile.get("primaryAlbumTypes") if isinstance(profile, dict) else None
+    if not isinstance(items, list) or not items:
+        return None
+    flags = [item.get("allowed") for item in items if isinstance(item, dict)]
+    if len(flags) != len(items) or not all(isinstance(f, bool) for f in flags):
+        return None
+    return any(flags)
+
+
 def _positive_int(value: Any) -> Optional[int]:
     try:
         number = int(value)
@@ -361,6 +372,31 @@ class LidarrClient:
 
     # ------------------------------------------------------------------ Song / album requests
 
+    def metadata_profile_allows_any_type(self, profile_id: int) -> bool:
+        """Whether metadata profile ``profile_id`` allows at least one primary album type.
+
+        A profile that allows none (Lidarr's stock "None" profile) makes Lidarr list no albums for the artist, ever.
+        An unexpected shape answers ``True`` (don't block on a guess). Not cached. Raises LidarrApiError.
+        """
+        allowed = _any_primary_type_allowed(self._get_json(f"metadataprofile/{int(profile_id)}"))
+        return True if allowed is None else allowed
+
+    def artist_add_options_pending(self, artist_id: int) -> bool:
+        """Whether Lidarr is still applying the add options of a just-added artist.
+
+        ``GET /artist/{id}`` carries ``addOptions`` (an object) until Lidarr has applied it (``monitor`` etc.), then
+        ``null``. Until then the album list shows every album as monitored. A failed read is not "pending" (it would
+        wedge the wait forever). Raises LidarrRateLimited.
+        """
+        try:
+            data = self._get_json(f"artist/{int(artist_id)}")
+        except LidarrRateLimited:
+            raise
+        except LidarrApiError as exc:
+            logger.debug("Lidarr artist %s unavailable while checking add options: %s", artist_id, _exc_text(exc))
+            return False
+        return isinstance(data, dict) and bool(data.get("addOptions"))
+
     def artist_refresh_state(self, artist_id: int) -> str:
         """Whether Lidarr's ``RefreshArtist`` command for ``artist_id`` is still working: ``running``, ``done`` or ``unknown``.
 
@@ -402,7 +438,9 @@ class LidarrClient:
 
         Lidarr loads a new artist's albums and tracks piecemeal, so the first non-empty list is not complete.
         The artist is settled when its ``RefreshArtist`` command has finished and albums exist, or, when Lidarr lists
-        no such command, when the album and track counts are the same on two consecutive polls. Sleeps between
+        no such command, when the album and track counts are the same on two consecutive polls. Either way Lidarr must
+        also have applied the artist's add options (``artist_add_options_pending``): it reports the refresh
+        ``completed`` slightly before that, and until then every album lists as ``monitored``. Sleeps between
         attempts, so call it from a worker or background thread only (pass ``attempts=1`` otherwise).
         """
         albums: list[dict[str, Any]] = []
@@ -412,10 +450,12 @@ class LidarrClient:
             albums = self.fetch_artist_albums(artist_id)
             state = self.artist_refresh_state(artist_id)
             if albums and state == "done":
-                return albums, True
+                if not self.artist_add_options_pending(artist_id):
+                    return albums, True
+                previous = None
             if albums and state == "unknown":
                 fingerprint = (len(albums), len(self.fetch_artist_tracks(artist_id, albums)))
-                if fingerprint == previous:
+                if fingerprint == previous and not self.artist_add_options_pending(artist_id):
                     return albums, True
                 previous = fingerprint
             else:
@@ -518,11 +558,18 @@ class LidarrClient:
             monitored_ids: list[int] = []
             if want_list:
                 try:
-                    if was_new:
-                        albums, settled = self.wait_for_artist_albums(artist_id, album_wait_attempts, album_wait_seconds)
+                    profile_id = _positive_int(added.get("metadataProfileId")) if was_new else None
+                    if profile_id is not None and not self.metadata_profile_allows_any_type(profile_id):
+                        # Lidarr never lists an album for such an artist: waiting would only retry forever.
+                        outcomes = [_outcome(OUTCOME_NOT_IN_PROFILE, None, NOT_IN_PROFILE_MESSAGE) for _ in want_list]
                     else:
-                        albums, settled = self.fetch_artist_albums(artist_id), True
-                    outcomes, monitored_ids = self._monitor_wants(artist_id, albums, want_list, should_search, settled)
+                        if was_new:
+                            albums, settled = self.wait_for_artist_albums(artist_id, album_wait_attempts, album_wait_seconds)
+                        else:
+                            albums, settled = self.fetch_artist_albums(artist_id), True
+                        outcomes, monitored_ids = self._monitor_wants(
+                            artist_id, albums, want_list, should_search, settled, was_new
+                        )
                 except LidarrRateLimited as exc:
                     return _rate_limited(artist_title, exc, "Rate limited while selecting releases")
                 except LidarrApiError as exc:
@@ -569,14 +616,19 @@ class LidarrClient:
         wants: list[dict[str, str]],
         should_search: bool,
         settled: bool = True,
+        added_now: bool = False,
     ) -> tuple[list[dict[str, Any]], list[int]]:
         """Selects, monitors, searches and verifies one release per want; returns (outcomes, monitored album ids).
 
         Until the artist is ``settled`` (Lidarr has finished loading its releases) a want that finds no release is
         ``albums_pending`` (retry later), never ``not_in_metadata_profile``: the release may simply not have loaded.
+        For an artist added in this call (``added_now``) the listed ``monitored`` flag is not trusted (Lidarr lists
+        every album monitored until it applies ``addOptions.monitor``), so the PUT is always sent, and only once settled
+        (monitoring earlier would be undone by that very step).
         """
         outcomes: list[dict[str, Any]] = [_outcome("error", None, "Nothing to look up") for _ in wants]
-        if not albums:
+        if not albums or (added_now and not settled):
+            # A new artist Lidarr has not finished (refresh or add options) may still unmonitor what we monitor now.
             pending = _outcome(OUTCOME_ALBUMS_PENDING, None, ALBUMS_PENDING_MESSAGE)
             return [dict(pending) for _ in wants], []
 
@@ -614,7 +666,11 @@ class LidarrClient:
         to_monitor = list(dict.fromkeys(int(a["id"]) for a in chosen.values()))
         if not to_monitor:
             return outcomes, []
-        unmonitored = [i for i in to_monitor if not next(a for a in chosen.values() if int(a["id"]) == i).get("monitored")]
+        unmonitored = [
+            i
+            for i in to_monitor
+            if added_now or not next(a for a in chosen.values() if int(a["id"]) == i).get("monitored")
+        ]
         if unmonitored:
             self.set_albums_monitored(unmonitored, True)
         if should_search:
