@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Ban, DownloadCloud, History } from 'lucide-react';
-import { TapeTransportBay, TapeDeckButton, ToastBanner } from '@/components/ui';
+import { TabStrip, TapeDeckButton, ToastBanner } from '@/components/ui';
 import { ActivityQueuePanel, ActivityHistoryPanel, ActivityBlocklistPanel } from '@/components/activity';
 import { useToast } from '@/hooks/useToast';
 
@@ -20,13 +20,13 @@ export const ActivityView: React.FC = () => {
   return (
     <div className="space-y-6">
       {toast && <ToastBanner message={toast.message} tone={toast.tone} />}
-      <TapeTransportBay className="flex items-center gap-1.5 overflow-x-auto" aria-label="Activity sections">
+      <TabStrip aria-label="Activity sections">
         {TABS.map((t) => (
           <TapeDeckButton key={t.id} size="sm" active={tab === t.id} onClick={() => setTab(t.id)} icon={t.icon}>
             {t.label}
           </TapeDeckButton>
         ))}
-      </TapeTransportBay>
+      </TabStrip>
 
       {tab === 'queue' && <ActivityQueuePanel onToast={showToast} />}
       {tab === 'history' && <ActivityHistoryPanel onToast={showToast} />}

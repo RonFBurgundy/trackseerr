@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { RefreshCw, Trash2, Loader2, Search, AlertTriangle } from 'lucide-react';
 import type { SystemEventItem } from '@/types/models';
-import { TapeDeckButton, TapeTransportBay } from '@/components/ui';
+import { TapeDeckButton, ActionBar } from '@/components/ui';
 import { FlatList, type FlatListColumn } from '@/components/lists';
 import { useSystemEvents } from '@/hooks/useSystemEvents';
 
@@ -94,7 +94,7 @@ export const SystemEventsPanel: React.FC = () => {
           <h4 className="text-sm font-bold uppercase font-mono text-white">System Events</h4>
           <p className="text-xs text-neutral-400 font-mono mt-0.5">Recorded lifecycle events, newest first</p>
         </div>
-        <TapeTransportBay className="flex items-center gap-2 self-start sm:self-auto">
+        <ActionBar bay align="end" className="p-1.5 sm:w-auto">
           <TapeDeckButton
             size="sm"
             onClick={ev.list.reload}
@@ -132,7 +132,7 @@ export const SystemEventsPanel: React.FC = () => {
               Clear Events
             </TapeDeckButton>
           )}
-        </TapeTransportBay>
+        </ActionBar>
       </div>
 
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 p-3 bg-[#101010] border border-[#222222] rounded-[4px]">

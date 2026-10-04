@@ -122,6 +122,7 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
       </TapeDeckButton>
       <ConfirmDangerButton
         icon={<Search className="h-3.5 w-3.5" />}
+        idleLabel="Search all"
         ariaLabel={`${searchAllLabel}: ${isCutoff ? 'cutoff unmet' : 'missing'} items`}
         confirmLabel={searchAllLabel}
         disabled={busy || list.total === 0}
@@ -132,6 +133,7 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
 
   return (
     <ListPanel
+      stackToolbar
       title={isCutoff ? 'Cutoff Unmet' : 'Missing'}
       description={
         isCutoff

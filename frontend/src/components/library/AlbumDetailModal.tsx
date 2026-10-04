@@ -62,8 +62,8 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
       title="Album Details"
       subtitle={album ? `${album.title}${album.artist_name ? ` • ${album.artist_name}` : ''}` : undefined}
       footer={
-        <div className="flex flex-wrap items-center justify-between w-full gap-2">
-          <div className="flex items-center gap-2">
+        <>
+          <>
             {isAdmin && lidarrMode && (
               <TapeDeckButton
                 size="sm"
@@ -87,11 +87,11 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
             <TapeDeckButton size="sm" onClick={goToArtist} icon={<User className="h-3.5 w-3.5" />}>
               Go to Artist
             </TapeDeckButton>
-          </div>
+          </>
           <TapeDeckButton size="sm" onClick={onClose}>
             Close
           </TapeDeckButton>
-        </div>
+        </>
       }
     >
       {album && (
@@ -111,7 +111,7 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
               <button
                 type="button"
                 onClick={goToArtist}
-                className="text-sm text-[#e5a00d] hover:underline truncate block font-mono text-left"
+                className="text-sm text-[#e5a00d] hover:underline truncate block max-w-full min-h-[44px] sm:min-h-0 font-mono text-left"
                 title="View Artist Discography"
               >
                 {album.artist_name || 'Unknown Artist'}

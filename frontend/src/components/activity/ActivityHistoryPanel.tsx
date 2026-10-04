@@ -5,7 +5,7 @@ import { getActivityHistory, getActivityHistoryIndex, markHistoryFailed } from '
 import { errorMessage } from '@/services/apiClient';
 import { pagedFetcher, useVirtualPagedList } from '@/hooks/useVirtualPagedList';
 import { useGroupIndex } from '@/hooks/useGroupIndex';
-import { ConfirmDangerButton, TapeDeckButton, TapeTransportBay } from '@/components/ui';
+import { ConfirmDangerButton, TapeDeckButton, TabStrip } from '@/components/ui';
 import { FlatList, ListPanel, ScrubberRail, formatDateTime, orDash, type FlatListColumn } from '@/components/lists';
 import type { ActivityPanelProps } from './ActivityQueuePanel';
 
@@ -108,7 +108,7 @@ export const ActivityHistoryPanel: React.FC<ActivityPanelProps> = ({ onToast }) 
   );
 
   const toolbar = (
-    <TapeTransportBay className="flex items-center gap-1 overflow-x-auto" aria-label="Filter by event">
+    <TabStrip aria-label="Filter by event">
       <TapeDeckButton size="sm" active={event === ''} onClick={() => setEvent('')}>
         All
       </TapeDeckButton>
@@ -117,7 +117,7 @@ export const ActivityHistoryPanel: React.FC<ActivityPanelProps> = ({ onToast }) 
           {e.label}
         </TapeDeckButton>
       ))}
-    </TapeTransportBay>
+    </TabStrip>
   );
 
   return (

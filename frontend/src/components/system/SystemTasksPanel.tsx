@@ -1,6 +1,6 @@
 import React from 'react';
 import { Loader2, Play, Square, RotateCw, AlertTriangle } from 'lucide-react';
-import { TapeDeckButton, MachinedCard } from '@/components/ui';
+import { TapeDeckButton, ActionBar, MachinedCard } from '@/components/ui';
 import { useScheduledTasks } from '@/hooks/useScheduledTasks';
 import { formatTimestamp } from './formatters';
 
@@ -13,8 +13,8 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
+      <div className="flex items-start sm:items-center justify-between gap-3">
+        <div className="min-w-0">
           <h4 className="text-sm font-bold uppercase font-mono text-white">Scheduled Tasks &amp; Background Workers</h4>
           <p className="text-xs text-neutral-400 font-mono mt-0.5">
             Monitor recurring automation timers, intervals, and trigger on-demand sweeps
@@ -24,6 +24,8 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
           size="sm"
           onClick={() => void refresh()}
           disabled={isLoading}
+          collapseLabel
+          className="shrink-0"
           icon={isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
         >
           Refresh
@@ -39,8 +41,8 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
 
       <MachinedCard className="overflow-hidden p-0 border-[#222222]">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
+          <table className="w-full text-left border-collapse max-md:block">
+            <thead className="max-md:hidden">
               <tr className="border-b border-[#222222] bg-[#121212] text-[11px] font-mono uppercase tracking-wider text-neutral-400">
                 <th className="py-3 px-4">Task</th>
                 <th className="py-3 px-4">Interval</th>
@@ -49,22 +51,22 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#1c1c1c] text-xs font-mono">
+            <tbody className="divide-y divide-[#1c1c1c] text-xs font-mono max-md:block">
               {tasks.map((task) => {
                 const isRunning = task.status === 'running' || runningIds.has(task.id);
                 const isCancelling = cancellingIds.has(task.id);
                 return (
-                  <tr key={task.id} className="hover:bg-[#141414] transition-colors">
-                    <td className="py-3.5 px-4 min-w-[200px]">
+                  <tr key={task.id} className="hover:bg-[#141414] transition-colors max-md:flex max-md:flex-col max-md:gap-2.5 max-md:p-4">
+                    <td className="py-3.5 px-4 min-w-[200px] max-md:min-w-0 max-md:p-0">
                       <span className="font-bold text-sm text-white block">{task.name}</span>
                       <span className="text-[11px] text-neutral-400 block mt-0.5 line-clamp-2">{task.description}</span>
                     </td>
-                    <td className="py-3.5 px-4 whitespace-nowrap">
+                    <td data-label="Interval" className="py-3.5 px-4 whitespace-nowrap max-md:flex max-md:items-center max-md:justify-between max-md:p-0 before:content-[attr(data-label)] before:text-[10px] before:uppercase before:tracking-wider before:text-neutral-500 md:before:hidden">
                       <span className="px-2 py-0.5 rounded-[2px] bg-[#181818] text-[10px] text-neutral-300 border border-[#282828]">
                         {task.interval}
                       </span>
                     </td>
-                    <td className="py-3.5 px-4 whitespace-nowrap">
+                    <td data-label="Status" className="py-3.5 px-4 whitespace-nowrap max-md:flex max-md:items-center max-md:justify-between max-md:p-0 before:content-[attr(data-label)] before:text-[10px] before:uppercase before:tracking-wider before:text-neutral-500 md:before:hidden">
                       {task.status === 'running' ? (
                         <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[2px] bg-[#e5a00d]/10 text-[#e5a00d] border border-[#e5a00d]/30 font-bold text-[10px] uppercase">
                           <Loader2 className="h-3 w-3 animate-spin" />
@@ -84,11 +86,11 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
                         </span>
                       )}
                     </td>
-                    <td className="py-3.5 px-4 whitespace-nowrap text-neutral-400">
+                    <td data-label="Last run" className="py-3.5 px-4 whitespace-nowrap text-neutral-400 max-md:flex max-md:items-center max-md:justify-between max-md:p-0 before:content-[attr(data-label)] before:text-[10px] before:uppercase before:tracking-wider before:text-neutral-500 md:before:hidden">
                       {task.last_run_at ? formatTimestamp(task.last_run_at) : 'Never'}
                     </td>
-                    <td className="py-3.5 px-4 whitespace-nowrap text-right">
-                      <div className="flex items-center justify-end gap-2">
+                    <td className="py-3.5 px-4 whitespace-nowrap text-right max-md:p-0">
+                      <ActionBar align="end">
                         <TapeDeckButton
                           size="sm"
                           variant="amber"
@@ -121,7 +123,7 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
                             Cancel
                           </TapeDeckButton>
                         )}
-                      </div>
+                      </ActionBar>
                     </td>
                   </tr>
                 );

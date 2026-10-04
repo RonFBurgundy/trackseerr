@@ -1,5 +1,5 @@
 import React from 'react';
-import { TapeTransportBay, TapeDeckButton } from '@/components/ui';
+import { TabStrip, TapeDeckButton } from '@/components/ui';
 import type { SettingsNavGroup, SettingsTab } from './settingsTabs';
 
 export interface SettingsNavProps {
@@ -11,20 +11,25 @@ export interface SettingsNavProps {
 }
 
 export const SettingsNav: React.FC<SettingsNavProps> = ({ groups, activeTab, onSelect, inactiveTabs }) => (
-  <TapeTransportBay className="flex flex-col sm:flex-row sm:flex-wrap sm:items-stretch gap-3 sm:gap-4 p-2" aria-label="Settings sections">
+  <TabStrip
+    className="sm:!flex-wrap sm:!overflow-visible sm:!items-stretch sm:!gap-x-6 sm:!gap-y-3 sm:!w-full !gap-3 p-1.5 sm:p-2"
+    aria-label="Settings sections"
+  >
     {groups.map((group, gi) => {
       const showHeader = !(group.items.length === 1 && group.items[0].label === group.label);
       return (
         <div
           key={group.id}
-          className={`flex flex-col gap-1.5 ${gi > 0 ? 'sm:border-l sm:border-[#1f1f1f] sm:pl-4' : ''}`}
+          className={`flex shrink-0 flex-col gap-1.5 ${
+            gi > 0 ? 'border-l border-[#1f1f1f] pl-3 sm:border-l-0 sm:pl-0' : ''
+          }`}
         >
           {showHeader && (
-            <span className="text-[10px] font-mono uppercase tracking-widest text-neutral-500 px-0.5">
+            <span className="hidden sm:block text-[10px] font-mono uppercase tracking-widest text-neutral-500 px-0.5 whitespace-nowrap">
               {group.label}
             </span>
           )}
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-nowrap sm:flex-wrap items-stretch gap-1.5">
             {group.items.map((st) => (
               <TapeDeckButton
                 key={st.id}
@@ -32,7 +37,7 @@ export const SettingsNav: React.FC<SettingsNavProps> = ({ groups, activeTab, onS
                 active={activeTab === st.id}
                 onClick={() => onSelect(st.id)}
                 icon={st.icon}
-                className={`${inactiveTabs?.has(st.id) ? 'opacity-50' : ''} ${group.items.length > 1 ? 'flex-1 sm:flex-none' : ''}`}
+                className={inactiveTabs?.has(st.id) ? 'opacity-50' : ''}
                 aria-current={activeTab === st.id ? 'page' : undefined}
               >
                 {st.label}
@@ -42,5 +47,5 @@ export const SettingsNav: React.FC<SettingsNavProps> = ({ groups, activeTab, onS
         </div>
       );
     })}
-  </TapeTransportBay>
+  </TabStrip>
 );

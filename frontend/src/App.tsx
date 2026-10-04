@@ -299,7 +299,7 @@ const MainApp: React.FC = () => {
                         href={auth.plexAuthUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="tape-deck-btn flex min-h-[44px] w-full items-center justify-center rounded-[3px] px-4 text-xs"
+                        className="tape-deck-btn flex min-h-[44px] w-full items-center justify-center rounded-[3px] px-4 text-xs sm:min-h-[38px]"
                       >
                         Open Plex Sign-In
                       </a>

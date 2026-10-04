@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { RefreshCw, Plus, Play, ExternalLink, Trash2, FileText, Link as LinkIcon, Loader2 } from 'lucide-react';
 import type { Playlist, User } from '@/types/models';
 import {
-  TapeTransportBay,
+  TabStrip,
+  ActionBar,
   TapeDeckButton,
   MachinedCard,
   ObsidianModal,
@@ -102,7 +103,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
     <div className="space-y-6">
       {/* Action Header */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        <TapeTransportBay className="flex items-center gap-2">
+        <ActionBar bay className="p-1.5">
           {isAdmin && (
           <TapeDeckButton
             size="sm"
@@ -128,7 +129,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
           >
             Add Playlist
           </TapeDeckButton>
-        </TapeTransportBay>
+        </ActionBar>
 
         <div className="text-xs text-neutral-400 font-mono">
           {playlists.length} Configured Playlists
@@ -255,7 +256,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
         subtitle="Import music tracks from streaming playlists or text"
       >
         <div className="space-y-4">
-          <TapeTransportBay className="flex items-center gap-1">
+          <TabStrip fill>
             <TapeDeckButton
               size="sm"
               active={importTab === 'link'}
@@ -280,7 +281,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
             >
               1-Click Helper
             </TapeDeckButton>
-          </TapeTransportBay>
+          </TabStrip>
 
           <form onSubmit={handleImportSubmit} className="space-y-4">
             <div>
@@ -346,7 +347,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
             )}
 
             {importTab !== 'helper' && (
-              <div className="flex justify-end pt-2">
+              <ActionBar align="end" className="pt-2">
                 <TapeDeckButton
                   type="submit"
                   variant="amber"
@@ -362,7 +363,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                 >
                   {isSubmittingImport ? 'Importing...' : 'Add Playlist'}
                 </TapeDeckButton>
-              </div>
+              </ActionBar>
             )}
           </form>
         </div>
@@ -378,7 +379,7 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = (props) => {
 
   return (
     <div className="space-y-6">
-      <TapeTransportBay className="inline-flex items-center gap-1">
+      <TabStrip fill>
         <TapeDeckButton size="sm" active={section === 'sync'} onClick={() => setSection('sync')}>
           Sync
         </TapeDeckButton>
@@ -388,7 +389,7 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = (props) => {
         <TapeDeckButton size="sm" active={section === 'mixes'} onClick={() => setSection('mixes')}>
           Mixes
         </TapeDeckButton>
-      </TapeTransportBay>
+      </TabStrip>
 
       {section === 'sync' && <SyncPlaylistsPanel {...props} />}
       {section === 'plex' && <PlexPlaylistsSection isAdmin={props.isAdmin ?? false} />}

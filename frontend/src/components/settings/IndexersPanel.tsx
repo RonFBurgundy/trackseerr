@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Trash2, Plus } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, ConfirmDangerButton } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar } from '@/components/ui';
 import type { IndexerItem } from '@/types/models';
 import { saveIndexer, deleteIndexer, testIndexer } from '@/services/settingsService';
 import { compactInputClass, compactLabelClass } from './formClasses';
@@ -123,7 +123,7 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, reload, 
             <label className={compactLabelClass}>API Key</label>
             <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} className={compactInputClass} />
           </div>
-          <div className="flex justify-end pt-2">
+          <ActionBar align="end" className="pt-2">
             <TapeDeckButton
               type="submit"
               size="sm"
@@ -133,7 +133,7 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, reload, 
             >
               Save Indexer
             </TapeDeckButton>
-          </div>
+          </ActionBar>
         </form>
       </MachinedCard>
     </div>

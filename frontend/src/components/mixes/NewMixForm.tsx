@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { MixConfigCreateBody, MixType } from '@/types/models';
-import { MachinedCard, TapeDeckButton, TapeTransportBay } from '@/components/ui';
+import { MachinedCard, TapeDeckButton, TabStrip } from '@/components/ui';
 
 const TYPES: Array<{ id: MixType; label: string; defaultName: string }> = [
   { id: 'discover_weekly', label: 'Discover Weekly', defaultName: 'Discover Weekly · TrackSeerr' },
@@ -50,7 +50,7 @@ export const NewMixForm: React.FC<NewMixFormProps> = ({ onCreate, onCancel }) =>
     <MachinedCard className="p-4 sm:p-6 max-w-2xl">
       <form onSubmit={handleSubmit} className="space-y-4">
         <h3 className="text-sm font-bold uppercase tracking-wider text-white">New Mix</h3>
-        <TapeTransportBay className="flex flex-wrap items-center gap-1">
+        <TabStrip fill>
           {TYPES.map((t) => (
             <TapeDeckButton
               key={t.id}
@@ -62,7 +62,7 @@ export const NewMixForm: React.FC<NewMixFormProps> = ({ onCreate, onCancel }) =>
               {t.label}
             </TapeDeckButton>
           ))}
-        </TapeTransportBay>
+        </TabStrip>
         {isRadio && (
           <div>
             <label className={labelClass}>Seed artist</label>

@@ -214,3 +214,106 @@ body {
     transition: none;
   }
 }
+
+/* 7. Shared button-group primitives (mobile-first) ------------------------- */
+
+/* Every transport key keeps its label on one line; the layout around it makes room. */
+.tape-deck-btn {
+  white-space: nowrap;
+}
+.tape-deck-btn > svg {
+  flex-shrink: 0;
+}
+
+/*
+ * TabStrip: a recessed bay whose keys never wrap. On narrow screens the strip
+ * scrolls horizontally (scrollbar hidden, snap to key edges); from `sm` up the
+ * keys sit in a normal row. Every key shares the same height.
+ */
+.tab-strip {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.tab-strip::-webkit-scrollbar {
+  display: none;
+}
+.tab-strip > * {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+}
+/* `fill`: keys share spare width equally (still never shrink below their label). */
+.tab-strip[data-fill='true'] > * {
+  flex: 1 0 auto;
+}
+@media (min-width: 640px) {
+  .tab-strip[data-fill='true'] > * {
+    flex: 0 0 auto;
+  }
+}
+
+/*
+ * ActionBar: a row of related buttons. Below `sm` it becomes an equal-width
+ * grid (every cell the same height, label on one line, as many columns as fit
+ * at >= 10.5rem each); from `sm` up it is a plain wrapping row.
+ */
+.action-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr));
+  gap: 0.5rem;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+}
+.action-bar > * {
+  min-width: 0;
+  width: 100%;
+  justify-content: center;
+}
+.action-bar[data-span='single'] {
+  grid-template-columns: 1fr;
+}
+/* An odd last button takes the whole row instead of leaving a ragged half-cell. */
+@media (max-width: 519px) {
+  .action-bar > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+@media (min-width: 640px) {
+  .action-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    width: auto;
+    gap: 0.5rem;
+  }
+  .action-bar[data-align='end'] {
+    justify-content: flex-end;
+  }
+  .action-bar > * {
+    width: auto;
+  }
+}
+@media (min-width: 640px) {
+  .tab-strip {
+    width: fit-content;
+  }
+}
+
+/* Touch targets: text inputs and selects are at least 44px tall on phones. */
+@media (max-width: 639px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='hidden']),
+  select,
+  textarea {
+    min-height: 44px;
+  }
+}

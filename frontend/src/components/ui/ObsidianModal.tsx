@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { TapeDeckButton } from './TapeDeckButton';
+import { ActionBar } from './ActionBar';
 
 // Open modals, topmost last. Only the topmost handles Escape.
 const openModalStack: symbol[] = [];
@@ -69,7 +70,7 @@ export const ObsidianModal: React.FC<ObsidianModalProps> = ({
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[#222222] px-4 py-3 sm:px-5 sm:py-3.5 bg-[#181818]/80 shrink-0">
-          <div>
+          <div className="min-w-0">
             <h3 className="text-sm sm:text-base font-bold tracking-wider uppercase text-white">
               {title}
             </h3>
@@ -80,6 +81,7 @@ export const ObsidianModal: React.FC<ObsidianModalProps> = ({
           <TapeDeckButton
             size="sm"
             onClick={onClose}
+            className="shrink-0"
             aria-label="Close dialog"
             icon={<X className="h-4 w-4" />}
           />
@@ -92,9 +94,12 @@ export const ObsidianModal: React.FC<ObsidianModalProps> = ({
 
         {/* Footer */}
         {footer && (
-          <div className="flex items-center justify-end gap-3 border-t border-[#222222] px-4 py-3 sm:px-5 bg-[#0e0e0e] shrink-0">
+          <ActionBar
+            align="end"
+            className="border-t border-[#222222] px-4 py-3 pb-safe sm:px-5 bg-[#0e0e0e] shrink-0"
+          >
             {footer}
-          </div>
+          </ActionBar>
         )}
       </div>
     </div>

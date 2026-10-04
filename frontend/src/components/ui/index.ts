@@ -10,3 +10,5 @@ export * from './CopyBox';
 export * from './StartupScreen';
 export * from './ConfirmDangerButton';
 export * from './ToastBanner';
+export * from './TabStrip';
+export * from './ActionBar';

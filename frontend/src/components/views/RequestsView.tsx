@@ -3,7 +3,8 @@ import { Check, X, Trash2, Clock, CheckCircle2, AlertCircle, Loader2 } from 'luc
 import type { UseRequestsReturn, RequestFilter } from '@/hooks/useRequests';
 import type { RequestItem } from '@/types/models';
 import {
-  TapeTransportBay,
+  TabStrip,
+  ActionBar,
   TapeDeckButton,
   MachinedCard,
   QuotaBadge,
@@ -116,7 +117,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
     <div className="space-y-6">
       {/* Top Banner / Filters */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <TapeTransportBay className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto">
+        <TabStrip fill>
           {filters.map((f) => (
             <TapeDeckButton
               key={f.id}
@@ -137,7 +138,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
           >
             My issues
           </TapeDeckButton>
-        </TapeTransportBay>
+        </TabStrip>
 
         {!account && quota && <QuotaBadge quota={quota} />}
       </div>
@@ -217,7 +218,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#1f1f1f]">
+                <ActionBar align="end" className="pt-2 border-t border-[#1f1f1f]">
                   {(req.status === 'fulfilled' || req.status === 'available') &&
                     currentUserId !== undefined &&
                     (req.user_id ?? req.requested_by_id) !== undefined &&
@@ -256,10 +257,11 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
                     disabled={isBusy}
                     onConfirm={() => void handleRemove(req.id)}
                     icon={<Trash2 className="h-3.5 w-3.5" />}
+                    idleLabel="Delete"
                     ariaLabel="Delete request"
                     confirmLabel="Delete"
                   />
-                </div>
+                </ActionBar>
               </MachinedCard>
             );
           })}

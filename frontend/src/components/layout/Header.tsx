@@ -83,7 +83,7 @@ export const Header: React.FC<HeaderProps> = ({
               (e.currentTarget as HTMLImageElement).src = '/static/trackseerr-logo.svg';
             }}
           />
-          <span className="text-base sm:text-lg font-black tracking-wider uppercase text-white font-mono leading-none">
+          <span className="hidden lg:inline text-base sm:text-lg font-black tracking-wider uppercase text-white font-mono leading-none">
             Track<span className="text-[#e5a00d]">Seerr</span>
             {brandSuffix}
             {coreBadge}
@@ -95,7 +95,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={() => onTabChange?.('discover')}
-            className="md:hidden flex items-center justify-center w-9 h-9 rounded-[3px] border border-[#222222] bg-[#121212] hover:border-[#383838] active:translate-y-[1px] transition-all flex-shrink-0"
+            className="hidden min-[420px]:flex md:hidden items-center justify-center w-11 h-11 rounded-[3px] border border-[#222222] bg-[#121212] hover:border-[#383838] active:translate-y-[1px] transition-all flex-shrink-0"
             aria-label="TrackSeerr Home"
             title="TrackSeerr Home"
           >
@@ -143,6 +143,8 @@ export const Header: React.FC<HeaderProps> = ({
                         onClick={() => onTabChange(item.id)}
                         icon={item.icon}
                         className="rounded-[3px]"
+                        collapseLabel="xl"
+                        title={item.label}
                       >
                         {item.label}
                       </TapeDeckButton>
@@ -155,9 +157,9 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Mobile Symbol-Based Tape Transport Bay */}
         {user && activeTab && onTabChange && (
-          <div className="md:hidden flex items-center justify-center flex-1 mx-1">
+          <div className="md:hidden flex items-center justify-center flex-1 min-w-0">
             <TapeTransportBay className="p-[2px]">
-              <div className="flex items-center gap-1">
+              <div className="flex items-stretch gap-1">
                 {mobileNavItems.filter((item) => !item.adminOnly || isAdmin).map((item) => {
                   const isActive = activeTab === item.id;
                   return (
@@ -167,7 +169,7 @@ export const Header: React.FC<HeaderProps> = ({
                       active={isActive}
                       onClick={() => onTabChange(item.id)}
                       icon={item.icon}
-                      className="w-9 h-9 p-0 !min-h-0 rounded-[3px]"
+                      className="w-10 h-11 !min-h-0 p-0 rounded-[3px] shrink-0"
                       aria-label={item.label}
                       title={item.label}
                     />
@@ -184,7 +186,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {user ? (
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-[#141414] border border-[#222222] rounded-[3px]">
+              <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-[#141414] border border-[#222222] rounded-[3px]">
                 {user.is_admin && <Shield className="h-3.5 w-3.5 text-[#e5a00d]" />}
                 <span className="text-xs font-mono font-medium text-neutral-200">
                   {user.plex_username}
@@ -195,9 +197,11 @@ export const Header: React.FC<HeaderProps> = ({
                 variant="default"
                 onClick={onLogout}
                 title="Sign Out"
+                aria-label="Sign out"
+                collapseLabel="lg"
                 icon={<LogOut className="h-4 w-4 text-neutral-400" />}
               >
-                <span>Logout</span>
+                Logout
               </TapeDeckButton>
             </div>
           ) : (
@@ -229,7 +233,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <Menu className="h-4 w-4 text-neutral-300" />
                 )
               }
-              className="w-9 h-9 p-0 !min-h-0 rounded-[3px]"
+              className="w-11 h-11 !min-h-0 p-0 rounded-[3px] shrink-0"
             />
           ) : (
             <TapeDeckButton

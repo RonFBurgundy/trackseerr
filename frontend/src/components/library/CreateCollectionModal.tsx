@@ -52,7 +52,7 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({ is
       title="Create Collection"
       subtitle="Organize albums into custom playlists, box sets, or anthologies"
       footer={
-        <div className="flex items-center justify-end gap-2">
+        <>
           <TapeDeckButton size="sm" onClick={onClose}>
             Cancel
           </TapeDeckButton>
@@ -65,7 +65,7 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({ is
           >
             Create Collection
           </TapeDeckButton>
-        </div>
+        </>
       }
     >
       <form onSubmit={(e) => void submit(e)} className="space-y-4">

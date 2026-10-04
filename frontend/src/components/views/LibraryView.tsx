@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Disc, Layers, Loader2, Music, RefreshCw, User } from 'lucide-react';
+import { Disc, Eye, Layers, Loader2, Music, RefreshCw, User } from 'lucide-react';
 import type { UseLibraryReturn, LibraryTab } from '@/hooks/useLibrary';
 import type { AlbumItem } from '@/types/models';
 import { useAddToCollection } from '@/hooks/useAddToCollection';
@@ -8,7 +8,7 @@ import { useLibraryManager } from '@/hooks/useLibraryManager';
 import { useToast } from '@/hooks/useToast';
 import { deleteCollection } from '@/services/libraryService';
 import { errorMessage } from '@/services/apiClient';
-import { SearchBar, TapeDeckButton, TapeTransportBay, ToastBanner } from '@/components/ui';
+import { SearchBar, TapeDeckButton, TabStrip, ToastBanner } from '@/components/ui';
 import {
   AddToCollectionModal,
   AlbumDetailModal,
@@ -174,24 +174,25 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
 
       {showScanBanner && <LibraryScanBanner scanStatus={scanStatus} onCancel={() => void cancelScan()} />}
 
-      <div className="flex items-center justify-between gap-2 sm:gap-4">
-        <TapeTransportBay className="flex min-w-0 items-center gap-1.5 overflow-x-auto">
+      <div className="flex items-stretch justify-between gap-2 sm:gap-4">
+        <TabStrip className="min-w-0 flex-1 sm:flex-none">
           {visibleTabs.map((tab) => (
             <TapeDeckButton key={tab.id} size="sm" active={activeTab === tab.id} onClick={() => setTab(tab.id)} icon={tab.icon}>
               {tab.label}
             </TapeDeckButton>
           ))}
-        </TapeTransportBay>
+        </TabStrip>
 
         {/* Scanning is a native-library action; Lidarr manages its own files. */}
         {isAdmin && !lidarrMode && (
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-stretch gap-2">
             {isScanning ? (
               <TapeDeckButton
                 size="sm"
                 variant="danger"
                 onClick={() => void cancelScan()}
                 icon={<Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                collapseLabel
               >
                 Cancel Scan
               </TapeDeckButton>
@@ -201,6 +202,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
                 variant="amber"
                 onClick={() => void triggerScan(false)}
                 icon={<RefreshCw className="h-3.5 w-3.5" />}
+                collapseLabel
               >
                 Scan Library
               </TapeDeckButton>
@@ -219,6 +221,9 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
             className="shrink-0"
             active={monitoredOnly}
             aria-pressed={monitoredOnly}
+            aria-label="Monitored only"
+            icon={<Eye className="h-3.5 w-3.5" />}
+            collapseLabel
             onClick={() => setMonitoredOnly((v) => !v)}
           >
             Monitored only

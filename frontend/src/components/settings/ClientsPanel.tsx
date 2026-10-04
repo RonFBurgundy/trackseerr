@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Trash2, Plus } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, ConfirmDangerButton } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar } from '@/components/ui';
 import type { DownloadClientItem } from '@/types/models';
 import { saveClientSettings, deleteClientSettings, testClientConnection } from '@/services/settingsService';
 import { compactInputClass, compactLabelClass } from './formClasses';
@@ -140,7 +140,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
               />
             </div>
           </div>
-          <div className="flex justify-end pt-2">
+          <ActionBar align="end" className="pt-2">
             <TapeDeckButton
               type="submit"
               size="sm"
@@ -150,7 +150,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
             >
               Add Client
             </TapeDeckButton>
-          </div>
+          </ActionBar>
         </form>
       </MachinedCard>
     </div>

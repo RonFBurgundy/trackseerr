@@ -86,9 +86,10 @@ export const ActivityBlocklistPanel: React.FC<ActivityPanelProps> = ({ onToast }
   const toolbar =
     selected.size > 0 ? (
       <>
-        <span className="text-[11px] font-mono text-neutral-400">{selected.size} selected</span>
+        <span className="self-center text-[11px] font-mono text-neutral-400">{selected.size} selected</span>
         <ConfirmDangerButton
           icon={<Trash2 className="h-3.5 w-3.5" />}
+          idleLabel="Remove selected"
           ariaLabel={`Remove ${selected.size} selected from blocklist`}
           confirmLabel={`Remove ${selected.size}`}
           disabled={busy}

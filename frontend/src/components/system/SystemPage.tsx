@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Activity, List, ListChecks, ScrollText, Terminal } from 'lucide-react';
-import { TapeTransportBay, TapeDeckButton } from '@/components/ui';
+import { TabStrip, TapeDeckButton } from '@/components/ui';
 import type { LibraryManagerMode } from '@/types/models';
 import { SystemStatusPanel } from './SystemStatusPanel';
 import { SystemQueuePanel } from './SystemQueuePanel';
@@ -31,13 +31,13 @@ export const SystemPage: React.FC<SystemPageProps> = ({ isCore, libraryMode, onT
 
   return (
     <div className="space-y-6">
-      <TapeTransportBay className="flex items-center gap-1.5 overflow-x-auto" aria-label="System sections">
+      <TabStrip aria-label="System sections">
         {TABS.map((t) => (
           <TapeDeckButton key={t.id} size="sm" active={tab === t.id} onClick={() => setTab(t.id)} icon={t.icon}>
             {t.label}
           </TapeDeckButton>
         ))}
-      </TapeTransportBay>
+      </TabStrip>
 
       {tab === 'status' && <SystemStatusPanel isCore={isCore} libraryMode={libraryMode} />}
       {tab === 'queue' && <SystemQueuePanel />}

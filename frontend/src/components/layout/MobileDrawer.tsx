@@ -128,7 +128,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
       />
 
       {/* Drawer Panel */}
-      <div className="relative w-full max-w-[320px] bg-[#0c0c0c] border-l border-[#222222] shadow-2xl flex flex-col h-full pt-safe pb-safe z-10">
+      <div className="relative w-full max-w-none bg-[#0c0c0c] border-l border-[#222222] shadow-2xl flex flex-col h-full pt-safe pb-safe z-10">
         {/* Top Header inside Drawer */}
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-[#1f1f1f] bg-[#121212]">
           <div className="flex items-center gap-2.5">
@@ -208,7 +208,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
                     onTabChange(item.id);
                     onClose();
                   }}
-                  className={`w-full flex items-center gap-3 p-3 rounded-[3px] text-left transition-all duration-75 border ${
+                  className={`w-full min-h-[56px] flex items-center gap-3 p-3 rounded-[3px] text-left transition-all duration-75 border ${
                     isActive
                       ? 'bg-[#151515] border-[#e5a00d]/40 shadow-[inset_0_1px_3px_rgba(0,0,0,0.8)]'
                       : 'bg-[#121212] border-[#1e1e1e] hover:border-[#333333] hover:bg-[#181818]'

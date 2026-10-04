@@ -1,4 +1,5 @@
 import React from 'react';
+import { ActionBar } from '@/components/ui';
 import { SourceBadge } from './SourceBadge';
 
 export interface ListPanelProps {
@@ -8,11 +9,13 @@ export interface ListPanelProps {
   total: number;
   /** Right-aligned toolbar (filters, bulk actions). */
   toolbar?: React.ReactNode;
+  /** One toolbar button per row on mobile (for long labels). */
+  stackToolbar?: boolean;
   children: React.ReactNode;
 }
 
 /** Header strip shared by the Activity and Wanted lists: title, count, source indicator, toolbar. */
-export const ListPanel: React.FC<ListPanelProps> = ({ title, description, mode, total, toolbar, children }) => (
+export const ListPanel: React.FC<ListPanelProps> = ({ title, description, mode, total, toolbar, stackToolbar = false, children }) => (
   <section className="space-y-3">
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div className="min-w-0">
@@ -25,7 +28,7 @@ export const ListPanel: React.FC<ListPanelProps> = ({ title, description, mode, 
           <SourceBadge mode={mode} />
         </div>
       </div>
-      {toolbar && <div className="flex flex-wrap items-center gap-2">{toolbar}</div>}
+      {toolbar && <ActionBar align="end" stackOnMobile={stackToolbar}>{toolbar}</ActionBar>}
     </div>
     {children}
   </section>

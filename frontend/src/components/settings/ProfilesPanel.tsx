@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Trash2, Plus } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, TactileSwitch, ConfirmDangerButton } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, TactileSwitch, ConfirmDangerButton, ActionBar } from '@/components/ui';
 import type { QualityProfile } from '@/types/models';
 import { saveQualityProfile, deleteQualityProfile } from '@/services/settingsService';
 import { compactInputClass, compactLabelClass } from './formClasses';
@@ -109,7 +109,7 @@ export const ProfilesPanel: React.FC<ProfilesPanelProps> = ({ profiles, onProfil
               className={compactInputClass}
             />
           </div>
-          <div className="flex justify-end pt-2">
+          <ActionBar align="end" className="pt-2">
             <TapeDeckButton
               type="submit"
               size="sm"
@@ -119,7 +119,7 @@ export const ProfilesPanel: React.FC<ProfilesPanelProps> = ({ profiles, onProfil
             >
               Create Profile
             </TapeDeckButton>
-          </div>
+          </ActionBar>
         </form>
       </MachinedCard>
     </div>
