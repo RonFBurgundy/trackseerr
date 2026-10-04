@@ -13,7 +13,7 @@ from plex_playlist_sync.api.dependencies import get_config, get_db, require_admi
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.library_monitoring import validate_monitor_option
 from plex_playlist_sync.redaction import redact_text
-from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient
+from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient, invalidate_add_defaults
 from plex_playlist_sync.naming import (
     PRESET_DESCRIPTIONS,
     PRESETS,
@@ -243,7 +243,6 @@ class PreviewResponseModel(BaseModel):
     format_previews: dict[str, FormatPreviewModel] = Field(default_factory=dict)
 
 
-LidarrMonitorOption = Literal["all", "future", "missing", "existing", "first", "latest", "none"]
 
 
 class LidarrSettingsModel(BaseModel):
@@ -251,32 +250,51 @@ class LidarrSettingsModel(BaseModel):
     api_key: str | None = None
     auto_search: bool = True
     root_folder: str | None = None
-    quality_profile_id: int | None = None
-    metadata_profile_id: int | None = None
     trickle_rate_seconds: float = 3.0
     trickle_batch_size: int = 25
     auto_trickle: bool = False
     auto_trickle_interval_minutes: int = 30
-    monitor_option: LidarrMonitorOption = "all"
     search_on_add: bool = True
-    tag_ids: list[int] = Field(default_factory=list)
+    prefer_singles: bool = True
     updated_at: str | None = None
 
 
 class LidarrSettingsUpdateModel(BaseModel):
+    """Unknown fields are ignored on purpose: older clients may still send the removed monitor / profile / tag
+    overrides (Lidarr's root-folder defaults decide those now)."""
+
     url: str | None = None
     api_key: str | None = None
     auto_search: bool | None = None
     root_folder: str | None = None
-    quality_profile_id: int | None = None
-    metadata_profile_id: int | None = None
     trickle_rate_seconds: float | None = None
     trickle_batch_size: int | None = None
     auto_trickle: bool | None = None
     auto_trickle_interval_minutes: int | None = None
-    monitor_option: LidarrMonitorOption | None = None
     search_on_add: bool | None = None
-    tag_ids: list[int] | None = None
+    prefer_singles: bool | None = None
+
+
+class LidarrNamedProfile(BaseModel):
+    id: int
+    name: str
+
+
+class LidarrTagModel(BaseModel):
+    id: int
+    label: str
+
+
+class LidarrDefaultsResponse(BaseModel):
+    root_folder: str
+    quality_profile: LidarrNamedProfile
+    metadata_profile: LidarrNamedProfile
+    monitor: str
+    new_item_monitor: str
+    tags: list[LidarrTagModel]
+    source: Literal["rootfolder", "fallback"]
+    root_folders: list[str]
+    singles_enabled: bool = True
 
 
 class LidarrTestConnectionPayload(BaseModel):
@@ -502,6 +520,7 @@ def update_lidarr_settings(
     try:
         updated = db.update_lidarr_settings(updates)
         lidarr_library.invalidate()  # URL / key may have changed: never serve the old server's cached library
+        invalidate_add_defaults()  # ...nor its cached root-folder defaults
         masked = _mask_lidarr_settings(updated)
         return LidarrSettingsModel(**masked)
     except Exception as e:
@@ -721,6 +740,54 @@ def set_library_manager(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not save the library manager mode"
         ) from exc
     return library_manager.get_status(db, config)
+
+
+@router.get(
+    "/lidarr/defaults",
+    response_model=LidarrDefaultsResponse,
+    summary="Lidarr Root-Folder Defaults Trackseerr Adds Artists With (Admin Only)",
+    dependencies=[Depends(require_core_tier)],
+)
+def get_lidarr_defaults(
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> LidarrDefaultsResponse:
+    """The read-only defaults (profiles, monitoring, tags) Trackseerr uses, straight from Lidarr's root folders."""
+    client = library_manager.build_lidarr_client(db, config)
+    if client is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Lidarr is not configured (URL and API key are required).",
+        )
+    try:
+        defaults = client.get_root_folder_defaults()
+        options = client.get_options()
+        singles_enabled = client.metadata_profile_allows_singles(defaults.metadata_profile_id)
+    except LidarrApiError as exc:
+        logger.warning("Lidarr defaults request failed: %s", redact_text(str(exc)))
+        message = redact_text(str(exc)).replace(client.api_key, "REDACTED") if client.api_key else redact_text(str(exc))
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Lidarr request failed: {message}") from exc
+    quality_names = {int(q["id"]): str(q["name"]) for q in options["quality_profiles"]}
+    metadata_names = {int(m["id"]): str(m["name"]) for m in options["metadata_profiles"]}
+    tag_labels = {int(t["id"]): str(t["label"]) for t in options["tags"]}
+    return LidarrDefaultsResponse(
+        root_folder=defaults.root_folder_path,
+        quality_profile=LidarrNamedProfile(
+            id=defaults.quality_profile_id,
+            name=quality_names.get(defaults.quality_profile_id, f"Profile {defaults.quality_profile_id}"),
+        ),
+        metadata_profile=LidarrNamedProfile(
+            id=defaults.metadata_profile_id,
+            name=metadata_names.get(defaults.metadata_profile_id, f"Profile {defaults.metadata_profile_id}"),
+        ),
+        monitor=defaults.monitor,
+        new_item_monitor=defaults.new_item_monitor,
+        tags=[LidarrTagModel(id=t, label=tag_labels.get(t, f"Tag {t}")) for t in defaults.tag_ids],
+        source="rootfolder" if defaults.source == "rootfolder" else "fallback",
+        root_folders=[r["path"] for r in options["root_folders"]],
+        singles_enabled=singles_enabled,
+    )
 
 
 @router.get(

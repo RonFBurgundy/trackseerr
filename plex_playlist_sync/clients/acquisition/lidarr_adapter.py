@@ -6,7 +6,11 @@ from typing import Any, Optional
 import httpx
 
 from plex_playlist_sync import lidarr_library
-from plex_playlist_sync.clients.acquisition.base import AcquisitionDriver
+from plex_playlist_sync.clients.acquisition.base import (
+    AcquisitionDriver,
+    AcquisitionRetryableError,
+    AcquisitionUnavailableError,
+)
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.models import AcquisitionSearchResult, DownloadStatus
 from plex_playlist_sync.security import is_safe_service_url
@@ -24,27 +28,24 @@ class LidarrAdapter(AcquisitionDriver):
         verify_ssl: bool = True,
         auto_search: bool = True,
         root_folder: Optional[str] = None,
-        quality_profile_id: Optional[int] = None,
-        metadata_profile_id: Optional[int] = None,
         timeout: float = 10.0,
+        prefer_singles: bool = True,
     ) -> None:
         self.host_url = host_url.rstrip("/")
         self.api_key = api_key.strip()
         self.verify_ssl = verify_ssl
         self.auto_search = auto_search
         self.root_folder = root_folder
-        self.quality_profile_id = quality_profile_id
-        self.metadata_profile_id = metadata_profile_id
         self.timeout = timeout
+        self.prefer_singles = prefer_singles
         self.client = LidarrClient(
             base_url=self.host_url,
             api_key=self.api_key,
             verify_ssl=self.verify_ssl,
             auto_search=self.auto_search,
             root_folder=self.root_folder,
-            quality_profile_id=self.quality_profile_id,
-            metadata_profile_id=self.metadata_profile_id,
             timeout=self.timeout,
+            prefer_singles=self.prefer_singles,
         )
 
     def test_connection(self) -> tuple[bool, str]:
@@ -91,16 +92,26 @@ class LidarrAdapter(AcquisitionDriver):
 
         artist = result.artist
         album = result.album or (result.title if result.item_type == "album" else "")
+        title = "" if album else str((result.extra or {}).get("title") or (result.title if result.item_type == "track" else "") or "")
+        # A song or album request never adds the whole discography: the client monitors only the release needed.
         res = self.client.add_artist_and_albums(
             artist_name=artist,
-            album_names=[album] if album else [],
             auto_search=self.auto_search,
-            monitor_mode="specific" if album else "all",
+            wants=[{"album": album, "title": title, "item_type": "album" if album else "track"}],
+            album_wait_attempts=1,  # called from request threads: never sleep on Lidarr; albums_pending is retried later
         )
         lidarr_library.invalidate()  # the artist/album lists in Lidarr changed
-        if res.get("status") in ("success", "rate_limited"):
-            return f"lidarr::{artist}::{album}"
-        raise RuntimeError(f"Lidarr addition failed: {res.get('message')}")
+        status = res.get("status")
+        message = str(res.get("message") or "")
+        if status == "success":
+            return f"lidarr::{artist}::{album or title}"
+        if status in ("rate_limited", "albums_pending"):
+            raise AcquisitionRetryableError(
+                message or "Lidarr is busy", reason=str(status), retry_after=int(res.get("retry_after") or 60)
+            )
+        if status == "not_in_metadata_profile":
+            raise AcquisitionUnavailableError(message or "Not available with your Lidarr metadata profile")
+        raise RuntimeError(f"Lidarr addition failed: {message}")
 
     def get_status(self, download_id: str) -> dict[str, Any]:
         """Polls Lidarr /api/v1/queue to determine progress."""

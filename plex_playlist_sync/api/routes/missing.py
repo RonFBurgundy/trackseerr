@@ -24,8 +24,16 @@ from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.lidarr_queue import lidarr_worker
+from plex_playlist_sync.lidarr_release import norm_title
 from plex_playlist_sync.library_manager import MODE_LIDARR, MODE_NATIVE, ModeChanged, get_library_mode, work_guard
 from plex_playlist_sync.storage import Database
+
+# Lidarr outcome -> missing_tracks.lidarr_status for a synchronous push that did not monitor the item.
+_PUSH_FAILURE_STATUS = {
+    "not_found": "not_found",
+    "not_in_metadata_profile": "unavailable",
+    "rate_limited": "rate_limited",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -352,7 +360,11 @@ def _push_missing_to_lidarr(
     seen = set()
     deduped = []
     for t in filtered:
-        key = ((t.get("artist") or "").strip().lower(), (t.get("album") or "").strip().lower())
+        key = (
+            (t.get("artist") or "").strip().lower(),
+            (t.get("album") or "").strip().lower(),
+            norm_title(t.get("title")),
+        )
         if key not in seen:
             seen.add(key)
             deduped.append(t)
@@ -371,6 +383,7 @@ def _push_missing_to_lidarr(
             album_name=album,
             title=title,
             auto_search=should_search,
+            album_wait_attempts=1,  # request thread: never sleep waiting for a new artist's albums; a re-push finishes it
         )
         results.append(res)
         track_id = item.get("id")
@@ -382,14 +395,14 @@ def _push_missing_to_lidarr(
             monitored_count += 1
             if track_id:
                 db.update_missing_track_lidarr_status(track_id, "monitored")
-        elif res.get("status") == "not_found":
-            failed_count += 1
-            if track_id:
-                db.update_missing_track_lidarr_status(track_id, "not_found")
         else:
             failed_count += 1
             if track_id:
-                db.update_missing_track_lidarr_status(track_id, "error")
+                # unavailable (not in the metadata profile) and not_found are re-checked weekly; rate_limited and
+                # error back off (see storage.lidarr_retry_delay).
+                db.update_missing_track_lidarr_status(
+                    track_id, _PUSH_FAILURE_STATUS.get(str(res.get("status")), "error")
+                )
 
     return {
         "status": "completed",

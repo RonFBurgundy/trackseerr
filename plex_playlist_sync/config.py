@@ -70,8 +70,6 @@ class Config:
     lidarr_api_key: Optional[str] = None
     lidarr_auto_search: bool = True
     lidarr_root_folder: Optional[str] = None
-    lidarr_quality_profile_id: Optional[int] = None
-    lidarr_metadata_profile_id: Optional[int] = None
     lidarr_trickle_rate_seconds: float = 3.0
     lidarr_trickle_batch_size: int = 25
     lidarr_auto_trickle: bool = False
@@ -166,8 +164,6 @@ class Config:
             lidarr_api_key=os.getenv("LIDARR_API_KEY") or None,
             lidarr_auto_search=_parse_bool(os.getenv("LIDARR_AUTO_SEARCH"), True),
             lidarr_root_folder=os.getenv("LIDARR_ROOT_FOLDER") or None,
-            lidarr_quality_profile_id=int(os.getenv("LIDARR_QUALITY_PROFILE_ID")) if os.getenv("LIDARR_QUALITY_PROFILE_ID") and os.getenv("LIDARR_QUALITY_PROFILE_ID").isdigit() else None,
-            lidarr_metadata_profile_id=int(os.getenv("LIDARR_METADATA_PROFILE_ID")) if os.getenv("LIDARR_METADATA_PROFILE_ID") and os.getenv("LIDARR_METADATA_PROFILE_ID").isdigit() else None,
             lidarr_trickle_rate_seconds=float(os.getenv("LIDARR_TRICKLE_RATE_SECONDS")) if os.getenv("LIDARR_TRICKLE_RATE_SECONDS") else 3.0,
             lidarr_trickle_batch_size=int(os.getenv("LIDARR_TRICKLE_BATCH_SIZE")) if os.getenv("LIDARR_TRICKLE_BATCH_SIZE") and os.getenv("LIDARR_TRICKLE_BATCH_SIZE").isdigit() else 25,
             lidarr_auto_trickle=_parse_bool(os.getenv("LIDARR_AUTO_TRICKLE"), False),

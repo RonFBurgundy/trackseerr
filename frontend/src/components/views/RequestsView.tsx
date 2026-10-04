@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, X, Trash2, Clock, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { Check, X, Trash2, Clock, CheckCircle2, AlertCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import type { UseRequestsReturn, RequestFilter } from '@/hooks/useRequests';
 import type { RequestItem } from '@/types/models';
 import {
@@ -209,6 +209,16 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
                     <p className="text-xs text-neutral-400 truncate" title={req.artist}>
                       {req.artist}
                     </p>
+                    {req.status_message && (
+                      <p
+                        className="flex items-start gap-1.5 text-[11px] text-amber-300 font-mono mt-1.5"
+                        role="status"
+                        data-reason={req.status_reason ?? undefined}
+                      >
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-px" />
+                        <span>{req.status_message}</span>
+                      </p>
+                    )}
                     {req.requested_by_username && (
                       <p className="text-[10px] text-neutral-500 font-mono mt-1">
                         By: {req.requested_by_username}

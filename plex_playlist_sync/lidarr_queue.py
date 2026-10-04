@@ -24,6 +24,18 @@ logger = logging.getLogger(__name__)
 MAX_PENDING_ITEMS = 1000
 
 
+# Request outcomes worth showing the requester; anything else leaves the request as it was.
+_REQUEST_OUTCOME_KINDS = ("not_in_metadata_profile", "monitor_failed", "albums_pending", "rate_limited")
+# missing_tracks.lidarr_status values for a failed item (everything not listed is a plain "error"). "unavailable"
+# is terminal-ish: the release is not in the user's metadata profile, so it is only re-checked weekly (see
+# storage.lidarr_retry_delay); error and rate_limited back off 1h, 6h, 24h and then weekly.
+_MISSING_TRACK_STATUS = {
+    "not_found": "not_found",
+    "not_in_metadata_profile": "unavailable",
+    "rate_limited": "rate_limited",
+}
+
+
 class LidarrTrickleWorker:
     """Thread-safe background queue worker for trickling missing tracks to Lidarr."""
 
@@ -378,12 +390,21 @@ class LidarrTrickleWorker:
                 self._current_album = albums[0] if albums else None
                 self._message = f"Processing artist: {artist_display} ({len(group)} track(s))"
 
-            # Attempt add and monitor with Lidarr
+            # One want per item: Lidarr's own settings decide how a new artist is added, and only the release each
+            # item needs is monitored (an existing artist is never modified).
+            wants = [
+                {
+                    "album": (it.get("album") or "").strip(),
+                    "title": (it.get("title") or "").strip(),
+                    "item_type": it.get("item_type") or "track",
+                }
+                for it in group
+            ]
             res = client.add_artist_and_albums(
                 artist_name=artist_display,
                 album_names=albums,
                 auto_search=self._auto_search,
-                monitor_mode="specific",
+                wants=wants,
             )
 
             # Check if rate-limited
@@ -410,45 +431,62 @@ class LidarrTrickleWorker:
                     artist_name=artist_display,
                     album_names=albums,
                     auto_search=self._auto_search,
-                    monitor_mode="specific",
+                    wants=wants,
                 )
 
             lidarr_library.invalidate()  # Lidarr's artist/album lists changed (or may have): drop cached copies
 
-            # Update database statuses for tracks / requests in this group
-            missing_track_ids = [
-                int(it["id"])
-                for it in group
-                if it.get("id") and not it.get("is_request") and (
-                    isinstance(it["id"], int) or (isinstance(it["id"], str) and it["id"].isdigit())
-                )
-            ]
-            request_ids = [
-                str(it["id"])
-                for it in group
-                if it.get("id") and it.get("is_request")
-            ]
+            # Update database statuses for tracks / requests in this group, one outcome per item when Lidarr gave them
+            outcomes = res.get("outcomes")
+            if not (isinstance(outcomes, list) and len(outcomes) == len(group)):
+                overall = str(res.get("status"))
+                if overall == "success":
+                    item_outcome = {"status": "monitored", "message": ""}
+                elif overall == "not_found":
+                    item_outcome = {"status": "not_found", "message": ""}
+                elif overall in ("rate_limited", "not_in_metadata_profile", "albums_pending", "monitor_failed"):
+                    item_outcome = {"status": overall, "message": str(res.get("message") or "")}
+                else:
+                    item_outcome = {"status": "error", "message": str(res.get("message") or "")}
+                outcomes = [item_outcome for _ in group]
 
+            monitored_count = 0
+            failed_count = 0
+            for it, outcome in zip(group, outcomes):
+                item_id = it.get("id")
+                kind = str(outcome.get("status"))
+                is_request = bool(it.get("is_request"))
+                ok = kind == "monitored"
+                monitored_count += 1 if ok else 0
+                failed_count += 0 if ok else 1
+                if not item_id:
+                    continue
+                try:
+                    if is_request:
+                        if ok:
+                            db.update_request_status(str(item_id), "processing")
+                        elif kind in _REQUEST_OUTCOME_KINDS:
+                            db.set_request_outcome(str(item_id), kind, str(outcome.get("message") or "") or None)
+                    elif isinstance(item_id, int) or (isinstance(item_id, str) and item_id.isdigit()):
+                        db.update_missing_tracks_lidarr_status_bulk(
+                            [int(item_id)], "monitored" if ok else _MISSING_TRACK_STATUS.get(kind, "error")
+                        )
+                except sqlite3.Error as exc:
+                    logger.warning("Could not record the Lidarr outcome for %s: %s", item_id, safe_exc(exc))
+            with self._lock:
+                self._successful_items += monitored_count
+                self._failed_items += failed_count
             if res.get("status") == "success":
-                if missing_track_ids:
-                    db.update_missing_tracks_lidarr_status_bulk(missing_track_ids, "monitored")
-                for req_id in request_ids:
-                    db.update_request_status(req_id, "processing")
-                with self._lock:
-                    self._successful_items += len(group)
-                logger.info("Monitored %d tracks for artist '%s' in Lidarr", len(group), artist_display)
+                logger.info("Monitored %d item(s) for artist '%s' in Lidarr", monitored_count, artist_display)
             elif res.get("status") == "not_found":
-                if missing_track_ids:
-                    db.update_missing_tracks_lidarr_status_bulk(missing_track_ids, "not_found")
-                with self._lock:
-                    self._failed_items += len(group)
                 logger.warning("Artist '%s' not found in Lidarr/MusicBrainz", artist_display)
             else:
-                if missing_track_ids:
-                    db.update_missing_tracks_lidarr_status_bulk(missing_track_ids, "error")
-                with self._lock:
-                    self._failed_items += len(group)
-                logger.error("Error queueing artist '%s': %s", artist_display, redact_text(str(res.get("message"))))
+                logger.error(
+                    "Could not monitor %d item(s) for artist '%s': %s",
+                    failed_count,
+                    artist_display,
+                    redact_text(str(res.get("message"))),
+                )
 
             with self._lock:
                 self._processed_items += len(group)

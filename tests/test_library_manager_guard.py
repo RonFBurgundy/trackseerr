@@ -213,7 +213,7 @@ class TestWorkGuard:
         gate = threading.Event()
         seen: list[str] = []
 
-        def add(artist_name, album_names, auto_search, monitor_mode):
+        def add(artist_name, album_names, auto_search, **kwargs):
             seen.append(artist_name)
             gate.wait(10)
             return {"status": "success"}
@@ -414,7 +414,7 @@ class TestTricklePending:
         gate = threading.Event()
         seen: list[str] = []
 
-        def add(artist_name, album_names, auto_search, monitor_mode):
+        def add(artist_name, album_names, auto_search, **kwargs):
             seen.append(artist_name)
             gate.wait(10)
             return {"status": "success"}
@@ -442,7 +442,7 @@ class TestTricklePending:
         _set_mode(test_db, "lidarr")
         gate = threading.Event()
 
-        def add(artist_name, album_names, auto_search, monitor_mode):
+        def add(artist_name, album_names, auto_search, **kwargs):
             gate.wait(10)
             raise ValueError("http://lidarr/api?apikey=SUPERSECRETKEY failed")
 

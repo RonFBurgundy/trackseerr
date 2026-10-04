@@ -715,14 +715,46 @@ def list_artists(
     return _enrich_artists(db, artists)
 
 
+def _ingest_artist_lidarr(db: Database, lidarr: LidarrClient, body: IngestArtistRequest) -> dict[str, Any]:
+    results = lidarr.lookup_artist(body.artist_name)
+    if not results:
+        raise LidarrNotFound("Artist not found in Lidarr lookup")
+    candidate = results[0]
+    existing_id = int(candidate.get("id") or 0)
+    added = False
+    if not existing_id:
+        search = bool(db.get_lidarr_settings().get("auto_search", True))
+        created = lidarr.add_artist_with_defaults(candidate, whole_artist=True, search=search)
+        existing_id = int(created.get("id") or 0)
+        added = True
+        lidarr_library.invalidate()
+    return {
+        "id": str(existing_id),
+        "artist_name": str(candidate.get("artistName") or body.artist_name),
+        "mode": "lidarr",
+        "albums_ingested": 0,
+        "tracks_ingested": 0,
+        "already_existed": not added,
+    }
+
+
 @router.post("/artists/ingest", dependencies=[Depends(require_core_tier)])
 def ingest_artist(
     body: IngestArtistRequest,
     db: Database = Depends(get_db),
     discovery_client: DiscoveryClient = Depends(get_discovery_client),
     _admin: dict[str, Any] = Depends(require_admin),
+    lidarr_client: Optional[LidarrClient] = Depends(get_lidarr_client),
 ) -> dict[str, Any]:
-    """Ingests an artist discography from discovery metadata into the native catalog."""
+    """Ingests an artist discography from discovery metadata into the native catalog.
+
+    In Lidarr mode the artist is added to Lidarr instead, with every default of the Lidarr root folder (profiles,
+    monitoring, new-item monitoring, tags) and a search when auto-search is on; ``monitor_option``,
+    ``quality_profile_id`` and ``monitored`` are ignored there. An artist Lidarr already has is never modified.
+    """
+    if _is_lidarr(db):
+        lidarr = require_lidarr(lidarr_client)
+        return _lidarr_mutation(db, lambda: _ingest_artist_lidarr(db, lidarr, body), "Artist")
     existing_artist = None
     if body.foreign_artist_id:
         existing_artist = db.get_library_artist_by_foreign_id(body.foreign_artist_id)

@@ -1,19 +1,19 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { LidarrOptions } from '@/types/models';
-import { getLidarrOptions } from '@/services/settingsService';
+import type { LidarrDefaults } from '@/types/models';
+import { getLidarrDefaults } from '@/services/settingsService';
 import { errorMessage } from '@/services/apiClient';
 
-export interface UseLidarrOptionsReturn {
-  options: LidarrOptions | null;
+export interface UseLidarrDefaultsReturn {
+  defaults: LidarrDefaults | null;
   isLoading: boolean;
   /** Server message (e.g. redacted 502 text) when Lidarr could not be queried. */
   error: string | null;
   refresh: () => Promise<void>;
 }
 
-/** Live Lidarr dropdown data. Only fetches while `enabled` (admin + a Lidarr URL is configured). */
-export function useLidarrOptions(enabled: boolean): UseLidarrOptionsReturn {
-  const [options, setOptions] = useState<LidarrOptions | null>(null);
+/** Root-folder defaults Lidarr itself reports (read-only). Only fetches while `enabled` (a Lidarr URL is saved). */
+export function useLidarrDefaults(enabled: boolean): UseLidarrDefaultsReturn {
+  const [defaults, setDefaults] = useState<LidarrDefaults | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,10 +22,10 @@ export function useLidarrOptions(enabled: boolean): UseLidarrOptionsReturn {
     setIsLoading(true);
     setError(null);
     try {
-      setOptions(await getLidarrOptions());
+      setDefaults(await getLidarrDefaults());
     } catch (err: unknown) {
-      setOptions(null);
-      setError(errorMessage(err, 'Could not load options from Lidarr'));
+      setDefaults(null);
+      setError(errorMessage(err, 'Could not load defaults from Lidarr'));
     } finally {
       setIsLoading(false);
     }
@@ -35,5 +35,5 @@ export function useLidarrOptions(enabled: boolean): UseLidarrOptionsReturn {
     void refresh();
   }, [refresh]);
 
-  return { options, isLoading, error, refresh };
+  return { defaults, isLoading, error, refresh };
 }

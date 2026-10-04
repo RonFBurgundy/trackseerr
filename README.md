@@ -396,8 +396,6 @@ TrackSeerr includes a first-class **Application URL** setting (configurable in t
 | `LIDARR_AUTO_TRICKLE` | `0` | Set to `1` to enable scheduled background trickle runs |
 | `LIDARR_AUTO_TRICKLE_INTERVAL_MINUTES` | `30` | Interval in minutes between scheduled trickle runs |
 | `LIDARR_ROOT_FOLDER` | *Auto* | Custom Lidarr root folder path override |
-| `LIDARR_QUALITY_PROFILE_ID` | *Auto* | Custom Lidarr quality profile ID override |
-| `LIDARR_METADATA_PROFILE_ID` | *Auto* | Custom Lidarr metadata profile ID override |
 | `ENABLE_BACKLOG_SEARCH` | `1` | Periodically sweep unfulfilled requests and missing tracks |
 | `BACKLOG_SEARCH_INTERVAL_MINUTES` | `60` | Interval in minutes between automated backlog search sweeps |
 | `ENABLE_RSS_SYNC` | `1` | Periodically poll Torznab/Newznab indexers for new releases |

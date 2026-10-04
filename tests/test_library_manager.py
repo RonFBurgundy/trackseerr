@@ -509,55 +509,60 @@ class TestLidarrOptions:
 
 
 class TestLidarrSettingsFields:
-    def test_new_fields_round_trip_via_post_and_put(self, app_and_client, test_db, test_config, seeded_users):
+    REMOVED = ("monitor_option", "quality_profile_id", "metadata_profile_id", "tag_ids")
+
+    def test_settings_round_trip_without_the_removed_overrides(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client
         headers = _headers(seeded_users["admin"], test_db, test_config)
         default = client.get("/api/settings/lidarr", headers=headers).json()
-        assert default["monitor_option"] == "all" and default["search_on_add"] is True and default["tag_ids"] == []
+        assert default["search_on_add"] is True
+        assert not any(k in default for k in self.REMOVED)
 
         payload = {
             "url": "http://lidarr.test:8686",
             "api_key": API_KEY,
-            "monitor_option": "future",
             "search_on_add": False,
-            "tag_ids": [3, 5],
             "root_folder": "/music",
-            "quality_profile_id": 1,
-            "metadata_profile_id": 2,
         }
         resp = client.put("/api/settings/lidarr", json=payload, headers=headers)
         assert resp.status_code == 200
         got = client.get("/api/settings/lidarr", headers=headers).json()
-        assert got["monitor_option"] == "future"
-        assert got["search_on_add"] is False and got["tag_ids"] == [3, 5]
-        assert got["root_folder"] == "/music" and got["quality_profile_id"] == 1
+        assert got["search_on_add"] is False and got["root_folder"] == "/music"
+        assert not any(k in got for k in self.REMOVED)
         assert API_KEY not in str(got)
         assert test_db.get_lidarr_settings()["auto_search"] is False  # search_on_add is auto_search
-        assert client.post("/api/settings/lidarr", json={"monitor_option": "none"}, headers=headers).status_code == 200
-        assert client.get("/api/settings/lidarr", headers=headers).json()["monitor_option"] == "none"
 
-    def test_invalid_monitor_option_is_422(self, app_and_client, test_db, test_config, seeded_users):
+    def test_clients_still_sending_the_removed_overrides_are_tolerated_and_ignored(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
         _, client = app_and_client
+        headers = _headers(seeded_users["admin"], test_db, test_config)
         resp = client.put(
             "/api/settings/lidarr",
-            json={"monitor_option": "everything"},
-            headers=_headers(seeded_users["admin"], test_db, test_config),
+            json={"monitor_option": "everything", "quality_profile_id": 3, "metadata_profile_id": 2, "tag_ids": [1],
+                  "root_folder": "/music"},
+            headers=headers,
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 200
+        assert not any(k in resp.json() for k in self.REMOVED)
+        stored = test_db.get_lidarr_settings()
+        assert not any(k in stored for k in self.REMOVED)
+        row = test_db.conn.execute("SELECT monitor_option, quality_profile_id, tag_ids FROM lidarr_settings WHERE id = 1").fetchone()
+        assert row["monitor_option"] == "all" and row["quality_profile_id"] is None and row["tag_ids"] == "[]"
 
-    def test_client_uses_monitor_option_and_tags_when_adding_artist(self):
+    def test_client_adds_artist_with_root_folder_defaults_not_settings(self):
         from plex_playlist_sync.clients.lidarr import LidarrClient
+        from tests.lidarr_fake import FakeLidarr
 
-        lc = LidarrClient("http://lidarr.test", API_KEY, root_folder="/music", quality_profile_id=1,
-                          metadata_profile_id=2, monitor_option="latest", tag_ids=[4])
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as cls:
-            http = cls.return_value.__enter__.return_value
-            http.get.side_effect = [_resp(payload=[{"id": 0, "artistName": "Queen"}])]
-            http.post.return_value = _resp(payload={"id": 9})
-            res = lc.add_artist_and_albums("Queen", [], auto_search=False)
+        fake = FakeLidarr()
+        fake.albums = [{"id": 1, "title": "A Night at the Opera", "albumType": "Album", "monitored": False}]
+        lc = LidarrClient("http://lidarr.test", API_KEY, root_folder="/music")
+        with patch("plex_playlist_sync.clients.lidarr.httpx.Client", fake):
+            res = lc.add_artist_and_albums("Queen", ["A Night at the Opera"], auto_search=False)
         assert res["status"] == "success"
-        sent = http.post.call_args.kwargs["json"]
-        assert sent["addOptions"]["monitor"] == "latest" and sent["tags"] == [4]
+        sent = fake.requests("POST", "artist")[0]
+        assert sent["qualityProfileId"] == 4 and sent["metadataProfileId"] == 6 and sent["tags"] == [7]
+        assert sent["monitorNewItems"] == "new" and sent["addOptions"]["monitor"] == "none"
 
 
 class TestLidarrHealth:
@@ -798,7 +803,7 @@ class TestTrickleQueuesWhileRunning:
         gate = threading.Event()
         seen = []
 
-        def add(artist_name, album_names, auto_search, monitor_mode):
+        def add(artist_name, album_names, auto_search, **kwargs):
             seen.append(artist_name)
             if artist_name == "Radiohead":
                 gate.wait(10)
@@ -856,7 +861,7 @@ class TestLidarrClientRedaction:
     def test_add_artist_error_message_redacts_apikey(self):
         from plex_playlist_sync.clients.lidarr import LidarrClient
 
-        lc = LidarrClient("http://lidarr.test", API_KEY, root_folder="/music", quality_profile_id=1, metadata_profile_id=2)
+        lc = LidarrClient("http://lidarr.test", API_KEY, root_folder="/music")
         leaky = httpx.ConnectError("failed http://lidarr.test/api/v1/artist?apikey=SECRETKEY123&x=1")
         with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as cls:
             cls.return_value.__enter__.return_value.get.side_effect = leaky
@@ -867,7 +872,7 @@ class TestLidarrClientRedaction:
     def test_generic_exception_text_is_type_only_and_logs_are_redacted(self, caplog):
         from plex_playlist_sync.clients.lidarr import LidarrClient
 
-        lc = LidarrClient("http://lidarr.test", API_KEY, root_folder="/music", quality_profile_id=1, metadata_profile_id=2)
+        lc = LidarrClient("http://lidarr.test", API_KEY, root_folder="/music")
         with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as cls, caplog.at_level("WARNING"):
             cls.return_value.__enter__.return_value.get.side_effect = RuntimeError("boom ?apikey=SECRETKEY123")
             res = lc.add_artist_and_albums("Queen", [], auto_search=False)

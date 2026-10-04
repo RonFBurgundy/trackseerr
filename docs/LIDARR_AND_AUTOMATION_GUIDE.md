@@ -294,10 +294,8 @@ services:
       - LIDARR_TRICKLE_BATCH_SIZE=25
       - LIDARR_AUTO_TRICKLE=0
       - LIDARR_AUTO_TRICKLE_INTERVAL_MINUTES=30
-      # Optional Lidarr Profile Overrides:
+      # Optional Lidarr settings (profiles, monitor option and tags come from the root folder in Lidarr):
       # - LIDARR_ROOT_FOLDER=/music
-      # - LIDARR_QUALITY_PROFILE_ID=1
-      # - LIDARR_METADATA_PROFILE_ID=1
 ```
 
 *Note: Your Lidarr API key is located in Lidarr under **Settings** -> **General** -> **Security** -> **API Key**.*
@@ -430,6 +428,4 @@ When set, feed and webhook endpoints require authentication via:
 | `LIDARR_AUTO_TRICKLE` | `0` | Enable scheduled background trickle runs (`1` or `0`) |
 | `LIDARR_AUTO_TRICKLE_INTERVAL_MINUTES` | `30` | Interval in minutes between automated drip runs |
 | `LIDARR_ROOT_FOLDER` | *Auto* | Custom Lidarr root folder path |
-| `LIDARR_QUALITY_PROFILE_ID` | *Auto* | Custom Lidarr quality profile ID |
-| `LIDARR_METADATA_PROFILE_ID` | *Auto* | Custom Lidarr metadata profile ID |
 | `FEED_TOKEN` | *None* | Secret token protecting RSS feeds, plain text lists, and webhooks |

@@ -12,6 +12,7 @@ from typing import Any, Optional, Union
 import uuid
 
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver, get_indexer_driver
+from plex_playlist_sync.clients.acquisition.base import AcquisitionRetryableError, AcquisitionUnavailableError
 from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from plex_playlist_sync.models import (
     AcquisitionSearchResult,
@@ -352,6 +353,26 @@ class AcquisitionCoordinator:
         try:
             client_driver = get_acquisition_driver(client)
             download_hash = client_driver.download(top_candidate)
+        except (AcquisitionRetryableError, AcquisitionUnavailableError) as e:
+            retryable = isinstance(e, AcquisitionRetryableError)
+            logger.warning(
+                "Dispatch on client '%s' for '%s' %s: %s",
+                client.get("name"),
+                top_candidate.title,
+                "needs a retry" if retryable else "is unavailable",
+                e,
+            )
+            if request_id:
+                try:  # let the requester see why it is stuck; the request status is unchanged
+                    db.set_request_outcome(request_id, e.reason, str(e) or None)
+                except sqlite3.Error as exc:
+                    logger.warning("Could not record the dispatch outcome for request %s: %s", request_id, exc)
+            return {
+                "success": False,
+                "retryable": retryable,
+                "reason": e.reason,
+                "message": f"Download dispatch failed: {e}",
+            }
         except Exception as e:
             logger.error(
                 "Dispatch download failed on client '%s' for '%s': %s",
