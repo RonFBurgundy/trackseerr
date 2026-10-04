@@ -372,10 +372,26 @@ class WantedBacklogWorker:
             missing_tracks = []
             errors_count += 1
 
+        # A playlist's monitor mode decides whether its missing tracks are searched one by one: "none" never,
+        # "album"/"artist" only until the list mode has taken them over (then the monitored album/artist is searched).
+        try:
+            playlist_modes = {str(p["id"]): str(p.get("monitor_mode") or "track") for p in db.list_playlists()}
+        except Exception as e:
+            logger.error("WantedBacklogWorker error reading playlist monitor modes: %s", e)
+            playlist_modes = {}
+            errors_count += 1
+
+        def _searchable_as_track(t: dict[str, Any]) -> bool:
+            mode = playlist_modes.get(str(t.get("playlist_id")), "track")
+            if mode == "none":
+                return False
+            return not (mode in ("album", "artist") and t.get("list_applied_at"))
+
         unfulfilled_missing = [
             t
             for t in missing_tracks
-            if t.get("lidarr_status") != "monitored"
+            if _searchable_as_track(t)
+            and t.get("lidarr_status") != "monitored"
             and (
                 (t.get("artist") or "").strip().lower(),
                 (t.get("title") or "").strip().lower(),

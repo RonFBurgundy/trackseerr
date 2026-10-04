@@ -15,6 +15,7 @@ import {
   ClientsPanel,
   IndexersPanel,
   LidarrPanel,
+  ImportListsPanel,
   buildSettingsGroups,
   SELF_SERVICE_TABS,
   MEDIA_MANAGEMENT_TABS,
@@ -142,6 +143,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {activeTab === 'users' && isAdmin && !mfaEnrollmentRequired && (
         <UsersPanel adminHook={adminUsersHook} currentUserId={currentUserId} />
       )}
+
+      {activeTab === 'import-lists' && isAdmin && !mfaEnrollmentRequired && <ImportListsPanel onToast={showToast} />}
 
       {activeTab === 'system' && isAdmin && !mfaEnrollmentRequired && (
         <SystemPage isCore={isCore} libraryMode={mode} onToast={showToast} />

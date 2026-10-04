@@ -3,10 +3,11 @@
 import hashlib
 import json
 import logging
+import threading
 from typing import Any, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from plex_playlist_sync.api.dependencies import (
     get_config,
@@ -21,6 +22,8 @@ from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.clients.spotify_scraper import SpotifyWebScraper
 from plex_playlist_sync.config import Config
+from plex_playlist_sync.library_monitoring import validate_list_monitor_mode
+from plex_playlist_sync.list_monitoring import apply_playlist_missing_safely
 from plex_playlist_sync.m3u import parse_m3u
 from plex_playlist_sync.models import Playlist, Track
 from plex_playlist_sync.redaction import safe_exc
@@ -35,6 +38,27 @@ from plex_playlist_sync.storage import Database
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Album and artist modes add to the library with no quota or approval, so only admins may pick them.
+NON_ADMIN_MONITOR_MODES = ("track", "none")
+
+
+def _require_mode_allowed(current_user: dict[str, Any], mode: Optional[str]) -> None:
+    if mode is not None and mode not in NON_ADMIN_MONITOR_MODES and not current_user.get("is_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can set an album or artist monitor mode",
+        )
+
+
+def _apply_missing_in_background(db: Database, config: Config, playlist_id: str) -> None:
+    """Runs the monitor-mode apply (MusicBrainz lookups, Lidarr waits) off the request thread."""
+    threading.Thread(
+        target=apply_playlist_missing_safely,
+        args=(db, config, playlist_id),
+        name=f"playlist-monitor-{playlist_id}",
+        daemon=True,
+    ).start()
 
 
 class PlaylistCreateRequest(BaseModel):
@@ -64,7 +88,34 @@ class PlaylistTargetsRequest(BaseModel):
 
 
 class PlaylistEnabledRequest(BaseModel):
-    enabled: bool = Field(..., description="True if playlist should be auto-synced; False if paused/static")
+    """Playlist settings update: ``enabled`` and/or ``monitor_mode`` (at least one)."""
+
+    enabled: Optional[bool] = Field(
+        default=None, description="True if playlist should be auto-synced; False if paused/static"
+    )
+    monitor_mode: Optional[str] = Field(
+        default=None, description="What a sync does with missing tracks: track, album, artist or none"
+    )
+
+    @field_validator("monitor_mode")
+    @classmethod
+    def _valid_mode(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else validate_list_monitor_mode(value)
+
+    @model_validator(mode="after")
+    def _something_to_change(self) -> "PlaylistEnabledRequest":
+        if self.enabled is None and self.monitor_mode is None:
+            raise ValueError("Provide enabled and/or monitor_mode")
+        return self
+
+
+class PlaylistMonitorModeRequest(BaseModel):
+    monitor_mode: str = Field(..., description="track, album, artist or none")
+
+    @field_validator("monitor_mode")
+    @classmethod
+    def _valid_mode(cls, value: str) -> str:
+        return validate_list_monitor_mode(value)
 
 
 class SmartMixRequest(BaseModel):
@@ -421,13 +472,36 @@ def set_playlist_enabled(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Playlist not found",
         )
+    _require_mode_allowed(current_user, req.monitor_mode)
 
-    db.set_playlist_enabled(playlist_id, req.enabled)
+    if req.enabled is not None:
+        db.set_playlist_enabled(playlist_id, req.enabled)
+    if req.monitor_mode is not None:
+        db.set_playlist_monitor_mode(playlist_id, req.monitor_mode)
     updated = db.get_playlist(playlist_id)
     return {
         "id": playlist_id,
-        "enabled": bool(updated.get("enabled", True)) if updated else req.enabled,
+        "enabled": bool(updated.get("enabled", True)) if updated else bool(req.enabled),
+        "monitor_mode": str(updated.get("monitor_mode") or "track") if updated else req.monitor_mode,
     }
+
+
+@router.put("/{playlist_id}/monitor-mode")
+def set_playlist_monitor_mode(
+    playlist_id: str,
+    req: PlaylistMonitorModeRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    db: Database = Depends(get_db),
+) -> dict[str, Any]:
+    """Sets what a sync does with the playlist's missing tracks (track, album, artist or none)."""
+    playlist = db.get_playlist(playlist_id)
+    is_admin = bool(current_user.get("is_admin"))
+    is_creator = bool(playlist) and str(playlist.get("creator_id")) == str(current_user["id"])
+    if not playlist or not (is_admin or is_creator):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
+    _require_mode_allowed(current_user, req.monitor_mode)
+    db.set_playlist_monitor_mode(playlist_id, req.monitor_mode)
+    return {"id": playlist_id, "monitor_mode": req.monitor_mode}
 
 
 @router.delete("/{playlist_id}")
@@ -552,6 +626,8 @@ def import_playlist_tracks(
                 logger.error("Error during direct import sync to Plex: %s", safe_exc(e))
                 logger.debug("Direct import sync traceback", exc_info=True)
                 db.record_sync_result(import_id, status="error")
+            else:
+                _apply_missing_in_background(db, config, import_id)
 
     return {
         "id": import_id,

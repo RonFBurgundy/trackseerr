@@ -648,6 +648,32 @@ class LidarrClient:
             raise LidarrApiError("Lidarr returned an unexpected response shape for track")
         return [row for row in data if isinstance(row, dict)]
 
+    def lookup_artist(self, term: str) -> list[dict[str, Any]]:
+        """``GET /artist/lookup``. ``term`` may be a name or ``lidarr:<musicbrainz id>``; raises LidarrApiError."""
+        data = self._get_json(f"artist/lookup?term={quote(term)}")
+        if not isinstance(data, list):
+            raise LidarrApiError("Lidarr returned an unexpected response shape for artist lookup")
+        return [row for row in data if isinstance(row, dict)]
+
+    def add_artist_with_monitor(self, candidate: dict[str, Any], monitor: str) -> dict[str, Any]:
+        """Adds a looked-up artist with ``addOptions.monitor`` (all/future/existing/none/...) and no search.
+
+        Raises LidarrApiError on failure. Returns Lidarr's artist resource (carrying its new ``id``).
+        """
+        payload = {
+            **candidate,
+            "monitored": True,
+            "rootFolderPath": self.get_root_folder(),
+            "qualityProfileId": self.get_quality_profile_id(),
+            "metadataProfileId": self.get_metadata_profile_id(),
+            "tags": list(self.tag_ids),
+            "addOptions": {"monitor": monitor, "searchForMissingAlbums": False},
+        }
+        result = self._send_json("POST", "artist", payload)
+        if not isinstance(result, dict):
+            raise LidarrApiError("Lidarr returned an unexpected response shape when adding an artist")
+        return result
+
     def set_artist_monitored(self, artist_id: int, monitored: bool) -> dict[str, Any]:
         """Fetch-modify-put, so no other field of the artist resource is lost."""
         artist = self.fetch_artist(artist_id)

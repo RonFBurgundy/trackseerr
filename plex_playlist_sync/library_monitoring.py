@@ -13,6 +13,10 @@ from typing import Optional
 
 NATIVE_MONITOR_OPTIONS: tuple[str, ...] = ("all", "albums", "singles_eps", "existing", "future", "none")
 
+# How a playlist or import list reacts to an item: request just the track, monitor its album, monitor its whole
+# artist, or only record it.
+LIST_MONITOR_MODES: tuple[str, ...] = ("track", "album", "artist", "none")
+
 _ALBUM_TYPE_ALIASES = {"studio": "album", "singles": "single", "eps": "ep"}
 # Release dates are only trusted in exactly these shapes (the SQL twin GLOBs the same set); anything else
 # falls back to the album's year.
@@ -26,6 +30,13 @@ def validate_monitor_option(option: object) -> str:
             f"Invalid monitor option {option!r}; expected one of: {', '.join(NATIVE_MONITOR_OPTIONS)}"
         )
     return option
+
+
+def validate_list_monitor_mode(mode: object) -> str:
+    """Returns ``mode`` if it is a list monitor mode, else raises ValueError."""
+    if not isinstance(mode, str) or mode not in LIST_MONITOR_MODES:
+        raise ValueError(f"Invalid monitor mode {mode!r}; expected one of: {', '.join(LIST_MONITOR_MODES)}")
+    return mode
 
 
 def normalize_album_type(album_type: Optional[str]) -> str:

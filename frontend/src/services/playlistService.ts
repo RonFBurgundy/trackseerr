@@ -1,5 +1,6 @@
 import { apiRequest } from './apiClient';
 import type { Playlist } from '@/types/models';
+import type { ListMonitorMode } from '@/types/importLists';
 
 export async function getPlaylists(): Promise<Playlist[]> {
   const res = await apiRequest<Playlist[]>('/api/playlists');
@@ -16,7 +17,18 @@ export async function toggleUserTarget(playlistId: number | string, targetUserId
 export async function togglePlaylistActive(playlistId: number | string, isEnabled: boolean): Promise<void> {
   await apiRequest<void>(`/api/playlists/${playlistId}/enabled`, {
     method: 'PUT',
-    body: { is_enabled: isEnabled },
+    body: { enabled: isEnabled },
+  });
+}
+
+/** The playlist update call (same endpoint as the enable toggle); `monitor_mode` is optional. */
+export async function updatePlaylistSettings(
+  playlistId: number | string,
+  settings: { enabled: boolean; monitor_mode?: ListMonitorMode }
+): Promise<void> {
+  await apiRequest<void>(`/api/playlists/${playlistId}/enabled`, {
+    method: 'PUT',
+    body: settings,
   });
 }
 

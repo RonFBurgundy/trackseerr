@@ -24,6 +24,7 @@ from plex_playlist_sync.api.routes import (
     deployment,
     discovery,
     download_clients,
+    import_lists,
     indexers,
     internal,
     issues,
@@ -213,6 +214,7 @@ def create_app(
     api_router.include_router(admin_users.router, prefix="/admin", tags=["admin-users"])
     api_router.include_router(deployment.router, prefix="/admin", tags=["deployment"])
     api_router.include_router(playlists.router, prefix="/playlists", tags=["playlists"])
+    api_router.include_router(import_lists.router, prefix="/import-lists", tags=["import-lists"])
     api_router.include_router(plex_playlists.router, prefix="/plex-playlists", tags=["plex_playlists"])
     api_router.include_router(sync.router, prefix="/sync", tags=["sync"])
     api_router.include_router(missing.router, prefix="/missing", tags=["missing"])

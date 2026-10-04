@@ -25,6 +25,7 @@ from plex_playlist_sync.clients.acquisition import get_acquisition_driver
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result
+from plex_playlist_sync.library_monitoring import NATIVE_MONITOR_OPTIONS
 from plex_playlist_sync.library_manager import ModeChanged, run_guarded
 from plex_playlist_sync.library import (
     AUDIO_EXTENSIONS,
@@ -52,6 +53,12 @@ from plex_playlist_sync.security import is_safe_service_url
 from plex_playlist_sync.storage import Database, clean_library_name
 
 logger = logging.getLogger(__name__)
+
+
+def _scan_monitor_option(media_settings: dict[str, Any]) -> str:
+    """Monitor option for artists created by an import: the configured scan default, never the model default ``all``."""
+    option = str(media_settings.get("scan_monitor_option") or "existing")
+    return option if option in NATIVE_MONITOR_OPTIONS else "existing"
 
 
 def _is_safe_cover_url(url: Optional[str]) -> bool:
@@ -1037,7 +1044,9 @@ class AcquisitionWorker:
                                             id=artist_id,
                                             name=artist_name,
                                             path=artist_folder,
-                                        )
+                                            monitor_option=_scan_monitor_option(media_settings),
+                                        ),
+                                        preserve_monitoring=True,
                                     )
                                 artist_id = artist_row["id"]
 

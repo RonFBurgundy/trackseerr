@@ -402,6 +402,7 @@ TrackSeerr includes a first-class **Application URL** setting (configurable in t
 | `BACKLOG_SEARCH_INTERVAL_MINUTES` | `60` | Interval in minutes between automated backlog search sweeps |
 | `ENABLE_RSS_SYNC` | `1` | Periodically poll Torznab/Newznab indexers for new releases |
 | `RSS_SYNC_INTERVAL_MINUTES` | `15` | Interval in minutes between indexer RSS sync loops |
+| `ENABLE_IMPORT_LISTS` | `1` | Run the background worker that syncs import lists (Last.fm, ListenBrainz, MusicBrainz collections) every 5 minutes for lists whose interval has elapsed. Set `0` to sync lists only on demand. `LASTFM_API_KEY` is also the fallback key for Last.fm import lists with no key of their own |
 | `LASTFM_API_KEY` | *Optional* | Last.fm API key enabling one-click per-user Last.fm scrobbling. When set (together with the secret) it overrides the value saved in Settings and locks those fields |
 | `LASTFM_API_SECRET` | *Optional* | Last.fm API shared secret paired with `LASTFM_API_KEY`; used only server-side to sign requests and never returned by the API |
 | `FEED_TOKEN` | *Optional* | Secret token protecting RSS feeds, plain text lists, and webhooks |

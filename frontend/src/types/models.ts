@@ -1,4 +1,5 @@
 import type { MonitorOption } from './monitoring';
+import type { ListMonitorMode } from './importLists';
 /**
  * Domain & UI models for TrackSeerr React SPA.
  * Strictly typed with zero `any` / `as any`.
@@ -80,6 +81,7 @@ export interface Playlist {
   source_type: 'spotify' | 'deezer' | 'm3u' | 'csv';
   target_user_ids: number[];
   is_active: boolean;
+  monitor_mode?: ListMonitorMode;
   last_synced?: string;
   track_count?: number;
   matched_count?: number;
