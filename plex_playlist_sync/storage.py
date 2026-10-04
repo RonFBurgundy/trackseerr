@@ -1989,6 +1989,52 @@ class Database:
             ).fetchone()
         return int(row[0])
 
+    def count_local_login_admins(self) -> int:
+        """Enabled admins that can sign in without a media server: local accounts holding a password hash."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) FROM users WHERE is_admin = 1 AND disabled = 0 AND auth_type = 'local' "
+                "AND password_hash IS NOT NULL AND password_hash != ''"
+            ).fetchone()
+        return int(row[0])
+
+    def create_local_user_with_password(
+        self, username: str, password_hash: str, permissions: int, email: Optional[str] = None
+    ) -> dict[str, Any]:
+        """Creates a local user and its password in ONE transaction (no invite row). Either the whole row exists
+        or nothing does. Raises ``ValueError`` for an invalid/taken username or unknown permission bits."""
+        name = local_auth.normalize_username(username)
+        problem = local_auth.validate_username(name)
+        if problem:
+            raise ValueError(problem)
+        perms = int(permissions)
+        if perms < 0 or perms & ~_KNOWN_PERMISSION_MASK:
+            raise ValueError("Unknown permission bits")
+        if not password_hash:
+            raise ValueError("Password hash required")
+        user_id = "local-" + secrets.token_hex(12)
+        now = _utcnow().isoformat()
+        with self._lock:
+            try:
+                if self.conn.execute("SELECT 1 FROM users WHERE lower(username) = lower(?)", (name,)).fetchone():
+                    raise ValueError("Username is already taken")
+                self.conn.execute(
+                    """
+                    INSERT INTO users (id, username, email, is_admin, permissions, auth_type, password_hash,
+                                       password_changed_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 'local', ?, ?, CURRENT_TIMESTAMP)
+                    """,
+                    (user_id, name, email, 1 if perms & int(UserPermission.ADMIN) else 0, perms, password_hash, now),
+                )
+                self.conn.commit()
+            except (ValueError, sqlite3.Error):
+                self.conn.rollback()
+                raise
+        user = self.get_user(user_id)
+        if user is None:
+            raise RuntimeError("Failed to create local user")
+        return user
+
     def list_users_admin(self) -> list[dict[str, Any]]:
         """Admin listing rows: profile, state, quota overrides and MFA flag. Never selects any secret value."""
         with self._lock:

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import media_server
+from plex_playlist_sync import local_auth, media_server
 from plex_playlist_sync.admin_bootstrap import ensure_bootstrap_admin
 from plex_playlist_sync.api.app import create_app
 from plex_playlist_sync.api.dependencies import get_config, get_db, get_plex_client
@@ -17,10 +17,11 @@ from plex_playlist_sync.api.routes.sync import SyncState
 from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
 from plex_playlist_sync.cli import main
 from plex_playlist_sync.config import Config, ConfigError
-from plex_playlist_sync.models import Playlist, Track
+from plex_playlist_sync.models import Playlist, Track, UserPermission
 from plex_playlist_sync.storage import Database
 from plex_playlist_sync.sync import SyncCoordinator
 
+_ADMIN_PERMS = int(UserPermission.DEFAULT) | int(UserPermission.ADMIN)
 SECRET = "s" * 40
 NO_SERVER_BODY = {"detail": "No media server connected", "code": "media_server_unavailable"}
 
@@ -48,6 +49,22 @@ def test_default_is_none_without_credentials():
 
 def test_partial_credentials_default_to_none():
     assert Config(plex_url="http://plex", plex_token="").media_server_type == "none"
+
+
+@pytest.mark.parametrize("url,token", [("http://plex", ""), ("", "tok")])
+def test_partial_plex_config_with_media_server_unset_is_a_config_error(url, token):
+    with pytest.raises(ConfigError, match="partially configured"):
+        Config(plex_url=url, plex_token=token).validate_media_server()
+
+
+@pytest.mark.parametrize("choice", ["none", "plex"])
+def test_partial_plex_config_with_explicit_media_server_keeps_prior_behaviour(choice):
+    cfg = Config(plex_url="http://plex", plex_token="", media_server=choice)
+    if choice == "none":
+        cfg.validate_media_server()
+    else:
+        with pytest.raises(ConfigError, match="PLEX_URL and PLEX_TOKEN"):
+            cfg.validate_media_server()
 
 
 def test_explicit_none_wins_over_credentials():
@@ -176,15 +193,98 @@ def test_bootstrap_admin_created_from_env_and_can_log_in(tmp_path):
     assert res.status_code == 200, res.text
 
 
-def test_bootstrap_admin_skipped_without_password_or_with_existing_admin(caplog):
+def test_bootstrap_admin_without_password_logs_error_with_recovery_instructions(caplog):
     db = Database(":memory:")
     with patch.dict(os.environ, {}, clear=True), caplog.at_level(logging.WARNING):
         assert ensure_bootstrap_admin(db) is False
-    assert any("ADMIN_PASSWORD" in r.getMessage() for r in caplog.records)
-    db.upsert_user("u1", "owner", "o@x.io", is_admin=True)
-    with patch.dict(os.environ, {"ADMIN_PASSWORD": "correct horse battery"}, clear=True):
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert errors and "set ADMIN_PASSWORD and restart to create a local admin" in errors[0].getMessage() and "restart" in errors[0].getMessage()
+    assert db.list_users() == []
+
+
+def test_bootstrap_admin_skipped_when_local_admin_with_password_exists():
+    db = Database(":memory:")
+    db.create_local_user_with_password("owner", local_auth.hash_password("correct horse battery"), _ADMIN_PERMS)
+    before = [u["id"] for u in db.list_users()]
+    with patch.dict(os.environ, {"ADMIN_PASSWORD": "another good passphrase"}, clear=True):
         assert ensure_bootstrap_admin(db) is False
+    assert [u["id"] for u in db.list_users()] == before
+
+
+def test_bootstrap_with_plex_only_admin_creates_local_admin_and_leaves_plex_admin_untouched(tmp_path):
+    db = Database(":memory:")
+    db.upsert_user("plex-1", "owner", "o@x.io", is_admin=True)
+    plex_before = db.get_user("plex-1")
+    with patch.dict(
+        os.environ, {"ADMIN_USERNAME": "localadmin", "ADMIN_PASSWORD": "correct horse battery"}, clear=True
+    ):
+        assert ensure_bootstrap_admin(db) is True
+    assert db.get_user("plex-1") == plex_before
+    local = next(u for u in db.list_users() if u["username"] == "localadmin")
+    assert local["is_admin"] and local["auth_type"] == "local"
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    app = create_app(db=db, config=cfg)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_config] = lambda: cfg
+    res = TestClient(app).post(
+        "/api/auth/local/login", json={"username": "localadmin", "password": "correct horse battery"}
+    )
+    assert res.status_code == 200, res.text
+
+
+def test_bootstrap_plex_only_admin_without_password_creates_nothing(caplog):
+    db = Database(":memory:")
+    db.upsert_user("plex-1", "owner", "o@x.io", is_admin=True)
+    with patch.dict(os.environ, {}, clear=True), caplog.at_level(logging.ERROR):
+        assert ensure_bootstrap_admin(db) is False
+    assert any(r.levelno == logging.ERROR and "ADMIN_PASSWORD" in r.getMessage() for r in caplog.records)
     assert [u["username"] for u in db.list_users()] == ["owner"]
+
+
+def test_bootstrap_username_collision_with_non_local_user_is_an_error_and_untouched(caplog):
+    db = Database(":memory:")
+    db.upsert_user("plex-1", "admin", "o@x.io", is_admin=True)
+    before = db.get_user("plex-1")
+    with patch.dict(os.environ, {"ADMIN_PASSWORD": "correct horse battery"}, clear=True), caplog.at_level(
+        logging.ERROR
+    ):
+        assert ensure_bootstrap_admin(db) is False
+    assert db.get_user("plex-1") == before and len(db.list_users()) == 1
+    assert any("already exists" in r.getMessage() and "ADMIN_USERNAME" in r.getMessage() for r in caplog.records)
+
+
+def test_bootstrap_is_atomic_failure_leaves_no_admin_row_and_no_invite():
+    db = Database(":memory:")
+    with patch.dict(os.environ, {"ADMIN_PASSWORD": "correct horse battery"}, clear=True), patch.object(
+        local_auth, "hash_password", side_effect=ValueError("boom")
+    ):
+        assert ensure_bootstrap_admin(db) is False
+    assert db.list_users() == []
+    # failure inside the transaction itself: nothing persists
+    with patch.object(db, "get_user", return_value=None):
+        with pytest.raises(RuntimeError):
+            db.create_local_user_with_password("zed", "hash", 34)
+    db.conn.execute("DELETE FROM users WHERE username = 'zed'")
+    db.conn.commit()
+    assert db.conn.execute("SELECT COUNT(*) FROM user_invites").fetchone()[0] == 0
+
+
+def test_bootstrap_creates_user_with_hash_and_no_invite_row():
+    db = Database(":memory:")
+    with patch.dict(os.environ, {"ADMIN_PASSWORD": "correct horse battery"}, clear=True):
+        assert ensure_bootstrap_admin(db) is True
+    assert db.conn.execute("SELECT COUNT(*) FROM user_invites").fetchone()[0] == 0
+    assert db.conn.execute("SELECT password_hash FROM users").fetchone()[0]
+
+
+def test_bootstrap_removes_admin_password_from_environment():
+    for existing in (False, True):
+        db = Database(":memory:")
+        if existing:
+            db.create_local_user_with_password("owner", local_auth.hash_password("correct horse battery"), _ADMIN_PERMS)
+        with patch.dict(os.environ, {"ADMIN_PASSWORD": "another good passphrase"}, clear=True):
+            ensure_bootstrap_admin(db)
+            assert "ADMIN_PASSWORD" not in os.environ
 
 
 def test_bootstrap_admin_rejects_weak_password():
@@ -258,6 +358,37 @@ def test_media_server_probe_is_cached_for_unauthenticated_callers(tmp_path):
         for _ in range(5):
             assert env.tc.get("/api/system/media-server").json()["connected"] is True
     assert connect.call_count == 1
+
+
+def test_media_server_probe_never_blocks_concurrent_callers():
+    import threading
+    import time
+
+    cfg = Config(plex_url="http://plex", plex_token="tok")
+
+    def slow_connect():
+        time.sleep(2)
+        return MagicMock()
+
+    durations: list[float] = []
+    results: list[bool] = []
+
+    def call():
+        t0 = time.monotonic()
+        results.append(media_server.media_server_status(cfg, slow_connect)["connected"])
+        durations.append(time.monotonic() - t0)
+
+    threads = [threading.Thread(target=call) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sum(1 for d in durations if d > 0.3) <= 1
+    assert results.count(False) >= 19  # no cache yet: the others answer "not connected" instead of waiting
+    # once the refresh lands, the cached value is served instantly
+    t0 = time.monotonic()
+    assert media_server.media_server_status(cfg, slow_connect)["connected"] is True
+    assert time.monotonic() - t0 < 0.3
 
 
 def test_media_server_endpoint_never_leaks_credentials(tmp_path):

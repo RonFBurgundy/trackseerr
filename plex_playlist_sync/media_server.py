@@ -6,6 +6,7 @@ push playlists anywhere. Features that need a media server answer ``409`` with
 (A configured-but-unreachable Plex keeps its own 503s: that is an outage, not a configuration choice.)
 """
 
+import logging
 import threading
 import time
 from typing import Any, Callable, Optional
@@ -14,6 +15,9 @@ from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
 from plex_playlist_sync.config import MEDIA_SERVER_NONE, Config
+from plex_playlist_sync.redaction import safe_exc
+
+logger = logging.getLogger(__name__)
 
 NO_MEDIA_SERVER_DETAIL = "No media server connected"
 NO_MEDIA_SERVER_CODE = "media_server_unavailable"
@@ -36,27 +40,48 @@ def media_server_unavailable_response(_request: Request, _exc: Exception) -> JSO
 
 
 _PROBE_TTL_SECONDS = 30.0
-_probe_lock = threading.Lock()
+_PROBE_TIMEOUT_SECONDS = 4.0
+_probe_lock = threading.Lock()  # guards the cache dict only; never held while connecting
+_probe_inflight: set[tuple[str, str]] = set()
 _probe_cache: dict[tuple[str, str], tuple[float, bool]] = {}
 
 
 def reset_probe_cache() -> None:
     with _probe_lock:
         _probe_cache.clear()
+        _probe_inflight.clear()
+
+
+def _run_probe(key: tuple[str, str], connect: Callable[[], Optional[Any]]) -> None:
+    reachable = False
+    try:
+        reachable = connect() is not None
+    except Exception as exc:  # noqa: BLE001 - a probe must never raise; the failure is logged and reported as down
+        logger.warning("Media server probe failed: %s", safe_exc(exc))
+    finally:
+        with _probe_lock:
+            _probe_cache[key] = (time.monotonic(), reachable)
+            _probe_inflight.discard(key)
 
 
 def _plex_reachable(config: Config, connect: Callable[[], Optional[Any]]) -> bool:
-    """Whether Plex answers, cached for ``_PROBE_TTL_SECONDS``: the status endpoint is unauthenticated, so it must
-    not open a fresh Plex connection per request."""
+    """Whether Plex answers, cached for ``_PROBE_TTL_SECONDS``. The status endpoint is unauthenticated, so it must
+    never block on Plex: one caller starts a background refresh and waits at most ``_PROBE_TIMEOUT_SECONDS`` for
+    it; every other caller gets the cached (possibly stale) value immediately. With no cache yet, they get False."""
     key = (config.plex_url, config.plex_token)
-    now = time.monotonic()
     with _probe_lock:
         hit = _probe_cache.get(key)
-        if hit is not None and now - hit[0] < _PROBE_TTL_SECONDS:
+        if hit is not None and time.monotonic() - hit[0] < _PROBE_TTL_SECONDS:
             return hit[1]
-        reachable = connect() is not None
-        _probe_cache[key] = (now, reachable)
-        return reachable
+        if key in _probe_inflight:
+            return hit[1] if hit is not None else False
+        _probe_inflight.add(key)
+    worker = threading.Thread(target=_run_probe, args=(key, connect), name="media-server-probe", daemon=True)
+    worker.start()
+    worker.join(_PROBE_TIMEOUT_SECONDS)
+    with _probe_lock:
+        hit = _probe_cache.get(key)
+    return hit[1] if hit is not None else False
 
 
 def media_server_status(config: Config, connect: Callable[[], Optional[Any]]) -> dict[str, Any]:

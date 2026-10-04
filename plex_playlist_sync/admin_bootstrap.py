@@ -19,28 +19,42 @@ DEFAULT_ADMIN_USERNAME = "admin"
 
 
 def ensure_bootstrap_admin(db: Database) -> bool:
-    """Creates a local admin from ``ADMIN_USERNAME`` (default ``admin``) / ``ADMIN_PASSWORD`` when the database has
-    no active admin. Returns True only when an account was created. Never modifies an existing admin, and never
-    runs once an admin exists (so the env password cannot be used to reset one)."""
-    if db.count_active_admins() > 0:
+    """Creates a local admin from ``ADMIN_USERNAME`` (default ``admin``) / ``ADMIN_PASSWORD`` when no enabled admin
+    can actually sign in without a media server (a local admin with a password). Returns True only when an account
+    was created. Never modifies an existing account, and never runs once a usable admin exists (so the env
+    password cannot be used to reset one). ``ADMIN_PASSWORD`` is removed from the process environment afterwards."""
+    if db.count_local_login_admins() > 0:
+        os.environ.pop("ADMIN_PASSWORD", None)
         return False
     password = os.getenv("ADMIN_PASSWORD", "")
+    os.environ.pop("ADMIN_PASSWORD", None)
     username = local_auth.normalize_username(os.getenv("ADMIN_USERNAME") or DEFAULT_ADMIN_USERNAME)
     if not password:
-        logger.warning(
-            "No administrator exists and no media server is configured to sign one in. "
-            "Set ADMIN_PASSWORD (and optionally ADMIN_USERNAME) and restart to create the first local admin."
+        logger.error(
+            "No administrator can sign in: no media server is configured and no local admin with a password "
+            "exists. To recover: set ADMIN_PASSWORD and restart to create a local admin (ADMIN_USERNAME optionally "
+            "chooses its name)."
         )
         return False
     problem = local_auth.validate_password(password, username)
     if problem:
         logger.error("ADMIN_PASSWORD rejected: %s", problem)
         return False
-    try:
-        user, _invite = db.create_local_user(
-            username, None, int(UserPermission.DEFAULT) | int(UserPermission.ADMIN), created_by="bootstrap"
+    existing = next((u for u in db.list_users() if str(u.get("username", "")).lower() == username.lower()), None)
+    if existing is not None:
+        logger.error(
+            "Cannot create the local admin '%s': a %s user with that name already exists and is left untouched. "
+            "Set ADMIN_USERNAME to a different name and restart.",
+            username,
+            existing.get("auth_type") or "existing",
         )
-        db.set_password(user["id"], local_auth.hash_password(password))
+        return False
+    try:
+        db.create_local_user_with_password(
+            username,
+            local_auth.hash_password(password),
+            int(UserPermission.DEFAULT) | int(UserPermission.ADMIN),
+        )
     except (ValueError, sqlite3.Error) as exc:
         logger.error("Could not create the first local admin '%s': %s", username, safe_exc(exc))
         return False

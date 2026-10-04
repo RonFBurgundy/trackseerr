@@ -212,9 +212,15 @@ class Config:
         return self.media_server_type == MEDIA_SERVER_PLEX and bool(self.plex_url and self.plex_token)
 
     def validate_media_server(self) -> None:
-        """Raises ``ConfigError`` for an unknown MEDIA_SERVER value, or an explicit ``plex`` without credentials."""
+        """Raises ``ConfigError`` for an unknown MEDIA_SERVER value, only one of PLEX_URL/PLEX_TOKEN with MEDIA_SERVER unset, or an explicit ``plex`` without credentials."""
         choice = (self.media_server or "").strip().lower()
         if not choice:
+            if bool(self.plex_url) != bool(self.plex_token):
+                missing = "PLEX_TOKEN" if self.plex_url else "PLEX_URL"
+                raise ConfigError(
+                    f"Plex is partially configured: {missing} is missing. Set both PLEX_URL and PLEX_TOKEN, or "
+                    "remove the other and set MEDIA_SERVER=none to run Trackseerr without a media server."
+                )
             return
         if choice not in SUPPORTED_MEDIA_SERVERS:
             raise ConfigError(
