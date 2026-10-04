@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from plex_playlist_sync import local_auth
+from plex_playlist_sync.list_index import SortDef, build_index, fold_search_text, library_sort_key, order_clause
 from plex_playlist_sync.models import (
     ActiveDownload,
     BlocklistItem,
@@ -85,6 +86,9 @@ RESERVED_USER_IDS = frozenset({"", "0", "1", "api_key_user", "gateway_service", 
 
 logger = logging.getLogger(__name__)
 
+# How long a statement waits for a competing writer before SQLite raises "database is locked".
+_BUSY_TIMEOUT_MS = 15_000
+
 LIDARR_MONITOR_OPTIONS = ("all", "future", "missing", "existing", "first", "latest", "none")
 
 
@@ -136,43 +140,53 @@ class Database:
         self._migrate()
 
     def _ensure_connection(self) -> sqlite3.Connection:
-        if self._conn is None:
-            if self.db_path != ":memory:":
-                assert isinstance(self.db_path, Path)
-                self.db_path.parent.mkdir(parents=True, exist_ok=True)
-                parent_dir = self.db_path.parent
-                if not os.access(parent_dir, os.W_OK):
-                    uid = os.getuid() if hasattr(os, "getuid") else "N/A"
-                    gid = os.getgid() if hasattr(os, "getgid") else "N/A"
-                    raise PermissionError(
-                        f"Database directory '{parent_dir}' is not writable (UID {uid}, GID {gid}). "
-                        f"Please verify permissions on your appdata volume or configure PUID/PGID."
-                    )
-                if self.db_path.exists() and not os.access(self.db_path, os.W_OK):
-                    uid = os.getuid() if hasattr(os, "getuid") else "N/A"
-                    gid = os.getgid() if hasattr(os, "getgid") else "N/A"
-                    raise PermissionError(
-                        f"Database file '{self.db_path}' exists but is not writable (UID {uid}, GID {gid}). "
-                        f"Please verify permissions on your appdata volume."
-                    )
-                try:
-                    conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-                except sqlite3.OperationalError as e:
-                    uid = os.getuid() if hasattr(os, "getuid") else "N/A"
-                    gid = os.getgid() if hasattr(os, "getgid") else "N/A"
-                    raise sqlite3.OperationalError(
-                        f"Failed to open SQLite database at '{self.db_path}': {e}. "
-                        f"Ensure directory '{parent_dir}' is writable by user UID {uid} / GID {gid}."
-                    ) from e
-            else:
-                conn = sqlite3.connect(":memory:", check_same_thread=False)
+        conn = self._conn
+        if conn is not None:
+            return conn
+        with self._lock:
+            if self._conn is None:
+                self._conn = self._open_connection()
+            return self._conn
 
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL;")
-            conn.execute("PRAGMA foreign_keys = ON;")
-            conn.execute("PRAGMA busy_timeout = 5000;")
-            self._conn = conn
-        return self._conn
+    def _open_connection(self) -> sqlite3.Connection:
+        if self.db_path != ":memory:":
+            assert isinstance(self.db_path, Path)
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            parent_dir = self.db_path.parent
+            if not os.access(parent_dir, os.W_OK):
+                uid = os.getuid() if hasattr(os, "getuid") else "N/A"
+                gid = os.getgid() if hasattr(os, "getgid") else "N/A"
+                raise PermissionError(
+                    f"Database directory '{parent_dir}' is not writable (UID {uid}, GID {gid}). "
+                    f"Please verify permissions on your appdata volume or configure PUID/PGID."
+                )
+            if self.db_path.exists() and not os.access(self.db_path, os.W_OK):
+                uid = os.getuid() if hasattr(os, "getuid") else "N/A"
+                gid = os.getgid() if hasattr(os, "getgid") else "N/A"
+                raise PermissionError(
+                    f"Database file '{self.db_path}' exists but is not writable (UID {uid}, GID {gid}). "
+                    f"Please verify permissions on your appdata volume."
+                )
+            try:
+                conn = sqlite3.connect(str(self.db_path), timeout=_BUSY_TIMEOUT_MS / 1000, check_same_thread=False)
+            except sqlite3.OperationalError as e:
+                uid = os.getuid() if hasattr(os, "getuid") else "N/A"
+                gid = os.getgid() if hasattr(os, "getgid") else "N/A"
+                raise sqlite3.OperationalError(
+                    f"Failed to open SQLite database at '{self.db_path}': {e}. "
+                    f"Ensure directory '{parent_dir}' is writable by user UID {uid} / GID {gid}."
+                ) from e
+        else:
+            conn = sqlite3.connect(":memory:", timeout=_BUSY_TIMEOUT_MS / 1000, check_same_thread=False)
+
+        conn.row_factory = sqlite3.Row
+        conn.create_function("fold_text", 1, fold_search_text, deterministic=True)
+        # busy_timeout first: switching to WAL and every later statement must wait for a competing writer
+        # instead of failing at once with "database is locked".
+        conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS};")
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA foreign_keys = ON;")
+        return conn
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -252,6 +266,8 @@ class Database:
                 (31, self._migration_v31),
                 (32, self._migration_v32),
                 (33, self._migration_v33),
+                (34, self._migration_v34),
+                (35, self._migration_v35),
             ]
 
             applied = 0
@@ -1282,6 +1298,64 @@ class Database:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_blocklist_created ON download_blocklist(created_at);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_tracks_monitored ON library_tracks(monitored);")
         self._seed_download_history(cur)
+
+    def _migration_v34(self, cur: sqlite3.Cursor) -> None:
+        """Persisted, indexed sort keys for the virtualized library lists and the scrubber.
+
+        ``sort_name`` (artists) / ``sort_title`` (albums, tracks) hold ``library_sort_key(name)``. Column-existence
+        guarded and the backfill only touches rows still holding the empty default, so a re-run changes nothing.
+        """
+        for table, source, column in (
+            ("library_artists", "name", "sort_name"),
+            ("library_albums", "title", "sort_title"),
+            ("library_tracks", "title", "sort_title"),
+        ):
+            cur.execute(f"PRAGMA table_info({table});")
+            if column not in {row[1] for row in cur.fetchall()}:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT '';")
+            pending = cur.execute(f"SELECT id, {source} FROM {table} WHERE {column} = ''").fetchall()
+            for start in range(0, len(pending), 1000):
+                cur.executemany(
+                    f"UPDATE {table} SET {column} = ? WHERE id = ?",
+                    [(library_sort_key(name), row_id) for row_id, name in pending[start : start + 1000]],
+                )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_artists_sort_name ON library_artists(sort_name, id);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_albums_sort_title ON library_albums(sort_title, id);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_tracks_sort_title ON library_tracks(sort_title, id);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_artists_created ON library_artists(created_at);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_albums_created ON library_albums(created_at);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_tracks_created ON library_tracks(created_at);")
+
+    def _migration_v35(self, cur: sqlite3.Cursor) -> None:
+        """Persisted folded search columns for the native library lists.
+
+        ``search_text`` is ``fold_search_text(name/title)`` and ``search_clean`` is ``fold_search_text(clean_name/
+        clean_title)``, so list search is a plain ``LIKE`` instead of a per-row Python UDF. Related names (an
+        album's artist, a track's album and artist) are deliberately NOT denormalized: the list queries join the
+        related row's own columns, so renaming an artist is reflected without touching albums or tracks. Column
+        guarded; the backfill only touches rows whose folded columns are still empty, so a re-run changes nothing.
+        """
+        for table, raw, clean in (
+            ("library_artists", "name", "clean_name"),
+            ("library_albums", "title", "clean_title"),
+            ("library_tracks", "title", "clean_title"),
+        ):
+            cur.execute(f"PRAGMA table_info({table});")
+            existing = {row[1] for row in cur.fetchall()}
+            for column in ("search_text", "search_clean"):
+                if column not in existing:
+                    cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT '';")
+            pending = cur.execute(
+                f"SELECT id, {raw}, {clean} FROM {table} WHERE search_text = '' AND search_clean = ''"
+            ).fetchall()
+            for start in range(0, len(pending), 1000):
+                cur.executemany(
+                    f"UPDATE {table} SET search_text = ?, search_clean = ? WHERE id = ?",
+                    [
+                        (fold_search_text(name or ""), fold_search_text(cleaned or ""), row_id)
+                        for row_id, name, cleaned in pending[start : start + 1000]
+                    ],
+                )
 
     @staticmethod
     def _seed_download_history(cur: sqlite3.Cursor) -> int:
@@ -3442,7 +3516,7 @@ class Database:
     def get_instance_id(self) -> str:
         """Random id for this database, created on first use and then stable."""
         with self._lock:
-            self.conn.execute("INSERT OR IGNORE INTO general_settings (id, application_url) VALUES (1, '')")
+            self._ensure_general_row()
             row = self.conn.execute("SELECT instance_id FROM general_settings WHERE id = 1").fetchone()
             current = str(row["instance_id"] or "") if row else ""
             if not current:
@@ -4140,12 +4214,22 @@ class Database:
     HISTORY_SORT_KEYS: dict[str, str] = {"date": "h.created_at"}
     HISTORY_EVENTS: tuple[str, ...] = ("grabbed", "imported", "failed", "deleted", "blocklisted", "upgraded")
     BLOCKLIST_SORT_KEYS: dict[str, str] = {"date": "b.created_at", "artist": "b.artist COLLATE NOCASE"}
+    # Name sorts order by the persisted sort keys (articles and accents folded) so the scrubber index can group on
+    # exactly the stored key the list is ordered by; ``WANTED_INDEX_SORTS`` below describes each key's grouping.
+    _WANTED_RELEASE_DATE = "COALESCE(NULLIF(al.release_date, ''), CAST(al.year AS TEXT))"
     WANTED_SORT_KEYS: dict[str, str] = {
-        "artist": "ar.name COLLATE NOCASE",
-        "album": "al.title COLLATE NOCASE",
-        "title": "t.title COLLATE NOCASE",
-        "release_date": "release_date",
+        "artist": "ar.sort_name",
+        "album": "al.sort_title",
+        "title": "t.sort_title",
+        "release_date": _WANTED_RELEASE_DATE,
         "last_searched_at": "t.last_searched_at",
+    }
+    WANTED_INDEX_SORTS: dict[str, SortDef] = {
+        "artist": SortDef("ar.sort_name", "name"),
+        "album": SortDef("al.sort_title", "name"),
+        "title": SortDef("t.sort_title", "name"),
+        "release_date": SortDef(_WANTED_RELEASE_DATE, "date"),
+        "last_searched_at": SortDef("t.last_searched_at", "date"),
     }
     # Downloads the native queue shows: everything that still needs the worker, plus an explicit ``warning`` state.
     NATIVE_QUEUE_STATUSES: tuple[str, ...] = ("queued", "downloading", "importing", "completed", "warning")
@@ -4337,7 +4421,7 @@ class Database:
     """
     _WANTED_SELECT = """
         SELECT t.id AS id, t.id AS track_id, t.album_id AS album_id, ar.name AS artist, al.title AS album,
-               t.title AS title, COALESCE(al.release_date, CAST(al.year AS TEXT)) AS release_date,
+               t.title AS title, COALESCE(NULLIF(al.release_date, ''), CAST(al.year AS TEXT)) AS release_date,
                t.monitored AS monitored, t.last_searched_at AS last_searched_at,
                ar.quality_profile_id AS quality_profile_id
     """
@@ -4360,6 +4444,24 @@ class Database:
                 (int(page_size), (int(page) - 1) * int(page_size)),
             )
             return [dict(r) for r in cur.fetchall()], int(total)
+
+    def wanted_index(self, kind: str, sort_key: str, sort_dir: str) -> tuple[int, list[dict[str, Any]]]:
+        """``(total, groups)`` for the native Wanted list, in the exact order ``list_wanted`` returns."""
+        if kind not in ("missing", "cutoff"):
+            raise ValueError(f"Unknown wanted list: {kind!r}")
+        if sort_key not in self.WANTED_INDEX_SORTS:
+            raise ValueError(f"Unknown sort key: {sort_key!r}")
+        frm = self._WANTED_MISSING_FROM if kind == "missing" else self._WANTED_CUTOFF_FROM
+        with self._lock:
+            return build_index(self.conn, frm, [], self.WANTED_INDEX_SORTS[sort_key], sort_dir)
+
+    def download_history_index(self, sort_dir: str, event: Optional[str] = None) -> tuple[int, list[dict[str, Any]]]:
+        """``(total, groups)`` for ``download_history`` ordered by date, matching ``list_download_history``."""
+        frm, params = "FROM download_history h", []
+        if event:
+            frm, params = frm + " WHERE h.event = ?", [str(event)]
+        with self._lock:
+            return build_index(self.conn, frm, params, SortDef("h.created_at", "date"), sort_dir)
 
     def list_wanted_search_targets(
         self, kind: Optional[str] = None, track_ids: Optional[list[str]] = None, limit: int = 1000
@@ -4951,12 +5053,16 @@ class Database:
 
     def _map_library_artist(self, row: sqlite3.Row) -> dict[str, Any]:
         res = dict(row)
+        res.pop("search_text", None)
+        res.pop("search_clean", None)
         res["monitored"] = bool(res.get("monitored", 1))
         res["monitor_option"] = str(res.get("monitor_option") or "all")
         return res
 
     def _map_library_album(self, row: sqlite3.Row) -> dict[str, Any]:
         res = dict(row)
+        res.pop("search_text", None)
+        res.pop("search_clean", None)
         res["monitored"] = bool(res.get("monitored", 1))
         if res.get("year") is not None:
             res["year"] = int(res["year"])
@@ -4966,6 +5072,8 @@ class Database:
 
     def _map_library_track(self, row: sqlite3.Row) -> dict[str, Any]:
         res = dict(row)
+        res.pop("search_text", None)
+        res.pop("search_clean", None)
         res["monitored"] = bool(res.get("monitored", 1))
         res["track_number"] = int(res.get("track_number", 1))
         res["disc_number"] = int(res.get("disc_number", 1))
@@ -4993,6 +5101,7 @@ class Database:
         artist_id = str(d.get("id") or uuid.uuid4())
         name = str(d.get("name") or "")
         clean_name = clean_library_name(d.get("clean_name") or name)
+        sort_name = library_sort_key(name)
         foreign_artist_id = str(d["foreign_artist_id"]) if d.get("foreign_artist_id") is not None else None
         path = str(d["path"]) if d.get("path") is not None else None
         monitored = 1 if d.get("monitored", True) else 0
@@ -5015,13 +5124,16 @@ class Database:
             self.conn.execute(
                 """
                 INSERT INTO library_artists (
-                    id, name, clean_name, foreign_artist_id, path, monitored,
+                    id, name, clean_name, sort_name, search_text, search_clean, foreign_artist_id, path, monitored,
                     monitor_option, quality_profile_id, metadata_json, mbid,
                     image_url, banner_url, bio, genres, country, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     clean_name = excluded.clean_name,
+                    sort_name = excluded.sort_name,
+                    search_text = excluded.search_text,
+                    search_clean = excluded.search_clean,
                     foreign_artist_id = COALESCE(excluded.foreign_artist_id, library_artists.foreign_artist_id),
                     path = COALESCE(excluded.path, library_artists.path),
                     monitored = excluded.monitored,
@@ -5040,6 +5152,9 @@ class Database:
                     artist_id,
                     name,
                     clean_name,
+                    sort_name,
+                    fold_search_text(name),
+                    fold_search_text(clean_name),
                     foreign_artist_id,
                     path,
                     monitored,
@@ -5161,6 +5276,7 @@ class Database:
         artist_id = str(d.get("artist_id") or "")
         title = str(d.get("title") or "")
         clean_title = clean_library_name(d.get("clean_title") or title)
+        sort_title = library_sort_key(title)
         foreign_album_id = str(d["foreign_album_id"]) if d.get("foreign_album_id") is not None else None
         release_date = str(d["release_date"]) if d.get("release_date") is not None else None
         year = int(d["year"]) if d.get("year") is not None else None
@@ -5178,15 +5294,18 @@ class Database:
             self.conn.execute(
                 """
                 INSERT INTO library_albums (
-                    id, artist_id, title, clean_title, foreign_album_id, release_date,
-                    year, album_type, monitored, path, cover_url, total_tracks,
+                    id, artist_id, title, clean_title, sort_title, search_text, search_clean, foreign_album_id,
+                    release_date, year, album_type, monitored, path, cover_url, total_tracks,
                     mb_release_group_id, mb_release_id, genres,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     artist_id = excluded.artist_id,
                     title = excluded.title,
                     clean_title = excluded.clean_title,
+                    sort_title = excluded.sort_title,
+                    search_text = excluded.search_text,
+                    search_clean = excluded.search_clean,
                     foreign_album_id = COALESCE(excluded.foreign_album_id, library_albums.foreign_album_id),
                     release_date = COALESCE(excluded.release_date, library_albums.release_date),
                     year = COALESCE(excluded.year, library_albums.year),
@@ -5205,6 +5324,9 @@ class Database:
                     artist_id,
                     title,
                     clean_title,
+                    sort_title,
+                    fold_search_text(title),
+                    fold_search_text(clean_title),
                     foreign_album_id,
                     release_date,
                     year,
@@ -5341,6 +5463,7 @@ class Database:
         artist_id = str(d.get("artist_id") or "")
         title = str(d.get("title") or "")
         clean_title = clean_library_name(d.get("clean_title") or title)
+        sort_title = library_sort_key(title)
         track_number = int(d.get("track_number", 1))
         disc_number = int(d.get("disc_number", 1))
         duration_seconds = float(d["duration_seconds"]) if d.get("duration_seconds") is not None else None
@@ -5354,16 +5477,19 @@ class Database:
             self.conn.execute(
                 """
                 INSERT INTO library_tracks (
-                    id, album_id, artist_id, title, clean_title, track_number,
-                    disc_number, duration_seconds, monitored, foreign_track_id,
+                    id, album_id, artist_id, title, clean_title, sort_title, search_text, search_clean,
+                    track_number, disc_number, duration_seconds, monitored, foreign_track_id,
                     mb_recording_id, isrc,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     album_id = excluded.album_id,
                     artist_id = excluded.artist_id,
                     title = excluded.title,
                     clean_title = excluded.clean_title,
+                    sort_title = excluded.sort_title,
+                    search_text = excluded.search_text,
+                    search_clean = excluded.search_clean,
                     track_number = excluded.track_number,
                     disc_number = excluded.disc_number,
                     duration_seconds = COALESCE(excluded.duration_seconds, library_tracks.duration_seconds),
@@ -5379,6 +5505,9 @@ class Database:
                     artist_id,
                     title,
                     clean_title,
+                    sort_title,
+                    fold_search_text(title),
+                    fold_search_text(clean_title),
                     track_number,
                     disc_number,
                     duration_seconds,
@@ -6226,7 +6355,15 @@ class Database:
     # -------------------------------------------------------------------------
 
     def _ensure_general_row(self) -> None:
-        self.conn.execute("INSERT OR IGNORE INTO general_settings (id, application_url) VALUES (1, '')")
+        """Creates the singleton ``general_settings`` row when missing, and commits that insert at once.
+
+        Must not leave a transaction open: a bare ``INSERT OR IGNORE`` that is never committed (the usual case, the row
+        exists) keeps the write lock on this connection until some other thread happens to commit, and every other
+        connection's write then fails with "database is locked".
+        """
+        if self.conn.execute("SELECT 1 FROM general_settings WHERE id = 1").fetchone() is None:
+            self.conn.execute("INSERT OR IGNORE INTO general_settings (id, application_url) VALUES (1, '')")
+            self.conn.commit()
 
     def get_plex_webhook_secret(self) -> str:
         """Return the Plex webhook secret, generating and persisting one on first read."""

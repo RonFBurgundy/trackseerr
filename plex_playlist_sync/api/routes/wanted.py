@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from plex_playlist_sync import activity_service as svc
 from plex_playlist_sync.api.dependencies import get_db, get_lidarr_client, require_admin, require_core_tier
 from plex_playlist_sync.api.routes.activity import (
+    MAX_PAGE,
     SORT_DIR_PATTERN,
     lidarr_call,
     require_lidarr,
@@ -64,7 +65,7 @@ def _wanted_list(
 
 @router.get("/missing", summary="Monitored items that are not in the library")
 def list_missing(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=MAX_PAGE),
     page_size: int = Query(50, ge=1, le=200),
     sort_key: Optional[str] = Query(None),
     sort_dir: str = Query("asc", pattern=SORT_DIR_PATTERN),
@@ -77,7 +78,7 @@ def list_missing(
 
 @router.get("/cutoff", summary="Files below their quality profile cutoff")
 def list_cutoff(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=MAX_PAGE),
     page_size: int = Query(50, ge=1, le=200),
     sort_key: Optional[str] = Query(None),
     sort_dir: str = Query("asc", pattern=SORT_DIR_PATTERN),
@@ -86,6 +87,35 @@ def list_cutoff(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     return _wanted_list("cutoff", page, page_size, sort_key, sort_dir, db, client)
+
+
+def _wanted_index(
+    kind: str, sort_key: Optional[str], sort_dir: str, db: Database
+) -> dict[str, Any]:
+    key = validate_sort_key(sort_key, svc.WANTED_SORT_KEYS, "artist")
+    if get_library_mode(db) == MODE_LIDARR:
+        return svc.empty_index(key, sort_dir)  # Lidarr pages server-side; there is nothing to index locally
+    return svc.native_wanted_index(db, kind, key, sort_dir)
+
+
+@router.get("/missing/index", summary="Scrubber groups for the missing list (native only)")
+def missing_index(
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("asc", pattern=SORT_DIR_PATTERN),
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    return _wanted_index("missing", sort_key, sort_dir, db)
+
+
+@router.get("/cutoff/index", summary="Scrubber groups for the cutoff-unmet list (native only)")
+def cutoff_index(
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("asc", pattern=SORT_DIR_PATTERN),
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    return _wanted_index("cutoff", sort_key, sort_dir, db)
 
 
 @router.post("/search", summary="Search for wanted items")

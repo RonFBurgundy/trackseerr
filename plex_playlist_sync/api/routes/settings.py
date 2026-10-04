@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from plex_playlist_sync import library_manager
+from plex_playlist_sync import library_manager, lidarr_library
 from plex_playlist_sync.api.dependencies import get_config, get_db, require_admin, require_core_tier
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.redaction import redact_text
@@ -483,6 +483,7 @@ def update_lidarr_settings(
 
     try:
         updated = db.update_lidarr_settings(updates)
+        lidarr_library.invalidate()  # URL / key may have changed: never serve the old server's cached library
         masked = _mask_lidarr_settings(updated)
         return LidarrSettingsModel(**masked)
     except Exception as e:

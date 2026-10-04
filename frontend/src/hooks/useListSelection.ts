@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import type { ListKey } from './useInfiniteList';
+import type { ListKey } from './useVirtualPagedList';
 
 export interface UseListSelectionReturn {
   selected: ReadonlySet<ListKey>;

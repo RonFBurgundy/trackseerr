@@ -150,7 +150,7 @@ def _library(db):
 
 class TestMigrationAndSeed:
     def test_schema_has_v33_objects(self, test_db):
-        assert test_db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 33
+        assert test_db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 35
         cols = {r[1] for r in test_db.conn.execute("PRAGMA table_info(active_downloads)")}
         assert {"progress_updated_at", "indexer", "quality", "protocol"} <= cols
         assert "last_searched_at" in {r[1] for r in test_db.conn.execute("PRAGMA table_info(library_tracks)")}
@@ -183,7 +183,7 @@ class TestMigrationAndSeed:
         db.conn.execute("UPDATE active_downloads SET progress_updated_at = NULL")
         db.conn.execute("UPDATE active_downloads SET progress_updated_at = '2020-01-01 00:00:00' WHERE id='dl-kept'")
         db.conn.execute("UPDATE active_downloads SET created_at = '2020-01-01 00:00:00'")
-        db.conn.execute("DELETE FROM schema_migrations WHERE version = 33")
+        db.conn.execute("DELETE FROM schema_migrations WHERE version >= 33")
         db.conn.commit()
         db.close()
         db = Database(str(path))
@@ -203,7 +203,7 @@ class TestMigrationAndSeed:
         _dl(db, "dl-old", status="downloading")
         db.conn.execute("UPDATE active_downloads SET status='imported' WHERE id='dl-old'")
         db.conn.execute("DELETE FROM download_history")
-        db.conn.execute("DELETE FROM schema_migrations WHERE version = 33")
+        db.conn.execute("DELETE FROM schema_migrations WHERE version >= 33")
         db.conn.execute("DROP TABLE download_history")
         db.conn.commit()
         db.close()

@@ -152,3 +152,65 @@ body {
 .pr-safe {
   padding-right: env(safe-area-inset-right, 0px);
 }
+
+/* 7. Virtualized lists and the scrubber rail */
+.virtual-scroll[data-scrubber='on'],
+[data-scrubber='on'] {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.virtual-scroll[data-scrubber='on']::-webkit-scrollbar,
+[data-scrubber='on']::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.virtual-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: #2a2a2a transparent;
+}
+
+.virtual-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.virtual-scroll::-webkit-scrollbar-thumb {
+  background-color: #2a2a2a;
+  border-radius: 3px;
+}
+
+/* Overlay rail (narrow screens) sits over the list's right edge: leave it a few px of the rows' room. */
+.virtual-scroll[data-rail='overlay'] {
+  padding-right: 8px;
+}
+
+.virtual-scroll:focus-visible {
+  outline: 2px solid #e5a00d;
+  outline-offset: -2px;
+}
+
+.scrubber-label {
+  transition: transform 60ms linear, opacity 60ms linear;
+  will-change: transform;
+}
+
+.scrubber-marker {
+  transition: transform 120ms ease-out;
+}
+
+.scrubber-balloon {
+  transition: opacity 80ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scrubber-label,
+  .scrubber-marker,
+  .scrubber-balloon {
+    transition: none;
+  }
+}

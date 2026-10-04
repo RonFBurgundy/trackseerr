@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { RefreshCw, Trash2, Loader2, Search, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
-import { TapeDeckButton, TapeTransportBay, MachinedCard } from '@/components/ui';
+import { RefreshCw, Trash2, Loader2, Search, AlertTriangle } from 'lucide-react';
+import type { SystemEventItem } from '@/types/models';
+import { TapeDeckButton, TapeTransportBay } from '@/components/ui';
+import { FlatList, type FlatListColumn } from '@/components/lists';
 import { useSystemEvents } from '@/hooks/useSystemEvents';
 
 const EVENT_TYPES = [
@@ -56,6 +58,31 @@ const EventTypeBadge: React.FC<{ eventType: string }> = ({ eventType }) => {
   );
 };
 
+const getEventKey = (e: SystemEventItem): number => e.id;
+const noopSort = (): void => undefined;
+
+const columns: FlatListColumn<SystemEventItem>[] = [
+  { key: 'created_at', label: 'Timestamp', width: '170px', render: (e) => <span className="text-neutral-400 text-[11px]">{e.created_at}</span> },
+  { key: 'event_type', label: 'Type', width: '190px', render: (e) => <EventTypeBadge eventType={e.event_type} /> },
+  { key: 'severity', label: 'Severity', width: '80px', render: (e) => <SeverityBadge severity={e.severity} /> },
+  { key: 'source', label: 'Source', width: '110px', render: (e) => <span className="text-neutral-300 font-bold text-[11px]">{e.source}</span> },
+  {
+    key: 'message',
+    label: 'Message',
+    width: 'minmax(0,1fr)',
+    render: (e) => (
+      <span className="text-neutral-200 break-words">
+        {e.message}
+        {e.details && Object.keys(e.details).length > 0 && (
+          <span className="mt-1 block text-[10px] text-neutral-400 bg-[#0d0d0d] p-1.5 rounded-[3px] border border-[#1f1f1f] overflow-x-auto">
+            {JSON.stringify(e.details)}
+          </span>
+        )}
+      </span>
+    ),
+  },
+];
+
 export const SystemEventsPanel: React.FC = () => {
   const ev = useSystemEvents();
   const [confirmingClear, setConfirmingClear] = useState<boolean>(false);
@@ -70,9 +97,9 @@ export const SystemEventsPanel: React.FC = () => {
         <TapeTransportBay className="flex items-center gap-2 self-start sm:self-auto">
           <TapeDeckButton
             size="sm"
-            onClick={() => void ev.refresh()}
-            disabled={ev.isLoading}
-            icon={<RefreshCw className={`h-3.5 w-3.5 ${ev.isLoading ? 'animate-spin' : ''}`} />}
+            onClick={ev.list.reload}
+            disabled={ev.list.loading}
+            icon={<RefreshCw className={`h-3.5 w-3.5 ${ev.list.loading ? 'animate-spin' : ''}`} />}
           >
             Refresh
           </TapeDeckButton>
@@ -99,7 +126,7 @@ export const SystemEventsPanel: React.FC = () => {
               size="sm"
               variant="danger"
               onClick={() => setConfirmingClear(true)}
-              disabled={ev.isClearing || ev.total === 0}
+              disabled={ev.isClearing || ev.list.total === 0}
               icon={<Trash2 className="h-3.5 w-3.5" />}
             >
               Clear Events
@@ -163,91 +190,23 @@ export const SystemEventsPanel: React.FC = () => {
         </div>
       </div>
 
-      {ev.error && (
+      {ev.clearError && (
         <div className="p-3 bg-red-950/40 border border-red-800/50 rounded-[4px] text-xs text-red-300 font-mono flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          <span>{ev.error}</span>
+          <span>{ev.clearError}</span>
         </div>
       )}
 
-      <MachinedCard className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs font-mono">
-            <thead>
-              <tr className="bg-[#141414] border-b border-[#222222] text-neutral-400 uppercase tracking-wider text-[11px]">
-                <th className="py-2.5 px-3 whitespace-nowrap">Timestamp</th>
-                <th className="py-2.5 px-3">Type</th>
-                <th className="py-2.5 px-3">Severity</th>
-                <th className="py-2.5 px-3">Source</th>
-                <th className="py-2.5 px-3">Message</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#1e1e1e]">
-              {ev.isLoading && ev.events.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="py-12 text-center text-neutral-500">
-                    <Loader2 className="h-5 w-5 text-[#e5a00d] animate-spin inline-block mr-2" />
-                    Loading system events...
-                  </td>
-                </tr>
-              )}
-              {!ev.isLoading && ev.events.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="py-12 text-center text-neutral-500">
-                    {ev.error
-                      ? 'System events could not be loaded.'
-                      : 'No system lifecycle events recorded matching current filters.'}
-                  </td>
-                </tr>
-              )}
-              {ev.events.map((e) => (
-                <tr key={e.id} className="hover:bg-[#151515] transition-colors">
-                  <td className="py-2 px-3 text-neutral-400 whitespace-nowrap text-[11px]">{e.created_at}</td>
-                  <td className="py-2 px-3">
-                    <EventTypeBadge eventType={e.event_type} />
-                  </td>
-                  <td className="py-2 px-3">
-                    <SeverityBadge severity={e.severity} />
-                  </td>
-                  <td className="py-2 px-3 text-neutral-300 font-bold text-[11px] whitespace-nowrap">{e.source}</td>
-                  <td className="py-2 px-3 text-neutral-200 break-words max-w-xl">
-                    {e.message}
-                    {e.details && Object.keys(e.details).length > 0 && (
-                      <div className="mt-1 text-[10px] text-neutral-400 bg-[#0d0d0d] p-1.5 rounded border border-[#1f1f1f] overflow-x-auto">
-                        {JSON.stringify(e.details)}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-2 p-3 bg-[#121212] border-t border-[#222222] text-xs font-mono">
-          <span className="text-neutral-400">
-            Page {ev.page} of {ev.totalPages} ({ev.total} total events)
-          </span>
-          <div className="flex items-center gap-2">
-            <TapeDeckButton
-              size="sm"
-              disabled={ev.page <= 1 || ev.isLoading}
-              onClick={() => ev.setPage((p) => Math.max(1, p - 1))}
-              icon={<ChevronLeft className="h-3 w-3" />}
-            >
-              Previous
-            </TapeDeckButton>
-            <TapeDeckButton
-              size="sm"
-              disabled={ev.page >= ev.totalPages || ev.isLoading}
-              onClick={() => ev.setPage((p) => p + 1)}
-              icon={<ChevronRight className="h-3 w-3" />}
-            >
-              Next
-            </TapeDeckButton>
-          </div>
-        </div>
-      </MachinedCard>
+      <FlatList
+        ariaLabel="System events"
+        columns={columns}
+        list={ev.list}
+        getKey={getEventKey}
+        sortKey="created_at"
+        sortDir="desc"
+        onSortChange={noopSort}
+        emptyMessage="No system lifecycle events recorded matching current filters."
+      />
     </div>
   );
 };

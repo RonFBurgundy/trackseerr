@@ -1,7 +1,9 @@
 """Lidarr REST API Client for automated music discovery and library queuing."""
 
 import logging
-from typing import Any, Optional
+import re
+import time
+from typing import Any, NamedTuple, Optional
 from urllib.parse import quote, urlencode
 
 import httpx
@@ -9,6 +11,8 @@ import httpx
 from plex_playlist_sync.redaction import safe_exc
 
 logger = logging.getLogger(__name__)
+
+_COVER_FILE_RE = re.compile(r"[A-Za-z0-9_-]{1,64}\.(?:jpg|jpeg|png|webp|gif)")
 
 
 def _exc_text(exc: BaseException) -> str:
@@ -18,6 +22,26 @@ def _exc_text(exc: BaseException) -> str:
 
 class LidarrApiError(Exception):
     """A Lidarr request failed. The message is application-authored and never carries the API key."""
+
+
+class LidarrNotFound(LidarrApiError):
+    """Lidarr answered 404 for the requested item."""
+
+
+class LidarrBadArtwork(LidarrApiError):
+    """Lidarr's artwork response was not an allowed raster image type."""
+
+
+# Raster formats only: SVG (and anything else) is refused so a proxied cover can never carry script.
+COVER_CONTENT_TYPES = frozenset({"image/jpeg", "image/png", "image/webp", "image/gif"})
+COVER_DEADLINE_SECONDS = 10.0
+_monotonic = time.monotonic
+
+
+class MediaCover(NamedTuple):
+    body: bytes
+    content_type: str
+    validator: str  # upstream ETag / Last-Modified, "" when Lidarr sent neither
 
 
 class LidarrClient:
@@ -57,6 +81,8 @@ class LidarrClient:
             raise LidarrApiError(f"Could not reach Lidarr ({type(exc).__name__})") from exc
         if resp.status_code in (401, 403):
             raise LidarrApiError("Lidarr rejected the API key")
+        if resp.status_code == 404:
+            raise LidarrNotFound(f"Lidarr could not find the item for {path}")
         if resp.status_code != 200:
             raise LidarrApiError(f"Lidarr returned HTTP {resp.status_code} for {path}")
         try:
@@ -488,7 +514,7 @@ class LidarrClient:
     # ------------------------------------------------------------------ Activity / Wanted (admin proxy)
 
     def _send_json(self, method: str, path: str, json_body: Optional[dict[str, Any]] = None) -> Any:
-        """POST or DELETE ``/api/v1/<path>``; returns the parsed JSON body (``None`` when empty).
+        """POST, PUT or DELETE ``/api/v1/<path>``; returns the parsed JSON body (``None`` when empty).
 
         Raises LidarrApiError on any failure, with a message that never carries the API key.
         """
@@ -497,6 +523,8 @@ class LidarrClient:
             with httpx.Client(verify=self.verify_ssl, timeout=self.timeout) as client:
                 if method == "POST":
                     resp = client.post(url, headers=self._get_headers(), json=json_body)
+                elif method == "PUT":
+                    resp = client.put(url, headers=self._get_headers(), json=json_body)
                 elif method == "DELETE":
                     resp = client.delete(url, headers=self._get_headers())
                 else:
@@ -506,7 +534,7 @@ class LidarrClient:
         if resp.status_code in (401, 403):
             raise LidarrApiError("Lidarr rejected the API key")
         if resp.status_code == 404:
-            raise LidarrApiError(f"Lidarr could not find the item for {path}")
+            raise LidarrNotFound(f"Lidarr could not find the item for {path}")
         if resp.status_code not in (200, 201, 202, 204):
             raise LidarrApiError(f"Lidarr returned HTTP {resp.status_code} for {path}")
         if not resp.content:
@@ -578,3 +606,104 @@ class LidarrClient:
         """POST ``/command`` (e.g. ``AlbumSearch`` with ``albumIds``); returns Lidarr's command resource."""
         result = self._send_json("POST", "command", {"name": name, **body})
         return result if isinstance(result, dict) else {}
+
+
+    # ------------------------------------------------------------------ Library browsing (live proxy)
+
+    def fetch_artists(self) -> list[dict[str, Any]]:
+        """Every artist (raises LidarrApiError, unlike ``get_all_artists`` which swallows failures)."""
+        data = self._get_json("artist")
+        if not isinstance(data, list):
+            raise LidarrApiError("Lidarr returned an unexpected response shape for artist")
+        return [row for row in data if isinstance(row, dict)]
+
+    def fetch_albums(self) -> list[dict[str, Any]]:
+        """Every album, including all of an artist's albums, with ``artist`` and ``statistics`` attached."""
+        data = self._get_json("album?includeAllArtistAlbums=true")
+        if not isinstance(data, list):
+            raise LidarrApiError("Lidarr returned an unexpected response shape for album")
+        return [row for row in data if isinstance(row, dict)]
+
+    def fetch_artist(self, artist_id: int) -> dict[str, Any]:
+        data = self._get_json(f"artist/{int(artist_id)}")
+        if not isinstance(data, dict):
+            raise LidarrApiError("Lidarr returned an unexpected response shape for artist")
+        return data
+
+    def fetch_album(self, album_id: int) -> dict[str, Any]:
+        data = self._get_json(f"album/{int(album_id)}")
+        if not isinstance(data, dict):
+            raise LidarrApiError("Lidarr returned an unexpected response shape for album")
+        return data
+
+    def fetch_artist_albums(self, artist_id: int) -> list[dict[str, Any]]:
+        data = self._get_json(f"album?artistId={int(artist_id)}")
+        if not isinstance(data, list):
+            raise LidarrApiError("Lidarr returned an unexpected response shape for album")
+        return [row for row in data if isinstance(row, dict)]
+
+    def fetch_album_tracks(self, album_id: int) -> list[dict[str, Any]]:
+        data = self._get_json(f"track?albumId={int(album_id)}")
+        if not isinstance(data, list):
+            raise LidarrApiError("Lidarr returned an unexpected response shape for track")
+        return [row for row in data if isinstance(row, dict)]
+
+    def set_artist_monitored(self, artist_id: int, monitored: bool) -> dict[str, Any]:
+        """Fetch-modify-put, so no other field of the artist resource is lost."""
+        artist = self.fetch_artist(artist_id)
+        artist["monitored"] = bool(monitored)
+        result = self._send_json("PUT", f"artist/{int(artist_id)}", artist)
+        return result if isinstance(result, dict) else artist
+
+    def set_albums_monitored(self, album_ids: list[int], monitored: bool) -> None:
+        self._send_json("PUT", "album/monitor", {"albumIds": [int(i) for i in album_ids], "monitored": bool(monitored)})
+
+    def fetch_mediacover(
+        self,
+        kind: str,
+        entity_id: int,
+        filename: str,
+        max_bytes: int,
+        deadline_seconds: float = COVER_DEADLINE_SECONDS,
+    ) -> "MediaCover":
+        """``MediaCover(body, content_type, validator)`` of ``/mediacover/<kind>/<id>/<filename>``.
+
+        ``kind`` is ``artist`` or ``album``; ``filename`` must be a plain image file name (no separators). The API key
+        goes in a header only, redirects are not followed, the body is capped at ``max_bytes``, the whole fetch must
+        finish within ``deadline_seconds`` (wall clock, not just per read) and the content type must be one of
+        ``COVER_CONTENT_TYPES`` (never SVG). ``validator`` is Lidarr's ETag or Last-Modified when it sent one.
+        Raises LidarrNotFound for 404, LidarrBadArtwork for a disallowed content type and LidarrApiError otherwise.
+        """
+        if kind not in ("artist", "album") or not _COVER_FILE_RE.fullmatch(filename):
+            raise LidarrNotFound("Invalid artwork path")
+        url = f"{self.base_url}/api/v1/mediacover/{kind}/{int(entity_id)}/{filename}"
+        headers = {"X-Api-Key": self.api_key, "Accept": ", ".join(sorted(COVER_CONTENT_TYPES))}
+        deadline = _monotonic() + float(deadline_seconds)
+        try:
+            with httpx.Client(verify=self.verify_ssl, timeout=self.timeout, follow_redirects=False) as client:
+                with client.stream("GET", url, headers=headers) as resp:
+                    if resp.status_code == 404:
+                        raise LidarrNotFound("Lidarr has no such artwork")
+                    if resp.status_code in (401, 403):
+                        raise LidarrApiError("Lidarr rejected the API key")
+                    if resp.status_code != 200:
+                        raise LidarrApiError(f"Lidarr returned HTTP {resp.status_code} for artwork")
+                    content_type = str(resp.headers.get("content-type", "")).split(";")[0].strip().lower()
+                    if content_type not in COVER_CONTENT_TYPES:
+                        raise LidarrBadArtwork(f"Lidarr artwork has a disallowed content type ({content_type[:40]!r})")
+                    declared = str(resp.headers.get("content-length", "")).strip()
+                    if declared.isdigit() and int(declared) > max_bytes:
+                        raise LidarrApiError("Lidarr artwork exceeds the size limit")
+                    validator = str(resp.headers.get("etag") or resp.headers.get("last-modified") or "")[:200]
+                    body = bytearray()
+                    for chunk in resp.iter_bytes():
+                        body.extend(chunk)
+                        if len(body) > max_bytes:
+                            raise LidarrApiError("Lidarr artwork exceeds the size limit")
+                        if _monotonic() > deadline:
+                            raise LidarrApiError("Lidarr artwork download timed out")
+                    if _monotonic() > deadline:
+                        raise LidarrApiError("Lidarr artwork download timed out")
+        except httpx.HTTPError as exc:
+            raise LidarrApiError(f"Could not reach Lidarr ({type(exc).__name__})") from exc
+        return MediaCover(bytes(body), content_type, validator)

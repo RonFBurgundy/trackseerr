@@ -1,109 +1,92 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { SystemEventItem } from '@/types/models';
 import { getSystemEvents, clearSystemEvents } from '@/services/systemService';
 import { errorMessage } from '@/services/apiClient';
+import { useVirtualPagedList, type FetchPage, type VirtualPagedList } from './useVirtualPagedList';
 
 export const EVENTS_PAGE_SIZE = 50;
 
 export interface UseSystemEventsReturn {
-  events: SystemEventItem[];
-  total: number;
-  page: number;
-  totalPages: number;
-  isLoading: boolean;
-  error: string | null;
+  list: VirtualPagedList<SystemEventItem>;
   isClearing: boolean;
+  /** Failure of the clear action (list load errors live on `list.error`). */
+  clearError: string | null;
   severity: string;
   eventType: string;
   searchInput: string;
   setSearchInput: (v: string) => void;
   setSeverity: (v: string) => void;
   setEventType: (v: string) => void;
-  setPage: React.Dispatch<React.SetStateAction<number>>;
   submitSearch: () => void;
-  refresh: () => Promise<void>;
   clear: () => Promise<void>;
 }
 
+const getKey = (e: SystemEventItem): number => e.id;
+
+/** System events, newest first, as a virtualized list: filters reset it, there are no page numbers. */
 export function useSystemEvents(): UseSystemEventsReturn {
-  const [events, setEvents] = useState<SystemEventItem[]>([]);
-  const [total, setTotal] = useState<number>(0);
-  const [page, setPage] = useState<number>(1);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-  const [severity, setSeverityState] = useState<string>('all');
-  const [eventType, setEventTypeState] = useState<string>('all');
+  const [severity, setSeverity] = useState<string>('all');
+  const [eventType, setEventType] = useState<string>('all');
   const [searchInput, setSearchInput] = useState<string>('');
   const [activeSearch, setActiveSearch] = useState<string>('');
   const [isClearing, setIsClearing] = useState<boolean>(false);
+  const [clearError, setClearError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await getSystemEvents({
-        page,
-        page_size: EVENTS_PAGE_SIZE,
-        event_type: eventType !== 'all' ? eventType : undefined,
-        severity: severity !== 'all' ? severity : undefined,
-        search: activeSearch.trim() || undefined,
-      });
-      setEvents(res.items || []);
-      setTotal(res.total || 0);
-    } catch (err: unknown) {
-      setError(errorMessage(err, 'Failed to fetch system events'));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [page, eventType, severity, activeSearch]);
+  const filters = useMemo(
+    () => ({
+      severity: severity !== 'all' ? severity : '',
+      event_type: eventType !== 'all' ? eventType : '',
+      search: activeSearch.trim(),
+    }),
+    [severity, eventType, activeSearch]
+  );
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const fetchPage = useCallback<FetchPage<SystemEventItem>>(async (req) => {
+    const res = await getSystemEvents({
+      page: req.page,
+      page_size: req.pageSize,
+      event_type: req.filters.event_type || undefined,
+      severity: req.filters.severity || undefined,
+      search: req.filters.search || undefined,
+    });
+    return { items: res.items || [], total: res.total || 0 };
+  }, []);
 
-  const setSeverity = (v: string) => {
-    setPage(1);
-    setSeverityState(v);
-  };
-  const setEventType = (v: string) => {
-    setPage(1);
-    setEventTypeState(v);
-  };
-  const submitSearch = () => {
-    setPage(1);
-    setActiveSearch(searchInput);
-  };
+  const list = useVirtualPagedList<SystemEventItem>(fetchPage, {
+    pageSize: EVENTS_PAGE_SIZE,
+    sortKey: 'created_at',
+    sortDir: 'desc',
+    filters,
+    getKey,
+  });
+  const { reload } = list;
+
+  const submitSearch = useCallback(() => setActiveSearch(searchInput), [searchInput]);
 
   const clear = useCallback(async () => {
     setIsClearing(true);
+    setClearError(null);
     try {
       await clearSystemEvents();
-      setPage(1);
-      await refresh();
+      reload();
     } catch (err: unknown) {
-      setError(errorMessage(err, 'Failed to clear system events'));
+      setClearError(errorMessage(err, 'Failed to clear system events'));
     } finally {
       setIsClearing(false);
     }
-  }, [refresh]);
+  }, [reload]);
 
   return {
-    events,
-    total,
-    page,
-    totalPages: Math.max(1, Math.ceil(total / EVENTS_PAGE_SIZE)),
-    isLoading,
-    error,
+    list,
     isClearing,
+    clearError,
     severity,
     eventType,
     searchInput,
     setSearchInput,
     setSeverity,
     setEventType,
-    setPage,
     submitSearch,
-    refresh,
     clear,
   };
 }

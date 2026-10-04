@@ -118,13 +118,21 @@ export interface ArtistItem {
   disambiguation?: string;
   genres?: string[] | string;
   images?: Array<{ cover_type: string; url: string }>;
-  image_url?: string;
-  banner_url?: string;
-  bio?: string;
-  country?: string;
-  mbid?: string;
+  /** Null when the record has no artwork (Lidarr mode); never a broken URL. */
+  image_url?: string | null;
+  banner_url?: string | null;
+  bio?: string | null;
+  country?: string | null;
+  mbid?: string | null;
   album_count?: number;
   track_count?: number;
+  track_file_count?: number;
+  size_bytes?: number;
+  path?: string | null;
+  status?: string | null;
+  added_at?: string | null;
+  /** `lidarr` for records served live from Lidarr; absent or `native` otherwise. */
+  source?: 'native' | 'lidarr';
 }
 
 export interface AlbumItem {
@@ -133,14 +141,21 @@ export interface AlbumItem {
   artist_name?: string;
   title: string;
   monitored: boolean;
-  release_date?: string;
-  album_type?: string;
+  release_date?: string | null;
+  year?: number | null;
+  album_type?: string | null;
   genres?: string[];
   images?: Array<{ cover_type: string; url: string }>;
-  cover_url?: string;
+  cover_url?: string | null;
   track_count?: number;
+  total_tracks?: number;
+  track_file_count?: number;
+  size_bytes?: number;
+  mbid?: string | null;
+  added_at?: string | null;
   mb_release_group_id?: string;
   mb_release_id?: string;
+  source?: 'native' | 'lidarr';
 }
 
 export interface TrackItem {
@@ -148,10 +163,18 @@ export interface TrackItem {
   album_id: number | string;
   artist_id: number | string;
   title: string;
+  /** Joined by the track list endpoints. */
+  artist_name?: string;
+  album_title?: string;
+  added_at?: string;
   track_number?: number;
   disc_number?: number;
+  /** Both list backends send `duration_seconds`; `duration_ms` is kept for older payloads. */
+  duration_seconds?: number | null;
   duration_ms?: number;
-  monitored: boolean;
+  /** `null` when the backend cannot tell (Lidarr mode): show no monitor indicator rather than "Unmonitored". */
+  monitored: boolean | null;
+  source?: 'native' | 'lidarr';
   file_path?: string;
   has_file?: boolean;
   preview_url?: string;
@@ -165,6 +188,8 @@ export interface TrackItem {
     bits_per_sample?: number;
     size_bytes?: number;
     cutoff_met?: boolean;
+    /** Lidarr mode: the quality name Lidarr reports for the file (e.g. "FLAC", "MP3-320"). */
+    quality?: string;
   } | null;
 }
 

@@ -1,12 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
-import type { ListSortDir, WantedCutoffRecord, WantedListName, WantedRecord } from '@/types/activity';
-import { getWantedCutoff, getWantedMissing, searchWanted } from '@/services/activityService';
+import type { IndexFetcher, ListSortDir, WantedCutoffRecord, WantedListName, WantedRecord } from '@/types/activity';
+import { getWantedCutoff, getWantedIndex, getWantedMissing, searchWanted } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
-import { pagedFetcher, useInfiniteList } from '@/hooks/useInfiniteList';
+import { pagedFetcher, useVirtualPagedList } from '@/hooks/useVirtualPagedList';
+import { useGroupIndex } from '@/hooks/useGroupIndex';
 import { useListSelection } from '@/hooks/useListSelection';
 import { ConfirmDangerButton, TapeDeckButton } from '@/components/ui';
-import { FlatList, ListPanel, formatCalendarDate, formatDateTime, orDash, type FlatListColumn } from '@/components/lists';
+import {
+  FlatList,
+  ListPanel,
+  ScrubberRail,
+  formatCalendarDate,
+  formatDateTime,
+  orDash,
+  type FlatListColumn,
+} from '@/components/lists';
 
 export interface WantedPanelProps {
   list: WantedListName;
@@ -30,11 +39,15 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
   const [busy, setBusy] = useState<boolean>(false);
   const { selected, setSelected, clear } = useListSelection();
 
-  const list = useInfiniteList<WantedRow>(isCutoff ? fetchCutoff : fetchMissing, {
+  const list = useVirtualPagedList<WantedRow>(isCutoff ? fetchCutoff : fetchMissing, {
     sortKey,
     sortDir,
     getKey,
   });
+
+  const fetchIndex = useCallback<IndexFetcher>((q, signal) => getWantedIndex(listName, q, signal), [listName]);
+  // Native mode only; Lidarr answers `groups: []`, which hides the rail.
+  const index = useGroupIndex(fetchIndex, { sortKey, sortDir, total: list.total, enabled: list.mode !== 'lidarr' });
 
   const onSortChange = useCallback((key: string, dir: ListSortDir) => {
     setSortKey(key);
@@ -76,17 +89,17 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
 
   const columns = useMemo<FlatListColumn<WantedRow>[]>(() => {
     const cols: FlatListColumn<WantedRow>[] = [
-      { key: 'artist', label: 'Artist', sortable: true, width: 'minmax(0,1.1fr)', render: (r) => orDash(r.artist) },
-      { key: 'album', label: 'Album', sortable: true, width: 'minmax(0,1.1fr)', render: (r) => orDash(r.album) },
-      { key: 'title', label: 'Title', sortable: true, width: 'minmax(0,1.2fr)', render: (r) => (r.item_type === 'album' ? '-' : orDash(r.title)) },
-      { key: 'release_date', label: 'Release date', sortable: true, width: '120px', render: (r) => formatCalendarDate(r.release_date) },
+      { key: 'artist', label: 'Artist', sortable: true, width: 'minmax(0,1.1fr)', mobile: 'title', render: (r) => orDash(r.artist) },
+      { key: 'album', label: 'Album', sortable: true, width: 'minmax(0,1.1fr)', mobile: 'sub', render: (r) => orDash(r.album) },
+      { key: 'title', label: 'Title', sortable: true, width: 'minmax(0,1.2fr)', mobile: 'sub', render: (r) => (r.item_type === 'album' ? '-' : orDash(r.title)) },
+      { key: 'release_date', label: 'Release date', sortable: true, width: '120px', mobile: 'meta', render: (r) => formatCalendarDate(r.release_date) },
       // Lidarr has no sort key for the last search time, so the column stays plain in lidarr mode.
-      { key: 'last_searched_at', label: 'Last searched', sortable: !lidarrMode, width: '150px', render: (r) => formatDateTime(r.last_searched_at) },
+      { key: 'last_searched_at', label: 'Last searched', sortable: !lidarrMode, width: '150px', mobile: 'meta', render: (r) => formatDateTime(r.last_searched_at) },
     ];
     if (isCutoff) {
       cols.push(
-        { key: 'current_quality', label: 'Current', width: '100px', render: (r) => orDash(r.current_quality) },
-        { key: 'cutoff_quality', label: 'Cutoff', width: '100px', render: (r) => orDash(r.cutoff_quality) }
+        { key: 'current_quality', label: 'Current', width: '100px', mobile: 'meta', render: (r) => orDash(r.current_quality) },
+        { key: 'cutoff_quality', label: 'Cutoff', width: '100px', mobile: 'meta', render: (r) => orDash(r.cutoff_quality) }
       );
     }
     return cols;
@@ -132,20 +145,16 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
       <FlatList
         ariaLabel={isCutoff ? 'Cutoff unmet' : 'Missing'}
         columns={columns}
-        items={list.items}
-        total={list.total}
-        loading={list.loading}
-        error={list.error}
-        hasMore={list.hasMore}
-        onLoadMore={list.loadMore}
-        onReload={list.reload}
+        list={list}
         getKey={getKey}
         sortKey={sortKey}
         sortDir={sortDir}
         onSortChange={onSortChange}
         selectedKeys={selected}
         onSelectedKeysChange={setSelected}
+        mobileLayout="compact"
         emptyMessage={isCutoff ? 'Nothing is below its cutoff.' : 'Nothing is missing.'}
+        rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
       />
     </ListPanel>
   );

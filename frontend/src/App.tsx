@@ -202,7 +202,10 @@ const MainApp: React.FC = () => {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-[#0a0a0a] text-white selection:bg-[#e5a00d] selection:text-black">
+    <div
+      className="h-screen w-screen flex flex-col overflow-hidden bg-[#0a0a0a] text-white selection:bg-[#e5a00d] selection:text-black"
+      style={{ height: '100dvh' }}
+    >
       {/* Sticky Header with integrated navigation */}
       <Header
         user={auth.user}
@@ -233,7 +236,9 @@ const MainApp: React.FC = () => {
       {/* Main Content Area - Locked scrolling inside container */}
       <main
         ref={mainRef}
-        className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-4 sm:px-6 py-4 pb-28"
+        className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-4 sm:px-6 pt-4"
+        // Bottom room: the safe-area inset, plus the audio bar while a preview is loaded. Lists size to this edge.
+        style={{ paddingBottom: `calc(${audioPlayer.currentTrack ? '6.5rem' : '1rem'} + env(safe-area-inset-bottom, 0px))` }}
       >
         {auth.isLoading ? (
           <div className="flex flex-col items-center justify-center py-28 gap-3">

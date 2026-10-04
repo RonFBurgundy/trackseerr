@@ -168,6 +168,21 @@ def native_queue(db: Database, page: int, page_size: int, sort_key: str, sort_di
     return _page(SOURCE_NATIVE, page, page_size, total, sort_key, sort_dir, [native_queue_record(r, now) for r in rows])
 
 
+def empty_index(sort_key: str, sort_dir: str) -> dict[str, Any]:
+    """The group index of a list that has none (Lidarr mode: Lidarr pages server-side)."""
+    return {"sort_key": sort_key, "sort_dir": sort_dir, "total": 0, "groups": []}
+
+
+def native_wanted_index(db: Database, kind: str, sort_key: str, sort_dir: str) -> dict[str, Any]:
+    total, groups = db.wanted_index(kind, sort_key, sort_dir)
+    return {"sort_key": sort_key, "sort_dir": sort_dir, "total": total, "groups": groups}
+
+
+def native_history_index(db: Database, sort_dir: str, event: Optional[str]) -> dict[str, Any]:
+    total, groups = db.download_history_index(sort_dir, event=event)
+    return {"sort_key": "date", "sort_dir": sort_dir, "total": total, "groups": groups}
+
+
 # ------------------------------------------------------------------------------------------- native: history etc.
 
 

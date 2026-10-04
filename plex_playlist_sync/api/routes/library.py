@@ -12,16 +12,18 @@ import logging
 import os
 from pathlib import Path
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 import httpx
 
+from plex_playlist_sync import library_paging as paging
 from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
+from plex_playlist_sync import lidarr_library
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.acquisition_worker import (
     place_audio_file,
@@ -39,12 +41,28 @@ from plex_playlist_sync.api.dependencies import (
     require_core_tier,
     require_user,
 )
+from plex_playlist_sync.api.routes.activity import (
+    MAX_PAGE,
+    SORT_DIR_PATTERN,
+    lidarr_call,
+    lidarr_numeric_id,
+    require_lidarr,
+    validate_sort_key,
+)
 from plex_playlist_sync.clients.core_client import CoreClient
 from plex_playlist_sync.clients.discovery import DiscoveryClient
-from plex_playlist_sync.clients.lidarr import LidarrClient
+from plex_playlist_sync.clients.lidarr import (
+    LidarrApiError,
+    LidarrBadArtwork,
+    LidarrClient,
+    LidarrNotFound,
+    MediaCover,
+    _exc_text,
+)
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.config import Config
+from plex_playlist_sync.library_manager import MODE_LIDARR, ModeChanged, get_library_mode, work_guard
 from plex_playlist_sync.library_availability import get_item_availability
 from plex_playlist_sync.mediacover import mediacover_service
 from plex_playlist_sync.models import (
@@ -225,22 +243,388 @@ def get_library_stats(
     return db.get_library_stats()
 
 
-@router.get("/artists")
-def list_artists(
-    monitored_only: bool = False,
-    query: Optional[str] = None,
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+# -------------------------------------------------------------------------
+# Virtualized lists: paged records and the scrubber group index
+# -------------------------------------------------------------------------
+
+_SORT_DIR = SORT_DIR_PATTERN
+
+# -------------------------------------------------------------------------
+# Lidarr mode: the same routes serve Lidarr's library live (ids are Lidarr numeric ids)
+# -------------------------------------------------------------------------
+
+NATIVE_ONLY_DETAIL = "Not available while Lidarr manages the library"
+
+
+def _is_lidarr(db: Database) -> bool:
+    return get_library_mode(db) == MODE_LIDARR
+
+
+def native_only(
     db: Database = Depends(get_db),
     _admin: dict[str, Any] = Depends(require_admin),
-) -> list[dict[str, Any]]:
-    """Lists library artists with optional filtering, search query, and pagination, attaching album and track counts."""
-    artists = db.list_library_artists(
-        monitored_only=monitored_only, query=query, limit=limit, offset=offset
-    )
-    if not artists:
-        return []
+) -> None:
+    """Route dependency: 409 while Lidarr manages the library (after the admin check, so non-admins still get 403)."""
+    if _is_lidarr(db):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NATIVE_ONLY_DETAIL)
 
+
+def _lidarr_fetch(fn: Callable[[], Any], what: str) -> Any:
+    try:
+        return fn()
+    except LidarrNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{what} not found")
+    except LidarrApiError as exc:
+        logger.warning("Lidarr request failed: %s", redact_text(_exc_text(exc)))
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=redact_text(_exc_text(exc)))
+
+
+def _lidarr_mutation(db: Database, fn: Callable[[], Any], what: str) -> Any:
+    """A Lidarr mutation under ``work_guard(lidarr)``; the manager flipping mid-flight is a 409."""
+    try:
+        with work_guard(db, MODE_LIDARR):
+            return _lidarr_fetch(fn, what)
+    except ModeChanged:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The library manager changed while this was running; reload and try again.",
+        )
+
+
+_PLACEHOLDER = "/placeholder.svg"
+
+
+def _image_headers(cache_control: str, etag: Optional[str] = None) -> dict[str, str]:
+    """Headers for every artwork response: never sniffed, never scriptable even if navigated to directly."""
+    headers = {
+        "Cache-Control": cache_control,
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+    }
+    if etag:
+        headers["ETag"] = etag
+    return headers
+
+
+def _placeholder() -> RedirectResponse:
+    return RedirectResponse(url=_PLACEHOLDER, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+
+def _lidarr_image(
+    kind_list: str,
+    kind_cover: str,
+    raw_id: str,
+    what: str,
+    types: tuple[str, ...],
+    client: Optional[LidarrClient],
+    if_none_match: Optional[str] = None,
+) -> Response:
+    """Streams one Lidarr media cover through the core; the API key never leaves the server.
+
+    Only raster types pass (JPEG/PNG/WebP/GIF); anything else becomes the placeholder. Concurrency is bounded, a
+    saturated proxy answers 503 + Retry-After, and a weak ETag lets browsers revalidate with a 304.
+    """
+    numeric = lidarr_numeric_id(raw_id, what)
+    lidarr = require_lidarr(client)
+    name = _lidarr_fetch(lambda: lidarr_library.cover_file(kind_list, lidarr, numeric, types), what)
+    if name is None:
+        return _placeholder()
+    identity = lidarr_library._identity(lidarr)
+    known = lidarr_library.known_cover_etag(identity, kind_cover, numeric, name)
+    if known and lidarr_library.etag_matches(if_none_match, known):
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=_image_headers(_COVER_CACHE, known))
+
+    def fetch() -> Optional[MediaCover]:
+        try:
+            return lidarr.fetch_mediacover(
+                kind_cover, numeric, name, lidarr_library.MAX_COVER_BYTES, lidarr_library.COVER_DEADLINE_SECONDS
+            )
+        except LidarrNotFound:
+            return None
+        except LidarrBadArtwork as exc:
+            logger.warning(
+                "Lidarr %s %s artwork refused: %s", kind_cover, numeric, redact_text(_exc_text(exc))
+            )
+            return None
+
+    try:
+        with lidarr_library.cover_slot():
+            fetched = _lidarr_fetch(fetch, what)
+    except lidarr_library.CoverBusy:
+        logger.warning("Lidarr artwork proxy saturated; answering 503 for %s %s", kind_cover, numeric)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Artwork proxy is busy; retry shortly",
+            headers={"Retry-After": "2"},
+        )
+    if fetched is None:
+        return _placeholder()
+    etag = lidarr_library.cover_etag(identity, kind_cover, numeric, name, fetched.validator)
+    lidarr_library.remember_cover_etag(identity, kind_cover, numeric, name, etag)
+    if lidarr_library.etag_matches(if_none_match, etag):
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=_image_headers(_COVER_CACHE, etag))
+    return Response(content=fetched.body, media_type=fetched.content_type, headers=_image_headers(_COVER_CACHE, etag))
+
+
+_COVER_CACHE = "private, max-age=86400"
+
+
+def _library_sort_key(kind: str, sort_key: Optional[str]) -> str:
+    return validate_sort_key(sort_key, paging.sort_keys(kind), paging.default_sort_key(kind))
+
+
+def _library_filters(kind: str, artist_id: Optional[str], album_id: Optional[str]) -> dict[str, Optional[str]]:
+    filters: dict[str, Optional[str]] = {}
+    if kind in ("albums", "tracks"):
+        filters["artist_id"] = artist_id
+    if kind == "tracks":
+        filters["album_id"] = album_id
+    return filters
+
+
+def _paged(
+    kind: str,
+    page: int,
+    page_size: int,
+    sort_key: Optional[str],
+    sort_dir: str,
+    q: Optional[str],
+    monitored_only: bool,
+    artist_id: Optional[str],
+    album_id: Optional[str],
+    db: Database,
+    enrich: Callable[[Database, list[dict[str, Any]]], list[dict[str, Any]]],
+) -> dict[str, Any]:
+    key = _library_sort_key(kind, sort_key)
+    rows, total = paging.page_library(
+        db, kind, page, page_size, key, sort_dir, q, monitored_only, _library_filters(kind, artist_id, album_id)
+    )
+    return {
+        "mode": "native",
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "sort_key": key,
+        "sort_dir": sort_dir,
+        "records": enrich(db, rows) if rows else [],
+    }
+
+
+def _index(
+    kind: str,
+    sort_key: Optional[str],
+    sort_dir: str,
+    q: Optional[str],
+    monitored_only: bool,
+    artist_id: Optional[str],
+    album_id: Optional[str],
+    db: Database,
+) -> dict[str, Any]:
+    key = _library_sort_key(kind, sort_key)
+    total, groups = paging.index_library(
+        db, kind, key, sort_dir, q, monitored_only, _library_filters(kind, artist_id, album_id)
+    )
+    return {"sort_key": key, "sort_dir": sort_dir, "total": total, "groups": groups}
+
+
+def _lidarr_paged(
+    kind: str,
+    page: int,
+    page_size: int,
+    sort_key: Optional[str],
+    sort_dir: str,
+    q: Optional[str],
+    monitored_only: bool,
+    artist_id: Optional[str],
+    client: Optional[LidarrClient],
+) -> dict[str, Any]:
+    key = _library_sort_key(kind, sort_key)
+    lidarr = require_lidarr(client)
+    records, total = _lidarr_fetch(
+        lambda: lidarr_library.list_page(kind, lidarr, page, page_size, key, sort_dir, q, monitored_only, artist_id),
+        "Library",
+    )
+    return {
+        "mode": "lidarr",
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "sort_key": key,
+        "sort_dir": sort_dir,
+        "records": records,
+    }
+
+
+def _lidarr_index(
+    kind: str,
+    sort_key: Optional[str],
+    sort_dir: str,
+    q: Optional[str],
+    monitored_only: bool,
+    artist_id: Optional[str],
+    client: Optional[LidarrClient],
+) -> dict[str, Any]:
+    key = _library_sort_key(kind, sort_key)
+    lidarr = require_lidarr(client)
+    total, groups = _lidarr_fetch(
+        lambda: lidarr_library.list_index(kind, lidarr, key, sort_dir, q, monitored_only, artist_id), "Library"
+    )
+    return {"mode": "lidarr", "sort_key": key, "sort_dir": sort_dir, "total": total, "groups": groups}
+
+
+def _lidarr_album_tracks(album_id: Optional[str], client: Optional[LidarrClient]) -> list[lidarr_library.Row]:
+    """Tracks of one album from Lidarr; Lidarr has no global track list, so ``album_id`` is required (else 409)."""
+    if not album_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NATIVE_ONLY_DETAIL)
+    numeric = lidarr_numeric_id(album_id, "Album")
+    lidarr = require_lidarr(client)
+    return _lidarr_fetch(lambda: lidarr_library.album_track_rows(lidarr, numeric), "Album")
+
+
+def _lidarr_tracks_paged(
+    page: int,
+    page_size: int,
+    sort_key: Optional[str],
+    sort_dir: str,
+    q: Optional[str],
+    monitored_only: bool,
+    album_id: Optional[str],
+    client: Optional[LidarrClient],
+) -> dict[str, Any]:
+    key = _library_sort_key("tracks", sort_key)
+    rows = lidarr_library.filter_rows(_lidarr_album_tracks(album_id, client), q, monitored_only)
+    return {
+        "mode": "lidarr",
+        "page": page,
+        "page_size": page_size,
+        "total": len(rows),
+        "sort_key": key,
+        "sort_dir": sort_dir,
+        "records": lidarr_library.page_rows("tracks", rows, page, page_size, key, sort_dir),
+    }
+
+
+def _lidarr_tracks_index(
+    sort_key: Optional[str], sort_dir: str, album_id: Optional[str], client: Optional[LidarrClient]
+) -> dict[str, Any]:
+    """No scrubber groups for tracks in Lidarr mode (an album's tracks are a short list)."""
+    key = _library_sort_key("tracks", sort_key)
+    total = len(_lidarr_album_tracks(album_id, client)) if album_id else 0
+    return {"mode": "lidarr", "sort_key": key, "sort_dir": sort_dir, "total": total, "groups": []}
+
+
+@router.get("/artists/paged", dependencies=[Depends(require_core_tier)])
+def paged_artists(
+    page: int = Query(1, ge=1, le=MAX_PAGE),
+    page_size: int = Query(50, ge=1, le=200),
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("asc", pattern=_SORT_DIR),
+    q: Optional[str] = Query(None, max_length=200),
+    monitored_only: bool = False,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """A page of library artists (with counts) plus the filtered total."""
+    if _is_lidarr(db):
+        return _lidarr_paged("artists", page, page_size, sort_key, sort_dir, q, monitored_only, None, client)
+    return _paged("artists", page, page_size, sort_key, sort_dir, q, monitored_only, None, None, db, _enrich_artists)
+
+
+@router.get("/artists/index", dependencies=[Depends(require_core_tier)])
+def artists_index(
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("asc", pattern=_SORT_DIR),
+    q: Optional[str] = Query(None, max_length=200),
+    monitored_only: bool = False,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Scrubber groups ``[{label, offset, count}]`` for the artists list, in its order."""
+    if _is_lidarr(db):
+        return _lidarr_index("artists", sort_key, sort_dir, q, monitored_only, None, client)
+    return _index("artists", sort_key, sort_dir, q, monitored_only, None, None, db)
+
+
+@router.get("/albums/paged", dependencies=[Depends(require_core_tier)])
+def paged_albums(
+    page: int = Query(1, ge=1, le=MAX_PAGE),
+    page_size: int = Query(50, ge=1, le=200),
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("asc", pattern=_SORT_DIR),
+    q: Optional[str] = Query(None, max_length=200),
+    monitored_only: bool = False,
+    artist_id: Optional[str] = None,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """A page of library albums (with artist name and track count) plus the filtered total."""
+    if _is_lidarr(db):
+        return _lidarr_paged("albums", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, client)
+    return _paged("albums", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, None, db, _enrich_albums)
+
+
+@router.get("/albums/index", dependencies=[Depends(require_core_tier)])
+def albums_index(
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("asc", pattern=_SORT_DIR),
+    q: Optional[str] = Query(None, max_length=200),
+    monitored_only: bool = False,
+    artist_id: Optional[str] = None,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Scrubber groups for the albums list, in its order."""
+    if _is_lidarr(db):
+        return _lidarr_index("albums", sort_key, sort_dir, q, monitored_only, artist_id, client)
+    return _index("albums", sort_key, sort_dir, q, monitored_only, artist_id, None, db)
+
+
+@router.get("/tracks/paged", dependencies=[Depends(require_core_tier)])
+def paged_tracks(
+    page: int = Query(1, ge=1, le=MAX_PAGE),
+    page_size: int = Query(50, ge=1, le=200),
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("asc", pattern=_SORT_DIR),
+    q: Optional[str] = Query(None, max_length=200),
+    monitored_only: bool = False,
+    artist_id: Optional[str] = None,
+    album_id: Optional[str] = None,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """A page of library tracks (with artist, album and file details) plus the filtered total."""
+    if _is_lidarr(db):
+        return _lidarr_tracks_paged(page, page_size, sort_key, sort_dir, q, monitored_only, album_id, client)
+    return _paged(
+        "tracks", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, album_id, db, _enrich_tracks
+    )
+
+
+@router.get("/tracks/index", dependencies=[Depends(require_core_tier)])
+def tracks_index(
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("asc", pattern=_SORT_DIR),
+    q: Optional[str] = Query(None, max_length=200),
+    monitored_only: bool = False,
+    artist_id: Optional[str] = None,
+    album_id: Optional[str] = None,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Scrubber groups for the tracks list, in its order."""
+    if _is_lidarr(db):
+        return _lidarr_tracks_index(sort_key, sort_dir, album_id, client)
+    return _index("tracks", sort_key, sort_dir, q, monitored_only, artist_id, album_id, db)
+
+
+def _enrich_artists(db: Database, artists: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attaches album/track counts and a resolved image URL to library artists."""
     artist_ids = [a["id"] for a in artists]
     placeholders = ",".join("?" for _ in artist_ids)
     with db._lock:
@@ -289,6 +673,24 @@ def list_artists(
         a_dict["image_url"] = img
         results.append(a_dict)
     return results
+
+
+@router.get("/artists")
+def list_artists(
+    monitored_only: bool = False,
+    query: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> list[dict[str, Any]]:
+    """Lists library artists with optional filtering, search query, and pagination, attaching album and track counts."""
+    artists = db.list_library_artists(
+        monitored_only=monitored_only, query=query, limit=limit, offset=offset
+    )
+    if not artists:
+        return []
+    return _enrich_artists(db, artists)
 
 
 @router.post("/artists/ingest", dependencies=[Depends(require_core_tier)])
@@ -477,13 +879,18 @@ def ingest_artist(
     }
 
 
-@router.get("/artists/{artist_id}")
+@router.get("/artists/{artist_id}", dependencies=[Depends(require_core_tier)])
 def get_artist(
     artist_id: str,
     db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Retrieves a single artist by ID, including its child albums and image_url."""
+    if _is_lidarr(db):
+        numeric = lidarr_numeric_id(artist_id, "Artist")
+        lidarr = require_lidarr(client)
+        return _lidarr_fetch(lambda: lidarr_library.artist_detail(lidarr, numeric), "Artist")
     artist = db.get_library_artist(artist_id)
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
@@ -522,13 +929,17 @@ def get_artist(
     return result
 
 
-@router.get("/artists/{artist_id}/image")
+@router.get("/artists/{artist_id}/image", dependencies=[Depends(require_core_tier)])
 def get_artist_image(
     artist_id: str,
     db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    if_none_match: Optional[str] = Header(None),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> Any:
     """Serves local artist artwork or redirects to remote image / first album cover / placeholder."""
+    if _is_lidarr(db):
+        return _lidarr_image("artists", "artist", artist_id, "Artist", ("poster", "cover"), client, if_none_match)
     artist = db.get_library_artist(artist_id)
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
@@ -545,7 +956,7 @@ def get_artist_image(
                         return FileResponse(
                             str(cand),
                             media_type=media_type,
-                            headers={"Cache-Control": "public, max-age=86400"},
+                            headers=_image_headers("public, max-age=86400"),
                         )
         except Exception as exc:
             logger.debug("Failed validating artist image path '%s': %s", artist_path_str, exc)
@@ -556,7 +967,7 @@ def get_artist_image(
         return FileResponse(
             str(cached_art),
             media_type="image/jpeg",
-            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+            headers=_image_headers("public, max-age=31536000, immutable"),
         )
 
     # Else if artist has image_url (http/https), return RedirectResponse
@@ -591,13 +1002,17 @@ def get_artist_image(
     return RedirectResponse(url="/placeholder.svg", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
-@router.get("/artists/{artist_id}/banner")
+@router.get("/artists/{artist_id}/banner", dependencies=[Depends(require_core_tier)])
 def get_artist_banner(
     artist_id: str,
     db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    if_none_match: Optional[str] = Header(None),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> Any:
     """Serves cached or local artist banner artwork."""
+    if _is_lidarr(db):
+        return _lidarr_image("artists", "artist", artist_id, "Artist", ("banner",), client, if_none_match)
     artist = db.get_library_artist(artist_id)
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
@@ -614,7 +1029,7 @@ def get_artist_banner(
                         return FileResponse(
                             str(cand),
                             media_type=media_type,
-                            headers={"Cache-Control": "public, max-age=86400"},
+                            headers=_image_headers("public, max-age=86400"),
                         )
         except Exception as exc:
             logger.debug("Failed validating artist banner path '%s': %s", artist_path_str, exc)
@@ -624,7 +1039,7 @@ def get_artist_banner(
         return FileResponse(
             str(cached_banner),
             media_type="image/jpeg",
-            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+            headers=_image_headers("public, max-age=31536000, immutable"),
         )
 
     banner_url = artist.get("banner_url")
@@ -639,9 +1054,21 @@ def set_artist_monitored(
     artist_id: str,
     body: ArtistMonitoredRequest,
     db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Updates monitoring status for an artist, optionally cascading to albums and tracks or applying a preset."""
+    if _is_lidarr(db):
+        numeric = lidarr_numeric_id(artist_id, "Artist")
+        lidarr = require_lidarr(client)
+        preset = body.monitor_option
+        if preset is not None:
+            return _lidarr_mutation(
+                db, lambda: lidarr_library.apply_monitor_preset(lidarr, numeric, preset), "Artist"
+            )
+        return _lidarr_mutation(
+            db, lambda: lidarr_library.set_artist_monitored(lidarr, numeric, body.monitored), "Artist"
+        )
     artist = db.get_library_artist(artist_id)
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
@@ -1395,9 +1822,15 @@ def refresh_artist(
     db: Database = Depends(get_db),
     discovery_client: DiscoveryClient = Depends(get_discovery_client),
     enricher: MbidEnricherClient = Depends(get_mbid_enricher),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Refreshes artist discography from Deezer/discovery metadata and enriches via MusicBrainz."""
+    if _is_lidarr(db):
+        numeric = lidarr_numeric_id(artist_id, "Artist")
+        lidarr = require_lidarr(client)
+        _lidarr_mutation(db, lambda: lidarr_library.refresh_artist(lidarr, numeric), "Artist")
+        return {"success": True, "artist_id": artist_id, "message": "Refresh queued in Lidarr"}
     artist = db.get_library_artist(artist_id)
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
@@ -1410,7 +1843,23 @@ def refresh_artist(
     )
 
 
-@router.delete("/artists/{artist_id}", dependencies=[Depends(require_core_tier)])
+@router.post("/artists/{artist_id}/search", dependencies=[Depends(require_core_tier)])
+def search_artist(
+    artist_id: str,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Asks Lidarr to search for every monitored missing album of the artist (Lidarr mode only)."""
+    if not _is_lidarr(db):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only available while Lidarr manages the library")
+    numeric = lidarr_numeric_id(artist_id, "Artist")
+    lidarr = require_lidarr(client)
+    _lidarr_mutation(db, lambda: lidarr_library.search_artist(lidarr, numeric), "Artist")
+    return {"success": True, "message": "Search queued in Lidarr"}
+
+
+@router.delete("/artists/{artist_id}", dependencies=[Depends(require_core_tier), Depends(native_only)])
 def delete_artist(
     artist_id: str,
     delete_files: bool = Query(False),
@@ -1438,23 +1887,8 @@ def delete_artist(
     return {"success": success}
 
 
-@router.get("/albums")
-def list_albums(
-    artist_id: Optional[str] = None,
-    monitored_only: bool = False,
-    query: Optional[str] = None,
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-    db: Database = Depends(get_db),
-    _admin: dict[str, Any] = Depends(require_admin),
-) -> list[dict[str, Any]]:
-    """Lists library albums with optional artist filtering, search query, and pagination, attaching artist name and track count."""
-    albums = db.list_library_albums(
-        artist_id=artist_id, monitored_only=monitored_only, query=query, limit=limit, offset=offset
-    )
-    if not albums:
-        return []
-
+def _enrich_albums(db: Database, albums: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attaches the artist name and track count to library albums."""
     album_ids = [a["id"] for a in albums]
     placeholders = ",".join("?" for _ in album_ids)
     with db._lock:
@@ -1478,13 +1912,37 @@ def list_albums(
     return results
 
 
-@router.get("/albums/{album_id}")
+@router.get("/albums")
+def list_albums(
+    artist_id: Optional[str] = None,
+    monitored_only: bool = False,
+    query: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> list[dict[str, Any]]:
+    """Lists library albums with optional artist filtering, search query, and pagination, attaching artist name and track count."""
+    albums = db.list_library_albums(
+        artist_id=artist_id, monitored_only=monitored_only, query=query, limit=limit, offset=offset
+    )
+    if not albums:
+        return []
+    return _enrich_albums(db, albums)
+
+
+@router.get("/albums/{album_id}", dependencies=[Depends(require_core_tier)])
 def get_album(
     album_id: str,
     db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Retrieves an album by ID, including its tracks and their linked library files."""
+    if _is_lidarr(db):
+        numeric = lidarr_numeric_id(album_id, "Album")
+        lidarr = require_lidarr(client)
+        return _lidarr_fetch(lambda: lidarr_library.album_detail(lidarr, numeric), "Album")
     album = db.get_library_album(album_id)
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
@@ -1497,13 +1955,17 @@ def get_album(
     return result
 
 
-@router.get("/albums/{album_id}/cover")
+@router.get("/albums/{album_id}/cover", dependencies=[Depends(require_core_tier)])
 def get_album_cover(
     album_id: str,
     db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    if_none_match: Optional[str] = Header(None),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> Any:
     """Serves local album cover artwork or redirects to remote artwork / placeholder."""
+    if _is_lidarr(db):
+        return _lidarr_image("albums", "album", album_id, "Album", ("cover",), client, if_none_match)
     album = db.get_library_album(album_id)
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
@@ -1536,7 +1998,7 @@ def get_album_cover(
         return FileResponse(
             str(local_img),
             media_type=media_type,
-            headers={"Cache-Control": "public, max-age=86400"},
+            headers=_image_headers("public, max-age=86400"),
         )
 
     cached_cover = mediacover_service.ensure_artwork("album_cover", album_id, remote_cover)
@@ -1544,7 +2006,7 @@ def get_album_cover(
         return FileResponse(
             str(cached_cover),
             media_type="image/jpeg",
-            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+            headers=_image_headers("public, max-age=31536000, immutable"),
         )
 
     if local_img:
@@ -1552,7 +2014,7 @@ def get_album_cover(
         return FileResponse(
             str(local_img),
             media_type=media_type,
-            headers={"Cache-Control": "public, max-age=86400"},
+            headers=_image_headers("public, max-age=86400"),
         )
 
     if remote_cover and (remote_cover.startswith("http://") or remote_cover.startswith("https://")):
@@ -1566,9 +2028,16 @@ def set_album_monitored(
     album_id: str,
     body: AlbumMonitoredRequest,
     db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Updates monitoring status for an album and optionally cascades to child tracks."""
+    if _is_lidarr(db):
+        numeric = lidarr_numeric_id(album_id, "Album")
+        lidarr = require_lidarr(client)
+        return _lidarr_mutation(
+            db, lambda: lidarr_library.set_album_monitored(lidarr, numeric, body.monitored), "Album"
+        )
     album = db.get_library_album(album_id)
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
@@ -1582,7 +2051,23 @@ def set_album_monitored(
     return updated or {}
 
 
-@router.delete("/albums/{album_id}", dependencies=[Depends(require_core_tier)])
+@router.post("/albums/{album_id}/search", dependencies=[Depends(require_core_tier)])
+def search_album(
+    album_id: str,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Asks Lidarr to search for the album (Lidarr mode only)."""
+    if not _is_lidarr(db):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only available while Lidarr manages the library")
+    numeric = lidarr_numeric_id(album_id, "Album")
+    lidarr = require_lidarr(client)
+    _lidarr_mutation(db, lambda: lidarr_library.search_album(lidarr, numeric), "Album")
+    return {"success": True, "message": "Search queued in Lidarr"}
+
+
+@router.delete("/albums/{album_id}", dependencies=[Depends(require_core_tier), Depends(native_only)])
 def delete_album(
     album_id: str,
     delete_files: bool = Query(False),
@@ -1610,26 +2095,8 @@ def delete_album(
     return {"success": success}
 
 
-@router.get("/tracks")
-def list_tracks(
-    album_id: Optional[str] = None,
-    artist_id: Optional[str] = None,
-    monitored_only: bool = False,
-    query: Optional[str] = None,
-    limit: int = Query(200, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-    db: Database = Depends(get_db),
-    _admin: dict[str, Any] = Depends(require_admin),
-) -> list[dict[str, Any]]:
-    """Lists library tracks with optional filtering and joins linked library file details."""
-    tracks = db.list_library_tracks(
-        album_id=album_id,
-        artist_id=artist_id,
-        monitored_only=monitored_only,
-        query=query,
-        limit=limit,
-        offset=offset,
-    )
+def _enrich_tracks(db: Database, tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attaches artist name, album title and the linked library file to library tracks."""
     artist_cache: dict[str, str] = {}
     album_cache: dict[str, str] = {}
     for t in tracks:
@@ -1655,7 +2122,30 @@ def list_tracks(
     return tracks
 
 
-@router.put("/tracks/{track_id}/monitored", dependencies=[Depends(require_core_tier)])
+@router.get("/tracks")
+def list_tracks(
+    album_id: Optional[str] = None,
+    artist_id: Optional[str] = None,
+    monitored_only: bool = False,
+    query: Optional[str] = None,
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> list[dict[str, Any]]:
+    """Lists library tracks with optional filtering and joins linked library file details."""
+    tracks = db.list_library_tracks(
+        album_id=album_id,
+        artist_id=artist_id,
+        monitored_only=monitored_only,
+        query=query,
+        limit=limit,
+        offset=offset,
+    )
+    return _enrich_tracks(db, tracks)
+
+
+@router.put("/tracks/{track_id}/monitored", dependencies=[Depends(require_core_tier), Depends(native_only)])
 def set_track_monitored(
     track_id: str,
     body: TrackMonitoredRequest,
@@ -1672,7 +2162,7 @@ def set_track_monitored(
     return updated or {}
 
 
-@router.delete("/tracks/{track_id}", dependencies=[Depends(require_core_tier)])
+@router.delete("/tracks/{track_id}", dependencies=[Depends(require_core_tier), Depends(native_only)])
 def delete_track(
     track_id: str,
     delete_files: bool = Query(False),
@@ -1698,7 +2188,7 @@ def delete_track(
     return {"success": success}
 
 
-@router.delete("/files/{file_id}", dependencies=[Depends(require_core_tier)])
+@router.delete("/files/{file_id}", dependencies=[Depends(require_core_tier), Depends(native_only)])
 def delete_file(
     file_id: str,
     delete_file_from_disk: bool = Query(True),
@@ -1773,7 +2263,7 @@ def get_availability(
 # 2. Filesystem Scanner Controls
 # -------------------------------------------------------------------------
 
-@router.post("/scan", dependencies=[Depends(require_core_tier)])
+@router.post("/scan", dependencies=[Depends(require_core_tier), Depends(native_only)])
 def trigger_scan(
     body: Optional[ScanRequest] = None,
     db: Database = Depends(get_db),
@@ -1802,7 +2292,7 @@ def get_scan_status(
     return library_scanner.get_status()
 
 
-@router.post("/scan/cancel", dependencies=[Depends(require_core_tier)])
+@router.post("/scan/cancel", dependencies=[Depends(require_core_tier), Depends(native_only)])
 def cancel_scan(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
@@ -1864,7 +2354,7 @@ def cancel_lidarr_migration(
 # 4. Manual Import Pipeline
 # -------------------------------------------------------------------------
 
-@router.post("/manual-import/scan", dependencies=[Depends(require_core_tier)])
+@router.post("/manual-import/scan", dependencies=[Depends(require_core_tier), Depends(native_only)])
 def manual_import_scan(
     body: Optional[ManualImportScanRequest] = None,
     db: Database = Depends(get_db),
@@ -1950,7 +2440,7 @@ def manual_import_scan(
     return candidates
 
 
-@router.post("/manual-import/commit", dependencies=[Depends(require_core_tier)])
+@router.post("/manual-import/commit", dependencies=[Depends(require_core_tier), Depends(native_only)])
 def manual_import_commit(
     body: ManualImportCommitRequest,
     db: Database = Depends(get_db),
@@ -2194,7 +2684,7 @@ def _album_total_discs(db: Database, album_id: str, *extra: Any) -> int:
     return max([1, *discs])
 
 
-@router.post("/rename/preview", dependencies=[Depends(require_core_tier)])
+@router.post("/rename/preview", dependencies=[Depends(require_core_tier), Depends(native_only)])
 def rename_preview(
     body: Optional[RenamePreviewRequest] = None,
     db: Database = Depends(get_db),
@@ -2273,7 +2763,7 @@ def rename_preview(
     return preview_diffs
 
 
-@router.post("/rename/apply", dependencies=[Depends(require_core_tier)])
+@router.post("/rename/apply", dependencies=[Depends(require_core_tier), Depends(native_only)])
 def rename_apply(
     body: RenameApplyRequest,
     db: Database = Depends(get_db),
@@ -2388,7 +2878,7 @@ def rename_apply(
 # AcoustID On-Demand Fingerprinting
 # -------------------------------------------------------------------------
 
-@router.post("/manual-import/fingerprint", dependencies=[Depends(require_core_tier)])
+@router.post("/manual-import/fingerprint", dependencies=[Depends(require_core_tier), Depends(native_only)])
 def fingerprint_file(
     body: FingerprintRequest,
     db: Database = Depends(get_db),

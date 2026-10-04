@@ -10,6 +10,7 @@ import threading
 from contextlib import contextmanager
 from typing import Any, Iterator, Optional
 
+from plex_playlist_sync import lidarr_library
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.lidarr_queue import lidarr_worker
@@ -179,6 +180,7 @@ def switch_mode(db: Database, new_mode: str, source: str, user: Optional[str] = 
         if reason is not None:
             raise SwitchRefused(reason)
         db.update_media_management_settings({"library_mode": new_mode})
+    lidarr_library.invalidate()  # cached Lidarr lists belong to the previous mode
     try:
         db.record_event(
             "library_manager_changed",

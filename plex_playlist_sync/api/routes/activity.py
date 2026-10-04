@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(require_core_tier)])
 
 SORT_DIR_PATTERN = "^(asc|desc)$"
+MAX_PAGE = 1_000_000  # bounds page * page_size so offset arithmetic stays small
 
 
 def validate_sort_key(sort_key: Optional[str], allowed: tuple[str, ...], default: str) -> str:
@@ -81,7 +82,7 @@ def _is_lidarr(db: Database) -> bool:
 
 @router.get("/queue", summary="Download queue (native or Lidarr)")
 def list_queue(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=MAX_PAGE),
     page_size: int = Query(50, ge=1, le=200),
     sort_key: Optional[str] = Query(None),
     sort_dir: str = Query("desc", pattern=SORT_DIR_PATTERN),
@@ -148,7 +149,7 @@ def retry_queue_item(
 
 @router.get("/history", summary="Download history (native or Lidarr)")
 def list_history(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=MAX_PAGE),
     page_size: int = Query(50, ge=1, le=200),
     sort_key: Optional[str] = Query(None),
     sort_dir: str = Query("desc", pattern=SORT_DIR_PATTERN),
@@ -166,6 +167,25 @@ def list_history(
     if _is_lidarr(db):
         return lidarr_call(svc.lidarr_history, require_lidarr(client), page, page_size, sort_dir, event)
     return svc.native_history(db, page, page_size, sort_dir, event)
+
+
+@router.get("/history/index", summary="Scrubber groups for the download history (native only)")
+def history_index(
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("desc", pattern=SORT_DIR_PATTERN),
+    event: Optional[str] = Query(None),
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    validate_sort_key(sort_key, svc.HISTORY_SORT_KEYS, "date")
+    if event is not None and event not in svc.HISTORY_EVENTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown event; allowed: {', '.join(svc.HISTORY_EVENTS)}",
+        )
+    if _is_lidarr(db):
+        return svc.empty_index("date", sort_dir)
+    return svc.native_history_index(db, sort_dir, event)
 
 
 @router.post("/history/{history_id}/failed", summary="Mark a grab as failed: blocklist it and search again")
@@ -197,7 +217,7 @@ def mark_history_failed(
 
 @router.get("/blocklist", summary="Blocklisted releases (native or Lidarr)")
 def list_blocklist(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=MAX_PAGE),
     page_size: int = Query(50, ge=1, le=200),
     sort_key: Optional[str] = Query(None),
     sort_dir: str = Query("desc", pattern=SORT_DIR_PATTERN),

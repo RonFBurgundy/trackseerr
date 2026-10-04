@@ -160,3 +160,61 @@ Every mutating action runs under `work_guard` for the active mode.
 - **Top-level Activity:** Queue · History · Blocklist
 - **New top-level Wanted (admin):** Missing · Cutoff Unmet, with a distinct icon
 - **Lists:** shared flat, sortable list components with infinite scroll and lazy-loaded pages. The phase 4 scrubber attaches to these same components.
+
+## Phase 4 contract: virtualized infinite lists and the scrubber
+
+### Backend
+Every endpoint here is admin-only and core-only, and every list query is parameterized with whitelisted sort keys.
+
+- **Paged library endpoints:** `GET /api/library/{artists|albums|tracks}/paged`
+  - Query: `?page&page_size(1-200)&sort_key&sort_dir&q&monitored_only` (plus `artist_id`/`album_id` filters where they make sense).
+  - Response: the Phase 3 paged shape, `{mode, page, page_size, total, sort_key, sort_dir, records}`. `records` has the same item shape the existing list endpoints return, including counts.
+  - Sort keys:
+    - artists: `name` (the sort name, with leading "The "/"A "/"An " ignored), `added_at`, `album_count`
+    - albums: `title`, `artist`, `release_date`, `added_at`
+    - tracks: `title`, `artist`, `album`, `added_at`, `size_bytes`
+  - The existing endpoints stay for existing callers.
+- **Group index:** `GET <list endpoint>/index?sort_key&sort_dir&<same filters>` returns `{sort_key, sort_dir, total, groups:[{label, offset, count}]}`.
+  - It is computed in SQL from the same ordering as the list, so `offset` is exact.
+  - Group rules:
+    - name sorts: first letter A–Z after normalization and accent folding; digits and symbols go to "#".
+    - date sorts: by year, or by month when the span is 2 years or less.
+    - number and size sorts: about 10 quantile buckets labelled with readable ranges.
+  - Lists with an index: the library paged endpoints, `/api/wanted/{missing|cutoff}/index` (native mode only; Lidarr mode returns `groups: []`), and `/api/activity/history/index` (date).
+
+### Frontend
+- **`useVirtualPagedList`** replaces the append-only `useInfiniteList`:
+  - The total is known up front. Pages are fetched on demand for the visible range plus overscan, with a page cache (LRU).
+  - Unloaded rows render as placeholders.
+  - `scrollToOffset(n)` jumps anywhere.
+  - Refresh re-fetches the visible pages. A removal re-fetches the visible pages, which fixes the offset-shift skip.
+  - A change of sort or filter resets the list.
+- **Virtualization** uses `@tanstack/react-virtual`, pinned to an exact version. It covers rows (FlatList) and grids (N columns per virtual row, for artist and album covers).
+- **`ScrubberRail`** fills the FlatList and grid `rail` slot and replaces the visible scrollbar on tall lists. Keyboard and wheel scrolling still work.
+  - It shows only the groups that exist. When there are more labels than fit, intermediate ones collapse into dots.
+  - **Desktop:** click a label to jump. Hovering or dragging balloons the active label with a subtle magnifier, scaling neighbouring labels in a fisheye.
+  - **Mobile:** a thin rail just wide enough to grab. Dragging scrubs, with a balloon label beside your thumb.
+  - **Design:** tape-deck styling, an ARIA slider role, keyboard support, and `prefers-reduced-motion` respected.
+  - It hides when the list fits on screen or the endpoint returns no groups.
+- **Migration:** Library (artists, albums, tracks, with search moved to the server), Activity, Wanted and System Events move to the new primitives. Page-number pagination is removed site-wide.
+
+### Library in Lidarr mode (owner decision 2026-10-04: live via the Lidarr API)
+- In Lidarr mode, `/api/library/{artists|albums}/paged` and `/index` proxy Lidarr live.
+  - Lidarr v1 `/artist` and `/album` are not paged, so the server fetches the full list, caches it per kind for a short time (TTL about 60 s, invalidated by our own Lidarr actions), then sorts, filters, pages and groups it in memory.
+  - Grouping uses the same normalization and group rules as native mode, so the scrubber behaves identically.
+  - `mode: "lidarr"` is set in the response.
+- **Same routes, no new URLs:** in Lidarr mode the existing `/api/library/artists/{id}`, `/artists/{id}/image`, `/artists/{id}/banner`, `/albums/{id}`, `/albums/{id}/cover`, `/artists/{id}/monitored`, `/albums/{id}/monitored` and `/artists/{id}/refresh` routes dispatch to Lidarr. Ids are Lidarr numeric ids (`^[0-9]{1,10}$`, otherwise 404), so the frontend changes no URLs.
+- **Tracks:**
+  - Lidarr has no global track list. `/tracks/paged` requires `album_id` in Lidarr mode (it returns that album's tracks from `/track?albumId=`) and is otherwise 409; `/tracks/index` returns empty groups. The Tracks tab shows a one-line notice ("Browse tracks from an album").
+  - Album detail shows tracks from `/track?albumId=`.
+- **Cache:** the artist and album lists are cached per kind for 60 s (thread-safe, single-flight so concurrent requests cause one Lidarr fetch) and invalidated by every mutation we make. Ordering and groups are computed by SQLite over an in-memory table using the same `list_index` builders as native mode, so offsets are exact.
+- **Artwork:** the existing image, banner and cover routes stream from Lidarr's `/api/v1/mediacover/{artist|album}/{id}/{file}` (file chosen from the record's `images` by coverType).
+  - The key travels in a header only and redirects are never followed.
+  - `Cache-Control: private, max-age=86400`; 10 MB cap; `image/*` content types only; bounded timeouts.
+  - A record with no artwork redirects to the placeholder, like native.
+- **Actions** (admin, core-only, under `work_guard(lidarr)`; a mode flip is a 409):
+  - Monitored: `PUT /artist/{id}` (fetch, modify, put) or `PUT /album/monitor {albumIds, monitored}`.
+  - Search: new `POST /api/library/artists/{id}/search` (`ArtistSearch`) and `POST /api/library/albums/{id}/search` (`AlbumSearch`); both 409 in native mode. `POST /artists/{id}/refresh` sends `RefreshArtist`.
+  - Native-only routes (rescan, file ops, rename, manual import, track and entity deletes) return 409 `{detail: "Not available while Lidarr manages the library"}`.
+  - Lidarr failures are a 502 with a redacted message; the key never appears in responses or logs.
+- Detail pages for an artist or album in Lidarr mode come from Lidarr: `/artist/{id}` plus `/album?artistId=`.

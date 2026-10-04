@@ -1,11 +1,12 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { AlertOctagon, ArrowUpCircle, Ban, CheckCircle2, Download, Trash2, XCircle } from 'lucide-react';
 import type { ActivityHistoryEvent, ActivityHistoryRecord, ListSortDir } from '@/types/activity';
-import { getActivityHistory, markHistoryFailed } from '@/services/activityService';
+import { getActivityHistory, getActivityHistoryIndex, markHistoryFailed } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
-import { pagedFetcher, useInfiniteList } from '@/hooks/useInfiniteList';
+import { pagedFetcher, useVirtualPagedList } from '@/hooks/useVirtualPagedList';
+import { useGroupIndex } from '@/hooks/useGroupIndex';
 import { ConfirmDangerButton, TapeDeckButton, TapeTransportBay } from '@/components/ui';
-import { FlatList, ListPanel, formatDateTime, orDash, type FlatListColumn } from '@/components/lists';
+import { FlatList, ListPanel, ScrubberRail, formatDateTime, orDash, type FlatListColumn } from '@/components/lists';
 import type { ActivityPanelProps } from './ActivityQueuePanel';
 
 const fetchHistory = pagedFetcher(getActivityHistory);
@@ -49,8 +50,9 @@ export const ActivityHistoryPanel: React.FC<ActivityPanelProps> = ({ onToast }) 
   const [busyId, setBusyId] = useState<string | number | null>(null);
 
   const filters = useMemo(() => ({ event }), [event]);
-  const list = useInfiniteList<ActivityHistoryRecord>(fetchHistory, { sortKey, sortDir, filters, getKey });
+  const list = useVirtualPagedList<ActivityHistoryRecord>(fetchHistory, { sortKey, sortDir, filters, getKey });
   const { refresh } = list;
+  const index = useGroupIndex(getActivityHistoryIndex, { sortKey, sortDir, filters, total: list.total });
 
   const onSortChange = useCallback((key: string, dir: ListSortDir) => {
     setSortKey(key);
@@ -79,12 +81,12 @@ export const ActivityHistoryPanel: React.FC<ActivityPanelProps> = ({ onToast }) 
 
   const columns = useMemo<FlatListColumn<ActivityHistoryRecord>[]>(
     () => [
-      { key: 'date', label: 'Date', sortable: true, width: '150px', render: (r) => formatDateTime(r.date) },
-      { key: 'event', label: 'Event', width: '120px', render: (r) => <EventBadge event={r.event} message={r.message} /> },
-      { key: 'artist', label: 'Artist', width: 'minmax(0,1fr)', render: (r) => orDash(r.artist) },
-      { key: 'album', label: 'Album', width: 'minmax(0,1fr)', render: (r) => orDash(r.album) },
-      { key: 'title', label: 'Title', width: 'minmax(0,1.1fr)', render: (r) => orDash(r.title) },
-      { key: 'quality', label: 'Quality', width: '80px', render: (r) => orDash(r.quality) },
+      { key: 'date', label: 'Date', sortable: true, width: '150px', mobile: 'meta', render: (r) => formatDateTime(r.date) },
+      { key: 'event', label: 'Event', width: '120px', mobile: 'end', render: (r) => <EventBadge event={r.event} message={r.message} /> },
+      { key: 'artist', label: 'Artist', width: 'minmax(0,1fr)', mobile: 'title', render: (r) => orDash(r.artist) },
+      { key: 'album', label: 'Album', width: 'minmax(0,1fr)', mobile: 'sub', render: (r) => orDash(r.album) },
+      { key: 'title', label: 'Title', width: 'minmax(0,1.1fr)', mobile: 'sub', render: (r) => orDash(r.title) },
+      { key: 'quality', label: 'Quality', width: '80px', mobile: 'meta', render: (r) => orDash(r.quality) },
       { key: 'indexer', label: 'Indexer', width: '100px', xlOnly: true, hideOnMobile: true, render: (r) => orDash(r.indexer) },
       { key: 'client', label: 'Client', width: '100px', xlOnly: true, hideOnMobile: true, render: (r) => orDash(r.client) },
     ],
@@ -123,13 +125,7 @@ export const ActivityHistoryPanel: React.FC<ActivityPanelProps> = ({ onToast }) 
       <FlatList
         ariaLabel="Download history"
         columns={columns}
-        items={list.items}
-        total={list.total}
-        loading={list.loading}
-        error={list.error}
-        hasMore={list.hasMore}
-        onLoadMore={list.loadMore}
-        onReload={list.reload}
+        list={list}
         getKey={getKey}
         sortKey={sortKey}
         sortDir={sortDir}
@@ -137,7 +133,9 @@ export const ActivityHistoryPanel: React.FC<ActivityPanelProps> = ({ onToast }) 
         rowActions={rowActions}
         actionsWidth="112px"
         actionsLabel=""
+        mobileLayout="compact"
         emptyMessage={event ? `No ${event} events.` : 'No history yet.'}
+        rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to date" />}
       />
     </ListPanel>
   );

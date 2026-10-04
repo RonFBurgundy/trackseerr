@@ -1,50 +1,41 @@
 import { apiRequest } from './apiClient';
+import { buildIndexUrl, buildListUrl } from './listUrl';
 import type {
   ActivityActionResult,
   ActivityBlocklistRecord,
   ActivityHistoryRecord,
   ActivityQueueRecord,
+  GroupIndexResponse,
+  IndexQuery,
   ListQuery,
   PagedResponse,
   QueueRemoveOptions,
   WantedCutoffRecord,
+  WantedListName,
   WantedRecord,
   WantedSearchRequest,
   WantedSearchResponse,
 } from '@/types/activity';
 
-function listUrl(path: string, q: ListQuery): string {
-  const params = new URLSearchParams({
-    page: String(q.page),
-    page_size: String(q.pageSize),
-    sort_key: q.sortKey,
-    sort_dir: q.sortDir,
-  });
-  for (const [key, value] of Object.entries(q.filters ?? {})) {
-    if (value) params.set(key, value);
-  }
-  return `${path}?${params.toString()}`;
-}
-
 export function getActivityQueue(
   q: ListQuery,
   signal?: AbortSignal
 ): Promise<PagedResponse<ActivityQueueRecord>> {
-  return apiRequest<PagedResponse<ActivityQueueRecord>>(listUrl('/api/activity/queue', q), { signal });
+  return apiRequest<PagedResponse<ActivityQueueRecord>>(buildListUrl('/api/activity/queue', q), { signal });
 }
 
 export function getActivityHistory(
   q: ListQuery,
   signal?: AbortSignal
 ): Promise<PagedResponse<ActivityHistoryRecord>> {
-  return apiRequest<PagedResponse<ActivityHistoryRecord>>(listUrl('/api/activity/history', q), { signal });
+  return apiRequest<PagedResponse<ActivityHistoryRecord>>(buildListUrl('/api/activity/history', q), { signal });
 }
 
 export function getActivityBlocklist(
   q: ListQuery,
   signal?: AbortSignal
 ): Promise<PagedResponse<ActivityBlocklistRecord>> {
-  return apiRequest<PagedResponse<ActivityBlocklistRecord>>(listUrl('/api/activity/blocklist', q), { signal });
+  return apiRequest<PagedResponse<ActivityBlocklistRecord>>(buildListUrl('/api/activity/blocklist', q), { signal });
 }
 
 export function removeActivityQueueItem(id: string | number, opts: QueueRemoveOptions): Promise<ActivityActionResult> {
@@ -79,16 +70,30 @@ export function getWantedMissing(
   q: ListQuery,
   signal?: AbortSignal
 ): Promise<PagedResponse<WantedRecord>> {
-  return apiRequest<PagedResponse<WantedRecord>>(listUrl('/api/wanted/missing', q), { signal });
+  return apiRequest<PagedResponse<WantedRecord>>(buildListUrl('/api/wanted/missing', q), { signal });
 }
 
 export function getWantedCutoff(
   q: ListQuery,
   signal?: AbortSignal
 ): Promise<PagedResponse<WantedCutoffRecord>> {
-  return apiRequest<PagedResponse<WantedCutoffRecord>>(listUrl('/api/wanted/cutoff', q), { signal });
+  return apiRequest<PagedResponse<WantedCutoffRecord>>(buildListUrl('/api/wanted/cutoff', q), { signal });
 }
 
 export function searchWanted(body: WantedSearchRequest): Promise<WantedSearchResponse> {
   return apiRequest<WantedSearchResponse>('/api/wanted/search', { method: 'POST', body });
+}
+
+/** Group index for History (date groups). Same sort and `event` filter as the list. */
+export function getActivityHistoryIndex(q: IndexQuery, signal?: AbortSignal): Promise<GroupIndexResponse> {
+  return apiRequest<GroupIndexResponse>(buildIndexUrl('/api/activity/history', q), { signal });
+}
+
+/** Group index for a Wanted list. Native mode only; Lidarr mode answers `groups: []`. */
+export function getWantedIndex(
+  list: WantedListName,
+  q: IndexQuery,
+  signal?: AbortSignal
+): Promise<GroupIndexResponse> {
+  return apiRequest<GroupIndexResponse>(buildIndexUrl(`/api/wanted/${list}`, q), { signal });
 }

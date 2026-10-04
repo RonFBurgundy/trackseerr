@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from plex_playlist_sync import lidarr_library
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.job_tracker import track_job
 from plex_playlist_sync.redaction import redact_text, safe_exc
@@ -411,6 +412,8 @@ class LidarrTrickleWorker:
                     auto_search=self._auto_search,
                     monitor_mode="specific",
                 )
+
+            lidarr_library.invalidate()  # Lidarr's artist/album lists changed (or may have): drop cached copies
 
             # Update database statuses for tracks / requests in this group
             missing_track_ids = [

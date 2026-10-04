@@ -43,6 +43,31 @@ _mbid_enricher_lock = threading.Lock()
 _mbid_enricher_instance: Optional[MbidEnricherClient] = None
 
 
+def _db_key(db_path: Union[str, Path]) -> str:
+    """Registry key for a database path: ``:memory:`` as is, files by resolved absolute path."""
+    return ":memory:" if str(db_path) == ":memory:" else str(Path(db_path).resolve())
+
+
+def register_db(db: Database) -> None:
+    """Makes ``db`` the instance ``get_db`` hands out for its file.
+
+    The server process opens one Database at boot and passes it to ``create_app``; without this ``get_db`` would open a
+    second connection to the same file, and two connections contend for SQLite's single write lock (a write that
+    arrives while the other connection is mid-transaction fails with "database is locked"). In-memory databases are not
+    registered: each ``:memory:`` connection is its own database.
+    """
+    if str(db.db_path) == ":memory:":
+        return
+    with _db_lock:
+        key = _db_key(db.db_path)
+        previous = _db_instances.get(key)
+        if previous is not None and previous is not db:
+            # Not closed: a request thread may still hold the old instance, and closing it under them would break
+            # that request. It is dropped from the registry and released once unreferenced.
+            logger.debug("Replacing registered Database for %s with the explicitly provided instance", key)
+        _db_instances[key] = db
+
+
 def get_config() -> Config:
     """Dependency to retrieve system configuration from environment."""
     return Config.from_env()
@@ -67,15 +92,20 @@ def get_db() -> Database:
             base_dir = os.getenv("DATA_DIR", config.data_dir).strip()
         db_path = str(safe_data_path("sync_db.sqlite", base_dir=base_dir))
 
+    key = _db_key(db_path)
     with _db_lock:
-        if db_path not in _db_instances:
-            _db_instances[db_path] = Database(db_path)
+        existing = _db_instances.get(key)
+        if existing is not None and existing._conn is None:
+            # Closed (e.g. by a context manager): drop it rather than hand out a handle that must silently reopen.
+            del _db_instances[key]
+        if key not in _db_instances:
+            _db_instances[key] = Database(db_path)
             if config.role == "gateway":
                 try:
-                    _db_instances[db_path].set_last_role("gateway")
+                    _db_instances[key].set_last_role("gateway")
                 except sqlite3.Error as exc:
                     logger.warning("Could not record the gateway role: %s", type(exc).__name__)
-        return _db_instances[db_path]
+        return _db_instances[key]
 
 
 def get_plex_client(config: Config = Depends(get_config)) -> Optional[PlexClient]:

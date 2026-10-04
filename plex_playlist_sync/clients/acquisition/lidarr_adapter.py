@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 import httpx
 
+from plex_playlist_sync import lidarr_library
 from plex_playlist_sync.clients.acquisition.base import AcquisitionDriver
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.models import AcquisitionSearchResult, DownloadStatus
@@ -96,6 +97,7 @@ class LidarrAdapter(AcquisitionDriver):
             auto_search=self.auto_search,
             monitor_mode="specific" if album else "all",
         )
+        lidarr_library.invalidate()  # the artist/album lists in Lidarr changed
         if res.get("status") in ("success", "rate_limited"):
             return f"lidarr::{artist}::{album}"
         raise RuntimeError(f"Lidarr addition failed: {res.get('message')}")

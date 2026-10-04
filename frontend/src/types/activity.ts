@@ -126,3 +126,28 @@ export interface QueueRemoveOptions {
   removeFromClient: boolean;
   blocklist: boolean;
 }
+
+/** Phase 4: one group of a list's index (an alphabet letter, a year, a size bucket). */
+export interface GroupIndexGroup {
+  label: string;
+  /** Absolute index of the group's first row in the list's current ordering. */
+  offset: number;
+  count: number;
+}
+
+/** Response of every `<list endpoint>/index`. */
+export interface GroupIndexResponse {
+  sort_key: string;
+  sort_dir: ListSortDir;
+  total: number;
+  groups: GroupIndexGroup[];
+}
+
+/** Same sort and filters as the list the index belongs to. */
+export interface IndexQuery {
+  sortKey: string;
+  sortDir: ListSortDir;
+  filters?: Readonly<Record<string, string>>;
+}
+
+export type IndexFetcher = (q: IndexQuery, signal?: AbortSignal) => Promise<GroupIndexResponse>;

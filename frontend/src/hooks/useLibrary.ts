@@ -1,17 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type {
-  ArtistItem,
-  AlbumItem,
-  TrackItem,
   CollectionItem,
   LibraryStats,
   ScanStatus,
   LidarrStatus,
 } from '@/types/models';
 import {
-  getArtists,
-  getAlbums,
-  getTracks,
   getCollections,
   getLibraryStats,
   triggerScan as apiTriggerScan,
@@ -27,9 +21,6 @@ export type LibraryTab = 'artists' | 'albums' | 'tracks' | 'collections';
 
 export interface UseLibraryReturn {
   activeTab: LibraryTab;
-  artists: ArtistItem[];
-  albums: AlbumItem[];
-  tracks: TrackItem[];
   collections: CollectionItem[];
   stats: LibraryStats | null;
   searchQuery: string;
@@ -38,6 +29,8 @@ export interface UseLibraryReturn {
   lidarrStatus: LidarrStatus | null;
   isLoading: boolean;
   error: string | null;
+  /** Bumps when a scan finishes or is cancelled; paged lists reload on change. */
+  catalogVersion: number;
   setTab: (tab: LibraryTab) => void;
   setSearch: (query: string) => void;
   triggerScan: (pruneMissing?: boolean) => Promise<void>;
@@ -51,9 +44,6 @@ export interface UseLibraryReturn {
 /** `enabled` must be false for non-admins: every /api/library route except availability is admin-only. */
 export function useLibrary(enabled: boolean = false): UseLibraryReturn {
   const [activeTab, setActiveTab] = useState<LibraryTab>('artists');
-  const [artists, setArtists] = useState<ArtistItem[]>([]);
-  const [albums, setAlbums] = useState<AlbumItem[]>([]);
-  const [tracks, setTracks] = useState<TrackItem[]>([]);
   const [collections, setCollections] = useState<CollectionItem[]>([]);
   const [stats, setStats] = useState<LibraryStats | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -62,6 +52,7 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
   const [lidarrStatus, setLidarrStatus] = useState<LidarrStatus | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [catalogVersion, setCatalogVersion] = useState<number>(0);
 
   const scanPollRef = useRef<number | null>(null);
 
@@ -71,6 +62,8 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
       scanPollRef.current = null;
     }
   }, []);
+
+  const collectionQuery = activeTab === 'collections' ? searchQuery : '';
 
   const loadData = useCallback(async () => {
     if (!enabled) return;
@@ -84,17 +77,9 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
       if (statsData) setStats(statsData);
       if (lidarrData) setLidarrStatus(lidarrData);
 
-      if (activeTab === 'artists') {
-        const data = await getArtists(searchQuery);
-        setArtists(data);
-      } else if (activeTab === 'albums') {
-        const data = await getAlbums(undefined, searchQuery);
-        setAlbums(data);
-      } else if (activeTab === 'tracks') {
-        const data = await getTracks(undefined, undefined, searchQuery);
-        setTracks(data);
-      } else if (activeTab === 'collections') {
-        const data = await getCollections(searchQuery);
+      // Artists, albums and tracks are paged by their own lists (useLibraryCatalog); only collections load here.
+      if (activeTab === 'collections') {
+        const data = await getCollections(collectionQuery);
         setCollections(data);
       }
     } catch (err: unknown) {
@@ -103,7 +88,8 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [enabled, activeTab, searchQuery]);
+    // The search text only feeds collections here; the paged lists take it as a server filter.
+  }, [enabled, activeTab, collectionQuery]);
 
   const loadDataRef = useRef(loadData);
   useEffect(() => {
@@ -129,6 +115,7 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
         if (!isCurrentlyScanning) {
           setIsScanning(false);
           stopScanPolling();
+          setCatalogVersion((v) => v + 1);
           loadDataRef.current();
         }
       } catch {
@@ -195,6 +182,7 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
     } finally {
       setIsScanning(false);
       stopScanPolling();
+      setCatalogVersion((v) => v + 1);
       await loadData();
     }
   }, [loadData, stopScanPolling]);
@@ -202,9 +190,6 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
   const toggleArtistMonitored = useCallback(
     async (artistId: number | string, monitored: boolean) => {
       await apiToggleArtistMonitored(artistId, monitored);
-      setArtists((prev) =>
-        prev.map((a) => (a.id === artistId ? { ...a, monitored } : a))
-      );
     },
     []
   );
@@ -212,9 +197,6 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
   const toggleAlbumMonitored = useCallback(
     async (albumId: number | string, monitored: boolean) => {
       await apiToggleAlbumMonitored(albumId, monitored);
-      setAlbums((prev) =>
-        prev.map((a) => (a.id === albumId ? { ...a, monitored } : a))
-      );
     },
     []
   );
@@ -222,18 +204,12 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
   const toggleTrackMonitored = useCallback(
     async (trackId: number | string, monitored: boolean) => {
       await apiToggleTrackMonitored(trackId, monitored);
-      setTracks((prev) =>
-        prev.map((t) => (t.id === trackId ? { ...t, monitored } : t))
-      );
     },
     []
   );
 
   return {
     activeTab,
-    artists,
-    albums,
-    tracks,
     collections,
     stats,
     searchQuery,
@@ -242,6 +218,7 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
     lidarrStatus,
     isLoading,
     error,
+    catalogVersion,
     setTab: setActiveTab,
     setSearch: setSearchQuery,
     triggerScan,

@@ -1,4 +1,6 @@
 import { apiRequest } from './apiClient';
+import { buildIndexUrl, buildListUrl } from './listUrl';
+import type { GroupIndexResponse, IndexQuery, ListQuery, PagedResponse } from '@/types/activity';
 import type {
   ArtistItem,
   AlbumItem,
@@ -80,6 +82,21 @@ export async function refreshArtist(
       method: 'POST',
     }
   );
+}
+
+export interface LidarrSearchResult {
+  success: boolean;
+  message?: string;
+}
+
+/** Lidarr mode only (the route is 409 while TrackSeerr manages the library): queue a search for the artist. */
+export async function searchArtist(artistId: number | string): Promise<LidarrSearchResult> {
+  return apiRequest<LidarrSearchResult>(`/api/library/artists/${artistId}/search`, { method: 'POST' });
+}
+
+/** Lidarr mode only: queue a search for the album. */
+export async function searchAlbum(albumId: number | string): Promise<LidarrSearchResult> {
+  return apiRequest<LidarrSearchResult>(`/api/library/albums/${albumId}/search`, { method: 'POST' });
 }
 
 export async function setArtistMonitoringPreset(
@@ -183,3 +200,57 @@ export async function removeAlbumFromCollection(
   return Boolean(res?.success);
 }
 
+
+/**
+ * Phase 4 paged library endpoints. `q.filters` carries the server-side filters: `q` (search), `monitored_only`
+ * (`'true'`), and for albums/tracks `artist_id` / `album_id`. Empty values are omitted.
+ * Sort keys: artists `name|added_at|album_count`; albums `title|artist|release_date|added_at`;
+ * tracks `title|artist|album|added_at|size_bytes`.
+ */
+export function getArtistsPaged(q: ListQuery, signal?: AbortSignal): Promise<PagedResponse<ArtistItem>> {
+  return apiRequest<PagedResponse<ArtistItem>>(buildListUrl('/api/library/artists/paged', q), { signal });
+}
+
+export function getAlbumsPaged(q: ListQuery, signal?: AbortSignal): Promise<PagedResponse<AlbumItem>> {
+  return apiRequest<PagedResponse<AlbumItem>>(buildListUrl('/api/library/albums/paged', q), { signal });
+}
+
+export function getTracksPaged(q: ListQuery, signal?: AbortSignal): Promise<PagedResponse<TrackItem>> {
+  return apiRequest<PagedResponse<TrackItem>>(buildListUrl('/api/library/tracks/paged', q), { signal });
+}
+
+export function getArtistsIndex(q: IndexQuery, signal?: AbortSignal): Promise<GroupIndexResponse> {
+  return apiRequest<GroupIndexResponse>(buildIndexUrl('/api/library/artists', q), { signal });
+}
+
+export function getAlbumsIndex(q: IndexQuery, signal?: AbortSignal): Promise<GroupIndexResponse> {
+  return apiRequest<GroupIndexResponse>(buildIndexUrl('/api/library/albums', q), { signal });
+}
+
+export function getTracksIndex(q: IndexQuery, signal?: AbortSignal): Promise<GroupIndexResponse> {
+  return apiRequest<GroupIndexResponse>(buildIndexUrl('/api/library/tracks', q), { signal });
+}
+
+const ALBUM_TRACK_PAGE_SIZE = 200;
+
+/** Every track of one album via the paged endpoint (`album_id` filter), in disc and track order. */
+export async function getAlbumTracksPaged(albumId: number | string, signal?: AbortSignal): Promise<TrackItem[]> {
+  const tracks: TrackItem[] = [];
+  for (let page = 1; ; page += 1) {
+    const res = await getTracksPaged(
+      {
+        page,
+        pageSize: ALBUM_TRACK_PAGE_SIZE,
+        sortKey: 'title',
+        sortDir: 'asc',
+        filters: { album_id: String(albumId) },
+      },
+      signal
+    );
+    tracks.push(...res.records);
+    if (res.records.length === 0 || tracks.length >= res.total) break;
+  }
+  return tracks.sort(
+    (a, b) => (a.disc_number ?? 1) - (b.disc_number ?? 1) || (a.track_number ?? 0) - (b.track_number ?? 0)
+  );
+}

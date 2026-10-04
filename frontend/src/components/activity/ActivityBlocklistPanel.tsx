@@ -3,7 +3,7 @@ import { Trash2 } from 'lucide-react';
 import type { ActivityBlocklistRecord, ListSortDir } from '@/types/activity';
 import { getActivityBlocklist, removeBlocklistItem } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
-import { pagedFetcher, useInfiniteList, type ListKey } from '@/hooks/useInfiniteList';
+import { pagedFetcher, useVirtualPagedList, type ListKey } from '@/hooks/useVirtualPagedList';
 import { useListSelection } from '@/hooks/useListSelection';
 import { ConfirmDangerButton } from '@/components/ui';
 import { FlatList, ListPanel, formatDateTime, orDash, type FlatListColumn } from '@/components/lists';
@@ -18,7 +18,7 @@ export const ActivityBlocklistPanel: React.FC<ActivityPanelProps> = ({ onToast }
   const [busy, setBusy] = useState<boolean>(false);
   const { selected, setSelected, clear } = useListSelection();
 
-  const list = useInfiniteList<ActivityBlocklistRecord>(fetchBlocklist, { sortKey, sortDir, getKey });
+  const list = useVirtualPagedList<ActivityBlocklistRecord>(fetchBlocklist, { sortKey, sortDir, getKey });
   const { removeItems } = list;
 
   const onSortChange = useCallback((key: string, dir: ListSortDir) => {
@@ -59,13 +59,13 @@ export const ActivityBlocklistPanel: React.FC<ActivityPanelProps> = ({ onToast }
 
   const columns = useMemo<FlatListColumn<ActivityBlocklistRecord>[]>(
     () => [
-      { key: 'date', label: 'Date', sortable: true, width: '150px', render: (r) => formatDateTime(r.date) },
-      { key: 'artist', label: 'Artist', sortable: true, width: 'minmax(0,1fr)', render: (r) => orDash(r.artist) },
-      { key: 'title', label: 'Title', width: 'minmax(0,1fr)', render: (r) => orDash(r.title) },
-      { key: 'release_title', label: 'Release', width: 'minmax(0,1.4fr)', render: (r) => orDash(r.release_title) },
-      { key: 'quality', label: 'Quality', width: '80px', render: (r) => orDash(r.quality) },
+      { key: 'date', label: 'Date', sortable: true, width: '150px', mobile: 'meta', render: (r) => formatDateTime(r.date) },
+      { key: 'artist', label: 'Artist', sortable: true, width: 'minmax(0,1fr)', mobile: 'title', render: (r) => orDash(r.artist) },
+      { key: 'title', label: 'Title', width: 'minmax(0,1fr)', mobile: 'sub', render: (r) => orDash(r.title) },
+      { key: 'release_title', label: 'Release', width: 'minmax(0,1.4fr)', mobile: 'sub', render: (r) => orDash(r.release_title) },
+      { key: 'quality', label: 'Quality', width: '80px', mobile: 'meta', render: (r) => orDash(r.quality) },
       { key: 'indexer', label: 'Indexer', width: '100px', xlOnly: true, hideOnMobile: true, render: (r) => orDash(r.indexer) },
-      { key: 'reason', label: 'Reason', width: 'minmax(0,1fr)', render: (r) => orDash(r.reason) },
+      { key: 'reason', label: 'Reason', width: 'minmax(0,1fr)', mobile: 'meta', render: (r) => orDash(r.reason) },
     ],
     []
   );
@@ -108,13 +108,7 @@ export const ActivityBlocklistPanel: React.FC<ActivityPanelProps> = ({ onToast }
       <FlatList
         ariaLabel="Blocklist"
         columns={columns}
-        items={list.items}
-        total={list.total}
-        loading={list.loading}
-        error={list.error}
-        hasMore={list.hasMore}
-        onLoadMore={list.loadMore}
-        onReload={list.reload}
+        list={list}
         getKey={getKey}
         sortKey={sortKey}
         sortDir={sortDir}
@@ -124,6 +118,7 @@ export const ActivityBlocklistPanel: React.FC<ActivityPanelProps> = ({ onToast }
         rowActions={rowActions}
         actionsWidth="112px"
         actionsLabel=""
+        mobileLayout="compact"
         emptyMessage="The blocklist is empty."
       />
     </ListPanel>

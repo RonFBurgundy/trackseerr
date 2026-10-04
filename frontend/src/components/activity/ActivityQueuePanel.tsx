@@ -3,7 +3,7 @@ import { AlertTriangle, RotateCcw, Trash2, X } from 'lucide-react';
 import type { ActivityQueueRecord, ListSortDir } from '@/types/activity';
 import { getActivityQueue, removeActivityQueueItem, retryActivityQueueItem } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
-import { pagedFetcher, useInfiniteList } from '@/hooks/useInfiniteList';
+import { pagedFetcher, useVirtualPagedList } from '@/hooks/useVirtualPagedList';
 import { usePolling } from '@/hooks/usePolling';
 import { TapeDeckButton } from '@/components/ui';
 import {
@@ -53,7 +53,7 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
   const [blocklist, setBlocklist] = useState<boolean>(false);
   const [busyId, setBusyId] = useState<string | number | null>(null);
 
-  const list = useInfiniteList<ActivityQueueRecord>(fetchQueue, { sortKey, sortDir, getKey });
+  const list = useVirtualPagedList<ActivityQueueRecord>(fetchQueue, { sortKey, sortDir, getKey });
   const { refresh, removeItems } = list;
   usePolling(() => void refresh(), 5000);
 
@@ -106,10 +106,10 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
 
   const columns = useMemo<FlatListColumn<ActivityQueueRecord>[]>(
     () => [
-      { key: 'artist', label: 'Artist', sortable: true, width: 'minmax(0,1.1fr)', render: (r) => orDash(r.artist) },
-      { key: 'album', label: 'Album', width: 'minmax(0,1.1fr)', render: (r) => orDash(r.album) },
-      { key: 'title', label: 'Title', sortable: true, width: 'minmax(0,1.2fr)', render: (r) => orDash(r.title) },
-      { key: 'quality', label: 'Quality', width: '80px', render: (r) => orDash(r.quality) },
+      { key: 'artist', label: 'Artist', sortable: true, width: 'minmax(0,1.1fr)', mobile: 'sub', render: (r) => orDash(r.artist) },
+      { key: 'album', label: 'Album', width: 'minmax(0,1.1fr)', mobile: 'sub', render: (r) => orDash(r.album) },
+      { key: 'title', label: 'Title', sortable: true, width: 'minmax(0,1.2fr)', mobile: 'title', render: (r) => orDash(r.title) },
+      { key: 'quality', label: 'Quality', width: '80px', mobile: 'meta', render: (r) => orDash(r.quality) },
       { key: 'protocol', label: 'Protocol', width: '70px', xlOnly: true, hideOnMobile: true, render: (r) => orDash(r.protocol) },
       { key: 'indexer', label: 'Indexer', width: '100px', xlOnly: true, hideOnMobile: true, render: (r) => orDash(r.indexer) },
       { key: 'client', label: 'Client', width: '100px', xlOnly: true, hideOnMobile: true, render: (r) => orDash(r.client) },
@@ -118,6 +118,7 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
         label: 'Progress',
         sortable: true,
         width: '120px',
+        mobile: 'meta',
         render: (r) => <ProgressMeter value={r.progress} tone={r.stalled ? 'warning' : 'default'} />,
       },
       {
@@ -125,15 +126,16 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
         label: 'Size',
         sortable: true,
         width: '100px',
+        mobile: 'hide',
         render: (r) => (
           <span title="size left / total">
             {formatBytes(r.sizeleft_bytes)} / {formatBytes(r.size_bytes)}
           </span>
         ),
       },
-      { key: 'eta', label: 'ETA', width: '64px', render: (r) => formatEta(r.eta_seconds) },
-      { key: 'status', label: 'Status', sortable: true, width: '110px', render: (r) => <StatusCell record={r} /> },
-      { key: 'added_at', label: 'Added', sortable: true, width: '140px', render: (r) => formatDateTime(r.added_at) },
+      { key: 'eta', label: 'ETA', width: '64px', mobile: 'meta', render: (r) => formatEta(r.eta_seconds) },
+      { key: 'status', label: 'Status', sortable: true, width: '110px', mobile: 'end', render: (r) => <StatusCell record={r} /> },
+      { key: 'added_at', label: 'Added', sortable: true, width: '140px', mobile: 'hide', render: (r) => formatDateTime(r.added_at) },
     ],
     []
   );
@@ -201,19 +203,14 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
       <FlatList
         ariaLabel="Download queue"
         columns={columns}
-        items={list.items}
-        total={list.total}
-        loading={list.loading}
-        error={list.error}
-        hasMore={list.hasMore}
-        onLoadMore={list.loadMore}
-        onReload={list.reload}
+        list={list}
         getKey={getKey}
         sortKey={sortKey}
         sortDir={sortDir}
         onSortChange={onSortChange}
         rowActions={rowActions}
         actionsWidth="112px"
+        mobileLayout="compact"
         rowTone={rowTone}
         emptyMessage="The queue is empty."
         emptyHint="Approved requests appear here while they download."

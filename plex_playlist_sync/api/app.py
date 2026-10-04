@@ -50,6 +50,7 @@ from plex_playlist_sync.api.tier_middleware import (
     SECURITY_HEADERS,
     StartupGateMiddleware,
 )
+from plex_playlist_sync.api.dependencies import register_db
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.internal_auth import MIN_SECRET_LENGTH, validate_secret_strength
 from plex_playlist_sync.role_guard import (
@@ -156,6 +157,7 @@ def create_app(
     # Attach instances to app state if provided
     if db is not None:
         app.state.db = db
+        register_db(db)
         role = ((config.role if config is not None else None) or os.getenv("ROLE", "all-in-one")).lower().strip()
         if role == "gateway":
             try:
@@ -176,7 +178,9 @@ def create_app(
     async def add_security_headers(request: Request, call_next) -> Response:
         response: Response = await call_next(request)
         for header, value in SECURITY_HEADERS.items():
-            response.headers[header] = value
+            # A route that set its own header (e.g. the artwork proxy's locked-down CSP) keeps it.
+            if header not in response.headers:
+                response.headers[header] = value
         return response
 
     cors_origins_env = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5250,http://127.0.0.1:5250").strip()

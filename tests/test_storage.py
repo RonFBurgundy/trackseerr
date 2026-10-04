@@ -533,3 +533,103 @@ class TestGeneralSettingsStorage:
 
 
 
+
+
+class TestBusyTimeout:
+    def test_busy_timeout_and_wal(self, tmp_path):
+        db = Database(tmp_path / "t.db")
+        assert db.conn.execute("PRAGMA busy_timeout").fetchone()[0] >= 5000
+        assert db.conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+        db.close()
+
+    def test_writer_waits_for_a_concurrent_writer_instead_of_failing(self, tmp_path):
+        import sqlite3
+        import threading
+        import time as _time
+
+        path = tmp_path / "t.db"
+        db = Database(path)
+        user = db.upsert_user("u1", "alice", "a@x.tv", is_admin=False)
+        other = sqlite3.connect(str(path), isolation_level=None, check_same_thread=False)
+        other.execute("BEGIN IMMEDIATE")  # hold the write lock
+
+        def release() -> None:
+            _time.sleep(0.6)
+            other.execute("COMMIT")
+
+        thread = threading.Thread(target=release)
+        thread.start()
+        start = _time.perf_counter()
+        db.record_successful_login(user["id"])  # must block ~0.6s, not raise "database is locked"
+        waited = _time.perf_counter() - start
+        thread.join()
+        other.close()
+        assert waited >= 0.4
+        db.close()
+
+
+class TestNoLeakedTransactions:
+    """A getter that leaves an implicit transaction open keeps the write lock until another thread commits."""
+
+    def test_settings_getters_do_not_hold_the_write_lock(self, tmp_path):
+        import sqlite3
+
+        db = Database(tmp_path / "t.db")
+        db.get_instance_id()
+        db.get_plex_webhook_secret()
+        db.get_plex_webhook_secret()
+        db.get_general_settings()
+        assert db.conn.in_transaction is False
+        other = sqlite3.connect(str(tmp_path / "t.db"), timeout=0.2)
+        other.execute("BEGIN IMMEDIATE")  # would raise "database is locked" if the first connection held a txn
+        other.execute("ROLLBACK")
+        other.close()
+        db.close()
+
+    def test_create_app_shares_its_database_with_get_db(self, tmp_path, monkeypatch):
+        from plex_playlist_sync.api import dependencies
+        from plex_playlist_sync.api.app import create_app
+        from plex_playlist_sync.config import Config
+
+        monkeypatch.delenv("DATABASE_PATH", raising=False)
+        monkeypatch.setenv("CONFIG_DIR", str(tmp_path))
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        db = Database(tmp_path / "sync_db.sqlite")
+        create_app(db=db, config=Config(plex_url="http://127.0.0.1:32400", plex_token="t", data_dir=str(tmp_path)))
+        assert dependencies.get_db() is db
+        db.close()
+
+
+def test_ensure_connection_is_single_under_concurrent_access_after_close(tmp_path):
+    """After close(), racing .conn accesses must share one connection, not each open their own."""
+    import threading
+
+    db = Database(tmp_path / "race.sqlite")
+    real_open = Database._open_connection
+    opened = []
+
+    def slow_open(self):
+        import time
+
+        conn = real_open(self)
+        opened.append(conn)
+        time.sleep(0.05)
+        return conn
+
+    db.close()
+    barrier = threading.Barrier(8)
+    seen = []
+
+    def worker():
+        barrier.wait()
+        seen.append(db.conn)
+
+    with patch.object(Database, "_open_connection", slow_open):
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    assert len(opened) == 1
+    assert len({id(c) for c in seen}) == 1
+    db.close()

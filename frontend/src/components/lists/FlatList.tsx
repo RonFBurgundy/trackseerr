@@ -1,8 +1,14 @@
-import React, { useCallback, useEffect, useRef } from 'react';
-import { AlertTriangle, ArrowDown, ArrowUp, Loader2, Inbox } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp } from 'lucide-react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { ListSortDir } from '@/types/activity';
-import type { ListKey } from '@/hooks/useInfiniteList';
+import type { ListKey, VirtualPagedList } from '@/hooks/useVirtualPagedList';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { useFillViewportHeight } from '@/hooks/useFillViewportHeight';
 import { TapeDeckButton } from '@/components/ui';
+import { ListViewportContext, type ListViewport } from './ListViewportContext';
+import { ListErrorBar, ListStates } from './ListStates';
+import { cancelJumpsOnUserScroll, createScrollJumper } from './scrollJump';
 
 export interface FlatListColumn<T> {
   key: string;
@@ -12,32 +18,33 @@ export interface FlatListColumn<T> {
   /** CSS grid track for desktop, e.g. `'120px'` or `'minmax(0,1.5fr)'`. Default `minmax(0,1fr)`. */
   width?: string;
   render: (item: T) => React.ReactNode;
-  /** Omitted from the stacked mobile card. The first column is always the card title. */
+  /** Omitted from the mobile card. */
   hideOnMobile?: boolean;
+  /**
+   * Role in the compact mobile card (`mobileLayout="compact"`): `title` is the bold first line (default: the first
+   * visible column), `sub` joins the muted second line, `meta` the small third line, `end` sits on the right beside
+   * the row actions, `hide` drops the column. Ignored by the stacked layout.
+   */
+  mobile?: MobileRole;
   /** Shown only from the `xl` breakpoint up on desktop; the `lg` grid drops it to keep the core columns readable. */
   xlOnly?: boolean;
   align?: 'left' | 'right';
 }
+
+export type MobileRole = 'title' | 'sub' | 'meta' | 'end' | 'hide';
 
 export type RowTone = 'warning' | 'error' | null;
 
 export interface FlatListProps<T> {
   /** Memoize: row memoization compares this by reference. */
   columns: ReadonlyArray<FlatListColumn<T>>;
-  items: readonly T[];
-  total: number;
-  loading: boolean;
-  error: string | null;
-  hasMore: boolean;
-  /** Appends the next page; also used to retry after an append error. */
-  onLoadMore: () => void;
-  /** Reloads from page 1; used by the full-page error state. */
-  onReload: () => void;
+  /** The list state from `useVirtualPagedList`: total, loading, error, getItem, ensureRange, reload, ... */
+  list: VirtualPagedList<T>;
   getKey: (item: T) => ListKey;
   sortKey: string;
   sortDir: ListSortDir;
   onSortChange: (key: string, dir: ListSortDir) => void;
-  /** Selection is enabled when both are provided. */
+  /** Selection (over loaded rows) is enabled when both are provided. */
   selectedKeys?: ReadonlySet<ListKey>;
   onSelectedKeysChange?: (next: ReadonlySet<ListKey>) => void;
   /** Memoize with useCallback. */
@@ -49,17 +56,59 @@ export interface FlatListProps<T> {
   emptyMessage: string;
   emptyHint?: string;
   ariaLabel: string;
-  /**
-   * Right-side rail slot. Phase 4 mounts the alphabet/group scrubber here; it is rendered in a sticky
-   * column beside the rows and sized by its own content.
-   */
+  /** Right-side rail slot; mount a `ScrubberRail` here. It reads the list viewport from context. */
   rail?: React.ReactNode;
+  /** Max height of the scrolling area (CSS length). Default: fill exactly the remaining viewport height. */
+  maxHeight?: string;
+  /**
+   * Mobile row layout. `compact` (one title line, a muted line, optional small meta line, badges and actions on the
+   * right; ~64-72px per row) or `stacked` (every column on its own labelled line). Default `stacked`.
+   */
+  mobileLayout?: 'compact' | 'stacked';
+  /** Hide the column-sort chip row on mobile (when the panel already offers a sort control). Default false. */
+  hideMobileSortBar?: boolean;
 }
+
+interface MobileCardLayout<T> {
+  title: FlatListColumn<T>;
+  sub: ReadonlyArray<FlatListColumn<T>>;
+  meta: ReadonlyArray<FlatListColumn<T>>;
+  end: ReadonlyArray<FlatListColumn<T>>;
+}
+
+/** Splits the columns into the compact card's lines. Null when no column can be the title. */
+function buildMobileLayout<T>(columns: ReadonlyArray<FlatListColumn<T>>): MobileCardLayout<T> | null {
+  const roleOf = (c: FlatListColumn<T>): MobileRole => c.mobile ?? (c.hideOnMobile ? 'hide' : 'sub');
+  const visible = columns.filter((c) => roleOf(c) !== 'hide');
+  const title = visible.find((c) => c.mobile === 'title') ?? visible.find((c) => c.mobile === undefined) ?? visible[0];
+  if (!title) return null;
+  const rest = visible.filter((c) => c !== title);
+  return {
+    title,
+    sub: rest.filter((c) => roleOf(c) === 'sub' || roleOf(c) === 'title'),
+    meta: rest.filter((c) => roleOf(c) === 'meta'),
+    end: rest.filter((c) => roleOf(c) === 'end'),
+  };
+}
+
+/** Compact card heights (px): fixed so a jump to any row lands exactly. */
+const COMPACT_ROW_PX = 64;
+const COMPACT_ROW_META_PX = 72;
 
 const TONE_CLASS: Record<'warning' | 'error', string> = {
   warning: 'border-l-[#e5a00d]',
   error: 'border-l-red-500',
 };
+
+/** Used until the first measurement of the remaining viewport height. */
+const FALLBACK_MAX_HEIGHT = 'clamp(360px, calc(100dvh - 240px), 1000px)';
+/** Border of the list box (1px each side) that the scroll area sits inside. */
+const BOX_BORDER_PX = 2;
+const DESKTOP_ROW_ESTIMATE_PX = 44;
+const OVERSCAN_ROWS = 8;
+
+const ROW_GRID =
+  'flex flex-col gap-1.5 lg:gap-3 lg:items-center lg:grid lg:[grid-template-columns:var(--cols)] xl:[grid-template-columns:var(--cols-xl)] px-3 py-2.5 border-b border-[#1c1c1c] border-l-2';
 
 interface RowProps<T> {
   item: T;
@@ -70,16 +119,87 @@ interface RowProps<T> {
   onToggle: (key: ListKey) => void;
   rowActions?: (item: T) => React.ReactNode;
   tone: RowTone;
+  /** Set (below `lg`, compact layout) to render the compact card instead of the grid/stacked row. */
+  card: MobileCardLayout<T> | null;
 }
 
-function RowInner<T>({ item, rowKey, columns, selectable, selected, onToggle, rowActions, tone }: RowProps<T>) {
+const SEPARATOR = <span aria-hidden="true" className="shrink-0 text-neutral-700">&middot;</span>;
+
+function CardLine<T>({ cols, item, className }: { cols: ReadonlyArray<FlatListColumn<T>>; item: T; className: string }) {
+  if (cols.length === 0) return null;
+  return (
+    <div className={`flex items-center gap-1.5 min-w-0 overflow-hidden whitespace-nowrap ${className}`}>
+      {cols.map((c, i) => (
+        <React.Fragment key={c.key}>
+          {i > 0 && SEPARATOR}
+          <span className="min-w-0 truncate">{c.render(item)}</span>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+function CardInner<T>({
+  item,
+  rowKey,
+  card,
+  selectable,
+  selected,
+  onToggle,
+  rowActions,
+  tone,
+}: RowProps<T> & { card: MobileCardLayout<T> }) {
+  const actions = rowActions ? rowActions(item) : null;
+  const hasEnd = card.end.length > 0 || actions !== null;
   return (
     <div
       role="row"
       aria-selected={selectable ? selected : undefined}
-      className={`flex flex-col gap-1.5 lg:gap-3 lg:items-center lg:grid lg:[grid-template-columns:var(--cols)] xl:[grid-template-columns:var(--cols-xl)] px-3 py-2.5 border-b border-[#1c1c1c] border-l-2 hover:bg-[#1a1a1a] [content-visibility:auto] [contain-intrinsic-size:auto_52px] ${
+      className={`flex items-center gap-2.5 px-3 border-b border-[#1c1c1c] border-l-2 hover:bg-[#1a1a1a] ${
         tone ? TONE_CLASS[tone] : 'border-l-transparent'
       } ${selected ? 'bg-[#e5a00d]/5' : 'bg-[#141414]'}`}
+      style={{ minHeight: card.meta.length > 0 ? COMPACT_ROW_META_PX : COMPACT_ROW_PX }}
+    >
+      {selectable && (
+        <div role="cell" className="shrink-0 flex items-center justify-center w-6 self-stretch">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggle(rowKey)}
+            aria-label="Select row"
+            className="h-5 w-5 accent-[#e5a00d] cursor-pointer"
+          />
+        </div>
+      )}
+      <div role="cell" className="min-w-0 flex-1 py-2 font-mono">
+        <div className="truncate text-sm leading-5 font-bold text-white">{card.title.render(item)}</div>
+        <CardLine cols={card.sub} item={item} className="text-xs leading-4 text-neutral-400" />
+        <CardLine cols={card.meta} item={item} className="text-[10px] leading-[14px] text-neutral-500" />
+      </div>
+      {hasEnd && (
+        <div role="cell" className="shrink-0 max-w-[55%] flex flex-wrap items-center justify-end gap-1.5 text-xs font-mono">
+          {card.end.map((c) => (
+            <span key={c.key} className="min-w-0">
+              {c.render(item)}
+            </span>
+          ))}
+          {actions}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RowInner<T>(props: RowProps<T>) {
+  const { item, rowKey, columns, selectable, selected, onToggle, rowActions, tone, card } = props;
+  if (card) return <CardInner {...props} card={card} />;
+  return (
+    <div
+      role="row"
+      aria-selected={selectable ? selected : undefined}
+      className={`${ROW_GRID} hover:bg-[#1a1a1a] ${tone ? TONE_CLASS[tone] : 'border-l-transparent'} ${
+        selected ? 'bg-[#e5a00d]/5' : 'bg-[#141414]'
+      }`}
     >
       {selectable && (
         <div role="cell" className="flex items-center min-h-[44px] lg:min-h-0">
@@ -127,29 +247,31 @@ function RowInner<T>({ item, rowKey, columns, selectable, selected, onToggle, ro
 
 const Row = React.memo(RowInner) as typeof RowInner;
 
-/** How far below the viewport the sentinel may sit and still trigger the next page. */
-const SENTINEL_MARGIN_PX = 400;
-
-function isWithinPreloadMargin(el: HTMLElement, margin: number): boolean {
-  const rect = el.getBoundingClientRect();
-  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-  return rect.top <= viewportHeight + margin && rect.bottom >= -margin;
-}
+/** Skeleton for a row whose page has not arrived. Fixed height so it never fights the virtualizer's measurement. */
+const PlaceholderRow: React.FC<{ height: number }> = React.memo(({ height }) => (
+  <div
+    role="row"
+    aria-busy="true"
+    className="flex items-center px-3 border-b border-[#1c1c1c] border-l-2 border-l-transparent bg-[#141414]"
+    style={{ height }}
+  >
+    <div className="w-full space-y-2">
+      <div className="h-2.5 w-2/5 rounded-[2px] bg-[#1d1d1d] animate-pulse" />
+      <div className="h-2 w-3/5 rounded-[2px] bg-[#191919] animate-pulse lg:hidden" />
+    </div>
+  </div>
+));
+PlaceholderRow.displayName = 'PlaceholderRow';
 
 /**
- * Flat, sortable, lazily-paged list. Desktop (`lg`+) is a sticky-header grid; below `lg` each row collapses to a
- * stacked card with a compact sort bar. Rows are memoized and use `content-visibility: auto`, so appending
- * a page does not re-render existing rows and off-screen rows skip layout/paint.
+ * Flat, sortable, virtualized list over a sparsely paged source. Only the rows in (and just around) the viewport are
+ * mounted; rows whose page has not arrived render as skeleton placeholders. Desktop (`lg`+) is a sticky-header grid;
+ * below `lg` each row collapses to a card (compact two/three-line, or stacked) with a sort bar. The scrolling area
+ * fills the remaining viewport height (or `maxHeight`); a `ScrubberRail` in the `rail` slot controls it through `ListViewportContext`.
  */
 export function FlatList<T>({
   columns,
-  items,
-  total,
-  loading,
-  error,
-  hasMore,
-  onLoadMore,
-  onReload,
+  list,
   getKey,
   sortKey,
   sortDir,
@@ -164,41 +286,94 @@ export function FlatList<T>({
   emptyHint,
   ariaLabel,
   rail,
+  maxHeight,
+  mobileLayout = 'stacked',
+  hideMobileSortBar = false,
 }: FlatListProps<T>): React.ReactElement {
+  const { total, loading, error, getItem, ensureRange, version, generation, reload, retry, bindScroller } = list;
   const selectable = selectedKeys !== undefined && onSelectedKeysChange !== undefined;
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
+  const headerRef = useRef<HTMLDivElement | null>(null);
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const [headerH, setHeaderH] = useState<number>(0);
+  const isDesktop = useMediaQuery('(min-width: 1024px)');
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const fillHeight = useFillViewportHeight(wrapperRef);
+  const jumperRef = useRef(createScrollJumper());
 
-  const selectedCount = selectedKeys ? items.reduce((n, it) => n + (selectedKeys.has(getKey(it)) ? 1 : 0), 0) : 0;
-  const allSelected = items.length > 0 && selectedCount === items.length;
+  const card = useMemo(
+    (): MobileCardLayout<T> | null => (!isDesktop && mobileLayout === 'compact' ? buildMobileLayout(columns) : null),
+    [isDesktop, mobileLayout, columns]
+  );
+
+  const estimate = useMemo((): number => {
+    if (isDesktop) return DESKTOP_ROW_ESTIMATE_PX;
+    if (card) return card.meta.length > 0 ? COMPACT_ROW_META_PX : COMPACT_ROW_PX;
+    const mobileCols = columns.filter((c) => !c.hideOnMobile).length;
+    return 22 + mobileCols * 24 + (rowActions ? 44 : 0) + (selectable ? 44 : 0);
+  }, [isDesktop, card, columns, rowActions, selectable]);
+
+  const virtualizer = useVirtualizer({
+    count: total,
+    getScrollElement: () => scrollEl,
+    estimateSize: () => estimate,
+    overscan: OVERSCAN_ROWS,
+    scrollMargin: headerH,
+    scrollPaddingStart: headerH,
+  });
+
+  useEffect(() => {
+    virtualizer.measure();
+  }, [virtualizer, estimate]);
+
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return undefined;
+    const update = (): void => setHeaderH(el.offsetHeight);
+    update();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const scrollToOffset = useCallback(
+    (index: number): void => {
+      jumperRef.current.jump(() => virtualizer.scrollToIndex(index, { align: 'start' }));
+    },
+    [virtualizer]
+  );
+
+  useEffect(() => bindScroller(scrollToOffset), [bindScroller, scrollToOffset]);
+  useEffect(() => {
+    const jumper = jumperRef.current;
+    return () => jumper.cancel();
+  }, []);
+  useEffect(() => {
+    if (!scrollEl) return undefined;
+    return cancelJumpsOnUserScroll(scrollEl, jumperRef.current);
+  }, [scrollEl]);
+
+  // A reset (sort/filter change, reload) goes back to the top.
+  useEffect(() => {
+    if (scrollEl) scrollEl.scrollTop = 0;
+  }, [generation, scrollEl]);
+
+  const virtualItems = virtualizer.getVirtualItems();
+  const firstIndex = virtualItems.length > 0 ? virtualItems[0].index : -1;
+  const lastIndex = virtualItems.length > 0 ? virtualItems[virtualItems.length - 1].index : -1;
+  useEffect(() => {
+    if (firstIndex >= 0) ensureRange(firstIndex, lastIndex);
+  }, [firstIndex, lastIndex, total, version, ensureRange]);
+
+  // `list` is rebuilt whenever its cache version changes, so this re-reads the loaded rows exactly then.
+  const loaded = useMemo(() => list.getLoadedItems(), [list]);
+  const selectedCount = selectedKeys ? loaded.reduce((n, it) => n + (selectedKeys.has(getKey(it)) ? 1 : 0), 0) : 0;
+  const allSelected = loaded.length > 0 && selectedCount === loaded.length;
 
   useEffect(() => {
     if (selectAllRef.current) selectAllRef.current.indeterminate = selectedCount > 0 && !allSelected;
   }, [selectedCount, allSelected]);
-
-  const canObserve = typeof IntersectionObserver !== 'undefined';
-  const sentinelActive = hasMore && !loading && !error;
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!canObserve || !el || !sentinelActive) return undefined;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) onLoadMore();
-      },
-      { rootMargin: `${SENTINEL_MARGIN_PX}px 0px` }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [canObserve, sentinelActive, onLoadMore, items.length]);
-
-  // An observer only reports changes, so when a load (or a background refresh) finishes while the sentinel is
-  // already inside the preload margin nothing would fire. Re-check geometry after every load so paging continues
-  // without a user scroll; `onLoadMore` is a no-op while a page is in flight.
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el || !sentinelActive) return;
-    if (isWithinPreloadMargin(el, SENTINEL_MARGIN_PX)) onLoadMore();
-  }, [sentinelActive, onLoadMore, items.length, total]);
 
   const toggleKey = useCallback(
     (key: ListKey) => {
@@ -213,7 +388,7 @@ export function FlatList<T>({
 
   const toggleAll = (): void => {
     if (!onSelectedKeysChange) return;
-    onSelectedKeysChange(allSelected ? new Set() : new Set(items.map(getKey)));
+    onSelectedKeysChange(allSelected ? new Set() : new Set(loaded.map(getKey)));
   };
 
   const handleSort = (col: FlatListColumn<T>): void => {
@@ -234,173 +409,185 @@ export function FlatList<T>({
     '--cols-xl': buildTemplate(columns),
   } as React.CSSProperties;
 
-  const initialLoading = loading && items.length === 0;
-  const fatalError = error !== null && items.length === 0 && !loading;
-  const empty = !loading && error === null && items.length === 0;
-
   const sortIndicator = (col: FlatListColumn<T>): React.ReactNode => {
     if (!col.sortable || col.key !== sortKey) return null;
     return sortDir === 'asc' ? <ArrowUp className="h-3 w-3 text-[#e5a00d]" /> : <ArrowDown className="h-3 w-3 text-[#e5a00d]" />;
   };
 
+  const viewportHeight = virtualizer.scrollRect?.height ?? 0;
+  const scrollOffset = virtualizer.scrollOffset ?? 0;
+  const contentHeight = virtualizer.getTotalSize() + headerH;
+  const fits = viewportHeight === 0 || contentHeight <= viewportHeight + 1;
+  const atEnd = !fits && scrollOffset + viewportHeight >= contentHeight - 2;
+  // Row containing the first pixel below the sticky header (+1px): the row at, or just entering, the top edge.
+  const topRow = virtualItems.find((vi) => vi.end > scrollOffset + headerH + 1);
+  const topIndex = topRow ? topRow.index : 0;
+  const overlayRail = useMediaQuery('(max-width: 1023px)');
+  const viewport = useMemo<ListViewport>(
+    () => ({ scrollElement: scrollEl, topIndex, atEnd, overlayRail, total, fits, scrollToOffset }),
+    [scrollEl, topIndex, atEnd, overlayRail, total, fits, scrollToOffset]
+  );
+
+  const hasRows = total > 0;
+
   return (
-    <div className="flex items-start gap-2">
-      <div className="flex-1 min-w-0 border border-[#222222] rounded-[4px] bg-[#141414]" style={gridVars}>
-        {/* Desktop sticky header */}
-        <div
-          role="row"
-          className="hidden lg:grid lg:[grid-template-columns:var(--cols)] xl:[grid-template-columns:var(--cols-xl)] gap-3 items-center px-3 py-2 sticky top-0 z-10 bg-[#121212] border-b border-[#2a2a2a] rounded-t-[4px] text-[10px] uppercase tracking-wider text-neutral-400 font-mono"
-        >
-          {selectable && (
-            <div role="columnheader">
-              <input
-                ref={selectAllRef}
-                type="checkbox"
-                checked={allSelected}
-                onChange={toggleAll}
-                disabled={items.length === 0}
-                aria-label="Select all loaded rows"
-                className="h-4 w-4 accent-[#e5a00d] cursor-pointer"
-              />
-            </div>
-          )}
-          {columns.map((col) => (
-            <div
-              key={col.key}
-              role="columnheader"
-              aria-sort={
-                col.sortable && col.key === sortKey ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined
-              }
-              className={`${col.xlOnly ? 'hidden xl:block ' : ''}${col.align === 'right' ? 'text-right' : ''}`}
-            >
-              {col.sortable ? (
-                <button
-                  type="button"
-                  onClick={() => handleSort(col)}
-                  className={`inline-flex items-center gap-1 uppercase tracking-wider hover:text-white ${
-                    col.key === sortKey ? 'text-white' : ''
-                  }`}
-                >
-                  {col.label}
-                  {sortIndicator(col)}
-                </button>
-              ) : (
-                col.label
+    <ListViewportContext.Provider value={viewport}>
+      <div ref={wrapperRef} className="relative flex items-stretch gap-1.5">
+        <div className="flex-1 min-w-0 border border-[#222222] rounded-[4px] bg-[#141414] overflow-hidden" style={gridVars}>
+          <div
+            ref={setScrollEl}
+            tabIndex={0}
+            role="region"
+            aria-label={`${ariaLabel} (scrollable)`}
+            className="virtual-scroll relative"
+            style={{ maxHeight: maxHeight ?? (fillHeight !== null ? fillHeight - BOX_BORDER_PX : FALLBACK_MAX_HEIGHT) }}
+          >
+            <div ref={headerRef} className="sticky top-0 z-10">
+              {/* Desktop header */}
+              <div
+                role="row"
+                className="hidden lg:grid lg:[grid-template-columns:var(--cols)] xl:[grid-template-columns:var(--cols-xl)] gap-3 items-center px-3 py-2 bg-[#121212] border-b border-[#2a2a2a] text-[10px] uppercase tracking-wider text-neutral-400 font-mono"
+              >
+                {selectable && (
+                  <div role="columnheader">
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      disabled={loaded.length === 0}
+                      aria-label="Select all loaded rows"
+                      className="h-4 w-4 accent-[#e5a00d] cursor-pointer"
+                    />
+                  </div>
+                )}
+                {columns.map((col) => (
+                  <div
+                    key={col.key}
+                    role="columnheader"
+                    aria-sort={
+                      col.sortable && col.key === sortKey ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined
+                    }
+                    className={`${col.xlOnly ? 'hidden xl:block ' : ''}${col.align === 'right' ? 'text-right' : ''}`}
+                  >
+                    {col.sortable ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSort(col)}
+                        className={`inline-flex items-center gap-1 uppercase tracking-wider hover:text-white ${
+                          col.key === sortKey ? 'text-white' : ''
+                        }`}
+                      >
+                        {col.label}
+                        {sortIndicator(col)}
+                      </button>
+                    ) : (
+                      col.label
+                    )}
+                  </div>
+                ))}
+                {rowActions && <div role="columnheader" className="text-right">{actionsLabel}</div>}
+              </div>
+
+              {/* Mobile sort bar */}
+              {(!hideMobileSortBar || selectable) && (
+              <div className="lg:hidden flex items-center gap-1.5 overflow-x-auto px-2 py-1.5 bg-[#121212] border-b border-[#2a2a2a]">
+                {selectable && (
+                  <label className="flex items-center gap-1.5 text-[10px] uppercase font-mono text-neutral-400 shrink-0 min-h-[44px] pr-2">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      disabled={loaded.length === 0}
+                      aria-label="Select all loaded rows"
+                      className="h-4 w-4 accent-[#e5a00d]"
+                    />
+                    All
+                  </label>
+                )}
+                {!hideMobileSortBar &&
+                  columns
+                  .filter((c) => c.sortable)
+                  .map((col) => (
+                    <TapeDeckButton
+                      key={col.key}
+                      size="sm"
+                      active={col.key === sortKey}
+                      onClick={() => handleSort(col)}
+                      className="shrink-0 whitespace-nowrap"
+                      aria-label={`Sort by ${col.label}`}
+                      icon={sortIndicator(col)}
+                    >
+                      {col.label}
+                    </TapeDeckButton>
+                  ))}
+              </div>
               )}
             </div>
-          ))}
-          {rowActions && <div role="columnheader" className="text-right">{actionsLabel}</div>}
-        </div>
 
-        {/* Mobile sort bar */}
-        <div className="lg:hidden sticky top-0 z-10 flex items-center gap-1.5 overflow-x-auto px-2 py-1.5 bg-[#121212] border-b border-[#2a2a2a] rounded-t-[4px]">
-          {selectable && (
-            <label className="flex items-center gap-1.5 text-[10px] uppercase font-mono text-neutral-400 shrink-0 min-h-[44px] pr-2">
-              <input
-                type="checkbox"
-                checked={allSelected}
-                onChange={toggleAll}
-                disabled={items.length === 0}
-                aria-label="Select all loaded rows"
-                className="h-4 w-4 accent-[#e5a00d]"
-              />
-              All
-            </label>
-          )}
-          {columns
-            .filter((c) => c.sortable)
-            .map((col) => (
-              <TapeDeckButton
-                key={col.key}
-                size="sm"
-                active={col.key === sortKey}
-                onClick={() => handleSort(col)}
-                className="shrink-0"
-                aria-label={`Sort by ${col.label}`}
+            <ListStates
+              total={total}
+              loading={loading}
+              error={error}
+              emptyMessage={emptyMessage}
+              emptyHint={emptyHint}
+              onReload={reload}
+            />
+
+            {hasRows && (
+              <div
+                role="table"
+                aria-label={ariaLabel}
+                aria-busy={loading}
+                aria-rowcount={total}
+                className="relative w-full"
+                style={{ height: virtualizer.getTotalSize() }}
               >
-                {col.label}
-                {sortIndicator(col)}
-              </TapeDeckButton>
-            ))}
-        </div>
-
-        <div role="table" aria-label={ariaLabel} aria-busy={loading} aria-rowcount={total}>
-          {initialLoading && (
-            <div role="status" className="p-3 space-y-2">
-              {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="h-10 rounded-[3px] bg-[#1a1a1a] animate-pulse" />
-              ))}
-              <div className="flex items-center justify-center gap-2 pt-1 text-[11px] font-mono text-neutral-400 uppercase">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-[#e5a00d]" /> Loading
+                {virtualItems.map((vi) => {
+                  const item = getItem(vi.index);
+                  const key = item !== undefined ? getKey(item) : vi.index;
+                  return (
+                    <div
+                      key={vi.index}
+                      data-index={vi.index}
+                      ref={virtualizer.measureElement}
+                      aria-rowindex={vi.index + 1}
+                      className="absolute left-0 top-0 w-full"
+                      style={{ transform: `translateY(${vi.start - headerH}px)` }}
+                    >
+                      {item !== undefined ? (
+                        <Row<T>
+                          item={item}
+                          rowKey={key}
+                          columns={columns}
+                          selectable={selectable}
+                          selected={selectedKeys?.has(key) ?? false}
+                          onToggle={toggleKey}
+                          rowActions={rowActions}
+                          tone={rowTone ? rowTone(item) : null}
+                          card={card}
+                        />
+                      ) : (
+                        <PlaceholderRow height={estimate} />
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            </div>
-          )}
-
-          {fatalError && (
-            <div role="alert" className="p-6 flex flex-col items-center gap-3 text-center">
-              <AlertTriangle className="h-6 w-6 text-red-400" />
-              <p className="text-xs font-mono text-red-300 break-words max-w-md">{error}</p>
-              <TapeDeckButton size="sm" onClick={onReload}>
-                Retry
-              </TapeDeckButton>
-            </div>
-          )}
-
-          {empty && (
-            <div className="p-8 flex flex-col items-center gap-2 text-center">
-              <Inbox className="h-6 w-6 text-neutral-600" />
-              <p className="text-xs font-mono text-neutral-300">{emptyMessage}</p>
-              {emptyHint && <p className="text-[11px] font-mono text-neutral-500">{emptyHint}</p>}
-            </div>
-          )}
-
-          {items.map((item) => {
-            const key = getKey(item);
-            return (
-              <Row<T>
-                key={key}
-                item={item}
-                rowKey={key}
-                columns={columns}
-                selectable={selectable}
-                selected={selectedKeys?.has(key) ?? false}
-                onToggle={toggleKey}
-                rowActions={rowActions}
-                tone={rowTone ? rowTone(item) : null}
-              />
-            );
-          })}
-        </div>
-
-        {items.length > 0 && (
-          <div className="px-3 py-3 text-center text-[11px] font-mono text-neutral-500">
-            {loading && (
-              <span role="status" className="inline-flex items-center gap-2 text-neutral-400">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-[#e5a00d]" /> Loading more
-              </span>
-            )}
-            {error !== null && !loading && (
-              <span role="alert" className="inline-flex flex-wrap items-center justify-center gap-2 text-red-300">
-                <AlertTriangle className="h-3.5 w-3.5" />
-                <span className="break-words">{error}</span>
-                <TapeDeckButton size="sm" onClick={onLoadMore}>
-                  Retry
-                </TapeDeckButton>
-              </span>
-            )}
-            {!loading && error === null && hasMore && !canObserve && (
-              <TapeDeckButton size="sm" onClick={onLoadMore}>
-                Load more
-              </TapeDeckButton>
-            )}
-            {!loading && error === null && !hasMore && (
-              <span className="uppercase tracking-wider">End of list - {total} {total === 1 ? 'item' : 'items'}</span>
             )}
           </div>
+          {error !== null && hasRows && <ListErrorBar error={error} onRetry={retry} />}
+        </div>
+        {rail && (
+          <aside
+            className={overlayRail ? 'absolute right-px bottom-px z-20' : 'shrink-0 self-stretch'}
+            // Overlay: starts under the sticky header so it never covers the sort chips.
+            style={overlayRail ? { top: headerH + 1 } : undefined}
+          >
+            {rail}
+          </aside>
         )}
-        <div ref={sentinelRef} aria-hidden="true" className="h-px" />
       </div>
-      {rail && <aside className="sticky top-2 self-start shrink-0">{rail}</aside>}
-    </div>
+    </ListViewportContext.Provider>
   );
 }
