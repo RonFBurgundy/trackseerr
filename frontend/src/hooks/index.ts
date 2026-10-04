@@ -14,3 +14,4 @@ export * from './useAdminUsers';
 export * from './useDeploymentIdentity';
 export * from './useGatewayStatus';
 export * from './useRoleChangeNotice';
+export * from './useStartupStatus';

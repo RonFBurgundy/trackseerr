@@ -208,7 +208,13 @@ def clear_session_status_cache() -> None:
 
 
 def core_session_status(
-    config: Config, user_id: str, session_issued_at_us: int, *, use_cache: bool = True
+    config: Config,
+    user_id: str,
+    session_issued_at_us: int,
+    *,
+    use_cache: bool = True,
+    record_login: bool = False,
+    username: Optional[str] = None,
 ) -> dict[str, Any]:
     """Core's verdict on a gateway session, cached for 60 s per (user, issue time) unless ``use_cache`` is off.
 
@@ -227,7 +233,9 @@ def core_session_status(
         raise unavailable
     client = CoreClient(core_url=config.trackseerr_core_url, secret=config.internal_core_secret)
     try:
-        code, body = client.session_status(str(user_id), int(session_issued_at_us))
+        code, body = client.session_status(
+            str(user_id), int(session_issued_at_us), record_login=record_login, username=username
+        )
     except (httpx.HTTPError, ValueError) as exc:
         logger.error("Gateway session-status check failed: %s", type(exc).__name__)
         raise unavailable from exc

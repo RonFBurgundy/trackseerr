@@ -12,6 +12,7 @@ import {
   useAccount,
   useLocalLogin,
   useDeploymentIdentity,
+  useStartupStatus,
 } from '@/hooks';
 import {
   Header,
@@ -28,6 +29,7 @@ import {
   MachinedCard,
   InvitePage,
   LocalLoginForm,
+  StartupScreen,
 } from '@/components';
 import type { MainTab } from '@/components/layout/Navigation';
 import {
@@ -479,7 +481,11 @@ const MainApp: React.FC = () => {
 };
 
 export const App: React.FC = () => {
+  const startup = useStartupStatus();
   const inviteToken = parseInviteToken(window.location.pathname);
+  // Hold the whole app (hooks included) back until the server is up, so nothing fires 503-ing requests.
+  if (startup.phase === 'checking') return <div className="min-h-screen bg-[#0a0a0a]" />;
+  if (startup.phase === 'starting') return <StartupScreen step={startup.step} />;
   // The invite page must work without a session, so it bypasses auth (and its hooks) entirely.
   return inviteToken ? <InvitePage token={inviteToken} /> : <MainApp />;
 };

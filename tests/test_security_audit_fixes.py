@@ -160,8 +160,9 @@ class _Core:
         self.calls: list[tuple[str, int]] = []
         self.reply: Any = (200, {"valid": True})
 
-    def __call__(self, user_id: str, issued: int):
+    def __call__(self, user_id: str, issued: int, **kwargs: Any):
         self.calls.append((user_id, issued))
+        self.kwargs = kwargs
         if isinstance(self.reply, Exception):
             raise self.reply
         return self.reply
@@ -174,7 +175,7 @@ def gw(db, tmp_path, monkeypatch):
     uid = "local-" + "b" * 24
     db.mirror_local_user(uid, "bob")
     core = _Core()
-    monkeypatch.setattr(CoreClient, "session_status", lambda self, u, i: core(u, i))
+    monkeypatch.setattr(CoreClient, "session_status", lambda self, u, i, **kw: core(u, i, **kw))
     clock = {"t": 1000.0}
     monkeypatch.setattr(dependencies, "_monotonic", lambda: clock["t"])
     dependencies.clear_session_status_cache()

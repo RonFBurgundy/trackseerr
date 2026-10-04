@@ -7,3 +7,4 @@ export * from './SearchBar';
 export * from './QuotaBadge';
 export * from './FormField';
 export * from './CopyBox';
+export * from './StartupScreen';

@@ -9,7 +9,7 @@ import {
   deleteRequest as apiDeleteRequest,
 } from '@/services/requestService';
 
-export type RequestFilter = 'all' | 'pending' | 'approved' | 'fulfilled';
+export type RequestFilter = 'all' | 'pending' | 'approved' | 'fulfilled' | 'rejected';
 
 export interface UseRequestsReturn {
   requests: RequestItem[];

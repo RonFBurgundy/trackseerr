@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
 
 from plex_playlist_sync import __version__
+from plex_playlist_sync.boot import boot_state
 from plex_playlist_sync.api.routes import (
     account,
     acquisition,
@@ -40,7 +41,13 @@ from plex_playlist_sync.api.routes import (
     system,
     users,
 )
-from plex_playlist_sync.api.tier_middleware import INVITE_TOKEN_PATH_RE, GatewayGuardMiddleware, SignedBodyMiddleware
+from plex_playlist_sync.api.tier_middleware import (
+    INVITE_TOKEN_PATH_RE,
+    GatewayGuardMiddleware,
+    SignedBodyMiddleware,
+    SECURITY_HEADERS,
+    StartupGateMiddleware,
+)
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.internal_auth import MIN_SECRET_LENGTH, validate_secret_strength
 from plex_playlist_sync.role_guard import (
@@ -166,21 +173,8 @@ def create_app(
     @app.middleware("http")
     async def add_security_headers(request: Request, call_next) -> Response:
         response: Response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' "
-            "https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-            "font-src 'self' https://fonts.gstatic.com; "
-            "img-src 'self' data: https:; "
-            "media-src 'self' https: data:; "
-            "connect-src 'self'; "
-            "frame-ancestors 'none'"
-        )
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        for header, value in SECURITY_HEADERS.items():
+            response.headers[header] = value
         return response
 
     cors_origins_env = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5250,http://127.0.0.1:5250").strip()
@@ -238,11 +232,23 @@ def create_app(
     api_router.include_router(system.router, prefix="/system", tags=["system"])
 
     @api_router.api_route("/health", methods=["GET", "HEAD"], tags=["health"])
-    def health_check() -> dict[str, str]:
-        # Deliberately minimal and unauthenticated: tier only, never a version.
-        return {"status": "ok", "tier": _role_of(app)}
+    def health_check() -> dict[str, object]:
+        # Deliberately minimal and unauthenticated: tier and boot state only, never a version.
+        # Always 200 so a container HEALTHCHECK does not flap while booting; the SPA reads ``status``.
+        return {**boot_state.snapshot(detailed=_role_of(app) != "gateway"), "tier": _role_of(app)}
+
+    @api_router.api_route("/health/ready", methods=["GET", "HEAD"], tags=["health"])
+    def health_ready() -> JSONResponse:
+        # Readiness probe: 503 + Retry-After until startup has finished.
+        body = {**boot_state.snapshot(detailed=_role_of(app) != "gateway"), "tier": _role_of(app)}
+        if boot_state.ready:
+            return JSONResponse(body)
+        return JSONResponse(body, status_code=503, headers={"Retry-After": "5"})
 
     app.include_router(api_router)
+
+    # Outermost: while the process is still booting, every /api route except health answers 503.
+    app.add_middleware(StartupGateMiddleware)
 
     # 4. Mount Static Directory & SPA Assets & Serve Root
     static_dir = Path(__file__).resolve().parent.parent / "static"

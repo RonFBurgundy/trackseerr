@@ -195,7 +195,14 @@ def verify_pin(
 
     # On the gateway core owns disabled / removed state: ask it before any session is created.
     if tier_of(config) == "gateway":
-        verdict = core_session_status(config, str(user_id), int(time.time() * 1_000_000), use_cache=False)
+        verdict = core_session_status(
+            config,
+            str(user_id),
+            int(time.time() * 1_000_000),
+            use_cache=False,
+            record_login=True,
+            username=username,
+        )
         if not verdict["valid"] and verdict.get("reason") in ("disabled", "deleted"):
             logger.warning("Refused Plex login for a disabled or removed account (per core)")
             raise HTTPException(
@@ -221,6 +228,9 @@ def verify_pin(
         email=email,
         is_admin=is_admin,
     )
+
+    # 5b. Stamp last_login_at once per successful sign-in (on a gateway, core was told via session-status above).
+    db.record_successful_login(user["id"])
 
     # 6. Create signed session token, store it, and set the HttpOnly, SameSite=Lax cookie
     #    (Secure flag follows HTTPS).

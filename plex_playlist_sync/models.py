@@ -427,6 +427,7 @@ class QualityProfile:
     is_default: bool = False
     custom_formats: list[dict[str, Any]] = field(default_factory=list)
     min_score: Optional[int] = None
+    upgrade_allowed: bool = True
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -446,6 +447,7 @@ class QualityProfile:
             "is_default": bool(self.is_default),
             "custom_formats": list(self.custom_formats),
             "min_score": self.min_score,
+            "upgrade_allowed": bool(self.upgrade_allowed),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

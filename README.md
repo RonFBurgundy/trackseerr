@@ -366,6 +366,7 @@ TrackSeerr includes a first-class **Application URL** setting (configurable in t
 | `HOST` | `0.0.0.0` | Host binding interface |
 | `PUID` / `PGID` | `1000` / `1000` | User and group ID for filesystem operations (`99`/`100` on Unraid) |
 | `UMASK` | `022` | File creation permissions mask |
+| `FORCE_CHOWN` | `0` | Set to `1` to force a full recursive ownership fix of `/config` and `/data` to `PUID:PGID` on this start. Done automatically once on first run (marker `/config/.trackseerr-chown-v1`); useful after restoring files created by an older root-run container. Can be slow on large music libraries |
 | `PLEX_URL` | *Required* | Base URL to your Plex Media Server (e.g. `http://192.168.1.100:32400`) |
 | `PLEX_TOKEN` | *Required* | Plex administrator `X-Plex-Token` |
 | `PLEX_MUSIC_SECTION` | `Music` | Plex music library section name |

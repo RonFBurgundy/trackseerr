@@ -16,7 +16,7 @@ import time
 import urllib.parse
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import httpx
 
@@ -44,6 +44,7 @@ from plex_playlist_sync.models import (
 )
 from plex_playlist_sync.naming import build_track_path
 from plex_playlist_sync.notifications import notification_dispatcher
+from plex_playlist_sync.redaction import safe_exc
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.security import is_safe_service_url
 from plex_playlist_sync.storage import Database, clean_library_name
@@ -330,8 +331,13 @@ class AcquisitionWorker:
         plex_client: Optional[PlexClient] = None,
         poll_interval: float = 5.0,
         staging_dir: Optional[str] = None,
+        plex_client_provider: Optional[Callable[[], Optional[PlexClient]]] = None,
     ) -> bool:
-        """Starts background download monitor worker thread."""
+        """Starts background download monitor worker thread.
+
+        ``plex_client_provider`` is resolved on every poll cycle, so a Plex that was down at boot and
+        connects later is picked up; it takes precedence over the by-value ``plex_client``.
+        """
         with self._lock:
             if self._is_running:
                 logger.warning("AcquisitionWorker is already running")
@@ -348,7 +354,14 @@ class AcquisitionWorker:
                 logger.info("AcquisitionWorker loop started (poll interval: %.1fs)", self.poll_interval)
                 while not self._stop_event.is_set():
                     try:
-                        self.poll_once(db=db, plex_client=plex_client, staging_dir=self.staging_dir)
+                        current_plex = plex_client
+                        if plex_client_provider is not None:
+                            try:
+                                current_plex = plex_client_provider()
+                            except Exception as e:  # a failing provider must not stop imports; Plex refresh is optional
+                                logger.warning("Plex client provider failed: %s", safe_exc(e))
+                                current_plex = None
+                        self.poll_once(db=db, plex_client=current_plex, staging_dir=self.staging_dir)
                     except Exception as e:
                         logger.error("Unexpected error in AcquisitionWorker poll cycle: %s", e)
 

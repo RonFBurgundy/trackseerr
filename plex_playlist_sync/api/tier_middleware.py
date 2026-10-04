@@ -26,6 +26,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from plex_playlist_sync.api.sessions import start_session
+from plex_playlist_sync.boot import boot_state
 from plex_playlist_sync.clients.core_client import SESSION_ISSUED_AT_KEY, CoreClient
 from plex_playlist_sync.internal_auth import HEADER_SIGNATURE
 
@@ -43,6 +44,7 @@ ALL_METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"})
 # Endpoints the gateway serves from its own process (no forwarding by the middleware).
 GATEWAY_LOCAL_ALLOWLIST: tuple[tuple[frozenset[str], str], ...] = (
     (READ, "/api/health"),  # container/orchestrator health check
+    (READ, "/api/health/ready"),  # readiness probe (503 while starting)
     (frozenset({"POST"}), "/api/auth/plex/pin"),  # sign-in: start the Plex PIN flow
     (frozenset({"POST"}), "/api/auth/plex/verify"),  # sign-in: claim the PIN and create the session
     (frozenset({"POST"}), "/api/auth/local/login"),  # sign-in: local account (core verifies the credentials)
@@ -166,6 +168,64 @@ def _resolve_db(app: Any) -> Any:
 
     override = app.dependency_overrides.get(get_db)
     return (override or get_db)()
+
+
+STARTUP_RETRY_AFTER_SECONDS = "5"
+# Applied to every response, including the startup 503s produced by the outermost StartupGateMiddleware
+# (which sits outside the ``add_security_headers`` HTTP middleware in app.py).
+SECURITY_HEADERS: dict[str, str] = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' "
+        "https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: https:; "
+        "media-src 'self' https: data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'"
+    ),
+    "X-XSS-Protection": "1; mode=block",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+}
+
+_STARTUP_OPEN_PATHS = frozenset({"/api/health", "/api/health/ready"})
+
+
+def _startup_role_is_gateway(scope: Scope) -> bool:
+    """Role as ``create_app`` recorded it on ``app.state`` (what ``/api/health`` uses), else the environment."""
+    state = getattr(scope.get("app"), "state", None)
+    config = getattr(state, "config", None)
+    role = getattr(config, "role", None) or os.getenv("ROLE", "all-in-one")
+    return str(role).lower().strip() == "gateway"
+
+
+class StartupGateMiddleware:
+    """Answers 503 + ``Retry-After`` on every ``/api`` route except health while the process is booting.
+
+    Static assets and the SPA shell are not gated, so the browser can load the "starting" screen.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and not boot_state.ready:
+            path = str(scope.get("path", ""))
+            if (path == "/api" or path.startswith("/api/")) and path.rstrip("/") not in _STARTUP_OPEN_PATHS:
+                body = {
+                    **boot_state.snapshot(detailed=not _startup_role_is_gateway(scope)),
+                    "detail": "TrackSeerr is starting",
+                }
+                await JSONResponse(
+                    body,
+                    status_code=503,
+                    headers={"Retry-After": STARTUP_RETRY_AFTER_SECONDS, **SECURITY_HEADERS},
+                )(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 class SignedBodyMiddleware:

@@ -61,7 +61,7 @@ export interface RequestItem {
   title: string;
   artist: string;
   album?: string;
-  status: 'pending' | 'approved' | 'rejected' | 'fulfilled' | 'available';
+  status: 'pending' | 'approved' | 'processing' | 'rejected' | 'fulfilled' | 'available';
   requested_by_id?: number;
   /** Owner id as returned by the backend DB row (plex id stored as TEXT, so usually a string). */
   user_id?: string | number;

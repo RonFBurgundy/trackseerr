@@ -40,6 +40,7 @@ class QualityProfilePayload(BaseModel):
     is_default: bool = False
     custom_formats: list[dict[str, Any]] = Field(default_factory=list)
     min_score: Optional[int] = None
+    upgrade_allowed: bool = True
 
 
 class QualityProfileResponse(BaseModel):
@@ -54,6 +55,7 @@ class QualityProfileResponse(BaseModel):
     is_default: bool = False
     custom_formats: list[dict[str, Any]] = Field(default_factory=list)
     min_score: Optional[int] = None
+    upgrade_allowed: bool = True
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -123,6 +125,7 @@ def create_or_update_quality_profile(
         is_default=payload.is_default,
         custom_formats=payload.custom_formats,
         min_score=payload.min_score,
+        upgrade_allowed=payload.upgrade_allowed,
     )
     try:
         saved = db.upsert_quality_profile(profile_obj)

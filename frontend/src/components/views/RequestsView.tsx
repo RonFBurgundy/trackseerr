@@ -49,6 +49,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
     { id: 'pending', label: 'Pending' },
     { id: 'approved', label: 'Approved' },
     { id: 'fulfilled', label: 'Fulfilled' },
+    { id: 'rejected', label: 'Rejected' },
   ];
 
   const handleApprove = async (id: number) => {
@@ -82,6 +83,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
   const getStatusBadge = (status: RequestItem['status']) => {
     switch (status) {
       case 'approved':
+      case 'processing':
         return (
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[2px] bg-blue-950/60 border border-blue-800 text-blue-300 text-[11px] font-mono uppercase">
             <CheckCircle2 className="h-3 w-3" /> Approved

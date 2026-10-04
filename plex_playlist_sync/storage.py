@@ -1,6 +1,7 @@
 """SQLite persistence engine for plex-playlist-sync with WAL mode and migrations."""
 
 import json
+import logging
 import os
 import re
 import hmac
@@ -80,6 +81,9 @@ def ts_to_us(value: Any) -> int:
 
 
 RESERVED_USER_IDS = frozenset({"", "0", "1", "api_key_user", "gateway_service", "internal_gateway"})
+
+
+logger = logging.getLogger(__name__)
 
 
 class Database:
@@ -221,8 +225,11 @@ class Database:
                 (28, self._migration_v28),
                 (29, self._migration_v29),
                 (30, self._migration_v30),
+                (31, self._migration_v31),
             ]
 
+            applied = 0
+            latest_version = migrations[-1][0]
             for version, migration_fn in migrations:
                 if current_version < version:
                     migration_fn(cur)
@@ -230,6 +237,13 @@ class Database:
                         "INSERT INTO schema_migrations (version) VALUES (?)",
                         (version,),
                     )
+                    applied += 1
+            if applied:
+                logger.info(
+                    "[boot] migrations: applied %d (schema v%d -> v%d)", applied, current_version, latest_version
+                )
+            else:
+                logger.info("[boot] migrations: schema up to date (v%d)", current_version)
             # Idempotent (column-existence guarded), so it is deliberately not version-numbered.
             self._ensure_naming_formats(cur)
             self.conn.commit()
@@ -1177,6 +1191,13 @@ class Database:
             "CREATE TABLE IF NOT EXISTS kv_store (key TEXT PRIMARY KEY, value TEXT NOT NULL, "
             "updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP))"
         )
+
+    def _migration_v31(self, cur: sqlite3.Cursor) -> None:
+        """Persist the per-profile "upgrade allowed" flag (default on: upgrades were previously ungated)."""
+        cur.execute("PRAGMA table_info(quality_profiles);")
+        qp_cols = {row[1] for row in cur.fetchall()}
+        if "upgrade_allowed" not in qp_cols:
+            cur.execute("ALTER TABLE quality_profiles ADD COLUMN upgrade_allowed INTEGER NOT NULL DEFAULT 1;")
 
     def _migration_v28(self, cur: sqlite3.Cursor) -> None:
         """Discography batch markers, legacy single-quota migration and per-type auto-approve bits.
@@ -2592,6 +2613,16 @@ class Database:
             )
             self.conn.commit()
 
+    def stamp_last_login(self, user_id: str) -> None:
+        """Stamps ``last_login_at`` only. Unlike :meth:`record_successful_login` it never touches
+        ``failed_logins`` / ``locked_until``, so a gateway-reported Plex sign-in cannot clear a lockout."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE users SET last_login_at = ? WHERE id = ?",
+                (_utcnow().isoformat(), str(user_id)),
+            )
+            self.conn.commit()
+
     def record_failed_login(self, user_id: str, locked_until_us: Optional[int] = None) -> None:
         locked = (
             datetime.fromtimestamp(locked_until_us / 1_000_000, tz=timezone.utc).isoformat()
@@ -2931,6 +2962,15 @@ class Database:
             row = cur.fetchone()
             return dict(row) if row else None
 
+    _REQUEST_STATUS_ALIASES: dict[str, tuple[str, ...]] = {
+        "pending": ("pending",),
+        "approved": ("approved", "processing"),
+        "fulfilled": ("available", "fulfilled"),
+        "available": ("available", "fulfilled"),
+        "processing": ("processing",),
+        "rejected": ("rejected",),
+    }
+
     def list_requests(
         self, user_id: Optional[str] = None, status: Optional[str] = None
     ) -> list[dict[str, Any]]:
@@ -2950,8 +2990,11 @@ class Database:
             params.append(str(user_id))
         if status:
             status_val = status.value if hasattr(status, "value") else str(status)
-            query += " AND r.status = ?"
-            params.append(status_val)
+            # UI tab names are not stored values: "approved" rows are stored as 'processing' and
+            # "fulfilled" rows as 'available'.
+            stored = self._REQUEST_STATUS_ALIASES.get(status_val.strip().lower(), (status_val,))
+            query += f" AND r.status IN ({','.join('?' * len(stored))})"
+            params.extend(stored)
 
         query += " ORDER BY r.created_at DESC"
 
@@ -2960,7 +3003,7 @@ class Database:
             return [dict(row) for row in cur.fetchall()]
 
     def get_cutoff_unmet_requests(self) -> list[dict[str, Any]]:
-        """Returns requests where status = 'available' AND cutoff_met = 0."""
+        """Returns requests where status = 'available' AND cutoff_met = 0, excluding those whose profile forbids upgrades."""
         query = """
             SELECT r.id, r.user_id, r.item_type, r.title, r.artist, r.album,
                    r.cover_url, r.preview_url, r.status, r.release_date, r.foreign_id,
@@ -2968,7 +3011,13 @@ class Database:
                    r.created_at, r.updated_at, u.username
             FROM music_requests r
             LEFT JOIN users u ON r.user_id = u.id
+            LEFT JOIN quality_profiles qp ON qp.id = r.quality_profile_id
             WHERE r.status = 'available' AND r.cutoff_met = 0
+              AND COALESCE(
+                    qp.upgrade_allowed,
+                    (SELECT upgrade_allowed FROM quality_profiles WHERE is_default = 1 LIMIT 1),
+                    1
+                  ) = 1
             ORDER BY r.created_at ASC
         """
         with self._lock:
@@ -3901,6 +3950,7 @@ class Database:
     def _format_quality_profile_row(self, row: sqlite3.Row) -> dict[str, Any]:
         res = dict(row)
         res["is_default"] = bool(res.get("is_default", 0))
+        res["upgrade_allowed"] = bool(res.get("upgrade_allowed", 1))
         res["min_size_mb"] = (
             float(res["min_size_mb"]) if res.get("min_size_mb") is not None else None
         )
@@ -4004,6 +4054,7 @@ class Database:
             is_default = bool(profile.is_default)
             custom_formats = profile.custom_formats
             min_score = profile.min_score
+            upgrade_allowed = bool(profile.upgrade_allowed)
         else:
             p_id = str(profile.get("id"))
             name = str(profile.get("name"))
@@ -4019,6 +4070,7 @@ class Database:
             is_default = bool(profile.get("is_default", False))
             custom_formats = profile.get("custom_formats", [])
             min_score = profile.get("min_score")
+            upgrade_allowed = bool(profile.get("upgrade_allowed", True))
 
         with self._lock:
             if is_default:
@@ -4030,8 +4082,8 @@ class Database:
                 """
                 INSERT INTO quality_profiles (
                     id, name, cutoff, items_json, preferred_tags_json, ignored_tags_json,
-                    min_size_mb, max_size_mb, is_default, custom_formats_json, min_score, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    min_size_mb, max_size_mb, is_default, custom_formats_json, min_score, upgrade_allowed, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     cutoff = excluded.cutoff,
@@ -4043,6 +4095,7 @@ class Database:
                     is_default = excluded.is_default,
                     custom_formats_json = excluded.custom_formats_json,
                     min_score = excluded.min_score,
+                    upgrade_allowed = excluded.upgrade_allowed,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -4057,6 +4110,7 @@ class Database:
                     1 if is_default else 0,
                     json.dumps(custom_formats if isinstance(custom_formats, list) else []),
                     int(min_score) if min_score is not None else None,
+                    1 if upgrade_allowed else 0,
                 ),
             )
 

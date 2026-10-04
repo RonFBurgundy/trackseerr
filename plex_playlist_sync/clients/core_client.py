@@ -182,16 +182,23 @@ class CoreClient:
             data = {}
         return resp.status_code, data if isinstance(data, dict) else {}
 
-    def session_status(self, user_id: str, session_issued_at_us: int) -> tuple[int, dict[str, Any]]:
+    def session_status(
+        self,
+        user_id: str,
+        session_issued_at_us: int,
+        *,
+        record_login: bool = False,
+        username: Optional[str] = None,
+    ) -> tuple[int, dict[str, Any]]:
         """Asks core whether a gateway session is still allowed, signed as the service principal.
 
         Returns ``(status_code, json_body)``; the body is ``{}`` when core's reply is not JSON.
         """
-        resp = self._json_call(
-            "POST",
-            "/api/internal/auth/session-status",
-            {"user_id": str(user_id), "session_issued_at": int(session_issued_at_us)},
-        )
+        payload: dict[str, Any] = {"user_id": str(user_id), "session_issued_at": int(session_issued_at_us)}
+        if record_login:
+            payload["record_login"] = True
+            payload["username"] = username
+        resp = self._json_call("POST", "/api/internal/auth/session-status", payload)
         try:
             data = resp.json()
         except ValueError:

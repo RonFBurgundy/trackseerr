@@ -54,6 +54,9 @@ def verify_local(
 class SessionStatusRequest(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=128)
     session_issued_at: int = Field(..., ge=0)
+    # Set by the gateway only at an actual Plex sign-in, so core can stamp last_login_at once per sign-in.
+    record_login: bool = False
+    username: Optional[str] = Field(default=None, max_length=128)
 
 
 @router.post("/auth/session-status")
@@ -73,6 +76,14 @@ def session_status(
         reason = "revoked"
     elif state["auth_type"] == "local" and not state["mfa_enabled"] and db.get_account_settings()["require_mfa_local"]:
         reason = "mfa_enrollment_required"
+    # Plex ids are all-digit. Local accounts (``local-*``) record their own logins on core and a
+    # gateway-reported login must never reset their failed-login counter or lockout.
+    if reason is None and req.record_login and req.user_id.isdigit():
+        try:
+            db.ensure_user(req.user_id, req.username or req.user_id)
+            db.stamp_last_login(req.user_id)
+        except PermissionError as exc:
+            logger.warning("Gateway sign-in not recorded on core: %s", exc)
     return {"valid": reason is None} if reason is None else {"valid": False, "reason": reason}
 
 

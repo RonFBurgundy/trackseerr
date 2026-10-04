@@ -29,6 +29,24 @@ def _gateway_session_status_allows_by_default(request, monkeypatch):
 
     dependencies.clear_session_status_cache()
     if request.node.get_closest_marker("real_core_client") is None:
-        monkeypatch.setattr(CoreClient, "session_status", lambda self, user_id, issued: (200, {"valid": True}))
+        monkeypatch.setattr(CoreClient, "session_status", lambda self, user_id, issued, **kw: (200, {"valid": True}))
     yield
     dependencies.clear_session_status_cache()
+
+
+@pytest.fixture(autouse=True)
+def _restore_root_logging():
+    """Tiered ``create_app`` / ``cli.main`` call ``setup_logging``, which attaches handlers bound to the
+    per-test captured ``sys.stdout``. Left on the root logger they hold a closed stream and break whichever
+    test runs next (order-dependent failures under xdist). Remove whatever a test added and restore the level."""
+    import logging
+
+    root = logging.getLogger()
+    before_handlers = list(root.handlers)
+    before_level = root.level
+    yield
+    for handler in list(root.handlers):
+        if handler not in before_handlers and type(handler).__name__ != "LogRingBuffer":
+            root.removeHandler(handler)
+            handler.close()
+    root.setLevel(before_level)
