@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from plex_playlist_sync import cli
 from plex_playlist_sync.api.app import create_app
+from plex_playlist_sync.api.dependencies import get_db
 from plex_playlist_sync.boot import BootState, boot_state
 from plex_playlist_sync.cli import main, setup_logging
 from plex_playlist_sync.config import Config
@@ -116,7 +117,11 @@ def test_health_ready_reachable_on_every_tier(tmp_path, role):
 
 @pytest.mark.parametrize("role", ["all-in-one", "gateway"])
 def test_api_routes_return_503_with_retry_after_while_starting(tmp_path, role):
-    client = TestClient(create_app(db=Database(":memory:"), config=_config(tmp_path, role)))
+    db = Database(":memory:")
+    app = create_app(db=db, config=_config(tmp_path, role))
+    # Once ready, routes resolve get_db(), which would otherwise open /data (unwritable unprivileged).
+    app.dependency_overrides[get_db] = lambda: db
+    client = TestClient(app)
     boot_state.begin("starting background workers")
     for method, path in (("get", "/api/playlists"), ("get", "/api/auth/me"), ("post", "/api/requests")):
         res = getattr(client, method)(path)
