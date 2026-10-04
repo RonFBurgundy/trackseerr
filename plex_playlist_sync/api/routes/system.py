@@ -45,6 +45,7 @@ from plex_playlist_sync.clients.acquisition import (
 from plex_playlist_sync.clients.deezer import DeezerClient
 from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient
 from plex_playlist_sync.clients.plex import PlexClient
+from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result, track_job
@@ -573,27 +574,9 @@ def _ping_plex(
 
     t0 = time.perf_counter()
     try:
-        if hasattr(plex_client, "test_connection"):
-            res = plex_client.test_connection()
-            if isinstance(res, tuple):
-                online = bool(res[0])
-                msg = redact_text(str(res[1]))
-            elif isinstance(res, bool):
-                online = res
-                msg = "Connected to Plex" if online else "Plex unreachable"
-            elif isinstance(res, dict):
-                online = bool(res.get("online", False))
-                msg = str(
-                    res.get("message")
-                    or res.get("error")
-                    or ("Connected to Plex" if online else "Plex unreachable")
-                )
-            else:
-                online = bool(res)
-                msg = "Connected to Plex" if online else "Plex unreachable"
-        else:
-            online = True
-            msg = "Connected to Plex"
+        result = as_media_server(plex_client).test_connection()
+        online = result.ok
+        msg = result.message
         latency_ms = round((time.perf_counter() - t0) * 1000.0, 2) if online else None
     except Exception as e:
         logger.warning("Error testing connection to Plex: %s", safe_exc(e))

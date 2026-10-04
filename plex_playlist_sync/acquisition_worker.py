@@ -24,6 +24,7 @@ from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
+from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result
 from plex_playlist_sync.library_monitoring import NATIVE_MONITOR_OPTIONS
 from plex_playlist_sync.library_manager import ModeChanged, run_guarded
@@ -714,7 +715,7 @@ class AcquisitionWorker:
 
                     if plex_client:
                         try:
-                            plex_client.refresh_music_library()
+                            as_media_server(plex_client).refresh_library()
                         except Exception as e:
                             logger.warning("Error refreshing Plex after Lidarr import: %s", e)
                     continue
@@ -1289,7 +1290,7 @@ class AcquisitionWorker:
                 # Trigger Plex library refresh ping
                 if plex_client:
                     try:
-                        plex_client.refresh_music_library()
+                        as_media_server(plex_client).refresh_library()
                     except Exception as e:
                         logger.warning("Error triggering Plex library refresh: %s", e)
 

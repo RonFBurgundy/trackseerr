@@ -18,6 +18,7 @@ from plex_playlist_sync.api.dependencies import (
 from plex_playlist_sync.clients.core_client import CoreClient
 from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.plex import PlexClient
+from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.library_availability import get_item_availability
 from plex_playlist_sync.storage import Database
@@ -149,7 +150,8 @@ def annotate_item_statuses(
 
     # For items without matches, skip individual per-track network round trips on batch discovery lists (> 5 items).
     # For small sets (<= 5 items) when plex_client is provided, resolve concurrently via ThreadPoolExecutor.
-    if plex_client is not None and len(items) <= 5:
+    server = as_media_server(plex_client)
+    if server is not None and len(items) <= 5:
         plex_lookups: list[tuple[int, str, str]] = []
         for idx, it in enumerate(annotated):
             if it.get("status") in (None, "none") and not it.get("request_id"):
@@ -162,7 +164,7 @@ def annotate_item_statuses(
             def _check_plex(entry: tuple[int, str, str]) -> tuple[int, bool]:
                 i, a, t = entry
                 try:
-                    plex_matches = plex_client.search_library_tracks(query=t, limit=5)
+                    plex_matches = server.search_tracks(t, limit=5)
                     for pm in plex_matches:
                         pm_artist = (pm.get("artist") or "").lower().strip()
                         pm_title = (pm.get("title") or "").lower().strip()

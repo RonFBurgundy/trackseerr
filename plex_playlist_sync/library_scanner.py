@@ -33,6 +33,7 @@ from plex_playlist_sync.models import (
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.job_tracker import track_job
 from plex_playlist_sync.library_manager import ModeChanged, run_guarded
+from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.redaction import redact_text, safe_exc
 from plex_playlist_sync.storage import Database
 
@@ -745,11 +746,10 @@ class LibraryScanner:
             # Step f: Notify Plex client if available and scan was not cancelled
             if plex_client is not None and not self._stop_event.is_set():
                 try:
-                    if hasattr(plex_client, "refresh_music_library"):
-                        plex_client.refresh_music_library()
+                    as_media_server(plex_client).refresh_library()
                 except Exception as exc:
                     logger.warning(
-                        "LibraryScanner: Error invoking plex_client.refresh_music_library(): %s",
+                        "LibraryScanner: Error invoking media-server library refresh: %s",
                         exc,
                     )
 

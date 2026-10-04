@@ -9,8 +9,6 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from plexapi.exceptions import BadRequest, NotFound, Unauthorized
-import requests
 
 from plex_playlist_sync.api.dependencies import (
     get_config,
@@ -23,6 +21,8 @@ from plex_playlist_sync.api.dependencies import (
 )
 from plex_playlist_sync.clients.deezer import DeezerClient
 from plex_playlist_sync.clients.plex import PlexClient
+from plex_playlist_sync.media_servers import MediaServerError, PlaylistSyncOptions, as_media_server, describe_error
+from plex_playlist_sync.media_servers.plex import read_playlist_items, refresh_mix_snapshots
 from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.config import MEDIA_SERVER_NONE, Config
 from plex_playlist_sync.job_tracker import tracked
@@ -108,12 +108,10 @@ class SyncState:
         if plex_client is None:
             return skip
         try:
-            server = plex_client.get_user_server(registry["plex_user"])
-            source = plex_client.get_playlist(server, registry["rating_key"])
-            items = plex_client.get_playlist_items(source)
-        except (NotFound, BadRequest, Unauthorized, requests.exceptions.RequestException) as e:
+            items = read_playlist_items(as_media_server(plex_client), registry["plex_user"], registry["rating_key"])
+        except MediaServerError as e:
             logger.warning(
-                "Source Plex playlist for adopted '%s' unavailable (%s); using stored snapshot", pl["name"], safe_exc(e)
+                "Source Plex playlist for adopted '%s' unavailable (%s); using stored snapshot", pl["name"], e.safe_detail
             )
             return skip
         snapshot = [
@@ -152,13 +150,14 @@ class SyncState:
         }
 
         try:
-            if plex_client:
+            server = as_media_server(plex_client)
+            if server:
                 try:
-                    refreshed = plex_client.refresh_auto_mix_snapshots(db)
+                    refreshed = refresh_mix_snapshots(server, db)
                     if refreshed:
                         logger.info("Refreshed %d Plexamp mix snapshot(s)", refreshed)
-                except (NotFound, BadRequest, Unauthorized, requests.exceptions.RequestException) as e:
-                    logger.warning("Mix snapshot refresh failed: %s", safe_exc(e))
+                except MediaServerError as e:
+                    logger.warning("Mix snapshot refresh failed: %s", e.safe_detail)
             playlists = db.list_playlists(enabled_only=True)
             stats["total_playlists"] = len(playlists)
 
@@ -234,21 +233,14 @@ class SyncState:
                         logger.error("Native library match failed for playlist '%s': %s", pl["name"], safe_exc(e))
                         logger.debug("Native match traceback", exc_info=True)
                         db.record_sync_result(playlist_id=pl_id, status="failed")
-                elif plex_client:
+                elif server:
                     try:
-                        results = plex_client.sync_playlist_to_users(
-                            playlist=model_playlist,
-                            target_usernames=target_usernames,
-                            append=config.append_instead_of_sync,
-                            add_description=config.add_playlist_description,
-                            add_poster=config.add_playlist_poster,
-                            write_missing_as_csv=config.write_missing_as_csv,
-                            data_dir=config.data_dir,
-                            threshold=config.search_similarity_threshold,
-                            db=db,
-                            skip_rating_keys=skip_rating_keys,
+                        results = server.sync_playlist(
+                            model_playlist,
+                            target_usernames,
+                            PlaylistSyncOptions.from_config(config, db=db, skip_item_ids=skip_rating_keys),
                         )
-                        matched, missing = plex_client.match_playlist_tracks(
+                        matched, missing = server.match_playlist_tracks(
                             tracks, threshold=config.search_similarity_threshold
                         )
                         success = any(r.success for r in results) if results else False
@@ -263,7 +255,7 @@ class SyncState:
                         stats["total_matched"] += len(matched)
                         stats["total_missing"] += len(missing)
                     except Exception as e:
-                        logger.error("Error syncing playlist '%s' to Plex: %s", pl["name"], safe_exc(e))
+                        logger.error("Error syncing playlist '%s' to Plex: %s", pl["name"], describe_error(e))
                         logger.debug("Playlist sync traceback", exc_info=True)
                         db.record_sync_result(playlist_id=pl_id, status="failed")
                 else:

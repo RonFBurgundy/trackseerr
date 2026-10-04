@@ -61,6 +61,7 @@ from plex_playlist_sync.clients.lidarr import (
 )
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
+from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.library_monitoring import (
     NATIVE_MONITOR_OPTIONS,
@@ -2736,11 +2737,11 @@ def manual_import_commit(
                 "error": redact_text(str(exc)),
             })
 
-    if plex_client and hasattr(plex_client, "refresh_music_library"):
+    if plex_client:
         try:
-            plex_client.refresh_music_library()
+            as_media_server(plex_client).refresh_library()
         except Exception as exc:
-            logger.warning("Error invoking plex_client.refresh_music_library(): %s", exc)
+            logger.warning("Error refreshing media-server library: %s", exc)
 
     return {
         "imported_count": imported_count,
@@ -2953,11 +2954,11 @@ def rename_apply(
             logger.exception("Failed to rename file ID %s: %s", fid, redact_text(str(exc)))
             errors.append(f"Error renaming file '{fid}': {redact_text(str(exc))}")
 
-    if plex_client and hasattr(plex_client, "refresh_music_library"):
+    if plex_client:
         try:
-            plex_client.refresh_music_library()
+            as_media_server(plex_client).refresh_library()
         except Exception as exc:
-            logger.warning("Error invoking plex_client.refresh_music_library(): %s", exc)
+            logger.warning("Error refreshing media-server library: %s", exc)
 
     return {"renamed_count": renamed_count, "errors": errors}
 

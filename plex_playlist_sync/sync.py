@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 from .clients.deezer import DeezerClient
 from .clients.plex import PlexClient
+from .media_servers import PlaylistSyncOptions, as_media_server
 from .clients.spotify import SpotifyClient
 from .config import Config
 from .models import Playlist, SyncResult
@@ -36,16 +37,9 @@ class SyncCoordinator:
         self.db = db
 
     def _sync_one(self, pl: Playlist) -> SyncResult:
-        if self.plex is not None:
-            return self.plex.sync_playlist(
-                playlist=pl,
-                append=self.config.append_instead_of_sync,
-                add_description=self.config.add_playlist_description,
-                add_poster=self.config.add_playlist_poster,
-                write_missing_as_csv=self.config.write_missing_as_csv,
-                data_dir=self.config.data_dir,
-                threshold=self.config.search_similarity_threshold,
-            )
+        server = as_media_server(self.plex)
+        if server is not None:
+            return server.sync_playlist(pl, [], PlaylistSyncOptions.from_config(self.config))[0]
         return self._match_without_media_server(pl)
 
     def _match_without_media_server(self, pl: Playlist) -> SyncResult:

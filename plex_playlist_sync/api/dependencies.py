@@ -24,6 +24,7 @@ from plex_playlist_sync.clients.spotify_scraper import SpotifyWebScraper
 from plex_playlist_sync.clients.core_client import SESSION_ISSUED_AT_KEY, CoreClient
 from plex_playlist_sync.config import MEDIA_SERVER_NONE, Config
 from plex_playlist_sync.media_server import MediaServerUnavailable
+from plex_playlist_sync.media_servers import MediaServer, as_media_server
 from plex_playlist_sync.internal_auth import (
     HEADER_SIGNATURE,
     InvalidAssertion,
@@ -128,6 +129,14 @@ def get_plex_client(config: Config = Depends(get_config)) -> Optional[PlexClient
     except Exception as e:
         logger.error("Failed to initialize PlexClient: %s", e)
         return None
+
+
+def get_active_media_server(plex_client: Optional[PlexClient] = Depends(get_plex_client)) -> Optional[MediaServer]:
+    """Dependency providing the configured media-server adapter, or None when none is configured/reachable.
+
+    Built on ``get_plex_client`` so existing dependency overrides keep working; further server kinds plug in here.
+    """
+    return as_media_server(plex_client)
 
 
 def get_spotify_client(

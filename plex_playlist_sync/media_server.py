@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
 from plex_playlist_sync.config import MEDIA_SERVER_NONE, Config
+from plex_playlist_sync.media_servers import MediaServerUnavailable, capabilities_for
 from plex_playlist_sync.redaction import safe_exc
 
 logger = logging.getLogger(__name__)
@@ -25,10 +26,6 @@ NO_MEDIA_SERVER_STATUS = 409
 NO_MEDIA_SERVER_BOOT_MESSAGE = (
     "No media server configured — library management runs; playlist push to a media server is disabled"
 )
-
-
-class MediaServerUnavailable(Exception):
-    """Raised when a media-server-only feature is used while no media server is configured."""
 
 
 def media_server_unavailable_response(_request: Request, _exc: Exception) -> JSONResponse:
@@ -95,12 +92,7 @@ def media_server_status(config: Config, connect: Callable[[], Optional[Any]]) ->
     return {
         "type": server_type,
         "connected": connected,
-        "capabilities": {
-            "playlists": has_server,
-            "users": has_server,
-            "mixes": has_server,
-            "library_refresh": has_server,
-        },
+        "capabilities": capabilities_for(server_type).to_dict(),
     }
 
 

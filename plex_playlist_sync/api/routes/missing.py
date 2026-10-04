@@ -23,6 +23,7 @@ from plex_playlist_sync.api.dependencies import (
 )
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.clients.plex import PlexClient
+from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.lidarr_queue import lidarr_worker
 from plex_playlist_sync.lidarr_release import norm_title
@@ -463,12 +464,13 @@ def search_plex_tracks(
     plex_client: Optional[PlexClient] = Depends(get_plex_client),
 ) -> list[dict[str, Any]]:
     """Searches the Plex library for tracks to enable manual matching and correction."""
-    if not plex_client:
+    server = as_media_server(plex_client)
+    if not server:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Plex Media Server client is not configured",
         )
-    return plex_client.search_library_tracks(query, limit=limit)
+    return server.search_tracks(query, limit=limit)
 
 
 @router.post("/match", status_code=status.HTTP_201_CREATED)
