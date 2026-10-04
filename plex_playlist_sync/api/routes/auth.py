@@ -43,6 +43,7 @@ from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.storage import Database
 from plex_playlist_sync.redaction import redact_text
+from plex_playlist_sync.security import safe_forward_url
 
 logger = logging.getLogger(__name__)
 
@@ -68,18 +69,48 @@ class VerifyPinRequest(BaseModel):
 def generate_pin(
     req: Optional[CreatePinRequest] = None,
     forward_url: Optional[str] = None,
+    request: Request = None,  # type: ignore[assignment]  # None only for direct calls in tests
+    config: Optional[Config] = Depends(get_config),
     db: Database = Depends(get_db),
 ) -> dict[str, Any]:
-    """Generates a Plex OAuth PIN and authorization URL."""
-    target_forward_url = (req.forward_url if req and req.forward_url else None) or forward_url
-    if not target_forward_url and db is not None:
+    """Generates a Plex OAuth PIN and authorization URL.
+
+    Two-tier decision: in the DMZ model this endpoint is served by the gateway process itself
+    (GATEWAY_LOCAL_ALLOWLIST), never relayed to core, so the check runs where the public request
+    arrives. The allowed origin is APPLICATION_URL (env, else the stored general setting) and only
+    falls back to the request's own origin, where X-Forwarded-Proto/Host count only from a
+    TRUSTED_PROXIES peer. A client-supplied forward_url on any other origin is dropped (Plex then
+    simply does not redirect), which closes the post-login open redirect.
+    """
+    cfg = config if isinstance(config, Config) else None
+    app_url = str((cfg.application_url if cfg else "") or "").strip().rstrip("/")
+    if not app_url and db is not None:
         try:
             general = db.get_general_settings()
             app_url = str(general.get("application_url") or "").strip().rstrip("/")
-            if app_url:
-                target_forward_url = app_url
         except Exception as e:
             logger.debug("Could not resolve application_url for Plex forward_url: %s", e)
+
+    request_origin: Optional[str] = None
+    if request is not None:
+        trusted = local_auth.parse_trusted_proxies(
+            (cfg.trusted_proxies if cfg else None) or os.getenv("TRUSTED_PROXIES")
+        )
+        request_origin = local_auth.resolve_request_origin(
+            request.url.scheme,
+            request.headers.get("host"),
+            request.client.host if request.client else None,
+            request.headers.get("x-forwarded-proto"),
+            request.headers.get("x-forwarded-host"),
+            trusted,
+        )
+
+    supplied = (req.forward_url if req and req.forward_url else None) or forward_url
+    target_forward_url = safe_forward_url(
+        supplied, application_url=app_url or None, request_origin=request_origin
+    )
+    if not supplied and app_url:
+        target_forward_url = app_url
 
     try:
         if target_forward_url:

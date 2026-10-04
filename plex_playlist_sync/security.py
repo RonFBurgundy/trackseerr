@@ -1,6 +1,7 @@
 """Security and input sanitization utilities for plex-playlist-sync."""
 
 import ipaddress
+import logging
 import os
 import re
 import unicodedata
@@ -368,3 +369,76 @@ def sanitize_csv_cell(val: Any) -> str:
     return text
 
 
+
+
+# --------------------------------------------------------------------------- Plex sign-in forwardUrl
+
+_LOG = logging.getLogger(__name__)
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+_FORBIDDEN_URL_CHARS = re.compile(r"[\x00-\x20\x7f-\x9f\\]")
+
+
+def _normalize_origin(url: str) -> Optional[tuple[str, str, int]]:
+    """(scheme, idna-lowercase host without trailing dot, effective port) of an http(s) URL, else None."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        scheme = parts.scheme.lower()
+        if scheme not in _DEFAULT_PORTS or parts.username is not None or parts.password is not None:
+            return None
+        host = (parts.hostname or "").rstrip(".").lower()
+        if not host:
+            return None
+        port = parts.port or _DEFAULT_PORTS[scheme]
+        host = host.encode("idna").decode("ascii")
+    except (ValueError, UnicodeError):
+        return None
+    return scheme, host, port
+
+
+def _log_forward_reject(candidate: str, reason: str) -> None:
+    try:
+        host = (urllib.parse.urlsplit(candidate).hostname or "")[:64]
+    except ValueError:
+        host = ""
+    _LOG.warning("Rejected Plex forward_url (%s, host=%r)", reason, host)
+
+
+def safe_forward_url(
+    candidate: Optional[str],
+    *,
+    application_url: Optional[str],
+    request_origin: Optional[str],
+) -> Optional[str]:
+    """Return ``candidate`` only if it points at this app's own origin, else None (open-redirect guard).
+
+    The allowed origin is ``application_url`` when configured, otherwise ``request_origin``. A
+    relative path (single leading ``/``) is resolved against the allowed origin. Absolute URLs must be
+    http(s), carry no userinfo, and match scheme, host and port after normalisation.
+    """
+    if not candidate or not isinstance(candidate, str):
+        return None
+    raw = candidate.strip()
+    if not raw:
+        return None
+    allowed_src = (application_url or "").strip() or (request_origin or "").strip()
+    allowed = _normalize_origin(allowed_src) if allowed_src else None
+    if allowed is None:
+        _log_forward_reject(raw, "no usable allowed origin")
+        return None
+    if _FORBIDDEN_URL_CHARS.search(raw):
+        _log_forward_reject(raw, "control character, whitespace or backslash")
+        return None
+    if raw.startswith("/"):
+        if raw.startswith("//"):
+            _log_forward_reject(raw, "protocol-relative URL")
+            return None
+        base = allowed_src.split("?", 1)[0].split("#", 1)[0].rstrip("/")
+        return base + raw
+    got = _normalize_origin(raw)
+    if got is None:
+        _log_forward_reject(raw, "unsupported scheme, userinfo or malformed")
+        return None
+    if got != allowed:
+        _log_forward_reject(raw, "origin mismatch")
+        return None
+    return raw

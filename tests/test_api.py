@@ -142,9 +142,11 @@ class TestAuthEndpoints:
             "auth_url": "https://app.plex.tv/auth#?clientID=trackseerr&code=CODE12&forwardUrl=https%3A%2F%2Ftrackseerr.local%2F",
         }
         _, client = app_and_client
-        resp = client.post("/api/auth/plex/pin", json={"forward_url": "https://trackseerr.local/"})
+        # Same origin as the request (TestClient host is "testserver"); cross-origin is covered in
+        # tests/test_forward_url_origin.py.
+        resp = client.post("/api/auth/plex/pin", json={"forward_url": "http://testserver/"})
         assert resp.status_code == 200
-        mock_create_pin.assert_called_once_with(forward_url="https://trackseerr.local/")
+        mock_create_pin.assert_called_once_with(forward_url="http://testserver/")
 
     @patch("plex_playlist_sync.api.routes.auth.create_plex_pin")
     def test_generate_pin_uses_application_url_as_fallback_forward_url(self, mock_create_pin, app_and_client, test_db):
