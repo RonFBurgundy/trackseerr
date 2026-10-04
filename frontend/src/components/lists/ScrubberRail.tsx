@@ -31,8 +31,13 @@ export function groupIndexForOffset(groups: readonly GroupIndexGroup[], index: n
 }
 
 const DESKTOP_WIDTH_PX = 28;
-/** Overlay rail (narrow screens): just wide enough to grab, drawn over the list's right edge. */
-const OVERLAY_WIDTH_PX = 20;
+/**
+ * Overlay rail (narrow screens): drawn over the list's right edge. 24px holds a 3-char 9px bold mono label
+ * (about 16px) plus OVERLAY_LABEL_PAD_PX at rest. Published to the scroll element as `--overlay-rail-w` so the
+ * list's right padding (index.css) is derived from this one constant.
+ */
+const OVERLAY_WIDTH_PX = 24;
+const OVERLAY_LABEL_PAD_PX = 3;
 const MIN_LABEL_GAP_PX = 16;
 const MIN_LABEL_GAP_TOUCH_PX = 14;
 const DOT_GAP_PX = 5;
@@ -429,8 +434,8 @@ const GroupRail: React.FC<RailProps> = ({ groups, viewport, touch, ariaLabel }) 
               <div
                 key={item.index}
                 aria-hidden="true"
-                className={`absolute right-0 left-0 flex items-center justify-end ${overlayRail ? 'pr-[7px]' : 'pr-1.5'}`}
-                style={{ top: y, transform: 'translateY(-50%)', height: 0 }}
+                className={`absolute right-0 left-0 flex items-center justify-end ${overlayRail ? '' : 'pr-1.5'}`}
+                style={{ top: y, ...(overlayRail ? { paddingRight: OVERLAY_LABEL_PAD_PX } : {}), transform: 'translateY(-50%)', height: 0 }}
               >
                 <span
                   ref={(el) => {
@@ -599,8 +604,12 @@ export const ScrubberRail: React.FC<ScrubberRailProps> = ({ groups, positionOnly
   useEffect(() => {
     if (!scrollElement || !visible) return undefined;
     scrollElement.dataset.scrubber = 'on';
-    if (overlay) scrollElement.dataset.rail = 'overlay';
+    if (overlay) {
+      scrollElement.dataset.rail = 'overlay';
+      scrollElement.style.setProperty('--overlay-rail-w', `${OVERLAY_WIDTH_PX}px`);
+    }
     return () => {
+      scrollElement.style.removeProperty('--overlay-rail-w');
       delete scrollElement.dataset.scrubber;
       delete scrollElement.dataset.rail;
     };

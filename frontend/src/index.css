@@ -184,9 +184,10 @@ body {
   border-radius: 3px;
 }
 
-/* Overlay rail (narrow screens) sits over the list's right edge: leave it a few px of the rows' room. */
+/* Overlay rail (narrow screens) sits over the list's right edge: rows reserve its full footprint
+   (width from ScrubberRail's OVERLAY_WIDTH_PX via --overlay-rail-w, plus 1px inset and a 3px gap). */
 .virtual-scroll[data-rail='overlay'] {
-  padding-right: 8px;
+  padding-right: calc(var(--overlay-rail-w) + 4px);
 }
 
 .virtual-scroll:focus-visible {
@@ -315,5 +316,14 @@ body {
   select,
   textarea {
     min-height: 44px;
+  }
+}
+
+@media (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='hidden']),
+  select,
+  textarea {
+    /* iOS Safari zooms on focus below 16px; max() beats Tailwind text-xs/text-sm (specificity: element + :not()s). */
+    font-size: max(16px, 1em);
   }
 }
