@@ -216,7 +216,7 @@ def test_mediacover_service_caches_and_validates_image(tmp_path: Path):
 
     with patch("requests.get", return_value=mock_resp) as mock_get:
         # First call: downloads and caches
-        result_path = service.ensure_artwork("artist_poster", "artist-uuid-1", remote_url)
+        result_path = service.ensure_artwork("artist_poster", "artist-uuid-1", remote_url, block=True)
         assert result_path is not None
         assert result_path.is_file()
         assert result_path.read_bytes() == valid_jpeg

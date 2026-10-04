@@ -403,7 +403,7 @@ def _start_local_workers(db: Database, config: Config) -> None:
 
     from .artist_refresh_worker import artist_refresh_worker
 
-    logger.info("Starting ArtistRefreshWorker (interval: 24h, pace: 1.5s)")
+    logger.info("Starting ArtistRefreshWorker (interval: 24h, pace: 1.5s, first cycle in 10 min)")
     artist_refresh_worker.start(db=db, interval_seconds=86400, pace_delay=1.5)
 
     from .scrobble_worker import scrobble_worker

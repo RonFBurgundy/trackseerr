@@ -18,6 +18,19 @@ from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
 
+# Per-artist "last refreshed" marker persisted in kv_store so a restart does not re-sweep the whole library.
+_LAST_REFRESH_PREFIX = "artist_refresh:last:"
+# First scheduled sweep waits this long after start so boot and the first requests are not competing with it.
+DEFAULT_INITIAL_DELAY_SECONDS = 600
+
+
+def _parse_iso(value: str) -> Optional[datetime]:
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
 
 class ArtistRefreshWorker:
     """Autonomous background worker executing periodic artist discography & track refreshes."""
@@ -62,6 +75,7 @@ class ArtistRefreshWorker:
         enricher: Optional[MbidEnricherClient] = None,
         interval_seconds: int = 86400,
         pace_delay: float = 1.5,
+        initial_delay: float = DEFAULT_INITIAL_DELAY_SECONDS,
     ) -> bool:
         """Starts background daemon thread for periodic scheduled refreshes."""
         with self._lock:
@@ -80,12 +94,18 @@ class ArtistRefreshWorker:
                     self.interval_seconds,
                     self.pace_delay,
                 )
+                # Delay the first cycle (responsive to stop) so a restart never starts a sweep at boot.
+                if self._stop_event.wait(max(0.0, float(initial_delay))):
+                    with self._lock:
+                        self._is_running = False
+                    return
                 while not self._stop_event.is_set():
                     try:
                         self.refresh_once(
                             db=db,
                             discovery_client=discovery_client,
                             enricher=enricher,
+                            only_stale=True,
                         )
                     except Exception as exc:
                         logger.exception("ArtistRefreshWorker: Error in refresh cycle: %s", exc)
@@ -120,6 +140,19 @@ class ArtistRefreshWorker:
         with self._lock:
             self._is_running = False
 
+    def _filter_stale(self, db: Database, artists: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Drops artists whose persisted last-refresh time is newer than the interval."""
+        last = db.list_kv_prefix(_LAST_REFRESH_PREFIX)
+        now = datetime.now(timezone.utc)
+        out: list[dict[str, Any]] = []
+        for art in artists:
+            raw = last.get(_LAST_REFRESH_PREFIX + str(art["id"]))
+            ts = _parse_iso(raw) if raw else None
+            if ts is not None and (now - ts).total_seconds() < self.interval_seconds:
+                continue
+            out.append(art)
+        return out
+
     @tracked("artist_metadata_refresh", "Artist Metadata & Discography Refresh")
     def refresh_once(
         self,
@@ -127,8 +160,12 @@ class ArtistRefreshWorker:
         discovery_client: Optional[DiscoveryClient] = None,
         enricher: Optional[MbidEnricherClient] = None,
         artist_ids: Optional[list[str]] = None,
+        only_stale: bool = False,
     ) -> dict[str, Any]:
-        """Synchronously executes a refresh cycle across target artists with pacing."""
+        """Synchronously executes a refresh cycle across target artists with pacing.
+
+        ``only_stale`` (scheduled sweeps) skips artists refreshed within the last ``interval_seconds``.
+        """
         from plex_playlist_sync.api.routes.library import refresh_single_artist
 
         with self._run_lock:
@@ -143,6 +180,8 @@ class ArtistRefreshWorker:
                         target_artists.append(art)
             else:
                 target_artists = db.list_library_artists(monitored_only=True, limit=10000)
+                if only_stale:
+                    target_artists = self._filter_stale(db, target_artists)
 
             logger.info("ArtistRefreshWorker: Starting refresh cycle for %d artist(s)", len(target_artists))
             start_iso = datetime.now(timezone.utc).isoformat()
@@ -175,6 +214,10 @@ class ArtistRefreshWorker:
                     logger.warning("ArtistRefreshWorker: Exception refreshing artist %s (%s): %s", art_name, art_id, exc)
 
                 checked += 1
+                try:
+                    db.set_kv(_LAST_REFRESH_PREFIX + art_id, datetime.now(timezone.utc).isoformat())
+                except Exception as exc:
+                    logger.warning("ArtistRefreshWorker: could not persist refresh time for %s: %s", art_id, exc)
 
                 # Pacing delay between artists
                 if idx < len(target_artists) - 1 and not self._stop_event.is_set():

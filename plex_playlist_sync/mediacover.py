@@ -4,10 +4,14 @@ Provides high-speed local caching for artist posters, artist banners, and album 
 with SSRF protection, magic byte verification, atomic writes, and responsive fallbacks.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 import logging
 import os
 from pathlib import Path
+import threading
+import time
 from typing import Optional, Union
+from urllib.parse import urlparse
 import uuid
 
 import requests
@@ -18,6 +22,20 @@ logger = logging.getLogger(__name__)
 
 # Max image size allowed for caching: 10 Megabytes
 _MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+# (connect, read) seconds. Connect is short so a black-holed host fails fast.
+_FETCH_TIMEOUT = (3.0, 5.0)
+# Wall-clock cap on one whole download (slow-drip bodies never trip the per-read timeout).
+_FETCH_DEADLINE_SECONDS = 15.0
+# A URL that failed is not retried for this long.
+_NEGATIVE_TTL_SECONDS = 6 * 3600
+_NEGATIVE_MAX_ENTRIES = 20000
+# Per-host circuit breaker: after this many consecutive network failures, skip the host for a while.
+_BREAKER_THRESHOLD = 5
+_BREAKER_OPEN_SECONDS = 300
+# Background download pool: small, bounded queue, excess work is dropped (it is re-requested on the next view).
+_POOL_WORKERS = 4
+_MAX_PENDING = 256
 
 
 class MediaCoverService:
@@ -42,6 +60,113 @@ class MediaCoverService:
         except OSError as exc:
             logger.warning("MediaCoverService: Failed to ensure cache directories: %s", exc)
 
+        self._state_lock = threading.Lock()
+        self._negative: dict[str, float] = {}
+        self._host_failures: dict[str, int] = {}
+        self._host_open_until: dict[str, float] = {}
+        self._inflight: set[str] = set()
+        self._executor: Optional[ThreadPoolExecutor] = None
+
+    # ------------------------------------------------------------------ failure memory
+    @staticmethod
+    def _host_of(url: str) -> str:
+        try:
+            return (urlparse(url).hostname or "").lower()
+        except ValueError:
+            return ""
+
+    def _should_skip(self, url: str) -> bool:
+        """True while ``url`` is negative-cached or its host's circuit breaker is open."""
+        now = time.monotonic()
+        host = self._host_of(url)
+        with self._state_lock:
+            exp = self._negative.get(url)
+            if exp is not None:
+                if exp > now:
+                    return True
+                del self._negative[url]
+            until = self._host_open_until.get(host)
+            if until is not None:
+                if until > now:
+                    return True
+                # Half-open: let the next attempt through; one more failure re-opens it.
+                del self._host_open_until[host]
+                self._host_failures[host] = _BREAKER_THRESHOLD - 1
+        return False
+
+    def _record_failure(self, url: str, network: bool) -> None:
+        now = time.monotonic()
+        host = self._host_of(url)
+        with self._state_lock:
+            if len(self._negative) >= _NEGATIVE_MAX_ENTRIES:
+                for k in [k for k, v in self._negative.items() if v <= now]:
+                    del self._negative[k]
+                if len(self._negative) >= _NEGATIVE_MAX_ENTRIES:
+                    self._negative.clear()
+            self._negative[url] = now + _NEGATIVE_TTL_SECONDS
+            if network and host:
+                n = self._host_failures.get(host, 0) + 1
+                self._host_failures[host] = n
+                if n >= _BREAKER_THRESHOLD and host not in self._host_open_until:
+                    self._host_open_until[host] = now + _BREAKER_OPEN_SECONDS
+                    logger.warning(
+                        "MediaCoverService: %d consecutive failures for %s; skipping it for %ds",
+                        n,
+                        host,
+                        _BREAKER_OPEN_SECONDS,
+                    )
+
+    def _record_success(self, url: str) -> None:
+        host = self._host_of(url)
+        with self._state_lock:
+            self._host_failures.pop(host, None)
+            self._host_open_until.pop(host, None)
+            self._negative.pop(url, None)
+
+    # ------------------------------------------------------------------ background pool
+    def schedule_cache(self, target_path: Path, remote_url: str) -> bool:
+        """Queues a background download. Never blocks; returns False if skipped, deduped, or dropped (queue full)."""
+        if not remote_url or not isinstance(remote_url, str) or self._should_skip(remote_url):
+            return False
+        key = str(target_path)
+        with self._state_lock:
+            if key in self._inflight or len(self._inflight) >= _MAX_PENDING:
+                return False
+            self._inflight.add(key)
+            if self._executor is None:
+                self._executor = ThreadPoolExecutor(
+                    max_workers=_POOL_WORKERS, thread_name_prefix="mediacover"
+                )
+            executor = self._executor
+
+        def _job() -> None:
+            try:
+                self.cache_image(target_path, remote_url)
+            except Exception as exc:
+                logger.warning("MediaCoverService: background cache of %s failed: %s", remote_url, exc)
+            finally:
+                with self._state_lock:
+                    self._inflight.discard(key)
+
+        try:
+            executor.submit(_job)
+        except RuntimeError as exc:
+            with self._state_lock:
+                self._inflight.discard(key)
+            logger.warning("MediaCoverService: background pool unavailable: %s", exc)
+            return False
+        return True
+
+    def wait_idle(self, timeout: float = 5.0) -> bool:
+        """Blocks until no background download is pending (for tests and shutdown)."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self._state_lock:
+                if not self._inflight:
+                    return True
+            time.sleep(0.01)
+        return False
+
     def get_artist_poster_path(self, artist_id: str) -> Path:
         """Returns the canonical filesystem path for an artist's poster image."""
         return self.artists_dir / f"{artist_id}_poster.jpg"
@@ -55,7 +180,7 @@ class MediaCoverService:
         return self.albums_dir / f"{album_id}_cover.jpg"
 
     def cache_image(
-        self, target_path: Path, remote_url: str, timeout: float = 8.0
+        self, target_path: Path, remote_url: str, timeout: Union[float, tuple[float, float]] = _FETCH_TIMEOUT
     ) -> bool:
         """Fetches and verifies remote image with magic byte check, writing atomically to target_path."""
         if not remote_url or not isinstance(remote_url, str):
@@ -71,6 +196,9 @@ class MediaCoverService:
         except OSError:
             pass
 
+        if self._should_skip(remote_url):
+            return False
+
         try:
             headers = {
                 "User-Agent": "Lidarr/2.0.0 (TrackSeerr; https://github.com/trackseerr)",
@@ -78,11 +206,12 @@ class MediaCoverService:
             }
             resp = requests.get(
                 remote_url,
-                timeout=float(timeout),
+                timeout=timeout,
                 stream=True,
                 headers=headers,
             )
             if resp.status_code != 200:
+                self._record_failure(remote_url, network=resp.status_code >= 500)
                 logger.debug(
                     "MediaCoverService: Remote image fetch failed (status=%d) for %s",
                     resp.status_code,
@@ -91,7 +220,14 @@ class MediaCoverService:
                 return False
 
             content = bytearray()
+            deadline = time.monotonic() + _FETCH_DEADLINE_SECONDS
             for chunk in resp.iter_content(chunk_size=65536):
+                if time.monotonic() > deadline:
+                    self._record_failure(remote_url, network=True)
+                    logger.warning(
+                        "MediaCoverService: Download of %s exceeded %.0fs deadline", remote_url, _FETCH_DEADLINE_SECONDS
+                    )
+                    return False
                 if chunk:
                     content.extend(chunk)
                     if len(content) > _MAX_IMAGE_BYTES:
@@ -127,9 +263,11 @@ class MediaCoverService:
             tmp_path = target_path.with_suffix(f".tmp.{uuid.uuid4().hex[:8]}")
             tmp_path.write_bytes(data)
             tmp_path.replace(target_path)
+            self._record_success(remote_url)
             return True
 
         except (requests.RequestException, OSError) as exc:
+            self._record_failure(remote_url, network=True)
             logger.warning(
                 "MediaCoverService: Error downloading/saving image from %s: %s",
                 remote_url,
@@ -137,6 +275,7 @@ class MediaCoverService:
             )
             return False
         except Exception as exc:
+            self._record_failure(remote_url, network=False)
             logger.warning(
                 "MediaCoverService: Unexpected error caching image from %s: %s",
                 remote_url,
@@ -145,9 +284,13 @@ class MediaCoverService:
             return False
 
     def ensure_artwork(
-        self, category: str, item_id: str, remote_url: Optional[str]
+        self, category: str, item_id: str, remote_url: Optional[str], block: bool = False
     ) -> Optional[Path]:
-        """Resolves target path for category, validates or caches artwork, returning path if valid."""
+        """Resolves target path for category, returning it if already cached.
+
+        On a miss the download is queued on the background pool and ``None`` is returned immediately, so request
+        handlers never wait on a remote host. ``block=True`` downloads inline (tests / explicit one-shot callers).
+        """
         if category == "artist_poster":
             target = self.get_artist_poster_path(item_id)
         elif category == "artist_banner":
@@ -163,9 +306,11 @@ class MediaCoverService:
         except OSError:
             pass
 
-        if remote_url and self.cache_image(target, remote_url):
-            return target
-
+        if not remote_url:
+            return None
+        if block:
+            return target if self.cache_image(target, remote_url) else None
+        self.schedule_cache(target, remote_url)
         return None
 
 

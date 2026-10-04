@@ -3580,6 +3580,14 @@ class Database:
             )
             self.conn.commit()
 
+    def list_kv_prefix(self, prefix: str) -> dict[str, str]:
+        """All kv_store entries whose key starts with ``prefix`` (literal match, no LIKE wildcards)."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT key, value FROM kv_store WHERE substr(key, 1, ?) = ?", (len(prefix), str(prefix))
+            ).fetchall()
+            return {str(r["key"]): str(r["value"]) for r in rows}
+
     def count_active_sessions(self) -> int:
         """Number of unexpired sessions (a count only; nothing identifying)."""
         now_iso = datetime.now(timezone.utc).isoformat()
