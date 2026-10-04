@@ -286,8 +286,24 @@ const MainApp: React.FC = () => {
                       <span>Connecting to Plex...</span>
                     </div>
                     <p className="text-[11px] text-neutral-400 font-mono">
-                      Popup window opened. Complete sign-in in the Plex window.
+                      {auth.plexAuthPhase === 'popup' &&
+                        'Popup window opened. Complete sign-in in the Plex window.'}
+                      {auth.plexAuthPhase === 'redirecting' &&
+                        'Finishing Plex sign-in. Redirecting to Plex...'}
+                      {auth.plexAuthPhase === 'starting' && 'Contacting Plex...'}
+                      {auth.plexAuthPhase === 'blocked' &&
+                        'Your browser blocked the sign-in popup. Tap the button below to open Plex sign-in.'}
                     </p>
+                    {auth.plexAuthPhase === 'blocked' && auth.plexAuthUrl && (
+                      <a
+                        href={auth.plexAuthUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="tape-deck-btn flex min-h-[44px] w-full items-center justify-center rounded-[3px] px-4 text-xs"
+                      >
+                        Open Plex Sign-In
+                      </a>
+                    )}
                     <TapeDeckButton
                       size="md"
                       variant="default"

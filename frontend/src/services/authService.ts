@@ -1,9 +1,10 @@
 import { apiRequest, setAuthToken } from './apiClient';
 import type { AuthPinResponse, AuthVerifyResponse, DeploymentTier, User } from '@/types/models';
 
-export async function startPlexAuth(): Promise<AuthPinResponse> {
+export async function startPlexAuth(forwardUrl?: string): Promise<AuthPinResponse> {
   return apiRequest<AuthPinResponse>('/api/auth/plex/pin', {
     method: 'POST',
+    ...(forwardUrl ? { body: { forward_url: forwardUrl } } : {}),
   });
 }
 
