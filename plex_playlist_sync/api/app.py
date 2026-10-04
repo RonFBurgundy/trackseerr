@@ -18,6 +18,7 @@ from plex_playlist_sync.boot import boot_state
 from plex_playlist_sync.api.routes import (
     account,
     acquisition,
+    activity,
     admin_users,
     auth,
     deployment,
@@ -40,6 +41,7 @@ from plex_playlist_sync.api.routes import (
     sync,
     system,
     users,
+    wanted,
 )
 from plex_playlist_sync.api.tier_middleware import (
     INVITE_TOKEN_PATH_RE,
@@ -230,6 +232,8 @@ def create_app(
     api_router.include_router(scrobbles.router, prefix="/scrobbles", tags=["scrobbles"])
     api_router.include_router(mixes.router, prefix="/mixes", tags=["mixes"])
     api_router.include_router(system.router, prefix="/system", tags=["system"])
+    api_router.include_router(activity.router, prefix="/activity", tags=["activity"])
+    api_router.include_router(wanted.router, prefix="/wanted", tags=["wanted"])
 
     @api_router.api_route("/health", methods=["GET", "HEAD"], tags=["health"])
     def health_check() -> dict[str, object]:

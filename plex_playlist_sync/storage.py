@@ -251,6 +251,7 @@ class Database:
                 (30, self._migration_v30),
                 (31, self._migration_v31),
                 (32, self._migration_v32),
+                (33, self._migration_v33),
             ]
 
             applied = 0
@@ -1232,6 +1233,103 @@ class Database:
             cur.execute("ALTER TABLE lidarr_settings ADD COLUMN monitor_option TEXT NOT NULL DEFAULT 'all';")
         if "tag_ids" not in cols:
             cur.execute("ALTER TABLE lidarr_settings ADD COLUMN tag_ids TEXT NOT NULL DEFAULT '[]';")
+
+    def _migration_v33(self, cur: sqlite3.Cursor) -> None:
+        """Activity + Wanted: stall tracking, release metadata on downloads, append-only download history."""
+        cur.execute("PRAGMA table_info(active_downloads);")
+        ad_cols = {row[1] for row in cur.fetchall()}
+        for col in ("progress_updated_at", "indexer", "quality", "protocol"):
+            if col not in ad_cols:
+                cur.execute(f"ALTER TABLE active_downloads ADD COLUMN {col} TEXT;")
+        cur.execute("PRAGMA table_info(library_tracks);")
+        if "last_searched_at" not in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE library_tracks ADD COLUMN last_searched_at TEXT;")
+        # Rows already in flight start their stall clock now, so an upgrade never flags them stalled on first read.
+        # Only NULLs are touched, which keeps a re-run from resetting clocks the workers have since maintained.
+        cur.execute(
+            "UPDATE active_downloads SET progress_updated_at = CURRENT_TIMESTAMP "
+            "WHERE progress_updated_at IS NULL AND status NOT IN ('failed', 'imported')"
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS download_history (
+                id TEXT PRIMARY KEY,
+                event TEXT NOT NULL,
+                download_id TEXT,
+                request_id TEXT,
+                track_id TEXT,
+                album_id TEXT,
+                item_type TEXT,
+                artist TEXT,
+                album TEXT,
+                title TEXT,
+                release_title TEXT,
+                quality TEXT,
+                indexer TEXT,
+                protocol TEXT,
+                client TEXT,
+                info_hash TEXT,
+                release_guid TEXT,
+                message TEXT,
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+            );
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_download_history_created ON download_history(created_at);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_download_history_event ON download_history(event, created_at);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_download_history_download ON download_history(download_id);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_active_downloads_created ON active_downloads(created_at);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_blocklist_created ON download_blocklist(created_at);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_tracks_monitored ON library_tracks(monitored);")
+        self._seed_download_history(cur)
+
+    @staticmethod
+    def _seed_download_history(cur: sqlite3.Cursor) -> int:
+        """Backfills ``download_history`` from terminal ``active_downloads`` rows (grab + terminal event).
+
+        Idempotent: seeded ids are deterministic (``seed-<download id>-<event>``) and inserted with
+        ``INSERT OR IGNORE``, so running it again adds nothing. Returns the number of rows inserted.
+        """
+        before = cur.execute("SELECT COUNT(*) FROM download_history").fetchone()[0]
+        cur.execute(
+            """
+            INSERT OR IGNORE INTO download_history (
+                id, event, download_id, request_id, track_id, album_id, item_type, artist, title, release_title,
+                quality, indexer, protocol, client, info_hash, message, created_at
+            )
+            SELECT 'seed-' || d.id || '-grabbed', 'grabbed', d.id, d.request_id, d.track_id, d.album_id, d.item_type,
+                   d.artist, d.title, d.title, d.quality, d.indexer, d.protocol, c.name, d.download_hash,
+                   'Grabbed (backfilled)', COALESCE(d.created_at, CURRENT_TIMESTAMP)
+            FROM active_downloads d LEFT JOIN download_clients c ON c.id = d.client_id
+            WHERE d.status IN ('failed', 'imported')
+            """
+        )
+        cur.execute(
+            """
+            INSERT OR IGNORE INTO download_history (
+                id, event, download_id, request_id, track_id, album_id, item_type, artist, title, release_title,
+                quality, indexer, protocol, client, info_hash, message, created_at
+            )
+            SELECT 'seed-' || d.id || '-' || d.status,
+                   CASE d.status WHEN 'imported' THEN 'imported' ELSE 'failed' END,
+                   d.id, d.request_id, d.track_id, d.album_id, d.item_type,
+                   d.artist, d.title, d.title, d.quality, d.indexer, d.protocol, c.name, d.download_hash,
+                   COALESCE(d.error_message, CASE d.status WHEN 'imported' THEN 'Imported (backfilled)' END),
+                   COALESCE(d.updated_at, d.created_at, CURRENT_TIMESTAMP)
+            FROM active_downloads d LEFT JOIN download_clients c ON c.id = d.client_id
+            WHERE d.status IN ('failed', 'imported')
+            """
+        )
+        after = cur.execute("SELECT COUNT(*) FROM download_history").fetchone()[0]
+        return int(after - before)
+
+    def seed_download_history(self) -> int:
+        """Public, idempotent re-run of the history backfill (see ``_seed_download_history``)."""
+        with self._lock:
+            cur = self.conn.cursor()
+            inserted = self._seed_download_history(cur)
+            self.conn.commit()
+            return inserted
 
     def _migration_v28(self, cur: sqlite3.Cursor) -> None:
         """Discography batch markers, legacy single-quota migration and per-type auto-approve bits.
@@ -3849,8 +3947,8 @@ class Database:
                 INSERT INTO active_downloads (
                     id, request_id, client_id, download_hash, title, artist,
                     item_type, status, progress, size_bytes, source_path,
-                    target_path, error_message, track_id, album_id, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    target_path, error_message, track_id, album_id, updated_at, progress_updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     request_id = excluded.request_id,
                     client_id = excluded.client_id,
@@ -3943,19 +4041,23 @@ class Database:
                 cur = self.conn.execute(
                     """
                     UPDATE active_downloads
-                    SET progress = ?, size_bytes = ?, updated_at = CURRENT_TIMESTAMP
+                    SET progress_updated_at = CASE WHEN progress <> ? OR progress_updated_at IS NULL
+                                                   THEN CURRENT_TIMESTAMP ELSE progress_updated_at END,
+                        progress = ?, size_bytes = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
-                    (float(progress), int(size_bytes), str(download_id)),
+                    (float(progress), float(progress), int(size_bytes), str(download_id)),
                 )
             else:
                 cur = self.conn.execute(
                     """
                     UPDATE active_downloads
-                    SET progress = ?, updated_at = CURRENT_TIMESTAMP
+                    SET progress_updated_at = CASE WHEN progress <> ? OR progress_updated_at IS NULL
+                                                   THEN CURRENT_TIMESTAMP ELSE progress_updated_at END,
+                        progress = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
-                    (float(progress), str(download_id)),
+                    (float(progress), float(progress), str(download_id)),
                 )
             self.conn.commit()
             return cur.rowcount > 0
@@ -3969,8 +4071,14 @@ class Database:
         target_path: Optional[str] = None,
     ) -> bool:
         """Updates status and paths / error for an active download."""
-        updates = ["status = ?", "updated_at = CURRENT_TIMESTAMP"]
-        params: list[Any] = [str(status).lower()]
+        new_status = str(status).lower()
+        updates = [
+            "status = ?",
+            "updated_at = CURRENT_TIMESTAMP",
+            # A status change restarts the stall clock (e.g. queued -> downloading).
+            "progress_updated_at = CASE WHEN status <> ? THEN CURRENT_TIMESTAMP ELSE progress_updated_at END",
+        ]
+        params: list[Any] = [new_status, new_status]
         if error_message is not None:
             updates.append("error_message = ?")
             params.append(error_message)
@@ -3984,9 +4092,28 @@ class Database:
         params.append(str(download_id))
         query = f"UPDATE active_downloads SET {', '.join(updates)} WHERE id = ?"
         with self._lock:
+            previous = self.conn.execute(
+                "SELECT status FROM active_downloads WHERE id = ?", (str(download_id),)
+            ).fetchone()
             cur = self.conn.execute(query, params)
             self.conn.commit()
-            return cur.rowcount > 0
+            changed = cur.rowcount > 0
+            # Every terminal transition lands in the append-only history exactly once, whichever worker path made it.
+            if (
+                changed
+                and previous is not None
+                and previous["status"] != new_status
+                and new_status in ("failed", "imported")
+            ):
+                try:
+                    self.record_download_event(
+                        "failed" if new_status == "failed" else "imported",
+                        download_id=str(download_id),
+                        message=error_message if new_status == "failed" else None,
+                    )
+                except sqlite3.Error as exc:
+                    logger.warning("Failed to record download history for %s: %s", download_id, type(exc).__name__)
+            return changed
 
     def delete_active_download(self, download_id: str) -> bool:
         """Deletes an active download entry."""
@@ -3996,6 +4123,290 @@ class Database:
             )
             self.conn.commit()
             return cur.rowcount > 0
+
+    # -------------------------------------------------------------------------
+    # Activity (queue / history) and Wanted
+    # -------------------------------------------------------------------------
+
+    # Sort-key whitelists: the key is looked up here and only the mapped SQL fragment is ever interpolated.
+    QUEUE_SORT_KEYS: dict[str, str] = {
+        "added_at": "d.created_at",
+        "artist": "d.artist COLLATE NOCASE",
+        "title": "item_title COLLATE NOCASE",
+        "progress": "d.progress",
+        "status": "d.status",
+        "size_bytes": "d.size_bytes",
+    }
+    HISTORY_SORT_KEYS: dict[str, str] = {"date": "h.created_at"}
+    HISTORY_EVENTS: tuple[str, ...] = ("grabbed", "imported", "failed", "deleted", "blocklisted", "upgraded")
+    BLOCKLIST_SORT_KEYS: dict[str, str] = {"date": "b.created_at", "artist": "b.artist COLLATE NOCASE"}
+    WANTED_SORT_KEYS: dict[str, str] = {
+        "artist": "ar.name COLLATE NOCASE",
+        "album": "al.title COLLATE NOCASE",
+        "title": "t.title COLLATE NOCASE",
+        "release_date": "release_date",
+        "last_searched_at": "t.last_searched_at",
+    }
+    # Downloads the native queue shows: everything that still needs the worker, plus an explicit ``warning`` state.
+    NATIVE_QUEUE_STATUSES: tuple[str, ...] = ("queued", "downloading", "importing", "completed", "warning")
+
+    _QUEUE_FROM = """
+        FROM active_downloads d
+        LEFT JOIN download_clients c ON d.client_id = c.id
+        LEFT JOIN library_tracks lt ON lt.id = d.track_id
+        LEFT JOIN library_albums al ON al.id = COALESCE(d.album_id, lt.album_id)
+        LEFT JOIN music_requests r ON r.id = d.request_id
+    """
+    _QUEUE_SELECT = """
+        SELECT d.*, c.name AS client_name, c.driver_type AS client_driver_type,
+               COALESCE(lt.title, r.title, d.title) AS item_title,
+               COALESCE(al.title, r.album, CASE WHEN d.item_type = 'album' THEN r.title END) AS album_title
+    """
+
+    @staticmethod
+    def _order_clause(sort_map: dict[str, str], sort_key: str, sort_dir: str, tiebreak: str) -> str:
+        if sort_key not in sort_map:
+            raise ValueError(f"Unknown sort key: {sort_key!r}")
+        direction = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
+        return f"ORDER BY {sort_map[sort_key]} {direction}, {tiebreak} {direction}"
+
+    def record_download_event(
+        self, event: str, download_id: Optional[str] = None, **fields: Any
+    ) -> str:
+        """Appends one ``download_history`` row; returns its id.
+
+        When ``download_id`` names a live ``active_downloads`` row its artist/album/title/release/quality/indexer/
+        protocol/client/hash context is copied in; any explicitly passed non-None ``fields`` override that context.
+        """
+        cols = (
+            "request_id", "track_id", "album_id", "item_type", "artist", "album", "title", "release_title",
+            "quality", "indexer", "protocol", "client", "info_hash", "release_guid", "message",
+        )
+        values: dict[str, Any] = {c: None for c in cols}
+        with self._lock:
+            if download_id:
+                row = self.conn.execute(
+                    self._QUEUE_SELECT + self._QUEUE_FROM + " WHERE d.id = ?", (str(download_id),)
+                ).fetchone()
+                if row is not None:
+                    values.update(
+                        request_id=row["request_id"], track_id=row["track_id"], album_id=row["album_id"],
+                        item_type=row["item_type"], artist=row["artist"], album=row["album_title"],
+                        title=row["item_title"], release_title=row["title"], quality=row["quality"],
+                        indexer=row["indexer"], protocol=row["protocol"], client=row["client_name"],
+                        info_hash=row["download_hash"], release_guid=row["id"],
+                    )
+            for key, val in fields.items():
+                if key not in values:
+                    raise ValueError(f"Unknown download history field: {key!r}")
+                if val is not None:
+                    values[key] = val
+            event_id = f"dh-{uuid.uuid4().hex[:16]}"
+            self.conn.execute(
+                f"INSERT INTO download_history (id, event, download_id, {', '.join(cols)}, created_at) "
+                f"VALUES (?, ?, ?, {', '.join('?' for _ in cols)}, CURRENT_TIMESTAMP)",
+                (event_id, str(event), download_id, *[values[c] for c in cols]),
+            )
+            self.conn.commit()
+        return event_id
+
+    def set_download_release_meta(
+        self,
+        download_id: str,
+        indexer: Optional[str] = None,
+        quality: Optional[str] = None,
+        protocol: Optional[str] = None,
+    ) -> bool:
+        """Stores the release's indexer / parsed quality / protocol on an active download."""
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE active_downloads SET indexer = COALESCE(?, indexer), quality = COALESCE(?, quality), "
+                "protocol = COALESCE(?, protocol) WHERE id = ?",
+                (indexer, quality, protocol, str(download_id)),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def record_download_grab(
+        self,
+        download_id: str,
+        indexer: Optional[str] = None,
+        quality: Optional[str] = None,
+        protocol: Optional[str] = None,
+        upgrade: bool = False,
+    ) -> None:
+        """Stores release metadata on a fresh download and writes its ``grabbed`` (and, for upgrades, ``upgraded``) event."""
+        self.set_download_release_meta(download_id, indexer=indexer, quality=quality, protocol=protocol)
+        self.record_download_event("grabbed", download_id=download_id)
+        if upgrade:
+            self.record_download_event(
+                "upgraded", download_id=download_id, message="Grabbed to replace a file below its quality cutoff"
+            )
+
+    def list_native_queue(
+        self, page: int, page_size: int, sort_key: str, sort_dir: str
+    ) -> tuple[list[dict[str, Any]], int]:
+        """One page of the native download queue (non-terminal, non-Lidarr rows) plus the total count."""
+        order = self._order_clause(self.QUEUE_SORT_KEYS, sort_key, sort_dir, "d.id")
+        where = (
+            " WHERE d.status IN ({}) AND COALESCE(c.driver_type, '') <> 'lidarr'"
+        ).format(", ".join("?" for _ in self.NATIVE_QUEUE_STATUSES))
+        params = list(self.NATIVE_QUEUE_STATUSES)
+        with self._lock:
+            total = self.conn.execute("SELECT COUNT(*) " + self._QUEUE_FROM + where, params).fetchone()[0]
+            cur = self.conn.execute(
+                self._QUEUE_SELECT + self._QUEUE_FROM + where + f" {order} LIMIT ? OFFSET ?",
+                [*params, int(page_size), (int(page) - 1) * int(page_size)],
+            )
+            return [self._map_active_download(r) for r in cur.fetchall()], int(total)
+
+    def get_native_queue_item(self, download_id: str) -> Optional[dict[str, Any]]:
+        """A single queue row with its resolved item/album titles, or None."""
+        with self._lock:
+            row = self.conn.execute(
+                self._QUEUE_SELECT + self._QUEUE_FROM + " WHERE d.id = ?", (str(download_id),)
+            ).fetchone()
+            return self._map_active_download(row) if row else None
+
+    # A grab can be marked failed only while it is the download's latest ``grabbed`` event and no later
+    # ``failed`` / ``blocklisted`` event exists for that download (marking twice would duplicate rows).
+    _CAN_MARK_FAILED_SQL = """(CASE WHEN h.event = 'grabbed' AND h.download_id IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM download_history x WHERE x.download_id = h.download_id
+                        AND x.event IN ('failed', 'blocklisted') AND x.rowid > h.rowid)
+        AND NOT EXISTS (SELECT 1 FROM download_history g WHERE g.download_id = h.download_id
+                        AND g.event = 'grabbed' AND g.rowid > h.rowid)
+        THEN 1 ELSE 0 END)"""
+
+    def list_download_history(
+        self, page: int, page_size: int, sort_dir: str, event: Optional[str] = None
+    ) -> tuple[list[dict[str, Any]], int]:
+        """One page of ``download_history`` (newest first by default) plus the total, optionally one event type."""
+        order = self._order_clause(self.HISTORY_SORT_KEYS, "date", sort_dir, "h.rowid")
+        where, params = "", []
+        if event:
+            where, params = " WHERE h.event = ?", [str(event)]
+        with self._lock:
+            total = self.conn.execute("SELECT COUNT(*) FROM download_history h" + where, params).fetchone()[0]
+            cur = self.conn.execute(
+                f"SELECT h.*, {self._CAN_MARK_FAILED_SQL} AS can_mark_failed FROM download_history h"
+                + where
+                + f" {order} LIMIT ? OFFSET ?",
+                [*params, int(page_size), (int(page) - 1) * int(page_size)],
+            )
+            return [dict(r) for r in cur.fetchall()], int(total)
+
+    def get_download_history_item(self, history_id: str) -> Optional[dict[str, Any]]:
+        with self._lock:
+            row = self.conn.execute(
+                f"SELECT h.*, {self._CAN_MARK_FAILED_SQL} AS can_mark_failed FROM download_history h WHERE h.id = ?",
+                (str(history_id),),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def list_blocklist_page(
+        self, page: int, page_size: int, sort_key: str, sort_dir: str
+    ) -> tuple[list[dict[str, Any]], int]:
+        """One page of the download blocklist plus the total."""
+        order = self._order_clause(self.BLOCKLIST_SORT_KEYS, sort_key, sort_dir, "b.id")
+        with self._lock:
+            total = self.conn.execute("SELECT COUNT(*) FROM download_blocklist").fetchone()[0]
+            cur = self.conn.execute(
+                f"SELECT b.* FROM download_blocklist b {order} LIMIT ? OFFSET ?",
+                (int(page_size), (int(page) - 1) * int(page_size)),
+            )
+            return [dict(r) for r in cur.fetchall()], int(total)
+
+    _WANTED_MISSING_FROM = """
+        FROM library_tracks t
+        JOIN library_albums al ON al.id = t.album_id
+        JOIN library_artists ar ON ar.id = t.artist_id
+        WHERE t.monitored = 1 AND al.monitored = 1 AND ar.monitored = 1
+          AND NOT EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id)
+    """
+    _WANTED_CUTOFF_FROM = """
+        FROM library_tracks t
+        JOIN library_albums al ON al.id = t.album_id
+        JOIN library_artists ar ON ar.id = t.artist_id
+        JOIN library_files f ON f.id = (
+            SELECT MIN(x.id) FROM library_files x WHERE x.track_id = t.id AND x.cutoff_met = 0
+        )
+        LEFT JOIN quality_profiles qp ON qp.id = ar.quality_profile_id
+        LEFT JOIN quality_profiles dp ON dp.id = (SELECT id FROM quality_profiles WHERE is_default = 1 LIMIT 1)
+        WHERE t.monitored = 1 AND al.monitored = 1 AND ar.monitored = 1
+          AND COALESCE(qp.upgrade_allowed, dp.upgrade_allowed, 1) = 1
+    """
+    _WANTED_SELECT = """
+        SELECT t.id AS id, t.id AS track_id, t.album_id AS album_id, ar.name AS artist, al.title AS album,
+               t.title AS title, COALESCE(al.release_date, CAST(al.year AS TEXT)) AS release_date,
+               t.monitored AS monitored, t.last_searched_at AS last_searched_at,
+               ar.quality_profile_id AS quality_profile_id
+    """
+
+    def list_wanted(
+        self, kind: str, page: int, page_size: int, sort_key: str, sort_dir: str
+    ) -> tuple[list[dict[str, Any]], int]:
+        """One page of native Wanted rows: ``kind`` is ``missing`` or ``cutoff``."""
+        if kind not in ("missing", "cutoff"):
+            raise ValueError(f"Unknown wanted list: {kind!r}")
+        order = self._order_clause(self.WANTED_SORT_KEYS, sort_key, sort_dir, "t.id")
+        frm = self._WANTED_MISSING_FROM if kind == "missing" else self._WANTED_CUTOFF_FROM
+        select = self._WANTED_SELECT
+        if kind == "cutoff":
+            select += ", f.quality_name AS current_quality, COALESCE(qp.cutoff, dp.cutoff) AS cutoff_quality"
+        with self._lock:
+            total = self.conn.execute("SELECT COUNT(*) " + frm).fetchone()[0]
+            cur = self.conn.execute(
+                select + frm + f" {order} LIMIT ? OFFSET ?",
+                (int(page_size), (int(page) - 1) * int(page_size)),
+            )
+            return [dict(r) for r in cur.fetchall()], int(total)
+
+    def list_wanted_search_targets(
+        self, kind: Optional[str] = None, track_ids: Optional[list[str]] = None, limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        """Rows to search for: every Wanted row of ``kind`` (capped at ``limit``), or the given track ids.
+
+        Rows carry ``current_quality`` when the track already has a file (so an upgrade search can be scored).
+        """
+        select = (
+            self._WANTED_SELECT
+            + ", (SELECT f2.quality_name FROM library_files f2 WHERE f2.track_id = t.id ORDER BY f2.cutoff_met ASC LIMIT 1)"
+            " AS current_quality, (SELECT MIN(f3.cutoff_met) FROM library_files f3 WHERE f3.track_id = t.id) AS cutoff_met"
+        )
+        with self._lock:
+            if track_ids is not None:
+                ids = [str(i) for i in track_ids][:limit]
+                if not ids:
+                    return []
+                marks = ", ".join("?" for _ in ids)
+                cur = self.conn.execute(
+                    select
+                    + " FROM library_tracks t JOIN library_albums al ON al.id = t.album_id"
+                    " JOIN library_artists ar ON ar.id = t.artist_id"
+                    f" WHERE t.id IN ({marks})",
+                    ids,
+                )
+            else:
+                if kind not in ("missing", "cutoff"):
+                    raise ValueError(f"Unknown wanted list: {kind!r}")
+                frm = self._WANTED_MISSING_FROM if kind == "missing" else self._WANTED_CUTOFF_FROM
+                cur = self.conn.execute(
+                    select + frm + " ORDER BY ar.name COLLATE NOCASE ASC, t.id ASC LIMIT ?", (int(limit),)
+                )
+            return [dict(r) for r in cur.fetchall()]
+
+    def mark_tracks_searched(self, track_ids: list[str]) -> int:
+        """Stamps ``last_searched_at`` on the given library tracks."""
+        ids = [str(i) for i in track_ids]
+        if not ids:
+            return 0
+        with self._lock:
+            cur = self.conn.execute(
+                f"UPDATE library_tracks SET last_searched_at = CURRENT_TIMESTAMP WHERE id IN ({', '.join('?' for _ in ids)})",
+                ids,
+            )
+            self.conn.commit()
+            return cur.rowcount
 
     # -------------------------------------------------------------------------
     # Quality Profiles CRUD
@@ -5355,6 +5766,21 @@ class Database:
         item = self.get_blocklist_item(item_id)
         if item is None:
             raise RuntimeError(f"Failed to retrieve blocklist item {item_id}")
+        try:
+            self.record_download_event(
+                "blocklisted",
+                artist=item.get("artist"),
+                album=item.get("album"),
+                title=item.get("album") or item.get("source_title"),
+                release_title=item.get("source_title"),
+                indexer=item.get("indexer"),
+                protocol=item.get("protocol"),
+                info_hash=item.get("info_hash"),
+                release_guid=item.get("release_guid"),
+                message=item.get("reason"),
+            )
+        except sqlite3.Error as exc:
+            logger.warning("Failed to record blocklist history event: %s", type(exc).__name__)
         return item
 
     def get_blocklist_item(self, blocklist_id: str) -> Optional[dict[str, Any]]:

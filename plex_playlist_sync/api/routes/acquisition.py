@@ -307,6 +307,12 @@ def _grab_release(payload: ManualGrabPayload, db: Database) -> dict[str, Any]:
     )
     try:
         db.create_active_download(active_dl)
+        db.record_download_grab(
+            download_id,
+            indexer=payload.release.indexer_name,
+            quality=payload.release.parsed_quality,
+            protocol=payload.release.protocol,
+        )
     except Exception as e:
         logger.error("Failed to record active download '%s': %s", download_id, e)
 

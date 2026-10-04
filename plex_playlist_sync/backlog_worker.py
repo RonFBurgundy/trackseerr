@@ -7,7 +7,9 @@
 """
 
 from difflib import SequenceMatcher
+from datetime import datetime, timedelta, timezone
 import logging
+import sqlite3
 import threading
 import time
 from typing import Any, Optional
@@ -30,6 +32,7 @@ from plex_playlist_sync.models import (
 )
 from plex_playlist_sync.notifications import notification_dispatcher
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
+from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.job_tracker import tracked
 from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from plex_playlist_sync.storage import Database
@@ -95,6 +98,23 @@ def _matches_request(candidate: AcquisitionSearchResult, req: dict[str, Any]) ->
     return artist_ok and (title_ok or title_match_raw)
 
 
+# A track searched this recently is not searched again by a manual Wanted search.
+RECENT_SEARCH_WINDOW = timedelta(minutes=10)
+
+
+def _searched_since(value: Any, cutoff: datetime) -> bool:
+    """True when ``value`` (SQLite ``YYYY-MM-DD HH:MM:SS`` UTC or ISO-8601) is at or after ``cutoff``."""
+    if not value:
+        return False
+    try:
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed >= cutoff
+
+
 class WantedBacklogWorker:
     """Autonomous worker periodically re-searching unfulfilled requests and missing tracks."""
 
@@ -109,6 +129,8 @@ class WantedBacklogWorker:
         self.items_checked: int = 0
         self.items_grabbed: int = 0
         self.errors: int = 0
+        self.last_search_thread: Optional[threading.Thread] = None
+        self._search_lock = threading.Lock()
 
     def is_running(self) -> bool:
         with self._lock:
@@ -198,6 +220,88 @@ class WantedBacklogWorker:
         except ModeChanged:
             logger.debug("WantedBacklogWorker: library manager is Lidarr; skipping native backlog sweep")
             return {"items_checked": 0, "items_grabbed": 0, "errors": 0, "skipped": "library manager is Lidarr"}
+
+    def search_batch_running(self) -> bool:
+        """True while a manual wanted-search batch thread is still working through its targets."""
+        thread = self.last_search_thread
+        return thread is not None and thread.is_alive()
+
+    def queue_wanted_search(self, db: Database, targets: list[dict[str, Any]]) -> dict[str, Any]:
+        """Queues indexer searches for Wanted rows; returns ``{"queued": n}`` plus a ``message`` when nothing/less ran.
+
+        Only one manual batch runs at a time: while one is alive a new request queues nothing and says so. Tracks
+        searched within ``RECENT_SEARCH_WINDOW`` (``last_searched_at``) are skipped, which also absorbs double clicks.
+        """
+        with self._search_lock:
+            if self.search_batch_running():
+                return {"queued": 0, "message": "A search batch is already running"}
+            cutoff = datetime.now(timezone.utc) - RECENT_SEARCH_WINDOW
+            fresh: list[dict[str, Any]] = []
+            skipped = 0
+            for t in targets:
+                if _searched_since(t.get("last_searched_at"), cutoff):
+                    skipped += 1
+                else:
+                    fresh.append(t)
+            queued = self.search_wanted_tracks(db, fresh)
+        out: dict[str, Any] = {"queued": queued}
+        if skipped and queued:
+            out["message"] = f"Skipped {skipped} searched in the last 10 minutes"
+        elif skipped:
+            out["message"] = "All selected items were searched in the last 10 minutes"
+        return out
+
+    def search_wanted_tracks(self, db: Database, targets: list[dict[str, Any]]) -> int:
+        """Queues indexer searches for the given Wanted rows and returns how many were queued.
+
+        The searches run on a daemon thread, paced like the periodic sweep; each one goes through
+        ``acquisition_coordinator.search_and_grab`` (which takes the native work guard itself). Rows that already
+        have a below-cutoff file are searched as upgrades, scored against the current quality. The caller is
+        expected to hold the native ``work_guard`` while it decides to queue.
+        """
+        runnable = [t for t in targets if (t.get("artist") or "").strip() and (t.get("title") or "").strip()]
+        if not runnable:
+            return 0
+        db.mark_tracks_searched([str(t["track_id"]) for t in runnable if t.get("track_id")])
+
+        def _run() -> None:
+            for t in runnable:
+                try:
+                    min_score: Optional[int] = None
+                    qp_id = t.get("quality_profile_id")
+                    if t.get("current_quality") and t.get("cutoff_met") == 0:
+                        profile_dict = db.get_quality_profile(qp_id) if qp_id else db.get_default_quality_profile()
+                        min_score = 0
+                        if profile_dict:
+                            cur_p = parse_release_title(t["current_quality"])
+                            if cur_p.quality == "Unknown":
+                                cur_p.quality = t["current_quality"]
+                            min_score = evaluate_release(cur_p, _to_quality_profile(profile_dict)).score
+                    res = acquisition_coordinator.search_and_grab(
+                        artist=str(t["artist"]).strip(),
+                        title=str(t["title"]).strip(),
+                        album=(str(t["album"]).strip() if t.get("album") else None),
+                        item_type="track",
+                        db=db,
+                        quality_profile_id=qp_id,
+                        min_score=min_score,
+                        track_id=t.get("track_id"),
+                        album_id=t.get("album_id"),
+                    )
+                    if res.get("mode_changed"):
+                        logger.info("Manual wanted search stopped: library manager switched to Lidarr")
+                        return
+                except Exception as e:  # one failing search must not abort the rest of the batch
+                    logger.error(
+                        "Manual wanted search failed for '%s - %s': %s", t.get("artist"), t.get("title"), redact_text(str(e))
+                    )
+                if self.pace_delay > 0:
+                    time.sleep(min(float(self.pace_delay), 5.0))
+
+        thread = threading.Thread(target=_run, daemon=True, name="WantedManualSearchThread")
+        self.last_search_thread = thread
+        thread.start()
+        return len(runnable)
 
     def _sweep(self, db: Database) -> dict[str, int]:
         items_checked = 0
@@ -446,6 +550,8 @@ class WantedBacklogWorker:
                     track_id=track_id,
                     album_id=album_id,
                 )
+                if track_id:
+                    db.mark_tracks_searched([str(track_id)])
                 if res.get("success"):
                     items_grabbed += 1
                     logger.info(
@@ -780,6 +886,16 @@ class RSSSyncWorker:
                 )
                 try:
                     db.create_active_download(active_dl)
+                    try:
+                        db.record_download_grab(
+                            download_id,
+                            indexer=str((candidate.extra or {}).get("indexer_name") or candidate.source or "") or None,
+                            quality=eval_res.parsed_quality if eval_res else None,
+                            protocol=candidate.protocol or None,
+                            upgrade=matched_req.get("cutoff_met") == 0 or matched_req.get("status") == "available",
+                        )
+                    except sqlite3.Error as hist_err:
+                        logger.warning("Failed to record grab history for %s: %s", download_id, type(hist_err).__name__)
                     db.update_request_status(matched_req["id"], RequestStatus.PROCESSING)
                     active_req_ids.add(matched_req["id"])
                     grabs_triggered += 1

@@ -7,6 +7,7 @@ appropriate download clients (qBittorrent, SABnzbd, slskd), and tracks active tr
 
 import logging
 import re
+import sqlite3
 from typing import Any, Optional, Union
 import uuid
 
@@ -382,6 +383,16 @@ class AcquisitionCoordinator:
             album_id=album_id,
         )
         db.create_active_download(active_dl)
+        try:
+            db.record_download_grab(
+                download_id,
+                indexer=str((top_candidate.extra or {}).get("indexer_name") or top_candidate.source or "") or None,
+                quality=eval_res.parsed_quality,
+                protocol=top_candidate.protocol or None,
+                upgrade=min_score is not None,
+            )
+        except sqlite3.Error as hist_err:
+            logger.warning("Failed to record grab history for %s: %s", download_id, type(hist_err).__name__)
 
         try:
             notification_dispatcher.dispatch(

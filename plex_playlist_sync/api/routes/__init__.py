@@ -2,6 +2,7 @@
 
 from plex_playlist_sync.api.routes import (
     acquisition,
+    activity,
     admin_users,
     auth,
     discovery,
@@ -22,10 +23,12 @@ from plex_playlist_sync.api.routes import (
     sync,
     system,
     users,
+    wanted,
 )
 
 __all__ = [
     "acquisition",
+    "activity",
     "admin_users",
     "auth",
     "discovery",
@@ -46,5 +49,6 @@ __all__ = [
     "sync",
     "system",
     "users",
+    "wanted",
 ]
 

@@ -5,6 +5,7 @@ import {
   Library,
   ListMusic,
   Activity,
+  ListTodo,
   Settings,
   LogIn,
   LogOut,
@@ -55,6 +56,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'library', label: 'Library', icon: <Library className="h-4 w-4" />, adminOnly: true },
     { id: 'playlists', label: 'Playlists', icon: <ListMusic className="h-4 w-4" /> },
     { id: 'activity', label: 'Activity', icon: <Activity className="h-4 w-4" />, adminOnly: true },
+    { id: 'wanted', label: 'Wanted', icon: <ListTodo className="h-4 w-4" />, adminOnly: true },
     { id: 'settings', label: 'Settings', icon: <Settings className="h-4 w-4" /> },
   ];
 
@@ -64,6 +66,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'library', label: 'Library', icon: <Library className="h-4 w-4" />, adminOnly: true },
     { id: 'playlists', label: 'Playlists', icon: <ListMusic className="h-4 w-4" /> },
     { id: 'activity', label: 'Activity', icon: <Activity className="h-4 w-4" />, adminOnly: true },
+    { id: 'wanted', label: 'Wanted', icon: <ListTodo className="h-4 w-4" />, adminOnly: true },
   ];
 
   return (

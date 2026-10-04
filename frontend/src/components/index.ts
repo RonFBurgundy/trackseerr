@@ -12,3 +12,6 @@ export * from './discovery';
 export * from './deployment';
 export * from './settings';
 export * from './system';
+export * from './lists';
+export * from './activity';
+export * from './wanted';

@@ -7,6 +7,7 @@ import {
   TapeDeckButton,
   MachinedCard,
   QuotaBadge,
+  ConfirmDangerButton,
 } from '@/components/ui';
 import { IssueReportButton, MyIssuesList } from '@/components/issues';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
@@ -71,7 +72,6 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
   };
 
   const handleRemove = async (id: number) => {
-    if (!confirm('Are you sure you want to remove this request?')) return;
     setProcessingId(id);
     try {
       await remove(id);
@@ -252,13 +252,12 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
                     </>
                   )}
 
-                  <TapeDeckButton
-                    size="sm"
-                    variant="danger"
+                  <ConfirmDangerButton
                     disabled={isBusy}
-                    onClick={() => handleRemove(req.id)}
+                    onConfirm={() => void handleRemove(req.id)}
                     icon={<Trash2 className="h-3.5 w-3.5" />}
-                    aria-label="Delete request"
+                    ariaLabel="Delete request"
+                    confirmLabel="Delete"
                   />
                 </div>
               </MachinedCard>

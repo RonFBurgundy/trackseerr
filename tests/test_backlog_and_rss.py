@@ -412,6 +412,7 @@ class TestRSSSyncWorker:
             size_bytes=420000000,
             protocol="torrent",
             download_url="magnet:?xt=urn:btih:daftpunkhash123",
+            extra={"indexer_name": "Local Indexer"},
         )
 
         mock_idx_driver = MagicMock()
@@ -437,6 +438,15 @@ class TestRSSSyncWorker:
             assert dl["client_id"] == "c-qbit-1"
             assert dl["download_hash"] == "daftpunkhash123"
             assert dl["status"] == "queued"
+
+            # The grab lands in history with indexer / quality / protocol, and on the queue row too
+            history, total = test_db.list_download_history(1, 10, "asc")
+            assert total == 1 and history[0]["event"] == "grabbed"
+            assert history[0]["download_id"] == dl["id"]
+            assert history[0]["indexer"] == "Local Indexer" and history[0]["protocol"] == "torrent"
+            assert history[0]["quality"]
+            queue_row = test_db.get_native_queue_item(dl["id"])
+            assert queue_row["indexer"] == "Local Indexer" and queue_row["protocol"] == "torrent" and queue_row["quality"]
 
             # Verify request status transitioned to processing
             updated_req = test_db.get_request("req-rss-target")

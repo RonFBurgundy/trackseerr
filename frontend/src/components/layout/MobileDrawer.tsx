@@ -5,6 +5,7 @@ import {
   Library,
   ListMusic,
   Activity,
+  ListTodo,
   Settings,
   X,
   LogOut,
@@ -95,6 +96,13 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
       label: 'Activity',
       description: 'Lidarr & download deck status',
       icon: <Activity className="h-5 w-5" />,
+      adminOnly: true,
+    },
+    {
+      id: 'wanted',
+      label: 'Wanted',
+      description: 'Missing & cutoff-unmet music',
+      icon: <ListTodo className="h-5 w-5" />,
       adminOnly: true,
     },
     {

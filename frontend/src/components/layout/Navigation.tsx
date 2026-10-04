@@ -1,8 +1,8 @@
 import React from 'react';
-import { Compass, Inbox, Library, ListMusic, Activity, Settings } from 'lucide-react';
+import { Compass, Inbox, Library, ListMusic, Activity, ListTodo, Settings } from 'lucide-react';
 import { TapeTransportBay, TapeDeckButton } from '@/components/ui';
 
-export type MainTab = 'discover' | 'requests' | 'library' | 'playlists' | 'activity' | 'settings';
+export type MainTab = 'discover' | 'requests' | 'library' | 'playlists' | 'activity' | 'wanted' | 'settings';
 
 export interface NavigationProps {
   activeTab: MainTab;
@@ -21,6 +21,7 @@ export const Navigation: React.FC<NavigationProps> = ({
     { id: 'library', label: 'Library', icon: <Library className="h-4 w-4" />, adminOnly: true },
     { id: 'playlists', label: 'Playlists', icon: <ListMusic className="h-4 w-4" /> },
     { id: 'activity', label: 'Activity', icon: <Activity className="h-4 w-4" />, adminOnly: true },
+    { id: 'wanted', label: 'Wanted', icon: <ListTodo className="h-4 w-4" />, adminOnly: true },
     { id: 'settings', label: 'Settings', icon: <Settings className="h-4 w-4" /> },
   ];
 

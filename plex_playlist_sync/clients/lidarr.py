@@ -2,7 +2,7 @@
 
 import logging
 from typing import Any, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import httpx
 
@@ -484,3 +484,97 @@ class LidarrClient:
         except Exception as e:
             logger.warning("Exception fetching track files from Lidarr: %s", _exc_text(e))
         return []
+
+    # ------------------------------------------------------------------ Activity / Wanted (admin proxy)
+
+    def _send_json(self, method: str, path: str, json_body: Optional[dict[str, Any]] = None) -> Any:
+        """POST or DELETE ``/api/v1/<path>``; returns the parsed JSON body (``None`` when empty).
+
+        Raises LidarrApiError on any failure, with a message that never carries the API key.
+        """
+        url = f"{self.base_url}/api/v1/{path}"
+        try:
+            with httpx.Client(verify=self.verify_ssl, timeout=self.timeout) as client:
+                if method == "POST":
+                    resp = client.post(url, headers=self._get_headers(), json=json_body)
+                elif method == "DELETE":
+                    resp = client.delete(url, headers=self._get_headers())
+                else:
+                    raise ValueError(f"Unsupported method: {method}")
+        except httpx.HTTPError as exc:
+            raise LidarrApiError(f"Could not reach Lidarr ({type(exc).__name__})") from exc
+        if resp.status_code in (401, 403):
+            raise LidarrApiError("Lidarr rejected the API key")
+        if resp.status_code == 404:
+            raise LidarrApiError(f"Lidarr could not find the item for {path}")
+        if resp.status_code not in (200, 201, 202, 204):
+            raise LidarrApiError(f"Lidarr returned HTTP {resp.status_code} for {path}")
+        if not resp.content:
+            return None
+        try:
+            return resp.json()
+        except ValueError:
+            return None
+
+    def _get_page(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        """GET a paged Lidarr resource and check it has the ``{page, pageSize, totalRecords, records}`` shape."""
+        data = self._get_json(f"{path}?{urlencode(params)}")
+        if not isinstance(data, dict) or not isinstance(data.get("records"), list):
+            raise LidarrApiError(f"Lidarr returned an unexpected response shape for {path}")
+        return data
+
+    @staticmethod
+    def _page_params(page: int, page_size: int, sort_key: str, sort_dir: str, **extra: Any) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "page": int(page),
+            "pageSize": int(page_size),
+            "sortKey": sort_key,
+            "sortDirection": "descending" if str(sort_dir).lower() == "desc" else "ascending",
+        }
+        params.update({k: v for k, v in extra.items() if v is not None})
+        return params
+
+    def get_queue(self, page: int, page_size: int, sort_key: str, sort_dir: str) -> dict[str, Any]:
+        return self._get_page(
+            "queue",
+            self._page_params(page, page_size, sort_key, sort_dir, includeArtist="true", includeAlbum="true"),
+        )
+
+    def delete_queue_item(self, queue_id: int, remove_from_client: bool, blocklist: bool) -> None:
+        query = urlencode(
+            {"removeFromClient": str(bool(remove_from_client)).lower(), "blocklist": str(bool(blocklist)).lower()}
+        )
+        self._send_json("DELETE", f"queue/{int(queue_id)}?{query}")
+
+    def get_history(
+        self, page: int, page_size: int, sort_key: str, sort_dir: str, event_type: Optional[int] = None
+    ) -> dict[str, Any]:
+        return self._get_page(
+            "history",
+            self._page_params(
+                page, page_size, sort_key, sort_dir, includeArtist="true", includeAlbum="true", eventType=event_type
+            ),
+        )
+
+    def mark_history_failed(self, history_id: int) -> None:
+        self._send_json("POST", f"history/failed/{int(history_id)}")
+
+    def get_blocklist(self, page: int, page_size: int, sort_key: str, sort_dir: str) -> dict[str, Any]:
+        return self._get_page("blocklist", self._page_params(page, page_size, sort_key, sort_dir))
+
+    def delete_blocklist_item(self, blocklist_id: int) -> None:
+        self._send_json("DELETE", f"blocklist/{int(blocklist_id)}")
+
+    def get_wanted(self, kind: str, page: int, page_size: int, sort_key: str, sort_dir: str) -> dict[str, Any]:
+        """``kind`` is ``missing`` or ``cutoff``."""
+        if kind not in ("missing", "cutoff"):
+            raise ValueError(f"Unknown wanted list: {kind!r}")
+        return self._get_page(
+            f"wanted/{kind}",
+            self._page_params(page, page_size, sort_key, sort_dir, includeArtist="true", monitored="true"),
+        )
+
+    def run_command(self, name: str, **body: Any) -> dict[str, Any]:
+        """POST ``/command`` (e.g. ``AlbumSearch`` with ``albumIds``); returns Lidarr's command resource."""
+        result = self._send_json("POST", "command", {"name": name, **body})
+        return result if isinstance(result, dict) else {}

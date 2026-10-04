@@ -8,7 +8,6 @@ import {
   useRequests,
   useIssues,
   useLibrary,
-  useQueue,
   useAccount,
   useLocalLogin,
   useDeploymentIdentity,
@@ -23,6 +22,7 @@ import {
   LibraryView,
   PlaylistsView,
   ActivityView,
+  WantedView,
   SettingsView,
   ObsidianModal,
   TapeDeckButton,
@@ -77,16 +77,15 @@ const MainApp: React.FC = () => {
   const requestsHook = useRequests();
   const issuesHook = useIssues(auth.user?.id);
   const libraryHook = useLibrary(auth.canUseAdminUi);
-  const queueHook = useQueue(auth.canUseAdminUi);
 
   const [requestedTab, setActiveTab] = useState<MainTab>(() => {
     const q = new URLSearchParams(window.location.search);
     return q.has('connected') || q.has('scrobble_error') ? 'settings' : 'discover';
   });
-  // Library and Activity are admin-only: any other source of those tabs falls back to Discover.
+  // Library, Activity and Wanted are admin-only: any other source of those tabs falls back to Discover.
   const activeTab: MainTab = mfaEnrollmentRequired
     ? 'settings'
-    : !auth.canUseAdminUi && (requestedTab === 'library' || requestedTab === 'activity')
+    : !auth.canUseAdminUi && (requestedTab === 'library' || requestedTab === 'activity' || requestedTab === 'wanted')
       ? 'discover'
       : requestedTab;
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
@@ -374,9 +373,11 @@ const MainApp: React.FC = () => {
             )}
 
             {activeTab === 'activity' && auth.canUseAdminUi && (
-              <ActivityView
-                queueHook={queueHook}
-              />
+              <ActivityView />
+            )}
+
+            {activeTab === 'wanted' && auth.canUseAdminUi && (
+              <WantedView />
             )}
 
             {activeTab === 'settings' && (

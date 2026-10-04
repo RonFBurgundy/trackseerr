@@ -7,6 +7,7 @@ import {
   MachinedCard,
   ObsidianModal,
   TactileSwitch,
+  ConfirmDangerButton,
 } from '@/components/ui';
 import { PlexPlaylistsSection } from '@/components/plex';
 import { TailoredMixesSection } from '@/components/mixes';
@@ -233,16 +234,11 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                 )}
 
                 {isAdmin && onDelete && (
-                  <TapeDeckButton
-                    size="sm"
-                    variant="danger"
-                    onClick={() => {
-                      if (confirm(`Delete playlist "${pl.name}"?`)) {
-                        onDelete(pl.id);
-                      }
-                    }}
+                  <ConfirmDangerButton
+                    onConfirm={() => onDelete(pl.id)}
                     icon={<Trash2 className="h-3 w-3" />}
-                    aria-label="Delete playlist"
+                    ariaLabel={`Delete playlist ${pl.name}`}
+                    confirmLabel="Delete"
                   />
                 )}
               </div>
