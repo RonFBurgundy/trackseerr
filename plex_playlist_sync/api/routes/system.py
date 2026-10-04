@@ -32,6 +32,7 @@ from plex_playlist_sync.api.dependencies import (
     get_plex_client,
     get_spotify_client,
     require_admin,
+    require_core_tier,
 )
 from plex_playlist_sync.api.routes.sync import sync_state
 from plex_playlist_sync.auth import get_or_create_secret_key, verify_session_token
@@ -42,10 +43,12 @@ from plex_playlist_sync.clients.acquisition import (
     get_indexer_driver,
 )
 from plex_playlist_sync.clients.deezer import DeezerClient
-from plex_playlist_sync.clients.lidarr import LidarrClient
+from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.config import Config
+from plex_playlist_sync.job_tracker import job_tracker, summarize_result, track_job
+from plex_playlist_sync.library_manager import MODE_LIDARR, MODE_NATIVE, build_lidarr_client, get_library_mode
 from plex_playlist_sync.library_scanner import library_scanner
 from plex_playlist_sync.lidarr_queue import lidarr_worker
 from plex_playlist_sync.models import DownloadClientConfig, IndexerConfig, UserPermission
@@ -770,14 +773,13 @@ def get_system_logs(
 @router.get("/logs/stream", summary="Live SSE stream of system logs")
 async def stream_system_logs(
     request: Request,
-    token: Optional[str] = None,
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
 ):
     """Server-Sent Events endpoint streaming real-time log records."""
-    # Same session resolution as get_current_user (session row, disabled/tombstoned,
-    # sessions_revoked_at, gateway status); ?token= only because EventSource cannot set headers.
-    user = authenticate_request(request, db, config, query_token=token)
+    # Same session resolution as get_current_user (session row, disabled/tombstoned, sessions_revoked_at, gateway
+    # status). Same-origin EventSource sends the HttpOnly session cookie, so no token ever appears in the URL.
+    user = authenticate_request(request, db, config)
     require_admin(user)
 
     loop = asyncio.get_running_loop()
@@ -1049,6 +1051,12 @@ def run_scheduled_task(
     if task_id not in VALID_TASK_IDS:
         raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
 
+    if task_id == "lidarr_auto_trickle" and get_library_mode(db) != MODE_LIDARR:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Library manager is set to TrackSeerr; the Lidarr trickle is disabled.",
+        )
+
     now_iso = datetime.now(timezone.utc).isoformat()
     with _tasks_lock:
         _task_last_run_at[task_id] = now_iso
@@ -1151,7 +1159,10 @@ def run_scheduled_task(
             with _tasks_lock:
                 _running_tasks.add("download_queue_monitor")
             try:
-                acquisition_worker.poll_once(db=db, plex_client=plex_client)
+                with track_job("download_queue_monitor", "Acquisition Worker") as job:
+                    job.message = summarize_result(acquisition_worker.poll_once(db=db, plex_client=plex_client))
+            except Exception as exc:  # the job is already recorded as failed; keep the thread from dying silently
+                logger.error("Manual acquisition poll failed: %s", safe_exc(exc))
             finally:
                 with _tasks_lock:
                     _running_tasks.discard("download_queue_monitor")
@@ -1171,6 +1182,51 @@ def run_scheduled_task(
         threading.Thread(target=_refresh_thread, daemon=True, name="ManualArtistRefreshTask").start()
 
     return {"success": True, "message": f"Task '{task_id}' dispatched successfully"}
+
+
+@router.get(
+    "/queue",
+    summary="Running, queued and recently finished background jobs",
+    dependencies=[Depends(require_core_tier)],
+)
+def get_job_queue(_admin: dict[str, Any] = Depends(require_admin)) -> dict[str, list[dict[str, Any]]]:
+    """In-memory job list: what is running now, what is queued, and the last 50 finished runs (admin only)."""
+    return job_tracker.snapshot()
+
+
+@router.get(
+    "/lidarr-health",
+    summary="Lidarr reachability, version and health checks",
+    dependencies=[Depends(require_core_tier)],
+)
+def get_lidarr_health(
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Lidarr's own health checks. Native mode never contacts Lidarr. Never raises: an unreachable Lidarr is
+    reported as ``reachable: false`` with the checks empty."""
+    mode = get_library_mode(db)
+    if mode != MODE_LIDARR:
+        return {"mode": MODE_NATIVE, "reachable": None, "version": None, "health": []}
+    unreachable: dict[str, Any] = {"mode": MODE_LIDARR, "reachable": False, "version": None, "health": []}
+    try:
+        client = build_lidarr_client(db, config)
+        if client is None:
+            return unreachable
+        status_info = client.test_connection()
+        if not status_info.get("online"):
+            logger.info("Lidarr health: not reachable (%s)", redact_text(str(status_info.get("error", ""))))
+            return unreachable
+        return {
+            "mode": MODE_LIDARR,
+            "reachable": True,
+            "version": status_info.get("version"),
+            "health": client.get_health(),
+        }
+    except (LidarrApiError, sqlite3.Error) as exc:
+        logger.warning("Lidarr health check failed: %s", redact_text(str(exc)))
+        return unreachable
 
 
 @router.post("/tasks/{task_id}/cancel", summary="Cancel a running scheduled task")

@@ -16,6 +16,7 @@ from plex_playlist_sync.auth import get_or_create_secret_key, verify_session_tok
 from plex_playlist_sync.clients.deezer import DeezerClient
 from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.lidarr import LidarrClient
+from plex_playlist_sync.library_manager import build_lidarr_client
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.clients.spotify import SpotifyClient
@@ -356,11 +357,11 @@ def authenticate_request(
     request: Request,
     db: Database,
     config: Config,
-    query_token: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Shared session resolution for get_current_user.
+    """Shared session resolution for get_current_user: signed principal, session cookie, or Bearer header.
 
-    query_token is a last-resort fallback for EventSource clients, which cannot set headers.
+    Session tokens are never accepted from the URL (they would land in proxy and access logs); same-origin
+    EventSource requests authenticate with the HttpOnly session cookie.
     """
     if request.headers.get(HEADER_SIGNATURE) is not None:
         return resolve_signed_principal(request, db, config)
@@ -376,9 +377,6 @@ def authenticate_request(
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header[7:].strip()
-
-    if not token and query_token:
-        token = query_token
 
     if not token:
         raise HTTPException(
@@ -548,56 +546,7 @@ def get_lidarr_client(
     config: Config = Depends(get_config),
 ) -> Optional[LidarrClient]:
     """Dependency providing LidarrClient using DB-backed settings with env fallback."""
-    lidarr_settings = db.get_lidarr_settings()
-    url = lidarr_settings.get("url")
-    api_key = lidarr_settings.get("api_key")
-    auto_search = lidarr_settings.get("auto_search", True)
-    root_folder = lidarr_settings.get("root_folder")
-    quality_profile_id = lidarr_settings.get("quality_profile_id")
-    metadata_profile_id = lidarr_settings.get("metadata_profile_id")
-
-    if not (url and api_key):
-        if config.has_lidarr:
-            url = config.lidarr_url
-            api_key = config.lidarr_api_key
-            auto_search = config.lidarr_auto_search
-            root_folder = config.lidarr_root_folder
-            quality_profile_id = config.lidarr_quality_profile_id
-            metadata_profile_id = config.lidarr_metadata_profile_id
-            # Seed the DB so subsequent requests use DB
-            try:
-                db.update_lidarr_settings(
-                    {
-                        "url": url,
-                        "api_key": api_key,
-                        "auto_search": auto_search,
-                        "root_folder": root_folder,
-                        "quality_profile_id": quality_profile_id,
-                        "metadata_profile_id": metadata_profile_id,
-                        "trickle_rate_seconds": config.lidarr_trickle_rate_seconds,
-                        "trickle_batch_size": config.lidarr_trickle_batch_size,
-                        "auto_trickle": config.lidarr_auto_trickle,
-                        "auto_trickle_interval_minutes": config.lidarr_auto_trickle_interval_minutes,
-                    }
-                )
-            except Exception as e:
-                logger.warning("Failed to seed Lidarr settings to DB: %s", e)
-        else:
-            return None
-
-    try:
-        return LidarrClient(
-            base_url=str(url),
-            api_key=str(api_key),
-            verify_ssl=config.plex_verify_ssl,
-            auto_search=bool(auto_search),
-            root_folder=root_folder,
-            quality_profile_id=quality_profile_id,
-            metadata_profile_id=metadata_profile_id,
-        )
-    except Exception as e:
-        logger.error("Failed to initialize LidarrClient: %s", e)
-        return None
+    return build_lidarr_client(db, config)
 
 
 def verify_feed_access(

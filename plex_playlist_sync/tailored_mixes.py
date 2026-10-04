@@ -293,7 +293,7 @@ def generate_and_sync(
                             submission = _queue_acquisition(db, app_config, config_row, user, t)
                     if submission is not None:
                         # Network follow-ups (notifications, native grab) run outside the lock.
-                        run_submission_followups(db, user, submission, source="mix")
+                        run_submission_followups(db, user, submission, source="mix", config=app_config)
                         if submission.grabbed:
                             db.update_request_status(str(submission.request["id"]), RequestStatus.PROCESSING)
                         queued += 1

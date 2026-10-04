@@ -8,6 +8,9 @@ import type {
   MediaManagementSettings,
   LidarrSettings,
   LidarrTestResult,
+  LibraryManagerMode,
+  LibraryManagerState,
+  LidarrOptions,
 } from '@/types/models';
 
 export async function getGeneralSettings(): Promise<GeneralSettings> {
@@ -130,4 +133,21 @@ export async function testLidarrConnection(payload: {
     method: 'POST',
     body: payload,
   });
+}
+
+export async function getLibraryManager(): Promise<LibraryManagerState> {
+  return apiRequest<LibraryManagerState>('/api/settings/library-manager');
+}
+
+/** Rejects with ApiError: 409 (work in flight, message is the blocking reason) or 422 (Lidarr not configured). */
+export async function setLibraryManager(mode: LibraryManagerMode): Promise<LibraryManagerState> {
+  return apiRequest<LibraryManagerState>('/api/settings/library-manager', {
+    method: 'PUT',
+    body: { mode },
+  });
+}
+
+/** Live from Lidarr; rejects with ApiError status 502 (redacted message) when Lidarr is unreachable. */
+export async function getLidarrOptions(): Promise<LidarrOptions> {
+  return apiRequest<LidarrOptions>('/api/settings/lidarr/options');
 }

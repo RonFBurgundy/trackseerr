@@ -24,6 +24,8 @@ from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
+from plex_playlist_sync.job_tracker import job_tracker, summarize_result
+from plex_playlist_sync.library_manager import ModeChanged, run_guarded
 from plex_playlist_sync.library import (
     AUDIO_EXTENSIONS,
     embed_album_artwork,
@@ -361,7 +363,15 @@ class AcquisitionWorker:
                             except Exception as e:  # a failing provider must not stop imports; Plex refresh is optional
                                 logger.warning("Plex client provider failed: %s", safe_exc(e))
                                 current_plex = None
-                        self.poll_once(db=db, plex_client=current_plex, staging_dir=self.staging_dir)
+                        tick_started = time.monotonic()
+                        stats = self.poll_once(db=db, plex_client=current_plex, staging_dir=self.staging_dir)
+                        if isinstance(stats, dict) and stats.get("polled"):  # idle 5s ticks would flood the job list; only record real work
+                            job_tracker.record_completed(
+                                "download_queue_monitor",
+                                "Acquisition Worker",
+                                int((time.monotonic() - tick_started) * 1000),
+                                summarize_result(stats),
+                            )
                     except Exception as e:
                         logger.error("Unexpected error in AcquisitionWorker poll cycle: %s", e)
 
@@ -473,6 +483,19 @@ class AcquisitionWorker:
         plex_client: Optional[PlexClient] = None,
         staging_dir: Optional[str] = None,
     ) -> dict[str, int]:
+        """One poll cycle, run under the library-manager guard so the mode cannot flip mid-cycle."""
+        try:
+            return run_guarded(db, lambda: self._poll_once(db, plex_client, staging_dir))
+        except ModeChanged:
+            logger.warning("AcquisitionWorker: library manager changed repeatedly; skipping this poll cycle")
+            return {"polled": 0, "completed": 0, "failed": 0, "imported": 0}
+
+    def _poll_once(
+        self,
+        db: Database,
+        plex_client: Optional[PlexClient] = None,
+        staging_dir: Optional[str] = None,
+    ) -> dict[str, int]:
         media_settings = db.get_media_management_settings()
         import_mode = media_settings.get("import_mode", "move")
         write_tags = bool(media_settings.get("write_audio_tags", True))
@@ -484,6 +507,7 @@ class AcquisitionWorker:
             self.staging_dir = media_settings.get("staging_folder_path", self.staging_dir)
 
         stats = {"polled": 0, "completed": 0, "failed": 0, "imported": 0}
+        lidarr_mode = media_settings.get("library_mode") == "lidarr"
         active_items = db.list_active_downloads(
             statuses=[
                 DownloadStatus.QUEUED.value,
@@ -492,6 +516,14 @@ class AcquisitionWorker:
                 DownloadStatus.COMPLETED.value,
             ]
         )
+
+        # Exactly one side owns each item: in lidarr mode only Lidarr-driver items are followed (nothing is done
+        # natively), in native mode Lidarr-driver items are left alone (Lidarr must not be contacted).
+        active_items = [
+            i for i in active_items if (str(i.get("client_driver_type") or "").lower() == "lidarr") == lidarr_mode
+        ]
+        if lidarr_mode and not active_items:
+            logger.debug("AcquisitionWorker: library manager is Lidarr; no native download polling")
 
         if not active_items:
             return stats

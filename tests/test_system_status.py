@@ -523,7 +523,8 @@ def test_system_logs_api_and_stream(app_and_client, seeded_users, secret_key, te
     # 0. Logs and the live stream are admin-only
     assert client.get("/api/system/logs", cookies=alice_cookies).status_code == 403
     alice_token = alice_cookies["session_token"]
-    assert client.get(f"/api/system/logs/stream?token={alice_token}").status_code == 403
+    assert client.get(f"/api/system/logs/stream?token={alice_token}").status_code == 401  # URL tokens are not accepted
+    assert client.get("/api/system/logs/stream", headers={"Authorization": f"Bearer {alice_token}"}).status_code == 403
     assert client.get("/api/system/logs/stream", cookies=alice_cookies).status_code == 403
 
     # 1. GET /api/system/logs returns recent logs list

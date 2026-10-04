@@ -308,7 +308,8 @@ export interface MediaManagementSettings {
 export interface LidarrSettings {
   url?: string;
   api_key?: string;
-  auto_search: boolean;
+  /** @deprecated Legacy mirror of `search_on_add`; read and write `search_on_add` instead. */
+  auto_search?: boolean;
   root_folder?: string;
   quality_profile_id?: number;
   metadata_profile_id?: number;
@@ -316,6 +317,86 @@ export interface LidarrSettings {
   trickle_batch_size: number;
   auto_trickle: boolean;
   auto_trickle_interval_minutes?: number;
+  /** Phase 2: what to monitor when an artist is added. */
+  monitor_option?: LidarrMonitorOption;
+  /** Search immediately after add (stored in the legacy `auto_search` column server-side). */
+  search_on_add?: boolean;
+  /** Phase 2: Lidarr tag ids applied to added artists. */
+  tag_ids?: number[];
+}
+
+export type LidarrMonitorOption =
+  | 'all'
+  | 'future'
+  | 'missing'
+  | 'existing'
+  | 'first'
+  | 'latest'
+  | 'none';
+
+export type LibraryManagerMode = 'native' | 'lidarr';
+
+export interface LibraryManagerState {
+  mode: LibraryManagerMode;
+  lidarr_configured: boolean;
+  native_configured: boolean;
+  can_switch: boolean;
+  blocking_reason: string | null;
+}
+
+export interface LidarrRootFolderOption {
+  path: string;
+  free_space: number;
+}
+
+export interface LidarrNamedOption {
+  id: number;
+  name: string;
+}
+
+export interface LidarrTagOption {
+  id: number;
+  label: string;
+}
+
+export interface LidarrOptions {
+  root_folders: LidarrRootFolderOption[];
+  quality_profiles: LidarrNamedOption[];
+  metadata_profiles: LidarrNamedOption[];
+  tags: LidarrTagOption[];
+}
+
+export type SystemJobState = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export interface SystemJob {
+  id: string;
+  task_id: string;
+  name: string;
+  state: SystemJobState;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+  message: string | null;
+}
+
+export interface SystemQueueResponse {
+  running: SystemJob[];
+  queued: SystemJob[];
+  recent: SystemJob[];
+}
+
+export interface LidarrHealthItem {
+  source: string;
+  type: 'ok' | 'notice' | 'warning' | 'error';
+  message: string;
+  wiki_url?: string | null;
+}
+
+export interface LidarrHealth {
+  mode: LibraryManagerMode;
+  reachable: boolean | null;
+  version?: string | null;
+  health: LidarrHealthItem[];
 }
 
 export interface LidarrTestResult {
@@ -330,7 +411,7 @@ export interface SystemEventItem {
   severity: 'info' | 'warn' | 'error';
   source: string;
   message: string;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
   created_at: string;
 }
 

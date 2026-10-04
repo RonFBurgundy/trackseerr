@@ -25,6 +25,7 @@ from plex_playlist_sync.clients.deezer import DeezerClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.config import Config
+from plex_playlist_sync.job_tracker import tracked
 from plex_playlist_sync.models import Playlist, RequestStatus, Track
 from plex_playlist_sync.storage import Database
 from plex_playlist_sync.redaction import redact_text, safe_exc
@@ -126,6 +127,7 @@ class SyncState:
         pl["tracks_json"] = payload
         return skip
 
+    @tracked("playlist_sync", "Plex Playlist Sync")
     def execute_sync(
         self,
         db: Database,

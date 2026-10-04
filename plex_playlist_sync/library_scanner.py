@@ -23,7 +23,9 @@ from plex_playlist_sync.models import (
     LibraryTrack,
 )
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
-from plex_playlist_sync.redaction import safe_exc
+from plex_playlist_sync.job_tracker import track_job
+from plex_playlist_sync.library_manager import ModeChanged, run_guarded
+from plex_playlist_sync.redaction import redact_text, safe_exc
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -191,13 +193,21 @@ class LibraryScanner:
     ) -> None:
         """Entrypoint for background scanning thread."""
         try:
-            self.scan(
-                db=db,
-                root_folder=root_folder,
-                prune_missing=prune_missing,
-                plex_client=plex_client,
-                _is_background=True,
-            )
+            with track_job("filesystem_scan", "Media Library Disk Scanner") as job:
+                result = self.scan(
+                    db=db,
+                    root_folder=root_folder,
+                    prune_missing=prune_missing,
+                    plex_client=plex_client,
+                    _is_background=True,
+                )
+                outcome = str(result.get("status") or "")
+                job.message = outcome or None
+                if outcome == "failed":
+                    err = redact_text(str(result.get("error") or ""))
+                    job.failed = f"Scan failed: {err}" if err else "Scan failed"
+                elif outcome == "cancelled":
+                    job.cancelled = True
         except Exception as exc:
             logger.error("LibraryScanner: Unhandled exception in background scan thread: %s", safe_exc(exc))
             logger.debug("LibraryScanner background scan traceback", exc_info=True)
@@ -215,7 +225,30 @@ class LibraryScanner:
         plex_client: Optional[Any] = None,
         _is_background: bool = False,
     ) -> dict[str, Any]:
-        """Synchronously scans media root folder, indexes audio files, and optionally prunes missing files."""
+        """Synchronously scans media root folder, indexes audio files, and optionally prunes missing files.
+
+        Runs under the library-manager guard, so the mode cannot be switched while a scan is in progress.
+        """
+        try:
+            return run_guarded(
+                db, lambda: self._scan(db, root_folder, prune_missing, plex_client, _is_background)
+            )
+        except ModeChanged:
+            logger.warning("LibraryScanner: library manager changed repeatedly; scan skipped")
+            with self._lock:
+                self._status["status"] = "skipped"
+                self._status["is_scanning"] = False
+                self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
+                return dict(self._status)
+
+    def _scan(
+        self,
+        db: Database,
+        root_folder: Optional[str],
+        prune_missing: bool,
+        plex_client: Optional[Any],
+        _is_background: bool,
+    ) -> dict[str, Any]:
         if not _is_background:
             with self._lock:
                 if self._status.get("is_scanning", False):
@@ -241,9 +274,7 @@ class LibraryScanner:
             # Step a: Check library mode safeguard
             media_settings = db.get_media_management_settings()
             if media_settings.get("library_mode") == "lidarr":
-                logger.warning(
-                    "LibraryScanner: library_mode is 'lidarr'. Skipping filesystem scan to prevent conflicts."
-                )
+                logger.debug("LibraryScanner: library manager is Lidarr; skipping filesystem scan")
                 with self._lock:
                     self._status["status"] = "skipped"
                     self._status["is_scanning"] = False

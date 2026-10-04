@@ -6,22 +6,28 @@ and the MusicBrainz metadata backend.
 
 import logging
 import random
+import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from plex_playlist_sync.clients.lidarr import LidarrClient
+from plex_playlist_sync.job_tracker import track_job
+from plex_playlist_sync.redaction import redact_text, safe_exc
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
+
+# Upper bound on items queued behind a running trickle; beyond it dispatch is refused and the request stays retryable.
+MAX_PENDING_ITEMS = 1000
 
 
 class LidarrTrickleWorker:
     """Thread-safe background queue worker for trickling missing tracks to Lidarr."""
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._pause_event = threading.Event()
@@ -41,6 +47,8 @@ class LidarrTrickleWorker:
         self._last_processed_at: Optional[str] = None
         self._rate_limited_until: float = 0.0
         self._message: str = "Idle"
+        # Items handed in while a trickle is running; drained by the worker before it exits.
+        self._pending: list[dict[str, Any]] = []
 
     def is_running(self) -> bool:
         with self._lock:
@@ -77,15 +85,78 @@ class LidarrTrickleWorker:
         delay_seconds: float = 3.0,
         auto_search: bool = True,
         batch_size: Optional[int] = None,
+        queue_if_running: bool = False,
     ) -> dict[str, Any]:
-        """Enqueues items and starts background trickle worker thread."""
+        """Enqueues items and starts background trickle worker thread.
+
+        Refuses unless the library manager is Lidarr, so nothing can reach Lidarr from native mode. With
+        ``queue_if_running`` items arriving while a trickle is active are appended to the running worker's pending
+        queue (status ``queued``) instead of being rejected; the worker drains it before it exits.
+        """
+        # Deferred: library_manager imports this module.
+        from plex_playlist_sync.library_manager import MODE_LIDARR, ModeChanged, acquire_work, release_work
+
+        # The guard is taken before (and never inside) the worker lock so the two locks cannot be ordered both ways.
+        try:
+            acquire_work(db, MODE_LIDARR)
+        except ModeChanged:
+            logger.info("Lidarr trickle refused: library manager is TrackSeerr (native mode)")
+            return {
+                "status": "refused",
+                "message": "Library manager is set to TrackSeerr; switch to Lidarr to send items to Lidarr",
+                "queued_count": 0,
+            }
+        owns_guard = True
+        try:
+            result, owns_guard = self._start_locked(items, client, db, delay_seconds, auto_search, batch_size, queue_if_running)
+            return result
+        finally:
+            if owns_guard:
+                release_work(MODE_LIDARR)
+
+    def _start_locked(
+        self,
+        items: list[dict[str, Any]],
+        client: LidarrClient,
+        db: Database,
+        delay_seconds: float,
+        auto_search: bool,
+        batch_size: Optional[int],
+        queue_if_running: bool,
+    ) -> tuple[dict[str, Any], bool]:
+        """Does the start/queue work under the worker lock. Returns ``(result, caller_still_owns_guard)``: the guard
+        passes to the worker thread only when one was actually started (it releases it when it exits)."""
         with self._lock:
             if self._is_running:
+                if queue_if_running and items:
+                    if len(self._pending) + len(items) > MAX_PENDING_ITEMS:
+                        logger.warning(
+                            "Lidarr trickle pending queue full (%d/%d); refusing %d item(s)",
+                            len(self._pending),
+                            MAX_PENDING_ITEMS,
+                            len(items),
+                        )
+                        return {
+                            "status": "queue_full",
+                            "message": (
+                                f"Lidarr queue is full ({MAX_PENDING_ITEMS} items waiting); "
+                                "retry these requests once it drains"
+                            ),
+                            "queued_count": 0,
+                        }, True
+                    self._pending.extend(items)
+                    self._total_items += len(items)
+                    logger.info("Lidarr trickle running; queued %d more item(s) behind it", len(items))
+                    return {
+                        "status": "queued",
+                        "message": f"Trickle already running; {len(items)} item(s) queued behind it",
+                        "queued_count": len(items),
+                    }, True
                 return {
                     "status": "already_running",
                     "message": "Trickle worker is already running",
                     "queue": self.get_status(),
-                }
+                }, True
 
             if batch_size and batch_size > 0:
                 items = items[:batch_size]
@@ -95,7 +166,7 @@ class LidarrTrickleWorker:
                     "status": "empty",
                     "message": "No items to queue",
                     "queued_count": 0,
-                }
+                }, True
 
             self._stop_event.clear()
             self._pause_event.clear()
@@ -113,16 +184,9 @@ class LidarrTrickleWorker:
             self._last_processed_at = None
             self._rate_limited_until = 0.0
             self._message = f"Enqueued {len(items)} tracks. Starting artist-first trickle..."
+            self._pending = []
 
-            # Group tracks by artist to consolidate API queries
-            artist_groups: dict[str, list[dict[str, Any]]] = {}
-            for item in items:
-                artist_key = (item.get("artist") or "").strip().lower()
-                if not artist_key:
-                    continue
-                if artist_key not in artist_groups:
-                    artist_groups[artist_key] = []
-                artist_groups[artist_key].append(item)
+            artist_groups = self._group_by_artist(items)
 
             self._thread = threading.Thread(
                 target=self._worker_loop,
@@ -130,7 +194,12 @@ class LidarrTrickleWorker:
                 name="LidarrTrickleWorkerThread",
                 daemon=True,
             )
-            self._thread.start()
+            try:
+                self._thread.start()
+            except RuntimeError:
+                self._is_running = False
+                logger.error("Could not start the Lidarr trickle worker thread")
+                raise
 
             return {
                 "status": "started",
@@ -139,7 +208,18 @@ class LidarrTrickleWorker:
                 "artist_count": len(artist_groups),
                 "delay_seconds": self._delay_seconds,
                 "auto_search": self._auto_search,
-            }
+            }, False
+
+    @staticmethod
+    def _group_by_artist(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        """Groups tracks by artist to consolidate API queries."""
+        artist_groups: dict[str, list[dict[str, Any]]] = {}
+        for item in items:
+            artist_key = (item.get("artist") or "").strip().lower()
+            if not artist_key:
+                continue
+            artist_groups.setdefault(artist_key, []).append(item)
+        return artist_groups
 
     def pause(self) -> dict[str, Any]:
         with self._lock:
@@ -185,45 +265,146 @@ class LidarrTrickleWorker:
             self._auto_search,
         )
 
+        failure: Optional[str] = None
         try:
-            for artist_key, group in artist_groups.items():
-                if self._stop_event.is_set():
-                    logger.info("Lidarr trickle worker received stop signal")
-                    break
-
-                # Handle pause
-                while self._is_paused and not self._stop_event.is_set():
-                    time.sleep(0.5)
-
-                if self._stop_event.is_set():
-                    break
-
-                # Handle rate-limit cooldown
-                now = time.time()
-                if self._rate_limited_until > now:
-                    wait_time = self._rate_limited_until - now
-                    logger.warning("Lidarr trickle cooling down for %.1fs due to rate limits...", wait_time)
+            with track_job("lidarr_auto_trickle", "Lidarr Trickle Worker") as job:
+                groups = artist_groups
+                while True:
+                    self._process_groups(groups, client, db)
                     with self._lock:
-                        self._message = f"Rate limited: cooling down for {int(wait_time)}s"
-                    while time.time() < self._rate_limited_until and not self._stop_event.is_set():
-                        time.sleep(1.0)
-                    if self._stop_event.is_set():
-                        break
+                        if self._stop_event.is_set() or not self._pending:
+                            # Flip the flag in the same lock hold as the empty check so a concurrent
+                            # start_trickle either sees a running worker (and its items get drained) or a stopped one.
+                            self._is_running = False
+                            break
+                        more, self._pending = self._pending, []
+                    groups = self._group_by_artist(more)
+                job.cancelled = self._stop_event.is_set()
+                job.message = (
+                    f"{self._successful_items} monitored, {self._failed_items} failed/missing "
+                    f"of {self._total_items}"
+                )
+        except Exception as e:  # worker thread boundary: log the cause, surface it in the status, never crash the thread
+            logger.error("Unexpected error in Lidarr trickle worker loop: %s", safe_exc(e))
+            logger.debug("Lidarr trickle worker traceback", exc_info=True)
+            failure = f"Error: {safe_exc(e)}"
+            with self._lock:
+                self._message = failure
+        finally:
+            stranded: list[str] = []
+            with self._lock:
+                self._is_running = False
+                self._is_paused = False
+                if self._pending:
+                    stranded = [str(it.get("id")) for it in self._pending if it.get("is_request")]
+                    logger.warning(
+                        "Lidarr trickle ended with %d queued item(s) unsent (requests %s); retry them to resend",
+                        len(self._pending),
+                        ", ".join(stranded) or "none",
+                    )
+                    self._pending = []
+                self._current_artist = None
+                self._current_album = None
+                if failure is not None:
+                    self._message = failure
+                elif self._stop_event.is_set():
+                    self._message = f"Canceled ({self._processed_items}/{self._total_items} processed)"
+                else:
+                    self._message = f"Completed ({self._successful_items} monitored, {self._failed_items} failed/missing)"
+                final_message = self._message
+            logger.info("Lidarr trickle worker finished. %s", final_message)
+            # Outside the worker lock: the DB write and the guard lock must never nest under it.
+            if stranded:
+                self._record_stranded(db, stranded)
+            from plex_playlist_sync.library_manager import MODE_LIDARR, release_work  # deferred: circular import
 
-                first_item = group[0]
-                artist_display = first_item.get("artist", "").strip()
-                albums = list(dict.fromkeys(
-                    (it.get("album") or "").strip()
-                    for it in group
-                    if (it.get("album") or "").strip()
-                ))
+            release_work(MODE_LIDARR)
 
+    @staticmethod
+    def _record_stranded(db: Database, request_ids: list[str]) -> None:
+        """One event per batch of requests that were queued behind the trickle but never sent to Lidarr."""
+        try:
+            db.record_event(
+                "lidarr_requests_unsent",
+                f"{len(request_ids)} requests not sent to Lidarr; retry them from Requests",
+                source="Lidarr Trickle",
+                severity="warning",
+                details={"request_ids": request_ids[:100], "count": len(request_ids)},
+            )
+        except (sqlite3.Error, ValueError, TypeError, AttributeError) as exc:
+            logger.warning("Could not record unsent-request event: %s", safe_exc(exc))
+
+    def _process_groups(
+        self,
+        artist_groups: dict[str, list[dict[str, Any]]],
+        client: LidarrClient,
+        db: Database,
+    ) -> None:
+        for artist_key, group in artist_groups.items():
+            if self._stop_event.is_set():
+                logger.info("Lidarr trickle worker received stop signal")
+                break
+
+            # Handle pause
+            while self._is_paused and not self._stop_event.is_set():
+                time.sleep(0.5)
+
+            if self._stop_event.is_set():
+                break
+
+            # Handle rate-limit cooldown
+            now = time.time()
+            if self._rate_limited_until > now:
+                wait_time = self._rate_limited_until - now
+                logger.warning("Lidarr trickle cooling down for %.1fs due to rate limits...", wait_time)
                 with self._lock:
-                    self._current_artist = artist_display
-                    self._current_album = albums[0] if albums else None
-                    self._message = f"Processing artist: {artist_display} ({len(group)} track(s))"
+                    self._message = f"Rate limited: cooling down for {int(wait_time)}s"
+                while time.time() < self._rate_limited_until and not self._stop_event.is_set():
+                    time.sleep(1.0)
+                if self._stop_event.is_set():
+                    break
 
-                # Attempt add and monitor with Lidarr
+            first_item = group[0]
+            artist_display = first_item.get("artist", "").strip()
+            albums = list(dict.fromkeys(
+                (it.get("album") or "").strip()
+                for it in group
+                if (it.get("album") or "").strip()
+            ))
+
+            with self._lock:
+                self._current_artist = artist_display
+                self._current_album = albums[0] if albums else None
+                self._message = f"Processing artist: {artist_display} ({len(group)} track(s))"
+
+            # Attempt add and monitor with Lidarr
+            res = client.add_artist_and_albums(
+                artist_name=artist_display,
+                album_names=albums,
+                auto_search=self._auto_search,
+                monitor_mode="specific",
+            )
+
+            # Check if rate-limited
+            if res.get("status") == "rate_limited":
+                retry_after = res.get("retry_after", 60)
+                logger.warning(
+                    "Rate limited by Lidarr/MusicBrainz for artist '%s'. Pausing for %ds",
+                    artist_display,
+                    retry_after,
+                )
+                with self._lock:
+                    self._rate_limited_until = time.time() + retry_after
+                    self._message = f"Rate limited on '{artist_display}' - cooling down for {retry_after}s"
+
+                # Sleep through cooldown
+                while time.time() < self._rate_limited_until and not self._stop_event.is_set():
+                    time.sleep(1.0)
+
+                if self._stop_event.is_set():
+                    break
+
+                # Retry once after cooldown
                 res = client.add_artist_and_albums(
                     artist_name=artist_display,
                     album_names=albums,
@@ -231,92 +412,49 @@ class LidarrTrickleWorker:
                     monitor_mode="specific",
                 )
 
-                # Check if rate-limited
-                if res.get("status") == "rate_limited":
-                    retry_after = res.get("retry_after", 60)
-                    logger.warning(
-                        "Rate limited by Lidarr/MusicBrainz for artist '%s'. Pausing for %ds",
-                        artist_display,
-                        retry_after,
-                    )
-                    with self._lock:
-                        self._rate_limited_until = time.time() + retry_after
-                        self._message = f"Rate limited on '{artist_display}' - cooling down for {retry_after}s"
+            # Update database statuses for tracks / requests in this group
+            missing_track_ids = [
+                int(it["id"])
+                for it in group
+                if it.get("id") and not it.get("is_request") and (
+                    isinstance(it["id"], int) or (isinstance(it["id"], str) and it["id"].isdigit())
+                )
+            ]
+            request_ids = [
+                str(it["id"])
+                for it in group
+                if it.get("id") and it.get("is_request")
+            ]
 
-                    # Sleep through cooldown
-                    while time.time() < self._rate_limited_until and not self._stop_event.is_set():
-                        time.sleep(1.0)
-
-                    if self._stop_event.is_set():
-                        break
-
-                    # Retry once after cooldown
-                    res = client.add_artist_and_albums(
-                        artist_name=artist_display,
-                        album_names=albums,
-                        auto_search=self._auto_search,
-                        monitor_mode="specific",
-                    )
-
-                # Update database statuses for tracks / requests in this group
-                missing_track_ids = [
-                    int(it["id"])
-                    for it in group
-                    if it.get("id") and not it.get("is_request") and (
-                        isinstance(it["id"], int) or (isinstance(it["id"], str) and it["id"].isdigit())
-                    )
-                ]
-                request_ids = [
-                    str(it["id"])
-                    for it in group
-                    if it.get("id") and it.get("is_request")
-                ]
-
-                if res.get("status") == "success":
-                    if missing_track_ids:
-                        db.update_missing_tracks_lidarr_status_bulk(missing_track_ids, "monitored")
-                    for req_id in request_ids:
-                        db.update_request_status(req_id, "processing")
-                    with self._lock:
-                        self._successful_items += len(group)
-                    logger.info("Monitored %d tracks for artist '%s' in Lidarr", len(group), artist_display)
-                elif res.get("status") == "not_found":
-                    if missing_track_ids:
-                        db.update_missing_tracks_lidarr_status_bulk(missing_track_ids, "not_found")
-                    with self._lock:
-                        self._failed_items += len(group)
-                    logger.warning("Artist '%s' not found in Lidarr/MusicBrainz", artist_display)
-                else:
-                    if missing_track_ids:
-                        db.update_missing_tracks_lidarr_status_bulk(missing_track_ids, "error")
-                    with self._lock:
-                        self._failed_items += len(group)
-                    logger.error("Error queueing artist '%s': %s", artist_display, res.get("message"))
-
+            if res.get("status") == "success":
+                if missing_track_ids:
+                    db.update_missing_tracks_lidarr_status_bulk(missing_track_ids, "monitored")
+                for req_id in request_ids:
+                    db.update_request_status(req_id, "processing")
                 with self._lock:
-                    self._processed_items += len(group)
-                    self._last_processed_at = datetime.now(timezone.utc).isoformat()
+                    self._successful_items += len(group)
+                logger.info("Monitored %d tracks for artist '%s' in Lidarr", len(group), artist_display)
+            elif res.get("status") == "not_found":
+                if missing_track_ids:
+                    db.update_missing_tracks_lidarr_status_bulk(missing_track_ids, "not_found")
+                with self._lock:
+                    self._failed_items += len(group)
+                logger.warning("Artist '%s' not found in Lidarr/MusicBrainz", artist_display)
+            else:
+                if missing_track_ids:
+                    db.update_missing_tracks_lidarr_status_bulk(missing_track_ids, "error")
+                with self._lock:
+                    self._failed_items += len(group)
+                logger.error("Error queueing artist '%s': %s", artist_display, redact_text(str(res.get("message"))))
 
-                # Pacing delay with gentle jitter to prevent lockstep API hammering
-                jitter = random.uniform(0.1, 0.4)
-                sleep_duration = self._delay_seconds + jitter
-                time.sleep(sleep_duration)
+            with self._lock:
+                self._processed_items += len(group)
+                self._last_processed_at = datetime.now(timezone.utc).isoformat()
 
-        except Exception as e:
-            logger.exception("Unexpected error in Lidarr trickle worker loop: %s", e)
-            with self._lock:
-                self._message = f"Error: {e}"
-        finally:
-            with self._lock:
-                self._is_running = False
-                self._is_paused = False
-                self._current_artist = None
-                self._current_album = None
-                if self._stop_event.is_set():
-                    self._message = f"Canceled ({self._processed_items}/{self._total_items} processed)"
-                else:
-                    self._message = f"Completed ({self._successful_items} monitored, {self._failed_items} failed/missing)"
-            logger.info("Lidarr trickle worker finished. %s", self._message)
+            # Pacing delay with gentle jitter to prevent lockstep API hammering
+            jitter = random.uniform(0.1, 0.4)
+            sleep_duration = self._delay_seconds + jitter
+            time.sleep(sleep_duration)
 
 
 # Global singleton worker instance

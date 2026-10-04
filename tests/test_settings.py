@@ -284,15 +284,16 @@ class TestMediaManagementAPI:
         assert resp.status_code == 200
         assert resp.json()["settings"]["library_mode"] == "native"
 
-        # 2. Update to 'lidarr'
-        payload = {"library_mode": "lidarr"}
+        # 2. The media-management PUT can no longer change the mode (PUT /api/settings/library-manager does)
+        payload = {"library_mode": "lidarr", "import_mode": "hardlink"}
         resp_up = client.post("/api/settings/media-management", json=payload, headers=admin_headers)
         assert resp_up.status_code == 200
-        assert resp_up.json()["library_mode"] == "lidarr"
+        assert resp_up.json()["library_mode"] == "native"
+        assert resp_up.json()["import_mode"] == "hardlink"
 
-        # 3. Verify DB persisted
+        # 3. Verify DB kept native
         db_settings = test_db.get_media_management_settings()
-        assert db_settings["library_mode"] == "lidarr"
+        assert db_settings["library_mode"] == "native"
 
 
 class TestLidarrSettingsAPI:

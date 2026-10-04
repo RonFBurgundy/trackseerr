@@ -50,3 +50,14 @@ def _restore_root_logging():
             root.removeHandler(handler)
             handler.close()
     root.setLevel(before_level)
+
+
+@pytest.fixture(autouse=True)
+def _reset_library_manager_guard():
+    """The work-guard counters are module state; a test that dies mid-work must not leave later tests unable to switch."""
+    from plex_playlist_sync import library_manager
+
+    with library_manager._guard_lock:
+        for mode in library_manager._in_flight:
+            library_manager._in_flight[mode] = 0
+    yield

@@ -1,14 +1,18 @@
 """Media Management Settings and Token Preview API endpoints."""
 
 import logging
-from typing import Any
+import sqlite3
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from plex_playlist_sync.api.dependencies import get_db, require_admin
+from plex_playlist_sync import library_manager
+from plex_playlist_sync.api.dependencies import get_config, get_db, require_admin, require_core_tier
+from plex_playlist_sync.config import Config
 from plex_playlist_sync.redaction import redact_text
-from plex_playlist_sync.clients.lidarr import LidarrClient
+from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient
 from plex_playlist_sync.naming import (
     PRESET_DESCRIPTIONS,
     PRESETS,
@@ -229,6 +233,9 @@ class PreviewResponseModel(BaseModel):
     format_previews: dict[str, FormatPreviewModel] = Field(default_factory=dict)
 
 
+LidarrMonitorOption = Literal["all", "future", "missing", "existing", "first", "latest", "none"]
+
+
 class LidarrSettingsModel(BaseModel):
     url: str | None = None
     api_key: str | None = None
@@ -240,6 +247,9 @@ class LidarrSettingsModel(BaseModel):
     trickle_batch_size: int = 25
     auto_trickle: bool = False
     auto_trickle_interval_minutes: int = 30
+    monitor_option: LidarrMonitorOption = "all"
+    search_on_add: bool = True
+    tag_ids: list[int] = Field(default_factory=list)
     updated_at: str | None = None
 
 
@@ -254,6 +264,9 @@ class LidarrSettingsUpdateModel(BaseModel):
     trickle_batch_size: int | None = None
     auto_trickle: bool | None = None
     auto_trickle_interval_minutes: int | None = None
+    monitor_option: LidarrMonitorOption | None = None
+    search_on_add: bool | None = None
+    tag_ids: list[int] | None = None
 
 
 class LidarrTestConnectionPayload(BaseModel):
@@ -354,6 +367,10 @@ def update_media_management_settings(
 ) -> MediaManagementSettingsModel:
     """Admin-only: updates media management naming templates and options."""
     updates = payload.model_dump(exclude_unset=True)
+    if "library_mode" in updates:
+        # The mode is an interlock with in-flight checks: it can only change through PUT /library-manager.
+        logger.warning("Ignoring library_mode in media-management update; use PUT /api/settings/library-manager")
+        updates.pop("library_mode")
     if not updates:
         current = db.get_media_management_settings()
         return MediaManagementSettingsModel(**current)
@@ -421,10 +438,17 @@ def get_lidarr_settings(
     return LidarrSettingsModel(**masked)
 
 
+@router.put(
+    "/lidarr",
+    response_model=LidarrSettingsModel,
+    summary="Update Lidarr Automation Settings (Admin Only)",
+    dependencies=[Depends(require_core_tier)],
+)
 @router.post(
     "/lidarr",
     response_model=LidarrSettingsModel,
     summary="Update Lidarr Automation Settings (Admin Only)",
+    dependencies=[Depends(require_core_tier)],
 )
 def update_lidarr_settings(
     payload: LidarrSettingsUpdateModel,
@@ -605,3 +629,101 @@ def regenerate_api_key(
         message="API key successfully regenerated",
     )
 
+
+
+# -----------------------------------------------------------------------------
+# Library manager (TrackSeerr vs Lidarr interlock)
+# -----------------------------------------------------------------------------
+
+
+class LibraryManagerModel(BaseModel):
+    mode: Literal["native", "lidarr"]
+    lidarr_configured: bool
+    native_configured: bool
+    can_switch: bool
+    blocking_reason: str | None = None
+
+
+class LibraryManagerUpdateModel(BaseModel):
+    mode: Literal["native", "lidarr"]
+
+
+@router.get(
+    "/library-manager",
+    response_model=LibraryManagerModel,
+    summary="Get Library Manager Mode (Admin Only)",
+    dependencies=[Depends(require_core_tier)],
+)
+def get_library_manager(
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Which side manages the library, whether each side is usable, and whether a switch is allowed right now."""
+    return library_manager.get_status(db, config)
+
+
+@router.put(
+    "/library-manager",
+    response_model=LibraryManagerModel,
+    summary="Switch Library Manager Mode (Admin Only)",
+    dependencies=[Depends(require_core_tier)],
+    responses={409: {"description": "Work is in flight"}, 422: {"description": "Lidarr is not configured"}},
+)
+def set_library_manager(
+    payload: LibraryManagerUpdateModel,
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+    admin_user: dict[str, Any] = Depends(require_admin),
+) -> Any:
+    """Switches the library manager. Refused (409) while downloads or a Lidarr trickle are in flight, and (422)
+    when switching to Lidarr before it is configured. The inactive side's settings are preserved untouched."""
+    current = library_manager.get_library_mode(db)
+    if payload.mode == current:
+        return library_manager.get_status(db, config)
+
+    if payload.mode == library_manager.MODE_LIDARR and not library_manager.lidarr_is_configured(db, config):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Configure Lidarr (URL and API key) before switching the library manager to Lidarr.",
+        )
+
+    try:
+        library_manager.switch_mode(db, payload.mode, source="Settings", user=admin_user.get("username"))
+    except library_manager.SwitchRefused as refused:
+        body = library_manager.get_status(db, config)
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={**body, "can_switch": False, "blocking_reason": refused.reason, "detail": refused.reason},
+        )
+    except sqlite3.Error as exc:
+        logger.error("Failed to switch library manager: %s", redact_text(str(exc)))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not save the library manager mode"
+        ) from exc
+    return library_manager.get_status(db, config)
+
+
+@router.get(
+    "/lidarr/options",
+    summary="Live Lidarr Root Folders, Profiles and Tags (Admin Only)",
+    dependencies=[Depends(require_core_tier)],
+)
+def get_lidarr_options(
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Fetches the pickers for the Lidarr settings form straight from Lidarr; 502 with a redacted message on failure."""
+    client = library_manager.build_lidarr_client(db, config)
+    if client is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Lidarr is not configured (URL and API key are required).",
+        )
+    try:
+        return client.get_options()
+    except LidarrApiError as exc:
+        logger.warning("Lidarr options request failed: %s", redact_text(str(exc)))
+        message = redact_text(str(exc)).replace(client.api_key, "REDACTED") if client.api_key else redact_text(str(exc))
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Lidarr request failed: {message}") from exc

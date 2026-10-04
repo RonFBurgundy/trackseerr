@@ -11,7 +11,8 @@ from plex_playlist_sync.acquisition_coordinator import (
     _to_quality_profile,
     acquisition_coordinator,
 )
-from plex_playlist_sync.api.dependencies import get_db, require_admin
+from plex_playlist_sync.api.dependencies import get_db, require_admin, require_core_tier
+from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver
 from plex_playlist_sync.models import (
@@ -197,12 +198,28 @@ def search_releases(
     }
 
 
-@router.post("/grab", summary="Force-enqueue a chosen candidate release to a download client")
+@router.post(
+    "/grab",
+    summary="Force-enqueue a chosen candidate release to a download client",
+    dependencies=[Depends(require_core_tier)],
+)
 def grab_release(
     payload: ManualGrabPayload,
     db: Database = Depends(get_db),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
+    """Native-mode only (409 while Lidarr manages the library); the grab runs under the library-manager guard."""
+    try:
+        with work_guard(db, MODE_NATIVE):
+            return _grab_release(payload, db)
+    except ModeChanged as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Library manager is set to Lidarr; native grabs are disabled.",
+        ) from exc
+
+
+def _grab_release(payload: ManualGrabPayload, db: Database) -> dict[str, Any]:
     """Force-enqueues a manually selected candidate release to the target download client.
 
     Creates an active download tracking record in the activity queue and transitions

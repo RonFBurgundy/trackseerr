@@ -55,3 +55,31 @@ The order is: General · Media Management · Lidarr · Requests · System · Acc
 2. Library-manager mode, the settings restructure and the System page.
 3. The Activity rebuild, plus Wanted (Missing and Cutoff Unmet).
 4. Infinite scroll and the scrubber.
+
+## Phase 2 API contract (frozen for parallel backend/frontend work)
+The existing `media_management_settings.library_mode` (`native` | `lidarr`) is **the** interlock. The UI labels these "TrackSeerr" and "Lidarr".
+
+- `GET /api/settings/library-manager` (admin) returns:
+  `{mode: "native"|"lidarr", lidarr_configured: bool, native_configured: bool, can_switch: bool, blocking_reason: string|null}`
+  - `native_configured` means at least one enabled non-Lidarr download client and at least one enabled indexer (or slskd).
+- `PUT /api/settings/library-manager {mode}` (admin) returns the same shape.
+  - It returns **409** with `blocking_reason` when work is in flight: non-terminal native acquisition queue items, or a running Lidarr trickle.
+  - It returns **422** when switching to `lidarr` while Lidarr is not configured.
+  - It writes an event, `library_manager_changed`.
+- The existing media-settings PUT must **not** be able to change `library_mode` any more; the field is ignored there with a logged warning. The Lidarr importer (`lidarr_migration`) may still flip the mode to `native`.
+- `GET /api/settings/lidarr/options` (admin, Lidarr mode or configured) returns:
+  `{root_folders:[{path, free_space}], quality_profiles:[{id,name}], metadata_profiles:[{id,name}], tags:[{id,label}]}`
+  - It is live from Lidarr and returns 502 with a redacted message on failure.
+- `lidarr_settings` gains `monitor_option` (`all`|`future`|`missing`|`existing`|`first`|`latest`|`none`, default `all`), `search_on_add` (bool; reuse `auto_search` if that is what it is) and `tag_ids` (a JSON list of int). Root folder and the profile ids already exist. GET and PUT on the Lidarr settings route expose them.
+- `GET /api/system/queue` (admin) returns `{running:[Job], queued:[Job], recent:[Job]}`, where `Job = {id, task_id, name, state:"queued"|"running"|"completed"|"failed"|"cancelled", started_at, finished_at, duration_ms, message}`.
+  - `recent` holds the last 50 jobs, in memory.
+  - Every task execution, scheduled or manual, records a Job.
+- `GET /api/system/lidarr-health` (admin) returns `{mode, reachable, version, health:[{source, type:"ok"|"notice"|"warning"|"error", message, wiki_url}]}`.
+  - It returns `{mode:"native", reachable:null, health:[]}` in native mode, and it never 500s.
+- **Enforcement:**
+  - In `lidarr` mode:
+    - request submission never uses native acquisition, and approved requests go to Lidarr using `lidarr_settings`
+    - the acquisition, backlog and RSS workers and the filesystem scanner do nothing natively, and log the skip once per cycle at DEBUG
+  - In `native` mode:
+    - no requests or grabs go to Lidarr, including the Lidarr trickle and auto-trickle and any Lidarr `driver_type` download client
+    - the Lidarr importer stays available as a one-way migration tool

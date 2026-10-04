@@ -11,6 +11,7 @@ from typing import Any, Optional, Union
 import uuid
 
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver, get_indexer_driver
+from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from plex_playlist_sync.models import (
     AcquisitionSearchResult,
     ActiveDownload,
@@ -266,10 +267,37 @@ class AcquisitionCoordinator:
     ) -> dict[str, Any]:
         """Searches indexers, ranks releases against the Quality Profile, and dispatches grab.
 
-        Records active download transfer in the database upon successful dispatch.
+        Records active download transfer in the database upon successful dispatch. Runs under the native
+        library-manager guard: if Lidarr manages the library it does nothing and reports ``mode_changed``.
         """
         if db is None:
             raise ValueError("Database instance must be provided to search_and_grab")
+        try:
+            with work_guard(db, MODE_NATIVE):
+                return self._search_and_grab(
+                    artist, title, album, item_type, request_id, db, quality_profile_id, min_score, track_id, album_id
+                )
+        except ModeChanged:
+            logger.info("Native grab skipped for '%s - %s': library manager is Lidarr", artist, title)
+            return {
+                "success": False,
+                "mode_changed": True,
+                "message": "Library manager is set to Lidarr; native grabs are disabled.",
+            }
+
+    def _search_and_grab(
+        self,
+        artist: str,
+        title: str,
+        album: Optional[str],
+        item_type: str,
+        request_id: Optional[str],
+        db: Database,
+        quality_profile_id: Optional[str],
+        min_score: Optional[int],
+        track_id: Optional[str],
+        album_id: Optional[str],
+    ) -> dict[str, Any]:
 
         # 1. Retrieve quality profile
         profile_dict: Optional[dict[str, Any]] = None

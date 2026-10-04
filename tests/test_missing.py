@@ -115,7 +115,8 @@ class TestLidarrClientAndPush:
     """Tests for Lidarr API client and push integration."""
 
     @patch("plex_playlist_sync.clients.lidarr.httpx.Client")
-    def test_lidarr_status_endpoint(self, mock_client_cls, client):
+    def test_lidarr_status_endpoint(self, mock_client_cls, client, test_db):
+        test_db.update_media_management_settings({"library_mode": "lidarr"})
         mock_http = MagicMock()
         mock_client_cls.return_value.__enter__.return_value = mock_http
         mock_http.get.return_value.status_code = 200
@@ -130,6 +131,7 @@ class TestLidarrClientAndPush:
 
     @patch("plex_playlist_sync.clients.lidarr.httpx.Client")
     def test_lidarr_push_endpoint(self, mock_client_cls, client, test_db):
+        test_db.update_media_management_settings({"library_mode": "lidarr"})
         mock_http = MagicMock()
         mock_client_cls.return_value.__enter__.return_value = mock_http
 
@@ -286,6 +288,7 @@ class TestLidarrTrickleWorkerAndEndpoints:
 
     @patch("plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle")
     def test_lidarr_push_trickle_enqueues(self, mock_start, client, test_db):
+        test_db.update_media_management_settings({"library_mode": "lidarr"})
         mock_start.return_value = {
             "status": "started",
             "message": "Enqueued 2 tracks",

@@ -10,3 +10,5 @@ export * from './account';
 export * from './admin';
 export * from './discovery';
 export * from './deployment';
+export * from './settings';
+export * from './system';

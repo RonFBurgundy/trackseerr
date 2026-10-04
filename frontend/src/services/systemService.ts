@@ -3,6 +3,8 @@ import type {
   ScheduledTaskItem,
   SystemEventsResponse,
   SystemLogItem,
+  SystemQueueResponse,
+  LidarrHealth,
 } from '@/types/models';
 
 export interface GetSystemEventsParams {
@@ -89,4 +91,17 @@ export async function cancelScheduledTask(
       method: 'POST',
     }
   );
+}
+
+export async function getSystemQueue(): Promise<SystemQueueResponse> {
+  const res = await apiRequest<SystemQueueResponse | null>('/api/system/queue');
+  return {
+    running: res?.running ?? [],
+    queued: res?.queued ?? [],
+    recent: res?.recent ?? [],
+  };
+}
+
+export async function getLidarrHealth(): Promise<LidarrHealth> {
+  return apiRequest<LidarrHealth>('/api/system/lidarr-health');
 }

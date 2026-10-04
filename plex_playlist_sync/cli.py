@@ -301,6 +301,7 @@ def _start_sync_scheduler(
 
 def _start_lidarr_trickle(db: Database, config: Config) -> None:
     from plex_playlist_sync.clients.lidarr import LidarrClient
+    from plex_playlist_sync.library_manager import get_library_mode
     from plex_playlist_sync.lidarr_queue import lidarr_worker
 
     def background_lidarr_trickle_worker() -> None:
@@ -314,6 +315,8 @@ def _start_lidarr_trickle(db: Database, config: Config) -> None:
                 lidarr_settings = db.get_lidarr_settings()
                 if not isinstance(lidarr_settings, dict):
                     continue
+                if get_library_mode(db) != "lidarr":
+                    continue  # native mode: nothing may be sent to Lidarr
                 auto_trickle = bool(lidarr_settings.get("auto_trickle", config.lidarr_auto_trickle))
                 url = lidarr_settings.get("url") or config.lidarr_url
                 api_key = lidarr_settings.get("api_key") or config.lidarr_api_key
@@ -360,6 +363,8 @@ def _start_lidarr_trickle(db: Database, config: Config) -> None:
                             root_folder=root_folder,
                             quality_profile_id=qp_id,
                             metadata_profile_id=mp_id,
+                            monitor_option=lidarr_settings.get("monitor_option"),
+                            tag_ids=lidarr_settings.get("tag_ids") or [],
                         )
                         logger.info(
                             "Auto-trickle: enqueuing %d unmonitored tracks into Lidarr (batch: %d, pacing: %.1fs)",
@@ -475,6 +480,9 @@ def _background_init(
         with boot_state.step_timer("starting background workers"):
             if config.wait_seconds > 0:
                 _start_sync_scheduler(db, config, clients, clients_ready)
+            from .library_manager import migrate_library_mode
+
+            migrate_library_mode(db, config)  # before any worker can route a request
             _start_lidarr_trickle(db, config)
             _start_local_workers(db, config)
         boot_state.mark_ready()

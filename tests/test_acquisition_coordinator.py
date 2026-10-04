@@ -669,7 +669,7 @@ def test_requests_api_native_grab_precedence(app_and_client, test_db, test_confi
         "plex_playlist_sync.api.routes.requests.acquisition_coordinator.search_and_grab",
         return_value={"success": True, "download_id": "dl-12345", "download_hash": "hash123"},
     ) as mock_grab, patch(
-        "plex_playlist_sync.api.routes.requests.lidarr_worker.start_trickle"
+        "plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle"
     ) as mock_lidarr:
         resp = client.post(
             "/api/requests",
@@ -686,8 +686,8 @@ def test_requests_api_native_grab_precedence(app_and_client, test_db, test_confi
     assert not mock_lidarr.called
 
 
-def test_requests_api_lidarr_fallback_when_native_unmatched(app_and_client, test_db, test_config, seeded_users):
-    """Tests requests API falling back to Lidarr when native acquisition finds no acceptable release."""
+def test_requests_api_no_lidarr_fallback_when_native_unmatched(app_and_client, test_db, test_config, seeded_users):
+    """In native mode an unmatched native search never falls back to Lidarr (the interlock is strict)."""
     app, client = app_and_client
     admin = seeded_users["admin"]
     headers = _auth_headers(admin, test_db, test_config)
@@ -720,7 +720,7 @@ def test_requests_api_lidarr_fallback_when_native_unmatched(app_and_client, test
             "plex_playlist_sync.api.routes.requests.acquisition_coordinator.search_and_grab",
             return_value={"success": False, "message": "No acceptable releases found"},
         ) as mock_grab, patch(
-            "plex_playlist_sync.api.routes.requests.lidarr_worker.start_trickle"
+            "plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle"
         ) as mock_lidarr:
             resp = client.post(
                 "/api/requests",
@@ -734,7 +734,7 @@ def test_requests_api_lidarr_fallback_when_native_unmatched(app_and_client, test
 
         assert resp.status_code == 201
         assert mock_grab.called
-        assert mock_lidarr.called
+        assert not mock_lidarr.called
     finally:
         app.dependency_overrides.pop(get_lidarr_client, None)
 

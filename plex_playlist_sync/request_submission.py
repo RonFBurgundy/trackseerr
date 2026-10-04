@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from plex_playlist_sync.acquisition_coordinator import acquisition_coordinator
+from plex_playlist_sync.library_manager import ModeChanged, dispatch_to_lidarr, native_is_configured, run_for_mode
 from plex_playlist_sync.models import MusicRequest, NotificationEvent, RequestStatus, UserPermission
 from plex_playlist_sync.notifications import notification_dispatcher
 from plex_playlist_sync.storage import Database
@@ -152,6 +153,7 @@ def submit_track_request(
     foreign_id: Optional[str] = None,
     preview_url: Optional[str] = None,
     defer_followups: bool = False,
+    lidarr_client: Any = None,
 ) -> RequestSubmission:
     """Apply request policy and create the request. Raises ``RequestRejected`` on quota or duplicate.
 
@@ -201,7 +203,7 @@ def submit_track_request(
 
     submission = RequestSubmission(request=created, status=initial_status)
     if not defer_followups:
-        run_submission_followups(db, user, submission, source=source)
+        run_submission_followups(db, user, submission, source=source, config=config, lidarr_client=lidarr_client)
     return submission
 
 
@@ -314,9 +316,18 @@ def submit_batch_requests(
 
 
 def run_submission_followups(
-    db: Database, user: dict[str, Any], submission: RequestSubmission, source: str = "api"
+    db: Database,
+    user: dict[str, Any],
+    submission: RequestSubmission,
+    source: str = "api",
+    config: Any = None,
+    lidarr_client: Any = None,
 ) -> RequestSubmission:
-    """Dispatch notifications and kick off the native grab. Must run without ``user_request_lock`` held."""
+    """Dispatch notifications, then hand an approved request to the active library manager.
+
+    Native mode runs the acquisition coordinator and never touches Lidarr; lidarr mode sends the request to Lidarr
+    (using ``lidarr_settings``) and never touches the coordinator. Must run without ``user_request_lock`` held.
+    """
     created = submission.request
     initial_status = submission.status
     req_id = created["id"]
@@ -333,32 +344,50 @@ def run_submission_followups(
         notification_dispatcher.dispatch(NotificationEvent.REQUEST_APPROVED, data=notification_data, db=db)
 
     grabbed = False
-    if initial_status == RequestStatus.PROCESSING:
-        has_native_clients = any(
-            c.get("enabled") for c in db.list_download_clients() if c.get("driver_type") != "lidarr"
+
+    def _lidarr_followup() -> None:
+        dispatch_to_lidarr(
+            db,
+            lidarr_client,
+            [
+                {
+                    "id": req_id,
+                    "artist": clean_artist,
+                    "album": clean_album or clean_title,
+                    "title": clean_title,
+                    "is_request": True,
+                }
+            ],
+            config,
         )
-        has_indexers = any(i.get("enabled") for i in db.list_indexers()) or any(
-            c.get("driver_type") == "slskd" and c.get("enabled") for c in db.list_download_clients()
-        )
-        if has_native_clients and has_indexers:
-            try:
-                grab_res = acquisition_coordinator.search_and_grab(
-                    artist=clean_artist,
-                    title=clean_title,
-                    album=clean_album,
-                    item_type=item_type,
-                    request_id=req_id,
-                    db=db,
+
+    def _native_followup() -> bool:
+        if not native_is_configured(db):
+            return False
+        try:
+            grab_res = acquisition_coordinator.search_and_grab(
+                artist=clean_artist,
+                title=clean_title,
+                album=clean_album,
+                item_type=item_type,
+                request_id=req_id,
+                db=db,
+            )
+            if grab_res.get("success"):
+                logger.info(
+                    "Native acquisition grabbed request %s (%s - %s) [%s]", req_id, clean_artist, clean_title, source
                 )
-                if grab_res.get("success"):
-                    grabbed = True
-                    logger.info(
-                        "Native acquisition grabbed request %s (%s - %s) [%s]", req_id, clean_artist, clean_title, source
-                    )
-                else:
-                    logger.info("Native acquisition found no match for request %s: %s", req_id, grab_res.get("message"))
-            except Exception as e:  # coordinator drivers raise heterogeneous errors; the request stays approved
-                logger.error("Error in native acquisition for request %s (%s)", req_id, type(e).__name__)
+                return True
+            logger.info("Native acquisition found no match for request %s: %s", req_id, grab_res.get("message"))
+        except Exception as e:  # coordinator drivers raise heterogeneous errors; the request stays approved
+            logger.error("Error in native acquisition for request %s (%s)", req_id, type(e).__name__)
+        return False
+
+    if initial_status == RequestStatus.PROCESSING:
+        try:
+            grabbed = bool(run_for_mode(db, native=_native_followup, lidarr=_lidarr_followup))
+        except ModeChanged:
+            logger.warning("Library manager kept changing; request %s stays in processing", req_id)
 
     submission.grabbed = grabbed
     return submission

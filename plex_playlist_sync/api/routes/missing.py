@@ -24,6 +24,7 @@ from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.lidarr_queue import lidarr_worker
+from plex_playlist_sync.library_manager import MODE_LIDARR, MODE_NATIVE, ModeChanged, get_library_mode, work_guard
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -232,7 +233,12 @@ def get_lidarr_status(
     db: Database = Depends(get_db),
     lidarr_client: Optional[LidarrClient] = Depends(get_lidarr_client),
 ) -> dict[str, Any]:
-    """Returns Lidarr connection and configuration status from DB or config."""
+    """Returns Lidarr connection and configuration status from DB or config.
+
+    In native mode Lidarr is not contacted at all: the mode is reported with ``connected`` null.
+    """
+    if get_library_mode(db) != MODE_LIDARR:
+        return {"mode": MODE_NATIVE, "connected": None}
     db_settings = db.get_lidarr_settings()
     url = db_settings.get("url") or config.lidarr_url
     auto_search = (
@@ -274,6 +280,23 @@ def push_missing_to_lidarr(
     - Background trickle mode (`trickle=True`) with delay pacing and rate-limit backoff.
     - Synchronous push (`trickle=False`) for targeted or immediate single-item updates.
     """
+    try:
+        with work_guard(db, MODE_LIDARR):
+            return _push_missing_to_lidarr(req, current_user, config, db, lidarr_client)
+    except ModeChanged as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Library manager is set to TrackSeerr; switch it to Lidarr to push items to Lidarr.",
+        ) from exc
+
+
+def _push_missing_to_lidarr(
+    req: Optional[LidarrPushRequest],
+    current_user: dict[str, Any],
+    config: Config,
+    db: Database,
+    lidarr_client: Optional[LidarrClient],
+) -> dict[str, Any]:
     if lidarr_client is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -499,11 +522,18 @@ def grab_missing_track(
             detail=f"Missing track {track_id} not found",
         )
 
-    return acquisition_coordinator.search_and_grab(
-        artist=track["artist"],
-        title=track["title"],
-        album=track.get("album"),
-        item_type="track",
-        db=db,
-    )
+    try:
+        with work_guard(db, MODE_NATIVE):
+            return acquisition_coordinator.search_and_grab(
+                artist=track["artist"],
+                title=track["title"],
+                album=track.get("album"),
+                item_type="track",
+                db=db,
+            )
+    except ModeChanged as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Library manager is set to Lidarr; native grabs are disabled.",
+        ) from exc
 

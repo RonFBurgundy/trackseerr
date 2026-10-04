@@ -630,6 +630,7 @@ class TestRetryRequestEndpoint:
 
         mock_lidarr = MagicMock()
         app.dependency_overrides[get_lidarr_client] = lambda: mock_lidarr
+        test_db.update_media_management_settings({"library_mode": "lidarr"})
 
         req = MusicRequest(
             id="req-lidarr-retry",
@@ -641,7 +642,9 @@ class TestRetryRequestEndpoint:
         )
         test_db.create_request(req)
 
-        with patch("plex_playlist_sync.api.routes.requests.lidarr_worker.start_trickle") as mock_trickle:
+        with patch(
+            "plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle", return_value={"status": "started"}
+        ) as mock_trickle:
             resp = client.post("/api/requests/req-lidarr-retry/retry", headers=admin_headers)
 
             assert resp.status_code == 200

@@ -30,6 +30,8 @@ from plex_playlist_sync.models import (
 )
 from plex_playlist_sync.notifications import notification_dispatcher
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
+from plex_playlist_sync.job_tracker import tracked
+from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -184,11 +186,20 @@ class WantedBacklogWorker:
         with self._lock:
             self._is_running = False
 
+    @tracked("wanted_backlog_sweep", "Monitored Missing & Upgrade Search Sweep")
     def poll_once(self, db: Database) -> dict[str, int]:
         """Executes a single sweep over unfulfilled requests and missing tracks."""
         with self._lock:
             self.last_run_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
+        try:
+            with work_guard(db, MODE_NATIVE):
+                return self._sweep(db)
+        except ModeChanged:
+            logger.debug("WantedBacklogWorker: library manager is Lidarr; skipping native backlog sweep")
+            return {"items_checked": 0, "items_grabbed": 0, "errors": 0, "skipped": "library manager is Lidarr"}
+
+    def _sweep(self, db: Database) -> dict[str, int]:
         items_checked = 0
         items_grabbed = 0
         errors_count = 0
@@ -561,11 +572,20 @@ class RSSSyncWorker:
         with self._lock:
             self._is_running = False
 
+    @tracked("indexer_rss_sync", "Torznab / Newznab RSS Sync")
     def poll_once(self, db: Database) -> dict[str, int]:
         """Polls indexer recent feeds and triggers grabs for matching requests."""
         with self._lock:
             self.last_run_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
+        try:
+            with work_guard(db, MODE_NATIVE):
+                return self._sync(db)
+        except ModeChanged:
+            logger.debug("RSSSyncWorker: library manager is Lidarr; skipping native RSS sync")
+            return {"releases_scanned": 0, "grabs_triggered": 0, "errors": 0, "skipped": "library manager is Lidarr"}
+
+    def _sync(self, db: Database) -> dict[str, int]:
         releases_scanned = 0
         grabs_triggered = 0
         errors_count = 0

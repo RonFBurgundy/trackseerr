@@ -23,7 +23,7 @@ from plex_playlist_sync.api.dependencies import (
 from plex_playlist_sync.clients.core_client import CoreClient
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.config import Config
-from plex_playlist_sync.lidarr_queue import lidarr_worker
+from plex_playlist_sync.library_manager import ModeChanged, dispatch_to_lidarr, native_is_configured, run_for_mode
 from plex_playlist_sync.models import (
     NotificationEvent,
     RequestStatus,
@@ -133,38 +133,14 @@ def create_request(
             release_date=body.release_date,
             foreign_id=body.foreign_id,
             preview_url=body.preview_url,
+            lidarr_client=lidarr_client,
         )
     except RequestRejected as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     created = submission.request
-    req_id = created["id"]
 
-    # Native grab already attempted by the shared submission; otherwise fall back to Lidarr
-    if submission.status == RequestStatus.PROCESSING:
-        grabbed = submission.grabbed
-
-        if not grabbed and lidarr_client is not None:
-            try:
-                lidarr_worker.start_trickle(
-                    items=[
-                        {
-                            "id": req_id,
-                            "artist": clean_artist,
-                            "album": clean_album or clean_title,
-                            "title": clean_title,
-                            "is_request": True,
-                        }
-                    ],
-                    client=lidarr_client,
-                    db=db,
-                    delay_seconds=config.lidarr_trickle_rate_seconds,
-                    auto_search=config.lidarr_auto_search,
-                )
-                logger.info("Enqueued request %s (%s - %s) to Lidarr worker", req_id, clean_artist, clean_title)
-            except Exception as e:
-                logger.error("Failed to enqueue request %s to Lidarr worker: %s", req_id, e)
-
+    # The shared submission already handed the request to the active library manager (native grab or Lidarr).
     return created
 
 
@@ -233,45 +209,48 @@ def create_batch_requests(
         if created.get("status") in (RequestStatus.PROCESSING.value, "processing"):
             notification_dispatcher.dispatch(NotificationEvent.REQUEST_APPROVED, data=notification_data, db=db)
 
-    # Dispatch to native acquisition coordinator if processing, otherwise fall back to Lidarr
+    # Strictly mode-driven: lidarr mode sends everything to Lidarr, native mode only ever uses the coordinator.
     processing_items = [
         c for c in created_items if c.get("status") in (RequestStatus.PROCESSING.value, "processing")
     ]
     if processing_items:
-        has_native_clients = any(
-            c.get("enabled") for c in db.list_download_clients() if c.get("driver_type") != "lidarr"
-        )
-        has_indexers = any(i.get("enabled") for i in db.list_indexers()) or any(
-            c.get("driver_type") == "slskd" and c.get("enabled") for c in db.list_download_clients()
-        )
+        def _lidarr_batch() -> None:
+            dispatch_to_lidarr(
+                db,
+                lidarr_client,
+                [
+                    {
+                        "id": c["id"],
+                        "artist": c["artist"],
+                        "album": c.get("album") or c["title"],
+                        "title": c["title"],
+                        "is_request": True,
+                    }
+                    for c in processing_items
+                ],
+                config,
+            )
 
-        lidarr_items: list[dict[str, Any]] = []
-
-        for created in processing_items:
-            req_id = created["id"]
-            clean_artist = created["artist"]
-            clean_title = created["title"]
-            clean_album = created.get("album")
-            item_type = created.get("item_type", "track")
-
-            grabbed = False
-            if has_native_clients and has_indexers:
+        def _native_batch() -> None:
+            if not native_is_configured(db):
+                return
+            for created in processing_items:
+                req_id = created["id"]
                 try:
                     grab_res = acquisition_coordinator.search_and_grab(
-                        artist=clean_artist,
-                        title=clean_title,
-                        album=clean_album,
-                        item_type=item_type,
+                        artist=created["artist"],
+                        title=created["title"],
+                        album=created.get("album"),
+                        item_type=created.get("item_type", "track"),
                         request_id=req_id,
                         db=db,
                     )
                     if grab_res.get("success"):
-                        grabbed = True
                         logger.info(
                             "Native acquisition grabbed batch request %s (%s - %s)",
                             req_id,
-                            clean_artist,
-                            clean_title,
+                            created["artist"],
+                            created["title"],
                         )
                     else:
                         logger.info(
@@ -279,32 +258,13 @@ def create_batch_requests(
                             req_id,
                             grab_res.get("message"),
                         )
-                except Exception as e:
-                    logger.error("Error in native acquisition for batch request %s: %s", req_id, e)
+                except Exception as e:  # coordinator drivers raise heterogeneous errors; the request stays approved
+                    logger.error("Error in native acquisition for batch request %s (%s)", req_id, type(e).__name__)
 
-            if not grabbed:
-                lidarr_items.append(
-                    {
-                        "id": req_id,
-                        "artist": clean_artist,
-                        "album": clean_album or clean_title,
-                        "title": clean_title,
-                        "is_request": True,
-                    }
-                )
-
-        if lidarr_items and lidarr_client is not None:
-            try:
-                lidarr_worker.start_trickle(
-                    items=lidarr_items,
-                    client=lidarr_client,
-                    db=db,
-                    delay_seconds=config.lidarr_trickle_rate_seconds,
-                    auto_search=config.lidarr_auto_search,
-                )
-                logger.info("Enqueued %d batch requests to Lidarr worker", len(lidarr_items))
-            except Exception as e:
-                logger.error("Failed to enqueue batch requests to Lidarr worker: %s", e)
+        try:
+            run_for_mode(db, native=_native_batch, lidarr=_lidarr_batch)
+        except ModeChanged:
+            logger.warning("Library manager kept changing; %d approved request(s) stay in processing", len(processing_items))
 
     return {"created": created_items, "count": len(created_items)}
 
@@ -325,15 +285,25 @@ def approve_request(
     db.update_request_status(request_id, RequestStatus.PROCESSING)
     updated = db.get_request(request_id)
 
-    grabbed = False
-    has_native_clients = any(
-        c.get("enabled") for c in db.list_download_clients() if c.get("driver_type") != "lidarr"
-    )
-    has_indexers = any(i.get("enabled") for i in db.list_indexers()) or any(
-        c.get("driver_type") == "slskd" and c.get("enabled") for c in db.list_download_clients()
-    )
+    def _lidarr_approve() -> None:
+        dispatch_to_lidarr(
+            db,
+            lidarr_client,
+            [
+                {
+                    "id": request_id,
+                    "artist": req["artist"],
+                    "album": req.get("album") or req["title"],
+                    "title": req["title"],
+                    "is_request": True,
+                }
+            ],
+            config,
+        )
 
-    if has_native_clients and has_indexers:
+    def _native_approve() -> None:
+        if not native_is_configured(db):
+            return
         try:
             grab_res = acquisition_coordinator.search_and_grab(
                 artist=req["artist"],
@@ -344,33 +314,16 @@ def approve_request(
                 db=db,
             )
             if grab_res.get("success"):
-                grabbed = True
                 logger.info("Native acquisition grabbed approved request %s (%s - %s)", request_id, req["artist"], req["title"])
             else:
                 logger.info("Native acquisition found no match for approved request %s: %s", request_id, grab_res.get("message"))
-        except Exception as e:
-            logger.error("Error in native acquisition for approved request %s: %s", request_id, e)
+        except Exception as e:  # coordinator drivers raise heterogeneous errors; the request stays approved
+            logger.error("Error in native acquisition for approved request %s (%s)", request_id, type(e).__name__)
 
-    if not grabbed and lidarr_client is not None:
-        try:
-            lidarr_worker.start_trickle(
-                items=[
-                    {
-                        "id": request_id,
-                        "artist": req["artist"],
-                        "album": req.get("album") or req["title"],
-                        "title": req["title"],
-                        "is_request": True,
-                    }
-                ],
-                client=lidarr_client,
-                db=db,
-                delay_seconds=config.lidarr_trickle_rate_seconds,
-                auto_search=config.lidarr_auto_search,
-            )
-            logger.info("Approved request %s enqueued to Lidarr worker", request_id)
-        except Exception as e:
-            logger.error("Error enqueuing approved request %s to Lidarr: %s", request_id, e)
+    try:
+        run_for_mode(db, native=_native_approve, lidarr=_lidarr_approve)
+    except ModeChanged:
+        logger.warning("Library manager kept changing; approved request %s stays in processing", request_id)
 
     res_req = updated or req
     notification_dispatcher.dispatch(NotificationEvent.REQUEST_APPROVED, data=res_req, db=db)
@@ -479,73 +432,74 @@ def retry_request(
     clean_album = req.get("album", "").strip() if req.get("album") else None
     item_type = req.get("item_type", "track")
 
-    grabbed = False
-    download_id: Optional[str] = None
-    msg = "Acquisition initiated"
+    def _lidarr_retry() -> dict[str, Any]:
+        sent = dispatch_to_lidarr(
+            db,
+            lidarr_client,
+            [
+                {
+                    "id": request_id,
+                    "artist": clean_artist,
+                    "album": clean_album or clean_title,
+                    "title": clean_title,
+                    "is_request": True,
+                }
+            ],
+            config,
+        )
+        if sent:
+            lidarr_msg = "Enqueued to Lidarr for search"
+        elif lidarr_client is None:
+            lidarr_msg = "Lidarr is not configured"
+        else:
+            lidarr_msg = "Lidarr did not accept the request; it stays in processing"
+        return {"success": sent, "status": "processing", "message": lidarr_msg, "download_id": None}
 
-    has_native_clients = any(
-        c.get("enabled") for c in db.list_download_clients() if c.get("driver_type") != "lidarr"
-    )
-    has_indexers = any(i.get("enabled") for i in db.list_indexers()) or any(
-        c.get("driver_type") == "slskd" and c.get("enabled") for c in db.list_download_clients()
-    )
-
-    if has_native_clients and has_indexers:
-        try:
-            grab_res = acquisition_coordinator.search_and_grab(
-                artist=clean_artist,
-                title=clean_title,
-                album=clean_album,
-                item_type=item_type,
-                request_id=request_id,
-                db=db,
-            )
-            if grab_res.get("success"):
-                grabbed = True
-                download_id = grab_res.get("download_id")
-                msg = f"Grabbed release: {grab_res.get('release')}"
-                logger.info(
-                    "Native acquisition grabbed retried request %s (%s - %s)",
-                    request_id,
-                    clean_artist,
-                    clean_title,
+    def _native_retry() -> dict[str, Any]:
+        grabbed = False
+        download_id: Optional[str] = None
+        msg = "Acquisition initiated"
+        if native_is_configured(db):
+            try:
+                grab_res = acquisition_coordinator.search_and_grab(
+                    artist=clean_artist,
+                    title=clean_title,
+                    album=clean_album,
+                    item_type=item_type,
+                    request_id=request_id,
+                    db=db,
                 )
-            else:
-                msg = grab_res.get("message") or "No matching release found on indexers"
-                logger.info(
-                    "Native acquisition found no match for retried request %s: %s",
-                    request_id,
-                    msg,
-                )
-        except Exception as e:
-            logger.error("Error in native acquisition for retried request %s: %s", request_id, redact_text(str(e)))
-            msg = f"Acquisition error: {redact_text(str(e))}"
+                if grab_res.get("success"):
+                    grabbed = True
+                    download_id = grab_res.get("download_id")
+                    msg = f"Grabbed release: {grab_res.get('release')}"
+                    logger.info(
+                        "Native acquisition grabbed retried request %s (%s - %s)",
+                        request_id,
+                        clean_artist,
+                        clean_title,
+                    )
+                else:
+                    msg = grab_res.get("message") or "No matching release found on indexers"
+                    logger.info(
+                        "Native acquisition found no match for retried request %s: %s",
+                        request_id,
+                        msg,
+                    )
+            except Exception as e:  # coordinator drivers raise heterogeneous errors
+                logger.error("Error in native acquisition for retried request %s: %s", request_id, redact_text(str(e)))
+                msg = f"Acquisition error: {redact_text(str(e))}"
+        return {
+            "success": grabbed,
+            "status": "processing",
+            "message": msg,
+            "download_id": download_id,
+        }
 
-    if not grabbed and lidarr_client is not None:
-        try:
-            lidarr_worker.start_trickle(
-                items=[
-                    {
-                        "id": request_id,
-                        "artist": clean_artist,
-                        "album": clean_album or clean_title,
-                        "title": clean_title,
-                        "is_request": True,
-                    }
-                ],
-                client=lidarr_client,
-                db=db,
-                delay_seconds=config.lidarr_trickle_rate_seconds,
-                auto_search=config.lidarr_auto_search,
-            )
-            logger.info("Enqueued retried request %s (%s - %s) to Lidarr worker", request_id, clean_artist, clean_title)
-            msg = "Enqueued to Lidarr for search"
-        except Exception as e:
-            logger.error("Failed to enqueue retried request %s to Lidarr worker: %s", request_id, e)
-
-    return {
-        "success": grabbed or (lidarr_client is not None),
-        "status": "processing",
-        "message": msg,
-        "download_id": download_id,
-    }
+    try:
+        return run_for_mode(db, native=_native_retry, lidarr=_lidarr_retry)
+    except ModeChanged as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The library manager is being switched; try again in a moment.",
+        ) from exc

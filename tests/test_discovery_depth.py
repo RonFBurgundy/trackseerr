@@ -783,7 +783,7 @@ class TestBatchRequestsAPI:
         assert "Song C" in titles
         assert "Song A" not in titles
 
-    def test_batch_create_native_grab_and_lidarr_trickle(
+    def test_batch_create_native_grab_without_lidarr_fallback(
         self, app_and_client, test_db, test_config, seeded_users
     ):
         app, client = app_and_client
@@ -818,7 +818,7 @@ class TestBatchRequestsAPI:
         with patch(
             "plex_playlist_sync.api.routes.requests.acquisition_coordinator.search_and_grab"
         ) as mock_grab, patch(
-            "plex_playlist_sync.api.routes.requests.lidarr_worker.start_trickle"
+            "plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle"
         ) as mock_trickle:
             def grab_side_effect(**kwargs):
                 if kwargs.get("title") == "Track 1":
@@ -840,11 +840,8 @@ class TestBatchRequestsAPI:
             # Native search attempted for both
             assert mock_grab.call_count == 2
 
-            # Lidarr trickle enqueued only for Track 2 (which wasn't grabbed natively)
-            assert mock_trickle.call_count == 1
-            trickle_items = mock_trickle.call_args[1]["items"]
-            assert len(trickle_items) == 1
-            assert trickle_items[0]["title"] == "Track 2"
+            # Native mode is strict: an unmatched track is never sent to Lidarr
+            assert mock_trickle.call_count == 0
 
     def test_batch_create_empty_requests_list_validation_error(
         self, app_and_client, test_db, test_config, seeded_users

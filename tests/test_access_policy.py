@@ -173,8 +173,14 @@ def test_sync_webhook_refuses_user_and_accepts_api_key(env):
 
 def test_log_stream_refuses_non_admin_session_token(env):
     token = env["alice"]["Authorization"].split(" ", 1)[1]
-    res = env["client"].get(f"/api/system/logs/stream?token={token}")
+    res = env["client"].get("/api/system/logs/stream", headers={"Authorization": f"Bearer {token}"})
     assert res.status_code == 403
+
+
+def test_log_stream_ignores_query_token(env, stream_ok):
+    """A session token in the URL (proxy/access-log exposure) is never accepted, even a valid admin one."""
+    token = env["admin"]["Authorization"].split(" ", 1)[1]
+    assert env["client"].get(f"/api/system/logs/stream?token={token}").status_code == 401
 
 
 def _tok(headers):
@@ -195,8 +201,9 @@ def stream_ok():
 
 def test_log_stream_admin_token_streams(env, stream_ok):
     token = _tok(env["admin"])
-    assert env["client"].get(f"/api/system/logs/stream?token={token}").status_code == 200
     assert env["client"].get("/api/system/logs/stream", headers=env["admin"]).status_code == 200
+    env["client"].cookies.set("session_token", token)
+    assert env["client"].get("/api/system/logs/stream").status_code == 200
 
 
 def test_log_stream_refuses_missing_token(env, stream_ok):
@@ -206,13 +213,13 @@ def test_log_stream_refuses_missing_token(env, stream_ok):
 def test_log_stream_refuses_logged_out_session_token(env, stream_ok):
     token = _tok(env["admin"])
     env["db"].delete_session(token)
-    assert env["client"].get(f"/api/system/logs/stream?token={token}").status_code == 401
+    assert env["client"].get("/api/system/logs/stream", headers={"Authorization": f"Bearer {token}"}).status_code == 401
 
 
 def test_log_stream_refuses_disabled_admin(env, stream_ok):
     token = _tok(env["admin"])
     env["db"].set_disabled("admin-1", True)
-    assert env["client"].get(f"/api/system/logs/stream?token={token}").status_code in (401, 403)
+    assert env["client"].get("/api/system/logs/stream", headers={"Authorization": f"Bearer {token}"}).status_code in (401, 403)
 
 
 def test_log_stream_refuses_session_issued_before_revocation(env, stream_ok):
@@ -220,7 +227,7 @@ def test_log_stream_refuses_session_issued_before_revocation(env, stream_ok):
     env["db"].revoke_sessions("admin-1")
     # the session row is kept so only the sessions_revoked_at check can reject it
     env["db"].create_session(token, "admin-1", {"auth": "test"}, issued_at_us=1_000_000)
-    assert env["client"].get(f"/api/system/logs/stream?token={token}").status_code == 401
+    assert env["client"].get("/api/system/logs/stream", headers={"Authorization": f"Bearer {token}"}).status_code == 401
 
 
 # --------------------------------------------------------------------------- user-level routes: 200

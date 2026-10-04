@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
+from plex_playlist_sync.job_tracker import tracked
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,7 @@ class ArtistRefreshWorker:
         with self._lock:
             self._is_running = False
 
+    @tracked("artist_metadata_refresh", "Artist Metadata & Discography Refresh")
     def refresh_once(
         self,
         db: Database,

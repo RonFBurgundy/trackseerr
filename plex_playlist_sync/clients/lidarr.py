@@ -6,7 +6,18 @@ from urllib.parse import quote
 
 import httpx
 
+from plex_playlist_sync.redaction import safe_exc
+
 logger = logging.getLogger(__name__)
+
+
+def _exc_text(exc: BaseException) -> str:
+    """Secret-safe exception text: httpx/Lidarr errors keep their (redacted) message, anything else the type name."""
+    return safe_exc(exc, safe_types=(httpx.HTTPError, LidarrApiError))
+
+
+class LidarrApiError(Exception):
+    """A Lidarr request failed. The message is application-authored and never carries the API key."""
 
 
 class LidarrClient:
@@ -22,6 +33,8 @@ class LidarrClient:
         quality_profile_id: Optional[int] = None,
         metadata_profile_id: Optional[int] = None,
         timeout: float = 15.0,
+        monitor_option: Optional[str] = None,
+        tag_ids: Optional[list[int]] = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key.strip()
@@ -31,6 +44,69 @@ class LidarrClient:
         self.quality_profile_id = quality_profile_id
         self.metadata_profile_id = metadata_profile_id
         self.timeout = timeout
+        self.monitor_option = monitor_option
+        self.tag_ids = list(tag_ids or [])
+
+    def _get_json(self, path: str) -> Any:
+        """GET ``/api/v1/<path>`` with the bounded client timeout; raises LidarrApiError on any failure."""
+        url = f"{self.base_url}/api/v1/{path}"
+        try:
+            with httpx.Client(verify=self.verify_ssl, timeout=self.timeout) as client:
+                resp = client.get(url, headers=self._get_headers())
+        except httpx.HTTPError as exc:
+            raise LidarrApiError(f"Could not reach Lidarr ({type(exc).__name__})") from exc
+        if resp.status_code in (401, 403):
+            raise LidarrApiError("Lidarr rejected the API key")
+        if resp.status_code != 200:
+            raise LidarrApiError(f"Lidarr returned HTTP {resp.status_code} for {path}")
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise LidarrApiError(f"Lidarr returned invalid JSON for {path}") from exc
+
+    def get_options(self) -> dict[str, list[dict[str, Any]]]:
+        """Live root folders, quality profiles, metadata profiles and tags (for the settings pickers)."""
+        roots = self._get_json("rootfolder")
+        quality = self._get_json("qualityprofile")
+        metadata = self._get_json("metadataprofile")
+        tags = self._get_json("tag")
+        if not all(isinstance(v, list) for v in (roots, quality, metadata, tags)):
+            raise LidarrApiError("Lidarr returned an unexpected response shape")
+        return {
+            "root_folders": [
+                {"path": str(r.get("path", "")), "free_space": int(r.get("freeSpace") or 0)}
+                for r in roots
+                if isinstance(r, dict)
+            ],
+            "quality_profiles": [
+                {"id": int(q["id"]), "name": str(q.get("name", ""))} for q in quality if isinstance(q, dict) and "id" in q
+            ],
+            "metadata_profiles": [
+                {"id": int(m["id"]), "name": str(m.get("name", ""))} for m in metadata if isinstance(m, dict) and "id" in m
+            ],
+            "tags": [{"id": int(t["id"]), "label": str(t.get("label", ""))} for t in tags if isinstance(t, dict) and "id" in t],
+        }
+
+    def get_health(self) -> list[dict[str, Any]]:
+        """Lidarr's ``/health`` checks, normalised to ``{source, type, message, wiki_url}``."""
+        data = self._get_json("health")
+        if not isinstance(data, list):
+            raise LidarrApiError("Lidarr returned an unexpected health response")
+        allowed = {"ok", "notice", "warning", "error"}
+        out: list[dict[str, Any]] = []
+        for h in data:
+            if not isinstance(h, dict):
+                continue
+            kind = str(h.get("type", "")).lower()
+            out.append(
+                {
+                    "source": str(h.get("source", "")),
+                    "type": kind if kind in allowed else "notice",
+                    "message": str(h.get("message", "")),
+                    "wiki_url": h.get("wikiUrl") or None,
+                }
+            )
+        return out
 
     def _get_headers(self) -> dict[str, str]:
         return {
@@ -57,7 +133,7 @@ class LidarrClient:
                     "error": f"HTTP {resp.status_code}: {resp.text[:100]}",
                 }
         except Exception as e:
-            return {"online": False, "error": str(e)}
+            return {"online": False, "error": _exc_text(e)}
 
     def get_root_folder(self, client: Optional[httpx.Client] = None) -> str:
         """Retrieves configured or default Lidarr root folder path."""
@@ -76,7 +152,7 @@ class LidarrClient:
                 if data and isinstance(data, list) and len(data) > 0:
                     return str(data[0].get("path", "/music"))
         except Exception as e:
-            logger.warning("Could not discover Lidarr root folder: %s", e)
+            logger.warning("Could not discover Lidarr root folder: %s", _exc_text(e))
         return "/music"
 
     def get_quality_profile_id(self, client: Optional[httpx.Client] = None) -> int:
@@ -96,7 +172,7 @@ class LidarrClient:
                 if data and isinstance(data, list) and len(data) > 0:
                     return int(data[0].get("id", 1))
         except Exception as e:
-            logger.warning("Could not discover Lidarr quality profile: %s", e)
+            logger.warning("Could not discover Lidarr quality profile: %s", _exc_text(e))
         return 1
 
     def get_metadata_profile_id(self, client: Optional[httpx.Client] = None) -> int:
@@ -116,7 +192,7 @@ class LidarrClient:
                 if data and isinstance(data, list) and len(data) > 0:
                     return int(data[0].get("id", 1))
         except Exception as e:
-            logger.warning("Could not discover Lidarr metadata profile: %s", e)
+            logger.warning("Could not discover Lidarr metadata profile: %s", _exc_text(e))
         return 1
 
     def add_artist_and_albums(
@@ -183,14 +259,19 @@ class LidarrClient:
                     quality_id = self.get_quality_profile_id(client)
                     metadata_id = self.get_metadata_profile_id(client)
 
+                    if self.monitor_option:
+                        add_monitor = self.monitor_option
+                    else:
+                        add_monitor = "none" if monitor_mode == "specific" else "all"
                     payload = {
                         **candidate,
                         "monitored": True,
                         "rootFolderPath": root_folder,
                         "qualityProfileId": quality_id,
                         "metadataProfileId": metadata_id,
+                        "tags": list(self.tag_ids),
                         "addOptions": {
-                            "monitor": "none" if monitor_mode == "specific" else "all",
+                            "monitor": add_monitor,
                             "searchForMissingAlbums": False,
                         },
                     }
@@ -246,7 +327,7 @@ class LidarrClient:
                                                 client.put(f"{self.base_url}/api/v1/album/{a_id}", headers=headers, json=alb)
                                         break
                     except Exception as e:
-                        logger.warning("Error inspecting Lidarr albums for artist %s: %s", artist_id, e)
+                        logger.warning("Error inspecting Lidarr albums for artist %s: %s", artist_id, _exc_text(e))
 
                 # 4. Trigger decoupled search command if requested
                 searched = False
@@ -272,8 +353,8 @@ class LidarrClient:
                 }
 
         except Exception as e:
-            logger.error("Exception in Lidarr add_artist_and_albums: %s", e)
-            return {"status": "error", "artist": clean_artist, "message": str(e)}
+            logger.error("Exception in Lidarr add_artist_and_albums: %s", _exc_text(e))
+            return {"status": "error", "artist": clean_artist, "message": _exc_text(e)}
 
     def search_and_add_track(
         self,
@@ -317,7 +398,7 @@ class LidarrClient:
             else:
                 logger.warning("Failed to fetch Lidarr artists: HTTP %s", resp.status_code)
         except Exception as e:
-            logger.warning("Exception fetching artists from Lidarr: %s", e)
+            logger.warning("Exception fetching artists from Lidarr: %s", _exc_text(e))
         return []
 
     def get_all_albums(
@@ -344,7 +425,7 @@ class LidarrClient:
             else:
                 logger.warning("Failed to fetch Lidarr albums: HTTP %s", resp.status_code)
         except Exception as e:
-            logger.warning("Exception fetching albums from Lidarr: %s", e)
+            logger.warning("Exception fetching albums from Lidarr: %s", _exc_text(e))
         return []
 
     def get_all_tracks(
@@ -374,7 +455,7 @@ class LidarrClient:
             else:
                 logger.warning("Failed to fetch Lidarr tracks: HTTP %s", resp.status_code)
         except Exception as e:
-            logger.warning("Exception fetching tracks from Lidarr: %s", e)
+            logger.warning("Exception fetching tracks from Lidarr: %s", _exc_text(e))
         return []
 
     def get_all_track_files(
@@ -401,5 +482,5 @@ class LidarrClient:
             else:
                 logger.warning("Failed to fetch Lidarr track files: HTTP %s", resp.status_code)
         except Exception as e:
-            logger.warning("Exception fetching track files from Lidarr: %s", e)
+            logger.warning("Exception fetching track files from Lidarr: %s", _exc_text(e))
         return []

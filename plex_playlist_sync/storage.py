@@ -85,6 +85,30 @@ RESERVED_USER_IDS = frozenset({"", "0", "1", "api_key_user", "gateway_service", 
 
 logger = logging.getLogger(__name__)
 
+LIDARR_MONITOR_OPTIONS = ("all", "future", "missing", "existing", "first", "latest", "none")
+
+
+def _parse_int_list(value: Any) -> list[int]:
+    """Coerces a JSON string or list into a de-duplicated list of ints; anything unparseable is dropped."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value) if value.strip() else []
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, (list, tuple)):
+        return []
+    out: list[int] = []
+    for item in value:
+        if isinstance(item, bool):
+            continue
+        try:
+            n = int(item)
+        except (TypeError, ValueError):
+            continue
+        if n not in out:
+            out.append(n)
+    return out
+
 
 class Database:
     """Thread-safe SQLite database wrapper with WAL mode, foreign keys, and migrations."""
@@ -226,6 +250,7 @@ class Database:
                 (29, self._migration_v29),
                 (30, self._migration_v30),
                 (31, self._migration_v31),
+                (32, self._migration_v32),
             ]
 
             applied = 0
@@ -1198,6 +1223,15 @@ class Database:
         qp_cols = {row[1] for row in cur.fetchall()}
         if "upgrade_allowed" not in qp_cols:
             cur.execute("ALTER TABLE quality_profiles ADD COLUMN upgrade_allowed INTEGER NOT NULL DEFAULT 1;")
+
+    def _migration_v32(self, cur: sqlite3.Cursor) -> None:
+        """Lidarr request front-end settings: monitor option and tag ids (``auto_search`` doubles as search-on-add)."""
+        cur.execute("PRAGMA table_info(lidarr_settings);")
+        cols = {row[1] for row in cur.fetchall()}
+        if "monitor_option" not in cols:
+            cur.execute("ALTER TABLE lidarr_settings ADD COLUMN monitor_option TEXT NOT NULL DEFAULT 'all';")
+        if "tag_ids" not in cols:
+            cur.execute("ALTER TABLE lidarr_settings ADD COLUMN tag_ids TEXT NOT NULL DEFAULT '[]';")
 
     def _migration_v28(self, cur: sqlite3.Cursor) -> None:
         """Discography batch markers, legacy single-quota migration and per-type auto-approve bits.
@@ -3458,6 +3492,10 @@ class Database:
                 res["quality_profile_id"] = int(res["quality_profile_id"])
             if res.get("metadata_profile_id") is not None:
                 res["metadata_profile_id"] = int(res["metadata_profile_id"])
+            monitor = str(res.get("monitor_option") or "all")
+            res["monitor_option"] = monitor if monitor in LIDARR_MONITOR_OPTIONS else "all"
+            res["search_on_add"] = res["auto_search"]
+            res["tag_ids"] = _parse_int_list(res.get("tag_ids"))
             return res
 
     def update_lidarr_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
@@ -3473,11 +3511,27 @@ class Database:
             "trickle_batch_size",
             "auto_trickle",
             "auto_trickle_interval_minutes",
+            "monitor_option",
+            "tag_ids",
+            "search_on_add",
         }
         updates: dict[str, Any] = {}
         for k, v in settings.items():
             if k in allowed_keys:
-                if k in ("auto_search", "auto_trickle"):
+                if k == "search_on_add":
+                    if v is not None:  # wins over a stale auto_search echoed back by a client
+                        updates["auto_search"] = 1 if v else 0
+                elif k == "monitor_option":
+                    if v is not None:
+                        opt = str(v).strip().lower()
+                        if opt not in LIDARR_MONITOR_OPTIONS:
+                            raise ValueError(f"Invalid monitor_option: {v!r}")
+                        updates[k] = opt
+                elif k == "tag_ids":
+                    updates[k] = json.dumps(_parse_int_list(v if v is not None else []))
+                elif k in ("auto_search", "auto_trickle"):
+                    if k == "auto_search" and settings.get("search_on_add") is not None:
+                        continue
                     if v is not None:
                         updates[k] = 1 if v else 0
                 elif k in (

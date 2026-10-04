@@ -6,6 +6,7 @@ library_tracks, library_files) and updates media management library mode.
 """
 
 import logging
+import sqlite3
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -19,6 +20,8 @@ from plex_playlist_sync.models import (
     LibraryFile,
     LibraryTrack,
 )
+from plex_playlist_sync.library_manager import MODE_NATIVE, SwitchRefused, switch_mode
+from plex_playlist_sync.redaction import safe_exc
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -486,7 +489,7 @@ class LidarrMigrationJob:
 
             if auto_switch_mode:
                 logger.info("LidarrMigration: Automatically switching library_mode to 'native'.")
-                db.update_media_management_settings({"library_mode": "native"})
+                self._switch_to_native(db)
 
             with self._lock:
                 self._status["status"] = "completed"
@@ -502,6 +505,31 @@ class LidarrMigrationJob:
                 self._status["is_migrating"] = False
                 self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
             return dict(self._status)
+
+
+    @staticmethod
+    def _switch_to_native(db: Database) -> None:
+        """Goes through the shared switch guard; a refusal leaves the import successful and tells the admin."""
+        try:
+            switch_mode(db, MODE_NATIVE, source="lidarr_import")
+        except SwitchRefused as refused:
+            logger.warning(
+                "LidarrMigration: import finished but the library manager was not switched to TrackSeerr: %s",
+                refused.reason,
+            )
+            try:
+                db.record_event(
+                    "library_manager_switch_skipped",
+                    "Lidarr import finished, but the library manager could not be switched to TrackSeerr "
+                    f"({refused.reason}) Switch it manually in Settings -> General when the work has finished.",
+                    source="lidarr_import",
+                    severity="warning",
+                    details={"reason": refused.reason},
+                )
+            except sqlite3.Error as exc:
+                logger.warning("LidarrMigration: could not record switch-skipped event: %s", safe_exc(exc))
+        except sqlite3.Error as exc:
+            logger.error("LidarrMigration: could not switch the library manager: %s", safe_exc(exc))
 
 
 lidarr_migration_job = LidarrMigrationJob()
