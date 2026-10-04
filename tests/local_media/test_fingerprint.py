@@ -1,8 +1,8 @@
 """AcoustID / Chromaprint fingerprinting on real MP3s.
 
-Generation needs the ``fpcalc`` binary and the ``pyacoustid`` package; neither ships in the test image, so the
-generation test skips there (and runs on a machine that has both). Lookups additionally need ACOUSTID_API_KEY
-and network. The orchestration around them is tested offline with a stand-in ``acoustid`` module.
+Generation needs the ``fpcalc`` binary and the ``pyacoustid`` package (both are in the test image; the
+generation test skips on a machine that lacks either). Lookups additionally need ACOUSTID_API_KEY and network.
+The orchestration around them is tested offline with a stand-in ``acoustid`` module.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def test_best_match_is_mapped_from_acoustid_results(mp3, monkeypatch):
     fake = types.ModuleType("acoustid")
     calls = []
 
-    def match(key, path):
+    def match(key, path, **kwargs):
         calls.append((key, path))
         yield (0.97, "rec-123", "Aerodynamic", "Daft Punk")
         yield (0.40, "rec-999", "Other", "Other")
@@ -60,7 +60,7 @@ def test_best_match_is_mapped_from_acoustid_results(mp3, monkeypatch):
 def test_acoustid_failure_is_swallowed(mp3, monkeypatch):
     fake = types.ModuleType("acoustid")
 
-    def match(key, path):
+    def match(key, path, **kwargs):
         raise RuntimeError("fpcalc exploded")
 
     fake.match = match
@@ -85,7 +85,7 @@ def test_fingerprint_route_rejects_missing_file_and_outside_paths(api, mp3):
 def test_fingerprint_generation_on_real_mp3(mp3):
     import acoustid
 
-    duration, fp = acoustid.fingerprint_file(str(mp3))
+    duration, fp = acoustid.fingerprint_file(str(mp3), force_fpcalc=True)
     assert fp and len(fp) > 100
     assert abs(duration - mutagen.File(str(mp3)).info.length) < 2
 
@@ -100,12 +100,6 @@ def test_acoustid_lookup_identifies_aerodynamic(mp3):
     assert out is not None and out["title"] and "aerodynamic" in out["title"].lower()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: fingerprinting can never work in the shipped image - neither pyacoustid nor chromaprint/fpcalc is "
-    "in requirements.txt or the Dockerfile, and fingerprint_audio_file (library.py:643) silently returns None when "
-    "the import fails. Fix: add `pyacoustid` to requirements.txt and `apt-get install libchromaprint-tools` to the Dockerfile",
-)
 def test_shipped_image_declares_acoustid_and_chromaprint():
     reqs = (REPO / "requirements.txt").read_text().lower()
     docker = (REPO / "Dockerfile").read_text().lower()

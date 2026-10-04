@@ -301,7 +301,7 @@ def test_scan_path_derived_fallback_on_corrupt_files(db: Database, scanner: Libr
     album = db.get_library_album_by_title(artist["id"], "IV")
     assert album is not None
 
-    track = db.get_library_track_by_title(album["id"], "04 - Stairway to Heaven", track_number=1)
+    track = db.get_library_track_by_title(album["id"], "Stairway to Heaven", track_number=4)  # name parsed from "04 - ..."
     assert track is not None
 
     fl = db.get_library_file_by_path(str(corrupt_file.resolve()))

@@ -65,6 +65,7 @@ from plex_playlist_sync.config import Config
 from plex_playlist_sync.library_monitoring import (
     NATIVE_MONITOR_OPTIONS,
     album_monitored_for_option,
+    hydrated_track_monitored,
     section_to_album_type,
 )
 from plex_playlist_sync.library_manager import MODE_LIDARR, ModeChanged, get_library_mode, work_guard
@@ -80,7 +81,10 @@ from plex_playlist_sync.models import (
 from plex_playlist_sync.library import (
     AUDIO_EXTENSIONS,
     fingerprint_audio_file,
+    find_folder_art,
     inspect_audio_file,
+    parse_filename_track,
+    resolve_album_artist,
     resolve_collision,
     write_audio_tags,
 )
@@ -162,11 +166,11 @@ class ManualImportItem(BaseModel):
     album_id: Optional[str] = None
     track_title: Optional[str] = None
     track_id: Optional[str] = None
-    track_number: Optional[int] = 1
+    track_number: Optional[int] = None
     disc_number: Optional[int] = 1
     year: Optional[int] = None
     mode: str = "move"
-    write_tags: bool = True
+    write_tags: Optional[bool] = None
 
 
 class ManualImportCommitRequest(BaseModel):
@@ -920,7 +924,11 @@ def ingest_artist(
                                     track_number=trk_num,
                                     disc_number=disc_num,
                                     duration_seconds=dur,
-                                    monitored=True,
+                                    monitored=(
+                                        bool(existing_trk["monitored"])
+                                        if existing_trk and monitor_option == "existing"
+                                        else hydrated_track_monitored(monitor_option)
+                                    ),
                                     foreign_track_id=foreign_track_id,
                                 )
                             )
@@ -1042,10 +1050,8 @@ def get_artist_image(
             elif alb.get("path"):
                 try:
                     p = validate_media_path(alb["path"], db=db)
-                    for c_name in ("cover.jpg", "cover.png", "folder.jpg", "folder.png"):
-                        if (p / c_name).is_file():
-                            has_cover = True
-                            break
+                    if find_folder_art(p) is not None:
+                        has_cover = True
                 except Exception:
                     pass
             if has_cover:
@@ -1506,7 +1512,7 @@ def refresh_single_artist(
                                     t_monitored = bool(existing_trk["monitored"])
                                 else:
                                     trk_id = str(uuid.uuid4())
-                                    t_monitored = True
+                                    t_monitored = hydrated_track_monitored(monitor_opt)
 
                                 db.upsert_library_track(
                                     LibraryTrack(
@@ -1737,7 +1743,7 @@ def refresh_single_artist(
                                             trk_monitored = bool(existing_trk["monitored"])
                                         else:
                                             track_id = str(uuid.uuid4())
-                                            trk_monitored = True
+                                            trk_monitored = hydrated_track_monitored(artist.get("monitor_option", "all"))
 
                                         trk_title = trk.get("title") or "Unknown Track"
                                         trk_num = int(trk.get("track_number") or 1)
@@ -2037,10 +2043,7 @@ def get_album_cover(
         try:
             validated = validate_media_path(p_str, db=db)
             if validated.is_dir():
-                for name in ("cover.jpg", "cover.png", "folder.jpg", "folder.png"):
-                    cand = validated / name
-                    if cand.is_file():
-                        return cand
+                return find_folder_art(validated)
             elif validated.is_file():
                 return validated
         except Exception as exc:
@@ -2464,14 +2467,14 @@ def manual_import_scan(
                         "artist": None,
                         "album": None,
                         "year": None,
-                        "track_number": 1,
+                        "track_number": None,
                         "disc_number": 1,
                         "codec": p.suffix.lstrip(".").upper(),
                         "file_path": str(p),
                     }
 
                 title = inspected.get("title")
-                artist = inspected.get("artist")
+                artist = resolve_album_artist(inspected, known_artist=lambda n: db.get_library_artist_by_name(n) is not None) or None
                 album = inspected.get("album")
                 trkn = inspected.get("track_number")
 
@@ -2559,7 +2562,7 @@ def manual_import_commit(
                     "artist": None,
                     "album": None,
                     "year": None,
-                    "track_number": 1,
+                    "track_number": None,
                     "disc_number": 1,
                     "codec": source_path.suffix.lstrip(".").upper(),
                     "file_path": str(source_path),
@@ -2569,7 +2572,11 @@ def manual_import_commit(
             artist_id = item.artist_id
             artist = db.get_library_artist(artist_id) if artist_id else None
             if not artist:
-                art_name = (item.artist_name or inspected.get("artist") or "Unknown Artist").strip()
+                art_name = (
+                    item.artist_name
+                    or resolve_album_artist(inspected, known_artist=lambda n: db.get_library_artist_by_name(n) is not None)
+                    or "Unknown Artist"
+                ).strip()
                 artist = db.get_library_artist_by_name(art_name)
                 if not artist:
                     artist = db.upsert_library_artist({
@@ -2601,10 +2608,11 @@ def manual_import_commit(
             # 3. Resolve or Create Track
             track_id = item.track_id
             track = db.get_library_track(track_id) if track_id else None
-            trkn = item.track_number or inspected.get("track_number") or 1
+            file_title, file_trkn = parse_filename_track(source_path.stem)
+            trkn = item.track_number or inspected.get("track_number") or file_trkn
             disc = item.disc_number or inspected.get("disc_number") or 1
             if not track:
-                trk_title = (item.track_title or inspected.get("title") or source_path.stem).strip()
+                trk_title = (item.track_title or inspected.get("title") or file_title).strip()
                 track = db.get_library_track_by_title(album_id, trk_title, track_number=trkn)
                 if not track:
                     track = db.upsert_library_track({
@@ -2613,15 +2621,42 @@ def manual_import_commit(
                         "artist_id": artist_id,
                         "title": trk_title,
                         "clean_title": clean_library_name(trk_title),
-                        "track_number": trkn,
+                        "track_number": trkn or 1,
                         "disc_number": disc,
                         "duration_seconds": inspected.get("duration"),
                         "monitored": True,
                     })
             track_id = track["id"]
 
+            # 3b. Quality profile & Cutoff evaluation
+            cutoff_met = True
+            quality_name = str(inspected.get("quality_full") or inspected.get("codec") or "Unknown")
+            try:
+                qp_id = artist.get("quality_profile_id")
+                profile_dict = db.get_quality_profile(qp_id) if qp_id else None
+                if not profile_dict:
+                    profile_dict = db.get_default_quality_profile()
+                if profile_dict:
+                    qp = _to_quality_profile(profile_dict)
+                    quality_input = (
+                        inspected.get("quality_full")
+                        or inspected.get("codec")
+                        or source_path.suffix.lstrip(".").upper()
+                    )
+                    parsed = parse_release_title(str(quality_input))
+                    if parsed.quality == "Unknown" and quality_input:
+                        parsed.quality = str(quality_input)
+                    fsize = source_path.stat().st_size
+                    eval_result = evaluate_release(parsed, qp, size_bytes=fsize)
+                    cutoff_met = bool(eval_result.meets_cutoff)
+                    quality_name = eval_result.parsed_quality or str(quality_input)
+            except Exception as exc:
+                logger.warning("Cutoff evaluation error during manual import for %s: %s", source_path, exc)
+                cutoff_met = True
+
             # 4. Resolve destination path
             meta = dict(inspected)
+            meta["quality_full"] = quality_name  # same catalog source as rename preview/apply
             meta["artist"] = artist["name"]
             meta["album_artist"] = artist["name"]
             meta["album"] = album["title"]
@@ -2642,37 +2677,14 @@ def manual_import_commit(
             placed_file = place_audio_file(source_path, target_dest, mode=item.mode)
 
             # 6. Write audio tags if requested
-            if item.write_tags:
+            write_tags = item.write_tags
+            if write_tags is None:
+                write_tags = bool(media_settings.get("write_audio_tags", True))
+            if write_tags:
                 try:
                     write_audio_tags(placed_file, meta)
                 except Exception as exc:
                     logger.warning("Error writing tags to %s: %s", placed_file, exc)
-
-            # 7. Quality profile & Cutoff evaluation
-            cutoff_met = True
-            quality_name = str(meta.get("quality_full") or meta.get("codec") or "Unknown")
-            try:
-                qp_id = artist.get("quality_profile_id")
-                profile_dict = db.get_quality_profile(qp_id) if qp_id else None
-                if not profile_dict:
-                    profile_dict = db.get_default_quality_profile()
-                if profile_dict:
-                    qp = _to_quality_profile(profile_dict)
-                    quality_input = (
-                        meta.get("quality_full")
-                        or meta.get("codec")
-                        or placed_file.suffix.lstrip(".").upper()
-                    )
-                    parsed = parse_release_title(str(quality_input))
-                    if parsed.quality == "Unknown" and quality_input:
-                        parsed.quality = str(quality_input)
-                    fsize = placed_file.stat().st_size if placed_file.exists() else 0
-                    eval_result = evaluate_release(parsed, qp, size_bytes=fsize)
-                    cutoff_met = bool(eval_result.meets_cutoff)
-                    quality_name = eval_result.parsed_quality or str(quality_input)
-            except Exception as exc:
-                logger.warning("Cutoff evaluation error during manual import for %s: %s", placed_file, exc)
-                cutoff_met = True
 
             try:
                 rel_path = str(placed_file.relative_to(root_dir))

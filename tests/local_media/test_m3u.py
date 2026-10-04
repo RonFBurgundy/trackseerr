@@ -66,12 +66,6 @@ def test_parsed_entries_resolve_against_scanned_library(db, lib):
         assert db.get_library_track_by_title(album["id"], t["title"]), t
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG/GAP: title lookup is exact on clean_library_name, so 'Nightvision' (the spelling in "
-    "'06 Nightvision.mp3' and many M3Us) never finds the track stored as 'Night Vision' unless a track number "
-    "is supplied; M3U entries carry none (storage.py:51 clean_library_name keeps the space, :6198 lookup)",
-)
 def test_m3u_title_variant_resolves_to_existing_track(db, lib):
     run_scan(db, lib)
     artist = db.get_library_artist_by_name("Daft Punk")
@@ -155,13 +149,6 @@ def test_real_playlist_referenced_files_exist_except_one(real_m3u, media_root):
     assert missing == ["Kavinsky/Unknown Album/Odd Look (ft. The Weeknd).mp3"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: iTunes writes EXTINF display names as 'Title - Artist' ('The Crash - Kavinsky'); parse_m3u always "
-    "assumes 'Artist - Title' (m3u.py:~58 `parts = display_name.split(' - ', 1)`), so artist and title are swapped "
-    "for every entry of an iTunes playlist. Fix: when the path has an Artist folder (Artist/Album/Track), pick the "
-    "orientation whose artist half equals that folder; or let the import match both orientations against the library",
-)
 def test_real_playlist_extinf_title_artist_orientation(real_m3u):
     crash = next(t for t in parse_m3u(real_m3u) if t["title"] == "The Crash" or t["artist"] == "The Crash")
     assert (crash["artist"], crash["title"]) == ("Kavinsky", "The Crash")

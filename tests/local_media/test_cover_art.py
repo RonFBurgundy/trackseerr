@@ -103,12 +103,6 @@ def test_cover_route_serves_local_cover_file(api, tmp_path, copy_discovery):
     assert resp.content == FAKE_JPEG
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG/GAP: iTunes/WMP folder art 'AlbumArt_{GUID}_Large.jpg' (present in the real Discovery folder) is not "
-    "recognised; only cover.jpg/png and folder.jpg/png are (library_scanner.py:531 and "
-    "api/routes/library.py:2040 candidate lists), so an iTunes-era library imports with no artwork",
-)
 def test_itunes_albumart_jpg_is_recognised_as_folder_art(db, tmp_path, copy_discovery, discovery_src):
     src_art = discovery_src / ALBUMART
     if not src_art.is_file():

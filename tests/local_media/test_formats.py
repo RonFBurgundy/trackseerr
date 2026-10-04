@@ -68,12 +68,6 @@ def test_m4a_scan_builds_hierarchy(db, m4a_root):
     assert {f["codec"] for f in snap["files"]} == {"AAC"}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: quality parser maps ANY 'aac' string to 'AAC 256' (quality.py:44-47 `\\baac\\b` in the AAC_256 "
-    "pattern, ignoring the bitrate), so a 128 kbps iTunes AAC is stored as 'AAC 256' and can satisfy cutoffs it "
-    "should not. Fix: only classify AAC 256 when bitrate >= ~256 (else Unknown / a lower AAC tier)",
-)
 def test_128kbps_aac_is_not_reported_as_aac_256(db, m4a_root):
     run_scan(db, m4a_root)
     assert {f["quality_name"] for f in snapshot(db)["files"]} != {"AAC 256"}
@@ -119,7 +113,7 @@ def test_wav_scan_falls_back_to_folder_and_file_names(db, wav_root):
     snap = snapshot(db)
     assert [a["name"] for a in snap["artists"]] == ["Unknown Artist"]
     assert [a["title"] for a in snap["albums"]] == ["Unknown Album"]
-    assert {t["title"] for t in snap["tracks"]} >= {"01 Intro 2"}   # raw file stem (see bug: tagless title)
+    assert {t["title"] for t in snap["tracks"]} >= {"Intro 2"}   # leading track number parsed off the file stem
     assert {f["codec"] for f in snap["files"]} == {"WAV"}
 
 
@@ -131,16 +125,10 @@ def test_wav_counts_as_lossless_for_the_default_cutoff(db, wav_root):
     assert {f["quality_name"] for f in files} == {"FLAC 16bit"}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: two different untagged files in one folder both default to track number 1 (library.py:269) and "
-    "get_library_track_by_title matches 'title OR track number' (storage.py:6198), so '01 Intro 3' is silently "
-    "attached to the '01 Intro 2' track. Fix: do not default a missing track number; match on number only when tagged",
-)
 def test_untagged_wavs_with_different_names_stay_separate_tracks(db, wav_root):
     run_scan(db, wav_root)
     snap = snapshot(db)
-    assert {t["title"] for t in snap["tracks"]} == {"01 Intro 2", "01 Intro 3"}
+    assert {t["title"] for t in snap["tracks"]} == {"Intro 2", "Intro 3"}
 
 
 def test_wav_rename_preview_keeps_wav_extension(api, wav_root):

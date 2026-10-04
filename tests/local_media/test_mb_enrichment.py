@@ -140,14 +140,6 @@ def test_refresh_creates_other_discography_albums_unmonitored_under_existing_opt
     assert db.get_library_album_by_title(artist_id, "Discovery")["monitored"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG (owner decision): under monitor option 'existing' only tracks that have files are monitored; "
-    "MusicBrainz-hydrated tracks missing from an owned (partial) album must be UNMONITORED. Hydration instead "
-    "creates them monitored=True (api/routes/library.py:1509 `t_monitored = True`), so the 10 missing Discovery "
-    "tracks become wanted downloads. Fix: for artist.monitor_option == 'existing' create new tracks with "
-    "monitored=False (generally: monitored = album_monitored_for_option(...) and has_files for 'existing')",
-)
 def test_refresh_monitors_only_tracks_with_files_under_existing_option(refreshed):
     db, artist_id, _ = refreshed
     album = db.get_library_album_by_title(artist_id, "Discovery")

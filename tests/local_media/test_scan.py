@@ -79,22 +79,12 @@ def test_scan_follows_scan_monitor_option(db, library_copy, option):
     assert {a["monitored"] for a in snap["albums"]} == {option == "all"}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: scanner prefers the TRACK artist over album artist, so 'Daft Punk/Romanthony' becomes its own "
-    "artist (library_scanner.py:457, artist_name = metadata.artist or album_artist)",
-)
 def test_combined_artist_tag_does_not_create_bogus_artist(scanned_pristine):
     db, _ = scanned_pristine
     names = [a["name"] for a in snapshot(db)["artists"]]
     assert not any("/" in n for n in names), names
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: same root cause as above - album is keyed by (track artist, title), so Discovery is split into "
-    "3 albums under 3 artists (library_scanner.py:457 and :542 album_key)",
-)
 def test_discovery_is_one_album_under_daft_punk(scanned_pristine):
     db, _ = scanned_pristine
     snap = snapshot(db)
@@ -102,12 +92,6 @@ def test_discovery_is_one_album_under_daft_punk(scanned_pristine):
     assert [a["title"] for a in snap["albums"]] == ["Discovery"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: inspect_audio_file defaults a MISSING track number to 1 (library.py:269) and "
-    "get_library_track_by_title matches 'clean title OR track number' (storage.py:6198), so an untagged "
-    "'Around The World' is silently merged into track 1 'One More Time' when they share an album",
-)
 def test_untagged_track_number_does_not_merge_into_track_one(db, tmp_path, copy_discovery):
     root = tmp_path / "music"
     album = root / "Daft Punk" / "Discovery"
@@ -115,7 +99,7 @@ def test_untagged_track_number_does_not_merge_into_track_one(db, tmp_path, copy_
     # Same artist tag on both so the artist/album split bug does not mask this one.
     set_id3(omt, TPE1="Daft Punk")
     set_id3(atw, TPE1="Daft Punk")
-    assert inspect_audio_file(atw)["track_number"] == 1  # no TRCK tag -> defaulted
+    assert inspect_audio_file(atw)["track_number"] is None  # no TRCK tag: not defaulted
 
     run_scan(db, root)
     snap = snapshot(db)

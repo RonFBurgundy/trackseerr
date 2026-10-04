@@ -28,6 +28,14 @@ from .sync import SyncCoordinator
 
 logger = logging.getLogger("plex_playlist_sync")
 _shutdown_requested = False
+# Wakes the background scheduler threads out of their waits at shutdown (and lets tests stop the ones a test
+# started). They wait on this event instead of ``time.sleep`` so a patched/no-op ``time.sleep`` cannot turn them
+# into hot loops.
+_shutdown_event = threading.Event()
+
+
+def _stopping() -> bool:
+    return _shutdown_requested or _shutdown_event.is_set()
 
 
 class RedactAccessLogFilter(logging.Filter):
@@ -84,6 +92,7 @@ def _signal_handler(signum, frame):
     global _shutdown_requested
     logger.info("Received termination signal (%d). Shutting down cleanly...", signum)
     _shutdown_requested = True
+    _shutdown_event.set()
 
 
 _STDOUT_HANDLER_NAME = "trackseerr-stdout"
@@ -273,15 +282,15 @@ def _start_sync_scheduler(
 
     def background_sync_worker() -> None:
         logger.info("Background sync scheduler started (interval: %d seconds)", config.wait_seconds)
-        while not _shutdown_requested:
+        while not _stopping():
             slept = 0
-            while slept < config.wait_seconds and not _shutdown_requested:
-                time.sleep(min(1, config.wait_seconds - slept))
+            while slept < config.wait_seconds and not _stopping():
+                _shutdown_event.wait(min(1, config.wait_seconds - slept))
                 slept += 1
             if clients_ready is not None:
-                while not _shutdown_requested and not clients_ready.wait(timeout=1.0):
+                while not _stopping() and not clients_ready.wait(timeout=1.0):
                     pass
-            if _shutdown_requested:
+            if _stopping():
                 break
             try:
                 logger.info("Triggering scheduled background synchronization...")
@@ -308,9 +317,9 @@ def _start_lidarr_trickle(db: Database, config: Config) -> None:
     def background_lidarr_trickle_worker() -> None:
         logger.info("Lidarr auto-trickle background runner started")
         last_run_time = 0.0
-        while not _shutdown_requested:
-            time.sleep(5)
-            if _shutdown_requested:
+        while not _stopping():
+            _shutdown_event.wait(5)
+            if _stopping():
                 break
             try:
                 lidarr_settings = db.get_lidarr_settings()

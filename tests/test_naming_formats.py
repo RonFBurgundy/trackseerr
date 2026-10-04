@@ -74,7 +74,7 @@ class TestSegments:
     def test_slash_in_token_value_does_not_split(self):
         meta = dict(META, artist="AC/DC", total_discs=1, disc_number=1)
         path = build_track_path(meta, settings_for("Trackseerr"))
-        assert path.startswith("/music/ACDC/")
+        assert path.startswith("/music/AC-DC/")
 
 
 class TestPresets:

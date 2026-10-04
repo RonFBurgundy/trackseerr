@@ -61,6 +61,12 @@ A test that asserts the **correct** behaviour but fails today is marked `xfail(s
 with the responsible file:line in the reason. When the bug is fixed the test XPASSes, strict mode fails the run,
 and you delete the marker. Run with `-rxX` to list them.
 
+The first round found 20 bugs (scanner artist keying, untagged track merging, manual-import defaults, naming,
+quality labels, `_` in names, folder art, title lookup, hydration monitoring under "existing", fingerprinting
+dependencies, AAC bitrate, iTunes M3U orientation). All are fixed and their markers removed; each fix also has a
+synthetic test in `tests/test_library_quality_fixes.py` so CI covers it without this library. New findings use the
+same convention.
+
 ## Adding fixtures
 
 Copy, never reference in place: `copy_discovery([...names], dst)` (from `conftest.py`) for a single album,

@@ -1,5 +1,6 @@
 """SQLite persistence engine for plex-playlist-sync with WAL mode and migrations."""
 
+import difflib
 import json
 import logging
 import os
@@ -49,13 +50,33 @@ from plex_playlist_sync.models import (
 
 
 def clean_library_name(text: str) -> str:
-    """Normalizes string for indexing and resilient comparison: lowercased, alphanumerics and single spaces."""
+    """Normalizes string for indexing and resilient comparison: lowercased, alphanumerics and single spaces.
+
+    '_' counts as whitespace: iTunes writes it in folder names in place of characters illegal on Windows
+    ('Daft Punk_ Pharrell Williams' for the tag 'Daft Punk; Pharrell Williams').
+    """
     if not text:
         return ""
-    cleaned = re.sub(r"[^\w\s]", "", str(text).lower())
+    cleaned = re.sub(r"[^\w\s]", "", str(text).lower().replace("_", " "))
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
+_NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
+
+
+def _titles_near_equal(a: str, b: str) -> bool:
+    """True when two clean titles plausibly name the same track (a track number then breaks the tie).
+
+    Titles that differ only in digits ('Intro 2' / 'Intro 3', 'Part 1' / 'Part 2') are different tracks.
+    """
+    if not a or not b:
+        return False
+    if a != b and re.sub(r"\d", "", a) == re.sub(r"\d", "", b):
+        return False
+    shorter, longer = sorted((a, b), key=len)
+    if len(shorter) >= 4 and shorter in longer:
+        return True
+    return difflib.SequenceMatcher(None, a, b).ratio() >= _NEAR_TITLE_RATIO
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 _KNOWN_PERMISSION_MASK = 1 | 2 | 4 | 8 | 16 | 32 | 64
 
@@ -286,6 +307,7 @@ class Database:
                 (36, self._migration_v36),
                 (37, self._migration_v37),
                 (38, self._migration_v38),
+                (39, self._migration_v39),
             ]
 
             applied = 0
@@ -1386,6 +1408,32 @@ class Database:
         if "add_monitor_option" not in cols:
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN add_monitor_option TEXT NOT NULL DEFAULT 'all';"
+            )
+
+    def _migration_v39(self, cur: sqlite3.Cursor) -> None:
+        """Recompute ``clean_name`` / ``clean_title`` (and the folded ``search_clean``) for rows containing '_'.
+
+        ``clean_library_name`` now treats '_' as whitespace (iTunes' stand-in for characters illegal on Windows), so
+        stored keys such as ``daft punk_ pharrell williams`` must be rebuilt to stay findable. Idempotent: only rows
+        whose stored key still holds '_' are touched, and a recompute never reintroduces one.
+        """
+        for table, raw, clean in (
+            ("library_artists", "name", "clean_name"),
+            ("library_albums", "title", "clean_title"),
+            ("library_tracks", "title", "clean_title"),
+        ):
+            cur.execute(f"PRAGMA table_info({table});")
+            if not {raw, clean, "search_clean"} <= {row[1] for row in cur.fetchall()}:
+                continue
+            pending = cur.execute(
+                f"SELECT id, {raw} FROM {table} WHERE {clean} LIKE '%\\_%' ESCAPE '\\'"
+            ).fetchall()
+            cur.executemany(
+                f"UPDATE {table} SET {clean} = ?, search_clean = ? WHERE id = ?",
+                [
+                    (clean_library_name(name or ""), fold_search_text(clean_library_name(name or "")), row_id)
+                    for row_id, name in pending
+                ],
             )
 
     def _migration_v38(self, cur: sqlite3.Cursor) -> None:
@@ -6198,21 +6246,36 @@ class Database:
     def get_library_track_by_title(
         self, album_id: str, title: str, track_number: Optional[int] = None
     ) -> Optional[dict[str, Any]]:
-        """Retrieves a library track by album ID, clean title, and optional track number."""
+        """Retrieves a library track by album ID and title, with an optional track-number tiebreaker.
+
+        Order: exact clean title; clean title ignoring spaces ('Nightvision' finds 'Night Vision'); then, only when
+        a track number is supplied, a track holding that number whose title is near-equal. A track number alone never
+        matches: untagged or differently named tracks sharing a number are different tracks.
+        """
         clean = clean_library_name(title)
         with self._lock:
-            if track_number is not None:
-                cur = self.conn.execute(
-                    "SELECT * FROM library_tracks WHERE album_id = ? AND (clean_title = ? OR track_number = ?) LIMIT 1",
-                    (str(album_id), clean, int(track_number)),
-                )
-            else:
-                cur = self.conn.execute(
-                    "SELECT * FROM library_tracks WHERE album_id = ? AND clean_title = ? LIMIT 1",
-                    (str(album_id), clean),
-                )
-            row = cur.fetchone()
-            return self._map_library_track(row) if row else None
+            row = self.conn.execute(
+                "SELECT * FROM library_tracks WHERE album_id = ? AND clean_title = ? LIMIT 1",
+                (str(album_id), clean),
+            ).fetchone()
+            if row:
+                return self._map_library_track(row)
+            squashed = clean.replace(" ", "")
+            if squashed:
+                row = self.conn.execute(
+                    "SELECT * FROM library_tracks WHERE album_id = ? AND REPLACE(clean_title, ' ', '') = ? LIMIT 1",
+                    (str(album_id), squashed),
+                ).fetchone()
+                if row:
+                    return self._map_library_track(row)
+            if track_number is not None and clean:
+                for cand in self.conn.execute(
+                    "SELECT * FROM library_tracks WHERE album_id = ? AND track_number = ?",
+                    (str(album_id), int(track_number)),
+                ).fetchall():
+                    if _titles_near_equal(str(cand["clean_title"] or ""), clean):
+                        return self._map_library_track(cand)
+            return None
 
     def list_library_tracks(
         self,

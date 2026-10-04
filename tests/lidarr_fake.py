@@ -5,10 +5,33 @@ Every request is recorded in ``calls`` as ``(METHOD, path, json_body)`` where ``
 """
 
 import copy
+import time as _real_time
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
+
+class FastClock:
+    """Stands in for the ``time`` name inside one module (``patch("pkg.mod.time", FastClock())``).
+
+    ``sleep`` advances the clock instead of waiting, so a cooldown loop (``while time.time() < until: time.sleep(1)``)
+    finishes after a few iterations. Patching ``pkg.mod.time.sleep`` instead replaces the process-global
+    ``time.sleep`` with a no-op mock, and such a loop then spins on the real clock for the whole cooldown while the
+    mock records every call (hundreds of MB per test).
+    """
+
+    def __init__(self) -> None:
+        self.offset = 0.0
+
+    def time(self) -> float:
+        return _real_time.time() + self.offset
+
+    def monotonic(self) -> float:
+        return _real_time.monotonic() + self.offset
+
+    def sleep(self, seconds: float) -> None:
+        self.offset += seconds
+
 
 ROOT_DEFAULTS: dict[str, Any] = {
     "path": "/music",

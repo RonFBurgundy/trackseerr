@@ -277,8 +277,10 @@ def sanitize_component(name: str, colon_replacement: str = " - ") -> str:
     result = re.sub(r":\s*", colon_replacement, str(name))
     # Prevent directory traversal
     result = re.sub(r"\.{2,}", "", result)
+    # A slash separates words in tags ('Daft Punk/Romanthony'): keep them apart instead of gluing them together
+    result = result.replace("/", "-")
     # Strip illegal cross-platform characters and ASCII controls
-    result = re.sub(r'[<>"/\\|?*\x00-\x1f]', "", result)
+    result = re.sub(r'[<>"\\|?*\x00-\x1f]', "", result)
     # Collapse redundant spaces
     result = re.sub(r"\s+", " ", result).strip()
     # Truncate to 255 bytes UTF-8 cleanly

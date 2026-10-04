@@ -19,7 +19,7 @@ from .conftest import audio_files, configure_roots, run_scan, set_id3, snapshot
 
 pytestmark = pytest.mark.local_media
 
-QUALITY = "(MP3 320kbps)"
+QUALITY = "(MP3 320)"  # catalog quality name, the same source rename uses
 
 
 @pytest.fixture
@@ -85,11 +85,6 @@ def test_manual_scan_matches_existing_catalog_with_full_confidence(env, copy_dis
     assert cand["confidence"] == 1.0
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: manual-import scan proposes the raw track artist ('Daft Punk/Romanthony') instead of the "
-    "album artist 'Daft Punk' (api/routes/library.py:2474 artist = inspected['artist'])",
-)
 def test_manual_scan_proposes_album_artist_for_combined_artist_tag(env, copy_discovery):
     api, _, staging = env
     copy_discovery(["01 One More Time.mp3"], staging)
@@ -170,12 +165,6 @@ def test_commit_leaves_tags_alone_when_write_tags_false(env, copy_discovery):
     assert inspect_audio_file(res["destination_path"])["artist"] == "Daft Punk/Romanthony"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: manual import ignores the global write_audio_tags setting; ManualImportItem.write_tags "
-    "defaults to True (api/routes/library.py:169) and the commit never consults "
-    "media_settings['write_audio_tags'] (:2645 `if item.write_tags`)",
-)
 def test_commit_honours_global_write_audio_tags_setting(env, copy_discovery):
     api, _, staging = env
     api.db.update_media_management_settings({"write_audio_tags": False})
@@ -186,12 +175,6 @@ def test_commit_honours_global_write_audio_tags_setting(env, copy_discovery):
     assert inspect_audio_file(res["destination_path"])["artist"] == "Daft Punk/Romanthony"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: ManualImportItem.track_number defaults to 1 (api/routes/library.py:165), so "
-    "`item.track_number or inspected['track_number']` (:2604) never falls back to the file's tag; an item "
-    "without track_number is filed as track 01",
-)
 def test_commit_without_track_number_uses_the_files_tag(env, copy_discovery):
     api, root, staging = env
     (src,) = copy_discovery(["02 Aerodynamic.mp3"], staging)
@@ -250,11 +233,6 @@ def test_commit_night_vision_variants_land_on_one_track(env, copy_discovery):
     assert len(snap["tracks"]) == 1 and len(snap["files"]) == 2
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: end-to-end effect of the sanitize_component bug (naming.py:281): no artist_name override, so the raw "
-    "'Daft Punk/Romanthony' tag becomes the folder 'Daft PunkRomanthony'",
-)
 def test_combined_artist_tag_folder_name_is_not_glued_together(env, copy_discovery):
     api, root, staging = env
     (src,) = copy_discovery(["01 One More Time.mp3"], staging)
@@ -265,11 +243,6 @@ def test_combined_artist_tag_folder_name_is_not_glued_together(env, copy_discove
     assert "PunkRomanthony" not in artist_dir, artist_dir
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: sanitize_component deletes '/' instead of substituting it, so 'Daft Punk/Romanthony' -> "
-    "'Daft PunkRomanthony' (naming.py:281, re.sub(r'[<>\"/\\\\|?*...]', '', ...))",
-)
 def test_sanitize_component_does_not_glue_words_across_slash():
     assert "PunkRomanthony" not in sanitize_component("Daft Punk/Romanthony")
 
@@ -303,12 +276,6 @@ def test_preview_proposes_default_layout_without_touching_disk(scanned_env):
     assert audio_files(root) == before
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: import and rename disagree on {Quality Full}: commit renders it from the tag string "
-    "('MP3 320kbps', api/routes/library.py:2624 meta=dict(inspected)) while rename preview/apply render it from the "
-    "catalog quality_name ('MP3 320', :2825/:2899). A freshly imported file therefore shows needs_rename=True",
-)
 def test_freshly_imported_file_needs_no_rename(env, copy_discovery):
     api, _, staging = env
     (src,) = copy_discovery(["02 Aerodynamic.mp3"], staging)

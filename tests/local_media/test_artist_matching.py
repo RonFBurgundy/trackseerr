@@ -73,12 +73,6 @@ def test_lookup_by_name_is_case_and_punctuation_insensitive(db, library_copy):
     assert db.get_library_artist_by_name("Daft Punk feat Pharrell") is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: clean_library_name keeps '_' (\\w) so the folder form 'Daft Punk_ Pharrell Williams' (iTunes' "
-    "substitute for ':') never equals the tag form 'Daft Punk; Pharrell Williams' "
-    "(storage.py:55, re.sub(r'[^\\w\\s]', '', ...)); fix: treat '_' as whitespace",
-)
 def test_underscore_substitute_matches_punctuation_form():
     assert clean_library_name("Daft Punk_ Pharrell Williams") == clean_library_name("Daft Punk; Pharrell Williams")
 
@@ -99,12 +93,6 @@ def test_source_tags_are_what_we_think_they_are(media_root):
     assert meta["artist"] == "Daft Punk; Pharrell Williams" and meta["album_artist"] == "Daft Punk"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: scanner groups by TRACK artist, so 'Daft Punk; Pharrell Williams' becomes its own artist instead of "
-    "joining album artist 'Daft Punk' (library_scanner.py:457); Random Access Memories and the Get Lucky single "
-    "end up under different artists",
-)
 def test_semicolon_collab_tag_resolves_to_album_artist(db, collab_root):
     run_scan(db, collab_root)
     assert [a["name"] for a in snapshot(db)["artists"]] == ["Daft Punk"]
@@ -132,12 +120,6 @@ def untagged_root(media_root, tmp_path):
     return root
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG/GAP: 'Daft Punk feat Pharrell' and 'Daft Punk ft Pharrell' each become a separate library artist; "
-    "there is no feat/ft/featuring splitting anywhere (library_scanner.py:457). '&' is deliberately NOT asserted "
-    "('Simon & Garfunkel' is a real act). Fix: split the primary artist off on feat./ft./featuring/';' only",
-)
 def test_feat_and_ft_variants_resolve_to_primary_artist(db, untagged_root):
     run_scan(db, untagged_root)
     names = {a["name"] for a in snapshot(db)["artists"] if "Rihanna" not in a["name"]}
@@ -160,12 +142,6 @@ def test_tagless_file_falls_back_to_folder_names(db, tmp_path, media_root):
     assert [a["title"] for a in snap["albums"]] == ["Random Access Memories"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG/GAP: a tagless file is titled with its raw filename stem and track number 1 "
-    "('08 Get Lucky', #1) instead of parsing the leading number off the name "
-    "(library_scanner.py:434 fallback_title = file_path.stem, :435 fallback_track_number = 1)",
-)
 def test_tagless_file_title_and_track_number_come_from_filename(db, tmp_path, media_root):
     root = tmp_path / "music"
     src = media_root / TAGGED_COLLAB / "08 Get Lucky.mp3"

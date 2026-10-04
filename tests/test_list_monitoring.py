@@ -34,6 +34,7 @@ from plex_playlist_sync.models import (
 )
 from plex_playlist_sync.request_submission import RequestRejected
 from plex_playlist_sync.storage import Database
+from tests.lidarr_fake import FastClock
 
 ART = "aaaaaaaa-0000-0000-0000-00000000000a"
 RG = "bbbbbbbb-0000-0000-0000-00000000000b"
@@ -52,7 +53,9 @@ def db():
 @pytest.fixture(autouse=True)
 def _offline(monkeypatch):
     """Nothing here may reach the network or sleep for real."""
-    monkeypatch.setattr("plex_playlist_sync.list_monitoring.time.sleep", lambda s: None)
+    # Patch the module's own ``time`` name: ``list_monitoring.time.sleep`` is the process-global ``time.sleep``, and
+    # a no-op there turns every background thread's sleep loop (in any module) into a hot loop for the whole test.
+    monkeypatch.setattr("plex_playlist_sync.list_monitoring.time", FastClock())
     monkeypatch.setattr("plex_playlist_sync.mediacover.mediacover_service.ensure_artwork", lambda *a, **k: Path("/tmp/c.jpg"))
 
 

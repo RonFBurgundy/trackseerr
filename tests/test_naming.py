@@ -156,7 +156,7 @@ class TestCrossPlatformSanitization:
     def test_illegal_character_stripping(self):
         raw = '<Invalid> "Path" | Name? *Test* /Directory\\ \x00\x1f'
         cleaned = sanitize_component(raw)
-        assert cleaned == "Invalid Path Name Test Directory"
+        assert cleaned == "Invalid Path Name Test -Directory"  # "/" separates words, so it becomes "-"
 
     def test_trailing_dot_and_space_elimination(self):
         # Trims trailing dots preventing SMB/CIFS errors while preserving internal dots
