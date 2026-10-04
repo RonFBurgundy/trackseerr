@@ -213,8 +213,7 @@ def build_lidarr_client(db: Database, config: Optional[Config]) -> Optional[Lida
     api_key = lidarr_settings.get("api_key")
     auto_search = lidarr_settings.get("auto_search", True)
     root_folder = lidarr_settings.get("root_folder")
-    quality_profile_id = lidarr_settings.get("quality_profile_id")
-    metadata_profile_id = lidarr_settings.get("metadata_profile_id")
+    prefer_singles = bool(lidarr_settings.get("prefer_singles", True))
 
     if not (url and api_key):
         if config is not None and config.has_lidarr:
@@ -222,8 +221,6 @@ def build_lidarr_client(db: Database, config: Optional[Config]) -> Optional[Lida
             api_key = config.lidarr_api_key
             auto_search = config.lidarr_auto_search
             root_folder = config.lidarr_root_folder
-            quality_profile_id = config.lidarr_quality_profile_id
-            metadata_profile_id = config.lidarr_metadata_profile_id
             try:  # seed the DB so subsequent requests use it
                 db.update_lidarr_settings(
                     {
@@ -231,8 +228,6 @@ def build_lidarr_client(db: Database, config: Optional[Config]) -> Optional[Lida
                         "api_key": api_key,
                         "auto_search": auto_search,
                         "root_folder": root_folder,
-                        "quality_profile_id": quality_profile_id,
-                        "metadata_profile_id": metadata_profile_id,
                         "trickle_rate_seconds": config.lidarr_trickle_rate_seconds,
                         "trickle_batch_size": config.lidarr_trickle_batch_size,
                         "auto_trickle": config.lidarr_auto_trickle,
@@ -251,10 +246,7 @@ def build_lidarr_client(db: Database, config: Optional[Config]) -> Optional[Lida
             verify_ssl=config.plex_verify_ssl if config is not None else True,
             auto_search=bool(auto_search),
             root_folder=root_folder,
-            quality_profile_id=quality_profile_id,
-            metadata_profile_id=metadata_profile_id,
-            monitor_option=lidarr_settings.get("monitor_option"),
-            tag_ids=lidarr_settings.get("tag_ids") or [],
+            prefer_singles=prefer_singles,
         )
     except (AttributeError, ValueError, TypeError) as exc:
         logger.error("Failed to initialize LidarrClient: %s", safe_exc(exc))

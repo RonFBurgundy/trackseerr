@@ -72,6 +72,10 @@ export interface RequestItem {
   cover_url?: string;
   type?: string;
   quality_profile?: string;
+  /** Machine-readable reason a processing request is stuck, e.g. `not_in_metadata_profile`. */
+  status_reason?: string | null;
+  /** Human-readable explanation of `status_reason`. */
+  status_message?: string | null;
 }
 
 export interface Playlist {
@@ -343,28 +347,15 @@ export interface LidarrSettings {
   /** @deprecated Legacy mirror of `search_on_add`; read and write `search_on_add` instead. */
   auto_search?: boolean;
   root_folder?: string;
-  quality_profile_id?: number;
-  metadata_profile_id?: number;
   trickle_rate_seconds: number;
   trickle_batch_size: number;
   auto_trickle: boolean;
   auto_trickle_interval_minutes?: number;
-  /** Phase 2: what to monitor when an artist is added. */
-  monitor_option?: LidarrMonitorOption;
   /** Search immediately after add (stored in the legacy `auto_search` column server-side). */
   search_on_add?: boolean;
-  /** Phase 2: Lidarr tag ids applied to added artists. */
-  tag_ids?: number[];
+  /** Song requests monitor the single (when one exists) instead of the album it appears on. Server default true. */
+  prefer_singles?: boolean;
 }
-
-export type LidarrMonitorOption =
-  | 'all'
-  | 'future'
-  | 'missing'
-  | 'existing'
-  | 'first'
-  | 'latest'
-  | 'none';
 
 export type LibraryManagerMode = 'native' | 'lidarr';
 
@@ -374,11 +365,6 @@ export interface LibraryManagerState {
   native_configured: boolean;
   can_switch: boolean;
   blocking_reason: string | null;
-}
-
-export interface LidarrRootFolderOption {
-  path: string;
-  free_space: number;
 }
 
 export interface LidarrNamedOption {
@@ -391,11 +377,19 @@ export interface LidarrTagOption {
   label: string;
 }
 
-export interface LidarrOptions {
-  root_folders: LidarrRootFolderOption[];
-  quality_profiles: LidarrNamedOption[];
-  metadata_profiles: LidarrNamedOption[];
+/** The root-folder defaults Trackseerr adds artists with, as Lidarr reports them. */
+export interface LidarrDefaults {
+  root_folder: string;
+  quality_profile: LidarrNamedOption;
+  metadata_profile: LidarrNamedOption;
+  monitor: string;
+  new_item_monitor: string;
   tags: LidarrTagOption[];
+  /** `fallback` when this Lidarr reports no per-folder defaults (first profiles, monitor all, no tags). */
+  source: 'rootfolder' | 'fallback';
+  root_folders: string[];
+  /** False when the resolved Lidarr metadata profile excludes the "Single" primary album type. */
+  singles_enabled: boolean;
 }
 
 export type SystemJobState = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';

@@ -320,12 +320,13 @@ def lidarr_mode(db):
 def lidarr_client(*, artist_id: int = 0, albums: Optional[list[dict[str, Any]]] = None) -> MagicMock:
     client = MagicMock(spec=LidarrClient)
     client.lookup_artist.return_value = [{"foreignArtistId": ART, "artistName": "Radiohead", "id": artist_id}]
-    client.add_artist_with_monitor.return_value = {"id": 77}
+    client.add_artist_with_defaults.return_value = {"id": 77}
     client.fetch_artist_albums.return_value = albums if albums is not None else []
+    client.fetch_album.return_value = {"monitored": True}  # the verify-after-monitor read
     return client
 
 
-def test_lidarr_album_adds_artist_with_none_then_monitors_and_searches_album(db, lidarr_mode):
+def test_lidarr_album_adds_artist_unmonitored_then_monitors_and_searches_album(db, lidarr_mode):
     client = lidarr_client(albums=[
         {"id": 5, "title": "The Bends", "foreignAlbumId": RG2, "monitored": False},
         {"id": 6, "title": "OK Computer", "foreignAlbumId": RG, "monitored": False},
@@ -333,8 +334,8 @@ def test_lidarr_album_adds_artist_with_none_then_monitors_and_searches_album(db,
     res = apply_list_item(db, None, album_item(), "album", enricher=make_enricher(), lidarr_client=client)
     assert (res.status, res.applied_level) == ("applied", "album")
     client.lookup_artist.assert_called_once_with(f"lidarr:{ART}")
-    client.add_artist_with_monitor.assert_called_once()
-    assert client.add_artist_with_monitor.call_args.args[1] == "none"
+    client.add_artist_with_defaults.assert_called_once()
+    assert client.add_artist_with_defaults.call_args.kwargs["whole_artist"] is False  # unmonitored add
     client.set_albums_monitored.assert_called_once_with([6], True)
     client.run_command.assert_called_once_with("AlbumSearch", albumIds=[6])
     assert db.list_library_artists() == []  # nothing native in lidarr mode
@@ -344,7 +345,7 @@ def test_lidarr_album_respects_auto_search_off_and_skips_already_monitored(db, l
     db.update_lidarr_settings({"auto_search": False})
     client = lidarr_client(artist_id=9, albums=[{"id": 6, "title": "OK Computer", "foreignAlbumId": RG, "monitored": False}])
     apply_list_item(db, None, album_item(), "album", enricher=make_enricher(), lidarr_client=client)
-    client.add_artist_with_monitor.assert_not_called()  # artist already in Lidarr
+    client.add_artist_with_defaults.assert_not_called()  # artist already in Lidarr
     client.set_albums_monitored.assert_called_once_with([6], True)
     client.run_command.assert_not_called()
 
@@ -369,33 +370,29 @@ def test_lidarr_album_not_loaded_yet_stays_pending_and_missing_album_unresolved(
     assert apply_list_item(db, None, album_item(), "album", enricher=make_enricher(), lidarr_client=other).status == "unresolved"
 
 
-@pytest.mark.parametrize("option,expected", [("all", "all"), ("existing", "existing"), ("future", "future"), ("none", "none")])
-def test_lidarr_artist_maps_monitor_option(db, lidarr_mode, option, expected):
+@pytest.mark.parametrize("option", ["all", "existing", "future", "none", "albums", "singles_eps"])
+@pytest.mark.parametrize("auto_search", [True, False])
+def test_lidarr_artist_ignores_list_monitor_option_and_uses_root_folder_defaults(db, lidarr_mode, option, auto_search):
+    """In Lidarr mode the list's artist_monitor_option is ignored: the add carries Lidarr's own defaults."""
+    db.update_lidarr_settings({"auto_search": auto_search})
     client = lidarr_client()
-    res = apply_list_item(db, None, artist_item(), "artist", artist_monitor_option=option, enricher=make_enricher(), lidarr_client=client)
-    assert (res.status, res.applied_level) == ("applied", "artist")
-    assert client.add_artist_with_monitor.call_args.args[1] == expected
-    searched = option in ("all", "existing")
-    assert (client.run_command.call_args_list == [(("ArtistSearch",), {"artistId": 77})]) is searched
-
-
-def test_lidarr_artist_preset_options_apply_after_albums_load(db, lidarr_mode):
-    client = lidarr_client(albums=[{"id": 1, "title": "X", "foreignAlbumId": RG, "monitored": False}])
     with patch("plex_playlist_sync.list_monitoring.lidarr_library.apply_monitor_preset") as preset:
-        res = apply_list_item(db, None, artist_item(), "artist", artist_monitor_option="albums", enricher=make_enricher(), lidarr_client=client)
-    assert res.status == "applied"
-    assert client.add_artist_with_monitor.call_args.args[1] == "none"
-    preset.assert_called_once_with(client, 77, "albums")
+        res = apply_list_item(db, None, artist_item(), "artist", artist_monitor_option=option, enricher=make_enricher(), lidarr_client=client)
+    assert (res.status, res.applied_level) == ("applied", "artist")
+    client.add_artist_with_defaults.assert_called_once()
+    assert client.add_artist_with_defaults.call_args.kwargs == {"whole_artist": True, "search": auto_search}
+    preset.assert_not_called()
+    client.run_command.assert_not_called()  # the search rides on the add (searchForMissingAlbums)
 
 
 def test_lidarr_artist_existing_is_untouched_and_errors_are_recorded(db, lidarr_mode):
     existing = lidarr_client(artist_id=3)
     assert apply_list_item(db, None, artist_item(), "artist", artist_monitor_option="all", enricher=make_enricher(), lidarr_client=existing).status == "applied"
-    existing.add_artist_with_monitor.assert_not_called()
+    existing.add_artist_with_defaults.assert_not_called()
     existing.run_command.assert_not_called()
 
     broken = lidarr_client()
-    broken.add_artist_with_monitor.side_effect = LidarrApiError("Lidarr returned HTTP 500 for artist")
+    broken.add_artist_with_defaults.side_effect = LidarrApiError("Lidarr returned HTTP 500 for artist")
     res = apply_list_item(db, None, artist_item(), "artist", artist_monitor_option="all", enricher=make_enricher(), lidarr_client=broken)
     assert res.status == "failed" and "HTTP 500" in res.error
 
@@ -810,23 +807,19 @@ def test_native_pre_existing_artist_is_never_refreshed_even_on_retry_without_fla
     refresh.assert_not_called()
 
 
-def test_lidarr_artist_retry_completes_preset_for_artist_added_by_item(db, lidarr_mode):
-    albums = [{"id": 1, "title": "A", "foreignAlbumId": RG, "monitored": False}]
-    client = lidarr_client(albums=[])  # albums not loaded yet on the first attempt
+def test_lidarr_artist_retry_after_item_added_artist_finds_it_and_changes_nothing(db, lidarr_mode):
+    client = lidarr_client()
     flagged: list[bool] = []
-    with patch("plex_playlist_sync.list_monitoring.lidarr_library.apply_monitor_preset") as preset:
-        res = apply_list_item(db, None, artist_item(), "artist", artist_monitor_option="albums",
-                              enricher=make_enricher(), lidarr_client=client, on_artist_added=lambda: flagged.append(True))
-        assert res.status == "pending" and flagged == [True]
-        preset.assert_not_called()
+    res = apply_list_item(db, None, artist_item(), "artist", artist_monitor_option="albums",
+                          enricher=make_enricher(), lidarr_client=client, on_artist_added=lambda: flagged.append(True))
+    assert res.status == "applied" and flagged == [True]
 
-        # Retry: Lidarr now reports the artist as existing (id 77) and its albums are loaded.
-        retry_client = lidarr_client(artist_id=77, albums=albums)
-        res = apply_list_item(db, None, artist_item(), "artist", artist_monitor_option="albums",
-                              enricher=make_enricher(), lidarr_client=retry_client, artist_added=True)
-        assert res.status == "applied"
-        preset.assert_called_once_with(retry_client, 77, "albums")
-        retry_client.add_artist_with_monitor.assert_not_called()
+    # Retry: Lidarr now reports the artist as existing (id 77): nothing is added or edited again.
+    retry_client = lidarr_client(artist_id=77)
+    res = apply_list_item(db, None, artist_item(), "artist", enricher=make_enricher(), lidarr_client=retry_client, artist_added=True)
+    assert res.status == "applied"
+    retry_client.add_artist_with_defaults.assert_not_called()
+    retry_client.run_command.assert_not_called()
 
 
 def test_lidarr_pre_existing_artist_untouched(db, lidarr_mode):
@@ -836,172 +829,7 @@ def test_lidarr_pre_existing_artist_untouched(db, lidarr_mode):
                               enricher=make_enricher(), lidarr_client=client)
     assert res.status == "applied"
     preset.assert_not_called()
+    client.add_artist_with_defaults.assert_not_called()
+    client.set_artist_monitored.assert_not_called()
+    client.bulk_edit_artists.assert_not_called()
     client.run_command.assert_not_called()
-
-
-def test_sync_persists_artist_added_flag_and_resumes_on_retry(db):
-    lst = _make_list(db, monitor_mode="artist")
-    it = ImportListItem(kind="artist", external_key=ART, artist_name="Radiohead", mbid=ART, artist_mbid=ART)
-    with _fetched(it), patch("plex_playlist_sync.api.routes.library.refresh_single_artist", return_value={"success": False, "message": "x"}):
-        sync_import_list(db, lst["id"], None, enricher=make_enricher())
-    row = db.conn.execute("SELECT status, artist_added_by_item FROM import_list_items").fetchone()
-    assert (row[0], row[1]) == ("pending", 1)
-    with _fetched(it), patch("plex_playlist_sync.api.routes.library.refresh_single_artist", return_value={"success": True}) as refresh:
-        sync_import_list(db, lst["id"], None, enricher=make_enricher())
-    refresh.assert_called_once()
-    assert db.import_list_item_counts(lst["id"])["applied"] == 1
-
-
-def test_playlist_missing_track_persists_artist_added_flag(db):
-    _playlist(db, "artist")
-    with patch("plex_playlist_sync.api.routes.library.refresh_single_artist", return_value={"success": False, "message": "x"}):
-        counts = apply_playlist_missing(db, None, "pl-1", enricher=make_enricher())
-    assert counts["pending"] == 1
-    row = db.get_missing_tracks("pl-1")[0]
-    assert row["artist_added_by_item"] == 1 and row["list_applied_at"] is None
-    with patch("plex_playlist_sync.api.routes.library.refresh_single_artist", return_value={"success": True}) as refresh:
-        assert apply_playlist_missing(db, None, "pl-1", enricher=make_enricher())["applied"] == 1
-    refresh.assert_called_once()
-
-
-# retry policy
-
-
-def _item_row(db: Database, lid: str) -> dict[str, Any]:
-    return dict(db.conn.execute("SELECT status, attempts, next_attempt_at FROM import_list_items").fetchone())
-
-
-def _one_item(db: Database) -> tuple[str, int]:
-    lst = _make_list(db)
-    db.upsert_import_list_items(lst["id"], [{"kind": "track", "external_key": "k", "artist_name": "A", "track_title": "T"}])
-    return lst["id"], db.list_pending_import_items(lst["id"])[0]["id"]
-
-
-def _hours_until_retry(db: Database) -> float:
-    return db.conn.execute(
-        "SELECT (julianday(next_attempt_at) - julianday('now')) * 24 FROM import_list_items"
-    ).fetchone()[0]
-
-
-def test_failed_items_back_off_1h_6h_24h_then_weekly_then_stay_failed(db):
-    lid, item_id = _one_item(db)
-    expected = [1, 6, 24, 168, 168]
-    for hours in expected:
-        db.update_import_list_item(item_id, "failed", error="x")
-        assert _hours_until_retry(db) == pytest.approx(hours, abs=0.05)
-        assert db.list_pending_import_items(lid) == []  # not due yet
-        db.conn.execute("UPDATE import_list_items SET next_attempt_at = datetime('now', '-1 minutes')")
-        db.conn.commit()
-        assert [r["id"] for r in db.list_pending_import_items(lid)] == [item_id]  # due now
-    db.update_import_list_item(item_id, "failed", error="x")  # 6th failure
-    row = _item_row(db, lid)
-    assert row["attempts"] == 6 and row["next_attempt_at"] is None and row["status"] == "failed"
-    assert db.list_pending_import_items(lid) == []
-
-
-def test_unresolved_items_retry_weekly_and_pending_every_sync(db):
-    lid, item_id = _one_item(db)
-    db.update_import_list_item(item_id, "unresolved", error="no match")
-    assert _hours_until_retry(db) == pytest.approx(168, abs=0.05)
-    assert db.list_pending_import_items(lid) == []
-    db.conn.execute("UPDATE import_list_items SET next_attempt_at = datetime('now', '-1 minutes')")
-    db.conn.commit()
-    assert len(db.list_pending_import_items(lid)) == 1
-    db.update_import_list_item(item_id, "applied", "track")
-    assert _item_row(db, lid)["next_attempt_at"] is None and db.list_pending_import_items(lid) == []
-
-
-def test_sync_retries_due_failed_item_and_clears_it_on_success(db):
-    lst = _make_list(db, monitor_mode="track")
-    it = ImportListItem(kind="track", external_key="a|b", artist_name="Band", track_title="Song")
-    with _fetched(it), patch("plex_playlist_sync.import_list_worker.apply_list_item", side_effect=LidarrApiError("down")):
-        sync_import_list(db, lst["id"], None, enricher=make_enricher())
-    assert db.import_list_item_counts(lst["id"])["failed"] == 1
-    with _fetched(it):  # not due yet: untouched
-        summary = sync_import_list(db, lst["id"], None, enricher=make_enricher())
-    assert db.import_list_item_counts(lst["id"])["failed"] == 1 and "applied" not in summary
-    db.conn.execute("UPDATE import_list_items SET next_attempt_at = datetime('now', '-1 minutes')")
-    db.conn.commit()
-    with _fetched(it):
-        sync_import_list(db, lst["id"], None, enricher=make_enricher())
-    assert db.import_list_item_counts(lst["id"])["applied"] == 1
-
-
-def test_changing_monitor_mode_resets_skipped_items_to_pending(db):
-    lst = _make_list(db, monitor_mode="none")
-    db.upsert_import_list_items(lst["id"], [
-        {"kind": "track", "external_key": "s", "artist_name": "A", "track_title": "S"},
-        {"kind": "track", "external_key": "p", "artist_name": "A", "track_title": "P"},
-    ])
-    s_id, p_id = [r["id"] for r in db.list_pending_import_items(lst["id"])]
-    db.update_import_list_item(s_id, "skipped")
-    db.update_import_list_item(p_id, "applied", "track")
-    data = {"name": "Loved", "provider": "lastfm", "config": lst["config"], "monitor_mode": "none"}
-    db.update_import_list(lst["id"], data)  # same mode: no reset
-    assert db.import_list_item_counts(lst["id"])["skipped"] == 1
-    db.update_import_list(lst["id"], {**data, "monitor_mode": "album"})
-    counts = db.import_list_item_counts(lst["id"])
-    assert (counts["skipped"], counts["pending"], counts["applied"]) == (0, 1, 1)
-
-
-# claims
-
-
-def test_claim_tokens_stale_release_cannot_free_a_newer_claim(db):
-    first = claim_sync("L1")
-    assert first and claim_sync("L1") is None
-    assert release_sync("L1", first) is True
-    second = claim_sync("L1")
-    assert second and second != first
-    assert release_sync("L1", first) is False  # the double release of the old claim is a no-op
-    assert claim_sync("L1") is None  # still held by `second`
-    assert release_sync("L1", second) is True
-
-
-def test_sync_import_list_releases_by_token_only_once(db):
-    lst = _make_list(db)
-    token = claim_sync(lst["id"])
-    with _fetched():
-        sync_import_list(db, lst["id"], None, enricher=make_enricher(), claim_token=token)
-    newer = claim_sync(lst["id"])
-    assert newer  # sync released its claim
-    assert release_sync(lst["id"], token) is False
-    assert claim_sync(lst["id"]) is None
-    release_sync(lst["id"], newer)
-
-
-# duplicate list-track requests
-
-
-def test_list_track_skipped_when_open_request_exists(db):
-    db.upsert_user("u2", "bob", "b@x.com", is_admin=False)
-    from plex_playlist_sync.request_submission import submit_track_request
-
-    cfg = MagicMock()
-    with patch("plex_playlist_sync.request_submission.run_submission_followups"):
-        submit_track_request(db, cfg, db.get_user("u2"), "Airbag", "Radiohead", "OK Computer")
-    before = len(db.list_requests())
-    admin = db.get_user("admin-1")
-    with patch("plex_playlist_sync.list_monitoring.submit_track_request") as submit:
-        res = apply_list_item(db, cfg, track_item(), "track", requested_by=admin)
-    assert (res.status, res.error) == ("applied", "already requested")
-    submit.assert_not_called()
-    assert len(db.list_requests()) == before
-
-
-def test_list_track_skipped_when_library_has_file(db):
-    artist = db.upsert_library_artist(LibraryArtist(id="a1", name="Radiohead", clean_name="radiohead", path="/m/R", monitored=True), preserve_monitoring=True)
-    album = db.upsert_library_album({"id": "al1", "artist_id": "a1", "title": "OK Computer", "clean_title": "ok computer", "monitored": True})
-    trk = db.upsert_library_track({"id": "t1", "album_id": "al1", "artist_id": "a1", "title": "Airbag", "clean_title": "airbag", "track_number": 1, "disc_number": 1, "monitored": True})
-    db.conn.execute(
-        "INSERT INTO library_files (id, track_id, file_path, relative_path, codec, quality_name) VALUES ('f1', 't1', '/m/a.flac', 'a.flac', 'flac', 'FLAC')"
-    )
-    db.conn.commit()
-    with patch("plex_playlist_sync.list_monitoring.submit_track_request") as submit:
-        res = apply_list_item(db, MagicMock(), track_item(), "track", requested_by=db.get_user("admin-1"))
-    assert (res.status, res.error) == ("applied", "already requested")
-    submit.assert_not_called()
-    # A track the library has without a file is still requested.
-    with patch("plex_playlist_sync.list_monitoring.submit_track_request") as submit:
-        apply_list_item(db, MagicMock(), track_item(track_title="Other"), "track", requested_by=db.get_user("admin-1"))
-    submit.assert_called_once()

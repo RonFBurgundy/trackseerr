@@ -144,7 +144,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <UsersPanel adminHook={adminUsersHook} currentUserId={currentUserId} />
       )}
 
-      {activeTab === 'import-lists' && isAdmin && !mfaEnrollmentRequired && <ImportListsPanel onToast={showToast} />}
+      {activeTab === 'import-lists' && isAdmin && !mfaEnrollmentRequired && <ImportListsPanel libraryMode={mode} onToast={showToast} />}
 
       {activeTab === 'system' && isAdmin && !mfaEnrollmentRequired && (
         <SystemPage isCore={isCore} libraryMode={mode} onToast={showToast} />

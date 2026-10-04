@@ -62,8 +62,7 @@ def get_acquisition_driver(
             api_key=api_key or "",
             auto_search=bool(extra.get("auto_search", True)),
             root_folder=extra.get("root_folder"),
-            quality_profile_id=extra.get("quality_profile_id"),
-            metadata_profile_id=extra.get("metadata_profile_id"),
+            prefer_singles=bool(extra.get("prefer_singles", True)),
         )
     else:
         raise ValueError(f"Unsupported download driver type: '{driver_type}'")

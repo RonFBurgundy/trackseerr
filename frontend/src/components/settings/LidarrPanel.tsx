@@ -1,14 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Loader2, Save, AlertTriangle, RotateCw } from 'lucide-react';
 import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar } from '@/components/ui';
-import type {
-  LidarrSettings,
-  LidarrMonitorOption,
-  LibraryManagerMode,
-  LidarrNamedOption,
-} from '@/types/models';
+import type { LidarrSettings, LibraryManagerMode } from '@/types/models';
 import { updateLidarrSettings, testLidarrConnection } from '@/services/settingsService';
-import { useLidarrOptions } from '@/hooks/useLidarrOptions';
+import { useLidarrDefaults } from '@/hooks/useLidarrDefaults';
 import { InactiveBanner } from './InactiveGate';
 import { inputClass, labelClass, compactInputClass, compactLabelClass } from './formClasses';
 
@@ -20,16 +15,6 @@ const DEFAULT_LIDARR: LidarrSettings = {
   trickle_batch_size: 25,
 };
 
-const MONITOR_OPTIONS: Array<{ value: LidarrMonitorOption; label: string }> = [
-  { value: 'all', label: 'All albums' },
-  { value: 'future', label: 'Future albums' },
-  { value: 'missing', label: 'Missing albums' },
-  { value: 'existing', label: 'Existing albums' },
-  { value: 'first', label: 'First album' },
-  { value: 'latest', label: 'Latest album' },
-  { value: 'none', label: 'None' },
-];
-
 export interface LidarrPanelProps {
   settings: LidarrSettings | null;
   onChange: React.Dispatch<React.SetStateAction<LidarrSettings | null>>;
@@ -39,36 +24,6 @@ export interface LidarrPanelProps {
   onRequestSwitch: (mode: LibraryManagerMode) => void;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
 }
-
-interface ProfileSelectProps {
-  label: string;
-  value: number | undefined;
-  options: LidarrNamedOption[] | null;
-  onChange: (id: number | undefined) => void;
-}
-
-const ProfileSelect: React.FC<ProfileSelectProps> = ({ label, value, options, onChange }) => {
-  const known = options?.some((o) => o.id === value) ?? false;
-  return (
-    <div>
-      <label className={compactLabelClass}>{label}</label>
-      <select
-        value={value ?? ''}
-        disabled={!options}
-        onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
-        className={compactInputClass}
-      >
-        <option value="">Default</option>
-        {value !== undefined && !known && <option value={value}>Profile #{value}</option>}
-        {options?.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.name}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-};
 
 export const LidarrPanel: React.FC<LidarrPanelProps> = ({
   settings,
@@ -80,7 +35,7 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
 }) => {
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isTesting, setIsTesting] = useState<boolean>(false);
-  // Options come from the *saved* Lidarr connection, so only enable once a saved URL exists.
+  // Defaults come from the *saved* Lidarr connection, so only enable once a saved URL exists.
   const [hasSavedUrl, setHasSavedUrl] = useState<boolean>(false);
   const seeded = useRef<boolean>(false);
   useEffect(() => {
@@ -89,17 +44,12 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
       setHasSavedUrl(Boolean(settings.url));
     }
   }, [settings]);
-  const optionsHook = useLidarrOptions(hasSavedUrl);
-  const { options, error: optionsError, isLoading: optionsLoading } = optionsHook;
+  const defaultsHook = useLidarrDefaults(hasSavedUrl);
+  const { defaults, error: defaultsError, isLoading: defaultsLoading } = defaultsHook;
 
   const patch = (p: Partial<LidarrSettings>) => onChange((prev) => ({ ...(prev ?? DEFAULT_LIDARR), ...p }));
 
   const searchOnAdd = settings?.search_on_add ?? true;
-  const tagIds = settings?.tag_ids ?? [];
-
-  const toggleTag = (id: number) => {
-    patch({ tag_ids: tagIds.includes(id) ? tagIds.filter((t) => t !== id) : [...tagIds, id] });
-  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,7 +60,7 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
       const { auto_search: _legacyAutoSearch, ...payload } = settings;
       const updated = await updateLidarrSettings(payload);
       onChange(updated);
-      if (hasSavedUrl) void optionsHook.refresh();
+      if (hasSavedUrl) void defaultsHook.refresh();
       setHasSavedUrl(Boolean(updated.url));
       onToast('Lidarr settings saved');
     } catch {
@@ -137,7 +87,9 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
     }
   };
 
-  const rootFolderKnown = options?.root_folders.some((r) => r.path === settings?.root_folder) ?? false;
+  const rootFolders = defaults?.root_folders ?? [];
+  const rootFolderKnown = rootFolders.includes(settings?.root_folder ?? '');
+  const monitorLabel = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1);
 
   return (
     <div className="space-y-4 max-w-2xl">
@@ -195,28 +147,28 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
           >
             <div className="pt-2 border-t border-[#1f1f1f] space-y-4">
               <div className="flex items-center justify-between gap-3">
-                <h5 className="text-xs font-bold uppercase font-mono text-white">Add Defaults</h5>
+                <h5 className="text-xs font-bold uppercase font-mono text-white">Root Folder</h5>
                 <TapeDeckButton
                   type="button"
                   size="sm"
-                  onClick={() => void optionsHook.refresh()}
-                  disabled={!hasSavedUrl || optionsLoading}
-                  icon={<RotateCw className={`h-3 w-3 ${optionsLoading ? 'animate-spin' : ''}`} />}
+                  onClick={() => void defaultsHook.refresh()}
+                  disabled={!hasSavedUrl || defaultsLoading}
+                  icon={<RotateCw className={`h-3 w-3 ${defaultsLoading ? 'animate-spin' : ''}`} />}
                 >
-                  Reload options
+                  Reload from Lidarr
                 </TapeDeckButton>
               </div>
 
               {!hasSavedUrl && (
                 <p className="text-[11px] font-mono text-neutral-500">
-                  Enter the Lidarr URL and API key, save, then reload options to pick a root folder and profiles.
+                  Enter the Lidarr URL and API key, save, then reload to pick a root folder.
                 </p>
               )}
 
-              {optionsError && (
+              {defaultsError && (
                 <p className="flex items-start gap-2 text-xs font-mono text-red-300" role="alert">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
-                  <span>Could not load options from Lidarr: {optionsError}</span>
+                  <span>Could not load defaults from Lidarr: {defaultsError}</span>
                 </p>
               )}
 
@@ -224,79 +176,70 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
                 <label className={compactLabelClass}>Root Folder</label>
                 <select
                   value={settings?.root_folder ?? ''}
-                  disabled={!options}
+                  disabled={!defaults}
                   onChange={(e) => patch({ root_folder: e.target.value || undefined })}
                   className={compactInputClass}
                 >
-                  <option value="">Default</option>
+                  <option value="">First Lidarr root folder</option>
                   {settings?.root_folder && !rootFolderKnown && (
                     <option value={settings.root_folder}>{settings.root_folder}</option>
                   )}
-                  {options?.root_folders.map((r) => (
-                    <option key={r.path} value={r.path}>
-                      {r.path}
+                  {rootFolders.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <ProfileSelect
-                  label="Quality Profile"
-                  value={settings?.quality_profile_id}
-                  options={options?.quality_profiles ?? null}
-                  onChange={(id) => patch({ quality_profile_id: id })}
-                />
-                <ProfileSelect
-                  label="Metadata Profile"
-                  value={settings?.metadata_profile_id}
-                  options={options?.metadata_profiles ?? null}
-                  onChange={(id) => patch({ metadata_profile_id: id })}
-                />
-              </div>
-
-              <div>
-                <label className={compactLabelClass}>Monitor</label>
-                <select
-                  value={settings?.monitor_option ?? 'all'}
-                  onChange={(e) => patch({ monitor_option: e.target.value as LidarrMonitorOption })}
-                  className={compactInputClass}
-                >
-                  {MONITOR_OPTIONS.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <span className={compactLabelClass}>Tags</span>
-                {options && options.tags.length === 0 && (
-                  <p className="text-[11px] font-mono text-neutral-500">No tags are defined in Lidarr.</p>
-                )}
-                {!options && (
-                  <p className="text-[11px] font-mono text-neutral-500">
-                    {tagIds.length > 0 ? `${tagIds.length} tag(s) selected. ` : ''}Tag list unavailable until options load.
+              {defaults && (
+                <div className="border border-[#222222] bg-[#0d0d0d] rounded-[4px] p-3 space-y-2" aria-label="From your Lidarr">
+                  <span className={compactLabelClass}>From your Lidarr</span>
+                  {defaults.source === 'fallback' && (
+                    <p className="flex items-start gap-2 text-[11px] font-mono text-amber-300" role="alert">
+                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                      <span>
+                        This Lidarr does not report root-folder defaults. Trackseerr is using its first quality and
+                        metadata profiles, monitoring all albums, and no tags. Set defaults on the root folder in Lidarr
+                        or update Lidarr.
+                      </span>
+                    </p>
+                  )}
+                  <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs font-mono">
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-neutral-500">Root folder</dt>
+                      <dd className="text-white truncate" title={defaults.root_folder}>{defaults.root_folder}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-neutral-500">Quality profile</dt>
+                      <dd className="text-white truncate">{defaults.quality_profile.name}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-neutral-500">Metadata profile</dt>
+                      <dd className="text-white truncate">{defaults.metadata_profile.name}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-neutral-500">Monitor</dt>
+                      <dd className="text-white">{monitorLabel(defaults.monitor)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-neutral-500">New albums</dt>
+                      <dd className="text-white">{monitorLabel(defaults.new_item_monitor)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-neutral-500">Tags</dt>
+                      <dd className="text-white truncate">
+                        {defaults.tags.length > 0 ? defaults.tags.map((t) => t.label).join(', ') : 'None'}
+                      </dd>
+                    </div>
+                  </dl>
+                  <p className="text-[11px] font-mono text-neutral-400">
+                    Trackseerr adds artists with these root-folder defaults from Lidarr (Settings → Media Management →
+                    Root Folders). Song and album requests add new artists unmonitored and monitor only the release
+                    needed.
                   </p>
-                )}
-                {options && options.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5" role="group" aria-label="Lidarr tags">
-                    {options.tags.map((t) => (
-                      <TapeDeckButton
-                        key={t.id}
-                        type="button"
-                        size="sm"
-                        active={tagIds.includes(t.id)}
-                        aria-pressed={tagIds.includes(t.id)}
-                        onClick={() => toggleTag(t.id)}
-                      >
-                        {t.label}
-                      </TapeDeckButton>
-                    ))}
-                  </div>
-                )}
-              </div>
+                </div>
+              )}
 
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -311,6 +254,29 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
                   label="Search on Add"
                 />
               </div>
+
+              {defaults?.singles_enabled === true && (
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-xs font-mono font-medium text-white block">
+                      Prefer singles for song requests
+                    </span>
+                    <span className="text-[11px] text-neutral-400 font-mono">
+                      When a song was released as a single, monitor the single instead of the album it appears on.
+                    </span>
+                  </div>
+                  <TactileSwitch
+                    checked={settings?.prefer_singles ?? true}
+                    onChange={(val) => patch({ prefer_singles: val })}
+                    label="Prefer singles for song requests"
+                  />
+                </div>
+              )}
+              {defaults?.singles_enabled === false && (
+                <p className="text-[11px] text-neutral-400 font-mono">
+                  Your Lidarr metadata profile excludes singles, so song requests always use albums.
+                </p>
+              )}
             </div>
 
             <div className="pt-2 border-t border-[#1f1f1f] space-y-4">

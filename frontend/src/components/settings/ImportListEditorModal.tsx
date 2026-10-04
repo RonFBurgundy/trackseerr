@@ -5,7 +5,7 @@ import { StatusMessage } from '@/components/ui/FormField';
 import type { UseImportListEditorReturn } from '@/hooks/useImportListEditor';
 import type { ProviderMeta, ProviderField, ImportListItemOut } from '@/types/importLists';
 import { SECRET_MASK, SYNC_INTERVAL_OPTIONS } from '@/types/importLists';
-import type { QualityProfile } from '@/types/models';
+import type { LibraryManagerMode, QualityProfile } from '@/types/models';
 import type { MonitorOption } from '@/types/monitoring';
 import { inputClass } from './formClasses';
 
@@ -13,6 +13,8 @@ export interface ImportListEditorModalProps {
   editor: UseImportListEditorReturn;
   providers: ProviderMeta[];
   profiles: QualityProfile[];
+  /** In Lidarr mode the artist monitor option does not apply: Lidarr's root-folder defaults decide. */
+  libraryMode: LibraryManagerMode;
 }
 
 function describeItem(it: ImportListItemOut): string {
@@ -69,7 +71,7 @@ const ProviderFieldInput: React.FC<{
   );
 };
 
-export const ImportListEditorModal: React.FC<ImportListEditorModalProps> = ({ editor, providers, profiles }) => {
+export const ImportListEditorModal: React.FC<ImportListEditorModalProps> = ({ editor, providers, profiles, libraryMode }) => {
   const { draft, provider, testResult } = editor;
   const intervalOptions = SYNC_INTERVAL_OPTIONS.some((o) => o.value === draft.sync_interval_minutes)
     ? SYNC_INTERVAL_OPTIONS
@@ -132,7 +134,7 @@ export const ImportListEditorModal: React.FC<ImportListEditorModalProps> = ({ ed
           <MonitorModeSelect id="il-mode" value={draft.monitor_mode} onChange={editor.setMonitorMode} />
         </FormField>
 
-        {draft.monitor_mode === 'artist' && (
+        {draft.monitor_mode === 'artist' && libraryMode !== 'lidarr' && (
           <FormField label="Artist monitor option" htmlFor="il-artist-opt">
             <MonitorOptionSelect
               id="il-artist-opt"
@@ -140,6 +142,12 @@ export const ImportListEditorModal: React.FC<ImportListEditorModalProps> = ({ ed
               onChange={(v: MonitorOption) => editor.patch({ artist_monitor_option: v })}
             />
           </FormField>
+        )}
+
+        {draft.monitor_mode === 'artist' && libraryMode === 'lidarr' && (
+          <p className="text-[11px] font-mono text-neutral-400">
+            New artists are added with the defaults of your Lidarr root folder.
+          </p>
         )}
 
         <FormField label="Quality profile" htmlFor="il-quality">

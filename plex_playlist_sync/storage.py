@@ -94,29 +94,39 @@ logger = logging.getLogger(__name__)
 # How long a statement waits for a competing writer before SQLite raises "database is locked".
 _BUSY_TIMEOUT_MS = 15_000
 
-LIDARR_MONITOR_OPTIONS = ("all", "future", "missing", "existing", "first", "latest", "none")
+_LEGACY_LIDARR_OVERRIDE_COLUMNS = ("monitor_option", "quality_profile_id", "metadata_profile_id", "tag_ids")
+
+# Missing-track statuses that are retried on a schedule instead of on every trickle pass.
+LIDARR_BACKOFF_STATUSES = ("error", "rate_limited")
+LIDARR_WEEKLY_STATUSES = ("unavailable", "not_found")
+LIDARR_WEEKLY_RETRY = timedelta(days=7)
+LIDARR_ERROR_BACKOFF = (timedelta(hours=1), timedelta(hours=6), timedelta(hours=24))
+_RETRY_TS_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
-def _parse_int_list(value: Any) -> list[int]:
-    """Coerces a JSON string or list into a de-duplicated list of ints; anything unparseable is dropped."""
-    if isinstance(value, str):
-        try:
-            value = json.loads(value) if value.strip() else []
-        except json.JSONDecodeError:
-            return []
-    if not isinstance(value, (list, tuple)):
-        return []
-    out: list[int] = []
-    for item in value:
-        if isinstance(item, bool):
-            continue
-        try:
-            n = int(item)
-        except (TypeError, ValueError):
-            continue
-        if n not in out:
-            out.append(n)
-    return out
+def lidarr_retry_delay(status: str, attempts: int) -> Optional[timedelta]:
+    """How long to wait before re-sending an item whose Lidarr outcome was ``status`` after ``attempts`` tries.
+
+    ``unavailable`` (not in the metadata profile) and ``not_found`` are re-checked weekly; ``error`` and
+    ``rate_limited`` back off 1h, 6h, 24h and then weekly. Other statuses are not scheduled (``None``).
+    """
+    if status in LIDARR_WEEKLY_STATUSES:
+        return LIDARR_WEEKLY_RETRY
+    if status in LIDARR_BACKOFF_STATUSES:
+        index = max(1, int(attempts)) - 1
+        return LIDARR_ERROR_BACKOFF[index] if index < len(LIDARR_ERROR_BACKOFF) else LIDARR_WEEKLY_RETRY
+    return None
+
+
+def lidarr_item_due(row: dict[str, Any], now: Optional[datetime] = None) -> bool:
+    """True when a missing track should be (re)sent to Lidarr now: not monitored and its retry time has passed."""
+    if row.get("lidarr_status") == "monitored":
+        return False
+    due_at = row.get("next_attempt_at")
+    if not due_at:
+        return True
+    current = (now or datetime.now(timezone.utc)).strftime(_RETRY_TS_FORMAT)
+    return str(due_at) <= current
 
 
 class Database:
@@ -275,6 +285,7 @@ class Database:
                 (35, self._migration_v35),
                 (36, self._migration_v36),
                 (37, self._migration_v37),
+                (38, self._migration_v38),
             ]
 
             applied = 0
@@ -1377,6 +1388,33 @@ class Database:
                 "ALTER TABLE media_management_settings ADD COLUMN add_monitor_option TEXT NOT NULL DEFAULT 'all';"
             )
 
+    def _migration_v38(self, cur: sqlite3.Cursor) -> None:
+        """Request outcomes (why a request is stuck) and retry scheduling for Lidarr dispatch.
+
+        - ``music_requests.status_reason`` / ``status_message``: why a request is stuck; the status is unchanged.
+        - ``lidarr_settings.prefer_singles``: monitor a song's single rather than the album it appears on (default on).
+        - ``missing_tracks.attempts`` / ``next_attempt_at``: back-off bookkeeping so a failing item is retried on a
+          schedule instead of every trickle interval.
+        """
+        for table, columns in (
+            (
+                "music_requests",
+                (
+                    ("status_reason", "TEXT"),
+                    ("status_message", "TEXT"),
+                ),
+            ),
+            ("missing_tracks", (("attempts", "INTEGER NOT NULL DEFAULT 0"), ("next_attempt_at", "TEXT"))),
+        ):
+            cur.execute(f"PRAGMA table_info({table});")
+            have = {row[1] for row in cur.fetchall()}
+            for name, decl in columns:
+                if name not in have:
+                    cur.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl};")
+        cur.execute("PRAGMA table_info(lidarr_settings);")
+        if "prefer_singles" not in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE lidarr_settings ADD COLUMN prefer_singles INTEGER NOT NULL DEFAULT 1;")
+
     def _migration_v37(self, cur: sqlite3.Cursor) -> None:
         """Import lists, per-playlist monitor mode and the missing-track "already applied" marker."""
         cur.execute("PRAGMA table_info(playlists);")
@@ -2442,9 +2480,11 @@ class Database:
             # Preserve existing lidarr_status across sync cycles
             existing_lidarr_status: dict[tuple[str, str], str] = {}
             existing_applied: dict[tuple[str, str], str] = {}
+            existing_retry: dict[tuple[str, str], tuple[int, Optional[str]]] = {}
             try:
                 cur = self.conn.execute(
-                    "SELECT title, artist, lidarr_status, list_applied_at FROM missing_tracks WHERE playlist_id = ?",
+                    "SELECT title, artist, lidarr_status, list_applied_at, attempts, next_attempt_at "
+                    "FROM missing_tracks WHERE playlist_id = ?",
                     (p_id,),
                 )
                 for r in cur.fetchall():
@@ -2452,6 +2492,7 @@ class Database:
                     existing_lidarr_status[key] = str(r["lidarr_status"] or "unmonitored")
                     if r["list_applied_at"]:
                         existing_applied[key] = str(r["list_applied_at"])
+                    existing_retry[key] = (int(r["attempts"] or 0), r["next_attempt_at"])
             except sqlite3.Error as exc:
                 logger.warning("Could not read previous missing-track state for playlist %s: %s", p_id, exc)
 
@@ -2475,12 +2516,18 @@ class Database:
                         continue
                     key = (str(title).strip().lower(), str(artist).strip().lower())
                     l_status = existing_lidarr_status.get(key, "unmonitored")
+                    attempts, next_at = existing_retry.get(key, (0, None))
                     self.conn.execute(
                         """
-                        INSERT INTO missing_tracks (playlist_id, title, artist, album, url, lidarr_status, list_applied_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO missing_tracks (
+                            playlist_id, title, artist, album, url, lidarr_status, list_applied_at, attempts, next_attempt_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (p_id, str(title), str(artist), str(album), str(url), l_status, existing_applied.get(key)),
+                        (
+                            p_id, str(title), str(artist), str(album), str(url), l_status,
+                            existing_applied.get(key), attempts, next_at,
+                        ),
                     )
             self.conn.commit()
 
@@ -2491,7 +2538,7 @@ class Database:
             if playlist_id is not None:
                 cur = self.conn.execute(
                     """
-                    SELECT id, playlist_id, title, artist, album, url, lidarr_status, list_applied_at, artist_added_by_item, created_at
+                    SELECT id, playlist_id, title, artist, album, url, lidarr_status, list_applied_at, artist_added_by_item, attempts, next_attempt_at, created_at
                     FROM missing_tracks
                     WHERE playlist_id = ?
                     ORDER BY id ASC
@@ -2501,7 +2548,7 @@ class Database:
             else:
                 cur = self.conn.execute(
                     """
-                    SELECT id, playlist_id, title, artist, album, url, lidarr_status, list_applied_at, artist_added_by_item, created_at
+                    SELECT id, playlist_id, title, artist, album, url, lidarr_status, list_applied_at, artist_added_by_item, attempts, next_attempt_at, created_at
                     FROM missing_tracks
                     ORDER BY id ASC
                     """
@@ -2513,7 +2560,7 @@ class Database:
         with self._lock:
             cur = self.conn.execute(
                 """
-                SELECT id, playlist_id, title, artist, album, url, lidarr_status, list_applied_at, artist_added_by_item, created_at
+                SELECT id, playlist_id, title, artist, album, url, lidarr_status, list_applied_at, artist_added_by_item, attempts, next_attempt_at, created_at
                 FROM missing_tracks
                 WHERE id = ?
                 """,
@@ -2523,28 +2570,44 @@ class Database:
             return dict(row) if row else None
 
     def update_missing_track_lidarr_status(self, track_id: int, status: str) -> bool:
-        """Updates the Lidarr monitoring status for a specific missing track."""
-        with self._lock:
-            cur = self.conn.execute(
-                "UPDATE missing_tracks SET lidarr_status = ? WHERE id = ?",
-                (str(status), int(track_id)),
-            )
-            self.conn.commit()
-            return cur.rowcount > 0
+        """Updates the Lidarr monitoring status for a specific missing track (and its retry schedule)."""
+        return self.update_missing_tracks_lidarr_status_bulk([int(track_id)], status) > 0
 
     def update_missing_tracks_lidarr_status_bulk(self, track_ids: list[int], status: str) -> int:
-        """Updates the Lidarr monitoring status for a list of track IDs."""
+        """Updates the Lidarr status for a list of track IDs and schedules their next attempt.
+
+        ``error`` / ``rate_limited`` / ``unavailable`` / ``not_found`` count one more attempt and set
+        ``next_attempt_at`` per ``lidarr_retry_delay``; any other status clears both.
+        """
         if not track_ids:
             return 0
+        status_val = str(status)
+        ids = [int(tid) for tid in track_ids]
+        now = datetime.now(timezone.utc)
         with self._lock:
-            placeholders = ",".join("?" for _ in track_ids)
-            params = [str(status)] + [int(tid) for tid in track_ids]
-            cur = self.conn.execute(
-                f"UPDATE missing_tracks SET lidarr_status = ? WHERE id IN ({placeholders})",
-                params,
-            )
+            if lidarr_retry_delay(status_val, 1) is None:
+                placeholders = ",".join("?" for _ in ids)
+                cur = self.conn.execute(
+                    "UPDATE missing_tracks SET lidarr_status = ?, attempts = 0, next_attempt_at = NULL "
+                    f"WHERE id IN ({placeholders})",
+                    [status_val, *ids],
+                )
+                self.conn.commit()
+                return cur.rowcount
+            updated = 0
+            for tid in ids:
+                row = self.conn.execute("SELECT attempts FROM missing_tracks WHERE id = ?", (tid,)).fetchone()
+                if row is None:
+                    continue
+                attempts = int(row["attempts"] or 0) + 1
+                delay = lidarr_retry_delay(status_val, attempts) or LIDARR_WEEKLY_RETRY
+                cur = self.conn.execute(
+                    "UPDATE missing_tracks SET lidarr_status = ?, attempts = ?, next_attempt_at = ? WHERE id = ?",
+                    (status_val, attempts, (now + delay).strftime(_RETRY_TS_FORMAT), tid),
+                )
+                updated += cur.rowcount
             self.conn.commit()
-            return cur.rowcount
+            return updated
 
     # -------------------------------------------------------------------------
     # Playlist monitor mode and import lists
@@ -3578,7 +3641,7 @@ class Database:
                 SELECT r.id, r.user_id, r.item_type, r.title, r.artist, r.album,
                        r.cover_url, r.preview_url, r.status, r.release_date, r.foreign_id,
                        r.quality_profile_id, r.current_quality, r.cutoff_met,
-                       r.created_at, r.updated_at, r.batch_id, r.batch_kind, u.username
+                       r.created_at, r.updated_at, r.batch_id, r.batch_kind, r.status_reason, r.status_message, u.username
                 FROM music_requests r
                 LEFT JOIN users u ON r.user_id = u.id
                 WHERE r.id = ?
@@ -3605,7 +3668,7 @@ class Database:
             SELECT r.id, r.user_id, r.item_type, r.title, r.artist, r.album,
                    r.cover_url, r.preview_url, r.status, r.release_date, r.foreign_id,
                    r.quality_profile_id, r.current_quality, r.cutoff_met,
-                   r.created_at, r.updated_at, r.batch_id, r.batch_kind, u.username
+                   r.created_at, r.updated_at, r.batch_id, r.batch_kind, r.status_reason, r.status_message, u.username
             FROM music_requests r
             LEFT JOIN users u ON r.user_id = u.id
             WHERE 1=1
@@ -3675,10 +3738,24 @@ class Database:
             cur = self.conn.execute(
                 """
                 UPDATE music_requests
-                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                SET status = ?, status_reason = NULL, status_message = NULL, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
                 (status_val, str(request_id)),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def set_request_outcome(self, request_id: str, reason: Optional[str], message: Optional[str]) -> bool:
+        """Records (or with ``None`` clears) why a request is stuck, leaving its status as it is."""
+        with self._lock:
+            cur = self.conn.execute(
+                """
+                UPDATE music_requests
+                SET status_reason = ?, status_message = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (reason, message, str(request_id)),
             )
             self.conn.commit()
             return cur.rowcount > 0
@@ -4090,19 +4167,17 @@ class Database:
             res = dict(row)
             res["auto_search"] = bool(res.get("auto_search", 1))
             res["auto_trickle"] = bool(res.get("auto_trickle", 0))
+            res["prefer_singles"] = bool(res.get("prefer_singles", 1))
             res["trickle_rate_seconds"] = float(res.get("trickle_rate_seconds") or 3.0)
             res["trickle_batch_size"] = int(res.get("trickle_batch_size") or 25)
             res["auto_trickle_interval_minutes"] = int(
                 res.get("auto_trickle_interval_minutes") or 30
             )
-            if res.get("quality_profile_id") is not None:
-                res["quality_profile_id"] = int(res["quality_profile_id"])
-            if res.get("metadata_profile_id") is not None:
-                res["metadata_profile_id"] = int(res["metadata_profile_id"])
-            monitor = str(res.get("monitor_option") or "all")
-            res["monitor_option"] = monitor if monitor in LIDARR_MONITOR_OPTIONS else "all"
+            # Lidarr's own root-folder defaults decide profiles, monitoring and tags; the legacy override columns stay
+            # in the table (no migration) but are never surfaced or read.
+            for legacy in _LEGACY_LIDARR_OVERRIDE_COLUMNS:
+                res.pop(legacy, None)
             res["search_on_add"] = res["auto_search"]
-            res["tag_ids"] = _parse_int_list(res.get("tag_ids"))
             return res
 
     def update_lidarr_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
@@ -4112,15 +4187,12 @@ class Database:
             "api_key",
             "auto_search",
             "root_folder",
-            "quality_profile_id",
-            "metadata_profile_id",
             "trickle_rate_seconds",
             "trickle_batch_size",
             "auto_trickle",
             "auto_trickle_interval_minutes",
-            "monitor_option",
-            "tag_ids",
             "search_on_add",
+            "prefer_singles",
         }
         updates: dict[str, Any] = {}
         for k, v in settings.items():
@@ -4128,25 +4200,12 @@ class Database:
                 if k == "search_on_add":
                     if v is not None:  # wins over a stale auto_search echoed back by a client
                         updates["auto_search"] = 1 if v else 0
-                elif k == "monitor_option":
-                    if v is not None:
-                        opt = str(v).strip().lower()
-                        if opt not in LIDARR_MONITOR_OPTIONS:
-                            raise ValueError(f"Invalid monitor_option: {v!r}")
-                        updates[k] = opt
-                elif k == "tag_ids":
-                    updates[k] = json.dumps(_parse_int_list(v if v is not None else []))
-                elif k in ("auto_search", "auto_trickle"):
+                elif k in ("auto_search", "auto_trickle", "prefer_singles"):
                     if k == "auto_search" and settings.get("search_on_add") is not None:
                         continue
                     if v is not None:
                         updates[k] = 1 if v else 0
-                elif k in (
-                    "quality_profile_id",
-                    "metadata_profile_id",
-                    "trickle_batch_size",
-                    "auto_trickle_interval_minutes",
-                ):
+                elif k in ("trickle_batch_size", "auto_trickle_interval_minutes"):
                     updates[k] = int(v) if v is not None else None
                 elif k == "trickle_rate_seconds":
                     updates[k] = float(v) if v is not None else 3.0

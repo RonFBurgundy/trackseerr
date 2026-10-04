@@ -5,11 +5,13 @@ import { useImportLists } from '@/hooks/useImportLists';
 import { useImportListEditor } from '@/hooks/useImportListEditor';
 import { useMonitoringDefaults } from '@/hooks/useMonitoringDefaults';
 import { useQualityProfiles } from '@/hooks/useQualityProfiles';
+import type { LibraryManagerMode } from '@/types/models';
 import { LIST_MONITOR_MODE_LABELS, type ImportList } from '@/types/importLists';
 import { ImportListEditorModal } from './ImportListEditorModal';
 import { ImportListHistoryModal } from './ImportListHistoryModal';
 
 export interface ImportListsPanelProps {
+  libraryMode: LibraryManagerMode;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
 }
 
@@ -21,7 +23,7 @@ const COUNT_LABELS: ReadonlyArray<{ key: keyof ImportList['item_counts']; label:
   { key: 'skipped', label: 'skipped' },
 ];
 
-export const ImportListsPanel: React.FC<ImportListsPanelProps> = ({ onToast }) => {
+export const ImportListsPanel: React.FC<ImportListsPanelProps> = ({ libraryMode, onToast }) => {
   const toast = useCallback((msg: string, tone: 'ok' | 'error' = 'ok') => onToast(msg, tone), [onToast]);
   const lists = useImportLists(true, toast);
   const defaults = useMonitoringDefaults();
@@ -130,7 +132,12 @@ export const ImportListsPanel: React.FC<ImportListsPanelProps> = ({ onToast }) =
         ))}
       </div>
 
-      <ImportListEditorModal editor={editor} providers={lists.providers} profiles={quality.profiles} />
+      <ImportListEditorModal
+        editor={editor}
+        providers={lists.providers}
+        profiles={quality.profiles}
+        libraryMode={libraryMode}
+      />
       <ImportListHistoryModal list={historyList} onClose={() => setHistoryList(null)} />
     </div>
   );

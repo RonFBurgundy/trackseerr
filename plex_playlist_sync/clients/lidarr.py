@@ -2,12 +2,14 @@
 
 import logging
 import re
+import threading
 import time
 from typing import Any, NamedTuple, Optional
 from urllib.parse import quote, urlencode
 
 import httpx
 
+from plex_playlist_sync.lidarr_release import albums_containing_song, match_named_album, select_release_for_song
 from plex_playlist_sync.redaction import safe_exc
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,14 @@ class LidarrApiError(Exception):
     """A Lidarr request failed. The message is application-authored and never carries the API key."""
 
 
+class LidarrRateLimited(LidarrApiError):
+    """Lidarr (or the metadata service behind it) answered 429 or a transient 5xx; ``retry_after`` is in seconds."""
+
+    def __init__(self, message: str, retry_after: int = 60) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 class LidarrNotFound(LidarrApiError):
     """Lidarr answered 404 for the requested item."""
 
@@ -36,6 +46,87 @@ class LidarrBadArtwork(LidarrApiError):
 COVER_CONTENT_TYPES = frozenset({"image/jpeg", "image/png", "image/webp", "image/gif"})
 COVER_DEADLINE_SECONDS = 10.0
 _monotonic = time.monotonic
+
+
+OUTCOME_NOT_IN_PROFILE = "not_in_metadata_profile"
+OUTCOME_MONITOR_FAILED = "monitor_failed"
+OUTCOME_ALBUMS_PENDING = "albums_pending"
+NOT_IN_PROFILE_MESSAGE = "Not available with your Lidarr metadata profile"
+ALBUMS_PENDING_MESSAGE = "Lidarr has not finished loading this artist's releases yet"
+MONITOR_FAILED_MESSAGE = "Lidarr did not keep the album monitored"
+
+ALBUM_WAIT_ATTEMPTS = 6
+ALBUM_WAIT_SECONDS = 3.0
+DEFAULTS_TTL_SECONDS = 300.0
+_MAX_PER_ALBUM_TRACK_FETCHES = 200
+_RETRYABLE_STATUS = (429, 502, 503, 504)
+
+
+class LidarrAddDefaults(NamedTuple):
+    """What Lidarr's own root-folder defaults say an added artist should get."""
+
+    root_folder_path: str
+    quality_profile_id: int
+    metadata_profile_id: int
+    monitor: str
+    new_item_monitor: str
+    tag_ids: list[int]
+    source: str  # "rootfolder" (Lidarr reported them) or "fallback" (first profiles, monitor all, no tags)
+
+
+_DEFAULTS_CACHE: dict[tuple[str, str, str], tuple[float, LidarrAddDefaults]] = {}
+_DEFAULTS_LOCK = threading.Lock()
+_SINGLES_CACHE: dict[tuple[str, str, int], tuple[float, bool]] = {}
+
+
+def invalidate_add_defaults() -> None:
+    """Drops every cached root-folder default (call when the Lidarr settings change)."""
+    with _DEFAULTS_LOCK:
+        _DEFAULTS_CACHE.clear()
+        _SINGLES_CACHE.clear()
+
+
+def _singles_allowed(profile: Any) -> Optional[bool]:
+    """``allowed`` of the "Single" entry in a metadata profile resource, or None when the shape is unexpected."""
+    items = profile.get("primaryAlbumTypes") if isinstance(profile, dict) else None
+    if not isinstance(items, list):
+        return None
+    for item in items:
+        if not isinstance(item, dict):
+            return None
+        album_type = item.get("albumType")
+        if isinstance(album_type, dict) and str(album_type.get("name") or "").strip().casefold() == "single":
+            allowed = item.get("allowed")
+            return allowed if isinstance(allowed, bool) else None
+    return None
+
+
+def _positive_int(value: Any) -> Optional[int]:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _outcome(status: str, album_id: Optional[int], message: str) -> dict[str, Any]:
+    return {"status": status, "album_id": album_id, "message": message}
+
+
+def _retry_after(resp: httpx.Response) -> int:
+    try:
+        return max(1, int(resp.headers.get("Retry-After", 60)))
+    except ValueError:
+        return 60
+
+
+def _rate_limited(artist: str, exc: "LidarrRateLimited", message: str) -> dict[str, Any]:
+    return {
+        "status": "rate_limited",
+        "artist": artist,
+        "retry_after": exc.retry_after,
+        "message": f"{message} ({_exc_text(exc)}). Backing off for {exc.retry_after}s.",
+    }
 
 
 class MediaCover(NamedTuple):
@@ -54,22 +145,16 @@ class LidarrClient:
         verify_ssl: bool = True,
         auto_search: bool = True,
         root_folder: Optional[str] = None,
-        quality_profile_id: Optional[int] = None,
-        metadata_profile_id: Optional[int] = None,
         timeout: float = 15.0,
-        monitor_option: Optional[str] = None,
-        tag_ids: Optional[list[int]] = None,
+        prefer_singles: bool = True,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key.strip()
         self.verify_ssl = verify_ssl
         self.auto_search = auto_search
         self.root_folder = root_folder
-        self.quality_profile_id = quality_profile_id
-        self.metadata_profile_id = metadata_profile_id
         self.timeout = timeout
-        self.monitor_option = monitor_option
-        self.tag_ids = list(tag_ids or [])
+        self.prefer_singles = prefer_singles
 
     def _get_json(self, path: str) -> Any:
         """GET ``/api/v1/<path>`` with the bounded client timeout; raises LidarrApiError on any failure."""
@@ -83,6 +168,8 @@ class LidarrClient:
             raise LidarrApiError("Lidarr rejected the API key")
         if resp.status_code == 404:
             raise LidarrNotFound(f"Lidarr could not find the item for {path}")
+        if resp.status_code in _RETRYABLE_STATUS:
+            raise LidarrRateLimited(f"Lidarr returned HTTP {resp.status_code} for {path}", _retry_after(resp))
         if resp.status_code != 200:
             raise LidarrApiError(f"Lidarr returned HTTP {resp.status_code} for {path}")
         try:
@@ -161,226 +248,389 @@ class LidarrClient:
         except Exception as e:
             return {"online": False, "error": _exc_text(e)}
 
-    def get_root_folder(self, client: Optional[httpx.Client] = None) -> str:
-        """Retrieves configured or default Lidarr root folder path."""
-        if self.root_folder:
-            return self.root_folder
-        url = f"{self.base_url}/api/v1/rootfolder"
-        headers = self._get_headers()
-        try:
-            if client:
-                resp = client.get(url, headers=headers)
-            else:
-                with httpx.Client(verify=self.verify_ssl, timeout=self.timeout) as c:
-                    resp = c.get(url, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data and isinstance(data, list) and len(data) > 0:
-                    return str(data[0].get("path", "/music"))
-        except Exception as e:
-            logger.warning("Could not discover Lidarr root folder: %s", _exc_text(e))
-        return "/music"
+    # ------------------------------------------------------------------ Root-folder defaults (the source of truth)
 
-    def get_quality_profile_id(self, client: Optional[httpx.Client] = None) -> int:
-        """Retrieves configured or default Lidarr quality profile ID."""
-        if self.quality_profile_id is not None:
-            return self.quality_profile_id
-        url = f"{self.base_url}/api/v1/qualityprofile"
-        headers = self._get_headers()
-        try:
-            if client:
-                resp = client.get(url, headers=headers)
-            else:
-                with httpx.Client(verify=self.verify_ssl, timeout=self.timeout) as c:
-                    resp = c.get(url, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data and isinstance(data, list) and len(data) > 0:
-                    return int(data[0].get("id", 1))
-        except Exception as e:
-            logger.warning("Could not discover Lidarr quality profile: %s", _exc_text(e))
-        return 1
+    def _first_profile_id(self, path: str, label: str) -> int:
+        data = self._get_json(path)
+        if isinstance(data, list):
+            for row in data:
+                if isinstance(row, dict) and _positive_int(row.get("id")) is not None:
+                    return int(row["id"])
+        raise LidarrApiError(f"Lidarr has no {label} profile to fall back to")
 
-    def get_metadata_profile_id(self, client: Optional[httpx.Client] = None) -> int:
-        """Retrieves configured or default Lidarr metadata profile ID."""
-        if self.metadata_profile_id is not None:
-            return self.metadata_profile_id
-        url = f"{self.base_url}/api/v1/metadataprofile"
-        headers = self._get_headers()
+    def get_root_folder_defaults(self, path_or_none: Optional[str] = None) -> LidarrAddDefaults:
+        """What Lidarr itself would use when adding an artist: the defaults of one of its root folders.
+
+        The root folder is ``path_or_none`` (default: this client's ``root_folder`` setting) when Lidarr has such a
+        folder, otherwise Lidarr's first one. A Lidarr that does not report per-folder defaults (older versions) gets
+        its first quality / metadata profile, monitor ``all`` and no tags, with ``source="fallback"``. The result is
+        cached per process for ``DEFAULTS_TTL_SECONDS``; ``invalidate_add_defaults`` drops it. Raises LidarrApiError.
+        """
+        requested = path_or_none if path_or_none is not None else self.root_folder
+        key = (self.base_url, self.api_key, requested or "")
+        now = _monotonic()
+        with _DEFAULTS_LOCK:
+            hit = _DEFAULTS_CACHE.get(key)
+            if hit is not None and now - hit[0] < DEFAULTS_TTL_SECONDS:
+                return hit[1]._replace(tag_ids=list(hit[1].tag_ids))
+
+        roots = self._get_json("rootfolder")
+        if not isinstance(roots, list):
+            raise LidarrApiError("Lidarr returned an unexpected response shape for rootfolder")
+        folders = [r for r in roots if isinstance(r, dict)]
+        wanted = (requested or "").rstrip("/")
+        chosen = next((r for r in folders if wanted and str(r.get("path") or "").rstrip("/") == wanted), None)
+        if chosen is None and folders:
+            chosen = folders[0]
+        raw: dict[str, Any] = chosen or {}
+        path = str(raw.get("path") or requested or "/music")
+
+        quality_id = _positive_int(raw.get("defaultQualityProfileId"))
+        metadata_id = _positive_int(raw.get("defaultMetadataProfileId"))
+        source = "rootfolder"
+        if quality_id is None or metadata_id is None:
+            source = "fallback"
+            if quality_id is None:
+                quality_id = self._first_profile_id("qualityprofile", "quality")
+            if metadata_id is None:
+                metadata_id = self._first_profile_id("metadataprofile", "metadata")
+            logger.warning("Lidarr reports no root-folder defaults for %s; using its first profiles", path)
+        defaults = LidarrAddDefaults(
+            root_folder_path=path,
+            quality_profile_id=quality_id,
+            metadata_profile_id=metadata_id,
+            monitor=str(raw.get("defaultMonitorOption") or "all"),
+            new_item_monitor=str(raw.get("defaultNewItemMonitorOption") or "all"),
+            tag_ids=[int(t) for t in (raw.get("defaultTags") or []) if _positive_int(t) is not None],
+            source=source,
+        )
+        with _DEFAULTS_LOCK:
+            _DEFAULTS_CACHE[key] = (now, defaults)
+        return defaults._replace(tag_ids=list(defaults.tag_ids))
+
+    def metadata_profile_allows_singles(self, profile_id: int) -> bool:
+        """Whether Lidarr metadata profile ``profile_id`` allows the "Single" primary album type.
+
+        ``GET /metadataprofile/{id}`` returns ``primaryAlbumTypes``: ``[{"albumType": {"id", "name"}, "allowed"}]``.
+        An unexpected shape (or no "Single" entry) answers ``True`` with a warning, so the setting stays visible.
+        Cached for ``DEFAULTS_TTL_SECONDS`` next to the root-folder defaults. Raises LidarrApiError on a request failure.
+        """
+        key = (self.base_url, self.api_key, int(profile_id))
+        now = _monotonic()
+        with _DEFAULTS_LOCK:
+            hit = _SINGLES_CACHE.get(key)
+            if hit is not None and now - hit[0] < DEFAULTS_TTL_SECONDS:
+                return hit[1]
+        data = self._get_json(f"metadataprofile/{int(profile_id)}")
+        allowed = _singles_allowed(data)
+        if allowed is None:
+            logger.warning("Lidarr metadata profile %s has an unexpected shape; assuming singles are allowed", profile_id)
+            allowed = True
+        with _DEFAULTS_LOCK:
+            _SINGLES_CACHE[key] = (now, allowed)
+        return allowed
+
+    def add_artist_with_defaults(
+        self, candidate: dict[str, Any], *, whole_artist: bool, search: bool = False
+    ) -> dict[str, Any]:
+        """``POST /artist`` for a looked-up artist, carrying every root-folder default of Lidarr.
+
+        ``whole_artist=True`` adds the artist the way Lidarr's own add-artist screen does (``addOptions.monitor`` is
+        the root folder's monitor option, ``searchForMissingAlbums`` is ``search``). ``whole_artist=False`` is for a
+        song or album request: same profiles, tags, root folder and ``monitorNewItems``, but nothing monitored and no
+        search yet, because the caller then monitors exactly the release it needs. Raises LidarrApiError.
+        """
+        defaults = self.get_root_folder_defaults()
+        payload = {
+            **candidate,
+            "monitored": True,
+            "rootFolderPath": defaults.root_folder_path,
+            "qualityProfileId": defaults.quality_profile_id,
+            "metadataProfileId": defaults.metadata_profile_id,
+            "tags": list(defaults.tag_ids),
+            "monitorNewItems": defaults.new_item_monitor,
+            "addOptions": {
+                "monitor": defaults.monitor if whole_artist else "none",
+                "searchForMissingAlbums": bool(search) if whole_artist else False,
+            },
+        }
+        result = self._send_json("POST", "artist", payload)
+        if not isinstance(result, dict):
+            raise LidarrApiError("Lidarr returned an unexpected response shape when adding an artist")
+        return result
+
+    # ------------------------------------------------------------------ Song / album requests
+
+    def artist_refresh_state(self, artist_id: int) -> str:
+        """Whether Lidarr's ``RefreshArtist`` command for ``artist_id`` is still working: ``running``, ``done`` or ``unknown``.
+
+        ``GET /api/v1/command`` lists command resources ``{id, name: "RefreshArtist", commandName, status, body}``
+        where ``status`` is queued, started, completed, failed, aborted, cancelled or orphaned and ``body.artistIds``
+        holds the artist ids (``body.artistId`` is accepted too). ``running`` means a queued/started refresh exists
+        for the artist, ``done`` that only finished ones do, ``unknown`` that Lidarr lists none (never seen or
+        already trimmed) or the list could not be read. Raises LidarrRateLimited.
+        """
         try:
-            if client:
-                resp = client.get(url, headers=headers)
+            data = self._get_json("command")
+        except LidarrRateLimited:
+            raise
+        except LidarrApiError as exc:
+            logger.debug("Lidarr command list unavailable: %s", _exc_text(exc))
+            return "unknown"
+        if not isinstance(data, list):
+            return "unknown"
+        mine: list[dict[str, Any]] = []
+        for cmd in data:
+            if not isinstance(cmd, dict) or str(cmd.get("name") or "").casefold() != "refreshartist":
+                continue
+            body = cmd.get("body") if isinstance(cmd.get("body"), dict) else {}
+            ids = body.get("artistIds") if isinstance(body.get("artistIds"), list) else []
+            if body.get("artistId") is not None:
+                ids = [*ids, body.get("artistId")]
+            if any(_positive_int(i) == int(artist_id) for i in ids):
+                mine.append(cmd)
+        if not mine:
+            return "unknown"
+        if any(str(c.get("status") or "").casefold() in ("queued", "started") for c in mine):
+            return "running"
+        return "done"
+
+    def wait_for_artist_albums(
+        self, artist_id: int, attempts: int = ALBUM_WAIT_ATTEMPTS, seconds: float = ALBUM_WAIT_SECONDS
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """``(albums, settled)`` for a just-added artist: ``settled`` once Lidarr has finished loading it.
+
+        Lidarr loads a new artist's albums and tracks piecemeal, so the first non-empty list is not complete.
+        The artist is settled when its ``RefreshArtist`` command has finished and albums exist, or, when Lidarr lists
+        no such command, when the album and track counts are the same on two consecutive polls. Sleeps between
+        attempts, so call it from a worker or background thread only (pass ``attempts=1`` otherwise).
+        """
+        albums: list[dict[str, Any]] = []
+        previous: Optional[tuple[int, int]] = None
+        total = max(1, attempts)
+        for attempt in range(total):
+            albums = self.fetch_artist_albums(artist_id)
+            state = self.artist_refresh_state(artist_id)
+            if albums and state == "done":
+                return albums, True
+            if albums and state == "unknown":
+                fingerprint = (len(albums), len(self.fetch_artist_tracks(artist_id, albums)))
+                if fingerprint == previous:
+                    return albums, True
+                previous = fingerprint
             else:
-                with httpx.Client(verify=self.verify_ssl, timeout=self.timeout) as c:
-                    resp = c.get(url, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data and isinstance(data, list) and len(data) > 0:
-                    return int(data[0].get("id", 1))
-        except Exception as e:
-            logger.warning("Could not discover Lidarr metadata profile: %s", _exc_text(e))
-        return 1
+                previous = None
+            if attempt + 1 < total:
+                time.sleep(seconds)
+        return albums, False
+
+    def fetch_artist_tracks(self, artist_id: int, albums: Optional[list[dict[str, Any]]] = None) -> list[dict[str, Any]]:
+        """Every track Lidarr lists for the artist: ``/track?artistId=``, else album by album when that is empty."""
+        try:
+            data = self._get_json(f"track?artistId={int(artist_id)}")
+        except LidarrRateLimited:
+            raise
+        except LidarrApiError as exc:
+            logger.warning("Lidarr track list by artist failed, trying per album: %s", _exc_text(exc))
+            data = []
+        tracks = [row for row in data if isinstance(row, dict)] if isinstance(data, list) else []
+        if tracks or not albums:
+            return tracks
+        for album in albums[:_MAX_PER_ALBUM_TRACK_FETCHES]:
+            if album.get("id") is not None:
+                tracks.extend(self.fetch_album_tracks(int(album["id"])))
+        return tracks
+
+    @staticmethod
+    def _normalise_wants(album_names: Optional[list[str]], wants: Optional[list[dict[str, Any]]]) -> list[dict[str, str]]:
+        if wants is None:
+            wants = [{"album": a, "title": "", "item_type": "album"} for a in (album_names or [])]
+        out: list[dict[str, str]] = []
+        for w in wants:
+            album = str(w.get("album") or "").strip()
+            title = str(w.get("title") or "").strip()
+            kind = "track" if (str(w.get("item_type") or "").lower() == "track" and title) else "album"
+            if kind == "album" and not album:
+                album = title  # an album request carrying only a title
+            out.append({"album": album, "title": title if kind == "track" else "", "item_type": kind})
+        return out
 
     def add_artist_and_albums(
         self,
         artist_name: str,
         album_names: Optional[list[str]] = None,
         auto_search: Optional[bool] = None,
-        monitor_mode: str = "specific",
+        wants: Optional[list[dict[str, Any]]] = None,
+        album_wait_attempts: int = ALBUM_WAIT_ATTEMPTS,
+        album_wait_seconds: float = ALBUM_WAIT_SECONDS,
     ) -> dict[str, Any]:
-        """Looks up an artist, ensures the artist and requested albums are monitored in Lidarr.
+        """Makes Lidarr fetch exactly the releases requested, leaving its own configuration alone.
 
-        Optimized for bulk onboarding:
-        - 1 artist lookup per artist (drastically reduces MusicBrainz network calls)
-        - Supports monitor_mode="specific" to prevent downloading full artist discographies
-        - Batches album search commands into a single AlbumSearch call
-        - Gracefully handles HTTP 429 / 503 rate limits with retry-after guidance
+        ``wants`` are ``{"album", "title", "item_type"}`` dicts (``album_names`` is shorthand for album wants).
+        An artist already in Lidarr is never modified; a new one is added unmonitored with the root-folder defaults
+        (see ``add_artist_with_defaults``). Each want then selects one release from Lidarr's own album list (see
+        ``lidarr_release``), that album is monitored (and searched when auto-search is on) and re-read to confirm
+        ``monitored`` stuck. The result carries ``outcomes``, one per want and in order, each
+        ``{"status", "album_id", "message"}`` with status ``monitored``, ``not_in_metadata_profile``,
+        ``monitor_failed``, ``albums_pending`` or ``error``. Never raises for a Lidarr failure.
+
+        A new artist's albums load asynchronously in Lidarr, so ``album_wait_attempts`` polls (sleeping
+        ``album_wait_seconds`` between them); pass 1 from a request thread that must not block.
         """
         clean_artist = artist_name.strip()
         if not clean_artist:
             return {"status": "error", "message": "Empty artist name"}
-
-        clean_albums = [a.strip() for a in (album_names or []) if a and a.strip()]
+        want_list = self._normalise_wants(album_names, wants)
         should_search = self.auto_search if auto_search is None else auto_search
-        headers = self._get_headers()
 
         try:
-            with httpx.Client(verify=self.verify_ssl, timeout=self.timeout) as client:
-                # 1. Look up artist in Lidarr / MusicBrainz
-                lookup_url = f"{self.base_url}/api/v1/artist/lookup?term={quote(clean_artist)}"
-                resp = client.get(lookup_url, headers=headers)
+            try:
+                results = self.lookup_artist(clean_artist)
+            except LidarrRateLimited as exc:
+                return _rate_limited(clean_artist, exc, "Rate limited by Lidarr/MusicBrainz")
+            except LidarrApiError as exc:
+                return {"status": "error", "artist": clean_artist, "message": f"Lookup failed: {_exc_text(exc)}"}
+            if not results:
+                return {"status": "not_found", "artist": clean_artist, "message": "Artist not found in Lidarr lookup"}
 
-                if resp.status_code in (429, 503):
-                    retry_after = int(resp.headers.get("Retry-After", 60))
-                    return {
-                        "status": "rate_limited",
-                        "artist": clean_artist,
-                        "retry_after": retry_after,
-                        "message": f"Rate limited by Lidarr/MusicBrainz (HTTP {resp.status_code}). Backing off for {retry_after}s.",
-                    }
-
-                if resp.status_code != 200:
+            candidate = results[0]
+            artist_id = int(candidate.get("id") or 0)
+            artist_title = str(candidate.get("artistName") or clean_artist)
+            was_new = False
+            if not artist_id:
+                try:
+                    added = self.add_artist_with_defaults(candidate, whole_artist=False)
+                except LidarrRateLimited as exc:
+                    return _rate_limited(artist_title, exc, "Rate limited during artist add")
+                except LidarrApiError as exc:
                     return {
                         "status": "error",
-                        "artist": clean_artist,
-                        "message": f"Lookup failed: HTTP {resp.status_code}",
+                        "artist": artist_title,
+                        "message": f"Failed to add artist: {_exc_text(exc)}",
                     }
-
-                results = resp.json()
-                if not results or not isinstance(results, list):
-                    return {
-                        "status": "not_found",
-                        "artist": clean_artist,
-                        "message": "Artist not found in Lidarr lookup",
-                    }
-
-                candidate = results[0]
-                artist_id = candidate.get("id", 0)
-                artist_title = candidate.get("artistName", clean_artist)
-                was_new = False
-
-                # 2. If artist is not yet in library
+                artist_id = int(added.get("id") or 0)
                 if not artist_id:
-                    root_folder = self.get_root_folder(client)
-                    quality_id = self.get_quality_profile_id(client)
-                    metadata_id = self.get_metadata_profile_id(client)
+                    return {"status": "error", "artist": artist_title, "message": "Lidarr did not return the new artist id"}
+                was_new = True
+                logger.info("Added artist '%s' (ID %s) to Lidarr unmonitored", artist_title, artist_id)
 
-                    if self.monitor_option:
-                        add_monitor = self.monitor_option
+            outcomes: list[dict[str, Any]] = []
+            monitored_ids: list[int] = []
+            if want_list:
+                try:
+                    if was_new:
+                        albums, settled = self.wait_for_artist_albums(artist_id, album_wait_attempts, album_wait_seconds)
                     else:
-                        add_monitor = "none" if monitor_mode == "specific" else "all"
-                    payload = {
-                        **candidate,
-                        "monitored": True,
-                        "rootFolderPath": root_folder,
-                        "qualityProfileId": quality_id,
-                        "metadataProfileId": metadata_id,
-                        "tags": list(self.tag_ids),
-                        "addOptions": {
-                            "monitor": add_monitor,
-                            "searchForMissingAlbums": False,
-                        },
-                    }
+                        albums, settled = self.fetch_artist_albums(artist_id), True
+                    outcomes, monitored_ids = self._monitor_wants(artist_id, albums, want_list, should_search, settled)
+                except LidarrRateLimited as exc:
+                    return _rate_limited(artist_title, exc, "Rate limited while selecting releases")
+                except LidarrApiError as exc:
+                    logger.warning("Selecting Lidarr releases for artist %s failed: %s", artist_id, _exc_text(exc))
+                    outcomes = [_outcome("error", None, f"Lidarr request failed: {_exc_text(exc)}") for _ in want_list]
+                    monitored_ids = []
 
-                    add_url = f"{self.base_url}/api/v1/artist"
-                    add_resp = client.post(add_url, headers=headers, json=payload)
-                    if add_resp.status_code in (429, 503):
-                        retry_after = int(add_resp.headers.get("Retry-After", 60))
-                        return {
-                            "status": "rate_limited",
-                            "artist": artist_title,
-                            "retry_after": retry_after,
-                            "message": f"Rate limited during artist add (HTTP {add_resp.status_code}).",
-                        }
-
-                    if add_resp.status_code in (200, 201):
-                        added_data = add_resp.json()
-                        artist_id = added_data.get("id", 0)
-                        was_new = True
-                        logger.info("Added artist '%s' (ID %s) to Lidarr", artist_title, artist_id)
-                    else:
-                        return {
-                            "status": "error",
-                            "artist": artist_title,
-                            "message": f"Failed to add artist: HTTP {add_resp.status_code}",
-                        }
-
-                # 3. Locate requested albums and ensure they are monitored
-                matched_album_ids: list[int] = []
-                if artist_id and clean_albums:
-                    try:
-                        alb_url = f"{self.base_url}/api/v1/album?artistId={artist_id}"
-                        alb_resp = client.get(alb_url, headers=headers)
-                        if alb_resp.status_code in (429, 503):
-                            return {
-                                "status": "rate_limited",
-                                "artist": artist_title,
-                                "retry_after": int(alb_resp.headers.get("Retry-After", 60)),
-                                "message": "Rate limited while fetching albums.",
-                            }
-                        if alb_resp.status_code == 200:
-                            albums = alb_resp.json()
-                            for req_alb in clean_albums:
-                                req_lower = req_alb.lower()
-                                for alb in albums:
-                                    alb_title = (alb.get("title") or "").lower()
-                                    if req_lower in alb_title or alb_title in req_lower:
-                                        a_id = alb.get("id")
-                                        if a_id and a_id not in matched_album_ids:
-                                            matched_album_ids.append(a_id)
-                                            if not alb.get("monitored"):
-                                                alb["monitored"] = True
-                                                client.put(f"{self.base_url}/api/v1/album/{a_id}", headers=headers, json=alb)
-                                        break
-                    except Exception as e:
-                        logger.warning("Error inspecting Lidarr albums for artist %s: %s", artist_id, _exc_text(e))
-
-                # 4. Trigger decoupled search command if requested
-                searched = False
-                if should_search:
-                    cmd_url = f"{self.base_url}/api/v1/command"
-                    if matched_album_ids:
-                        cmd_payload = {"name": "AlbumSearch", "albumIds": matched_album_ids}
-                        cmd_resp = client.post(cmd_url, headers=headers, json=cmd_payload)
-                        searched = cmd_resp.status_code in (200, 201)
-                    elif was_new and monitor_mode != "specific":
-                        cmd_payload = {"name": "ArtistSearch", "artistId": artist_id}
-                        cmd_resp = client.post(cmd_url, headers=headers, json=cmd_payload)
-                        searched = cmd_resp.status_code in (200, 201)
-
+            ok = [o for o in outcomes if o["status"] == "monitored"]
+            searched = bool(should_search and monitored_ids)
+            if outcomes and not ok:
+                statuses = {o["status"] for o in outcomes}
+                status = next(
+                    (s for s in (OUTCOME_NOT_IN_PROFILE, OUTCOME_MONITOR_FAILED, OUTCOME_ALBUMS_PENDING) if s in statuses),
+                    "error",
+                )
                 return {
-                    "status": "success",
+                    "status": status,
                     "artist": artist_title,
                     "artist_id": artist_id,
                     "added": was_new,
-                    "matched_album_ids": matched_album_ids,
-                    "searched": searched,
-                    "message": f"{'Added and monitored' if was_new else 'Monitored'} in Lidarr ({len(matched_album_ids)} album(s))",
+                    "matched_album_ids": [],
+                    "searched": False,
+                    "outcomes": outcomes,
+                    "message": outcomes[0]["message"],
                 }
-
-        except Exception as e:
+            return {
+                "status": "success",
+                "artist": artist_title,
+                "artist_id": artist_id,
+                "added": was_new,
+                "matched_album_ids": monitored_ids,
+                "searched": searched,
+                "outcomes": outcomes,
+                "message": f"{'Added and monitored' if was_new else 'Monitored'} in Lidarr ({len(monitored_ids)} album(s))",
+            }
+        except Exception as e:  # last-resort guard for one artist: the root cause is logged (redacted) and returned
             logger.error("Exception in Lidarr add_artist_and_albums: %s", _exc_text(e))
             return {"status": "error", "artist": clean_artist, "message": _exc_text(e)}
+
+    def _monitor_wants(
+        self,
+        artist_id: int,
+        albums: list[dict[str, Any]],
+        wants: list[dict[str, str]],
+        should_search: bool,
+        settled: bool = True,
+    ) -> tuple[list[dict[str, Any]], list[int]]:
+        """Selects, monitors, searches and verifies one release per want; returns (outcomes, monitored album ids).
+
+        Until the artist is ``settled`` (Lidarr has finished loading its releases) a want that finds no release is
+        ``albums_pending`` (retry later), never ``not_in_metadata_profile``: the release may simply not have loaded.
+        """
+        outcomes: list[dict[str, Any]] = [_outcome("error", None, "Nothing to look up") for _ in wants]
+        if not albums:
+            pending = _outcome(OUTCOME_ALBUMS_PENDING, None, ALBUMS_PENDING_MESSAGE)
+            return [dict(pending) for _ in wants], []
+
+        tracks_cache: list[list[dict[str, Any]]] = []
+
+        def tracks() -> list[dict[str, Any]]:
+            if not tracks_cache:
+                tracks_cache.append(self.fetch_artist_tracks(artist_id, albums))
+            return tracks_cache[0]
+
+        chosen: dict[int, dict[str, Any]] = {}
+        for idx, want in enumerate(wants):
+            if not (want["album"] or want["title"]):
+                continue
+            if want["item_type"] == "track":
+                # The requested album is only a tie-breaker among releases that really hold the song.
+                target = select_release_for_song(
+                    albums_containing_song(tracks(), albums, want["title"]),
+                    want["title"],
+                    want["album"],
+                    prefer_singles=self.prefer_singles,
+                )
+            else:
+                target = match_named_album(albums, want["album"])
+            if target is None or target.get("id") is None:
+                if settled:
+                    outcomes[idx] = _outcome(OUTCOME_NOT_IN_PROFILE, None, NOT_IN_PROFILE_MESSAGE)
+                else:
+                    outcomes[idx] = _outcome(OUTCOME_ALBUMS_PENDING, None, ALBUMS_PENDING_MESSAGE)
+                continue
+            album_id = int(target["id"])
+            chosen[idx] = target
+            outcomes[idx] = _outcome("monitored", album_id, "")
+
+        to_monitor = list(dict.fromkeys(int(a["id"]) for a in chosen.values()))
+        if not to_monitor:
+            return outcomes, []
+        unmonitored = [i for i in to_monitor if not next(a for a in chosen.values() if int(a["id"]) == i).get("monitored")]
+        if unmonitored:
+            self.set_albums_monitored(unmonitored, True)
+        if should_search:
+            try:
+                self.run_command("AlbumSearch", albumIds=to_monitor)
+            except LidarrApiError as exc:  # the albums are monitored; Lidarr's own schedule will still find them
+                logger.warning("Lidarr AlbumSearch failed for artist %s: %s", artist_id, _exc_text(exc))
+
+        verified: dict[int, bool] = {}
+        for album_id in to_monitor:
+            verified[album_id] = bool(self.fetch_album(album_id).get("monitored"))
+        for idx in chosen:
+            album_id = int(outcomes[idx]["album_id"])
+            if not verified[album_id]:
+                outcomes[idx] = _outcome(OUTCOME_MONITOR_FAILED, album_id, MONITOR_FAILED_MESSAGE)
+        return outcomes, [i for i in to_monitor if verified[i]]
 
     def search_and_add_track(
         self,
@@ -388,13 +638,14 @@ class LidarrClient:
         album_name: str = "",
         title: str = "",
         auto_search: Optional[bool] = None,
+        album_wait_attempts: int = ALBUM_WAIT_ATTEMPTS,
     ) -> dict[str, Any]:
-        """Finds artist/album in Lidarr, ensures it is monitored, and triggers search."""
+        """Makes Lidarr fetch one song: its release is chosen and monitored (see ``add_artist_and_albums``)."""
         res = self.add_artist_and_albums(
             artist_name=artist_name,
-            album_names=[album_name] if album_name else [],
             auto_search=auto_search,
-            monitor_mode="specific",
+            wants=[{"album": album_name, "title": title, "item_type": "track"}],
+            album_wait_attempts=album_wait_attempts,
         )
         if res.get("status") == "success":
             return {
@@ -535,6 +786,8 @@ class LidarrClient:
             raise LidarrApiError("Lidarr rejected the API key")
         if resp.status_code == 404:
             raise LidarrNotFound(f"Lidarr could not find the item for {path}")
+        if resp.status_code in _RETRYABLE_STATUS:
+            raise LidarrRateLimited(f"Lidarr returned HTTP {resp.status_code} for {path}", _retry_after(resp))
         if resp.status_code not in (200, 201, 202, 204):
             raise LidarrApiError(f"Lidarr returned HTTP {resp.status_code} for {path}")
         if not resp.content:
@@ -654,25 +907,6 @@ class LidarrClient:
         if not isinstance(data, list):
             raise LidarrApiError("Lidarr returned an unexpected response shape for artist lookup")
         return [row for row in data if isinstance(row, dict)]
-
-    def add_artist_with_monitor(self, candidate: dict[str, Any], monitor: str) -> dict[str, Any]:
-        """Adds a looked-up artist with ``addOptions.monitor`` (all/future/existing/none/...) and no search.
-
-        Raises LidarrApiError on failure. Returns Lidarr's artist resource (carrying its new ``id``).
-        """
-        payload = {
-            **candidate,
-            "monitored": True,
-            "rootFolderPath": self.get_root_folder(),
-            "qualityProfileId": self.get_quality_profile_id(),
-            "metadataProfileId": self.get_metadata_profile_id(),
-            "tags": list(self.tag_ids),
-            "addOptions": {"monitor": monitor, "searchForMissingAlbums": False},
-        }
-        result = self._send_json("POST", "artist", payload)
-        if not isinstance(result, dict):
-            raise LidarrApiError("Lidarr returned an unexpected response shape when adding an artist")
-        return result
 
     def set_artist_monitored(self, artist_id: int, monitored: bool) -> dict[str, Any]:
         """Fetch-modify-put, so no other field of the artist resource is lost."""

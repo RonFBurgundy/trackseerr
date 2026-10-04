@@ -303,6 +303,7 @@ def _start_lidarr_trickle(db: Database, config: Config) -> None:
     from plex_playlist_sync.clients.lidarr import LidarrClient
     from plex_playlist_sync.library_manager import get_library_mode
     from plex_playlist_sync.lidarr_queue import lidarr_worker
+    from plex_playlist_sync.storage import lidarr_item_due
 
     def background_lidarr_trickle_worker() -> None:
         logger.info("Lidarr auto-trickle background runner started")
@@ -338,7 +339,8 @@ def _start_lidarr_trickle(db: Database, config: Config) -> None:
 
                 if not lidarr_worker.is_running():
                     all_missing = db.get_missing_tracks()
-                    unmonitored = [t for t in all_missing if t.get("lidarr_status") != "monitored"]
+                    # Only items whose retry time has passed: "unavailable" is re-checked weekly, errors back off.
+                    unmonitored = [t for t in all_missing if lidarr_item_due(t)]
                     if unmonitored:
                         batch_size = int(
                             lidarr_settings.get("trickle_batch_size")
@@ -352,8 +354,6 @@ def _start_lidarr_trickle(db: Database, config: Config) -> None:
                         )
                         auto_search = bool(lidarr_settings.get("auto_search", config.lidarr_auto_search))
                         root_folder = lidarr_settings.get("root_folder") or config.lidarr_root_folder
-                        qp_id = lidarr_settings.get("quality_profile_id") or config.lidarr_quality_profile_id
-                        mp_id = lidarr_settings.get("metadata_profile_id") or config.lidarr_metadata_profile_id
 
                         lidarr_cli = LidarrClient(
                             base_url=str(url),
@@ -361,10 +361,7 @@ def _start_lidarr_trickle(db: Database, config: Config) -> None:
                             verify_ssl=config.plex_verify_ssl,
                             auto_search=auto_search,
                             root_folder=root_folder,
-                            quality_profile_id=qp_id,
-                            metadata_profile_id=mp_id,
-                            monitor_option=lidarr_settings.get("monitor_option"),
-                            tag_ids=lidarr_settings.get("tag_ids") or [],
+                            prefer_singles=bool(lidarr_settings.get("prefer_singles", True)),
                         )
                         logger.info(
                             "Auto-trickle: enqueuing %d unmonitored tracks into Lidarr (batch: %d, pacing: %.1fs)",

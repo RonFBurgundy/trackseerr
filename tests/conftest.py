@@ -61,3 +61,13 @@ def _reset_library_manager_guard():
         for mode in library_manager._in_flight:
             library_manager._in_flight[mode] = 0
     yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_lidarr_add_defaults_cache():
+    """Root-folder defaults are cached per process (keyed by URL and key); tests reusing a URL must not share them."""
+    from plex_playlist_sync.clients.lidarr import invalidate_add_defaults
+
+    invalidate_add_defaults()
+    yield
+    invalidate_add_defaults()

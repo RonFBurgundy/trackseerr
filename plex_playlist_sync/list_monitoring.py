@@ -56,7 +56,6 @@ __all__ = [
 
 LEVELS = ("track", "album", "artist")
 _LEVEL_RANK = {"track": 0, "album": 1, "artist": 2}
-_LIDARR_MONITOR = {"all": "all", "existing": "existing", "future": "future", "none": "none"}
 # Lidarr adds albums to a new artist asynchronously after the add call returns.
 LIDARR_ALBUM_WAIT_ATTEMPTS = 6
 LIDARR_ALBUM_WAIT_SECONDS = 3.0
@@ -313,10 +312,16 @@ def _pick_lidarr_candidate(candidates: list[dict[str, Any]], artist_mbid: Option
 def _lidarr_artist(
     client: LidarrClient,
     resolved: _Resolved,
-    monitor: str,
+    *,
+    whole_artist: bool,
+    search: bool = False,
     on_added: Optional[Callable[[], None]] = None,
 ) -> tuple[int, bool]:
-    """Lidarr's id for the artist, adding it with ``monitor`` if absent. Returns (id, added)."""
+    """Lidarr's id for the artist, adding it with Lidarr's own root-folder defaults if absent. Returns (id, added).
+
+    An artist already in Lidarr is returned untouched. A new one is added whole (``whole_artist``) or unmonitored
+    for a release that is monitored afterwards.
+    """
     term = f"lidarr:{resolved.artist_mbid}" if resolved.artist_mbid else resolved.artist_name
     candidate = _pick_lidarr_candidate(client.lookup_artist(term), resolved.artist_mbid)
     if candidate is None:
@@ -324,7 +329,7 @@ def _lidarr_artist(
     existing_id = int(candidate.get("id") or 0)
     if existing_id:
         return existing_id, False
-    added = client.add_artist_with_monitor(candidate, monitor)
+    added = client.add_artist_with_defaults(candidate, whole_artist=whole_artist, search=search)
     if on_added is not None:
         on_added()  # persisted before the post-add steps so a failure there is retried, not lost
     return int(added.get("id") or 0), True
@@ -345,7 +350,7 @@ def _norm_title(text: Any) -> str:
 
 
 def _apply_album_lidarr(db: Database, client: LidarrClient, resolved: _Resolved) -> None:
-    artist_id, _ = _lidarr_artist(client, resolved, "none")
+    artist_id, _ = _lidarr_artist(client, resolved, whole_artist=False)
     albums = _wait_for_lidarr_albums(client, artist_id)
     target = next(
         (a for a in albums if str(a.get("foreignAlbumId") or "").lower() == str(resolved.album_mbid).lower()), None
@@ -357,6 +362,8 @@ def _apply_album_lidarr(db: Database, client: LidarrClient, resolved: _Resolved)
         return  # already monitored (and presumably searched) by the user or an earlier run
     try:
         client.set_albums_monitored([album_id], True)
+        if not client.fetch_album(album_id).get("monitored"):
+            raise LidarrApiError("Lidarr did not keep the album monitored")
         if db.get_lidarr_settings().get("auto_search", True):
             client.run_command("AlbumSearch", albumIds=[album_id])
     finally:
@@ -367,24 +374,15 @@ def _apply_artist_lidarr(
     db: Database,
     client: LidarrClient,
     resolved: _Resolved,
-    monitor_option: str,
     *,
-    resume: bool = False,
     on_artist_added: Optional[Callable[[], None]] = None,
 ) -> None:
-    """Lidarr artist level. ``resume`` says an earlier attempt of this same item added the artist, so the preset
-    and search it still owes are finished; an artist that pre-existed is never touched."""
-    preset = monitor_option in ("albums", "singles_eps")
-    monitor = _LIDARR_MONITOR.get(monitor_option, "none")
-    artist_id, added = _lidarr_artist(client, resolved, monitor, on_artist_added)
-    if not (added or resume):
-        return  # an existing artist keeps the user's settings
+    """Lidarr artist level: a new artist is added with every root-folder default of Lidarr (the list's own artist
+    monitor option does not apply in Lidarr mode) and searched when auto-search is on, all in the one POST. An artist
+    that already exists is never touched. Nothing is owed after the add, so a retried item just finds the artist."""
+    search = bool(db.get_lidarr_settings().get("auto_search", True))
     try:
-        if preset:
-            _wait_for_lidarr_albums(client, artist_id)
-            lidarr_library.apply_monitor_preset(client, artist_id, monitor_option)
-        if monitor_option not in ("none", "future") and db.get_lidarr_settings().get("auto_search", True):
-            client.run_command("ArtistSearch", artistId=artist_id)
+        _lidarr_artist(client, resolved, whole_artist=True, search=search, on_added=on_artist_added)
     finally:
         lidarr_library.invalidate()
 
@@ -512,9 +510,7 @@ def apply_list_item(
             if level == "album":
                 _apply_album_lidarr(db, client, resolved)
             else:
-                _apply_artist_lidarr(
-                    db, client, resolved, option, resume=artist_added, on_artist_added=on_artist_added
-                )
+                _apply_artist_lidarr(db, client, resolved, on_artist_added=on_artist_added)
 
         run_for_mode(db, native=_native, lidarr=_lidarr)
         return ApplyResult(STATUS_APPLIED, level, error=notes[0] if notes else None, mbid=item_mbid)

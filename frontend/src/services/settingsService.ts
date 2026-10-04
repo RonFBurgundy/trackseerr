@@ -10,7 +10,7 @@ import type {
   LidarrTestResult,
   LibraryManagerMode,
   LibraryManagerState,
-  LidarrOptions,
+  LidarrDefaults,
 } from '@/types/models';
 
 export async function getGeneralSettings(): Promise<GeneralSettings> {
@@ -148,6 +148,6 @@ export async function setLibraryManager(mode: LibraryManagerMode): Promise<Libra
 }
 
 /** Live from Lidarr; rejects with ApiError status 502 (redacted message) when Lidarr is unreachable. */
-export async function getLidarrOptions(): Promise<LidarrOptions> {
-  return apiRequest<LidarrOptions>('/api/settings/lidarr/options');
+export async function getLidarrDefaults(): Promise<LidarrDefaults> {
+  return apiRequest<LidarrDefaults>('/api/settings/lidarr/defaults');
 }

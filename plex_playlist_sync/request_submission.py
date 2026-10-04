@@ -353,8 +353,9 @@ def run_submission_followups(
                 {
                     "id": req_id,
                     "artist": clean_artist,
-                    "album": clean_album or clean_title,
+                    "album": (clean_album or clean_title) if item_type == "album" else (clean_album or ""),
                     "title": clean_title,
+                    "item_type": item_type,
                     "is_request": True,
                 }
             ],

@@ -954,7 +954,7 @@ def test_migration_v27_schema_and_defaults(db):
         "default_quota_discographies": 1, "default_quota_window_days": 7,
     }
     top = db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
-    assert top == 37
+    assert top == 38
     assert db.get_user("1001")["auth_type"] == "plex"
 
 

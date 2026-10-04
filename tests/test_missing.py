@@ -129,26 +129,60 @@ class TestLidarrClientAndPush:
         assert data["status"]["online"] is True
         assert data["status"]["version"] == "2.4.3.4248"
 
-    @patch("plex_playlist_sync.clients.lidarr.httpx.Client")
-    def test_lidarr_push_endpoint(self, mock_client_cls, client, test_db):
+    def _push_setup(self, test_db, titles, album=""):
         test_db.update_media_management_settings({"library_mode": "lidarr"})
-        mock_http = MagicMock()
-        mock_client_cls.return_value.__enter__.return_value = mock_http
+        test_db.upsert_playlist("pl_1", "Rock", service="spotify")
+        test_db.record_sync_result(
+            "pl_1",
+            status="partial",
+            missing_tracks=[{"title": t, "artist": "Queen", "album": album} for t in titles],
+        )
 
-        # Lookup returns artist not in library (id=0)
-        mock_http.get.side_effect = [
-            # 1. lookup artist
-            MagicMock(status_code=200, json=lambda: [{"id": 0, "artistName": "Queen", "foreignArtistId": "mb-queen"}]),
-            # 2. get root folder
-            MagicMock(status_code=200, json=lambda: [{"path": "/music"}]),
-            # 3. get quality profile
-            MagicMock(status_code=200, json=lambda: [{"id": 1}]),
-            # 4. get metadata profile
-            MagicMock(status_code=200, json=lambda: [{"id": 1}]),
+    def test_push_dedupes_per_song_not_per_artist_and_album(self, client, test_db):
+        from tests.lidarr_fake import FakeLidarr
+
+        self._push_setup(test_db, ["Bohemian Rhapsody", "Bohemian Rhapsody (Remastered 2011)", "Killer Queen"])
+        fake = FakeLidarr()
+        fake.albums = [
+            {"id": 5, "title": "Opera", "albumType": "Album", "releaseDate": "1975-01-01", "monitored": False},
+            {"id": 6, "title": "Sheer", "albumType": "Album", "releaseDate": "1974-01-01", "monitored": False},
         ]
-        # POST to add artist
-        mock_http.post.return_value.status_code = 201
-        mock_http.post.return_value.json.return_value = {"id": 42, "artistName": "Queen"}
+        fake.tracks = [
+            {"id": 1, "albumId": 5, "title": "Bohemian Rhapsody"},
+            {"id": 2, "albumId": 6, "title": "Killer Queen"},
+        ]
+        with patch("plex_playlist_sync.clients.lidarr.httpx.Client", fake):
+            data = client.post("/api/missing/lidarr/push", json={}).json()
+        # two distinct songs (the remaster is the same song) -> two pushes, both tracks of the empty album covered
+        assert data["total_requested"] == 3 and data["deduplicated_items"] == 2
+        assert sorted(a["id"] for a in fake.albums if a["monitored"]) == [5, 6]
+
+    def test_push_maps_outcomes_to_retryable_statuses(self, client, test_db):
+        from tests.lidarr_fake import FakeLidarr
+
+        self._push_setup(test_db, ["Some Deep Cut"])
+        fake = FakeLidarr()
+        fake.albums = [{"id": 5, "title": "Opera", "albumType": "Album", "monitored": False}]
+        fake.tracks = [{"id": 1, "albumId": 5, "title": "Love of My Life"}]
+        with patch("plex_playlist_sync.clients.lidarr.httpx.Client", fake):
+            client.post("/api/missing/lidarr/push", json={})
+        row = test_db.get_missing_tracks()[0]
+        assert row["lidarr_status"] == "unavailable" and row["attempts"] == 1 and row["next_attempt_at"]
+
+        fake = FakeLidarr()
+        fake.fail[("GET", "artist/lookup")] = 429
+        with patch("plex_playlist_sync.clients.lidarr.httpx.Client", fake):
+            client.post("/api/missing/lidarr/push", json={})
+        row = test_db.get_missing_tracks()[0]
+        assert row["lidarr_status"] == "rate_limited" and row["attempts"] == 2
+
+    def test_lidarr_push_endpoint(self, client, test_db):
+        from tests.lidarr_fake import FakeLidarr
+
+        test_db.update_media_management_settings({"library_mode": "lidarr"})
+        fake = FakeLidarr()
+        fake.albums = [{"id": 5, "title": "A Night at the Opera", "albumType": "Album", "monitored": False}]
+        fake.tracks = [{"id": 1, "albumId": 5, "title": "Bohemian Rhapsody"}]
 
         test_db.upsert_playlist("pl_1", "Rock", service="spotify")
         test_db.record_sync_result(
@@ -159,13 +193,17 @@ class TestLidarrClientAndPush:
             ],
         )
 
-        resp = client.post("/api/missing/lidarr/push", json={})
+        with patch("plex_playlist_sync.clients.lidarr.httpx.Client", fake):
+            resp = client.post("/api/missing/lidarr/push", json={})
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_requested"] == 1
         assert data["added"] == 1
         assert data["results"][0]["status"] == "added"
         assert data["results"][0]["artist"] == "Queen"
+        posted = fake.requests("POST", "artist")[0]
+        assert posted["addOptions"] == {"monitor": "none", "searchForMissingAlbums": False}
+        assert fake.requests("PUT", "album/monitor") == [{"albumIds": [5], "monitored": True}]
 
 
 class TestWebhookAndSelfHealingSync:

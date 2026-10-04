@@ -222,8 +222,9 @@ def create_batch_requests(
                     {
                         "id": c["id"],
                         "artist": c["artist"],
-                        "album": c.get("album") or c["title"],
+                        "album": (c.get("album") or c["title"]) if c.get("item_type") == "album" else (c.get("album") or ""),
                         "title": c["title"],
+                        "item_type": c.get("item_type") or "track",
                         "is_request": True,
                     }
                     for c in processing_items
@@ -293,8 +294,9 @@ def approve_request(
                 {
                     "id": request_id,
                     "artist": req["artist"],
-                    "album": req.get("album") or req["title"],
+                    "album": (req.get("album") or req["title"]) if req.get("item_type") == "album" else (req.get("album") or ""),
                     "title": req["title"],
+                    "item_type": req.get("item_type") or "track",
                     "is_request": True,
                 }
             ],
@@ -440,8 +442,9 @@ def retry_request(
                 {
                     "id": request_id,
                     "artist": clean_artist,
-                    "album": clean_album or clean_title,
+                    "album": (clean_album or clean_title) if item_type == "album" else (clean_album or ""),
                     "title": clean_title,
+                    "item_type": item_type,
                     "is_request": True,
                 }
             ],

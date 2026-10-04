@@ -6,6 +6,26 @@ from typing import Any, Optional
 from plex_playlist_sync.models import AcquisitionSearchResult
 
 
+class AcquisitionRetryableError(RuntimeError):
+    """A dispatch failed for a transient reason (rate limit, data still loading); the caller may retry later.
+
+    ``reason`` is a short machine code (``rate_limited``, ``albums_pending``) shown to the requester.
+    """
+
+    def __init__(self, message: str, reason: str = "retry_later", retry_after: int = 60) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.retry_after = retry_after
+
+
+class AcquisitionUnavailableError(RuntimeError):
+    """The release cannot be fetched by this client (e.g. not in Lidarr's metadata profile); retrying soon is futile."""
+
+    def __init__(self, message: str, reason: str = "not_in_metadata_profile") -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 class AcquisitionDriver(ABC):
     """Abstract base class for all acquisition drivers."""
 
