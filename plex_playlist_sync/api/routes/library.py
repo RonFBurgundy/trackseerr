@@ -36,7 +36,7 @@ from plex_playlist_sync.api.dependencies import (
     get_discovery_client,
     get_lidarr_client,
     get_mbid_enricher,
-    get_plex_client,
+    get_media_client,
     require_admin,
     require_core_tier,
     require_user,
@@ -2347,7 +2347,7 @@ def get_availability(
 def trigger_scan(
     body: Optional[ScanRequest] = None,
     db: Database = Depends(get_db),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Triggers an asynchronous background filesystem scan."""
@@ -2524,7 +2524,7 @@ def manual_import_scan(
 def manual_import_commit(
     body: ManualImportCommitRequest,
     db: Database = Depends(get_db),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Commits selected manual import items: resolves/creates catalog entities, moves/copies files to destination, tags them, and registers them in the library."""
@@ -2856,7 +2856,7 @@ def rename_preview(
 def rename_apply(
     body: RenameApplyRequest,
     db: Database = Depends(get_db),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Applies batch renaming to specified library files, moving them to their template-rendered destinations and updating the catalog."""

@@ -1,5 +1,6 @@
 import os
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -36,8 +37,31 @@ def _split_ids(val: Optional[str]) -> List[str]:
 
 
 MEDIA_SERVER_PLEX = "plex"
+MEDIA_SERVER_SUBSONIC = "subsonic"
 MEDIA_SERVER_NONE = "none"
-SUPPORTED_MEDIA_SERVERS = (MEDIA_SERVER_PLEX, MEDIA_SERVER_NONE)
+SUPPORTED_MEDIA_SERVERS = (MEDIA_SERVER_PLEX, MEDIA_SERVER_SUBSONIC, MEDIA_SERVER_NONE)
+
+# Where the effective media-server choice came from: the environment always wins; the Settings page (database) only
+# applies when the environment says nothing about a media server.
+MEDIA_SERVER_SOURCE_ENV = "env"
+MEDIA_SERVER_SOURCE_SETTINGS = "settings"
+
+_media_server_overlay: dict[str, str] = {}
+_media_server_overlay_lock = threading.Lock()
+
+
+def set_media_server_overlay(stored: Optional[dict[str, str]]) -> None:
+    """Install (or clear, with None/empty) the Settings-page media-server values that ``Config.from_env`` applies when
+    the environment leaves the media server unconfigured. Set at core startup and after every Settings save."""
+    with _media_server_overlay_lock:
+        _media_server_overlay.clear()
+        if stored:
+            _media_server_overlay.update({k: str(v or "") for k, v in stored.items()})
+
+
+def get_media_server_overlay() -> dict[str, str]:
+    with _media_server_overlay_lock:
+        return dict(_media_server_overlay)
 
 
 class ConfigError(ValueError):
@@ -51,6 +75,11 @@ class Config:
     plex_verify_ssl: bool = True
     # Raw MEDIA_SERVER value ("" = unset: derived from the Plex credentials). Read ``media_server_type``.
     media_server: str = ""
+    subsonic_url: str = ""
+    subsonic_user: str = ""
+    subsonic_password: str = ""
+    subsonic_api_key: str = ""
+    media_server_source: str = MEDIA_SERVER_SOURCE_ENV
 
     write_missing_as_csv: bool = False
     append_service_suffix: bool = True
@@ -147,11 +176,15 @@ class Config:
         host = os.getenv("HOST", "0.0.0.0").strip() or "0.0.0.0"
         headless = _parse_bool(os.getenv("HEADLESS"), False)
 
-        return cls(
+        config = cls(
             plex_url=plex_url,
             plex_token=plex_token,
             plex_verify_ssl=verify_ssl,
             media_server=os.getenv("MEDIA_SERVER", "").strip().lower(),
+            subsonic_url=os.getenv("SUBSONIC_URL", "").strip(),
+            subsonic_user=os.getenv("SUBSONIC_USER", "").strip(),
+            subsonic_password=os.getenv("SUBSONIC_PASSWORD", ""),
+            subsonic_api_key=os.getenv("SUBSONIC_API_KEY", "").strip(),
             write_missing_as_csv=_parse_bool(os.getenv("WRITE_MISSING_AS_CSV"), False),
             append_service_suffix=_parse_bool(os.getenv("APPEND_SERVICE_SUFFIX"), True),
             add_playlist_poster=_parse_bool(os.getenv("ADD_PLAYLIST_POSTER"), True),
@@ -196,6 +229,38 @@ class Config:
             lastfm_api_key=os.getenv("LASTFM_API_KEY", "").strip() or None,
             lastfm_api_secret=os.getenv("LASTFM_API_SECRET", "").strip() or None,
         )
+        config.apply_media_server_overlay()
+        return config
+
+    @property
+    def media_server_env_controlled(self) -> bool:
+        """True when the environment configures a media server (MEDIA_SERVER, Plex or Subsonic variables), which
+        then takes precedence over anything saved on the Settings page."""
+        return bool(
+            self.media_server_source == MEDIA_SERVER_SOURCE_ENV
+            and (self.media_server or self.plex_url or self.plex_token or self.subsonic_url or self.subsonic_user
+                 or self.subsonic_password or self.subsonic_api_key)
+        )
+
+    def apply_media_server_overlay(self, stored: Optional[dict[str, str]] = None) -> None:
+        """Fill the media-server fields from the Settings page values (``stored``, default: the installed overlay)
+        unless the environment already configures one. Idempotent; resets to env values first so a cleared setting
+        really clears."""
+        if self.media_server_source == MEDIA_SERVER_SOURCE_ENV and self.media_server_env_controlled:
+            return
+        values = get_media_server_overlay() if stored is None else stored
+        kind = (values.get("type") or "").strip().lower()
+        if kind not in (MEDIA_SERVER_SUBSONIC, MEDIA_SERVER_NONE):
+            self.media_server_source = MEDIA_SERVER_SOURCE_ENV
+            self.media_server, self.subsonic_url, self.subsonic_user = "", "", ""
+            self.subsonic_password, self.subsonic_api_key = "", ""
+            return
+        self.media_server_source = MEDIA_SERVER_SOURCE_SETTINGS
+        self.media_server = kind
+        self.subsonic_url = (values.get("url") or "").strip() if kind == MEDIA_SERVER_SUBSONIC else ""
+        self.subsonic_user = (values.get("username") or "").strip() if kind == MEDIA_SERVER_SUBSONIC else ""
+        self.subsonic_password = (values.get("password") or "") if kind == MEDIA_SERVER_SUBSONIC else ""
+        self.subsonic_api_key = (values.get("api_key") or "").strip() if kind == MEDIA_SERVER_SUBSONIC else ""
 
     @property
     def media_server_type(self) -> str:
@@ -212,9 +277,16 @@ class Config:
         return self.media_server_type == MEDIA_SERVER_PLEX and bool(self.plex_url and self.plex_token)
 
     def validate_media_server(self) -> None:
-        """Raises ``ConfigError`` for an unknown MEDIA_SERVER value, only one of PLEX_URL/PLEX_TOKEN with MEDIA_SERVER unset, or an explicit ``plex`` without credentials."""
+        """Raises ``ConfigError`` for an unknown MEDIA_SERVER value, only one of PLEX_URL/PLEX_TOKEN with MEDIA_SERVER unset, SUBSONIC_* without MEDIA_SERVER, or an explicit ``plex`` / ``subsonic`` without (complete) credentials."""
+        if self.media_server_source == MEDIA_SERVER_SOURCE_SETTINGS:
+            return  # saved from the Settings page, which only accepts complete values: never block boot over it
         choice = (self.media_server or "").strip().lower()
         if not choice:
+            if any((self.subsonic_url, self.subsonic_user, self.subsonic_password, self.subsonic_api_key)):
+                raise ConfigError(
+                    "SUBSONIC_* variables are set but MEDIA_SERVER is not. Set MEDIA_SERVER=subsonic to use the "
+                    "Subsonic server, or remove the SUBSONIC_* variables."
+                )
             if bool(self.plex_url) != bool(self.plex_token):
                 missing = "PLEX_TOKEN" if self.plex_url else "PLEX_URL"
                 raise ConfigError(
@@ -226,10 +298,38 @@ class Config:
             raise ConfigError(
                 f"MEDIA_SERVER={self.media_server!r} is not supported; use one of: {', '.join(SUPPORTED_MEDIA_SERVERS)}."
             )
+        if choice == MEDIA_SERVER_SUBSONIC:
+            self._validate_subsonic()
         if choice == MEDIA_SERVER_PLEX and not (self.plex_url and self.plex_token):
             raise ConfigError(
                 "MEDIA_SERVER=plex requires PLEX_URL and PLEX_TOKEN. Set both, or set MEDIA_SERVER=none "
                 "(or leave it unset) to run Trackseerr without a media server."
+            )
+
+    @property
+    def subsonic_configured(self) -> bool:
+        """True when Subsonic is the active media server and has everything it needs to connect."""
+        return self.media_server_type == MEDIA_SERVER_SUBSONIC and self._subsonic_problem() is None
+
+    def _subsonic_problem(self) -> Optional[str]:
+        if not self.subsonic_url:
+            return "SUBSONIC_URL is missing"
+        if self.subsonic_api_key:
+            return None
+        if self.subsonic_user and self.subsonic_password:
+            return None
+        if self.subsonic_user:
+            return "SUBSONIC_PASSWORD is missing (or set SUBSONIC_API_KEY instead)"
+        if self.subsonic_password:
+            return "SUBSONIC_USER is missing"
+        return "SUBSONIC_USER and SUBSONIC_PASSWORD (or SUBSONIC_API_KEY) are missing"
+
+    def _validate_subsonic(self) -> None:
+        problem = self._subsonic_problem()
+        if problem:
+            raise ConfigError(
+                f"MEDIA_SERVER=subsonic is not fully configured: {problem}. Set SUBSONIC_URL with SUBSONIC_USER and "
+                "SUBSONIC_PASSWORD (or SUBSONIC_API_KEY), or set MEDIA_SERVER=none to run without a media server."
             )
 
     @property

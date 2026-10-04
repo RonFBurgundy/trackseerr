@@ -10,13 +10,23 @@ const LEGACY_CAPABILITIES: MediaServerCapabilities = {
   library_refresh: true,
 };
 
+const MEDIA_SERVER_LABELS: Record<MediaServerType, string> = {
+  plex: 'Plex',
+  subsonic: 'Subsonic server',
+  none: 'media server',
+};
+
 export interface UseMediaServerReturn {
   /** False until the first answer (or failure) arrives; gate sign-in choices on it to avoid flicker. */
   isLoaded: boolean;
   status: MediaServerStatus | null;
   type: MediaServerType;
-  /** True when a media server is configured, so playlist push, mixes and Plex sign-in make sense. */
+  /** True when a media server is configured, so playlist push makes sense. */
   hasMediaServer: boolean;
+  /** True only for Plex: Plex sign-in and Plex-only features (Plex playlists, home users) depend on it. */
+  isPlex: boolean;
+  /** Human name for generic copy ("Plex", "Subsonic server", "media server"). */
+  label: string;
   capabilities: MediaServerCapabilities;
 }
 
@@ -43,6 +53,8 @@ export function useMediaServer(): UseMediaServerReturn {
     status,
     type,
     hasMediaServer: type !== 'none',
+    isPlex: type === 'plex',
+    label: MEDIA_SERVER_LABELS[type],
     capabilities: status?.capabilities ?? LEGACY_CAPABILITIES,
   };
 }

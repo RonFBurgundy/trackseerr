@@ -224,7 +224,7 @@ const MainApp: React.FC = () => {
         isAdmin={auth.canUseAdminUi}
         tier={identity.tier}
         onLogin={() => {
-          if (mediaServer.hasMediaServer) setIsAuthModalOpen(true);
+          if (mediaServer.isPlex) setIsAuthModalOpen(true);
           else setShowLocalLogin(true);
         }}
         onLogout={auth.logout}
@@ -296,8 +296,8 @@ const MainApp: React.FC = () => {
                     <Loader2 className="h-4 w-4 animate-spin" />
                     <span>Loading...</span>
                   </div>
-                ) : !mediaServer.hasMediaServer ? (
-                  /* No media server: there is no Plex to sign in with, local accounts only. */
+                ) : !mediaServer.isPlex ? (
+                  /* No Plex (none, or a Subsonic server): there is no Plex to sign in with, local accounts only. */
                   <LocalLoginForm login={localLogin} />
                 ) : (
                   <>
@@ -416,6 +416,10 @@ const MainApp: React.FC = () => {
                 isLoading={isPlaylistsLoading}
                 isAdmin={auth.canUseAdminUi}
                 hasMediaServer={mediaServer.hasMediaServer}
+                serverType={mediaServer.type}
+                serverLabel={mediaServer.label}
+                canTargetUsers={mediaServer.capabilities.users}
+                mixesEnabled={mediaServer.capabilities.mixes}
               />
             )}
 
@@ -435,7 +439,7 @@ const MainApp: React.FC = () => {
                 accountHook={accountHook}
                 currentUserId={auth.user?.id}
                 mfaEnrollmentRequired={mfaEnrollmentRequired}
-                hasMediaServer={mediaServer.hasMediaServer}
+                hasMediaServer={mediaServer.isPlex}
               />
             )}
             {identity.isGateway && (
@@ -461,7 +465,7 @@ const MainApp: React.FC = () => {
 
       {/* Plex Sign-In Modal */}
       <ObsidianModal
-        isOpen={isAuthModalOpen && mediaServer.hasMediaServer}
+        isOpen={isAuthModalOpen && mediaServer.isPlex}
         onClose={() => {
           setIsAuthModalOpen(false);
           auth.cancelLogin();

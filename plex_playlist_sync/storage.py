@@ -308,6 +308,7 @@ class Database:
                 (37, self._migration_v37),
                 (38, self._migration_v38),
                 (39, self._migration_v39),
+                (40, self._migration_v40),
             ]
 
             applied = 0
@@ -1409,6 +1410,26 @@ class Database:
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN add_monitor_option TEXT NOT NULL DEFAULT 'all';"
             )
+
+    def _migration_v40(self, cur: sqlite3.Cursor) -> None:
+        """``media_server_settings``: the media server chosen on the Settings page (singleton row; Plex stays env-only).
+
+        ``password`` / ``api_key`` are stored the same way ``lidarr_settings.api_key`` is; they are never returned by
+        the API (masked) and a gateway database must not hold them (see ``role_guard``).
+        """
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS media_server_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                type TEXT NOT NULL DEFAULT '',
+                url TEXT NOT NULL DEFAULT '',
+                username TEXT NOT NULL DEFAULT '',
+                password TEXT NOT NULL DEFAULT '',
+                api_key TEXT NOT NULL DEFAULT '',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
 
     def _migration_v39(self, cur: sqlite3.Cursor) -> None:
         """Recompute ``clean_name`` / ``clean_title`` (and the folded ``search_clean``) for rows containing '_'.
@@ -4316,6 +4337,32 @@ class Database:
                 self.conn.commit()
 
         return self.get_lidarr_settings()
+
+    # -------------------------------------------------------------------------
+    # Media server settings (Settings page)
+    # -------------------------------------------------------------------------
+
+    _MEDIA_SERVER_SETTING_KEYS = ("type", "url", "username", "password", "api_key")
+
+    def get_media_server_settings(self) -> dict[str, str]:
+        """The saved media-server choice; every key is present, all empty when nothing was ever saved."""
+        with self._lock:
+            row = self.conn.execute("SELECT * FROM media_server_settings WHERE id = 1").fetchone()
+        stored = dict(row) if row else {}
+        return {k: str(stored.get(k) or "") for k in self._MEDIA_SERVER_SETTING_KEYS}
+
+    def save_media_server_settings(self, settings: dict[str, str]) -> dict[str, str]:
+        """Replace the saved media-server choice (all keys; missing ones are stored empty)."""
+        values = [str(settings.get(k) or "") for k in self._MEDIA_SERVER_SETTING_KEYS]
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO media_server_settings (id, type, url, username, password, api_key) VALUES (1, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET type = excluded.type, url = excluded.url, username = excluded.username, "
+                "password = excluded.password, api_key = excluded.api_key, updated_at = CURRENT_TIMESTAMP",
+                values,
+            )
+            self.conn.commit()
+        return self.get_media_server_settings()
 
     # -------------------------------------------------------------------------
     # Download Clients CRUD

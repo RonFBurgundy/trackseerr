@@ -146,7 +146,7 @@ def lidarr_target():
     if shutil.which("docker") is None:
         pytest.skip("no Lidarr reachable and no docker CLI: run `docker compose -f docker-compose.integration.yml up -d`")
     started = subprocess.run(
-        ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d"], capture_output=True, text=True, timeout=600
+        ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d", "lidarr"], capture_output=True, text=True, timeout=600
     )
     if started.returncode != 0:
         pytest.skip(f"docker compose up failed: {started.stderr.strip()[-300:]}")
@@ -319,3 +319,65 @@ def recorded_calls(monkeypatch) -> list[tuple[str, str, Any]]:
     _Recorder.calls = calls
     monkeypatch.setattr(lidarr_mod.httpx, "Client", _Recorder)
     return calls
+
+
+# --------------------------------------------------------------------------- Navidrome (Subsonic API)
+
+NAVIDROME_DEFAULT_URL = "http://127.0.0.1:14533"
+# TEST-ONLY credentials for the throwaway container. Not secrets.
+NAVIDROME_USER = "it-admin"
+NAVIDROME_PASSWORD = "it-admin-password-1"
+
+
+def _navidrome_up(url: str) -> bool:
+    try:
+        return httpx.get(f"{url}/ping", timeout=3.0).status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+def _navidrome_ensure_admin(url: str, user: str, password: str) -> bool:
+    """First start has no users: ``POST /auth/createAdmin`` makes the first admin. Later starts already have one;
+    either way the credentials must then log in."""
+    httpx.post(f"{url}/auth/createAdmin", json={"username": user, "password": password}, timeout=15.0)
+    login = httpx.post(f"{url}/auth/login", json={"username": user, "password": password}, timeout=15.0)
+    return login.status_code == 200
+
+
+@pytest.fixture(scope="session")
+def navidrome_target():
+    """``(url, user, password)`` of a ready Navidrome holding the generated library; starts the compose stack when
+    none is running (and then tears it down). NAVIDROME_IT_URL / _USER / _PASSWORD select an existing throwaway one."""
+    from tests.integration.navidrome.make_music import generate
+
+    url = os.environ.get("NAVIDROME_IT_URL")
+    if url:
+        user = os.environ.get("NAVIDROME_IT_USER", NAVIDROME_USER)
+        password = os.environ.get("NAVIDROME_IT_PASSWORD", NAVIDROME_PASSWORD)
+        if not _navidrome_up(url.rstrip("/")):
+            pytest.skip(f"Navidrome at {url} did not answer /ping")
+        yield url.rstrip("/"), user, password
+        return
+    generate()
+    started_here = False
+    if not _navidrome_up(NAVIDROME_DEFAULT_URL):
+        if shutil.which("docker") is None:
+            pytest.skip("no Navidrome reachable and no docker CLI: run `docker compose -f docker-compose.integration.yml up -d navidrome`")
+        started = subprocess.run(
+            ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d", "navidrome"], capture_output=True, text=True, timeout=600
+        )
+        if started.returncode != 0:
+            pytest.skip(f"docker compose up failed: {started.stderr.strip()[-300:]}")
+        started_here = True
+    try:
+        deadline = time.monotonic() + 120.0
+        while not _navidrome_up(NAVIDROME_DEFAULT_URL):
+            if time.monotonic() > deadline:
+                pytest.skip("the integration Navidrome did not become ready within 120s")
+            time.sleep(1.0)
+        if not _navidrome_ensure_admin(NAVIDROME_DEFAULT_URL, NAVIDROME_USER, NAVIDROME_PASSWORD):
+            pytest.skip("could not create or log in the integration Navidrome admin (is it a fresh throwaway instance?)")
+        yield NAVIDROME_DEFAULT_URL, NAVIDROME_USER, NAVIDROME_PASSWORD
+    finally:
+        if started_here:
+            subprocess.run(["docker", "compose", "-f", str(COMPOSE_FILE), "down", "-v"], capture_output=True, timeout=120)

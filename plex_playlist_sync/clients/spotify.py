@@ -112,7 +112,9 @@ class SpotifyClient:
                     album = track_data["album"]["name"] if track_data.get("album") else ""
                     url = track_data.get("external_urls", {}).get("spotify", "")
 
-                    tracks.append(Track(title=title, artist=artist, album=album, url=url))
+                    duration_ms = track_data.get("duration_ms")
+                    duration = float(duration_ms) / 1000.0 if isinstance(duration_ms, (int, float)) else None
+                    tracks.append(Track(title=title, artist=artist, album=album, url=url, duration_seconds=duration))
 
                 if results.get("next"):
                     results = self.sp.next(results)

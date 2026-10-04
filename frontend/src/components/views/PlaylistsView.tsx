@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { RefreshCw, Plus, Play, ExternalLink, Trash2, FileText, Link as LinkIcon, Loader2 } from 'lucide-react';
 import type { Playlist, User } from '@/types/models';
+import type { MediaServerType } from '@/types/mediaServer';
 import {
   TabStrip,
   ActionBar,
@@ -33,6 +34,14 @@ export interface PlaylistsViewProps {
   isAdmin?: boolean;
   /** False when no media server is connected: playlist push, Plex playlists and mixes are hidden. */
   hasMediaServer?: boolean;
+  /** Which server receives playlists; Plex-only sections (Plex playlists) show for `plex` alone. */
+  serverType?: MediaServerType;
+  /** Name used in generic copy ("Plex", "Subsonic server"). */
+  serverLabel?: string;
+  /** False when playlists can only go to one account (Subsonic): per-user sync targets are hidden. */
+  canTargetUsers?: boolean;
+  /** False when the server has no mixes (Subsonic): the Mixes section is hidden. */
+  mixesEnabled?: boolean;
 }
 
 const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
@@ -48,6 +57,8 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   isLoading = false,
   isAdmin = false,
   hasMediaServer = true,
+  serverLabel = 'Plex',
+  canTargetUsers = true,
 }) => {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
@@ -218,7 +229,12 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
               )}
 
               {/* Target Users Assignment: only meaningful when a media server receives the playlist */}
-              {hasMediaServer && (
+              {hasMediaServer && !canTargetUsers && (
+                <p className="pt-3 border-t border-[#1f1f1f] text-[11px] font-mono text-neutral-500">
+                  Pushed to the configured {serverLabel} account.
+                </p>
+              )}
+              {hasMediaServer && canTargetUsers && (
                 <div className="space-y-2 pt-3 border-t border-[#1f1f1f]">
                   <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-mono">
                     Sync Targets
@@ -409,7 +425,11 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = (props) => {
   const [requestedSection, setSection] = useState<PlaylistsSection>('sync');
   const hasMediaServer = props.hasMediaServer ?? true;
   // Plex playlists and mixes only exist with a media server; never leave a hidden section selected.
-  const section: PlaylistsSection = hasMediaServer ? requestedSection : 'sync';
+  const serverType = props.serverType ?? 'plex';
+  const showPlexSection = serverType === 'plex';
+  const showMixes = props.mixesEnabled ?? true;
+  const visible = (s: PlaylistsSection): boolean => s === 'sync' || (s === 'plex' ? showPlexSection : showMixes);
+  const section: PlaylistsSection = hasMediaServer && visible(requestedSection) ? requestedSection : 'sync';
 
   return (
     <div className="space-y-6">
@@ -418,12 +438,16 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = (props) => {
           <TapeDeckButton size="sm" active={section === 'sync'} onClick={() => setSection('sync')}>
             Sync
           </TapeDeckButton>
-          <TapeDeckButton size="sm" active={section === 'plex'} onClick={() => setSection('plex')}>
-            Plex
-          </TapeDeckButton>
-          <TapeDeckButton size="sm" active={section === 'mixes'} onClick={() => setSection('mixes')}>
-            Mixes
-          </TapeDeckButton>
+          {showPlexSection && (
+            <TapeDeckButton size="sm" active={section === 'plex'} onClick={() => setSection('plex')}>
+              Plex
+            </TapeDeckButton>
+          )}
+          {showMixes && (
+            <TapeDeckButton size="sm" active={section === 'mixes'} onClick={() => setSection('mixes')}>
+              Mixes
+            </TapeDeckButton>
+          )}
         </TabStrip>
       ) : (
         <NoMediaServerNote />

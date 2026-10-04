@@ -1,9 +1,10 @@
 """Pluggable media-server sinks. Plex is the default; see :mod:`plex_playlist_sync.media_servers.base`."""
 
 import logging
+import threading
 from typing import Any, Optional
 
-from plex_playlist_sync.config import MEDIA_SERVER_PLEX, Config
+from plex_playlist_sync.config import MEDIA_SERVER_PLEX, MEDIA_SERVER_SUBSONIC, Config
 from plex_playlist_sync.media_servers.base import (
     NO_CAPABILITIES,
     ConnectionTest,
@@ -21,6 +22,7 @@ from plex_playlist_sync.media_servers.base import (
     as_media_server,
 )
 from plex_playlist_sync.media_servers.plex import PLEX_CAPABILITIES, PlexMediaServer, plex_extras
+from plex_playlist_sync.media_servers.subsonic import SUBSONIC_CAPABILITIES, SubsonicMediaServer
 from plex_playlist_sync.redaction import safe_exc
 
 logger = logging.getLogger(__name__)
@@ -45,12 +47,59 @@ def get_media_server(config: Config, *, plex_client: Optional[Any] = None) -> Op
         except Exception as exc:  # noqa: BLE001 - PlexServer raises plexapi/requests/ssl errors; cause is logged
             logger.error("Failed to initialize media server: %s", safe_exc(exc))
             return None
+    if config.media_server_type == MEDIA_SERVER_SUBSONIC:
+        return build_subsonic(config)
     return None
+
+
+_subsonic_lock = threading.Lock()
+_subsonic_cached: Optional[tuple[tuple[Any, ...], SubsonicMediaServer]] = None
+
+
+def build_subsonic(config: Config) -> Optional[SubsonicMediaServer]:
+    """The Subsonic adapter for ``config`` (env, else the Settings page), or None when it is incomplete.
+
+    One adapter (one pooled HTTP client) is shared per distinct configuration and replaced, with the old client
+    closed, when the settings change. No network call is made here: connectivity is checked by ``test_connection``
+    and surfaces per operation.
+    """
+    global _subsonic_cached
+    if not config.subsonic_configured:
+        return None
+    key = (
+        config.subsonic_url,
+        config.subsonic_user,
+        config.subsonic_password,
+        config.subsonic_api_key,
+        config.plex_verify_ssl,
+    )
+    with _subsonic_lock:
+        if _subsonic_cached is not None and _subsonic_cached[0] == key:
+            return _subsonic_cached[1]
+        try:
+            server = SubsonicMediaServer(
+                config.subsonic_url,
+                config.subsonic_user,
+                config.subsonic_password,
+                api_key=config.subsonic_api_key,
+                verify_ssl=config.plex_verify_ssl,
+            )
+        except MediaServerError as exc:
+            logger.error("Failed to initialize Subsonic media server: %s", exc.safe_detail)
+            return None
+        if _subsonic_cached is not None:
+            _subsonic_cached[1].close()
+        _subsonic_cached = (key, server)
+        return server
 
 
 def capabilities_for(kind: str) -> ServerCapabilities:
     """Static capabilities of a server kind, known without connecting (the public status endpoint needs them)."""
-    return PLEX_CAPABILITIES if kind == MEDIA_SERVER_PLEX else NO_CAPABILITIES
+    if kind == MEDIA_SERVER_PLEX:
+        return PLEX_CAPABILITIES
+    if kind == MEDIA_SERVER_SUBSONIC:
+        return SUBSONIC_CAPABILITIES
+    return NO_CAPABILITIES
 
 
 def describe_error(exc: BaseException) -> str:
@@ -70,10 +119,13 @@ __all__ = [
     "MediaServerUnsupported",
     "PlaylistSyncOptions",
     "PlexMediaServer",
+    "SUBSONIC_CAPABILITIES",
     "ServerCapabilities",
     "ServerTrackRef",
     "ServerUser",
+    "SubsonicMediaServer",
     "as_media_server",
+    "build_subsonic",
     "capabilities_for",
     "describe_error",
     "get_media_server",

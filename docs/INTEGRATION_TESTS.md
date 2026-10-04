@@ -73,3 +73,31 @@ Confirmed as the client and the fake assume: rootfolder `default*` field names; 
    name, so no effect.
 5. A metadata profile that allows nothing (stock "None") makes a new artist list zero albums forever;
    `wait_for_artist_albums` then returns `([], False)` and requests end `albums_pending`.
+
+
+# Navidrome (Subsonic adapter) integration tests
+
+`tests/integration/test_navidrome_contract.py` runs `SubsonicMediaServer` against a real Navidrome
+(`deluan/navidrome:0.64.2`, pinned) with the same opt-in as the Lidarr tests (`RUN_INTEGRATION=1`, marker `integration`).
+`tests/subsonic_fake.py` (used by the unit and contract tests) is the in-process stand-in; these tests are the check
+that the real server still behaves as the fake assumes.
+
+```bash
+docker compose -f docker-compose.integration.yml up -d navidrome        # 127.0.0.1:14533, ~15s, 512m / 1 cpu
+RUN_INTEGRATION=1 pytest tests/integration/test_navidrome_contract.py -m integration -p no:xdist
+docker compose -f docker-compose.integration.yml down -v                # then `docker ps` must show only your own containers
+```
+
+The music library is **generated**, nothing audio is committed: `tests/integration/navidrome/make_music.py` writes six
+~16 KB MP3s (silent MPEG frames, tags by mutagen) into the git-ignored `tests/integration/navidrome/music/` before the
+stack starts. `/data` is a tmpfs. The first admin is created by the fixture with `POST /auth/createAdmin` (TEST-ONLY
+credentials in `tests/integration/conftest.py`). `NAVIDROME_IT_URL` / `_USER` / `_PASSWORD` select another throwaway
+instance. The container name and port differ from any Navidrome you run yourself.
+
+Covered: ping, wrong password -> `MediaServerAuthError`, unreachable server, search / match (remaster suffix, wrong
+artist), playlist create -> reorder + add -> remove -> append mode verified with raw `getPlaylist` (same playlist id, so
+updated in place), idempotent re-sync, description as comment, other-account target rejected, 150-entry playlist
+(request chunking), `startScan` starts a scan, `getUsers`.
+
+Findings on Navidrome 0.64.2: `getUsers` works for an admin; it does not advertise `apiKeyAuthentication`; a fresh
+instance scans on first start and reports `Full scan required after migration`.

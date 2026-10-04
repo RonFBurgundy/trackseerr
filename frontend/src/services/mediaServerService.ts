@@ -1,7 +1,13 @@
 import { apiRequest } from './apiClient';
-import type { MediaServerStatus, MediaServerType } from '@/types/mediaServer';
+import type {
+  MediaServerSettings,
+  MediaServerSettingsInput,
+  MediaServerStatus,
+  MediaServerTestResult,
+  MediaServerType,
+} from '@/types/mediaServer';
 
-const MEDIA_SERVER_TYPES: readonly MediaServerType[] = ['plex', 'none'];
+const MEDIA_SERVER_TYPES: readonly MediaServerType[] = ['plex', 'subsonic', 'none'];
 
 function isMediaServerStatus(value: unknown): value is MediaServerStatus {
   if (typeof value !== 'object' || value === null) return false;
@@ -28,4 +34,16 @@ export async function getMediaServerStatus(): Promise<MediaServerStatus | null> 
     if (err instanceof Error) return null;
     throw err;
   }
+}
+
+export async function getMediaServerSettings(): Promise<MediaServerSettings> {
+  return apiRequest<MediaServerSettings>('/api/settings/media-server');
+}
+
+export async function saveMediaServerSettings(input: MediaServerSettingsInput): Promise<MediaServerSettings> {
+  return apiRequest<MediaServerSettings>('/api/settings/media-server', { method: 'PUT', body: input });
+}
+
+export async function testMediaServerSettings(input: MediaServerSettingsInput): Promise<MediaServerTestResult> {
+  return apiRequest<MediaServerTestResult>('/api/settings/media-server/test', { method: 'POST', body: input });
 }

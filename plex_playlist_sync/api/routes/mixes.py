@@ -16,7 +16,7 @@ from plex_playlist_sync.api.dependencies import (
     get_current_user,
     get_db,
     get_discovery_client,
-    get_plex_client,
+    get_media_client,
 )
 from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.plex import PlexClient
@@ -293,7 +293,7 @@ def generate_mix(
     background_tasks: BackgroundTasks,
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     discovery: DiscoveryClient = Depends(get_discovery_client),
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, str]:

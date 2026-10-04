@@ -15,6 +15,7 @@ from plexapi.server import PlexServer
 
 from ..models import Playlist, SyncResult, Track
 from ..security import is_safe_image_url, safe_data_path
+from ..missing_csv import delete_missing_csv, write_missing_csv
 from ..redaction import redact_text, safe_exc
 
 logger = logging.getLogger(__name__)
@@ -413,42 +414,11 @@ class PlexClient:
 
     def write_missing_csv(self, missing_tracks: List[Track], playlist_name: str, data_dir: str = "/data") -> None:
         """Write missing tracks to CSV file in data directory with formula injection defense."""
-        try:
-            folder = Path(data_dir).resolve()
-            folder.mkdir(parents=True, exist_ok=True)
-            # Sanitize playlist name for filesystem
-            clean_name = re.sub(r'[\\/*?:"<>|]', "_", playlist_name).strip()
-            if not clean_name:
-                clean_name = "missing_playlist"
-            target = safe_data_path(f"{clean_name}.csv", base_dir=str(folder))
-
-            def _clean(val: Any) -> str:
-                text = str(val if val is not None else "")
-                if text.lstrip().startswith(("=", "+", "-", "@", "\t", "\r", "|")):
-                    return f"'{text}"
-                return text
-
-            with open(target, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(["title", "artist", "album", "url"])
-                for t in missing_tracks:
-                    writer.writerow([_clean(t.title), _clean(t.artist), _clean(t.album), _clean(t.url)])
-            logger.info("Wrote %d missing track(s) to %s", len(missing_tracks), target)
-        except Exception as e:
-            logger.warning("Failed to write missing tracks CSV for '%s': %s", playlist_name, e)
+        write_missing_csv(missing_tracks, playlist_name, data_dir)
 
     def delete_missing_csv(self, playlist_name: str, data_dir: str = "/data") -> None:
         """Delete previously written missing CSV if all tracks now match."""
-        try:
-            clean_name = re.sub(r'[\\/*?:"<>|]', "_", playlist_name).strip()
-            if not clean_name:
-                return
-            target = safe_data_path(f"{clean_name}.csv", base_dir=str(data_dir))
-            if target.exists():
-                target.unlink()
-                logger.info("Cleaned up obsolete missing CSV: %s", target)
-        except Exception as e:
-            logger.debug("Could not delete missing CSV for '%s': %s", playlist_name, e)
+        delete_missing_csv(playlist_name, data_dir)
 
     def sync_playlist(
         self,

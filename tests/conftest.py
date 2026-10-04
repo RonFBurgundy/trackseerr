@@ -38,6 +38,25 @@ def _gateway_session_status_allows_by_default(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _reset_media_server_process_state():
+    """The Settings-page media-server overlay, its change listeners and the shared Subsonic adapter are process-wide:
+    never let one test's saved settings reach the next."""
+    from plex_playlist_sync import media_servers
+    from plex_playlist_sync.config import set_media_server_overlay
+    from plex_playlist_sync.media_servers import settings as media_server_settings
+
+    def _reset() -> None:
+        set_media_server_overlay(None)
+        media_server_settings.clear_listeners()
+        with media_servers._subsonic_lock:
+            media_servers._subsonic_cached = None
+
+    _reset()
+    yield
+    _reset()
+
+
+@pytest.fixture(autouse=True)
 def _restore_root_logging():
     """Tiered ``create_app`` / ``cli.main`` call ``setup_logging``, which attaches handlers bound to the
     per-test captured ``sys.stdout``. Left on the root logger they hold a closed stream and break whichever

@@ -12,6 +12,7 @@ PlexClient's own matching and playlist logic is covered by tests/test_plex.py an
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 
+import httpx
 import pytest
 import requests
 from plexapi.exceptions import BadRequest, NotFound, Unauthorized
@@ -33,7 +34,10 @@ from plex_playlist_sync.media_servers import (
     plex_extras,
 )
 from plex_playlist_sync.media_servers.plex import refresh_mix_snapshots
+from plex_playlist_sync.media_servers.subsonic import SubsonicMediaServer
 from plex_playlist_sync.models import Playlist, SyncResult, Track
+from tests.subsonic_fake import Fault as SubsonicFault
+from tests.subsonic_fake import FakeSubsonic, default_state
 
 LIBRARY = [
     Track("Song A", "Artist 1", "Album X"),
@@ -206,6 +210,7 @@ class Harness:
     backend: Backend
     server: MediaServer
     errors: dict[str, Callable[[], Exception]]
+    multi_user: bool = True  # False: the adapter can only write to the configured account (Subsonic)
 
     def playlist(self, name: str, user: str = ADMIN) -> Optional[list[str]]:
         return self.backend.playlists.get((user, name))
@@ -239,7 +244,78 @@ def _plex() -> Harness:
     )
 
 
-HARNESSES = {"fake": _fake, "plex": _plex}  # Stage 3/4: add "subsonic" / "jellyfin" harnesses here
+class SubsonicBackend:
+    """The Backend surface the scenarios use, over a fake Subsonic server's state."""
+
+    def __init__(self, fake: FakeSubsonic) -> None:
+        self.fake = fake
+        self._reachable = True
+        self._failure: Optional[Callable[[], Exception]] = None
+
+    def _sync_hooks(self) -> None:
+        st = self.fake.state
+        failure = self._failure
+        probe = failure() if failure is not None else None
+        st.transport_failure = None
+        st.fault = None
+        if not self._reachable:
+            st.transport_failure = lambda: httpx.ConnectError("http://srv/rest/ping?u=admin&t=SECRET&s=SECRET")
+        elif isinstance(probe, SubsonicFault):
+            st.fault = lambda: failure()  # type: ignore[misc,return-value]
+        elif probe is not None:
+            st.transport_failure = lambda: failure()  # type: ignore[misc,return-value]
+
+    @property
+    def reachable(self) -> bool:
+        return self._reachable
+
+    @reachable.setter
+    def reachable(self, value: bool) -> None:
+        self._reachable = value
+        self._sync_hooks()
+
+    @property
+    def failure(self) -> Optional[Callable[[], Exception]]:
+        return self._failure
+
+    @failure.setter
+    def failure(self, value: Optional[Callable[[], Exception]]) -> None:
+        self._failure = value
+        self._sync_hooks()
+
+    @property
+    def playlists(self) -> dict[tuple[str, str], list[str]]:
+        st = self.fake.state
+        out: dict[tuple[str, str], list[str]] = {}
+        for p in st.playlists.values():
+            out[(p.owner, p.name)] = [st.song(i).title for i in p.entries]  # type: ignore[union-attr]
+        return out
+
+    @property
+    def refreshes(self) -> int:
+        return self.fake.state.scans
+
+
+def _subsonic() -> Harness:
+    fake = FakeSubsonic(default_state([(t.title, t.artist, t.album) for t in LIBRARY]))
+    backend = SubsonicBackend(fake)
+    server = SubsonicMediaServer(
+        "http://srv", ADMIN, "pw", transport=fake.transport(), sleep=lambda _s: None
+    )
+    return Harness(
+        "subsonic",
+        backend,  # type: ignore[arg-type]
+        server,
+        {
+            "auth": lambda: SubsonicFault(40, "Wrong username or password"),
+            "notfound": lambda: SubsonicFault(70, "Data not found"),
+            "connection": lambda: httpx.ConnectError("http://srv/rest/ping?u=admin&t=SECRET&s=SECRET"),
+        },
+        multi_user=False,
+    )
+
+
+HARNESSES = {"fake": _fake, "plex": _plex, "subsonic": _subsonic}  # Stage 4: add a "jellyfin" harness here
 
 
 @pytest.fixture(params=sorted(HARNESSES))
@@ -320,8 +396,14 @@ class TestPlaylistSync:
 
     def test_multiple_targets_one_result_each(self, h: Harness) -> None:
         results = h.server.sync_playlist(_pl("Song A"), [ADMIN, "kid"], PlaylistSyncOptions())
-        assert len(results) == 2 and all(r.success for r in results)
-        assert h.playlist("Mix", "kid") == ["Song A"]
+        assert len(results) == 2
+        assert results[0].success
+        if h.multi_user:
+            assert results[1].success
+            assert h.playlist("Mix", "kid") == ["Song A"]
+        else:  # one account only: the other target is reported, never silently written to the wrong account
+            assert not results[1].success and "configured account" in results[1].error
+            assert h.playlist("Mix", "kid") is None
 
     def test_no_targets_means_default_account(self, h: Harness) -> None:
         results = h.server.sync_playlist(_pl("Song A"), [], PlaylistSyncOptions())

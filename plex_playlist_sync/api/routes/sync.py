@@ -14,7 +14,7 @@ from plex_playlist_sync.api.dependencies import (
     get_config,
     get_db,
     get_deezer_client,
-    get_plex_client,
+    get_media_client,
     get_spotify_client,
     require_admin,
     verify_feed_access,
@@ -299,7 +299,7 @@ def trigger_sync(
     _admin: dict[str, Any] = Depends(require_admin),
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     spotify_client: Optional[SpotifyClient] = Depends(get_spotify_client),
     deezer_client: Optional[DeezerClient] = Depends(get_deezer_client),
 ) -> dict[str, Any]:
@@ -387,7 +387,7 @@ async def handle_sync_webhook(
     _auth: dict[str, Any] = Depends(verify_feed_access),
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     spotify_client: Optional[SpotifyClient] = Depends(get_spotify_client),
     deezer_client: Optional[DeezerClient] = Depends(get_deezer_client),
 ) -> dict[str, Any]:

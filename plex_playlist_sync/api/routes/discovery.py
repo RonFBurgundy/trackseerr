@@ -12,7 +12,7 @@ from plex_playlist_sync.api.dependencies import (
     get_config,
     get_db,
     get_discovery_client,
-    get_plex_client,
+    get_media_client,
     require_user,
 )
 from plex_playlist_sync.clients.core_client import CoreClient
@@ -192,7 +192,7 @@ def get_trending(
     limit: int = Query(default=25, ge=1, le=50),
     discovery: DiscoveryClient = Depends(get_discovery_client),
     db: Database = Depends(get_db),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     config: Config = Depends(get_config),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
@@ -207,7 +207,7 @@ def get_new_releases(
     limit: int = Query(default=25, ge=1, le=50),
     discovery: DiscoveryClient = Depends(get_discovery_client),
     db: Database = Depends(get_db),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     config: Config = Depends(get_config),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
@@ -224,7 +224,7 @@ def search_discovery(
     limit: int = Query(default=25, ge=1, le=50),
     discovery: DiscoveryClient = Depends(get_discovery_client),
     db: Database = Depends(get_db),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     config: Config = Depends(get_config),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
@@ -239,7 +239,7 @@ def get_album(
     album_id: str,
     discovery: DiscoveryClient = Depends(get_discovery_client),
     db: Database = Depends(get_db),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     config: Config = Depends(get_config),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
@@ -269,7 +269,7 @@ def get_artist(
     artist_id: str,
     discovery: DiscoveryClient = Depends(get_discovery_client),
     db: Database = Depends(get_db),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     config: Config = Depends(get_config),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:

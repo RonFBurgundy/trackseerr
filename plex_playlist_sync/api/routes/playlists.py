@@ -14,7 +14,7 @@ from plex_playlist_sync.api.dependencies import (
     get_current_user,
     get_db,
     get_deezer_client,
-    get_plex_client,
+    get_media_client,
     require_media_server,
     get_spotify_client,
 )
@@ -370,7 +370,7 @@ def create_smart_mix(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
 ) -> dict[str, Any]:
     """Generates a smart playlist in Plex from local listening history."""
     server = as_media_server(plex_client)
@@ -540,7 +540,7 @@ def import_playlist_tracks(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
 ) -> dict[str, Any]:
     """Imports playlist and tracks directly from browser helpers, clipboard, or bookmarklet."""
     clean_name = sanitize_text(req.name)
@@ -668,7 +668,7 @@ def import_m3u_playlist(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
 ) -> dict[str, Any]:
     """Imports a playlist from raw M3U / M3U8 file contents."""
     parsed_tracks = parse_m3u(req.content)

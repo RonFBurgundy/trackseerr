@@ -98,7 +98,9 @@ class DeezerClient:
                     url = getattr(item, "link", None) or (item.as_dict().get("link", "") if hasattr(item, "as_dict") else "")
 
                     if title:
-                        tracks.append(Track(title=title, artist=artist, album=album, url=url or ""))
+                        raw_duration = getattr(item, "duration", None)
+                        duration = float(raw_duration) if isinstance(raw_duration, (int, float)) else None
+                        tracks.append(Track(title=title, artist=artist, album=album, url=url or "", duration_seconds=duration))
 
             logger.debug("Fetched %d tracks for Deezer playlist '%s'", len(tracks), playlist_id)
         except Exception as e:

@@ -40,7 +40,7 @@ from plex_playlist_sync.auth import (
     verify_server_access,
 )
 from plex_playlist_sync.clients.plex import PlexClient
-from plex_playlist_sync.config import MEDIA_SERVER_NONE, Config
+from plex_playlist_sync.config import MEDIA_SERVER_PLEX, Config
 from plex_playlist_sync.media_server import MediaServerUnavailable
 from plex_playlist_sync.storage import Database
 from plex_playlist_sync.redaction import redact_text
@@ -67,12 +67,12 @@ class VerifyPinRequest(BaseModel):
 
 
 def _plex_login_unavailable(config: Optional[Config]) -> bool:
-    """Plex sign-in cannot work on a core / all-in-one instance with no media server. A gateway signs users in
+    """Plex sign-in cannot work on a core / all-in-one instance whose media server is not Plex. A gateway signs users in
     on behalf of a core that holds the Plex settings, and an explicit PLEX_MACHINE_IDENTIFIER means Plex
     sign-in is intended, so neither is blocked here."""
     if config is None or config.role == "gateway" or os.getenv("PLEX_MACHINE_IDENTIFIER"):
         return False
-    return config.media_server_type == MEDIA_SERVER_NONE
+    return config.media_server_type != MEDIA_SERVER_PLEX  # Subsonic servers have no Plex OAuth either
 
 
 @router.post("/plex/pin")

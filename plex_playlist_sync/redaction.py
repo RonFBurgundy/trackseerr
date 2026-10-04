@@ -15,6 +15,11 @@ _SENSITIVE_QUERY_RE = re.compile(
     r"|(?<![\w-])(x-plex-token['\"]?\s*[=:]\s*['\"]?)[^&#\s\"',)]+"
 )
 
+# Subsonic-API requests carry the credential in the query string (``u``, ``t`` + ``s`` salt, ``p``, ``apiKey``). The
+# salted token is replayable, so it is redacted wherever a ``/rest/<endpoint>?...`` URL reaches a log line or response.
+_SUBSONIC_URL_RE = re.compile(r"(?i)(/rest/\w+(?:\.view)?\?)([^\s\"'#]*)")
+_SUBSONIC_AUTH_PARAM_RE = re.compile(r"(?i)(^|&)(u|t|s|p|apikey)=[^&]*")
+
 _INVITE_TOKEN_RE = re.compile(r"(/(?:api/auth/)?invite/)[^/?#\s\"']+")
 
 _URL_USERINFO_RE = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@\"']+@")
@@ -27,8 +32,14 @@ def _sub_query(match: "re.Match[str]") -> str:
     return (match.group(1) or match.group(2)) + "REDACTED"
 
 
+def _sub_subsonic_query(match: "re.Match[str]") -> str:
+    return match.group(1) + _SUBSONIC_AUTH_PARAM_RE.sub(r"\1\2=REDACTED", match.group(2))
+
+
 def redact_sensitive_query(text: str) -> str:
-    """Replace token/apikey/api_key/state query values, and invite/reset link tokens (``[REDACTED]``), with ``REDACTED``."""
+    """Replace token/apikey/api_key/state query values, Subsonic auth parameters, and invite/reset link tokens
+    (``[REDACTED]``), with ``REDACTED``."""
+    text = _SUBSONIC_URL_RE.sub(_sub_subsonic_query, text)
     return _INVITE_TOKEN_RE.sub(r"\1[REDACTED]", _SENSITIVE_QUERY_RE.sub(_sub_query, text))
 
 

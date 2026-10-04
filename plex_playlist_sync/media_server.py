@@ -1,6 +1,6 @@
 """Media-server status and the shared "no media server" API contract.
 
-Plex is the only supported media server today; ``none`` means Trackseerr manages the library and does not
+Plex and Subsonic-API servers (Navidrome, Gonic, ...) are supported; ``none`` means Trackseerr manages the library and does not
 push playlists anywhere. Features that need a media server answer ``409`` with
 ``{"detail": "No media server connected", "code": "media_server_unavailable"}`` when none is configured.
 (A configured-but-unreachable Plex keeps its own 503s: that is an outage, not a configuration choice.)
@@ -14,7 +14,7 @@ from typing import Any, Callable, Optional
 from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
-from plex_playlist_sync.config import MEDIA_SERVER_NONE, Config
+from plex_playlist_sync.config import MEDIA_SERVER_NONE, MEDIA_SERVER_SUBSONIC, Config
 from plex_playlist_sync.media_servers import MediaServerUnavailable, capabilities_for
 from plex_playlist_sync.redaction import safe_exc
 
@@ -65,7 +65,10 @@ def _plex_reachable(config: Config, connect: Callable[[], Optional[Any]]) -> boo
     """Whether Plex answers, cached for ``_PROBE_TTL_SECONDS``. The status endpoint is unauthenticated, so it must
     never block on Plex: one caller starts a background refresh and waits at most ``_PROBE_TIMEOUT_SECONDS`` for
     it; every other caller gets the cached (possibly stale) value immediately. With no cache yet, they get False."""
-    key = (config.plex_url, config.plex_token)
+    if config.media_server_type == MEDIA_SERVER_SUBSONIC:
+        key = (f"subsonic:{config.subsonic_url}", f"{config.subsonic_user}:{config.subsonic_password}:{config.subsonic_api_key}")
+    else:
+        key = (config.plex_url, config.plex_token)
     with _probe_lock:
         hit = _probe_cache.get(key)
         if hit is not None and time.monotonic() - hit[0] < _PROBE_TTL_SECONDS:
@@ -84,7 +87,7 @@ def _plex_reachable(config: Config, connect: Callable[[], Optional[Any]]) -> boo
 def media_server_status(config: Config, connect: Callable[[], Optional[Any]]) -> dict[str, Any]:
     """Public, non-sensitive description of the active media server and what the UI may offer.
 
-    ``connect`` returns a connected client or None; it is only called when Plex is the configured server.
+    ``connect`` returns a connected client or None; it is only called when a media server is configured.
     """
     server_type = config.media_server_type
     has_server = server_type != MEDIA_SERVER_NONE

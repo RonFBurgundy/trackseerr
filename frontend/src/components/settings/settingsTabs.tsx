@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sliders, Folder, Download, Search, Radio, Layers, UserRound, Users, Server, ListMusic } from 'lucide-react';
+import { Sliders, Folder, Download, Search, Radio, Layers, UserRound, Users, Server, ListMusic, HardDrive } from 'lucide-react';
 
 export type SettingsTab =
   | 'general'
@@ -8,6 +8,7 @@ export type SettingsTab =
   | 'clients'
   | 'indexers'
   | 'lidarr'
+  | 'media-server'
   | 'import-lists'
   | 'users'
   | 'scrobbling'
@@ -61,6 +62,11 @@ export function buildSettingsGroups(isAdmin: boolean, mfaEnrollmentRequired: boo
     },
     { id: 'lidarr', label: 'Lidarr', items: [item('lidarr', 'Lidarr', <Radio className={ico} />)] },
     {
+      id: 'media-server',
+      label: 'Media Server',
+      items: [item('media-server', 'Media Server', <HardDrive className={ico} />)],
+    },
+    {
       id: 'import-lists',
       label: 'Import Lists',
       items: [item('import-lists', 'Import Lists', <ListMusic className={ico} />)],
@@ -85,6 +91,7 @@ export const SELF_SERVICE_TABS: ReadonlySet<SettingsTab> = new Set<SettingsTab>(
   'users',
   'system',
   'import-lists',
+  'media-server',
 ]);
 
 export const MEDIA_MANAGEMENT_TABS: ReadonlySet<SettingsTab> = new Set<SettingsTab>([

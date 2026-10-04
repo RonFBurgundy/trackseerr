@@ -5,6 +5,7 @@ import { ScrobblingSettings } from '@/components/scrobbling';
 import { AccountPanel } from '@/components/account';
 import { UsersPanel } from '@/components/admin';
 import { RoleChangeBanner } from '@/components/deployment';
+import { MediaServerPanel } from '@/components/mediaServer';
 import {
   SettingsNav,
   InactiveGate,
@@ -38,7 +39,7 @@ export interface SettingsViewProps {
   currentUserId?: string | number;
   /** Local sign-in succeeded but MFA enrollment is mandatory: only the Account tab is usable. */
   mfaEnrollmentRequired?: boolean;
-  /** False when no media server is connected: Plex-only settings are hidden. */
+  /** False unless Plex is the media server: Plex-only settings are hidden. */
   hasMediaServer?: boolean;
 }
 
@@ -148,6 +149,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       )}
 
       {activeTab === 'import-lists' && isAdmin && !mfaEnrollmentRequired && <ImportListsPanel libraryMode={mode} onToast={showToast} />}
+
+      {activeTab === 'media-server' && isAdmin && !mfaEnrollmentRequired && <MediaServerPanel onToast={showToast} />}
 
       {activeTab === 'system' && isAdmin && !mfaEnrollmentRequired && (
         <SystemPage isCore={isCore} libraryMode={mode} onToast={showToast} />

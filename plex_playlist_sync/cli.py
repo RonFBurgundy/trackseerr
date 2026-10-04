@@ -19,9 +19,11 @@ from .api.routes.system import get_log_file_path, log_ring_buffer
 from .clients.deezer import DeezerClient
 from .clients.plex import PlexClient
 from .media_server import NO_MEDIA_SERVER_BOOT_MESSAGE
+from .media_servers import MediaServer, build_subsonic
+from .media_servers import settings as media_server_settings
 from .clients.spotify import SpotifyClient
 from .clients.spotify_scraper import SpotifyWebScraper
-from .config import MEDIA_SERVER_NONE, Config, ConfigError
+from .config import MEDIA_SERVER_NONE, MEDIA_SERVER_PLEX, Config, ConfigError
 from .redaction import redact_sensitive_query, redact_text, safe_exc
 from .security import safe_data_path
 from .storage import Database
@@ -169,7 +171,8 @@ def setup_logging(level_name: str, config: Optional[Config] = None) -> None:
 class _Clients:
     """External-service clients; filled in after the HTTP server is up so slow probes never delay binding."""
 
-    plex: Optional[PlexClient] = None
+    # The connected media-server client: a PlexClient, or the Subsonic adapter (anything ``as_media_server`` accepts).
+    plex: Optional[Union[PlexClient, MediaServer]] = None
     spotify: Optional[Union[SpotifyClient, SpotifyWebScraper]] = None
     deezer: Optional[DeezerClient] = None
 
@@ -177,6 +180,9 @@ class _Clients:
 def _connect_clients(config: Config, clients: _Clients, *, fatal_plex: bool) -> bool:
     """Connects Plex (when it is the configured media server), Spotify and Deezer. Returns False only when
     Plex is configured, ``fatal_plex`` is set and Plex is unreachable. With no media server nothing is connected."""
+    if config.subsonic_configured:
+        with boot_state.step_timer("connecting to Subsonic"):
+            clients.plex = build_subsonic(config)  # lazy: no network here; unreachability surfaces per operation
     if config.plex_enabled:
         with boot_state.step_timer("connecting to Plex"):
             try:
@@ -518,7 +524,7 @@ def _background_init(
         logger.debug("Client connect traceback", exc_info=True)
     finally:
         clients_ready.set()  # success or failure: the scheduler must not wait forever
-    if clients.plex is not None:
+    if clients.plex is not None and not isinstance(clients.plex, MediaServer):  # a raw Plex client, not the Subsonic adapter
         try:
             with boot_state.step_timer("discovering Plex Home users", publish=False):
                 _discover_plex_users(db, clients.plex)
@@ -664,7 +670,20 @@ def main() -> int:
     except sqlite3.Error as e:
         logger.warning("Could not record the deployment role: %s", safe_exc(e))
 
-    if role != "gateway" and config.media_server_type == MEDIA_SERVER_NONE:
+    if role != "gateway":
+        # The Settings page may name the media server when the environment does not; follow later saves live.
+        media_server_settings.load_into_process(db)
+        config.apply_media_server_overlay()
+
+        def _reconnect_media_server() -> None:
+            config.apply_media_server_overlay()
+            if clients.plex is None or isinstance(clients.plex, MediaServer):  # never replace a connected Plex client
+                clients.plex = build_subsonic(config) if config.subsonic_configured else None
+            logger.info("Media server settings changed: now using '%s'", config.media_server_type)
+
+        media_server_settings.on_change(_reconnect_media_server)
+
+    if role != "gateway" and config.media_server_type != MEDIA_SERVER_PLEX:  # no Plex owner can sign in as first admin
         from .admin_bootstrap import ensure_bootstrap_admin
 
         ensure_bootstrap_admin(db)

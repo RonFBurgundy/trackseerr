@@ -50,10 +50,14 @@ export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, li
             </div>
             <div className="py-2.5 flex justify-between gap-3">
               <span className="text-neutral-400">
-                {mediaServer.hasMediaServer ? 'Plex Server Connection:' : 'Media Server:'}
+                {mediaServer.isPlex ? 'Plex Server Connection:' : 'Media Server:'}
               </span>
-              <span className={mediaServer.hasMediaServer && status.plex_connected ? 'text-green-400' : 'text-neutral-400'}>
-                {!mediaServer.hasMediaServer ? 'Not configured' : status.plex_connected ? 'Connected' : 'Configured'}
+              <span className={mediaServer.isPlex ? (status.plex_connected ? 'text-green-400' : 'text-neutral-400') : mediaServer.status?.connected ? 'text-green-400' : 'text-neutral-400'}>
+                {!mediaServer.hasMediaServer
+                  ? 'Not configured'
+                  : (mediaServer.isPlex ? status.plex_connected : mediaServer.status?.connected)
+                    ? 'Connected'
+                    : 'Configured'}
               </span>
             </div>
             <div className="py-2.5 flex justify-between gap-3">
