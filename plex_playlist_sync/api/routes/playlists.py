@@ -15,13 +15,15 @@ from plex_playlist_sync.api.dependencies import (
     get_db,
     get_deezer_client,
     get_plex_client,
+    require_media_server,
     get_spotify_client,
 )
 from plex_playlist_sync.clients.deezer import DeezerClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.clients.spotify_scraper import SpotifyWebScraper
-from plex_playlist_sync.config import Config
+from plex_playlist_sync.config import MEDIA_SERVER_NONE, Config
+from plex_playlist_sync.native_match import match_playlist_tracks_native
 from plex_playlist_sync.library_monitoring import validate_list_monitor_mode
 from plex_playlist_sync.list_monitoring import apply_playlist_missing_safely
 from plex_playlist_sync.m3u import parse_m3u
@@ -361,7 +363,7 @@ def get_smart_mix_presets(
     return SMART_MIX_PRESETS
 
 
-@router.post("/smart-mix", status_code=status.HTTP_201_CREATED)
+@router.post("/smart-mix", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_media_server)])
 def create_smart_mix(
     req: SmartMixRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
@@ -628,6 +630,24 @@ def import_playlist_tracks(
                 db.record_sync_result(import_id, status="error")
             else:
                 _apply_missing_in_background(db, config, import_id)
+    elif config.media_server_type == MEDIA_SERVER_NONE and model_tracks:
+        # No media server: nothing to push, but the playlist is still matched against the native library so its
+        # missing tracks feed monitoring / wanted.
+        try:
+            matched, missing = match_playlist_tracks_native(db, model_tracks)
+            matched_count = len(matched)
+            missing_count = len(missing)
+            db.record_sync_result(
+                import_id,
+                status="success" if not missing else "partial",
+                missing_tracks=missing,
+            )
+        except Exception as e:  # the playlist is already stored; the root cause is logged
+            logger.error("Native library match failed for imported playlist: %s", safe_exc(e))
+            logger.debug("Native match traceback", exc_info=True)
+            db.record_sync_result(import_id, status="error")
+        else:
+            _apply_missing_in_background(db, config, import_id)
 
     return {
         "id": import_id,

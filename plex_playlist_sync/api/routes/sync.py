@@ -24,10 +24,11 @@ from plex_playlist_sync.api.dependencies import (
 from plex_playlist_sync.clients.deezer import DeezerClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.clients.spotify import SpotifyClient
-from plex_playlist_sync.config import Config
+from plex_playlist_sync.config import MEDIA_SERVER_NONE, Config
 from plex_playlist_sync.job_tracker import tracked
 from plex_playlist_sync.list_monitoring import apply_playlist_missing_safely
 from plex_playlist_sync.models import Playlist, RequestStatus, Track
+from plex_playlist_sync.native_match import match_playlist_tracks_native
 from plex_playlist_sync.storage import Database
 from plex_playlist_sync.redaction import redact_text, safe_exc
 
@@ -161,22 +162,26 @@ class SyncState:
             playlists = db.list_playlists(enabled_only=True)
             stats["total_playlists"] = len(playlists)
 
+            no_media_server = config.media_server_type == MEDIA_SERVER_NONE
             for pl in playlists:
                 pl_id = pl["id"]
-                target_uids = db.get_playlist_targets(pl_id)
-                if not target_uids:
-                    logger.info("Playlist '%s' has no target users assigned; skipping", pl["name"])
-                    continue
-
                 target_usernames: list[str] = []
-                for uid in target_uids:
-                    user_row = db.get_user(uid)
-                    if user_row:
-                        target_usernames.append(user_row["username"])
+                if not no_media_server:
+                    # Target users only matter for pushing to a media server; without one the playlist is
+                    # still matched against the native library below.
+                    target_uids = db.get_playlist_targets(pl_id)
+                    if not target_uids:
+                        logger.info("Playlist '%s' has no target users assigned; skipping", pl["name"])
+                        continue
 
-                if not target_usernames:
-                    logger.info("No valid usernames found for playlist '%s' targets", pl["name"])
-                    continue
+                    for uid in target_uids:
+                        user_row = db.get_user(uid)
+                        if user_row:
+                            target_usernames.append(user_row["username"])
+
+                    if not target_usernames:
+                        logger.info("No valid usernames found for playlist '%s' targets", pl["name"])
+                        continue
 
                 tracks: list[Track] = []
                 service = pl.get("service", "spotify")
@@ -215,7 +220,21 @@ class SyncState:
                     poster=pl.get("poster_url", ""),
                 )
 
-                if plex_client:
+                if no_media_server:
+                    # No media server: nothing is pushed, but the source playlist is matched against the native
+                    # library so its missing tracks reach monitoring / wanted.
+                    try:
+                        matched, missing = match_playlist_tracks_native(db, tracks)
+                        db.record_sync_result(playlist_id=pl_id, status="success", missing_tracks=missing)
+                        apply_playlist_missing_safely(db, config, pl_id)
+                        stats["success_count"] += 1
+                        stats["total_matched"] += len(matched)
+                        stats["total_missing"] += len(missing)
+                    except Exception as e:  # one playlist must not stop the cycle; the root cause is logged
+                        logger.error("Native library match failed for playlist '%s': %s", pl["name"], safe_exc(e))
+                        logger.debug("Native match traceback", exc_info=True)
+                        db.record_sync_result(playlist_id=pl_id, status="failed")
+                elif plex_client:
                     try:
                         results = plex_client.sync_playlist_to_users(
                             playlist=model_playlist,

@@ -18,9 +18,10 @@ from .api.routes.sync import sync_state
 from .api.routes.system import get_log_file_path, log_ring_buffer
 from .clients.deezer import DeezerClient
 from .clients.plex import PlexClient
+from .media_server import NO_MEDIA_SERVER_BOOT_MESSAGE
 from .clients.spotify import SpotifyClient
 from .clients.spotify_scraper import SpotifyWebScraper
-from .config import Config
+from .config import MEDIA_SERVER_NONE, Config, ConfigError
 from .redaction import redact_sensitive_query, redact_text, safe_exc
 from .security import safe_data_path
 from .storage import Database
@@ -174,25 +175,27 @@ class _Clients:
 
 
 def _connect_clients(config: Config, clients: _Clients, *, fatal_plex: bool) -> bool:
-    """Connects Plex/Spotify/Deezer. Returns False only when Plex is mandatory (``fatal_plex``) and unreachable."""
-    with boot_state.step_timer("connecting to Plex"):
-        try:
-            clients.plex = PlexClient(
-                base_url=config.plex_url,
-                token=config.plex_token,
-                verify_ssl=config.plex_verify_ssl,
-            )
-        except Exception as e:  # PlexServer raises a wide set (requests, plexapi, ssl); root cause is logged
-            if fatal_plex:
-                logger.error("Failed to connect to Plex Media Server: %s", safe_exc(e))
-                logger.debug("Plex connect traceback", exc_info=True)
-                return False
-            logger.warning(
-                "Could not connect to Plex Server at %s on startup: %s. "
-                "Starting Web Server; connection will be retried during sync.",
-                redact_text(config.plex_url),
-                safe_exc(e),
-            )
+    """Connects Plex (when it is the configured media server), Spotify and Deezer. Returns False only when
+    Plex is configured, ``fatal_plex`` is set and Plex is unreachable. With no media server nothing is connected."""
+    if config.plex_enabled:
+        with boot_state.step_timer("connecting to Plex"):
+            try:
+                clients.plex = PlexClient(
+                    base_url=config.plex_url,
+                    token=config.plex_token,
+                    verify_ssl=config.plex_verify_ssl,
+                )
+            except Exception as e:  # PlexServer raises a wide set (requests, plexapi, ssl); root cause is logged
+                if fatal_plex:
+                    logger.error("Failed to connect to Plex Media Server: %s", safe_exc(e))
+                    logger.debug("Plex connect traceback", exc_info=True)
+                    return False
+                logger.warning(
+                    "Could not connect to Plex Server at %s on startup: %s. "
+                    "Starting Web Server; connection will be retried during sync.",
+                    redact_text(config.plex_url),
+                    safe_exc(e),
+                )
 
     with boot_state.step_timer("initializing Spotify/Deezer clients"):
         if config.has_spotify:
@@ -225,7 +228,7 @@ def _make_plex_provider(
     state = {"last_attempt": time.monotonic(), "warned": False}  # the boot connect counts as attempt #1
 
     def provider() -> Optional[PlexClient]:
-        if clients.plex is not None:
+        if clients.plex is not None or not config.plex_enabled:
             return clients.plex
         with lock:
             if clients.plex is not None:
@@ -576,9 +579,15 @@ def main() -> int:
             print(f"ERROR: refusing to start. {README_HINT}", file=sys.stderr)
             return 1
 
-    if role != "gateway" and (not config.plex_url or not config.plex_token):
-        logger.error("Missing mandatory environment variables: PLEX_URL and PLEX_TOKEN must be specified.")
-        return 1
+    if role != "gateway":
+        try:
+            config.validate_media_server()
+        except ConfigError as e:
+            logger.error("%s", e)
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
+        if config.media_server_type == MEDIA_SERVER_NONE:
+            logger.info(NO_MEDIA_SERVER_BOOT_MESSAGE)
 
     clients = _Clients()
 
@@ -654,6 +663,11 @@ def main() -> int:
         record_boot_role(db, role)
     except sqlite3.Error as e:
         logger.warning("Could not record the deployment role: %s", safe_exc(e))
+
+    if role != "gateway" and config.media_server_type == MEDIA_SERVER_NONE:
+        from .admin_bootstrap import ensure_bootstrap_admin
+
+        ensure_bootstrap_admin(db)
 
     # Sync legacy config playlist IDs to DB if any (local writes only)
     if role != "gateway":

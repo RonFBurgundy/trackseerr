@@ -20,6 +20,8 @@ export interface ScrobbleAdminPanelProps {
   onSaveServerConfig: (body: ScrobbleServerConfigBody) => Promise<boolean>;
   onRotateWebhook: () => Promise<void>;
   onSaveUser: (userId: string, body: AdminScrobbleConfigBody) => Promise<boolean>;
+  /** False when no media server is connected: the Plex history poll and webhook controls are hidden. */
+  showPlexOptions?: boolean;
 }
 
 export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
@@ -30,6 +32,7 @@ export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
   onSaveServerConfig,
   onRotateWebhook,
   onSaveUser,
+  showPlexOptions = true,
 }) => {
   const [apiKey, setApiKey] = useState<string>('');
   const [apiSecret, setApiSecret] = useState<string>('');
@@ -131,59 +134,63 @@ export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
               Managed by LASTFM_API_KEY / LASTFM_API_SECRET environment variables.
             </p>
           )}
-          <div>
-            <label className={labelClass}>Plex History Poll (minutes, 0 = off)</label>
-            <input
-              type="number"
-              min={0}
-              value={pollMinutes}
-              onChange={(e) => setPollMinutes(Math.max(0, Number(e.target.value) || 0))}
-              className={inputClass}
-            />
-          </div>
+          {showPlexOptions && (
+            <div>
+              <label className={labelClass}>Plex History Poll (minutes, 0 = off)</label>
+              <input
+                type="number"
+                min={0}
+                value={pollMinutes}
+                onChange={(e) => setPollMinutes(Math.max(0, Number(e.target.value) || 0))}
+                className={inputClass}
+              />
+            </div>
+          )}
           <TapeDeckButton type="submit" variant="amber" disabled={isSaving}>
             Save Server Settings
           </TapeDeckButton>
         </form>
       </MachinedCard>
 
-      <MachinedCard className="p-4 sm:p-6">
-        <h3 className="text-sm font-bold uppercase tracking-wider text-white mb-2">Plex Webhook</h3>
-        <p className="text-xs text-neutral-400 mb-3">
-          Add this URL in Plex under Settings, Webhooks (requires Plex Pass on the server owner).
-        </p>
-        <div className="bg-[#0d0d0d] border border-[#2a2a2a] rounded-[3px] px-3 py-2 text-xs font-mono text-neutral-200 break-all select-all">
-          {webhookUrl ?? 'Unavailable'}
-        </div>
-        <div className="flex flex-wrap items-center gap-2 mt-3">
-          <TapeDeckButton size="sm" disabled={!webhookUrl} onClick={() => void handleCopy()} icon={<Copy className="h-3.5 w-3.5" />}>
-            {copied ? 'Copied' : 'Copy'}
-          </TapeDeckButton>
-          {confirmRotate ? (
-            <>
-              <span className="text-xs text-neutral-400">Existing Plex webhook will stop working.</span>
-              <TapeDeckButton
-                size="sm"
-                variant="danger"
-                disabled={isSaving}
-                onClick={() => {
-                  setConfirmRotate(false);
-                  void onRotateWebhook();
-                }}
-              >
-                Confirm Rotate
-              </TapeDeckButton>
-              <TapeDeckButton size="sm" onClick={() => setConfirmRotate(false)}>
-                Cancel
-              </TapeDeckButton>
-            </>
-          ) : (
-            <TapeDeckButton size="sm" disabled={isSaving} onClick={() => setConfirmRotate(true)} icon={<RefreshCw className="h-3.5 w-3.5" />}>
-              Rotate
+      {showPlexOptions && (
+        <MachinedCard className="p-4 sm:p-6">
+          <h3 className="text-sm font-bold uppercase tracking-wider text-white mb-2">Plex Webhook</h3>
+          <p className="text-xs text-neutral-400 mb-3">
+            Add this URL in Plex under Settings, Webhooks (requires Plex Pass on the server owner).
+          </p>
+          <div className="bg-[#0d0d0d] border border-[#2a2a2a] rounded-[3px] px-3 py-2 text-xs font-mono text-neutral-200 break-all select-all">
+            {webhookUrl ?? 'Unavailable'}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            <TapeDeckButton size="sm" disabled={!webhookUrl} onClick={() => void handleCopy()} icon={<Copy className="h-3.5 w-3.5" />}>
+              {copied ? 'Copied' : 'Copy'}
             </TapeDeckButton>
-          )}
-        </div>
-      </MachinedCard>
+            {confirmRotate ? (
+              <>
+                <span className="text-xs text-neutral-400">Existing Plex webhook will stop working.</span>
+                <TapeDeckButton
+                  size="sm"
+                  variant="danger"
+                  disabled={isSaving}
+                  onClick={() => {
+                    setConfirmRotate(false);
+                    void onRotateWebhook();
+                  }}
+                >
+                  Confirm Rotate
+                </TapeDeckButton>
+                <TapeDeckButton size="sm" onClick={() => setConfirmRotate(false)}>
+                  Cancel
+                </TapeDeckButton>
+              </>
+            ) : (
+              <TapeDeckButton size="sm" disabled={isSaving} onClick={() => setConfirmRotate(true)} icon={<RefreshCw className="h-3.5 w-3.5" />}>
+                Rotate
+              </TapeDeckButton>
+            )}
+          </div>
+        </MachinedCard>
+      )}
 
       <MachinedCard className="p-4 sm:p-6">
         <h3 className="text-sm font-bold uppercase tracking-wider text-white mb-4">Users</h3>

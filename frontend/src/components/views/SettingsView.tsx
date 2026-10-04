@@ -38,6 +38,8 @@ export interface SettingsViewProps {
   currentUserId?: string | number;
   /** Local sign-in succeeded but MFA enrollment is mandatory: only the Account tab is usable. */
   mfaEnrollmentRequired?: boolean;
+  /** False when no media server is connected: Plex-only settings are hidden. */
+  hasMediaServer?: boolean;
 }
 
 interface ToastState {
@@ -52,6 +54,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   accountHook,
   currentUserId,
   mfaEnrollmentRequired = false,
+  hasMediaServer = true,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(() =>
     mfaEnrollmentRequired
@@ -134,7 +137,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       <SettingsNav groups={groups} activeTab={activeTab} onSelect={setActiveTab} inactiveTabs={inactiveTabs} />
 
-      {activeTab === 'scrobbling' && !mfaEnrollmentRequired && <ScrobblingSettings isAdmin={isAdmin} />}
+      {activeTab === 'scrobbling' && !mfaEnrollmentRequired && <ScrobblingSettings isAdmin={isAdmin} hasMediaServer={hasMediaServer} />}
 
       {activeTab === 'account' && (
         <AccountPanel accountHook={accountHook} isAdmin={isAdmin} enrollmentBlocking={mfaEnrollmentRequired} />

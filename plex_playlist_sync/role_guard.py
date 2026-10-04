@@ -30,6 +30,7 @@ GATEWAY_FORBIDDEN_ENV: tuple[str, ...] = (
     "SPOTIFY_CLIENT_ID",
     "LIDARR_API_KEY",
     "FEED_TOKEN",
+    "ADMIN_PASSWORD",
 )
 
 # Download-client / indexer credentials supplied through the environment.

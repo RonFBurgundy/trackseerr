@@ -17,6 +17,7 @@ from plex_playlist_sync.api.dependencies import (
     get_db,
     get_lidarr_client,
     get_plex_client,
+    require_media_server,
     require_admin,
     verify_feed_access,
 )
@@ -454,7 +455,7 @@ def cancel_lidarr_queue(
     return {**status, "action_status": res.get("status"), "action_message": res.get("message")}
 
 
-@router.get("/search")
+@router.get("/search", dependencies=[Depends(require_media_server)])
 def search_plex_tracks(
     query: str = Query(..., min_length=1, description="Query string to search Plex library tracks"),
     limit: int = Query(default=15, ge=1, le=50),

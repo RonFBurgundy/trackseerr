@@ -50,6 +50,7 @@ from plex_playlist_sync.config import Config
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result, track_job
 from plex_playlist_sync.library_manager import MODE_LIDARR, MODE_NATIVE, build_lidarr_client, get_library_mode
 from plex_playlist_sync.library_scanner import library_scanner
+from plex_playlist_sync.media_server import media_server_status
 from plex_playlist_sync.lidarr_queue import lidarr_worker
 from plex_playlist_sync.models import DownloadClientConfig, IndexerConfig, UserPermission
 from plex_playlist_sync.security import is_safe_service_url
@@ -680,6 +681,14 @@ def _get_worker_statuses() -> WorkerStatus:
         backlog_worker=backlog_status,
         rss_worker=rss_status,
     )
+
+
+@router.get("/media-server", summary="Active media server and the features it enables")
+def get_media_server_status(
+    config: Config = Depends(get_config),
+) -> dict[str, Any]:
+    """Unauthenticated (the login screen needs it) and non-sensitive: type, connectivity, capability flags."""
+    return media_server_status(config, lambda: get_plex_client(config))
 
 
 @router.get("/status", response_model=SystemStatusResponse, summary="Get system status and diagnostics")

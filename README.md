@@ -368,8 +368,10 @@ TrackSeerr includes a first-class **Application URL** setting (configurable in t
 | `PUID` / `PGID` | `1000` / `1000` | User and group ID for filesystem operations (`99`/`100` on Unraid) |
 | `UMASK` | `022` | File creation permissions mask |
 | `FORCE_CHOWN` | `0` | Set to `1` to force a full recursive ownership fix of `/config` and `/data` to `PUID:PGID` on this start. Done automatically once on first run (marker `/config/.trackseerr-chown-v1`); useful after restoring files created by an older root-run container. Can be slow on large music libraries |
-| `PLEX_URL` | *Required* | Base URL to your Plex Media Server (e.g. `http://192.168.1.100:32400`) |
-| `PLEX_TOKEN` | *Required* | Plex administrator `X-Plex-Token` |
+| `MEDIA_SERVER` | *Auto* | Media server that receives playlists: `plex` or `none` (Subsonic and Jellyfin are planned). Unset: `plex` when both `PLEX_URL` and `PLEX_TOKEN` are set, otherwise `none`. With `none`, Trackseerr still manages the library, acquisition and import lists and matches playlists against the native library to find missing tracks, but pushes nothing and Plex-only features (Plex sign-in, Plex playlists, mixes, library refresh) are hidden or answer `409 media_server_unavailable`. An explicit `plex` without `PLEX_URL`/`PLEX_TOKEN` stops startup |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / *unset* | Creates the first local administrator when none exists. Needed with `MEDIA_SERVER=none` (there is no Plex owner to sign in); ignored once an admin exists. Core / all-in-one only, never set on a gateway |
+| `PLEX_URL` | *Required for Plex* | Base URL to your Plex Media Server (e.g. `http://192.168.1.100:32400`) |
+| `PLEX_TOKEN` | *Required for Plex* | Plex administrator `X-Plex-Token` |
 | `PLEX_MUSIC_SECTION` | `Music` | Plex music library section name |
 | `PLEX_MACHINE_IDENTIFIER` | *Auto* | Plex machine ID for pinning multi-user access |
 | `PLEX_VERIFY_SSL` | `1` | Set to `0` or `false` to disable SSL certificate verification |

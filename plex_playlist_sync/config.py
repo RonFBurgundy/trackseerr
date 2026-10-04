@@ -35,11 +35,22 @@ def _split_ids(val: Optional[str]) -> List[str]:
     return cleaned
 
 
+MEDIA_SERVER_PLEX = "plex"
+MEDIA_SERVER_NONE = "none"
+SUPPORTED_MEDIA_SERVERS = (MEDIA_SERVER_PLEX, MEDIA_SERVER_NONE)
+
+
+class ConfigError(ValueError):
+    """The environment holds a combination of settings the process cannot start with."""
+
+
 @dataclass
 class Config:
     plex_url: str
     plex_token: str
     plex_verify_ssl: bool = True
+    # Raw MEDIA_SERVER value ("" = unset: derived from the Plex credentials). Read ``media_server_type``.
+    media_server: str = ""
 
     write_missing_as_csv: bool = False
     append_service_suffix: bool = True
@@ -140,6 +151,7 @@ class Config:
             plex_url=plex_url,
             plex_token=plex_token,
             plex_verify_ssl=verify_ssl,
+            media_server=os.getenv("MEDIA_SERVER", "").strip().lower(),
             write_missing_as_csv=_parse_bool(os.getenv("WRITE_MISSING_AS_CSV"), False),
             append_service_suffix=_parse_bool(os.getenv("APPEND_SERVICE_SUFFIX"), True),
             add_playlist_poster=_parse_bool(os.getenv("ADD_PLAYLIST_POSTER"), True),
@@ -184,6 +196,35 @@ class Config:
             lastfm_api_key=os.getenv("LASTFM_API_KEY", "").strip() or None,
             lastfm_api_secret=os.getenv("LASTFM_API_SECRET", "").strip() or None,
         )
+
+    @property
+    def media_server_type(self) -> str:
+        """The effective media server: the explicit ``MEDIA_SERVER`` choice, else ``plex`` when both
+        PLEX_URL and PLEX_TOKEN are set, else ``none``."""
+        choice = (self.media_server or "").strip().lower()
+        if choice in SUPPORTED_MEDIA_SERVERS:
+            return choice
+        return MEDIA_SERVER_PLEX if (self.plex_url and self.plex_token) else MEDIA_SERVER_NONE
+
+    @property
+    def plex_enabled(self) -> bool:
+        """True when Plex is the active media server and has the credentials to connect."""
+        return self.media_server_type == MEDIA_SERVER_PLEX and bool(self.plex_url and self.plex_token)
+
+    def validate_media_server(self) -> None:
+        """Raises ``ConfigError`` for an unknown MEDIA_SERVER value, or an explicit ``plex`` without credentials."""
+        choice = (self.media_server or "").strip().lower()
+        if not choice:
+            return
+        if choice not in SUPPORTED_MEDIA_SERVERS:
+            raise ConfigError(
+                f"MEDIA_SERVER={self.media_server!r} is not supported; use one of: {', '.join(SUPPORTED_MEDIA_SERVERS)}."
+            )
+        if choice == MEDIA_SERVER_PLEX and not (self.plex_url and self.plex_token):
+            raise ConfigError(
+                "MEDIA_SERVER=plex requires PLEX_URL and PLEX_TOKEN. Set both, or set MEDIA_SERVER=none "
+                "(or leave it unset) to run Trackseerr without a media server."
+            )
 
     @property
     def has_spotify(self) -> bool:

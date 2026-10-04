@@ -319,7 +319,8 @@ def generate_and_sync(
     )
 
     if plex_client is None:
-        result.sync_error = "Plex is not configured"
+        no_server = getattr(app_config, "media_server_type", None) == "none"
+        result.sync_error = "No media server connected" if no_server else "Plex is not configured"
     elif not user:
         result.sync_error = "Mix owner not found"
     elif not available_tracks:

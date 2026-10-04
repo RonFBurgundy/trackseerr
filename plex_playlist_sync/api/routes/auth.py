@@ -40,7 +40,8 @@ from plex_playlist_sync.auth import (
     verify_server_access,
 )
 from plex_playlist_sync.clients.plex import PlexClient
-from plex_playlist_sync.config import Config
+from plex_playlist_sync.config import MEDIA_SERVER_NONE, Config
+from plex_playlist_sync.media_server import MediaServerUnavailable
 from plex_playlist_sync.storage import Database
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.security import safe_forward_url
@@ -65,6 +66,15 @@ class VerifyPinRequest(BaseModel):
     )
 
 
+def _plex_login_unavailable(config: Optional[Config]) -> bool:
+    """Plex sign-in cannot work on a core / all-in-one instance with no media server. A gateway signs users in
+    on behalf of a core that holds the Plex settings, and an explicit PLEX_MACHINE_IDENTIFIER means Plex
+    sign-in is intended, so neither is blocked here."""
+    if config is None or config.role == "gateway" or os.getenv("PLEX_MACHINE_IDENTIFIER"):
+        return False
+    return config.media_server_type == MEDIA_SERVER_NONE
+
+
 @router.post("/plex/pin")
 def generate_pin(
     req: Optional[CreatePinRequest] = None,
@@ -86,6 +96,8 @@ def generate_pin(
     never exposes the token via the redirect).
     """
     cfg = config if isinstance(config, Config) else None
+    if _plex_login_unavailable(cfg):
+        raise MediaServerUnavailable()
     app_url = str((cfg.application_url if cfg else "") or "").strip().rstrip("/")
     if not app_url and db is not None:
         try:
@@ -183,6 +195,8 @@ def verify_pin(
         machine_id = req.target_machine_id
 
     if not machine_id:
+        if _plex_login_unavailable(config):
+            raise MediaServerUnavailable()
         logger.error("No Plex machine identifier configured to verify user access")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

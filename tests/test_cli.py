@@ -5,8 +5,9 @@ from plex_playlist_sync.cli import main
 from plex_playlist_sync.gateway_link import HANDSHAKE_OK, HandshakeResult
 
 
-def test_cli_missing_plex_vars():
-    with patch.dict(os.environ, {}, clear=True):
+def test_cli_explicit_plex_without_credentials_fails():
+    """No PLEX_* is fine (media server defaults to none); an explicit MEDIA_SERVER=plex without them is not."""
+    with patch.dict(os.environ, {"MEDIA_SERVER": "plex"}, clear=True):
         code = main()
         assert code == 1
 
@@ -199,15 +200,15 @@ def test_cli_gateway_role_fallback_to_ephemeral_db(
         assert os.environ.get("DATABASE_PATH") == "/tmp/trackseerr_gateway.sqlite"
 
 
-def test_cli_core_role_requires_plex_vars():
+def test_cli_core_role_requires_internal_secret():
     env = {"ROLE": "core"}
     with patch.dict(os.environ, env, clear=True):
         code = main()
         assert code == 1
 
 
-def test_cli_all_in_one_role_requires_plex_vars():
-    env = {"ROLE": "all-in-one"}
+def test_cli_all_in_one_role_with_explicit_plex_requires_plex_vars():
+    env = {"ROLE": "all-in-one", "MEDIA_SERVER": "plex"}
     with patch.dict(os.environ, env, clear=True):
         code = main()
         assert code == 1

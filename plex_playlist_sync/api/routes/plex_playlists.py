@@ -10,7 +10,7 @@ from plexapi.exceptions import BadRequest, NotFound, PlexApiException, Unauthori
 from pydantic import BaseModel, Field
 import requests
 
-from plex_playlist_sync.api.dependencies import get_current_user, get_db, get_plex_client
+from plex_playlist_sync.api.dependencies import get_current_user, get_db, get_plex_client, require_media_server
 from plex_playlist_sync.clients.plex import (
     MixNotFoundError,
     PlaylistProtectedError,
@@ -24,7 +24,7 @@ from plex_playlist_sync.redaction import redact_text, safe_exc
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_media_server)])
 
 
 # ---------------------------------------------------------------------------

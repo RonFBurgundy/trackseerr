@@ -1,0 +1,48 @@
+import { useEffect, useState } from 'react';
+import type { MediaServerCapabilities, MediaServerStatus, MediaServerType } from '@/types/mediaServer';
+import { getMediaServerStatus } from '@/services/mediaServerService';
+
+/** What an older server (no media-server endpoint) implies: Plex, with every feature on, as before. */
+const LEGACY_CAPABILITIES: MediaServerCapabilities = {
+  playlists: true,
+  users: true,
+  mixes: true,
+  library_refresh: true,
+};
+
+export interface UseMediaServerReturn {
+  /** False until the first answer (or failure) arrives; gate sign-in choices on it to avoid flicker. */
+  isLoaded: boolean;
+  status: MediaServerStatus | null;
+  type: MediaServerType;
+  /** True when a media server is configured, so playlist push, mixes and Plex sign-in make sense. */
+  hasMediaServer: boolean;
+  capabilities: MediaServerCapabilities;
+}
+
+/** Loads the active media server once; features hide themselves when none is connected. */
+export function useMediaServer(): UseMediaServerReturn {
+  const [status, setStatus] = useState<MediaServerStatus | null>(null);
+  const [isLoaded, setIsLoaded] = useState<boolean>(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getMediaServerStatus().then((next) => {
+      if (cancelled) return;
+      setStatus(next);
+      setIsLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const type: MediaServerType = status?.type ?? 'plex';
+  return {
+    isLoaded,
+    status,
+    type,
+    hasMediaServer: type !== 'none',
+    capabilities: status?.capabilities ?? LEGACY_CAPABILITIES,
+  };
+}

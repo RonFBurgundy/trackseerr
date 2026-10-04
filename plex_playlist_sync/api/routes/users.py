@@ -12,6 +12,7 @@ from plex_playlist_sync.api.dependencies import (
     get_config,
     get_db,
     get_plex_client,
+    require_media_server,
     require_admin,
     require_user,
 )
@@ -146,7 +147,7 @@ def update_user_governance_route(
     return updated
 
 
-@router.post("/refresh")
+@router.post("/refresh", dependencies=[Depends(require_media_server)])
 def refresh_users(
     _admin: dict[str, Any] = Depends(require_admin),
     db: Database = Depends(get_db),

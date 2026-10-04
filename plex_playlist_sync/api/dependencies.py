@@ -22,7 +22,8 @@ from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.clients.spotify_scraper import SpotifyWebScraper
 from plex_playlist_sync.clients.core_client import SESSION_ISSUED_AT_KEY, CoreClient
-from plex_playlist_sync.config import Config
+from plex_playlist_sync.config import MEDIA_SERVER_NONE, Config
+from plex_playlist_sync.media_server import MediaServerUnavailable
 from plex_playlist_sync.internal_auth import (
     HEADER_SIGNATURE,
     InvalidAssertion,
@@ -108,9 +109,15 @@ def get_db() -> Database:
         return _db_instances[key]
 
 
+def require_media_server(config: Config = Depends(get_config)) -> None:
+    """Route dependency: 409 ``media_server_unavailable`` unless a media server is configured."""
+    if config.media_server_type == MEDIA_SERVER_NONE:
+        raise MediaServerUnavailable()
+
+
 def get_plex_client(config: Config = Depends(get_config)) -> Optional[PlexClient]:
     """Dependency providing PlexClient instance if configured."""
-    if not config.plex_url or not config.plex_token:
+    if not config.plex_enabled:
         return None
     try:
         return PlexClient(
