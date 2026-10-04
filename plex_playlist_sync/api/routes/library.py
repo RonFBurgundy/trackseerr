@@ -6,7 +6,7 @@ interactive Manual Import scan and commit pipelines;
 and Arr-grade token-template preview and batch-renaming engine.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -62,6 +62,11 @@ from plex_playlist_sync.clients.lidarr import (
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.config import Config
+from plex_playlist_sync.library_monitoring import (
+    NATIVE_MONITOR_OPTIONS,
+    album_monitored_for_option,
+    section_to_album_type,
+)
 from plex_playlist_sync.library_manager import MODE_LIDARR, ModeChanged, get_library_mode, work_guard
 from plex_playlist_sync.library_availability import get_item_availability
 from plex_playlist_sync.mediacover import mediacover_service
@@ -94,11 +99,14 @@ router = APIRouter()
 # Request Models
 # -------------------------------------------------------------------------
 
+MONITOR_OPTION_PATTERN = "^(" + "|".join(NATIVE_MONITOR_OPTIONS) + ")$"
+
+
 class IngestArtistRequest(BaseModel):
     foreign_artist_id: str  # e.g. "deezer:artist:13" or "itunes:artist:..."
     artist_name: str
     quality_profile_id: Optional[str] = None
-    monitor_option: str = Field(default="all", pattern="^(all|albums|singles_eps|none)$")
+    monitor_option: Optional[str] = Field(default=None, pattern=MONITOR_OPTION_PATTERN)
     monitored: bool = True
     root_folder: Optional[str] = None
 
@@ -106,12 +114,26 @@ class IngestArtistRequest(BaseModel):
 class ArtistMonitoredRequest(BaseModel):
     monitored: bool
     cascade_children: bool = True
-    monitor_option: Optional[str] = Field(default=None, pattern="^(all|albums|singles_eps|none)$")
+    monitor_option: Optional[str] = Field(default=None, pattern=MONITOR_OPTION_PATTERN)
 
 
 class AlbumMonitoredRequest(BaseModel):
     monitored: bool
     cascade_tracks: bool = True
+
+
+class ArtistBulkEditRequest(BaseModel):
+    artist_ids: Optional[list[str]] = None
+    all: bool = False
+    monitored: Optional[bool] = None
+    monitor_option: Optional[str] = Field(default=None, pattern=MONITOR_OPTION_PATTERN)
+    quality_profile_id: Optional[str] = None  # an explicit null clears the profile; omitted leaves it alone
+    apply_monitor_to_albums: bool = False
+
+
+class AlbumBulkEditRequest(BaseModel):
+    album_ids: list[str]
+    monitored: bool
 
 
 class TrackMonitoredRequest(BaseModel):
@@ -721,6 +743,9 @@ def ingest_artist(
     root_path = Path(root_folder_str).resolve()
     artist_folder = str(root_path / body.artist_name)
 
+    monitor_option = body.monitor_option or str(mm.get("add_monitor_option") or "all")
+    artist_added_at = datetime.now(timezone.utc).date().isoformat()
+
     artist_id = str(uuid.uuid4())
     artist_dict = db.upsert_library_artist(
         LibraryArtist(
@@ -730,7 +755,7 @@ def ingest_artist(
             foreign_artist_id=body.foreign_artist_id,
             path=artist_folder,
             monitored=body.monitored,
-            monitor_option=body.monitor_option,
+            monitor_option=monitor_option,
             quality_profile_id=body.quality_profile_id,
         )
     )
@@ -764,17 +789,15 @@ def ingest_artist(
                 if foreign_album_id:
                     seen_album_ids.add(foreign_album_id)
 
-                if not body.monitored:
-                    alb_monitored = False
-                elif body.monitor_option == "all":
-                    alb_monitored = True
-                elif body.monitor_option == "albums":
-                    alb_monitored = (section_name == "albums")
-                elif body.monitor_option == "singles_eps":
-                    alb_monitored = (section_name == "singles_eps")
-                else:  # "none"
-                    alb_monitored = False
-
+                alb_monitored = album_monitored_for_option(
+                    monitor_option,
+                    artist_monitored=body.monitored,
+                    album_type=section_to_album_type(section_name),
+                    has_files=False,
+                    release_date=album.get("release_date"),
+                    year=album.get("year"),
+                    artist_added_at=artist_added_at,
+                )
                 album_title = album.get("title") or "Unknown Album"
                 year_val: Optional[int] = None
                 if album.get("year") is not None:
@@ -1063,9 +1086,12 @@ def set_artist_monitored(
         lidarr = require_lidarr(client)
         preset = body.monitor_option
         if preset is not None:
-            return _lidarr_mutation(
-                db, lambda: lidarr_library.apply_monitor_preset(lidarr, numeric, preset), "Artist"
-            )
+            try:
+                return _lidarr_mutation(
+                    db, lambda: lidarr_library.apply_monitor_preset(lidarr, numeric, preset), "Artist"
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
         return _lidarr_mutation(
             db, lambda: lidarr_library.set_artist_monitored(lidarr, numeric, body.monitored), "Artist"
         )
@@ -1073,74 +1099,15 @@ def set_artist_monitored(
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
 
-    if body.monitor_option == "all":
-        with db._lock:
-            db.conn.execute(
-                "UPDATE library_artists SET monitored = 1, monitor_option = 'all', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (str(artist_id),),
-            )
-            db.conn.execute(
-                "UPDATE library_albums SET monitored = 1, updated_at = CURRENT_TIMESTAMP WHERE artist_id = ?",
-                (str(artist_id),),
-            )
-            db.conn.execute(
-                "UPDATE library_tracks SET monitored = 1, updated_at = CURRENT_TIMESTAMP WHERE artist_id = ?",
-                (str(artist_id),),
-            )
-            db.conn.commit()
-    elif body.monitor_option == "albums":
-        with db._lock:
-            db.conn.execute(
-                "UPDATE library_artists SET monitored = 1, monitor_option = 'albums', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (str(artist_id),),
-            )
-            db.conn.execute(
-                "UPDATE library_albums SET monitored = CASE WHEN LOWER(COALESCE(album_type, 'album')) IN ('album', 'studio') THEN 1 ELSE 0 END, updated_at = CURRENT_TIMESTAMP WHERE artist_id = ?",
-                (str(artist_id),),
-            )
-            db.conn.execute(
-                """
-                UPDATE library_tracks SET monitored = (
-                    SELECT monitored FROM library_albums WHERE library_albums.id = library_tracks.album_id
-                ), updated_at = CURRENT_TIMESTAMP WHERE artist_id = ?
-                """,
-                (str(artist_id),),
-            )
-            db.conn.commit()
-    elif body.monitor_option == "singles_eps":
-        with db._lock:
-            db.conn.execute(
-                "UPDATE library_artists SET monitored = 1, monitor_option = 'singles_eps', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (str(artist_id),),
-            )
-            db.conn.execute(
-                "UPDATE library_albums SET monitored = CASE WHEN LOWER(COALESCE(album_type, '')) IN ('single', 'ep', 'singles', 'eps') THEN 1 ELSE 0 END, updated_at = CURRENT_TIMESTAMP WHERE artist_id = ?",
-                (str(artist_id),),
-            )
-            db.conn.execute(
-                """
-                UPDATE library_tracks SET monitored = (
-                    SELECT monitored FROM library_albums WHERE library_albums.id = library_tracks.album_id
-                ), updated_at = CURRENT_TIMESTAMP WHERE artist_id = ?
-                """,
-                (str(artist_id),),
-            )
-            db.conn.commit()
-    elif body.monitor_option == "none":
-        with db._lock:
-            db.conn.execute(
-                "UPDATE library_artists SET monitored = 0, monitor_option = 'none', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (str(artist_id),),
-            )
-            db.conn.execute(
-                "UPDATE library_albums SET monitored = 0, updated_at = CURRENT_TIMESTAMP WHERE artist_id = ?",
-                (str(artist_id),),
-            )
-            db.conn.execute(
-                "UPDATE library_tracks SET monitored = 0, updated_at = CURRENT_TIMESTAMP WHERE artist_id = ?",
-                (str(artist_id),),
-            )
-            db.conn.commit()
+    if body.monitor_option is not None:
+        # Same set-based rules as bulk edit: the artist's option and monitored flag are written, then every album
+        # is recomputed from them and its tracks follow the album.
+        db.bulk_edit_library_artists(
+            [str(artist_id)],
+            monitored=body.monitor_option != "none",
+            monitor_option=body.monitor_option,
+            apply_monitor_to_albums=True,
+        )
     else:
         db.set_artist_monitored(
             artist_id=artist_id,
@@ -1150,6 +1117,65 @@ def set_artist_monitored(
 
     updated = db.get_library_artist(artist_id)
     return updated or {}
+
+
+@router.post("/artists/bulk-edit", dependencies=[Depends(require_core_tier)])
+def bulk_edit_artists(
+    body: ArtistBulkEditRequest,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, int]:
+    """Bulk-edits many artists (selected by ``artist_ids`` or ``all``) in one set-based transaction.
+
+    Native mode: ``monitored``, ``monitor_option`` and ``quality_profile_id`` are written when given;
+    ``apply_monitor_to_albums`` then recomputes every affected album (and its tracks) from the artist's resulting
+    option. Lidarr mode: ``monitored``/``quality_profile_id`` via ``artist/editor`` and the presets
+    all/albums/singles_eps/none per artist.
+    """
+    has_ids = bool(body.artist_ids)
+    if has_ids == bool(body.all):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide exactly one of a non-empty artist_ids or all=true",
+        )
+    profile_given = "quality_profile_id" in body.model_fields_set
+    if body.monitored is None and body.monitor_option is None and not profile_given:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide at least one of monitored, monitor_option or quality_profile_id",
+        )
+    if _is_lidarr(db):
+        lidarr = require_lidarr(client)
+        numeric_ids = [lidarr_numeric_id(i, "Artist") for i in body.artist_ids] if has_ids else None
+        profile_id: Optional[int] = None
+        if profile_given:
+            if body.quality_profile_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="quality_profile_id cannot be cleared in Lidarr mode",
+                )
+            profile_id = lidarr_numeric_id(body.quality_profile_id, "Quality profile")
+        try:
+            return _lidarr_mutation(
+                db,
+                lambda: lidarr_library.bulk_edit_artists(
+                    lidarr, numeric_ids, body.monitored, body.monitor_option, profile_id
+                ),
+                "Artist",
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    try:
+        return db.bulk_edit_library_artists(
+            body.artist_ids if has_ids else None,
+            monitored=body.monitored,
+            monitor_option=body.monitor_option,
+            quality_profile_id=body.quality_profile_id if profile_given else Database._UNSET,
+            apply_monitor_to_albums=body.apply_monitor_to_albums,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 def reconcile_artist_files(db: Database, artist_id: str) -> int:
@@ -1342,16 +1368,15 @@ def refresh_single_artist(
                     title = rg.get("title") or "Unknown Album"
                     album_type = rg.get("album_type", "album")
 
-                    if not artist.get("monitored", True):
-                        alb_monitored = False
-                    elif monitor_opt == "all":
-                        alb_monitored = True
-                    elif monitor_opt == "albums":
-                        alb_monitored = (album_type == "album")
-                    elif monitor_opt == "singles_eps":
-                        alb_monitored = (album_type in ("single", "ep"))
-                    else:  # "none"
-                        alb_monitored = False
+                    alb_monitored = album_monitored_for_option(
+                        monitor_opt,
+                        artist_monitored=bool(artist.get("monitored", True)),
+                        album_type=album_type,
+                        has_files=False,
+                        release_date=rg.get("release_date"),
+                        year=rg.get("year"),
+                        artist_added_at=artist.get("created_at"),
+                    )
 
                     existing_alb = None
                     if rg_id:
@@ -1614,16 +1639,15 @@ def refresh_single_artist(
                             else:
                                 album_id = str(uuid.uuid4())
                                 monitor_opt = artist.get("monitor_option", "all")
-                                if not artist.get("monitored", True):
-                                    alb_monitored = False
-                                elif monitor_opt == "all":
-                                    alb_monitored = True
-                                elif monitor_opt == "albums":
-                                    alb_monitored = (section_name == "albums")
-                                elif monitor_opt == "singles_eps":
-                                    alb_monitored = (section_name == "singles_eps")
-                                else:
-                                    alb_monitored = False
+                                alb_monitored = album_monitored_for_option(
+                                    monitor_opt,
+                                    artist_monitored=bool(artist.get("monitored", True)),
+                                    album_type=section_to_album_type(section_name),
+                                    has_files=False,
+                                    release_date=album.get("release_date"),
+                                    year=year_val,
+                                    artist_added_at=artist.get("created_at"),
+                                )
 
                                 alb_path = str(Path(artist_path) / album_title) if artist_path else None
                                 db.upsert_library_album(
@@ -2049,6 +2073,26 @@ def set_album_monitored(
     )
     updated = db.get_library_album(album_id)
     return updated or {}
+
+
+@router.post("/albums/bulk-edit", dependencies=[Depends(require_core_tier)])
+def bulk_edit_albums(
+    body: AlbumBulkEditRequest,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, int]:
+    """Monitors or unmonitors many albums at once (native: albums and their tracks; Lidarr: one album/monitor call)."""
+    if not body.album_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="album_ids must not be empty")
+    if _is_lidarr(db):
+        lidarr = require_lidarr(client)
+        numeric_ids = [lidarr_numeric_id(i, "Album") for i in body.album_ids]
+        updated = _lidarr_mutation(
+            db, lambda: lidarr_library.set_albums_monitored(lidarr, numeric_ids, body.monitored), "Album"
+        )
+        return {"albums_updated": int(updated)}
+    return {"albums_updated": db.bulk_set_albums_monitored(body.album_ids, body.monitored)}
 
 
 @router.post("/albums/{album_id}/search", dependencies=[Depends(require_core_tier)])

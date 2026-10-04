@@ -4,7 +4,7 @@ import type { AlbumItem } from '@/types/models';
 import { useAlbumTracks } from '@/hooks/useAlbumTracks';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
 import { errorMessage } from '@/services/apiClient';
-import { MachinedCard, TactileSwitch, TapeDeckButton } from '@/components/ui';
+import { MachinedCard, SelectionCheckbox, TactileSwitch, TapeDeckButton } from '@/components/ui';
 import { AlbumTrackList } from './AlbumTrackList';
 
 export interface ArtistAlbumCardProps {
@@ -16,6 +16,8 @@ export interface ArtistAlbumCardProps {
   onToggleAlbumMonitored: (albumId: number | string, currentMonitored: boolean) => void;
   onToggleTrackMonitored: (trackId: number | string, monitored: boolean) => Promise<void>;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
+  /** Present while the bulk editor is active. */
+  selected?: { checked: boolean; onToggle: () => void };
 }
 
 /** One release in an artist's discography; expanding it loads the tracks through the paged endpoint. */
@@ -28,6 +30,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
   onToggleAlbumMonitored,
   onToggleTrackMonitored,
   onToast,
+  selected,
 }) => {
   const [expanded, setExpanded] = useState<boolean>(false);
   const { tracks, loading, error, patchMonitored } = useAlbumTracks(expanded ? album.id : null);
@@ -49,9 +52,18 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
   const toggleExpanded = (): void => setExpanded((v) => !v);
 
   return (
-    <MachinedCard className="p-4 space-y-4">
+    <MachinedCard className={`relative p-4 space-y-4 ${selected?.checked ? 'ring-1 ring-[#e5a00d]' : ''}`}>
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
-        <div className="flex items-center gap-3 cursor-pointer min-w-0 w-full sm:w-auto flex-1" onClick={toggleExpanded}>
+        <div className="flex items-center gap-3 min-w-0 w-full sm:w-auto flex-1">
+          {selected && (
+            <SelectionCheckbox
+              inline
+              checked={selected.checked}
+              label={`Select ${album.title}`}
+              onChange={selected.onToggle}
+            />
+          )}
+          <div className="flex items-center gap-3 cursor-pointer min-w-0 flex-1" onClick={toggleExpanded}>
           <div className="h-12 w-12 rounded-[3px] bg-[#1a1a1a] border border-[#262626] overflow-hidden flex-shrink-0 flex items-center justify-center">
             {album.cover_url ? (
               <img src={album.cover_url} alt={album.title} className="w-full h-full object-cover" loading="lazy" />
@@ -74,6 +86,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
               {album.release_date ? album.release_date.substring(0, 4) : 'Unknown Year'} &bull;{' '}
               {album.track_count ?? tracks.length} Tracks
             </p>
+          </div>
           </div>
         </div>
 

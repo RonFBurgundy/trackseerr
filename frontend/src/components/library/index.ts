@@ -16,3 +16,5 @@ export * from './CollectionArt';
 export * from './CreateCollectionModal';
 export * from './CollectionsPanel';
 export * from './CollectionDetail';
+export * from './ArtistBulkBar';
+export * from './AlbumBulkBar';

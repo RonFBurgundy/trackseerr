@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from plex_playlist_sync import local_auth
+from plex_playlist_sync.library_monitoring import ALBUM_MONITORED_SQL, validate_monitor_option
 from plex_playlist_sync.list_index import SortDef, build_index, fold_search_text, library_sort_key, order_clause
 from plex_playlist_sync.models import (
     ActiveDownload,
@@ -268,6 +269,7 @@ class Database:
                 (33, self._migration_v33),
                 (34, self._migration_v34),
                 (35, self._migration_v35),
+                (36, self._migration_v36),
             ]
 
             applied = 0
@@ -1356,6 +1358,19 @@ class Database:
                         for row_id, name, cleaned in pending[start : start + 1000]
                     ],
                 )
+
+    def _migration_v36(self, cur: sqlite3.Cursor) -> None:
+        """Default monitor options for newly scanned (``existing``) and newly added (``all``) native artists."""
+        cur.execute("PRAGMA table_info(media_management_settings);")
+        cols = {row[1] for row in cur.fetchall()}
+        if "scan_monitor_option" not in cols:
+            cur.execute(
+                "ALTER TABLE media_management_settings ADD COLUMN scan_monitor_option TEXT NOT NULL DEFAULT 'existing';"
+            )
+        if "add_monitor_option" not in cols:
+            cur.execute(
+                "ALTER TABLE media_management_settings ADD COLUMN add_monitor_option TEXT NOT NULL DEFAULT 'all';"
+            )
 
     @staticmethod
     def _seed_download_history(cur: sqlite3.Cursor) -> int:
@@ -3391,6 +3406,8 @@ class Database:
             )
             res["mb_mirror_url"] = str(res.get("mb_mirror_url") or "https://api.brainzmash.cc")
             res["prefer_local_artwork"] = bool(res.get("prefer_local_artwork", 1))
+            res["scan_monitor_option"] = str(res.get("scan_monitor_option") or "existing")
+            res["add_monitor_option"] = str(res.get("add_monitor_option") or "all")
             return res
 
     def update_media_management_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
@@ -3419,7 +3436,12 @@ class Database:
             "acoustid_api_key",
             "mb_mirror_url",
             "prefer_local_artwork",
+            "scan_monitor_option",
+            "add_monitor_option",
         }
+        for opt_key in ("scan_monitor_option", "add_monitor_option"):
+            if settings.get(opt_key) is not None:
+                validate_monitor_option(settings[opt_key])
         updates: dict[str, Any] = {}
         for k, v in settings.items():
             if k in allowed_keys:
@@ -5102,9 +5124,12 @@ class Database:
         return res
 
     def upsert_library_artist(
-        self, artist_data: Union[LibraryArtist, dict[str, Any]]
+        self, artist_data: Union[LibraryArtist, dict[str, Any]], preserve_monitoring: bool = False
     ) -> dict[str, Any]:
-        """Creates or updates a native library artist."""
+        """Creates or updates a native library artist.
+
+        With ``preserve_monitoring`` an existing row keeps its ``monitored`` / ``monitor_option`` (user choices).
+        """
         d = artist_data.to_dict() if hasattr(artist_data, "to_dict") else dict(artist_data)
         artist_id = str(d.get("id") or uuid.uuid4())
         name = str(d.get("name") or "")
@@ -5144,8 +5169,8 @@ class Database:
                     search_clean = excluded.search_clean,
                     foreign_artist_id = COALESCE(excluded.foreign_artist_id, library_artists.foreign_artist_id),
                     path = COALESCE(excluded.path, library_artists.path),
-                    monitored = excluded.monitored,
-                    monitor_option = excluded.monitor_option,
+                    monitored = CASE WHEN ? THEN library_artists.monitored ELSE excluded.monitored END,
+                    monitor_option = CASE WHEN ? THEN library_artists.monitor_option ELSE excluded.monitor_option END,
                     quality_profile_id = COALESCE(excluded.quality_profile_id, library_artists.quality_profile_id),
                     metadata_json = COALESCE(excluded.metadata_json, library_artists.metadata_json),
                     mbid = COALESCE(excluded.mbid, library_artists.mbid),
@@ -5176,6 +5201,8 @@ class Database:
                     genres,
                     country,
                     created_at,
+                    1 if preserve_monitoring else 0,
+                    1 if preserve_monitoring else 0,
                 ),
             )
             self.conn.commit()
@@ -5275,10 +5302,129 @@ class Database:
             self.conn.commit()
             return True
 
+    _BULK_CHUNK = 500
+    _UNSET: Any = object()
+
+    def bulk_edit_library_artists(
+        self,
+        artist_ids: Optional[list[str]] = None,
+        *,
+        monitored: Optional[bool] = None,
+        monitor_option: Optional[str] = None,
+        quality_profile_id: Any = _UNSET,
+        apply_monitor_to_albums: bool = False,
+    ) -> dict[str, int]:
+        """Set-based bulk edit of native artists (``artist_ids=None`` means every artist), in one transaction.
+
+        ``monitored`` / ``monitor_option`` / ``quality_profile_id`` (pass None to clear) are written only when
+        given. With ``apply_monitor_to_albums`` every album of the affected artists is recomputed from the artist's
+        resulting option and monitored flag (see ``library_monitoring.ALBUM_MONITORED_SQL``; ``existing`` keeps
+        albums having at least one track with a library file), and each album's tracks follow their album.
+        Returns ``artists_updated`` plus the post-update count of ``albums_monitored`` / ``albums_unmonitored``
+        among the affected artists' albums (0/0 when albums were not recomputed).
+        """
+        if monitor_option is not None:
+            validate_monitor_option(monitor_option)
+        sets: list[str] = []
+        set_params: list[Any] = []
+        if monitored is not None:
+            sets.append("monitored = ?")
+            set_params.append(1 if monitored else 0)
+        if monitor_option is not None:
+            sets.append("monitor_option = ?")
+            set_params.append(monitor_option)
+        if quality_profile_id is not self._UNSET:
+            sets.append("quality_profile_id = ?")
+            set_params.append(str(quality_profile_id) if quality_profile_id is not None else None)
+        if not sets and not apply_monitor_to_albums:
+            raise ValueError("No changes requested")
+
+        if artist_ids is None:
+            chunks: list[Optional[list[str]]] = [None]
+        else:
+            unique = list(dict.fromkeys(str(i) for i in artist_ids))
+            chunks = [unique[i : i + self._BULK_CHUNK] for i in range(0, len(unique), self._BULK_CHUNK)]
+
+        album_expr = ALBUM_MONITORED_SQL.format(opt="ar.monitor_option", art_mon="ar.monitored")
+        result = {"artists_updated": 0, "albums_monitored": 0, "albums_unmonitored": 0}
+        with self._lock:
+            try:
+                for chunk in chunks:
+                    art_where, alb_where, alb_where_a, params = "", "", "", []
+                    if chunk is not None:
+                        marks = ", ".join("?" for _ in chunk)
+                        art_where = f" WHERE id IN ({marks})"
+                        alb_where = f" WHERE artist_id IN ({marks})"
+                        alb_where_a = f" WHERE a.artist_id IN ({marks})"
+                        params = chunk
+                    if sets:
+                        cur = self.conn.execute(
+                            f"UPDATE library_artists SET {', '.join(sets)}, updated_at = CURRENT_TIMESTAMP{art_where}",
+                            [*set_params, *params],
+                        )
+                    else:
+                        cur = self.conn.execute(f"SELECT COUNT(*) FROM library_artists{art_where}", params)
+                    updated = cur.rowcount if sets else int(cur.fetchone()[0])
+                    result["artists_updated"] += max(int(updated), 0)
+                    if not apply_monitor_to_albums:
+                        continue
+                    self.conn.execute(
+                        "UPDATE library_albums AS a SET monitored = ("
+                        f"SELECT {album_expr} FROM library_artists ar WHERE ar.id = a.artist_id"
+                        f"), updated_at = CURRENT_TIMESTAMP{alb_where_a}",
+                        params,
+                    )
+                    self.conn.execute(
+                        "UPDATE library_tracks SET monitored = ("
+                        "SELECT monitored FROM library_albums WHERE library_albums.id = library_tracks.album_id"
+                        f"), updated_at = CURRENT_TIMESTAMP{alb_where}",
+                        params,
+                    )
+                    counts = self.conn.execute(
+                        "SELECT COALESCE(SUM(monitored), 0), COUNT(*) FROM library_albums" + alb_where, params
+                    ).fetchone()
+                    result["albums_monitored"] += int(counts[0])
+                    result["albums_unmonitored"] += int(counts[1]) - int(counts[0])
+                self.conn.commit()
+            except sqlite3.Error:
+                self.conn.rollback()
+                logger.exception("bulk_edit_library_artists failed; transaction rolled back")
+                raise
+        return result
+
+    def bulk_set_albums_monitored(
+        self, album_ids: list[str], monitored: bool, cascade_tracks: bool = True
+    ) -> int:
+        """Sets ``monitored`` on many albums (and their tracks) in one transaction; returns albums updated."""
+        val = 1 if monitored else 0
+        unique = list(dict.fromkeys(str(i) for i in album_ids))
+        updated = 0
+        with self._lock:
+            try:
+                for i in range(0, len(unique), self._BULK_CHUNK):
+                    chunk = unique[i : i + self._BULK_CHUNK]
+                    marks = ", ".join("?" for _ in chunk)
+                    cur = self.conn.execute(
+                        f"UPDATE library_albums SET monitored = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({marks})",
+                        [val, *chunk],
+                    )
+                    updated += max(int(cur.rowcount), 0)
+                    if cascade_tracks:
+                        self.conn.execute(
+                            f"UPDATE library_tracks SET monitored = ?, updated_at = CURRENT_TIMESTAMP WHERE album_id IN ({marks})",
+                            [val, *chunk],
+                        )
+                self.conn.commit()
+            except sqlite3.Error:
+                self.conn.rollback()
+                logger.exception("bulk_set_albums_monitored failed; transaction rolled back")
+                raise
+        return updated
+
     def upsert_library_album(
-        self, album_data: Union[LibraryAlbum, dict[str, Any]]
+        self, album_data: Union[LibraryAlbum, dict[str, Any]], preserve_monitoring: bool = False
     ) -> dict[str, Any]:
-        """Creates or updates a native library album."""
+        """Creates or updates a native library album (``preserve_monitoring`` keeps an existing row's flag)."""
         d = album_data.to_dict() if hasattr(album_data, "to_dict") else dict(album_data)
         album_id = str(d.get("id") or uuid.uuid4())
         artist_id = str(d.get("artist_id") or "")
@@ -5318,7 +5464,7 @@ class Database:
                     release_date = COALESCE(excluded.release_date, library_albums.release_date),
                     year = COALESCE(excluded.year, library_albums.year),
                     album_type = excluded.album_type,
-                    monitored = excluded.monitored,
+                    monitored = CASE WHEN ? THEN library_albums.monitored ELSE excluded.monitored END,
                     path = COALESCE(excluded.path, library_albums.path),
                     cover_url = COALESCE(excluded.cover_url, library_albums.cover_url),
                     total_tracks = COALESCE(excluded.total_tracks, library_albums.total_tracks),
@@ -5347,6 +5493,7 @@ class Database:
                     mb_release_id,
                     genres,
                     created_at,
+                    1 if preserve_monitoring else 0,
                 ),
             )
             self.conn.commit()
@@ -5462,9 +5609,9 @@ class Database:
             return True
 
     def upsert_library_track(
-        self, track_data: Union[LibraryTrack, dict[str, Any]]
+        self, track_data: Union[LibraryTrack, dict[str, Any]], preserve_monitoring: bool = False
     ) -> dict[str, Any]:
-        """Creates or updates a native library track."""
+        """Creates or updates a native library track (``preserve_monitoring`` keeps an existing row's flag)."""
         d = track_data.to_dict() if hasattr(track_data, "to_dict") else dict(track_data)
         track_id = str(d.get("id") or uuid.uuid4())
         album_id = str(d.get("album_id") or "")
@@ -5501,7 +5648,7 @@ class Database:
                     track_number = excluded.track_number,
                     disc_number = excluded.disc_number,
                     duration_seconds = COALESCE(excluded.duration_seconds, library_tracks.duration_seconds),
-                    monitored = excluded.monitored,
+                    monitored = CASE WHEN ? THEN library_tracks.monitored ELSE excluded.monitored END,
                     foreign_track_id = COALESCE(excluded.foreign_track_id, library_tracks.foreign_track_id),
                     mb_recording_id = COALESCE(excluded.mb_recording_id, library_tracks.mb_recording_id),
                     isrc = COALESCE(excluded.isrc, library_tracks.isrc),
@@ -5524,6 +5671,7 @@ class Database:
                     mb_recording_id,
                     isrc,
                     created_at,
+                    1 if preserve_monitoring else 0,
                 ),
             )
             self.conn.commit()

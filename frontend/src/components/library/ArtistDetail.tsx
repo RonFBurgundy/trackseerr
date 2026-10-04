@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ArrowLeft,
+  CheckSquare,
   Disc,
   ExternalLink,
   Globe,
@@ -14,11 +15,15 @@ import {
   User,
 } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
+import { MONITOR_OPTIONS } from '@/types/monitoring';
 import { useArtistDetail, type MonitorPreset } from '@/hooks/useArtistDetail';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
+import { useBulkSelection } from '@/hooks/useBulkSelection';
+import { useAlbumBulkEdit } from '@/hooks/useAlbumBulkEdit';
 import { errorMessage } from '@/services/apiClient';
 import { MachinedCard, TactileSwitch, TapeDeckButton, TabStrip } from '@/components/ui';
 import { ArtistAlbumCard } from './ArtistAlbumCard';
+import { AlbumBulkBar } from './AlbumBulkBar';
 
 type DiscographyTab = 'studio' | 'singles_eps' | 'live' | 'compilations';
 
@@ -72,6 +77,23 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   const categorized = useMemo(() => categorize(artist?.albums ?? []), [artist]);
   const albums = categorized[tab];
 
+  const canBulkEdit = isAdmin && !lidarrMode;
+  const selection = useBulkSelection();
+  const { exit: exitSelection } = selection;
+  const bulk = useAlbumBulkEdit(onToast);
+
+  const handleBulkApply = async (monitored: boolean): Promise<void> => {
+    const ids = Array.from(selection.selected);
+    if (await bulk.apply(ids, monitored)) {
+      const picked = new Set(ids);
+      for (const a of artist?.albums ?? []) {
+        if (picked.has(a.id)) patchAlbumMonitored(a.id, monitored);
+      }
+      exitSelection();
+      onChanged();
+    }
+  };
+
   const genreList = Array.isArray(artist?.genres)
     ? artist.genres
     : typeof artist?.genres === 'string'
@@ -103,6 +125,10 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
 
   const lidarrSearch = useLidarrSearch(onToast);
   const preset = (p: MonitorPreset): void => void detail.applyPreset(p);
+  // Lidarr's own preset set has no existing/future; those are native-library only.
+  const presetOptions = MONITOR_OPTIONS.filter(
+    (o) => !lidarrMode || (o.value !== 'existing' && o.value !== 'future')
+  );
 
   const tabs: Array<{ id: DiscographyTab; full: string; short: string; icon: React.ReactNode }> = [
     { id: 'studio', full: 'Studio Albums', short: 'Studio', icon: <Disc className="h-3.5 w-3.5" /> },
@@ -241,28 +267,27 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
                     <option value="" disabled>
                       Apply Monitor Preset...
                     </option>
-                    <option value="all">Monitor All</option>
-                    <option value="albums">Studio Albums Only</option>
-                    <option value="singles_eps">Singles & EPs Only</option>
-                    <option value="none">Unmonitor All</option>
+                    {presetOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div className="hidden sm:flex flex-wrap items-center gap-2">
                   <span className="text-[11px] font-mono text-neutral-400 flex items-center gap-1.5 mr-1">
                     <Sliders className="h-3 w-3 text-[#e5a00d]" /> Monitor Presets:
                   </span>
-                  <TapeDeckButton size="sm" onClick={() => preset('all')} className="text-xs py-1">
-                    Monitor All
-                  </TapeDeckButton>
-                  <TapeDeckButton size="sm" onClick={() => preset('albums')} className="text-xs py-1">
-                    Studio Albums Only
-                  </TapeDeckButton>
-                  <TapeDeckButton size="sm" onClick={() => preset('singles_eps')} className="text-xs py-1">
-                    Singles &amp; EPs Only
-                  </TapeDeckButton>
-                  <TapeDeckButton size="sm" onClick={() => preset('none')} className="text-xs py-1 text-neutral-400">
-                    Unmonitor All
-                  </TapeDeckButton>
+                  {presetOptions.map((o) => (
+                    <TapeDeckButton
+                      key={o.value}
+                      size="sm"
+                      onClick={() => preset(o.value)}
+                      className={`text-xs py-1${o.value === 'none' ? ' text-neutral-400' : ''}`}
+                    >
+                      {o.label}
+                    </TapeDeckButton>
+                  ))}
                 </div>
               </div>
             )}
@@ -278,6 +303,26 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
           </TapeDeckButton>
         ))}
       </TabStrip>
+
+      {canBulkEdit && !loading && (
+        <>
+          {selection.active ? (
+            <AlbumBulkBar
+              count={selection.selected.size}
+              busy={bulk.busy}
+              selectLabel="Select tab"
+              onSelectAll={() => selection.selectKeys(albums.map((a) => a.id))}
+              onClear={selection.clear}
+              onDone={exitSelection}
+              onApply={(m) => void handleBulkApply(m)}
+            />
+          ) : (
+            <TapeDeckButton size="sm" icon={<CheckSquare className="h-3.5 w-3.5" />} onClick={selection.enter}>
+              Select albums
+            </TapeDeckButton>
+          )}
+        </>
+      )}
 
       {loading ? (
         <div className="flex flex-col items-center justify-center py-20 gap-3">
@@ -297,6 +342,11 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
               onToggleAlbumMonitored={(id, cur) => void toggleAlbum(id, cur)}
               onToggleTrackMonitored={onToggleTrackMonitored}
               onToast={onToast}
+              selected={
+                canBulkEdit && selection.active
+                  ? { checked: selection.isSelected(album.id), onToggle: () => selection.toggle(album.id) }
+                  : undefined
+              }
             />
           ))}
           {albums.length === 0 && (

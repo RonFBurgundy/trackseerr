@@ -1,3 +1,4 @@
+import type { MonitorOption } from './monitoring';
 /**
  * Domain & UI models for TrackSeerr React SPA.
  * Strictly typed with zero `any` / `as any`.
@@ -328,6 +329,10 @@ export interface MediaManagementSettings {
   library_mode?: string;
   colon_replacement_format?: string;
   clean_artist_names?: boolean;
+  /** Monitoring applied to artists found by a library scan (server default 'existing'). */
+  scan_monitor_option?: MonitorOption;
+  /** Monitoring applied to artists added manually (server default 'all'). */
+  add_monitor_option?: MonitorOption;
 }
 
 export interface LidarrSettings {

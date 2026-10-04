@@ -655,6 +655,20 @@ class LidarrClient:
         result = self._send_json("PUT", f"artist/{int(artist_id)}", artist)
         return result if isinstance(result, dict) else artist
 
+    def bulk_edit_artists(
+        self,
+        artist_ids: list[int],
+        monitored: Optional[bool] = None,
+        quality_profile_id: Optional[int] = None,
+    ) -> None:
+        """``PUT /api/v1/artist/editor``: one call changing ``monitored`` and/or the quality profile of many artists."""
+        body: dict[str, Any] = {"artistIds": [int(i) for i in artist_ids]}
+        if monitored is not None:
+            body["monitored"] = bool(monitored)
+        if quality_profile_id is not None:
+            body["qualityProfileId"] = int(quality_profile_id)
+        self._send_json("PUT", "artist/editor", body)
+
     def set_albums_monitored(self, album_ids: list[int], monitored: bool) -> None:
         self._send_json("PUT", "album/monitor", {"albumIds": [int(i) for i in album_ids], "monitored": bool(monitored)})
 

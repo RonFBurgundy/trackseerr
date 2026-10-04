@@ -1,7 +1,14 @@
 import React from 'react';
 import { User } from 'lucide-react';
 import type { ArtistItem } from '@/types/models';
-import { MachinedCard, TactileSwitch } from '@/components/ui';
+import { MachinedCard, SelectionCheckbox, TactileSwitch } from '@/components/ui';
+
+/** Selection-mode wiring for a tile: clicking selects instead of opening. */
+export interface TileSelection {
+  checked: boolean;
+  locked: boolean;
+  onToggle: () => void;
+}
 
 export interface ArtistTileProps {
   artist: ArtistItem;
@@ -10,6 +17,8 @@ export interface ArtistTileProps {
   isAdmin: boolean;
   onOpen: (artistId: number | string) => void;
   onToggleMonitored: (artistId: number | string, monitored: boolean) => void;
+  /** Present while the bulk editor is active. */
+  selection?: TileSelection;
 }
 
 function hideBrokenImage(e: React.SyntheticEvent<HTMLImageElement>): void {
@@ -18,21 +27,31 @@ function hideBrokenImage(e: React.SyntheticEvent<HTMLImageElement>): void {
 
 /** Square artwork tile for the artists grid. */
 export const ArtistTile: React.FC<ArtistTileProps> = React.memo(
-  ({ artist, monitored, isAdmin, onOpen, onToggleMonitored }) => (
+  ({ artist, monitored, isAdmin, onOpen, onToggleMonitored, selection }) => (
     <MachinedCard
       interactive
       role="button"
       tabIndex={0}
-      aria-label={`Open ${artist.name}`}
-      onClick={() => onOpen(artist.id)}
+      aria-label={selection ? `Select ${artist.name}` : `Open ${artist.name}`}
+      onClick={() => (selection ? (selection.locked ? undefined : selection.onToggle()) : onOpen(artist.id))}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onOpen(artist.id);
+          if (selection) {
+            if (!selection.locked) selection.onToggle();
+          } else onOpen(artist.id);
         }
       }}
-      className="overflow-hidden group"
+      className={`relative overflow-hidden group ${selection?.checked ? 'ring-1 ring-[#e5a00d]' : ''}`}
     >
+      {selection && (
+        <SelectionCheckbox
+          checked={selection.checked}
+          disabled={selection.locked}
+          label={`Select ${artist.name}`}
+          onChange={selection.onToggle}
+        />
+      )}
       <div className="aspect-square w-full bg-[#1a1a1a] flex items-center justify-center overflow-hidden">
         {artist.image_url ? (
           <img

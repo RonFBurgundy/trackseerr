@@ -1,13 +1,19 @@
 import React, { useCallback, useEffect } from 'react';
+import { CheckSquare } from 'lucide-react';
 import type { ArtistItem } from '@/types/models';
 import { getArtistsIndex, getArtistsPaged } from '@/services/libraryService';
 import { errorMessage } from '@/services/apiClient';
 import { pagedFetcher } from '@/hooks/useVirtualPagedList';
 import { useLibraryCatalog, type LibrarySortOption } from '@/hooks/useLibraryCatalog';
 import { useMonitoredOverrides } from '@/hooks/useMonitoredOverrides';
+import { useBulkSelection } from '@/hooks/useBulkSelection';
+import { useArtistBulkEdit } from '@/hooks/useArtistBulkEdit';
+import { useQualityProfiles } from '@/hooks/useQualityProfiles';
+import { TapeDeckButton } from '@/components/ui';
 import { ListPanel, ScrubberRail, VirtualGrid } from '@/components/lists';
 import { LibrarySortControl } from './LibrarySortControl';
 import { ArtistTile } from './ArtistTile';
+import { ArtistBulkBar } from './ArtistBulkBar';
 
 const SORT_OPTIONS: ReadonlyArray<LibrarySortOption> = [
   { key: 'name', label: 'Name', defaultDir: 'asc' },
@@ -52,6 +58,19 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
   const overrides = useMonitoredOverrides();
   const { refresh, reload, mode } = list;
 
+  // Bulk editing is a native-library, admin-only action; Lidarr owns monitoring in its own mode.
+  const canBulkEdit = isAdmin && mode !== 'lidarr';
+  const selection = useBulkSelection();
+  const { toggle: toggleSelected, isSelected, allMatching, active: selecting, exit: exitSelection } = selection;
+  const bulk = useArtistBulkEdit(selection, list.total, onToast, reload);
+  const profiles = useQualityProfiles(selecting, onToast);
+  const unfiltered = !query && !monitoredOnly;
+
+  // Filters change what "all" would mean in the user's head; drop the selection rather than act on a stale view.
+  useEffect(() => {
+    exitSelection();
+  }, [query, monitoredOnly, exitSelection]);
+
   useEffect(() => onModeChange(mode), [mode, onModeChange]);
   useEffect(() => {
     if (reloadToken > 0) reload();
@@ -80,9 +99,14 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
         isAdmin={isAdmin}
         onOpen={onOpenArtist}
         onToggleMonitored={(id, val) => void handleToggle(id, val)}
+        selection={
+          selecting
+            ? { checked: isSelected(artist.id), locked: allMatching, onToggle: () => toggleSelected(artist.id) }
+            : undefined
+        }
       />
     ),
-    [overrides, isAdmin, onOpenArtist, handleToggle]
+    [overrides, isAdmin, onOpenArtist, handleToggle, selecting, isSelected, allMatching, toggleSelected]
   );
 
   return (
@@ -90,8 +114,33 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
       title="Artists"
       mode={mode}
       total={list.total}
-      toolbar={<LibrarySortControl options={SORT_OPTIONS} sortKey={sortKey} sortDir={sortDir} onChange={changeSort} />}
+      toolbar={
+        <>
+          {canBulkEdit && (
+            <TapeDeckButton
+              size="sm"
+              active={selecting}
+              aria-pressed={selecting}
+              icon={<CheckSquare className="h-3.5 w-3.5" />}
+              onClick={selecting ? exitSelection : selection.enter}
+            >
+              Select
+            </TapeDeckButton>
+          )}
+          <LibrarySortControl options={SORT_OPTIONS} sortKey={sortKey} sortDir={sortDir} onChange={changeSort} />
+        </>
+      }
     >
+      {canBulkEdit && selecting && (
+        <ArtistBulkBar
+          selection={selection}
+          total={list.total}
+          canSelectAll={unfiltered}
+          edit={bulk}
+          profiles={profiles.profiles}
+          profilesLoading={profiles.loading}
+        />
+      )}
       <VirtualGrid<ArtistItem>
         list={list}
         getKey={getKey}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Loader2, Save } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, FormField, MonitorOptionSelect } from '@/components/ui';
 import type { MediaManagementSettings } from '@/types/models';
 import { updateMediaManagementSettings } from '@/services/settingsService';
 import { NamingFormatsEditor } from '@/components/naming/NamingFormatsEditor';
@@ -118,6 +118,31 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
                 label="Embed Artwork"
               />
             </div>
+          </div>
+        </div>
+
+        <div className="pt-2 border-t border-[#1f1f1f] space-y-3">
+          <div>
+            <h5 className="text-xs font-bold uppercase font-mono text-white">Monitoring</h5>
+            <p className="text-[11px] text-neutral-400 font-mono mt-0.5">
+              &ldquo;Existing albums only&rdquo; monitors only the albums already on disk; future releases stay unmonitored.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField label="Artists found by library scan" htmlFor="scan-monitor-option">
+              <MonitorOptionSelect
+                id="scan-monitor-option"
+                value={settings?.scan_monitor_option ?? 'existing'}
+                onChange={(v) => onChange((prev) => (prev ? { ...prev, scan_monitor_option: v } : null))}
+              />
+            </FormField>
+            <FormField label="Artists added manually" htmlFor="add-monitor-option">
+              <MonitorOptionSelect
+                id="add-monitor-option"
+                value={settings?.add_monitor_option ?? 'all'}
+                onChange={(v) => onChange((prev) => (prev ? { ...prev, add_monitor_option: v } : null))}
+              />
+            </FormField>
           </div>
         </div>
 

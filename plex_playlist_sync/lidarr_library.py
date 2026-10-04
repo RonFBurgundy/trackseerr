@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Optional
 from urllib.parse import urlsplit
 
-from plex_playlist_sync.clients.lidarr import _COVER_FILE_RE, LidarrClient
+from plex_playlist_sync.clients.lidarr import _COVER_FILE_RE, LidarrApiError, LidarrClient
 from plex_playlist_sync.list_index import SortDef, build_index, fold_search_text, library_sort_key, order_clause
 from plex_playlist_sync.storage import clean_library_name
 
@@ -628,6 +628,57 @@ def apply_monitor_preset(client: LidarrClient, artist_id: int, option: str) -> d
     record = dict(artist_row(artist).record)
     record["monitor_option"] = option
     return record
+
+
+def bulk_edit_artists(
+    client: LidarrClient,
+    artist_ids: Optional[list[int]],
+    monitored: Optional[bool],
+    monitor_option: Optional[str],
+    quality_profile_id: Optional[int],
+) -> dict[str, int]:
+    """Bulk artist edit in Lidarr (``artist_ids=None`` means every artist).
+
+    ``monitored`` and the quality profile go through ``PUT /artist/editor`` in one call. A ``monitor_option``
+    preset (all / albums / singles_eps / none) is applied per artist, as it is for a single artist, and also sets
+    the artist's monitored flag; it takes precedence over ``monitored``. Album counts are not tracked in this mode.
+    """
+    if monitor_option is not None and monitor_option not in ("all", "albums", "singles_eps", "none"):
+        raise ValueError(f"Monitor option {monitor_option!r} is not supported in Lidarr mode")
+    try:
+        ids = artist_ids
+        if ids is None:
+            ids = [i for i in (_int(a.get("id")) for a in client.get_all_artists()) if i]
+        if monitor_option is not None:
+            for done, artist_id in enumerate(ids):
+                try:
+                    apply_monitor_preset(client, artist_id, monitor_option)
+                except LidarrApiError as exc:
+                    logger.warning(
+                        "Lidarr bulk monitor preset %r failed at artist %s after %d of %d artists: %s",
+                        monitor_option, artist_id, done, len(ids), exc,
+                    )
+                    raise LidarrApiError(
+                        f"Bulk edit stopped at artist {artist_id}: {exc} "
+                        f"({done} of {len(ids)} artists were updated before the failure)"
+                    ) from exc
+        if ids and (quality_profile_id is not None or (monitored is not None and monitor_option is None)):
+            client.bulk_edit_artists(
+                ids, monitored=monitored if monitor_option is None else None, quality_profile_id=quality_profile_id
+            )
+    finally:
+        invalidate()
+    return {"artists_updated": len(ids or []), "albums_monitored": 0, "albums_unmonitored": 0}
+
+
+def set_albums_monitored(client: LidarrClient, album_ids: list[int], monitored: bool) -> int:
+    """Monitors or unmonitors many Lidarr albums in one ``PUT /album/monitor`` call."""
+    try:
+        if album_ids:
+            client.set_albums_monitored(album_ids, monitored)
+    finally:
+        invalidate()
+    return len(album_ids)
 
 
 def search_artist(client: LidarrClient, artist_id: int) -> dict[str, Any]:
