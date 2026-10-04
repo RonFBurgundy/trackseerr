@@ -26,6 +26,7 @@ from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.job_tracker import tracked
+from plex_playlist_sync.list_monitoring import apply_playlist_missing_safely
 from plex_playlist_sync.models import Playlist, RequestStatus, Track
 from plex_playlist_sync.storage import Database
 from plex_playlist_sync.redaction import redact_text, safe_exc
@@ -237,6 +238,7 @@ class SyncState:
                             status="success" if success else "failed",
                             missing_tracks=missing,
                         )
+                        apply_playlist_missing_safely(db, config, pl_id)
                         if success:
                             stats["success_count"] += 1
                         stats["total_matched"] += len(matched)

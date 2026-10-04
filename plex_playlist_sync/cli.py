@@ -406,6 +406,12 @@ def _start_local_workers(db: Database, config: Config) -> None:
     logger.info("Starting ArtistRefreshWorker (interval: 24h, pace: 1.5s, first cycle in 10 min)")
     artist_refresh_worker.start(db=db, interval_seconds=86400, pace_delay=1.5)
 
+    if config.enable_import_lists:
+        from .import_list_worker import import_list_worker
+
+        logger.info("Starting ImportListWorker (checks every 5 min for due lists)")
+        import_list_worker.start(db=db, config=config)
+
     from .scrobble_worker import scrobble_worker
 
     logger.info("Starting ScrobbleWorker (history poll + forward retry)")
@@ -720,6 +726,7 @@ def main() -> int:
                 ("ArtistRefreshWorker", "artist_refresh_worker", "artist_refresh_worker"),
                 ("ScrobbleWorker", "scrobble_worker", "scrobble_worker"),
                 ("MixWorker", "mix_worker", "mix_worker"),
+                ("ImportListWorker", "import_list_worker", "import_list_worker"),
             ):
                 try:
                     module = __import__(f"plex_playlist_sync.{module_name}", fromlist=[attr])

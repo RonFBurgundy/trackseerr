@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, LogIn } from 'lucide-react';
 import type { ArtistDiscographyAlbum, Playlist, User } from '@/types/models';
+import type { ListMonitorMode } from '@/types/importLists';
 import {
   useAuth,
   useAudioPlayer,
@@ -36,6 +37,7 @@ import {
   getPlaylists,
   toggleUserTarget,
   togglePlaylistActive,
+  updatePlaylistSettings,
   deletePlaylist,
   triggerSync,
   importPlaylist,
@@ -183,6 +185,11 @@ const MainApp: React.FC = () => {
 
   const handleTogglePlaylistActive = async (playlistId: number | string, isEnabled: boolean) => {
     await togglePlaylistActive(playlistId, isEnabled);
+    await loadPlaylistsAndUsers();
+  };
+
+  const handleSetPlaylistMonitorMode = async (playlist: Playlist, mode: ListMonitorMode) => {
+    await updatePlaylistSettings(playlist.id, { enabled: playlist.is_active, monitor_mode: mode });
     await loadPlaylistsAndUsers();
   };
 
@@ -387,6 +394,7 @@ const MainApp: React.FC = () => {
                 onToggleTarget={handleToggleTarget}
                 onImport={handleImportPlaylist}
                 onToggleActive={handleTogglePlaylistActive}
+                onSetMonitorMode={handleSetPlaylistMonitorMode}
                 onDelete={handleDeletePlaylist}
                 isLoading={isPlaylistsLoading}
                 isAdmin={auth.canUseAdminUi}

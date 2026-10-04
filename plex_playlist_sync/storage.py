@@ -15,7 +15,11 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from plex_playlist_sync import local_auth
-from plex_playlist_sync.library_monitoring import ALBUM_MONITORED_SQL, validate_monitor_option
+from plex_playlist_sync.library_monitoring import (
+    ALBUM_MONITORED_SQL,
+    validate_list_monitor_mode,
+    validate_monitor_option,
+)
 from plex_playlist_sync.list_index import SortDef, build_index, fold_search_text, library_sort_key, order_clause
 from plex_playlist_sync.models import (
     ActiveDownload,
@@ -270,6 +274,7 @@ class Database:
                 (34, self._migration_v34),
                 (35, self._migration_v35),
                 (36, self._migration_v36),
+                (37, self._migration_v37),
             ]
 
             applied = 0
@@ -1372,6 +1377,72 @@ class Database:
                 "ALTER TABLE media_management_settings ADD COLUMN add_monitor_option TEXT NOT NULL DEFAULT 'all';"
             )
 
+    def _migration_v37(self, cur: sqlite3.Cursor) -> None:
+        """Import lists, per-playlist monitor mode and the missing-track "already applied" marker."""
+        cur.execute("PRAGMA table_info(playlists);")
+        if "monitor_mode" not in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE playlists ADD COLUMN monitor_mode TEXT NOT NULL DEFAULT 'track';")
+        cur.execute("PRAGMA table_info(missing_tracks);")
+        if "list_applied_at" not in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE missing_tracks ADD COLUMN list_applied_at TEXT;")
+        cur.execute("PRAGMA table_info(missing_tracks);")
+        if "artist_added_by_item" not in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE missing_tracks ADD COLUMN artist_added_by_item INTEGER NOT NULL DEFAULT 0;")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS import_lists (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                config_json TEXT NOT NULL DEFAULT '{}',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                monitor_mode TEXT NOT NULL DEFAULT 'track',
+                artist_monitor_option TEXT,
+                quality_profile_id TEXT,
+                sync_interval_minutes INTEGER NOT NULL DEFAULT 1440,
+                last_synced_at TEXT,
+                last_status TEXT,
+                last_error TEXT,
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS import_list_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                list_id TEXT NOT NULL REFERENCES import_lists(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                external_key TEXT NOT NULL,
+                mbid TEXT,
+                artist_mbid TEXT,
+                artist_name TEXT NOT NULL DEFAULT '',
+                album_title TEXT NOT NULL DEFAULT '',
+                track_title TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                applied_level TEXT,
+                error TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at TEXT,
+                artist_added_by_item INTEGER NOT NULL DEFAULT 0,
+                first_seen_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                last_seen_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                UNIQUE (list_id, kind, external_key)
+            )
+            """
+        )
+        cur.execute("PRAGMA table_info(import_list_items);")
+        item_cols = {row[1] for row in cur.fetchall()}
+        for col, ddl in (
+            ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+            ("next_attempt_at", "TEXT"),
+            ("artist_added_by_item", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if col not in item_cols:
+                cur.execute(f"ALTER TABLE import_list_items ADD COLUMN {col} {ddl};")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_import_list_items_list_status ON import_list_items(list_id, status)")
+
     @staticmethod
     def _seed_download_history(cur: sqlite3.Cursor) -> int:
         """Backfills ``download_history`` from terminal ``active_downloads`` rows (grab + terminal event).
@@ -1996,7 +2067,7 @@ class Database:
             cur = self.conn.execute(
                 """
                 SELECT id, name, service, description, poster_url, enabled, creator_id, tracks_json,
-                       last_synced_at, sync_status, created_at, updated_at
+                       last_synced_at, sync_status, monitor_mode, created_at, updated_at
                 FROM playlists
                 WHERE id = ?
                 """,
@@ -2020,7 +2091,7 @@ class Database:
                     cur = self.conn.execute(
                         """
                         SELECT DISTINCT p.id, p.name, p.service, p.description, p.poster_url, p.enabled, p.creator_id, p.tracks_json,
-                               p.last_synced_at, p.sync_status, p.created_at, p.updated_at
+                               p.last_synced_at, p.sync_status, p.monitor_mode, p.created_at, p.updated_at
                         FROM playlists p
                         LEFT JOIN playlist_targets pt ON p.id = pt.playlist_id
                         WHERE (pt.user_id = ? OR p.creator_id = ?) AND p.enabled = 1
@@ -2032,7 +2103,7 @@ class Database:
                     cur = self.conn.execute(
                         """
                         SELECT DISTINCT p.id, p.name, p.service, p.description, p.poster_url, p.enabled, p.creator_id, p.tracks_json,
-                               p.last_synced_at, p.sync_status, p.created_at, p.updated_at
+                               p.last_synced_at, p.sync_status, p.monitor_mode, p.created_at, p.updated_at
                         FROM playlists p
                         LEFT JOIN playlist_targets pt ON p.id = pt.playlist_id
                         WHERE (pt.user_id = ? OR p.creator_id = ?)
@@ -2045,7 +2116,7 @@ class Database:
                     cur = self.conn.execute(
                         """
                         SELECT id, name, service, description, poster_url, enabled, creator_id, tracks_json,
-                               last_synced_at, sync_status, created_at, updated_at
+                               last_synced_at, sync_status, monitor_mode, created_at, updated_at
                         FROM playlists
                         WHERE enabled = 1
                         ORDER BY name ASC
@@ -2055,7 +2126,7 @@ class Database:
                     cur = self.conn.execute(
                         """
                         SELECT id, name, service, description, poster_url, enabled, creator_id, tracks_json,
-                               last_synced_at, sync_status, created_at, updated_at
+                               last_synced_at, sync_status, monitor_mode, created_at, updated_at
                         FROM playlists
                         ORDER BY name ASC
                         """
@@ -2370,16 +2441,19 @@ class Database:
             )
             # Preserve existing lidarr_status across sync cycles
             existing_lidarr_status: dict[tuple[str, str], str] = {}
+            existing_applied: dict[tuple[str, str], str] = {}
             try:
                 cur = self.conn.execute(
-                    "SELECT title, artist, lidarr_status FROM missing_tracks WHERE playlist_id = ?",
+                    "SELECT title, artist, lidarr_status, list_applied_at FROM missing_tracks WHERE playlist_id = ?",
                     (p_id,),
                 )
                 for r in cur.fetchall():
                     key = (str(r["title"]).strip().lower(), str(r["artist"]).strip().lower())
                     existing_lidarr_status[key] = str(r["lidarr_status"] or "unmonitored")
-            except Exception:
-                pass
+                    if r["list_applied_at"]:
+                        existing_applied[key] = str(r["list_applied_at"])
+            except sqlite3.Error as exc:
+                logger.warning("Could not read previous missing-track state for playlist %s: %s", p_id, exc)
 
             self.conn.execute(
                 "DELETE FROM missing_tracks WHERE playlist_id = ?",
@@ -2403,10 +2477,10 @@ class Database:
                     l_status = existing_lidarr_status.get(key, "unmonitored")
                     self.conn.execute(
                         """
-                        INSERT INTO missing_tracks (playlist_id, title, artist, album, url, lidarr_status)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        INSERT INTO missing_tracks (playlist_id, title, artist, album, url, lidarr_status, list_applied_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (p_id, str(title), str(artist), str(album), str(url), l_status),
+                        (p_id, str(title), str(artist), str(album), str(url), l_status, existing_applied.get(key)),
                     )
             self.conn.commit()
 
@@ -2417,7 +2491,7 @@ class Database:
             if playlist_id is not None:
                 cur = self.conn.execute(
                     """
-                    SELECT id, playlist_id, title, artist, album, url, lidarr_status, created_at
+                    SELECT id, playlist_id, title, artist, album, url, lidarr_status, list_applied_at, artist_added_by_item, created_at
                     FROM missing_tracks
                     WHERE playlist_id = ?
                     ORDER BY id ASC
@@ -2427,7 +2501,7 @@ class Database:
             else:
                 cur = self.conn.execute(
                     """
-                    SELECT id, playlist_id, title, artist, album, url, lidarr_status, created_at
+                    SELECT id, playlist_id, title, artist, album, url, lidarr_status, list_applied_at, artist_added_by_item, created_at
                     FROM missing_tracks
                     ORDER BY id ASC
                     """
@@ -2439,7 +2513,7 @@ class Database:
         with self._lock:
             cur = self.conn.execute(
                 """
-                SELECT id, playlist_id, title, artist, album, url, lidarr_status, created_at
+                SELECT id, playlist_id, title, artist, album, url, lidarr_status, list_applied_at, artist_added_by_item, created_at
                 FROM missing_tracks
                 WHERE id = ?
                 """,
@@ -2471,6 +2545,337 @@ class Database:
             )
             self.conn.commit()
             return cur.rowcount
+
+    # -------------------------------------------------------------------------
+    # Playlist monitor mode and import lists
+    # -------------------------------------------------------------------------
+
+    def set_playlist_monitor_mode(self, playlist_id: str, mode: str) -> bool:
+        """Sets a playlist's list monitor mode (``track``/``album``/``artist``/``none``); ValueError if invalid."""
+        validated = validate_list_monitor_mode(mode)
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE playlists SET monitor_mode = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (validated, str(playlist_id)),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def mark_missing_tracks_list_applied(self, track_ids: list[int]) -> int:
+        """Stamps missing tracks as handled by a list monitor mode so later syncs do not apply them again."""
+        if not track_ids:
+            return 0
+        placeholders = ",".join("?" for _ in track_ids)
+        with self._lock:
+            cur = self.conn.execute(
+                f"UPDATE missing_tracks SET list_applied_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
+                [int(t) for t in track_ids],
+            )
+            self.conn.commit()
+            return cur.rowcount
+
+    def mark_missing_track_artist_added(self, track_id: int) -> None:
+        """Records that applying this missing track added its artist, so a retry finishes the artist's setup."""
+        with self._lock:
+            self.conn.execute("UPDATE missing_tracks SET artist_added_by_item = 1 WHERE id = ?", (int(track_id),))
+            self.conn.commit()
+
+    def has_open_track_request(self, artist: str, title: str) -> bool:
+        """True when a pending/processing/approved request exists for the same artist and track title."""
+        wanted = (title or "").strip().casefold()
+        if not wanted:
+            return False
+        return any(
+            str(r.get("title") or "").strip().casefold() == wanted
+            for r in self.find_matching_processing_requests(artist, title=title)
+        )
+
+    def library_track_has_file(self, artist: str, title: str) -> bool:
+        """True when the library holds a file for a track with this artist name and title."""
+        with self._lock:
+            row = self.conn.execute(
+                """
+                SELECT 1 FROM library_tracks t
+                JOIN library_artists a ON a.id = t.artist_id
+                JOIN library_files f ON f.track_id = t.id
+                WHERE a.clean_name = ? AND t.clean_title = ? LIMIT 1
+                """,
+                (clean_library_name(artist or ""), clean_library_name(title or "")),
+            ).fetchone()
+        return row is not None
+
+    _IMPORT_LIST_COLUMNS = (
+        "id, name, provider, config_json, enabled, monitor_mode, artist_monitor_option, quality_profile_id, "
+        "sync_interval_minutes, last_synced_at, last_status, last_error, created_at, updated_at"
+    )
+    IMPORT_LIST_ITEM_STATUSES = ("pending", "applied", "unresolved", "skipped", "failed")
+
+    @staticmethod
+    def _map_import_list(row: sqlite3.Row) -> dict[str, Any]:
+        d = dict(row)
+        d["enabled"] = bool(d["enabled"])
+        try:
+            cfg = json.loads(d.pop("config_json") or "{}")
+        except ValueError:
+            logger.warning("Import list %s has unreadable config_json; treating it as empty", d.get("id"))
+            cfg = {}
+        d["config"] = cfg if isinstance(cfg, dict) else {}
+        return d
+
+    def create_import_list(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Inserts an import list. ``data`` carries name, provider, config (dict) and the optional settings."""
+        list_id = str(data.get("id") or uuid.uuid4())
+        mode = validate_list_monitor_mode(data.get("monitor_mode", "track"))
+        option = data.get("artist_monitor_option")
+        if option is not None:
+            option = validate_monitor_option(option)
+        with self._lock:
+            self.conn.execute(
+                """
+                INSERT INTO import_lists (
+                    id, name, provider, config_json, enabled, monitor_mode, artist_monitor_option,
+                    quality_profile_id, sync_interval_minutes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    list_id,
+                    str(data["name"]),
+                    str(data["provider"]),
+                    json.dumps(data.get("config") or {}),
+                    1 if data.get("enabled", True) else 0,
+                    mode,
+                    option,
+                    str(data["quality_profile_id"]) if data.get("quality_profile_id") else None,
+                    int(data.get("sync_interval_minutes") or 1440),
+                ),
+            )
+            self.conn.commit()
+        created = self.get_import_list(list_id)
+        if created is None:
+            raise RuntimeError(f"Failed to create import list {list_id}")
+        return created
+
+    def get_import_list(self, list_id: str) -> Optional[dict[str, Any]]:
+        with self._lock:
+            row = self.conn.execute(
+                f"SELECT {self._IMPORT_LIST_COLUMNS} FROM import_lists WHERE id = ?", (str(list_id),)
+            ).fetchone()
+        return self._map_import_list(row) if row else None
+
+    def list_import_lists(self, enabled_only: bool = False) -> list[dict[str, Any]]:
+        sql = f"SELECT {self._IMPORT_LIST_COLUMNS} FROM import_lists"
+        if enabled_only:
+            sql += " WHERE enabled = 1"
+        sql += " ORDER BY name COLLATE NOCASE ASC, created_at ASC"
+        with self._lock:
+            rows = self.conn.execute(sql).fetchall()
+        return [self._map_import_list(r) for r in rows]
+
+    def update_import_list(self, list_id: str, data: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """Replaces the editable fields of an import list; returns the updated row or None if it does not exist."""
+        mode = validate_list_monitor_mode(data.get("monitor_mode", "track"))
+        option = data.get("artist_monitor_option")
+        if option is not None:
+            option = validate_monitor_option(option)
+        with self._lock:
+            prev = self.conn.execute("SELECT monitor_mode FROM import_lists WHERE id = ?", (str(list_id),)).fetchone()
+            cur = self.conn.execute(
+                """
+                UPDATE import_lists SET name = ?, provider = ?, config_json = ?, enabled = ?, monitor_mode = ?,
+                    artist_monitor_option = ?, quality_profile_id = ?, sync_interval_minutes = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    str(data["name"]),
+                    str(data["provider"]),
+                    json.dumps(data.get("config") or {}),
+                    1 if data.get("enabled", True) else 0,
+                    mode,
+                    option,
+                    str(data["quality_profile_id"]) if data.get("quality_profile_id") else None,
+                    int(data.get("sync_interval_minutes") or 1440),
+                    str(list_id),
+                ),
+            )
+            if cur.rowcount > 0 and prev is not None and str(prev[0]) != mode:
+                # A new mode may apply what "none" only recorded, so skipped items get another go.
+                self.conn.execute(
+                    "UPDATE import_list_items SET status = 'pending', error = NULL, next_attempt_at = NULL "
+                    "WHERE list_id = ? AND status = 'skipped'",
+                    (str(list_id),),
+                )
+            self.conn.commit()
+            if cur.rowcount == 0:
+                return None
+        return self.get_import_list(list_id)
+
+    def delete_import_list(self, list_id: str) -> bool:
+        with self._lock:
+            cur = self.conn.execute("DELETE FROM import_lists WHERE id = ?", (str(list_id),))
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def set_import_list_sync_result(self, list_id: str, status: str, error: Optional[str] = None) -> None:
+        """Records the outcome (``ok`` or ``error``) of a sync and stamps ``last_synced_at``."""
+        if status not in ("ok", "error"):
+            raise ValueError(f"Invalid import list status {status!r}")
+        with self._lock:
+            self.conn.execute(
+                """
+                UPDATE import_lists SET last_status = ?, last_error = ?, last_synced_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (status, error, str(list_id)),
+            )
+            self.conn.commit()
+
+    def list_due_import_lists(self) -> list[dict[str, Any]]:
+        """Enabled lists never synced, or whose interval has elapsed since ``last_synced_at``."""
+        with self._lock:
+            rows = self.conn.execute(
+                f"""
+                SELECT {self._IMPORT_LIST_COLUMNS} FROM import_lists
+                WHERE enabled = 1 AND (
+                    last_synced_at IS NULL
+                    OR datetime(last_synced_at, '+' || sync_interval_minutes || ' minutes') <= datetime('now')
+                )
+                ORDER BY COALESCE(last_synced_at, '') ASC
+                """
+            ).fetchall()
+        return [self._map_import_list(r) for r in rows]
+
+    def import_list_item_counts(self, list_id: str) -> dict[str, int]:
+        counts = {s: 0 for s in self.IMPORT_LIST_ITEM_STATUSES}
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT status, COUNT(*) FROM import_list_items WHERE list_id = ? GROUP BY status", (str(list_id),)
+            ).fetchall()
+        for status, count in rows:
+            counts[str(status)] = int(count)
+        return counts
+
+    def upsert_import_list_items(self, list_id: str, items: list[dict[str, Any]]) -> int:
+        """Inserts new items as ``pending`` and refreshes ``last_seen_at`` of known ones; returns the new count.
+
+        An existing item keeps its status and applied level, so an item already applied is never reset.
+        """
+        with self._lock:
+            before = self.conn.execute(
+                "SELECT COUNT(*) FROM import_list_items WHERE list_id = ?", (str(list_id),)
+            ).fetchone()[0]
+            for it in items:
+                self.conn.execute(
+                    """
+                    INSERT INTO import_list_items (
+                        list_id, kind, external_key, mbid, artist_mbid, artist_name, album_title, track_title
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(list_id, kind, external_key) DO UPDATE SET
+                        last_seen_at = CURRENT_TIMESTAMP,
+                        mbid = COALESCE(import_list_items.mbid, excluded.mbid),
+                        artist_mbid = COALESCE(import_list_items.artist_mbid, excluded.artist_mbid)
+                    """,
+                    (
+                        str(list_id),
+                        str(it["kind"]),
+                        str(it["external_key"]),
+                        it.get("mbid"),
+                        it.get("artist_mbid"),
+                        str(it.get("artist_name") or ""),
+                        str(it.get("album_title") or ""),
+                        str(it.get("track_title") or ""),
+                    ),
+                )
+            after = self.conn.execute(
+                "SELECT COUNT(*) FROM import_list_items WHERE list_id = ?", (str(list_id),)
+            ).fetchone()[0]
+            self.conn.commit()
+        return int(after - before)
+
+    def list_import_list_items(
+        self, list_id: str, status: Optional[str] = None, limit: int = 50, offset: int = 0
+    ) -> tuple[list[dict[str, Any]], int]:
+        where = "list_id = ?"
+        params: list[Any] = [str(list_id)]
+        if status:
+            where += " AND status = ?"
+            params.append(status)
+        with self._lock:
+            total = self.conn.execute(f"SELECT COUNT(*) FROM import_list_items WHERE {where}", params).fetchone()[0]
+            rows = self.conn.execute(
+                f"""
+                SELECT id, kind, mbid, artist_name, album_title, track_title, status, applied_level, error,
+                       first_seen_at, last_seen_at
+                FROM import_list_items WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?
+                """,
+                [*params, int(limit), int(offset)],
+            ).fetchall()
+        return [dict(r) for r in rows], int(total)
+
+    # Failed items wait this long after the Nth failed attempt; after MAX_ATTEMPTS they stay failed.
+    IMPORT_ITEM_FAILED_BACKOFF_HOURS = (1, 6, 24, 168, 168)
+    IMPORT_ITEM_MAX_ATTEMPTS = 6
+    IMPORT_ITEM_UNRESOLVED_RETRY_HOURS = 168
+
+    def list_pending_import_items(self, list_id: str) -> list[dict[str, Any]]:
+        """Items due for an apply attempt: pending ones, plus failed/unresolved ones whose retry time has come."""
+        with self._lock:
+            rows = self.conn.execute(
+                """
+                SELECT id, list_id, kind, external_key, mbid, artist_mbid, artist_name, album_title, track_title,
+                       status, artist_added_by_item
+                FROM import_list_items
+                WHERE list_id = ? AND (
+                    status = 'pending'
+                    OR (status IN ('failed', 'unresolved') AND next_attempt_at IS NOT NULL
+                        AND next_attempt_at <= datetime('now'))
+                )
+                ORDER BY id ASC
+                """,
+                (str(list_id),),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_import_item_artist_added(self, item_id: int) -> None:
+        """Records that applying this item added its artist, so a retry finishes the artist's setup."""
+        with self._lock:
+            self.conn.execute("UPDATE import_list_items SET artist_added_by_item = 1 WHERE id = ?", (int(item_id),))
+            self.conn.commit()
+
+    def update_import_list_item(
+        self,
+        item_id: int,
+        status: str,
+        applied_level: Optional[str] = None,
+        error: Optional[str] = None,
+        mbid: Optional[str] = None,
+    ) -> None:
+        """Records an apply outcome and schedules the retry: see the retry policy in ``import_list_worker``."""
+        if status not in self.IMPORT_LIST_ITEM_STATUSES:
+            raise ValueError(f"Invalid import list item status {status!r}")
+        with self._lock:
+            row = self.conn.execute("SELECT attempts FROM import_list_items WHERE id = ?", (int(item_id),)).fetchone()
+            if row is None:
+                return
+            attempts = int(row[0] or 0)
+            delay_hours: Optional[int] = None
+            if status == "failed":
+                attempts += 1
+                if attempts < self.IMPORT_ITEM_MAX_ATTEMPTS:
+                    backoff = self.IMPORT_ITEM_FAILED_BACKOFF_HOURS
+                    delay_hours = backoff[min(attempts, len(backoff)) - 1]
+            elif status == "unresolved":
+                delay_hours = self.IMPORT_ITEM_UNRESOLVED_RETRY_HOURS
+            self.conn.execute(
+                """
+                UPDATE import_list_items
+                SET status = ?, applied_level = ?, error = ?, mbid = COALESCE(?, mbid), attempts = ?,
+                    next_attempt_at = CASE WHEN ? IS NULL THEN NULL ELSE datetime('now', '+' || ? || ' hours') END
+                WHERE id = ?
+                """,
+                (status, applied_level, error, mbid, attempts, delay_hours, delay_hours, int(item_id)),
+            )
+            self.conn.commit()
 
     # -------------------------------------------------------------------------
     # Sessions
@@ -5244,6 +5649,28 @@ class Database:
             )
             row = cur.fetchone()
             return self._map_library_artist(row) if row else None
+
+    def get_library_artist_by_mbid(self, mbid: str) -> Optional[dict[str, Any]]:
+        """Retrieves a library artist by MusicBrainz artist id."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT * FROM library_artists WHERE mbid = ? LIMIT 1", (str(mbid),)
+            ).fetchone()
+            return self._map_library_artist(row) if row else None
+
+    def monitor_library_album_and_tracks(self, album_id: str) -> tuple[bool, int]:
+        """Sets an album and all its tracks monitored (never unmonitors). Returns (album changed, tracks changed)."""
+        with self._lock:
+            album_cur = self.conn.execute(
+                "UPDATE library_albums SET monitored = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND monitored = 0",
+                (str(album_id),),
+            )
+            track_cur = self.conn.execute(
+                "UPDATE library_tracks SET monitored = 1, updated_at = CURRENT_TIMESTAMP WHERE album_id = ? AND monitored = 0",
+                (str(album_id),),
+            )
+            self.conn.commit()
+            return album_cur.rowcount > 0, track_cur.rowcount
 
     def list_library_artists(
         self,

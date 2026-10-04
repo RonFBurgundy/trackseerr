@@ -9,7 +9,12 @@ import {
   ObsidianModal,
   TactileSwitch,
   ConfirmDangerButton,
+  MonitorModeSelect,
 } from '@/components/ui';
+import { LIST_MONITOR_MODES, type ListMonitorMode } from '@/types/importLists';
+
+/** Album and artist modes add to the library without a quota, so the server only accepts them from admins. */
+const NON_ADMIN_MONITOR_MODES: ReadonlyArray<ListMonitorMode> = ['track', 'none'];
 import { PlexPlaylistsSection } from '@/components/plex';
 import { TailoredMixesSection } from '@/components/mixes';
 
@@ -21,6 +26,7 @@ export interface PlaylistsViewProps {
   onToggleTarget: (playlistId: number | string, userIds: string[]) => Promise<void>;
   onImport: (payload: { name: string; source_type: string; source_url?: string; tracks?: string[] }) => Promise<void>;
   onToggleActive?: (playlistId: number | string, active: boolean) => Promise<void>;
+  onSetMonitorMode?: (playlist: Playlist, mode: ListMonitorMode) => Promise<void>;
   onDelete?: (playlistId: number | string) => Promise<void>;
   isLoading?: boolean;
   isAdmin?: boolean;
@@ -34,6 +40,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   onToggleTarget,
   onImport,
   onToggleActive,
+  onSetMonitorMode,
   onDelete,
   isLoading = false,
   isAdmin = false,
@@ -187,6 +194,24 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                   </p>
                 )}
               </div>
+
+              {onSetMonitorMode && (
+                <div className="space-y-1.5 pt-3 border-t border-[#1f1f1f]">
+                  <label
+                    htmlFor={`pl-mode-${pl.id}`}
+                    className="text-[10px] uppercase tracking-wider text-neutral-400 font-mono"
+                  >
+                    Monitor mode
+                  </label>
+                  <MonitorModeSelect
+                    id={`pl-mode-${pl.id}`}
+                    compact
+                    allowedModes={isAdmin ? LIST_MONITOR_MODES : NON_ADMIN_MONITOR_MODES}
+                    value={pl.monitor_mode ?? 'track'}
+                    onChange={(m) => void onSetMonitorMode(pl, m)}
+                  />
+                </div>
+              )}
 
               {/* Target Users Assignment */}
               <div className="space-y-2 pt-3 border-t border-[#1f1f1f]">

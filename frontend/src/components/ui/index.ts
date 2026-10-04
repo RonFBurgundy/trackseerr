@@ -14,3 +14,4 @@ export * from './TabStrip';
 export * from './ActionBar';
 export * from './SelectionCheckbox';
 export * from './MonitorOptionSelect';
+export * from './MonitorModeSelect';

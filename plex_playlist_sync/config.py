@@ -83,6 +83,7 @@ class Config:
     backlog_search_interval_minutes: int = 60
     enable_rss_sync: bool = True
     rss_sync_interval_minutes: int = 15
+    enable_import_lists: bool = True
     application_url: Optional[str] = None
     role: str = "all-in-one"
     trackseerr_core_url: Optional[str] = None
@@ -178,6 +179,7 @@ class Config:
             backlog_search_interval_minutes=int(os.getenv("BACKLOG_SEARCH_INTERVAL_MINUTES")) if os.getenv("BACKLOG_SEARCH_INTERVAL_MINUTES") and os.getenv("BACKLOG_SEARCH_INTERVAL_MINUTES").isdigit() else 60,
             enable_rss_sync=_parse_bool(os.getenv("ENABLE_RSS_SYNC"), True),
             rss_sync_interval_minutes=int(os.getenv("RSS_SYNC_INTERVAL_MINUTES")) if os.getenv("RSS_SYNC_INTERVAL_MINUTES") and os.getenv("RSS_SYNC_INTERVAL_MINUTES").isdigit() else 15,
+            enable_import_lists=_parse_bool(os.getenv("ENABLE_IMPORT_LISTS"), True),
             application_url=(os.getenv("APPLICATION_URL") or os.getenv("APP_URL") or "").strip().rstrip("/") or None,
             role=os.getenv("ROLE", "all-in-one").lower().strip() or "all-in-one",
             trackseerr_core_url=os.getenv("TRACKSEERR_CORE_URL", "").rstrip("/") or None,
