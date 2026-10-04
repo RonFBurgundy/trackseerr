@@ -23,7 +23,7 @@ from plex_playlist_sync.lidarr_release import (
 )
 from plex_playlist_sync.models import AcquisitionSearchResult, MusicRequest, RequestStatus
 from plex_playlist_sync.storage import Database
-from tests.lidarr_fake import FakeLidarr
+from tests.lidarr_fake import FakeLidarr, FastClock
 
 API_KEY = "lidarr-secret-key-abcdef123456"
 HTTPX = "plex_playlist_sync.clients.lidarr.httpx.Client"
@@ -448,7 +448,7 @@ class TestFeedbackLoop:
         worker._delay_seconds = 0.0
         worker._auto_search = True
         groups = LidarrTrickleWorker._group_by_artist(items)
-        with patch(HTTPX, fake), patch("plex_playlist_sync.lidarr_queue.time.sleep"):
+        with patch(HTTPX, fake), patch("plex_playlist_sync.lidarr_queue.time", FastClock()):
             worker._process_groups(groups, client_for(), db)
         return worker
 

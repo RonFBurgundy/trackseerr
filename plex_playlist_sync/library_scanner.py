@@ -15,7 +15,14 @@ from pathlib import Path
 from typing import Any, Optional
 
 from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
-from plex_playlist_sync.library import AUDIO_EXTENSIONS, inspect_audio_file
+from plex_playlist_sync.library import (
+    AUDIO_EXTENSIONS,
+    find_folder_art,
+    inspect_audio_file,
+    parse_filename_track,
+    primary_artist,
+    resolve_album_artist,
+)
 from plex_playlist_sync.library_monitoring import album_monitored_for_option, normalize_album_type
 from plex_playlist_sync.models import (
     LibraryAlbum,
@@ -42,8 +49,7 @@ def _inspect_audio_file_worker(file_path: Path, root: Path) -> tuple[Path, dict[
         if (parent != root and grandparent != root and grandparent != parent)
         else "Unknown Artist"
     )
-    fallback_title = file_path.stem
-    fallback_track_number = 1
+    fallback_title, fallback_track_number = parse_filename_track(file_path.stem)
 
     try:
         metadata = inspect_audio_file(file_path)
@@ -67,6 +73,8 @@ def _inspect_audio_file_worker(file_path: Path, root: Path) -> tuple[Path, dict[
             "quality_full": file_path.suffix.lstrip(".").upper() or "UNKNOWN",
             "file_path": str(file_path),
             "musicbrainz_artistid": None,
+            "musicbrainz_albumartistid": None,
+            "artists": [],
             "musicbrainz_albumid": None,
             "musicbrainz_releasegroupid": None,
             "musicbrainz_trackid": None,
@@ -431,8 +439,7 @@ class LibraryScanner:
                         if (parent != root and grandparent != root and grandparent != parent)
                         else "Unknown Artist"
                     )
-                    fallback_title = file_path.stem
-                    fallback_track_number = 1
+                    fallback_title, fallback_track_number = parse_filename_track(file_path.stem)
 
                     if metadata.get("from_cache"):
                         cached_track_id = metadata.get("cached_track_id")
@@ -454,12 +461,19 @@ class LibraryScanner:
                                 metadata["album"] = fallback_album
 
                     if not metadata.get("from_cache"):
+                        def known_artist(name: str) -> bool:
+                            return name in artist_cache or db.get_library_artist_by_name(name) is not None
+
                         artist_name = (
-                            metadata.get("artist") or metadata.get("album_artist") or ""
-                        ).strip() or fallback_artist
+                            resolve_album_artist(metadata, known_artist=known_artist)
+                            or primary_artist(fallback_artist, known_artist)
+                            or fallback_artist
+                        )
                         album_title = (metadata.get("album") or "").strip() or fallback_album
                         track_title = (metadata.get("title") or "").strip() or fallback_title
-                        track_number = metadata.get("track_number") or fallback_track_number
+                        # None means "untagged": it is stored as 1 (NOT NULL column) but never used to match tracks.
+                        tagged_track_number = metadata.get("track_number") or fallback_track_number
+                        track_number = tagged_track_number or 1
                         disc_number = metadata.get("disc_number") or 1
                         duration_seconds = metadata.get("duration")
                         year = metadata.get("year")
@@ -528,11 +542,8 @@ class LibraryScanner:
                         mb_rg_id = metadata.get("musicbrainz_releasegroupid")
                         mb_rel_id = metadata.get("musicbrainz_albumid")
                         has_local_cover = False
-                        for cover_name in ("cover.jpg", "cover.png", "folder.jpg", "folder.png"):
-                            candidate = parent / cover_name
-                            if candidate.is_file():
-                                has_local_cover = True
-                                break
+                        if find_folder_art(parent) is not None:
+                            has_local_cover = True
 
                         if not has_local_cover:
                             extracted = extract_embedded_cover_art(file_path, parent)
@@ -603,8 +614,10 @@ class LibraryScanner:
                         # Resolve/Upsert Track
                         mb_rec_id = metadata.get("musicbrainz_trackid")
                         track_isrc = metadata.get("isrc")
-                        track_key = (album_id, track_title, int(track_number))
-                        track_row = track_cache.get(track_key) or db.get_library_track_by_title(album_id, track_title, track_number)
+                        track_key = (album_id, track_title, tagged_track_number)
+                        track_row = track_cache.get(track_key) or db.get_library_track_by_title(
+                            album_id, track_title, tagged_track_number
+                        )
                         if not track_row:
                             track_id = str(uuid.uuid4())
                             track_row = db.upsert_library_track(

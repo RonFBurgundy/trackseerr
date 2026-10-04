@@ -41,7 +41,7 @@ _FORMAT_PATTERNS: list[tuple[AudioQuality, re.Pattern[str]]] = [
     ),
     (
         AudioQuality.AAC_256,
-        re.compile(r"(?i)(?:\b256\s*(?:kbps|k)?\b|\baac\b|\bm4a\b)"),
+        re.compile(r"(?i)\b256\s*(?:kbps|k)?\b"),
     ),
     (
         AudioQuality.MP3_192,
@@ -52,6 +52,10 @@ _FORMAT_PATTERNS: list[tuple[AudioQuality, re.Pattern[str]]] = [
         re.compile(r"(?i)(?:\bv2\b|\bvbr[-_ ]?v2\b|\bvbr[-_ ]?2\b)"),
     ),
 ]
+
+_AAC_WORD = re.compile(r"(?i)\b(?:aac|m4a)\b")
+_AAC_256_MIN_KBPS = 256
+_LOSSLESS_QUALITIES = frozenset({AudioQuality.FLAC_24BIT.value, AudioQuality.FLAC_16BIT.value})
 
 _SOURCE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
@@ -100,6 +104,15 @@ def parse_release_title(title: str) -> ParsedRelease:
 
     # Extract explicit bitrate if present
     br_match = re.search(r"(?i)\b(\d{2,4})\s*k(?:bps)?\b", raw_title)
+
+    # AAC is classified by bitrate: only >= 256 kbps (or an unstated bitrate) is "AAC 256". The quality model has no
+    # lower AAC tier, so a lower-bitrate AAC is "Unknown" (it must not satisfy a cutoff it does not meet).
+    if _AAC_WORD.search(raw_title) and detected_quality not in _LOSSLESS_QUALITIES:
+        aac_kbps = int(br_match.group(1)) if br_match else None
+        if aac_kbps is None or aac_kbps >= _AAC_256_MIN_KBPS:
+            detected_quality = AudioQuality.AAC_256.value
+        else:
+            detected_quality = AudioQuality.UNKNOWN.value
     if br_match:
         try:
             bitrate_kbps = int(br_match.group(1))

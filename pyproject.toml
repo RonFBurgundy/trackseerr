@@ -58,6 +58,7 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+markers = ["integration: contract tests against a real Lidarr container (RUN_INTEGRATION=1, see docs/INTEGRATION_TESTS.md)"]
 
 [tool.ruff.lint]
 ignore = ["B008"]

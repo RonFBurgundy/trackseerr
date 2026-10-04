@@ -10,7 +10,7 @@ import re
 import tarfile
 import zipfile
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import mutagen
 from mutagen.flac import FLAC, Picture
@@ -38,6 +38,121 @@ def is_archive_file(path: Path | str) -> bool:
         or name.endswith(".tgz")
         or name.endswith(".tar.bz2")
     )
+
+
+_FEAT_SPLIT_RE = re.compile(r"\s*[(\[]\s*(?:feat|ft|featuring)\b|\s+(?:feat\.?|ft\.?|featuring)\s+", re.IGNORECASE)
+_LEADING_TRACK_RE = re.compile(r"^\s*(\d{1,3})\s*(?:[-.)_]+\s*|\s+)(?=\S)(.+)$")
+
+
+_FOLDER_ART_EXTS = (".jpg", ".jpeg", ".png")
+_ALBUMART_RE = re.compile(r"^albumart_\{?[0-9a-f-]+\}?_(large|small)\.(?:jpe?g|png)$", re.IGNORECASE)
+
+
+def find_folder_art(directory: Path | str) -> Optional[Path]:
+    """Finds album art in a folder (case-insensitive): cover/folder, then iTunes/WMP AlbumArt (Large preferred)."""
+    try:
+        entries = [e for e in Path(directory).iterdir() if e.is_file()]
+    except OSError:
+        return None
+
+    def rank(entry: Path) -> int | None:
+        name = entry.name.lower()
+        stem, ext = os.path.splitext(name)
+        if ext not in _FOLDER_ART_EXTS:
+            return None
+        if stem == "cover":
+            return 0
+        if stem == "folder":
+            return 1
+        match = _ALBUMART_RE.match(name)
+        if match:
+            return 2 if match.group(1).lower() == "large" else 4
+        if stem == "albumartsmall":
+            return 4
+        if stem == "albumart":
+            return 3
+        return None
+
+    ranked = sorted(
+        ((r, e.name.lower(), e) for e in entries if (r := rank(e)) is not None),
+        key=lambda t: (t[0], t[1]),
+    )
+    return ranked[0][2] if ranked else None
+
+
+_SPACED_SPLIT_RE = re.compile(r"\s+/\s+|\s*;\s*")
+_MBID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
+
+
+def _clean_credits(values: Any) -> list[str]:
+    """Normalises a multi-valued tag (str/bytes/list) into a list of non-empty credited names."""
+    if values is None:
+        return []
+    if isinstance(values, (str, bytes, bytearray)):
+        values = [values]
+    out: list[str] = []
+    for raw in values:
+        text = raw.decode("utf-8", errors="ignore") if isinstance(raw, (bytes, bytearray)) else str(raw)
+        text = text.strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def primary_artist(
+    credit: str | None,
+    known_artist: Callable[[str], bool] | None = None,
+    single_entity: bool = False,
+) -> str:
+    """Primary artist of a track-artist credit.
+
+    Always splits on spaced ' / ', ';' and feat./ft./featuring; '&' is never split ('Simon & Garfunkel' is one act).
+    A bare '/' ('AC/DC', 'f/x') splits only when ``known_artist`` says the left part is already a library artist
+    and the whole string is not. ``single_entity`` (one MusicBrainz artist ID) keeps a bare '/' intact.
+    """
+    text = (credit or "").strip()
+    if not text:
+        return text
+    text = _SPACED_SPLIT_RE.split(text, maxsplit=1)[0]
+    text = _FEAT_SPLIT_RE.split(text, maxsplit=1)[0].strip()
+    if "/" in text and known_artist is not None and not single_entity:
+        left = text.split("/", 1)[0].strip()
+        if left and known_artist(left) and not known_artist(text):
+            return left
+    return text
+
+
+def resolve_album_artist(
+    metadata: dict[str, Any],
+    fallback: str = "",
+    known_artist: Callable[[str], bool] | None = None,
+) -> str:
+    """Artist an album/track is filed under.
+
+    Precedence: album artist tag; first credit of the multi-valued ARTISTS tag; the track-artist string split by
+    ``primary_artist`` (a single MusicBrainz artist ID marks it as one entity, so a bare '/' is kept).
+    """
+    album_artist = str(metadata.get("album_artist") or "").strip()
+    if album_artist:
+        return album_artist
+    credits = _clean_credits(metadata.get("artists"))
+    if credits:
+        return credits[0]
+    mbid_text = f"{metadata.get('musicbrainz_artistid') or ''} {metadata.get('musicbrainz_albumartistid') or ''}"
+    mbids = {m.lower() for m in _MBID_RE.findall(mbid_text)}
+    return primary_artist(str(metadata.get("artist") or ""), known_artist, single_entity=len(mbids) == 1) or fallback
+
+
+def parse_filename_track(stem: str) -> tuple[str, int | None]:
+    """Splits a leading track number off a file stem: '08 Get Lucky' -> ('Get Lucky', 8)."""
+    match = _LEADING_TRACK_RE.match(stem or "")
+    if not match:
+        return (stem or "").strip(), None
+    number = int(match.group(1))
+    title = match.group(2).strip()
+    if number <= 0 or not title:
+        return (stem or "").strip(), None
+    return title, number
 
 
 def _parse_int(val: Any) -> int | None:
@@ -112,6 +227,8 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
     bits_per_sample: int | None = None
     duration: float = 0.0
     musicbrainz_artistid: str | None = None
+    musicbrainz_albumartistid: str | None = None
+    artists: list[str] = []
     musicbrainz_albumid: str | None = None
     musicbrainz_releasegroupid: str | None = None
     musicbrainz_trackid: str | None = None
@@ -142,6 +259,8 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
             if total_discs is None:
                 total_discs = _parse_int(tags.get("disctotal", [None])[0] or tags.get("totaldiscs", [None])[0])
             musicbrainz_artistid = tags.get("musicbrainz_artistid", [None])[0]
+            musicbrainz_albumartistid = tags.get("musicbrainz_albumartistid", [None])[0]
+            artists = _clean_credits(tags.get("artists"))
             musicbrainz_albumid = tags.get("musicbrainz_albumid", [None])[0]
             musicbrainz_releasegroupid = tags.get("musicbrainz_releasegroupid", [None])[0]
             musicbrainz_trackid = tags.get("musicbrainz_trackid", [None])[0]
@@ -167,6 +286,9 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
             track_number, total_tracks = _parse_num_total(id3_val("TRCK"))
             disc_number, total_discs = _parse_num_total(id3_val("TPOS"))
             musicbrainz_artistid = id3_val("TXXX:MusicBrainz Artist Id")
+            musicbrainz_albumartistid = id3_val("TXXX:MusicBrainz Album Artist Id")
+            artists_frame = tags.get("TXXX:ARTISTS")
+            artists = _clean_credits(getattr(artists_frame, "text", None))
             musicbrainz_albumid = id3_val("TXXX:MusicBrainz Album Id")
             musicbrainz_releasegroupid = id3_val("TXXX:MusicBrainz Release Group Id")
             ufid = tags.get("UFID:http://musicbrainz.org")
@@ -207,6 +329,8 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
                 disc_number, total_discs = _parse_num_total(disk[0])
 
             musicbrainz_artistid = mp4_val("----:com.apple.iTunes:MusicBrainz Artist Id")
+            musicbrainz_albumartistid = mp4_val("----:com.apple.iTunes:MusicBrainz Album Artist Id")
+            artists = _clean_credits(tags.get("----:com.apple.iTunes:ARTISTS"))
             musicbrainz_albumid = mp4_val("----:com.apple.iTunes:MusicBrainz Album Id")
             musicbrainz_releasegroupid = mp4_val("----:com.apple.iTunes:MusicBrainz Release Group Id")
             musicbrainz_trackid = mp4_val("----:com.apple.iTunes:MusicBrainz Track Id")
@@ -224,6 +348,8 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
             track_number, total_tracks = _parse_num_total(tags.get("tracknumber", [None])[0])
             disc_number, total_discs = _parse_num_total(tags.get("discnumber", [None])[0])
             musicbrainz_artistid = tags.get("musicbrainz_artistid", [None])[0]
+            musicbrainz_albumartistid = tags.get("musicbrainz_albumartistid", [None])[0]
+            artists = _clean_credits(tags.get("artists"))
             musicbrainz_albumid = tags.get("musicbrainz_albumid", [None])[0]
             musicbrainz_releasegroupid = tags.get("musicbrainz_releasegroupid", [None])[0]
             musicbrainz_trackid = tags.get("musicbrainz_trackid", [None])[0]
@@ -254,6 +380,8 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
             track_number, total_tracks = _parse_num_total(tags.get("tracknumber", [""])[0])
             disc_number, total_discs = _parse_num_total(tags.get("discnumber", [""])[0])
             musicbrainz_artistid = str(tags.get("musicbrainz_artistid", [""])[0]) or None
+            musicbrainz_albumartistid = str(tags.get("musicbrainz_albumartistid", [""])[0]) or None
+            artists = _clean_credits(tags.get("artists"))
             musicbrainz_albumid = str(tags.get("musicbrainz_albumid", [""])[0]) or None
             musicbrainz_releasegroupid = str(tags.get("musicbrainz_releasegroupid", [""])[0]) or None
             musicbrainz_trackid = str(tags.get("musicbrainz_trackid", [""])[0]) or None
@@ -266,7 +394,7 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
         "album_artist": album_artist,
         "year": year,
         "release_year": year,
-        "track_number": track_number or 1,
+        "track_number": track_number or None,
         "total_tracks": total_tracks,
         "disc_number": disc_number or 1,
         "total_discs": total_discs or 1,
@@ -278,6 +406,8 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
         "extension": path.suffix.lower(),
         "file_path": str(path),
         "musicbrainz_artistid": musicbrainz_artistid,
+        "musicbrainz_albumartistid": musicbrainz_albumartistid,
+        "artists": artists,
         "musicbrainz_albumid": musicbrainz_albumid,
         "musicbrainz_releasegroupid": musicbrainz_releasegroupid,
         "musicbrainz_trackid": musicbrainz_trackid,
@@ -640,6 +770,18 @@ def extract_archive(archive_path: Path | str, target_dir: Path | str) -> list[Pa
     return sorted(extracted_audio)
 
 
+_fingerprint_warned = False
+
+
+def _warn_fingerprint_unavailable(reason: str) -> None:
+    """Logs once per process why audio fingerprinting cannot run, instead of failing silently on every call."""
+    global _fingerprint_warned
+    if _fingerprint_warned:
+        return
+    _fingerprint_warned = True
+    logger.warning("Audio fingerprinting is unavailable: %s. AcoustID lookups will return no match.", reason)
+
+
 def fingerprint_audio_file(
     file_path: str | Path,
     api_key: Optional[str] = None,
@@ -655,8 +797,8 @@ def fingerprint_audio_file(
 
     try:
         import acoustid
-    except (ImportError, Exception) as exc:
-        logger.debug("fingerprint_audio_file: acoustid package unavailable: %s", exc)
+    except ImportError as exc:
+        _warn_fingerprint_unavailable("the pyacoustid package is not installed (%s)" % exc)
         return None
 
     if not api_key:
@@ -664,7 +806,9 @@ def fingerprint_audio_file(
         return None
 
     try:
-        results = acoustid.match(api_key, str(path))
+        # force_fpcalc: pyacoustid otherwise prefers its audioread decoder when the chromaprint library is present,
+        # and audioread has no backend in the slim image (no ffmpeg/gstreamer), so every fingerprint would fail.
+        results = acoustid.match(api_key, str(path), force_fpcalc=True)
         for score, recording_id, title, artist in results:
             return {
                 "score": float(score),
@@ -674,6 +818,10 @@ def fingerprint_audio_file(
             }
         return None
     except Exception as exc:
+        if type(exc).__name__ == "NoBackendError":
+            # pyacoustid raises this when neither the chromaprint library nor the fpcalc binary is available.
+            _warn_fingerprint_unavailable("the chromaprint 'fpcalc' binary / library was not found (install chromaprint)")
+            return None
         logger.warning("fingerprint_audio_file: AcoustID match failed for %s: %s", path, exc)
         return None
 

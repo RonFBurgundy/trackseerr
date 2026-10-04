@@ -657,14 +657,15 @@ def import_m3u_playlist(
             detail="Could not extract any valid tracks from the provided M3U content.",
         )
 
-    import_items = [
-        TrackImportItem(
-            title=t["title"],
-            artist=t.get("artist", ""),
-            album=t.get("album", ""),
-        )
-        for t in parsed_tracks
-    ]
+    import_items = []
+    for t in parsed_tracks:
+        title, artist = t["title"], t.get("artist", "")
+        alt = t.get("alt")
+        # An ambiguous 'A - B' display name (iTunes writes 'Title - Artist'): when only the swapped reading names
+        # an artist the library knows, use that one.
+        if alt and not db.get_library_artist_by_name(artist) and db.get_library_artist_by_name(alt["artist"]):
+            title, artist = alt["title"], alt["artist"]
+        import_items.append(TrackImportItem(title=title, artist=artist, album=t.get("album", "")))
 
     import_req = PlaylistDirectImportRequest(
         name=req.name or "Imported M3U Playlist",

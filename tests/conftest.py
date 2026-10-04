@@ -8,6 +8,9 @@ os.environ["TRACKSEERR_LEGACY_UI"] = "1"
 
 import pytest
 
+# The Lidarr contract tests need a real Lidarr: not even collected unless RUN_INTEGRATION=1 (docs/INTEGRATION_TESTS.md).
+collect_ignore_glob = [] if os.environ.get("RUN_INTEGRATION") == "1" else ["integration/*"]
+
 
 def pytest_configure(config):
     config.addinivalue_line(
@@ -50,6 +53,30 @@ def _restore_root_logging():
             root.removeHandler(handler)
             handler.close()
     root.setLevel(before_level)
+
+
+@pytest.fixture(autouse=True)
+def _stop_scheduler_threads_started_by_the_test():
+    """``cli.main`` starts the sync scheduler and the Lidarr auto-trickle runner as daemon threads that live until
+    process exit. Left running they outlive their test (and its DB) for the rest of the xdist worker, burn CPU
+    alongside every later test and, whenever a later test replaces ``time.sleep`` with a no-op, spin hot. Stop and
+    join whatever the test started."""
+    import threading
+
+    from plex_playlist_sync import cli
+
+    names = {"ScheduledSyncWorker", "ScheduledLidarrTrickleWorker"}
+    before = set(threading.enumerate())
+    yield
+    started = [t for t in threading.enumerate() if t.name in names and t not in before]
+    if not started:
+        return
+    cli._shutdown_event.set()
+    try:
+        for thread in started:
+            thread.join(timeout=10)
+    finally:
+        cli._shutdown_event.clear()
 
 
 @pytest.fixture(autouse=True)

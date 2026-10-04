@@ -1,0 +1,12 @@
+<!-- TEST-ONLY seed for the throwaway integration Lidarr. The ApiKey below is NOT a secret. -->
+<Config>
+  <BindAddress>*</BindAddress>
+  <Port>8686</Port>
+  <ApiKey>a5ef0acebccb7d5f1a894d9ed1b96e98</ApiKey>
+  <AuthenticationMethod>None</AuthenticationMethod>
+  <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>
+  <LogLevel>info</LogLevel>
+  <AnalyticsEnabled>False</AnalyticsEnabled>
+  <UpdateMechanism>Docker</UpdateMechanism>
+  <Branch>master</Branch>
+</Config>

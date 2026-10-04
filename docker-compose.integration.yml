@@ -1,0 +1,22 @@
+# Throwaway real Lidarr for the contract tests in tests/integration (see docs/INTEGRATION_TESTS.md).
+# No download clients, no indexers. Bound to loopback only. /config is a tmpfs: nothing persists.
+# The API key in tests/integration/lidarr/config.xml is a TEST-ONLY value, not a secret.
+services:
+  lidarr:
+    image: lscr.io/linuxserver/lidarr:3.1.0.4875-ls42
+    container_name: trackseerr-it-lidarr
+    mem_limit: 1g
+    cpus: 1.0
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: UTC
+    ports:
+      - "127.0.0.1:18686:8686"
+    tmpfs:
+      - /config:uid=1000,gid=1000,mode=0755
+      - /music:uid=1000,gid=1000,mode=0755
+      - /music-nosingles:uid=1000,gid=1000,mode=0755
+    volumes:
+      - ./tests/integration/lidarr/config.xml:/seed/config.xml:ro
+      - ./tests/integration/lidarr/10-seed-config.sh:/custom-cont-init.d/10-seed-config.sh:ro

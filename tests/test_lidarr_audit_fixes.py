@@ -18,7 +18,7 @@ from plex_playlist_sync.lidarr_queue import LidarrTrickleWorker
 from plex_playlist_sync.lidarr_release import norm_title, titles_match
 from plex_playlist_sync.models import AcquisitionSearchResult, MusicRequest, RequestStatus
 from plex_playlist_sync.storage import Database, lidarr_item_due, lidarr_retry_delay
-from tests.lidarr_fake import FakeLidarr
+from tests.lidarr_fake import FakeLidarr, FastClock
 
 HTTPX = "plex_playlist_sync.clients.lidarr.httpx.Client"
 SONG = "Bohemian Rhapsody"
@@ -70,7 +70,7 @@ class TestMigrationV38:
 
         db = Database(path)  # runs v38 over the v37 schema
         try:
-            assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 38
+            assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 39
             assert db.get_request("r1")["status_reason"] is None
             assert [r["id"] for r in db.list_requests()] == ["r1"]
             assert db.set_request_outcome("r1", "not_in_metadata_profile", "nope")
@@ -90,7 +90,7 @@ class TestMigrationV38:
         db.close()
         db = Database(path)  # columns already exist: must not raise
         try:
-            assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 38
+            assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 39
         finally:
             db.close()
 
@@ -159,7 +159,7 @@ class TestRetryPolicy:
         worker = LidarrTrickleWorker()
         worker._delay_seconds = 0.0
         worker._auto_search = True
-        with patch(HTTPX, fake), patch("plex_playlist_sync.lidarr_queue.time.sleep"):
+        with patch(HTTPX, fake), patch("plex_playlist_sync.lidarr_queue.time", FastClock()):
             worker._process_groups(LidarrTrickleWorker._group_by_artist(items), client_for(), db)
 
     def test_not_in_metadata_profile_is_unavailable_and_not_re_enqueued_until_due(self, db):

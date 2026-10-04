@@ -14,7 +14,7 @@ ENV PYTHONUNBUFFERED=1 \
     PORT=5250
 WORKDIR /app
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gosu && \
+    apt-get install -y --no-install-recommends gosu libchromaprint-tools && \
     rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

@@ -125,6 +125,15 @@ def album_monitored_for_option(
     return False
 
 
+def hydrated_track_monitored(option: Optional[str]) -> bool:
+    """Monitored flag for a track created from catalog (MusicBrainz/Deezer) data rather than from a file.
+
+    Under ``existing`` only owned tracks are monitored, so a hydrated track with no file is created unmonitored even
+    inside an owned, monitored album. Every other option keeps the tracks following their album.
+    """
+    return option != "existing"
+
+
 # SQL twin of album_monitored_for_option for set-based updates. Expects tables aliased as ``a`` (library_albums)
 # and ``ar`` (library_artists) and the artist's resulting option/monitored values in ``:opt`` / ``:art_mon``
 # style expressions supplied by the caller via format placeholders {opt} and {art_mon}.
