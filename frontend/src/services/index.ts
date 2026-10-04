@@ -19,3 +19,4 @@ export * from './healthService';
 export * from './activityService';
 export * from './listUrl';
 export * from './importListsService';
+export * from './itunesImportService';

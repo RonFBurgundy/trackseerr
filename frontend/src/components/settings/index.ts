@@ -9,3 +9,4 @@ export * from './ClientsPanel';
 export * from './IndexersPanel';
 export * from './LidarrPanel';
 export * from './ImportListsPanel';
+export * from './ItunesImportCard';

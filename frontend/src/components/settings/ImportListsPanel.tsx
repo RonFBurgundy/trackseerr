@@ -9,6 +9,7 @@ import type { LibraryManagerMode } from '@/types/models';
 import { LIST_MONITOR_MODE_LABELS, type ImportList } from '@/types/importLists';
 import { ImportListEditorModal } from './ImportListEditorModal';
 import { ImportListHistoryModal } from './ImportListHistoryModal';
+import { ItunesImportCard } from './ItunesImportCard';
 
 export interface ImportListsPanelProps {
   libraryMode: LibraryManagerMode;
@@ -131,6 +132,8 @@ export const ImportListsPanel: React.FC<ImportListsPanelProps> = ({ libraryMode,
           </MachinedCard>
         ))}
       </div>
+
+      <ItunesImportCard />
 
       <ImportListEditorModal
         editor={editor}

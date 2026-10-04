@@ -6498,6 +6498,30 @@ class Database:
             row = cur.fetchone()
             return self._map_library_file(row) if row else None
 
+    def list_library_artist_track_index(self, artist_id: str) -> list[dict[str, Any]]:
+        """One artist's tracks for import matching: id, clean_title, album clean title, duration, file presence."""
+        with self._lock:
+            rows = self.conn.execute(
+                """
+                SELECT t.id, t.clean_title, t.track_number, t.duration_seconds,
+                       COALESCE(a.clean_title, '') AS album_clean_title,
+                       EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) AS has_file
+                FROM library_tracks t
+                LEFT JOIN library_albums a ON a.id = t.album_id
+                WHERE t.artist_id = ?
+                """,
+                (str(artist_id),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def list_library_file_paths(self, limit: int = 500000) -> list[tuple[str, str]]:
+        """(absolute path, track id) of library files (bounded), for import path matching and mapping suggestions."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT file_path, track_id FROM library_files LIMIT ?", (int(limit),)
+            ).fetchall()
+            return [(str(r["file_path"]), str(r["track_id"])) for r in rows]
+
     def delete_library_file(self, file_id: str) -> bool:
         """Deletes a library file record."""
         with self._lock:

@@ -50,6 +50,7 @@ Useful variants:
 | `test_import_rename.py` | `/manual-import/scan` + `/commit` (default naming, tags, hardlink, duplicates), `/rename/preview` + `/apply` |
 | `test_cover_art.py` | embedded art detection/extraction, scanner `cover_url`, cover route, iTunes `AlbumArt_{GUID}_Large.jpg` |
 | `test_m3u.py` | M3U with absolute / relative / Windows paths and EXTINF; route; resolution against the scanned library; the real `iTunes/Playlists/Kavinsky.m3u` (CRLF, `C:\\...` paths, 28 of 29 files exist) |
+| `test_itunes_import.py` | the real `iTunes Library.xml` (mount `/mnt/music` at `/media`, read-only): 31,487 tracks, 68 playlists of which 57 import (7 built-in, 4 folders, 0 empty; 15 smart), suggested `D:/iTunes/iTunes Media/Music` mapping, Discovery tracks of a real playlist matching the scanned mini library |
 | `test_artist_matching.py` | `clean_library_name`, collaboration folders (`_`, `feat`, `ft`, `&`, truncated names), tagless fallbacks |
 | `test_mb_enrichment.py` | live MusicBrainz: artist MBID, Discovery release group, 14-track hydration, monitoring |
 | `test_formats.py` | real M4A (AAC 128), untagged WAV, FLAC (opt-in: `TRACKSEERR_LOCAL_FLAC=<file>`; the iTunes library has none): tags, quality, scan, rename |
