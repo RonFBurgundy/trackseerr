@@ -1,6 +1,6 @@
 import React from 'react';
 import { Loader2, AlertTriangle, Check } from 'lucide-react';
-import { TapeTransportBay, TapeDeckButton, MachinedCard } from '@/components/ui';
+import { TabStrip, TapeDeckButton, MachinedCard, ActionBar } from '@/components/ui';
 import type { LibraryManagerMode } from '@/types/models';
 import type { UseLibraryManagerReturn } from '@/hooks/useLibraryManager';
 import { MANAGER_LABEL } from './InactiveGate';
@@ -57,7 +57,7 @@ export const LibraryManagerSwitch: React.FC<LibraryManagerSwitchProps> = ({
       </div>
 
       <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-        <TapeTransportBay className="flex items-center gap-1.5 w-full sm:w-auto" role="group" aria-label="Library manager">
+        <TabStrip fill role="group" aria-label="Library manager">
           {modes.map((m) => (
             <TapeDeckButton
               key={m}
@@ -73,7 +73,7 @@ export const LibraryManagerSwitch: React.FC<LibraryManagerSwitchProps> = ({
               {MANAGER_LABEL[m]}
             </TapeDeckButton>
           ))}
-        </TapeTransportBay>
+        </TabStrip>
         {isLoading && <Loader2 className="h-4 w-4 animate-spin text-[#e5a00d]" />}
       </div>
 
@@ -112,7 +112,7 @@ export const LibraryManagerSwitch: React.FC<LibraryManagerSwitchProps> = ({
           {blocked && state?.blocking_reason && (
             <p className="text-[11px] font-mono text-amber-300">Currently blocked: {state.blocking_reason}</p>
           )}
-          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+          <ActionBar align="end" stackOnMobile className="max-sm:[&>*:last-child]:order-first">
             <TapeDeckButton size="sm" onClick={() => onPendingChange(null)} disabled={isSwitching}>
               Cancel
             </TapeDeckButton>
@@ -125,7 +125,7 @@ export const LibraryManagerSwitch: React.FC<LibraryManagerSwitchProps> = ({
             >
               Switch to {MANAGER_LABEL[pendingMode]}
             </TapeDeckButton>
-          </div>
+          </ActionBar>
         </div>
       )}
     </MachinedCard>

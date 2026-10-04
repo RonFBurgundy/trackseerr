@@ -5,14 +5,19 @@ export interface TapeDeckButtonProps extends React.ButtonHTMLAttributes<HTMLButt
   variant?: 'default' | 'danger' | 'amber';
   size?: 'sm' | 'md' | 'lg';
   icon?: React.ReactNode;
+  /** Icon-only below `sm` (the label stays in the DOM for assistive tech via aria-label). Needs `icon`. */
+  collapseLabel?: boolean | 'sm' | 'lg' | 'xl';
   children?: React.ReactNode;
 }
+
+const COLLAPSE_CLASS = { sm: 'hidden sm:inline', lg: 'hidden lg:inline', xl: 'hidden xl:inline' } as const;
 
 export const TapeDeckButton: React.FC<TapeDeckButtonProps> = ({
   active = false,
   variant = 'default',
   size = 'md',
   icon,
+  collapseLabel = false,
   children,
   className = '',
   disabled = false,
@@ -42,6 +47,7 @@ export const TapeDeckButton: React.FC<TapeDeckButtonProps> = ({
         active ? 'engaged' : ''
       } ${className}`}
       disabled={disabled}
+      aria-label={props['aria-label'] ?? (collapseLabel && typeof children === 'string' ? children : undefined)}
       {...props}
     >
       {/* 2px amber LED indicator jewel when active/engaged */}
@@ -52,7 +58,7 @@ export const TapeDeckButton: React.FC<TapeDeckButtonProps> = ({
         />
       )}
       {icon && <span className="inline-flex shrink-0 items-center justify-center">{icon}</span>}
-      {children && <span>{children}</span>}
+      {children && <span className={collapseLabel && icon ? COLLAPSE_CLASS[collapseLabel === true ? 'sm' : collapseLabel] : undefined}>{children}</span>}
     </button>
   );
 };

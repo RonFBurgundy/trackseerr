@@ -66,7 +66,7 @@ export const AlbumTile: React.FC<AlbumTileProps> = React.memo(
               onClick={() => onCollect(album)}
               title="Add to Collection"
               aria-label={`Add ${album.title} to a collection`}
-              className="inline-flex items-center justify-center h-8 w-8 rounded-[3px] border border-[#2a2a2a] bg-[#181818] hover:border-[#e5a00d]/50"
+              className="inline-flex items-center justify-center h-11 w-11 max-sm:-my-1.5 sm:h-8 sm:w-8 rounded-[3px] border border-[#2a2a2a] bg-[#181818] hover:border-[#e5a00d]/50"
             >
               <BookmarkPlus className="h-3.5 w-3.5 text-[#e5a00d]" />
             </button>

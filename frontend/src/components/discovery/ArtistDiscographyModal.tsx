@@ -81,8 +81,8 @@ export const ArtistDiscographyModal: React.FC<ArtistDiscographyModalProps> = ({
       title={artistName}
       subtitle="Discography"
       footer={
-        <div className="flex items-center justify-between w-full gap-3">
-          <span className="text-xs text-[var(--text-secondary)] font-mono">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between w-full gap-2 sm:gap-3">
+          <span className="text-xs text-[var(--text-secondary)] font-mono text-center sm:text-left">
             {included.length} release{included.length === 1 ? '' : 's'}
           </span>
           <TapeDeckButton

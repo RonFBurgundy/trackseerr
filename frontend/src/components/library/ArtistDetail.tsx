@@ -17,7 +17,7 @@ import type { AlbumItem } from '@/types/models';
 import { useArtistDetail, type MonitorPreset } from '@/hooks/useArtistDetail';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
 import { errorMessage } from '@/services/apiClient';
-import { MachinedCard, TactileSwitch, TapeDeckButton, TapeTransportBay } from '@/components/ui';
+import { MachinedCard, TactileSwitch, TapeDeckButton, TabStrip } from '@/components/ui';
 import { ArtistAlbumCard } from './ArtistAlbumCard';
 
 type DiscographyTab = 'studio' | 'singles_eps' | 'live' | 'compilations';
@@ -175,13 +175,6 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
               </div>
               {isAdmin && artist && (
                 <div className="flex items-center justify-center sm:justify-end gap-2 flex-shrink-0">
-                  <span
-                    className={`text-[10px] font-mono uppercase tracking-wider ${
-                      artist.monitored ? 'text-[#e5a00d]' : 'text-neutral-500'
-                    }`}
-                  >
-                    {artist.monitored ? 'Monitored' : 'Unmonitored'}
-                  </span>
                   <TactileSwitch
                     checked={artist.monitored}
                     onChange={(val) => void toggleArtist(val)}
@@ -277,14 +270,14 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
         </div>
       </MachinedCard>
 
-      <TapeTransportBay className="flex items-center gap-1.5 overflow-x-auto">
+      <TabStrip>
         {tabs.map((t) => (
           <TapeDeckButton key={t.id} size="sm" active={tab === t.id} onClick={() => setTab(t.id)} icon={t.icon}>
             <span className="hidden sm:inline">{t.full}</span>
             <span className="sm:hidden">{t.short}</span> ({categorized[t.id].length})
           </TapeDeckButton>
         ))}
-      </TapeTransportBay>
+      </TabStrip>
 
       {loading ? (
         <div className="flex flex-col items-center justify-center py-20 gap-3">

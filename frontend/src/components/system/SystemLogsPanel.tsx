@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Download, Trash2, Loader2, Search, AlertTriangle } from 'lucide-react';
-import { TapeDeckButton, TapeTransportBay, MachinedCard } from '@/components/ui';
+import { TapeDeckButton, ActionBar, TabStrip, MachinedCard } from '@/components/ui';
 import { useSystemLogs } from '@/hooks/useSystemLogs';
 
 const LEVELS = ['all', 'info', 'warning', 'error', 'debug'] as const;
@@ -24,7 +24,7 @@ export const SystemLogsPanel: React.FC = () => {
           <h4 className="text-sm font-bold uppercase font-mono text-white">Application Logs</h4>
           <p className="text-xs text-neutral-400 font-mono mt-0.5">Live stream from the server process</p>
         </div>
-        <TapeTransportBay className="flex items-center gap-2 self-start sm:self-auto">
+        <ActionBar bay align="end" className="p-1.5 sm:w-auto">
           <TapeDeckButton
             size="sm"
             onClick={() => void logsHook.download()}
@@ -44,7 +44,7 @@ export const SystemLogsPanel: React.FC = () => {
           >
             Clear Logs
           </TapeDeckButton>
-        </TapeTransportBay>
+        </ActionBar>
       </div>
 
       {logsHook.actionError && (
@@ -55,23 +55,21 @@ export const SystemLogsPanel: React.FC = () => {
       )}
 
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 p-3 bg-[#101010] border border-[#222222] rounded-[4px]">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-xs font-mono text-neutral-400 mr-1">Level:</span>
-          {LEVELS.map((lvl) => (
-            <button
-              key={lvl}
-              type="button"
-              onClick={() => logsHook.setLevelFilter(lvl)}
-              aria-pressed={logsHook.levelFilter === lvl}
-              className={`px-2 py-1 text-[11px] font-mono uppercase rounded-[2px] transition-colors ${
-                logsHook.levelFilter === lvl
-                  ? 'bg-[#e5a00d] text-black font-bold'
-                  : 'bg-[#181818] text-neutral-400 hover:text-white border border-[#262626]'
-              }`}
-            >
-              {lvl}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="hidden sm:inline text-xs font-mono text-neutral-400">Level:</span>
+          <TabStrip fill aria-label="Log level" className="min-w-0 flex-1">
+            {LEVELS.map((lvl) => (
+              <TapeDeckButton
+                key={lvl}
+                size="sm"
+                active={logsHook.levelFilter === lvl}
+                aria-pressed={logsHook.levelFilter === lvl}
+                onClick={() => logsHook.setLevelFilter(lvl)}
+              >
+                {lvl}
+              </TapeDeckButton>
+            ))}
+          </TabStrip>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -86,7 +84,7 @@ export const SystemLogsPanel: React.FC = () => {
             />
           </div>
 
-          <label className="flex items-center gap-1.5 text-xs font-mono text-neutral-400 cursor-pointer select-none">
+          <label className="flex items-center gap-1.5 min-h-[44px] sm:min-h-0 text-xs font-mono text-neutral-400 cursor-pointer select-none">
             <input
               type="checkbox"
               checked={autoScroll}

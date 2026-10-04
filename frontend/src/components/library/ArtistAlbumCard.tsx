@@ -80,13 +80,6 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
         <div className="flex items-center gap-2 sm:gap-3 self-stretch sm:self-center justify-between sm:justify-end flex-wrap sm:flex-nowrap">
           {isAdmin && (
             <div className="flex items-center gap-2">
-              <span
-                className={`text-[10px] font-mono uppercase tracking-wider hidden sm:inline ${
-                  album.monitored ? 'text-[#e5a00d]' : 'text-neutral-500'
-                }`}
-              >
-                {album.monitored ? 'Monitored' : 'Unmonitored'}
-              </span>
               <TactileSwitch
                 checked={album.monitored}
                 onChange={() => onToggleAlbumMonitored(album.id, album.monitored)}

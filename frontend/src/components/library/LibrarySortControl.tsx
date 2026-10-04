@@ -16,8 +16,8 @@ export interface LibrarySortControlProps {
 export const LibrarySortControl: React.FC<LibrarySortControlProps> = ({ options, sortKey, sortDir, onChange }) => {
   const DirIcon = sortDir === 'asc' ? ArrowUp : ArrowDown;
   return (
-    <div className="flex items-center gap-1.5" role="group" aria-label="Sort">
-      <TapeTransportBay className="hidden sm:flex items-center gap-1">
+    <div className="flex w-full sm:w-auto items-stretch gap-1.5" role="group" aria-label="Sort">
+      <TapeTransportBay className="hidden sm:flex items-stretch gap-1">
         {options.map((o) => (
           <TapeDeckButton
             key={o.key}

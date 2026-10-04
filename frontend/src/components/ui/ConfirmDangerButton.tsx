@@ -7,6 +7,8 @@ export interface ConfirmDangerButtonProps {
   icon: React.ReactNode;
   /** Accessible name for the idle (first-step) button. */
   ariaLabel: string;
+  /** Visible text for the idle button (icon-only when omitted). */
+  idleLabel?: string;
   confirmLabel?: string;
   cancelLabel?: string;
   size?: 'sm' | 'md' | 'lg';
@@ -20,6 +22,7 @@ export const ConfirmDangerButton: React.FC<ConfirmDangerButtonProps> = ({
   onConfirm,
   icon,
   ariaLabel,
+  idleLabel,
   confirmLabel = 'Confirm',
   cancelLabel = 'Keep',
   size = 'sm',
@@ -43,15 +46,18 @@ export const ConfirmDangerButton: React.FC<ConfirmDangerButtonProps> = ({
         onClick={() => setArmed(true)}
         icon={icon}
         aria-label={ariaLabel}
-      />
+      >
+        {idleLabel}
+      </TapeDeckButton>
     );
   }
 
   return (
-    <>
+    <div className="col-span-full flex items-stretch gap-2 sm:contents">
       <TapeDeckButton
         size={size}
         variant="danger"
+        className="min-w-0 flex-1 sm:flex-none"
         disabled={disabled}
         onClick={() => {
           setArmed(false);
@@ -60,9 +66,9 @@ export const ConfirmDangerButton: React.FC<ConfirmDangerButtonProps> = ({
       >
         {confirmLabel}
       </TapeDeckButton>
-      <TapeDeckButton size={size} onClick={() => setArmed(false)}>
+      <TapeDeckButton size={size} className="shrink-0" onClick={() => setArmed(false)}>
         {cancelLabel}
       </TapeDeckButton>
-    </>
+    </div>
   );
 };

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowUpCircle, SearchX } from 'lucide-react';
-import { TapeTransportBay, TapeDeckButton, ToastBanner } from '@/components/ui';
+import { TabStrip, TapeDeckButton, ToastBanner } from '@/components/ui';
 import { WantedPanel } from '@/components/wanted';
 import { useToast } from '@/hooks/useToast';
 import type { WantedListName } from '@/types/activity';
@@ -18,13 +18,13 @@ export const WantedView: React.FC = () => {
   return (
     <div className="space-y-6">
       {toast && <ToastBanner message={toast.message} tone={toast.tone} />}
-      <TapeTransportBay className="flex items-center gap-1.5 overflow-x-auto" aria-label="Wanted sections">
+      <TabStrip aria-label="Wanted sections">
         {TABS.map((t) => (
           <TapeDeckButton key={t.id} size="sm" active={tab === t.id} onClick={() => setTab(t.id)} icon={t.icon}>
             {t.label}
           </TapeDeckButton>
         ))}
-      </TapeTransportBay>
+      </TabStrip>
 
       <WantedPanel key={tab} list={tab} onToast={showToast} />
     </div>

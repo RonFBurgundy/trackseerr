@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Loader2, Save, AlertTriangle, RotateCw } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, TactileSwitch } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar } from '@/components/ui';
 import type {
   LidarrSettings,
   LidarrMonitorOption,
@@ -354,7 +354,7 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
             </div>
           </fieldset>
 
-          <div className="flex justify-end pt-3">
+          <ActionBar align="end" className="pt-3">
             <TapeDeckButton
               type="submit"
               variant="amber"
@@ -364,7 +364,7 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
             >
               Save Lidarr Settings
             </TapeDeckButton>
-          </div>
+          </ActionBar>
         </form>
       </MachinedCard>
     </div>

@@ -4,7 +4,7 @@ import type { ArtistDiscographyAlbum, DiscoveryItem, AudioPreviewTrack } from '@
 import { ArtistDiscographyModal } from '@/components/discovery';
 import type { UseDiscoveryReturn } from '@/hooks/useDiscovery';
 import {
-  TapeTransportBay,
+  TabStrip,
   TapeDeckButton,
   MachinedCard,
   SearchBar,
@@ -86,7 +86,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
           />
         </div>
 
-        <TapeTransportBay className="flex items-center gap-1.5 self-start sm:self-auto">
+        <TabStrip fill>
           <TapeDeckButton
             size="sm"
             active={discovery.category === 'trending'}
@@ -109,7 +109,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
           >
             New Releases
           </TapeDeckButton>
-        </TapeTransportBay>
+        </TabStrip>
       </div>
 
       {/* Loading state */}
@@ -198,7 +198,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                           preview_url: item.preview_url!,
                         });
                       }}
-                      className="absolute bottom-2 left-2 p-2 rounded-full bg-black/80 hover:bg-[#e5a00d] text-white hover:text-black border border-[#2a2a2a] shadow-lg transition-colors z-10"
+                      className="absolute bottom-2 left-2 inline-flex h-11 w-11 sm:h-9 sm:w-9 items-center justify-center rounded-[3px] bg-black/80 hover:bg-[#e5a00d] text-white hover:text-black border border-[#2a2a2a] shadow-lg transition-colors z-10"
                       aria-label="Toggle 30s preview"
                     >
                       {isPlayingThis ? (
@@ -286,8 +286,8 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
           title={selectedAlbum.title}
           subtitle={`By ${selectedAlbum.artist}`}
           footer={
-            <div className="flex items-center justify-between w-full">
-              <span className="text-xs text-neutral-400 font-mono">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 w-full">
+              <span className="text-xs text-neutral-400 font-mono text-center sm:text-left">
                 {albumDetails?.tracks?.length || 0} Tracks
               </span>
               {selectedAlbum.in_library || selectedAlbum.status === 'in_library' || selectedAlbum.status === 'available' ? (

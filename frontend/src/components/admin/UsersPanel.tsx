@@ -5,7 +5,7 @@ import {
   SearchBar,
   StatusMessage,
   TapeDeckButton,
-  TapeTransportBay,
+  TabStrip,
 } from '@/components/ui';
 import type { AdminUser, AuthType } from '@/types/account';
 import type { UseAdminUsersReturn } from '@/hooks/useAdminUsers';
@@ -68,8 +68,8 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({ adminHook, currentUserId
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <TapeTransportBay className="flex items-center gap-1.5">
+      <div className="flex items-stretch justify-between gap-2 sm:gap-3">
+        <TabStrip className="min-w-0 flex-1 sm:flex-none" fill>
           <TapeDeckButton size="sm" active={section === 'users'} onClick={() => setSection('users')}>
             Users
           </TapeDeckButton>
@@ -80,13 +80,14 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({ adminHook, currentUserId
           >
             Defaults
           </TapeDeckButton>
-        </TapeTransportBay>
+        </TabStrip>
         {section === 'users' && (
           <TapeDeckButton
             size="sm"
             variant="amber"
             onClick={() => setCreateOpen(true)}
             icon={<UserPlus className="h-3.5 w-3.5" />}
+            collapseLabel
           >
             Create local user
           </TapeDeckButton>
@@ -105,8 +106,8 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({ adminHook, currentUserId
             <div className="flex-1 max-w-lg">
               <SearchBar value={search} onChange={setSearch} placeholder="Search users..." />
             </div>
-            <div className="flex flex-wrap gap-3">
-              <TapeTransportBay className="flex items-center gap-1.5">
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+              <TabStrip fill>
                 {(['all', 'plex', 'local'] as const).map((t) => (
                   <TapeDeckButton
                     key={t}
@@ -117,8 +118,8 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({ adminHook, currentUserId
                     {t === 'all' ? 'All types' : t}
                   </TapeDeckButton>
                 ))}
-              </TapeTransportBay>
-              <TapeTransportBay className="flex items-center gap-1.5">
+              </TabStrip>
+              <TabStrip fill>
                 {(['all', 'active', 'disabled'] as const).map((s) => (
                   <TapeDeckButton
                     key={s}
@@ -129,7 +130,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({ adminHook, currentUserId
                     {s === 'all' ? 'Any status' : s}
                   </TapeDeckButton>
                 ))}
-              </TapeTransportBay>
+              </TabStrip>
             </div>
           </div>
 

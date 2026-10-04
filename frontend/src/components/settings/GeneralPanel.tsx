@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Loader2, Save } from 'lucide-react';
-import { TapeDeckButton, MachinedCard } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, ActionBar } from '@/components/ui';
 import type { GeneralSettings } from '@/types/models';
 import { updateGeneralSettings } from '@/services/settingsService';
 import { inputClass, labelClass } from './formClasses';
@@ -49,7 +49,7 @@ export const GeneralPanel: React.FC<GeneralPanelProps> = ({ settings, onChange, 
             className={inputClass}
           />
         </div>
-        <div className="flex justify-end pt-3">
+        <ActionBar align="end" className="pt-3">
           <TapeDeckButton
             type="submit"
             variant="amber"
@@ -59,7 +59,7 @@ export const GeneralPanel: React.FC<GeneralPanelProps> = ({ settings, onChange, 
           >
             Save General Settings
           </TapeDeckButton>
-        </div>
+        </ActionBar>
       </form>
     </MachinedCard>
   );

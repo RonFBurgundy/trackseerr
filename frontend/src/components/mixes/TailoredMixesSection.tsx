@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Loader2, Plus } from 'lucide-react';
 import { useTailoredMixes } from '@/hooks/useTailoredMixes';
-import { TapeDeckButton, TapeTransportBay } from '@/components/ui';
+import { TapeDeckButton, ActionBar } from '@/components/ui';
 import { MixCard } from './MixCard';
 import { NewMixForm } from './NewMixForm';
 
@@ -16,11 +16,11 @@ export const TailoredMixesSection: React.FC<TailoredMixesSectionProps> = ({ isAd
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        <TapeTransportBay className="flex items-center gap-2">
+        <ActionBar bay className="p-1.5">
           <TapeDeckButton size="sm" variant="amber" onClick={() => setShowNew(true)} icon={<Plus className="h-3.5 w-3.5" />}>
             New Mix
           </TapeDeckButton>
-        </TapeTransportBay>
+        </ActionBar>
         {isAdmin && (
           <select
             aria-label="Select user"

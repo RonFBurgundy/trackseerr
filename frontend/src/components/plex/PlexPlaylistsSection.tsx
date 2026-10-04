@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, RefreshCw, X } from 'lucide-react';
 import { usePlexPlaylists } from '@/hooks/usePlexPlaylists';
-import { TapeTransportBay, TapeDeckButton, MachinedCard, TactileSwitch } from '@/components/ui';
+import { TabStrip, TapeDeckButton, MachinedCard, TactileSwitch } from '@/components/ui';
 import { PlexKindBadge, PlexOwnerBadge } from './PlexBadges';
 import { PlexPlaylistDetailModal } from './PlexPlaylistDetailModal';
 import { PlexMixesPanel } from './PlexMixesPanel';
@@ -24,14 +24,14 @@ export const PlexPlaylistsSection: React.FC<PlexPlaylistsSectionProps> = ({ isAd
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        <TapeTransportBay className="flex items-center gap-1">
+        <TabStrip fill>
           <TapeDeckButton size="sm" active={subTab === 'playlists'} onClick={() => setSubTab('playlists')}>
             Playlists
           </TapeDeckButton>
           <TapeDeckButton size="sm" active={subTab === 'mixes'} onClick={() => setSubTab('mixes')}>
             Mixes
           </TapeDeckButton>
-        </TapeTransportBay>
+        </TabStrip>
 
         <div className="flex flex-wrap items-center gap-3">
           {plex.users.length > 1 && (
@@ -70,7 +70,7 @@ export const PlexPlaylistsSection: React.FC<PlexPlaylistsSectionProps> = ({ isAd
           className="flex items-start justify-between gap-3 p-3 bg-[#1a0f0f] border border-[#ef4444]/40 rounded-[3px] text-xs text-[#ef4444] font-mono"
         >
           <span>{plex.error}</span>
-          <button type="button" onClick={plex.clearError} aria-label="Dismiss error" className="shrink-0">
+          <button type="button" onClick={plex.clearError} aria-label="Dismiss error" className="shrink-0 inline-flex h-11 w-11 -my-3 -mr-3 items-center justify-center">
             <X className="h-4 w-4" />
           </button>
         </div>

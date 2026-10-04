@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Loader2, Save } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, TactileSwitch } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar } from '@/components/ui';
 import type { MediaManagementSettings } from '@/types/models';
 import { updateMediaManagementSettings } from '@/services/settingsService';
 import { NamingFormatsEditor } from '@/components/naming/NamingFormatsEditor';
@@ -121,7 +121,7 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
           </div>
         </div>
 
-        <div className="flex justify-end pt-3">
+        <ActionBar align="end" className="pt-3">
           <TapeDeckButton
             type="submit"
             variant="amber"
@@ -131,7 +131,7 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
           >
             Save Media Settings
           </TapeDeckButton>
-        </div>
+        </ActionBar>
       </form>
     </MachinedCard>
   );
