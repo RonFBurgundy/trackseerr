@@ -28,6 +28,7 @@ from plex_playlist_sync.api.routes import (
     indexers,
     internal,
     issues,
+    itunes_import,
     library,
     missing,
     mixes,
@@ -222,6 +223,7 @@ def create_app(
     api_router.include_router(requests.router, prefix="/requests", tags=["requests"])
     api_router.include_router(issues.router, prefix="/issues", tags=["issues"])
     api_router.include_router(library.router, prefix="/library", tags=["library"])
+    api_router.include_router(itunes_import.router, prefix="/import/itunes", tags=["itunes-import"])
     api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
     api_router.include_router(
         download_clients.router, prefix="/settings/download-clients", tags=["download_clients"]

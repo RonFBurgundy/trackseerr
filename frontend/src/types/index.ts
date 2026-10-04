@@ -6,3 +6,4 @@ export * from './health';
 export * from './activity';
 export * from './monitoring';
 export * from './importLists';
+export * from './itunesImport';
