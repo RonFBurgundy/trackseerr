@@ -355,3 +355,40 @@ def resolve_client_ip(
         if not _is_trusted(addr, trusted):
             return str(addr)
     return str(_parse_ip(hops[0])) if hops and _parse_ip(hops[0]) is not None else peer_text
+
+
+# --------------------------------------------------------------------------- public request origin
+
+_FORWARDED_HOST_RE = re.compile(r"^[A-Za-z0-9.\-\[\]:]+$")
+
+
+def resolve_request_origin(
+    scheme: str,
+    host_header: Optional[str],
+    peer: Optional[str],
+    forwarded_proto: Optional[str],
+    forwarded_host: Optional[str],
+    trusted: Sequence[Network],
+) -> Optional[str]:
+    """The ``scheme://host[:port]`` the browser used to reach this process, or None when unknown.
+
+    ``X-Forwarded-Proto`` / ``X-Forwarded-Host`` are honoured only when the direct peer is inside
+    ``TRUSTED_PROXIES`` (same rule as :func:`resolve_client_ip`); otherwise the request's own scheme
+    and ``Host`` header are used. Only the first value of a forwarded list is considered.
+    """
+    use_fwd = False
+    if trusted:
+        peer_addr = _parse_ip(peer or "")
+        use_fwd = peer_addr is not None and _is_trusted(peer_addr, trusted)
+    proto = scheme
+    host = (host_header or "").strip()
+    if use_fwd:
+        fp = (forwarded_proto or "").split(",")[0].strip().lower()
+        if fp in ("http", "https"):
+            proto = fp
+        fh = (forwarded_host or "").split(",")[0].strip()
+        if fh and _FORWARDED_HOST_RE.match(fh):
+            host = fh
+    if proto not in ("http", "https") or not host or not _FORWARDED_HOST_RE.match(host):
+        return None
+    return f"{proto}://{host}"

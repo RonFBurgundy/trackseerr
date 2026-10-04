@@ -1,12 +1,13 @@
 """Security and input sanitization utilities for plex-playlist-sync."""
 
 import ipaddress
+import logging
 import os
 import re
 import unicodedata
 import urllib.parse
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 # Strict regex matching for 22-char alphanumeric Spotify ID
 _SPOTIFY_ID_RE = re.compile(r"^[A-Za-z0-9]{22}$")
@@ -368,3 +369,82 @@ def sanitize_csv_cell(val: Any) -> str:
     return text
 
 
+
+
+# --------------------------------------------------------------------------- Plex sign-in forwardUrl
+
+_LOG = logging.getLogger(__name__)
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+_FORBIDDEN_URL_CHARS = re.compile(r"[\x00-\x20\x7f-\x9f\\]")
+
+
+def _normalize_origin(url: str) -> Optional[tuple[str, str, int]]:
+    """(scheme, idna-lowercase host without trailing dot, effective port) of an http(s) URL, else None."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        scheme = parts.scheme.lower()
+        if scheme not in _DEFAULT_PORTS or parts.username is not None or parts.password is not None:
+            return None
+        host = (parts.hostname or "").rstrip(".").lower()
+        if not host:
+            return None
+        port = parts.port or _DEFAULT_PORTS[scheme]
+        host = host.encode("idna").decode("ascii")
+    except (ValueError, UnicodeError):
+        return None
+    return scheme, host, port
+
+
+def _log_forward_reject(candidate: str, reason: str) -> None:
+    try:
+        host = (urllib.parse.urlsplit(candidate).hostname or "")[:64]
+    except ValueError:
+        host = ""
+    _LOG.warning("Rejected Plex forward_url (%s, host=%r)", reason, host)
+
+
+def safe_forward_url(
+    candidate: Optional[str],
+    *,
+    allowed_origins: Sequence[Optional[str]],
+) -> Optional[str]:
+    """Return ``candidate`` only if it points at one of ``allowed_origins``, else None (open-redirect guard).
+
+    Callers pass the union of the configured APPLICATION_URL and the request's own (trusted-proxy
+    aware) origin, so a user on a secondary hostname (e.g. a Tailscale name) is not stranded on
+    plex.tv. The request-origin path already applied when APPLICATION_URL was unset, so the union
+    does not weaken that case. Residual limitation: a client calling the endpoint directly with a
+    spoofed Host header can obtain a forwardUrl for that host; this is defense-in-depth only, as the
+    PIN flow never exposes the token through the redirect.
+
+    A relative path (single leading ``/``) is resolved against the first allowed origin (callers list
+    the request origin first). Absolute URLs must be http(s), carry no userinfo, and match scheme,
+    host and port of an allowed origin after normalisation.
+    """
+    if not candidate or not isinstance(candidate, str):
+        return None
+    raw = candidate.strip()
+    if not raw:
+        return None
+    sources = [str(o).strip() for o in allowed_origins if o and str(o).strip()]
+    allowed = [(src, n) for src in sources if (n := _normalize_origin(src)) is not None]
+    if not allowed:
+        _log_forward_reject(raw, "no usable allowed origin")
+        return None
+    if _FORBIDDEN_URL_CHARS.search(raw):
+        _log_forward_reject(raw, "control character, whitespace or backslash")
+        return None
+    if raw.startswith("/"):
+        if raw.startswith("//"):
+            _log_forward_reject(raw, "protocol-relative URL")
+            return None
+        base = allowed[0][0].split("?", 1)[0].split("#", 1)[0].rstrip("/")
+        return base + raw
+    got = _normalize_origin(raw)
+    if got is None:
+        _log_forward_reject(raw, "unsupported scheme, userinfo or malformed")
+        return None
+    if all(got != n for _, n in allowed):
+        _log_forward_reject(raw, "origin mismatch")
+        return None
+    return raw
