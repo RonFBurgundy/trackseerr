@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AlbumItem, ArtistItem } from '@/types/models';
+import type { MonitorOption } from '@/types/monitoring';
 import { errorMessage } from '@/services/apiClient';
 import { getArtistDetail, refreshArtist, setArtistMonitoringPreset } from '@/services/libraryService';
 
 export type ArtistDetailData = ArtistItem & { albums?: AlbumItem[] };
-export type MonitorPreset = 'all' | 'albums' | 'singles_eps' | 'none';
+export type MonitorPreset = MonitorOption;
 
 export interface UseArtistDetailReturn {
   artist: ArtistDetailData | null;

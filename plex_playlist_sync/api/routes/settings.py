@@ -6,11 +6,12 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from plex_playlist_sync import library_manager, lidarr_library
 from plex_playlist_sync.api.dependencies import get_config, get_db, require_admin, require_core_tier
 from plex_playlist_sync.config import Config
+from plex_playlist_sync.library_monitoring import validate_monitor_option
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient
 from plex_playlist_sync.naming import (
@@ -160,6 +161,8 @@ class MediaManagementSettingsModel(BaseModel):
     acoustid_api_key: str | None = Field(None, description="AcoustID API key for Chromaprint fingerprinting")
     mb_mirror_url: str = Field("https://api.brainzmash.cc", description="MusicBrainz / BrainzMash API mirror base URL")
     prefer_local_artwork: bool = Field(True, description="Whether to prefer local filesystem artwork over remote metadata art")
+    scan_monitor_option: str = Field("existing", description="Monitor option given to artists created by a library scan")
+    add_monitor_option: str = Field("all", description="Default monitor option for artists added manually")
     updated_at: str | None = None
 
 
@@ -187,6 +190,13 @@ class MediaManagementUpdateModel(BaseModel):
     acoustid_api_key: str | None = None
     mb_mirror_url: str | None = None
     prefer_local_artwork: bool | None = None
+    scan_monitor_option: str | None = None
+    add_monitor_option: str | None = None
+
+    @field_validator("scan_monitor_option", "add_monitor_option")
+    @classmethod
+    def _check_monitor_option(cls, value: str | None) -> str | None:
+        return validate_monitor_option(value) if value is not None else None
 
 
 class PreviewRequestModel(BaseModel):
@@ -355,6 +365,12 @@ def get_media_management_settings(
     )
 
 
+@router.put(
+    "/media-management",
+    response_model=MediaManagementSettingsModel,
+    summary="Update Media Management Settings (Admin Only, PUT alias)",
+    include_in_schema=False,
+)
 @router.post(
     "/media-management",
     response_model=MediaManagementSettingsModel,
@@ -378,6 +394,8 @@ def update_media_management_settings(
     try:
         updated = db.update_media_management_settings(updates)
         return MediaManagementSettingsModel(**updated)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except Exception as e:
         logger.error("Failed to update media management settings: %s", redact_text(str(e)))
         raise HTTPException(

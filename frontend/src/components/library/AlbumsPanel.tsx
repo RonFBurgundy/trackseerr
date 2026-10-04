@@ -1,13 +1,18 @@
 import React, { useCallback, useEffect } from 'react';
+import { CheckSquare } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
 import { getAlbumsIndex, getAlbumsPaged } from '@/services/libraryService';
 import { errorMessage } from '@/services/apiClient';
 import { pagedFetcher } from '@/hooks/useVirtualPagedList';
 import { useLibraryCatalog, type LibrarySortOption } from '@/hooks/useLibraryCatalog';
 import { useMonitoredOverrides } from '@/hooks/useMonitoredOverrides';
+import { useBulkSelection } from '@/hooks/useBulkSelection';
+import { useAlbumBulkEdit } from '@/hooks/useAlbumBulkEdit';
+import { TapeDeckButton } from '@/components/ui';
 import { ListPanel, ScrubberRail, VirtualGrid } from '@/components/lists';
 import { LibrarySortControl } from './LibrarySortControl';
 import { AlbumTile } from './AlbumTile';
+import { AlbumBulkBar } from './AlbumBulkBar';
 
 const SORT_OPTIONS: ReadonlyArray<LibrarySortOption> = [
   { key: 'title', label: 'Title', defaultDir: 'asc' },
@@ -56,6 +61,26 @@ export const AlbumsPanel: React.FC<AlbumsPanelProps> = ({
   const overrides = useMonitoredOverrides();
   const { refresh, reload, mode } = list;
 
+  const canBulkEdit = isAdmin && mode !== 'lidarr';
+  const selection = useBulkSelection();
+  const { toggle: toggleSelected, isSelected, active: selecting, exit: exitSelection, selectKeys } = selection;
+  const bulk = useAlbumBulkEdit(onToast);
+  const { getLoadedItems } = list;
+
+  useEffect(() => {
+    exitSelection();
+  }, [query, monitoredOnly, exitSelection]);
+
+  const handleBulkApply = useCallback(
+    async (monitored: boolean): Promise<void> => {
+      if (await bulk.apply(Array.from(selection.selected), monitored)) {
+        exitSelection();
+        reload();
+      }
+    },
+    [bulk, selection.selected, exitSelection, reload]
+  );
+
   useEffect(() => onModeChange(mode), [mode, onModeChange]);
   useEffect(() => {
     if (reloadToken > 0) reload();
@@ -86,9 +111,12 @@ export const AlbumsPanel: React.FC<AlbumsPanelProps> = ({
         onOpen={onOpenAlbum}
         onCollect={onCollectAlbum}
         onToggleMonitored={(id, val) => void handleToggle(id, val)}
+        selection={
+          selecting ? { checked: isSelected(album.id), locked: false, onToggle: () => toggleSelected(album.id) } : undefined
+        }
       />
     ),
-    [overrides, isAdmin, canCollect, onOpenAlbum, onCollectAlbum, handleToggle]
+    [overrides, isAdmin, canCollect, onOpenAlbum, onCollectAlbum, handleToggle, selecting, isSelected, toggleSelected]
   );
 
   return (
@@ -96,8 +124,34 @@ export const AlbumsPanel: React.FC<AlbumsPanelProps> = ({
       title="Albums"
       mode={mode}
       total={list.total}
-      toolbar={<LibrarySortControl options={SORT_OPTIONS} sortKey={sortKey} sortDir={sortDir} onChange={changeSort} />}
+      toolbar={
+        <>
+          {canBulkEdit && (
+            <TapeDeckButton
+              size="sm"
+              active={selecting}
+              aria-pressed={selecting}
+              icon={<CheckSquare className="h-3.5 w-3.5" />}
+              onClick={selecting ? exitSelection : selection.enter}
+            >
+              Select
+            </TapeDeckButton>
+          )}
+          <LibrarySortControl options={SORT_OPTIONS} sortKey={sortKey} sortDir={sortDir} onChange={changeSort} />
+        </>
+      }
     >
+      {canBulkEdit && selecting && (
+        <AlbumBulkBar
+          count={selection.selected.size}
+          busy={bulk.busy}
+          selectLabel="Select loaded"
+          onSelectAll={() => selectKeys(getLoadedItems().map((a) => a.id))}
+          onClear={selection.clear}
+          onDone={exitSelection}
+          onApply={(m) => void handleBulkApply(m)}
+        />
+      )}
       <VirtualGrid<AlbumItem>
         list={list}
         getKey={getKey}

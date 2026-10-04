@@ -12,3 +12,5 @@ export * from './ConfirmDangerButton';
 export * from './ToastBanner';
 export * from './TabStrip';
 export * from './ActionBar';
+export * from './SelectionCheckbox';
+export * from './MonitorOptionSelect';

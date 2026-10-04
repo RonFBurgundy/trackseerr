@@ -1,7 +1,8 @@
 import React from 'react';
 import { BookmarkPlus, Disc } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
-import { MachinedCard, TactileSwitch } from '@/components/ui';
+import { MachinedCard, SelectionCheckbox, TactileSwitch } from '@/components/ui';
+import type { TileSelection } from './ArtistTile';
 
 export interface AlbumTileProps {
   album: AlbumItem;
@@ -12,6 +13,8 @@ export interface AlbumTileProps {
   onOpen: (album: AlbumItem) => void;
   onCollect: (album: AlbumItem) => void;
   onToggleMonitored: (albumId: number | string, monitored: boolean) => void;
+  /** Present while the bulk editor is active. */
+  selection?: TileSelection;
 }
 
 function hideBrokenImage(e: React.SyntheticEvent<HTMLImageElement>): void {
@@ -20,21 +23,31 @@ function hideBrokenImage(e: React.SyntheticEvent<HTMLImageElement>): void {
 
 /** Cover tile for the albums grid. */
 export const AlbumTile: React.FC<AlbumTileProps> = React.memo(
-  ({ album, monitored, isAdmin, canCollect, onOpen, onCollect, onToggleMonitored }) => (
+  ({ album, monitored, isAdmin, canCollect, onOpen, onCollect, onToggleMonitored, selection }) => (
     <MachinedCard
       interactive
       role="button"
       tabIndex={0}
-      aria-label={`Open ${album.title}`}
-      onClick={() => onOpen(album)}
+      aria-label={selection ? `Select ${album.title}` : `Open ${album.title}`}
+      onClick={() => (selection ? (selection.locked ? undefined : selection.onToggle()) : onOpen(album))}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onOpen(album);
+          if (selection) {
+            if (!selection.locked) selection.onToggle();
+          } else onOpen(album);
         }
       }}
-      className="overflow-hidden group"
+      className={`relative overflow-hidden group ${selection?.checked ? 'ring-1 ring-[#e5a00d]' : ''}`}
     >
+      {selection && (
+        <SelectionCheckbox
+          checked={selection.checked}
+          disabled={selection.locked}
+          label={`Select ${album.title}`}
+          onChange={selection.onToggle}
+        />
+      )}
       <div className="aspect-square w-full bg-[#1a1a1a] flex items-center justify-center overflow-hidden">
         {album.cover_url ? (
           <img

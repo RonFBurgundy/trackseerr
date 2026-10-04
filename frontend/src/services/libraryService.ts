@@ -10,6 +10,13 @@ import type {
   ScanStatus,
   LidarrStatus,
 } from '@/types/models';
+import type {
+  BulkAlbumEditRequest,
+  BulkAlbumEditResult,
+  BulkArtistEditRequest,
+  BulkArtistEditResult,
+  MonitorOption,
+} from '@/types/monitoring';
 
 export async function getLibraryStats(): Promise<LibraryStats> {
   return apiRequest<LibraryStats>('/api/library/stats');
@@ -101,7 +108,7 @@ export async function searchAlbum(albumId: number | string): Promise<LidarrSearc
 
 export async function setArtistMonitoringPreset(
   artistId: number | string,
-  option: 'all' | 'albums' | 'singles_eps' | 'none'
+  option: MonitorOption
 ): Promise<void> {
   await apiRequest<void>(`/api/library/artists/${artistId}/monitored`, {
     method: 'PUT',
@@ -253,4 +260,26 @@ export async function getAlbumTracksPaged(albumId: number | string, signal?: Abo
   return tracks.sort(
     (a, b) => (a.disc_number ?? 1) - (b.disc_number ?? 1) || (a.track_number ?? 0) - (b.track_number ?? 0)
   );
+}
+
+export async function bulkEditArtists(body: BulkArtistEditRequest): Promise<BulkArtistEditResult> {
+  return apiRequest<BulkArtistEditResult>('/api/library/artists/bulk-edit', { method: 'POST', body });
+}
+
+export async function bulkEditAlbums(body: BulkAlbumEditRequest): Promise<BulkAlbumEditResult> {
+  return apiRequest<BulkAlbumEditResult>('/api/library/albums/bulk-edit', { method: 'POST', body });
+}
+
+export interface IngestArtistInput {
+  foreign_artist_id: string;
+  artist_name: string;
+  monitor_option: MonitorOption;
+  monitored?: boolean;
+  quality_profile_id?: string | null;
+  root_folder?: string | null;
+}
+
+/** Ingest an artist discography from discovery metadata into the native catalog. */
+export async function ingestArtist(input: IngestArtistInput): Promise<void> {
+  await apiRequest<void>('/api/library/artists/ingest', { method: 'POST', body: input });
 }

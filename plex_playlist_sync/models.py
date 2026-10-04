@@ -767,6 +767,8 @@ class MediaManagementSettings:
     acoustid_api_key: Optional[str] = None
     mb_mirror_url: str = "https://api.brainzmash.cc"
     prefer_local_artwork: bool = True
+    scan_monitor_option: str = "existing"
+    add_monitor_option: str = "all"
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -792,6 +794,8 @@ class MediaManagementSettings:
             "acoustid_api_key": self.acoustid_api_key,
             "mb_mirror_url": self.mb_mirror_url,
             "prefer_local_artwork": bool(self.prefer_local_artwork),
+            "scan_monitor_option": self.scan_monitor_option,
+            "add_monitor_option": self.add_monitor_option,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

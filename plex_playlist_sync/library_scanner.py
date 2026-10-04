@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
 from plex_playlist_sync.library import AUDIO_EXTENSIONS, inspect_audio_file
+from plex_playlist_sync.library_monitoring import album_monitored_for_option, normalize_album_type
 from plex_playlist_sync.models import (
     LibraryAlbum,
     LibraryArtist,
@@ -281,6 +282,8 @@ class LibraryScanner:
                     self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
                     return dict(self._status)
 
+            scan_monitor_option = str(media_settings.get("scan_monitor_option") or "existing")
+
             # Step b: Determine and validate root folder
             root_path_str = root_folder or media_settings.get("root_folder_path") or "/music"
             root = Path(root_path_str).resolve()
@@ -485,6 +488,7 @@ class LibraryScanner:
                                     name=artist_name,
                                     path=artist_path,
                                     monitored=True,
+                                    monitor_option=scan_monitor_option,
                                     mbid=mb_artist_id,
                                     foreign_artist_id=foreign_artist_id,
                                     image_url=art_img_url,
@@ -516,7 +520,7 @@ class LibraryScanner:
                                     "mbid": new_mbid,
                                     "foreign_artist_id": new_foreign,
                                     "image_url": new_img,
-                                })
+                                }, preserve_monitoring=True)
                         artist_cache[artist_name] = artist_row
                         artist_id = str(artist_row["id"])
 
@@ -539,6 +543,18 @@ class LibraryScanner:
                         album_row = album_cache.get(album_key) or db.get_library_album_by_title(artist_id, album_title)
                         if not album_row:
                             album_id = str(uuid.uuid4())
+                            new_album_type = normalize_album_type(
+                                metadata.get("album_type") or ("single" if total_tracks == 1 else "album")
+                            )
+                            new_album_monitored = album_monitored_for_option(
+                                str(artist_row.get("monitor_option") or scan_monitor_option),
+                                artist_monitored=bool(artist_row.get("monitored", True)),
+                                album_type=new_album_type,
+                                has_files=True,
+                                release_date=metadata.get("release_date"),
+                                year=year,
+                                artist_added_at=artist_row.get("created_at"),
+                            )
                             album_path = str(parent)
                             album_cover = f"/api/library/albums/{album_id}/cover" if has_local_cover else None
                             album_row = db.upsert_library_album(
@@ -550,7 +566,9 @@ class LibraryScanner:
                                     path=album_path,
                                     cover_url=album_cover,
                                     total_tracks=total_tracks,
-                                    monitored=True,
+                                    album_type=new_album_type,
+                                    release_date=metadata.get("release_date"),
+                                    monitored=new_album_monitored,
                                     mb_release_group_id=mb_rg_id,
                                     mb_release_id=mb_rel_id,
                                 )
@@ -578,7 +596,7 @@ class LibraryScanner:
                                     "mb_release_group_id": new_rg,
                                     "mb_release_id": new_rel,
                                     "cover_url": new_cov,
-                                })
+                                }, preserve_monitoring=True)
                         album_cache[album_key] = album_row
                         album_id = str(album_row["id"])
 
@@ -598,7 +616,7 @@ class LibraryScanner:
                                     track_number=int(track_number),
                                     disc_number=int(disc_number),
                                     duration_seconds=duration_seconds,
-                                    monitored=True,
+                                    monitored=bool(album_row.get("monitored", True)),
                                     mb_recording_id=mb_rec_id,
                                     isrc=track_isrc,
                                 )
@@ -620,7 +638,7 @@ class LibraryScanner:
                                     **track_row,
                                     "mb_recording_id": new_rec,
                                     "isrc": new_isrc,
-                                })
+                                }, preserve_monitoring=True)
                         track_cache[track_key] = track_row
                         track_id_cache[str(track_row["id"])] = track_row
                         track_id = str(track_row["id"])
