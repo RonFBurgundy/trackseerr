@@ -16,7 +16,7 @@ REQ = "https://app.example.com"
 
 
 def sfu(candidate, app=None, req=REQ):
-    return safe_forward_url(candidate, application_url=app, request_origin=req)
+    return safe_forward_url(candidate, allowed_origins=[req, app])
 
 
 def test_same_origin_absolute_passes():
@@ -26,13 +26,16 @@ def test_same_origin_absolute_passes():
 
 def test_relative_path_resolved():
     assert sfu("/library?tab=a") == "https://app.example.com/library?tab=a"
-    assert sfu("/x", app="https://pub.example.org/ts/") == "https://pub.example.org/ts/x"
+    assert sfu("/x", app="https://pub.example.org/ts/", req=None) == "https://pub.example.org/ts/x"
 
 
-def test_application_url_wins_over_host():
-    app = "https://pub.example.org"
-    assert sfu("https://pub.example.org/a", app=app) == "https://pub.example.org/a"
-    assert sfu("https://app.example.com/a", app=app) is None
+def test_union_of_application_url_and_request_origin():
+    app = "https://public.example"
+    req = "https://rontube.tailb0577.ts.net"
+    assert sfu("https://public.example/a", app=app, req=req) == "https://public.example/a"
+    assert sfu("https://rontube.tailb0577.ts.net/a", app=app, req=req) == "https://rontube.tailb0577.ts.net/a"
+    assert sfu("https://evil.com/a", app=app, req=req) is None
+    assert sfu("/x", app=app, req=req) == "https://rontube.tailb0577.ts.net/x"
 
 
 def test_request_origin_used_when_no_application_url():
@@ -132,7 +135,7 @@ def make_client(tmp_path):
         app = create_app(db=db, config=cfg)
         app.dependency_overrides[get_db] = lambda: db
         app.dependency_overrides[get_config] = lambda: cfg
-        return TestClient(app, client=client_addr, **kw) if client_addr else TestClient(app)
+        return TestClient(app, client=client_addr, **kw) if client_addr else TestClient(app, **kw)
 
     return _make
 
@@ -160,10 +163,13 @@ def test_endpoint_bad_forward_url_omitted(make_client):
         assert "forwardUrl" not in _post_pin(make_client(), bad)
 
 
-def test_endpoint_application_url_is_only_allowed_origin(make_client):
-    c = make_client(app_url="https://pub.example.org")
-    assert "forwardUrl" not in _post_pin(c, "http://testserver/")
-    assert _post_pin(c, "https://pub.example.org/x")["forwardUrl"][0].startswith("https://pub.example.org/x")
+def test_endpoint_application_url_and_request_host_both_allowed(make_client):
+    c = make_client(app_url="https://public.example", base_url="https://rontube.tailb0577.ts.net")
+    assert _post_pin(c, "https://public.example/x")["forwardUrl"][0].startswith("https://public.example/x")
+    assert _post_pin(c, "https://rontube.tailb0577.ts.net/x")["forwardUrl"][0].startswith(
+        "https://rontube.tailb0577.ts.net/x"
+    )
+    assert "forwardUrl" not in _post_pin(c, "https://evil.com/x")
 
 
 def test_endpoint_spoofed_forwarded_host_ignored_from_untrusted(make_client):

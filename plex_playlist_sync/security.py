@@ -7,7 +7,7 @@ import re
 import unicodedata
 import urllib.parse
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 # Strict regex matching for 22-char alphanumeric Spotify ID
 _SPOTIFY_ID_RE = re.compile(r"^[A-Za-z0-9]{22}$")
@@ -406,23 +406,29 @@ def _log_forward_reject(candidate: str, reason: str) -> None:
 def safe_forward_url(
     candidate: Optional[str],
     *,
-    application_url: Optional[str],
-    request_origin: Optional[str],
+    allowed_origins: Sequence[Optional[str]],
 ) -> Optional[str]:
-    """Return ``candidate`` only if it points at this app's own origin, else None (open-redirect guard).
+    """Return ``candidate`` only if it points at one of ``allowed_origins``, else None (open-redirect guard).
 
-    The allowed origin is ``application_url`` when configured, otherwise ``request_origin``. A
-    relative path (single leading ``/``) is resolved against the allowed origin. Absolute URLs must be
-    http(s), carry no userinfo, and match scheme, host and port after normalisation.
+    Callers pass the union of the configured APPLICATION_URL and the request's own (trusted-proxy
+    aware) origin, so a user on a secondary hostname (e.g. a Tailscale name) is not stranded on
+    plex.tv. The request-origin path already applied when APPLICATION_URL was unset, so the union
+    does not weaken that case. Residual limitation: a client calling the endpoint directly with a
+    spoofed Host header can obtain a forwardUrl for that host; this is defense-in-depth only, as the
+    PIN flow never exposes the token through the redirect.
+
+    A relative path (single leading ``/``) is resolved against the first allowed origin (callers list
+    the request origin first). Absolute URLs must be http(s), carry no userinfo, and match scheme,
+    host and port of an allowed origin after normalisation.
     """
     if not candidate or not isinstance(candidate, str):
         return None
     raw = candidate.strip()
     if not raw:
         return None
-    allowed_src = (application_url or "").strip() or (request_origin or "").strip()
-    allowed = _normalize_origin(allowed_src) if allowed_src else None
-    if allowed is None:
+    sources = [str(o).strip() for o in allowed_origins if o and str(o).strip()]
+    allowed = [(src, n) for src in sources if (n := _normalize_origin(src)) is not None]
+    if not allowed:
         _log_forward_reject(raw, "no usable allowed origin")
         return None
     if _FORBIDDEN_URL_CHARS.search(raw):
@@ -432,13 +438,13 @@ def safe_forward_url(
         if raw.startswith("//"):
             _log_forward_reject(raw, "protocol-relative URL")
             return None
-        base = allowed_src.split("?", 1)[0].split("#", 1)[0].rstrip("/")
+        base = allowed[0][0].split("?", 1)[0].split("#", 1)[0].rstrip("/")
         return base + raw
     got = _normalize_origin(raw)
     if got is None:
         _log_forward_reject(raw, "unsupported scheme, userinfo or malformed")
         return None
-    if got != allowed:
+    if all(got != n for _, n in allowed):
         _log_forward_reject(raw, "origin mismatch")
         return None
     return raw

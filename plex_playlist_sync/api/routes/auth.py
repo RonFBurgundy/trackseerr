@@ -77,10 +77,13 @@ def generate_pin(
 
     Two-tier decision: in the DMZ model this endpoint is served by the gateway process itself
     (GATEWAY_LOCAL_ALLOWLIST), never relayed to core, so the check runs where the public request
-    arrives. The allowed origin is APPLICATION_URL (env, else the stored general setting) and only
-    falls back to the request's own origin, where X-Forwarded-Proto/Host count only from a
-    TRUSTED_PROXIES peer. A client-supplied forward_url on any other origin is dropped (Plex then
-    simply does not redirect), which closes the post-login open redirect.
+    arrives. The allowed set is the UNION of APPLICATION_URL (env, else the stored general setting)
+    and the request's own origin (X-Forwarded-Proto/Host count only from a TRUSTED_PROXIES peer), so
+    a user on a secondary hostname such as a Tailscale name still gets redirected back. No
+    client-supplied header is trusted beyond that. A forward_url on any other origin is dropped (Plex
+    then simply does not redirect), which closes the post-login open redirect. Residual: a direct
+    caller spoofing Host can get a forwardUrl for that host (defense-in-depth only; the PIN flow
+    never exposes the token via the redirect).
     """
     cfg = config if isinstance(config, Config) else None
     app_url = str((cfg.application_url if cfg else "") or "").strip().rstrip("/")
@@ -107,7 +110,7 @@ def generate_pin(
 
     supplied = (req.forward_url if req and req.forward_url else None) or forward_url
     target_forward_url = safe_forward_url(
-        supplied, application_url=app_url or None, request_origin=request_origin
+        supplied, allowed_origins=[request_origin, app_url or None]
     )
     if not supplied and app_url:
         target_forward_url = app_url
