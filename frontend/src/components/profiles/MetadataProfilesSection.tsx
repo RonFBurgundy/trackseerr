@@ -1,6 +1,6 @@
 import React, { useId, useState } from 'react';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
-import { ActionBar, ConfirmDangerButton, FormField, MachinedCard, ScrollFill, TapeDeckButton } from '@/components/ui';
+import { Pencil, Trash2 } from 'lucide-react';
+import { ConfirmDangerButton, FormField, MachinedCard, TapeDeckButton } from '@/components/ui';
 import type { MediaManagementSettings } from '@/types/models';
 import {
   RELEASE_PRIMARY_LABELS,
@@ -11,10 +11,11 @@ import {
 import { updateMediaManagementSettings } from '@/services/settingsService';
 import { errorMessage } from '@/services/apiClient';
 import { useMetadataProfiles } from '@/hooks/useMetadataProfiles';
-import { inputClass } from './formClasses';
+import { inputClass } from '@/components/settings/formClasses';
+import { EmptyNote, ProfileSection } from './ProfileSection';
 import { MetadataProfileEditorModal } from './MetadataProfileEditorModal';
 
-export interface MetadataProfilesPanelProps {
+export interface MetadataProfilesSectionProps {
   /** False while Lidarr manages the library: the routes answer 409 there, so nothing is fetched. */
   enabled: boolean;
   settings: MediaManagementSettings | null;
@@ -31,7 +32,7 @@ function summarize(p: MetadataProfile): string {
 }
 
 /** Optional metadata profiles for the native library: they shape automatic monitoring and never hide releases. */
-export const MetadataProfilesPanel: React.FC<MetadataProfilesPanelProps> = ({ enabled, settings, onChange, onToast }) => {
+export const MetadataProfilesSection: React.FC<MetadataProfilesSectionProps> = ({ enabled, settings, onChange, onToast }) => {
   const defaultId = useId();
   const { profiles, loading, save, remove } = useMetadataProfiles(enabled, onToast);
   const [editing, setEditing] = useState<ReleaseOrNew | null>(null);
@@ -57,55 +58,50 @@ export const MetadataProfilesPanel: React.FC<MetadataProfilesPanelProps> = ({ en
   };
 
   return (
-    <div className="flex min-h-0 flex-col gap-4">
-      <MachinedCard className="p-3 sm:p-4 space-y-3">
+    <ProfileSection
+      title="Metadata Profiles"
+      hint="Optional. Decide which releases are monitored automatically; every release stays in the catalog and can be monitored by hand."
+      onAdd={() => setEditing('new')}
+    >
+      <MachinedCard className="space-y-2 p-3">
         <p className="text-xs font-mono text-neutral-400">
-          Metadata profiles are optional and off by default. They only decide which releases are monitored
-          automatically; every release stays in the catalog and can always be monitored or requested by hand. Files
-          you already own stay monitored under &ldquo;Existing tracks&rdquo; whatever the profile says.
+          Off by default. Files you already own stay monitored under &ldquo;Existing tracks&rdquo; whatever the profile says.
         </p>
-        <div className="flex flex-col sm:flex-row sm:items-end gap-3">
-          <FormField label="Default for new artists" htmlFor={defaultId} className="sm:w-72">
-            <select
-              id={defaultId}
-              name="add_metadata_profile_id"
-              className={inputClass}
-              value={currentDefault === null ? NONE : String(currentDefault)}
-              disabled={settings === null}
-              onChange={(e) => void changeDefault(e.target.value)}
-            >
-              <option value={NONE}>No profile</option>
-              {profiles.map((p) => (
-                <option key={p.id} value={String(p.id)}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </FormField>
-          <ActionBar align="end" className="sm:ml-auto">
-            <TapeDeckButton variant="amber" onClick={() => setEditing('new')} icon={<Plus className="h-4 w-4" />}>
-              New profile
-            </TapeDeckButton>
-          </ActionBar>
-        </div>
+        <FormField label="Default for new artists" htmlFor={defaultId} className="sm:w-72">
+          <select
+            id={defaultId}
+            name="add_metadata_profile_id"
+            className={inputClass}
+            value={currentDefault === null ? NONE : String(currentDefault)}
+            disabled={settings === null}
+            onChange={(e) => void changeDefault(e.target.value)}
+          >
+            <option value={NONE}>No profile</option>
+            {profiles.map((p) => (
+              <option key={p.id} value={String(p.id)}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </FormField>
       </MachinedCard>
 
       {loading && profiles.length === 0 ? (
-        <p className="text-xs font-mono text-neutral-500 py-4">Loading metadata profiles...</p>
+        <EmptyNote>Loading metadata profiles...</EmptyNote>
       ) : profiles.length === 0 ? (
-        <p className="text-xs font-mono text-neutral-500 py-4">No metadata profiles defined. Artists are monitored by their option alone.</p>
+        <EmptyNote>No metadata profiles defined. Artists are monitored by their option alone.</EmptyNote>
       ) : (
-        <ScrollFill ariaLabel="Metadata profiles" className="grid grid-cols-1 md:grid-cols-2 gap-3 content-start">
+        <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
           {profiles.map((p) => (
-            <MachinedCard key={p.id} className="p-3 sm:p-4 flex items-start justify-between gap-3">
+            <MachinedCard key={p.id} className="flex items-start justify-between gap-3 p-2.5 sm:p-3">
               <div className="min-w-0">
-                <span className="font-bold text-sm text-white break-words">{p.name}</span>
-                <p className="text-xs text-neutral-400 font-mono mt-1 break-words">{summarize(p)}</p>
-                <p className="text-[11px] text-neutral-500 font-mono mt-1">
+                <span className="break-words text-sm font-bold text-white">{p.name}</span>
+                <p className="mt-1 break-words text-xs font-mono text-neutral-400">{summarize(p)}</p>
+                <p className="mt-1 text-[11px] font-mono text-neutral-500">
                   {p.artist_count} {p.artist_count === 1 ? 'artist' : 'artists'}
                 </p>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex shrink-0 items-center gap-2">
                 <TapeDeckButton
                   size="sm"
                   aria-label={`Edit ${p.name}`}
@@ -121,10 +117,10 @@ export const MetadataProfilesPanel: React.FC<MetadataProfilesPanelProps> = ({ en
               </div>
             </MachinedCard>
           ))}
-        </ScrollFill>
+        </div>
       )}
 
       <MetadataProfileEditorModal target={editing} onClose={() => setEditing(null)} onSave={save} />
-    </div>
+    </ProfileSection>
   );
 };

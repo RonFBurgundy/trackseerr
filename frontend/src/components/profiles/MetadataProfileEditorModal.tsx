@@ -11,7 +11,7 @@ import {
   type MetadataProfileInput,
   type ReleaseSecondaryType,
 } from '@/types/metadataProfiles';
-import { inputClass } from './formClasses';
+import { inputClass } from '@/components/settings/formClasses';
 
 export interface MetadataProfileEditorModalProps {
   /** The profile being edited, or `'new'` for a blank one. Closed when null. */

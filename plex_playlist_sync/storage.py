@@ -29,6 +29,7 @@ from plex_playlist_sync.library_monitoring import (
     TRACK_HAS_FILE_SQL,
 )
 from plex_playlist_sync.list_index import SortDef, build_index, fold_search_text, library_sort_key, order_clause
+from plex_playlist_sync.delay_store import DelayProfileMixin
 from plex_playlist_sync.quality_store import QualityCatalogMixin
 from plex_playlist_sync.models import (
     ActiveDownload,
@@ -71,7 +72,7 @@ def clean_library_name(text: str) -> str:
 
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
-SCHEMA_VERSION = 49  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 50  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _titles_near_equal(a: str, b: str) -> bool:
@@ -160,7 +161,7 @@ def lidarr_item_due(row: dict[str, Any], now: Optional[datetime] = None) -> bool
     return str(due_at) <= current
 
 
-class Database(QualityCatalogMixin):
+class Database(QualityCatalogMixin, DelayProfileMixin):
     """Thread-safe SQLite database wrapper with WAL mode, foreign keys, and migrations."""
 
     def __init__(self, db_path: Optional[Union[str, Path]] = None) -> None:
@@ -329,6 +330,7 @@ class Database(QualityCatalogMixin):
                 (47, self._migration_v47),
                 (48, self._migration_v48),
                 (49, self._migration_v49),
+                (50, self._migration_v50),
             ]
 
             applied = 0

@@ -15,8 +15,10 @@ import time
 from typing import Any, Optional
 import uuid
 
+from plex_playlist_sync import delay_gate
 from plex_playlist_sync.acquisition_coordinator import (
     acquisition_coordinator,
+    candidate_rank,
     _to_quality_profile,
 )
 from plex_playlist_sync.clients.acquisition import (
@@ -31,7 +33,7 @@ from plex_playlist_sync.models import (
     RequestStatus,
 )
 from plex_playlist_sync.notifications import notification_dispatcher
-from plex_playlist_sync.decision_engine import upgrade_floor
+from plex_playlist_sync.decision_engine import prepare_profile, upgrade_floor
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.job_tracker import tracked
@@ -857,6 +859,31 @@ class RSSSyncWorker:
                                 matched_req["id"],
                             )
                             continue
+
+                # Delay gate: park the best release of the item until its protocol delay has elapsed
+                if eval_res is not None and req_profile is not None:
+                    delay_profile = delay_gate.resolve_delay_profile(db, matched_req.get("artist") or candidate.artist)
+                    decision = delay_gate.apply_gate(
+                        db,
+                        profile=delay_profile,
+                        top_tier=delay_gate.highest_allowed_tier(prepare_profile(req_profile)),
+                        candidate=candidate,
+                        result=eval_res,
+                        rank=candidate_rank(candidate, eval_res, delay_profile.get("preferred_protocol")),
+                        artist=str(matched_req.get("artist") or candidate.artist or ""),
+                        item_title=str(matched_req.get("title") or ""),
+                        album=matched_req.get("album"),
+                        item_type=str(matched_req.get("item_type") or "track"),
+                        request_id=str(matched_req["id"]),
+                        album_id=None,
+                        track_id=None,
+                        quality_profile_id=matched_req.get("quality_profile_id"),
+                    )
+                    if not decision.grab:
+                        logger.info(
+                            "RSS held '%s' for request %s: %s", candidate.title, matched_req["id"], decision.reason
+                        )
+                        continue
 
                 # Find download client for protocol
                 client = acquisition_coordinator.find_client_for_protocol(

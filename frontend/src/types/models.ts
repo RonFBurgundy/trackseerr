@@ -248,14 +248,6 @@ export interface BacklogStatus {
   last_run?: string;
 }
 
-export interface QualityProfile {
-  id: number;
-  name: string;
-  cutoff: number;
-  items?: Array<{ id: number; name: string; allowed: boolean; quality: string }>;
-  upgrade_allowed?: boolean;
-}
-
 export interface DownloadClientItem {
   id: number;
   name: string;

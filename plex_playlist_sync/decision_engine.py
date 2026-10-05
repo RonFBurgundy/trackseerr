@@ -90,12 +90,21 @@ def normalize_protocol(protocol: Optional[str]) -> str:
     return proto or "unknown"
 
 
-def protocol_rank(protocol: Optional[str]) -> int:
+def protocol_order(preferred: Optional[str] = None) -> tuple[str, ...]:
+    """Protocol preference order: the delay profile's preferred protocol first, the rest in the default order."""
+    pref = normalize_protocol(preferred) if preferred else None
+    if pref is None or pref not in PROTOCOL_PREFERENCE:
+        return PROTOCOL_PREFERENCE
+    return (pref, *(p for p in PROTOCOL_PREFERENCE if p != pref))
+
+
+def protocol_rank(protocol: Optional[str], preferred: Optional[str] = None) -> int:
     proto = normalize_protocol(protocol)
+    order = protocol_order(preferred)
     try:
-        return PROTOCOL_PREFERENCE.index(proto)
+        return order.index(proto)
     except ValueError:
-        return len(PROTOCOL_PREFERENCE)
+        return len(order)
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -748,11 +757,19 @@ def candidate_context(candidate: AcquisitionSearchResult) -> dict[str, Any]:
 _NO_DISTANCE = 1e12
 
 
-def rank_key(protocol: Optional[str], seeders: Optional[int], result: EvaluationResult) -> tuple[Any, ...]:
-    """Sort key (sort descending): quality order > format score > preferred-kbps distance > protocol > seeders."""
+def rank_key(
+    protocol: Optional[str],
+    seeders: Optional[int],
+    result: EvaluationResult,
+    preferred_protocol: Optional[str] = None,
+) -> tuple[Any, ...]:
+    """Sort key (sort descending): quality order > format score > preferred-kbps distance > protocol > seeders.
+
+    ``preferred_protocol`` is the applicable delay profile's preference; without it ``PROTOCOL_PREFERENCE`` applies.
+    """
     tier = result.tier if result.tier is not None else 10**9
     distance = result.kbps_distance if result.kbps_distance is not None else _NO_DISTANCE
-    return (-tier, result.format_score, -distance, -protocol_rank(protocol), int(seeders or 0))
+    return (-tier, result.format_score, -distance, -protocol_rank(protocol, preferred_protocol), int(seeders or 0))
 
 
 @dataclass

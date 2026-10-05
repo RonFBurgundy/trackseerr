@@ -46,7 +46,7 @@ class QualityProfilePayload(BaseModel):
     cutoff: str = Field(..., min_length=1)
     items: list[QualityProfileItemModel] = Field(default_factory=list)
     upgrade_allowed: bool = True
-    min_format_score: int = Field(0, ge=-100000, le=100000)
+    min_format_score: int = Field(-100, ge=-100000, le=100000)
     cutoff_format_score: int = Field(0, ge=-100000, le=100000)
     min_upgrade_format_score: int = Field(1, ge=1, le=100000)
     format_items: Optional[list[FormatItemModel]] = None
@@ -66,7 +66,7 @@ class QualityProfileResponse(BaseModel):
     cutoff: str
     items: list[QualityProfileItemModel]
     upgrade_allowed: bool = True
-    min_format_score: int = 0
+    min_format_score: int = -100
     cutoff_format_score: int = 0
     min_upgrade_format_score: int = 1
     format_items: list[FormatItemModel] = Field(default_factory=list)

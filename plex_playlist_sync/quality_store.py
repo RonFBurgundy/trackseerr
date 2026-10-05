@@ -28,6 +28,8 @@ LEGACY_PREFERRED_SCORE = 50
 # Migrated profiles keep accepting everything the old engine accepted: the default formats carry soft penalties
 # (Vinyl -50, Mono -10, Censored/Clean -15) that a floor of 0 would turn into hard rejections.
 MIGRATED_MIN_FORMAT_SCORE = -100
+# New profiles default to the same soft floor, so Vinyl/Mono/Censored penalties are a preference, not a ban.
+DEFAULT_MIN_FORMAT_SCORE = -100
 
 
 def _loads(raw: Any, default: Any) -> Any:
@@ -537,7 +539,7 @@ class QualityCatalogMixin:
             ).fetchone()
             if "format_items" not in src and existing:
                 format_items = _loads(existing[0], [])
-            min_fs = src.get("min_format_score", existing[1] if existing else 0)
+            min_fs = src.get("min_format_score", existing[1] if existing else DEFAULT_MIN_FORMAT_SCORE)
             cut_fs = src.get("cutoff_format_score", existing[2] if existing else 0)
             min_up = src.get("min_upgrade_format_score", existing[3] if existing else 1)
             if is_default:

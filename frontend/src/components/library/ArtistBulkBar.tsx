@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useState } from 'react';
 import { X } from 'lucide-react';
-import type { QualityProfile } from '@/types/models';
+import type { QualityProfile } from '@/types/qualityProfiles';
 import type { MetadataProfile } from '@/types/metadataProfiles';
 import { MONITOR_OPTIONS, MONITOR_OPTION_HINTS, MONITOR_OPTION_LABELS, type MonitorOption } from '@/types/monitoring';
 import type { UseBulkSelectionReturn } from '@/hooks/useBulkSelection';

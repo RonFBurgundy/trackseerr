@@ -46,10 +46,10 @@ def _migrated(tmp_path):
 
 
 def test_schema_version_and_seeds(tmp_path):
-    assert SCHEMA_VERSION == 49
+    assert SCHEMA_VERSION == 50
     db = Database(str(tmp_path / "fresh.db"))
     try:
-        assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 49
+        assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 50
         defs = {d["quality"]: d for d in db.list_quality_definitions()}
         assert (defs["FLAC 24bit"]["min_kbps"], defs["FLAC 24bit"]["preferred_kbps"], defs["FLAC 24bit"]["max_kbps"]) == (0, 2000, 9500)
         assert (defs["MP3 320"]["min_kbps"], defs["MP3 320"]["preferred_kbps"], defs["MP3 320"]["max_kbps"]) == (290, 320, 350)
