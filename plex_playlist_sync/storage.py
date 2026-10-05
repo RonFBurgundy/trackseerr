@@ -29,6 +29,7 @@ from plex_playlist_sync.library_monitoring import (
     TRACK_HAS_FILE_SQL,
 )
 from plex_playlist_sync.list_index import SortDef, build_index, fold_search_text, library_sort_key, order_clause
+from plex_playlist_sync.quality_store import QualityCatalogMixin
 from plex_playlist_sync.models import (
     ActiveDownload,
     BlocklistItem,
@@ -70,7 +71,7 @@ def clean_library_name(text: str) -> str:
 
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
-SCHEMA_VERSION = 48  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 49  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _titles_near_equal(a: str, b: str) -> bool:
@@ -159,7 +160,7 @@ def lidarr_item_due(row: dict[str, Any], now: Optional[datetime] = None) -> bool
     return str(due_at) <= current
 
 
-class Database:
+class Database(QualityCatalogMixin):
     """Thread-safe SQLite database wrapper with WAL mode, foreign keys, and migrations."""
 
     def __init__(self, db_path: Optional[Union[str, Path]] = None) -> None:
@@ -327,6 +328,7 @@ class Database:
                 (46, self._migration_v46),
                 (47, self._migration_v47),
                 (48, self._migration_v48),
+                (49, self._migration_v49),
             ]
 
             applied = 0
@@ -5445,43 +5447,6 @@ class Database:
     # Quality Profiles CRUD
     # -------------------------------------------------------------------------
 
-    def _format_quality_profile_row(self, row: sqlite3.Row) -> dict[str, Any]:
-        res = dict(row)
-        res["is_default"] = bool(res.get("is_default", 0))
-        res["upgrade_allowed"] = bool(res.get("upgrade_allowed", 1))
-        res["min_size_mb"] = (
-            float(res["min_size_mb"]) if res.get("min_size_mb") is not None else None
-        )
-        res["max_size_mb"] = (
-            float(res["max_size_mb"]) if res.get("max_size_mb") is not None else None
-        )
-
-        try:
-            res["items"] = json.loads(res.get("items_json") or "[]")
-        except (json.JSONDecodeError, TypeError):
-            res["items"] = []
-
-        try:
-            res["preferred_tags"] = json.loads(res.get("preferred_tags_json") or "[]")
-        except (json.JSONDecodeError, TypeError):
-            res["preferred_tags"] = []
-
-        try:
-            res["ignored_tags"] = json.loads(res.get("ignored_tags_json") or "[]")
-        except (json.JSONDecodeError, TypeError):
-            res["ignored_tags"] = []
-
-        try:
-            res["custom_formats"] = json.loads(res.get("custom_formats_json") or "[]")
-        except (json.JSONDecodeError, TypeError):
-            res["custom_formats"] = []
-
-        res["min_score"] = (
-            int(res["min_score"]) if res.get("min_score") is not None else None
-        )
-
-        return res
-
     def list_quality_profiles(self) -> list[dict[str, Any]]:
         """Lists all quality profiles ordered by default first, then name."""
         with self._lock:
@@ -5490,33 +5455,6 @@ class Database:
             )
             rows = cur.fetchall()
             return [self._format_quality_profile_row(r) for r in rows]
-
-    def get_quality_profile(self, profile_id: str) -> Optional[dict[str, Any]]:
-        """Retrieves a single quality profile by ID."""
-        with self._lock:
-            cur = self.conn.execute(
-                "SELECT * FROM quality_profiles WHERE id = ?", (str(profile_id),)
-            )
-            row = cur.fetchone()
-            if not row:
-                return None
-            return self._format_quality_profile_row(row)
-
-    def get_default_quality_profile(self) -> dict[str, Any]:
-        """Retrieves the default quality profile."""
-        with self._lock:
-            cur = self.conn.execute(
-                "SELECT * FROM quality_profiles WHERE is_default = 1 LIMIT 1"
-            )
-            row = cur.fetchone()
-            if not row:
-                cur = self.conn.execute(
-                    "SELECT * FROM quality_profiles ORDER BY name ASC LIMIT 1"
-                )
-                row = cur.fetchone()
-            if not row:
-                raise ValueError("No quality profiles configured in the database")
-            return self._format_quality_profile_row(row)
 
     def create_quality_profile(
         self, profile: Union[QualityProfile, dict[str, Any]]
@@ -5533,101 +5471,6 @@ class Database:
             return None
         existing.update(updates)
         return self.upsert_quality_profile(existing)
-
-    def upsert_quality_profile(
-        self, profile: Union[QualityProfile, dict[str, Any]]
-    ) -> dict[str, Any]:
-        """Creates or updates a quality profile. If is_default=True, clears is_default on all others."""
-        if isinstance(profile, QualityProfile):
-            p_id = profile.id
-            name = profile.name
-            cutoff = profile.cutoff
-            items = [
-                i.to_dict() if hasattr(i, "to_dict") else i for i in profile.items
-            ]
-            preferred_tags = profile.preferred_tags
-            ignored_tags = profile.ignored_tags
-            min_size_mb = profile.min_size_mb
-            max_size_mb = profile.max_size_mb
-            is_default = bool(profile.is_default)
-            custom_formats = profile.custom_formats
-            min_score = profile.min_score
-            upgrade_allowed = bool(profile.upgrade_allowed)
-        else:
-            p_id = str(profile.get("id"))
-            name = str(profile.get("name"))
-            cutoff = str(profile.get("cutoff"))
-            items = profile.get("items", [])
-            items = [
-                i.to_dict() if hasattr(i, "to_dict") else i for i in items
-            ]
-            preferred_tags = profile.get("preferred_tags", [])
-            ignored_tags = profile.get("ignored_tags", [])
-            min_size_mb = profile.get("min_size_mb")
-            max_size_mb = profile.get("max_size_mb")
-            is_default = bool(profile.get("is_default", False))
-            custom_formats = profile.get("custom_formats", [])
-            min_score = profile.get("min_score")
-            upgrade_allowed = bool(profile.get("upgrade_allowed", True))
-
-        with self._lock:
-            if is_default:
-                self.conn.execute(
-                    "UPDATE quality_profiles SET is_default = 0 WHERE id != ?", (p_id,)
-                )
-
-            self.conn.execute(
-                """
-                INSERT INTO quality_profiles (
-                    id, name, cutoff, items_json, preferred_tags_json, ignored_tags_json,
-                    min_size_mb, max_size_mb, is_default, custom_formats_json, min_score, upgrade_allowed, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(id) DO UPDATE SET
-                    name = excluded.name,
-                    cutoff = excluded.cutoff,
-                    items_json = excluded.items_json,
-                    preferred_tags_json = excluded.preferred_tags_json,
-                    ignored_tags_json = excluded.ignored_tags_json,
-                    min_size_mb = excluded.min_size_mb,
-                    max_size_mb = excluded.max_size_mb,
-                    is_default = excluded.is_default,
-                    custom_formats_json = excluded.custom_formats_json,
-                    min_score = excluded.min_score,
-                    upgrade_allowed = excluded.upgrade_allowed,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (
-                    p_id,
-                    name,
-                    cutoff,
-                    json.dumps(items),
-                    json.dumps(preferred_tags),
-                    json.dumps(ignored_tags),
-                    min_size_mb,
-                    max_size_mb,
-                    1 if is_default else 0,
-                    json.dumps(custom_formats if isinstance(custom_formats, list) else []),
-                    int(min_score) if min_score is not None else None,
-                    1 if upgrade_allowed else 0,
-                ),
-            )
-
-            # Ensure at least one profile is marked default
-            cur = self.conn.execute(
-                "SELECT COUNT(*) FROM quality_profiles WHERE is_default = 1"
-            )
-            count = cur.fetchone()[0]
-            if count == 0:
-                self.conn.execute(
-                    "UPDATE quality_profiles SET is_default = 1 WHERE id = ?", (p_id,)
-                )
-
-            self.conn.commit()
-
-        result = self.get_quality_profile(p_id)
-        if not result:
-            raise sqlite3.OperationalError(f"Failed to retrieve upserted profile {p_id}")
-        return result
 
     def delete_quality_profile(self, profile_id: str) -> bool:
         """Deletes a quality profile. Raises ValueError if the profile is default."""

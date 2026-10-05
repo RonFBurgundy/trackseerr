@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from plex_playlist_sync.acquisition_coordinator import (
     _to_quality_profile,
+    resolve_duration,
     acquisition_coordinator,
 )
 from plex_playlist_sync.api.dependencies import get_db, require_admin, require_core_tier
@@ -22,6 +23,7 @@ from plex_playlist_sync.models import (
     QualityProfile,
     RequestStatus,
 )
+from plex_playlist_sync.decision_engine import candidate_context, evaluate_prepared, prepare_profile
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.storage import Database
 
@@ -49,6 +51,8 @@ class InteractiveReleaseItem(BaseModel):
     score: int
     meets_cutoff: bool
     rejection_reasons: list[str] = []
+    format_score: int = 0
+    breakdown: Optional[dict[str, Any]] = None
     extra: dict[str, Any] = {}
 
 
@@ -60,6 +64,8 @@ class InteractiveSearchQuery(BaseModel):
     album: Optional[str] = None
     item_type: str = "track"
     quality_profile_id: Optional[str] = None
+    album_id: Optional[str] = None
+    track_id: Optional[str] = None
 
 
 class ManualGrabPayload(BaseModel):
@@ -132,14 +138,18 @@ def search_releases(
         candidates = []
 
     # 3. Parse and evaluate each candidate release
+    prepared = prepare_profile(profile)
+    duration = resolve_duration(db, query.album_id, query.track_id, query.item_type)
     results: list[InteractiveReleaseItem] = []
     for r in candidates:
         try:
             parsed = parse_release_title(r.title)
-            eval_res = evaluate_release(
-                release=parsed,
-                profile=profile,
-                size_bytes=r.size_bytes if r.size_bytes > 0 else None,
+            eval_res = evaluate_prepared(
+                parsed,
+                prepared,
+                r.size_bytes if r.size_bytes > 0 else None,
+                duration=duration,
+                **candidate_context(r),
             )
 
             # Determine protocol badge
@@ -176,6 +186,8 @@ def search_releases(
                 score=eval_res.score,
                 meets_cutoff=eval_res.meets_cutoff,
                 rejection_reasons=list(eval_res.rejection_reasons),
+                format_score=eval_res.format_score,
+                breakdown=eval_res.breakdown.to_dict() if eval_res.breakdown else None,
                 extra=extra_data,
             )
             results.append(release_item)

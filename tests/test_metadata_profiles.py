@@ -617,7 +617,7 @@ def test_v48_renames_release_profiles_preserving_data(tmp_path: Path):
     db.close()
 
     up = Database(path)
-    assert up.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION == 48
+    assert up.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION >= 48
     tables = {r[0] for r in up.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "native_metadata_profiles" in tables and "native_release_profiles" not in tables
     artist_cols = {r[1] for r in up.conn.execute("PRAGMA table_info(library_artists)")}

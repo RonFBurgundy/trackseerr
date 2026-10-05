@@ -167,7 +167,7 @@ def test_custom_formats_scoring_bonuses_and_penalties():
     )
     res1 = evaluate_release(rel1, profile)
     assert res1.is_acceptable is True
-    assert res1.score == 1290
+    assert res1.format_score == 290
 
     # 2. Live release: FLAC 16bit + Live (-200) (Not Censored -> +60)
     # Expected: 1000 - 200 + 60 = 860
@@ -177,7 +177,7 @@ def test_custom_formats_scoring_bonuses_and_penalties():
     )
     res2 = evaluate_release(rel2, profile)
     assert res2.is_acceptable is True
-    assert res2.score == 860
+    assert res2.format_score == -140
 
     # 3. Censored release: MP3 320 (700) + Censored (-350) + Negate matched (+0)
     # Expected: 700 - 350 = 350
@@ -187,7 +187,7 @@ def test_custom_formats_scoring_bonuses_and_penalties():
     )
     res3 = evaluate_release(rel3, profile)
     assert res3.is_acceptable is True
-    assert res3.score == 350
+    assert res3.format_score == -350
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +218,7 @@ def test_min_score_cutoff_rejects_below_threshold():
     )
     res_good = evaluate_release(rel_good, profile)
     assert res_good.is_acceptable is True
-    assert res_good.score == 1000
+    assert res_good.format_score == 0
 
     # 2. Score 800 (1000 - 200 for Live) < 900: Rejected
     rel_live = ParsedRelease(
@@ -227,7 +227,7 @@ def test_min_score_cutoff_rejects_below_threshold():
     )
     res_live = evaluate_release(rel_live, profile)
     assert res_live.is_acceptable is False
-    assert res_live.score == 800
+    assert res_live.format_score == -200
     assert any("below profile minimum 900" in r for r in res_live.rejection_reasons)
 
     # 3. Base score 700 < 900: Rejected
@@ -237,7 +237,7 @@ def test_min_score_cutoff_rejects_below_threshold():
     )
     res_mp3 = evaluate_release(rel_mp3, profile)
     assert res_mp3.is_acceptable is False
-    assert res_mp3.score == 700
+    assert res_mp3.format_score == 0
     assert any("below profile minimum 900" in r for r in res_mp3.rejection_reasons)
 
 

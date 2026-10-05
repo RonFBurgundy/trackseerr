@@ -31,6 +31,7 @@ from plex_playlist_sync.models import (
     RequestStatus,
 )
 from plex_playlist_sync.notifications import notification_dispatcher
+from plex_playlist_sync.decision_engine import upgrade_floor
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.job_tracker import tracked
@@ -276,7 +277,7 @@ class WantedBacklogWorker:
                             cur_p = parse_release_title(t["current_quality"])
                             if cur_p.quality == "Unknown":
                                 cur_p.quality = t["current_quality"]
-                            min_score = evaluate_release(cur_p, _to_quality_profile(profile_dict)).score
+                            min_score = upgrade_floor(evaluate_release(cur_p, _to_quality_profile(profile_dict)), _to_quality_profile(profile_dict))
                     res = acquisition_coordinator.search_and_grab(
                         artist=str(t["artist"]).strip(),
                         title=str(t["title"]).strip(),
@@ -427,7 +428,7 @@ class WantedBacklogWorker:
                         cur_p = parse_release_title(cur_q)
                         if cur_p.quality == "Unknown":
                             cur_p.quality = cur_q
-                        min_score = evaluate_release(cur_p, prof).score
+                        min_score = upgrade_floor(evaluate_release(cur_p, prof), prof)
                     else:
                         min_score = 0
             items_to_search.append(
@@ -513,7 +514,7 @@ class WantedBacklogWorker:
                                 cur_p = parse_release_title(cur_q)
                                 if cur_p.quality == "Unknown":
                                     cur_p.quality = cur_q
-                                min_score = evaluate_release(cur_p, prof).score
+                                min_score = upgrade_floor(evaluate_release(cur_p, prof), prof)
 
                         items_to_search.append(
                             (
@@ -845,7 +846,7 @@ class RSSSyncWorker:
                             cur_p = parse_release_title(current_quality)
                             if cur_p.quality == "Unknown":
                                 cur_p.quality = current_quality
-                            current_score = evaluate_release(cur_p, req_profile).score
+                            current_score = upgrade_floor(evaluate_release(cur_p, req_profile), req_profile)
 
                         if eval_res.score <= current_score:
                             logger.debug(

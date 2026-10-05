@@ -25,7 +25,16 @@ from plex_playlist_sync.models import (
     QualityProfileItem,
 )
 from plex_playlist_sync.notifications import notification_dispatcher
+from plex_playlist_sync.decision_engine import (
+    DurationInfo,
+    candidate_context,
+    evaluate_prepared,
+    prepare_profile,
+    rank_key,
+    resolve_durations,
+)
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
+from plex_playlist_sync.quality_defaults import entry_qualities, is_v2_items, normalize_entries
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -60,18 +69,27 @@ def _to_quality_profile(data: Union[QualityProfile, dict[str, Any]]) -> QualityP
     if isinstance(data, QualityProfile):
         return data
 
+    raw_items = data.get("items", []) or []
+    entries = normalize_entries(raw_items) if is_v2_items(raw_items) else []
     items: list[QualityProfileItem] = []
-    for item in data.get("items", []):
-        if isinstance(item, QualityProfileItem):
-            items.append(item)
-        elif isinstance(item, dict):
-            items.append(
-                QualityProfileItem(
-                    quality=str(item.get("quality", "Unknown")),
-                    allowed=bool(item.get("allowed", True)),
-                    weight=int(item.get("weight", 100)),
+    if entries:
+        # v2 entries carry no weights; derive descending ones so legacy readers keep a consistent order.
+        flat = [q for e in entries for q in entry_qualities(e)]
+        allowed = {q: bool(e.get("allowed", True)) for e in entries for q in entry_qualities(e)}
+        for idx, quality in enumerate(flat):
+            items.append(QualityProfileItem(quality=quality, allowed=allowed[quality], weight=(len(flat) - idx) * 100))
+    else:
+        for item in raw_items:
+            if isinstance(item, QualityProfileItem):
+                items.append(item)
+            elif isinstance(item, dict):
+                items.append(
+                    QualityProfileItem(
+                        quality=str(item.get("quality", "Unknown")),
+                        allowed=bool(item.get("allowed", True)),
+                        weight=int(item.get("weight", 100)),
+                    )
                 )
-            )
 
     return QualityProfile(
         id=str(data.get("id", "")),
@@ -91,7 +109,32 @@ def _to_quality_profile(data: Union[QualityProfile, dict[str, Any]]) -> QualityP
         min_score=(
             int(data["min_score"]) if data.get("min_score") is not None else None
         ),
+        upgrade_allowed=bool(data.get("upgrade_allowed", True)),
+        entries=entries,
+        format_items=list(data.get("format_items") or []),
+        min_format_score=int(data.get("min_format_score") or 0),
+        cutoff_format_score=int(data.get("cutoff_format_score") or 0),
+        min_upgrade_format_score=int(data.get("min_upgrade_format_score") or 1),
+        catalog=dict(data.get("catalog") or {}),
     )
+
+
+def resolve_duration(
+    db: Database, album_id: Optional[str], track_id: Optional[str], item_type: Optional[str]
+) -> Optional[DurationInfo]:
+    """Duration a release should be measured against: the track for track searches, the album otherwise."""
+    try:
+        if item_type == "track":
+            if track_id:
+                seconds = db.get_track_duration(str(track_id))
+                return DurationInfo(seconds, estimated=False, source="tracks") if seconds else None
+            return None
+        if album_id:
+            durations, total = db.get_album_track_durations(str(album_id))
+            return resolve_durations(durations, total)
+    except sqlite3.Error as e:
+        logger.warning("Could not resolve release duration for album %s / track %s: %s", album_id, track_id, e)
+    return None
 
 
 class AcquisitionCoordinator:
@@ -127,6 +170,12 @@ class AcquisitionCoordinator:
                 driver = get_indexer_driver(idx_cfg)
                 res = driver.search(artist=artist, title=title, album=album)
                 if res:
+                    for r in res:
+                        if isinstance(r.extra, dict) or r.extra is None:
+                            extra = dict(r.extra or {})
+                            extra.setdefault("indexer_id", idx_cfg.get("id"))
+                            extra.setdefault("indexer_name", idx_name)
+                            r.extra = extra
                     all_results.extend(res)
             except Exception as e:
                 logger.warning("Error searching indexer '%s' (%s): %s", idx_name, idx_cfg.get("host_url"), e)
@@ -173,15 +222,21 @@ class AcquisitionCoordinator:
         candidates: list[AcquisitionSearchResult],
         profile: Union[QualityProfile, dict[str, Any]],
         db: Optional[Database] = None,
+        album_id: Optional[str] = None,
+        track_id: Optional[str] = None,
+        item_type: Optional[str] = None,
     ) -> list[tuple[AcquisitionSearchResult, EvaluationResult]]:
-        """Evaluates candidates against QualityProfile and sorts by score descending.
+        """Evaluates candidates against the QualityProfile and ranks the acceptable ones.
 
-        Ties for torrent releases are broken using seeder counts.
+        Order: quality > custom-format score > distance to the preferred kbps > protocol preference > seeders.
+        ``album_id`` / ``track_id`` give the duration the quality-definition kbps limits are measured against.
         """
         if not candidates:
             return []
 
         prof = _to_quality_profile(profile)
+        prepared = prepare_profile(prof)
+        duration = resolve_duration(db, album_id, track_id, item_type) if db is not None else None
         ranked: list[tuple[AcquisitionSearchResult, EvaluationResult]] = []
 
         for candidate in candidates:
@@ -196,19 +251,20 @@ class AcquisitionCoordinator:
                     continue
 
             parsed = parse_release_title(candidate.title)
-            eval_res = evaluate_release(
-                release=parsed,
-                profile=prof,
-                size_bytes=candidate.size_bytes if candidate.size_bytes > 0 else None,
+            eval_res = evaluate_prepared(
+                parsed,
+                prepared,
+                candidate.size_bytes if candidate.size_bytes > 0 else None,
+                duration=duration,
+                **candidate_context(candidate),
             )
             if eval_res.is_acceptable:
                 ranked.append((candidate, eval_res))
 
-        def sort_key(item: tuple[AcquisitionSearchResult, EvaluationResult]) -> tuple[int, int]:
+        def sort_key(item: tuple[AcquisitionSearchResult, EvaluationResult]) -> tuple[Any, ...]:
             cand, res = item
             is_torrent = cand.protocol == "torrent" or cand.source in ("torznab", "torrent") or bool(cand.magnet_url)
-            seeders = int(cand.seeders or 0) if is_torrent else 0
-            return (res.score, seeders)
+            return rank_key(cand.protocol, int(cand.seeders or 0) if is_torrent else 0, res)
 
         ranked.sort(key=sort_key, reverse=True)
         return ranked
@@ -325,7 +381,9 @@ class AcquisitionCoordinator:
         candidates = self.search_all_indexers(artist=artist, title=title, album=album, db=db)
 
         # 3. Evaluate and rank
-        ranked = self.evaluate_and_rank(candidates=candidates, profile=profile, db=db)
+        ranked = self.evaluate_and_rank(
+            candidates=candidates, profile=profile, db=db, album_id=album_id, track_id=track_id, item_type=item_type
+        )
         if min_score is not None:
             ranked = [item for item in ranked if item[1].score > min_score]
         if not ranked:

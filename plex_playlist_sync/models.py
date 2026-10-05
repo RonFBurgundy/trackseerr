@@ -431,12 +431,26 @@ class QualityProfile:
     upgrade_allowed: bool = True
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    # v2 (Arr-style) shape. ``entries`` is the ordered quality/group list (top = best); empty means a legacy
+    # weight-based profile, whose ``items`` are ordered by weight instead. ``format_items`` is [{format_id, score}].
+    entries: list[dict[str, Any]] = field(default_factory=list)
+    format_items: list[dict[str, Any]] = field(default_factory=list)
+    min_format_score: int = 0
+    cutoff_format_score: int = 0
+    min_upgrade_format_score: int = 1
+    # Resolved decision catalog ({"definitions", "formats", "release_profiles"} rows), attached by the storage layer.
+    catalog: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
             "cutoff": self.cutoff,
+            "entries": list(self.entries),
+            "format_items": list(self.format_items),
+            "min_format_score": int(self.min_format_score),
+            "cutoff_format_score": int(self.cutoff_format_score),
+            "min_upgrade_format_score": int(self.min_upgrade_format_score),
             "items": [
                 item.to_dict() if hasattr(item, "to_dict") else item
                 for item in self.items
@@ -465,9 +479,11 @@ class ParsedRelease:
     source: Optional[str] = None
     tags: list[str] = field(default_factory=list)
     bitrate_kbps: Optional[int] = None
+    release_group: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "release_group": self.release_group,
             "raw_title": self.raw_title,
             "artist": self.artist,
             "album": self.album,
@@ -481,12 +497,64 @@ class ParsedRelease:
 
 
 @dataclass
+class DecisionBreakdown:
+    """Structured record of every reject and score contribution behind an ``EvaluationResult``."""
+
+    title: str = ""
+    release_group: Optional[str] = None
+    protocol: Optional[str] = None
+    source: Optional[str] = None
+    quality: str = "Unknown"
+    tier: Optional[int] = None  # index of the matching profile entry (0 = best); None = not in the profile
+    tier_name: Optional[str] = None
+    quality_allowed: bool = False
+    cutoff_tier: Optional[int] = None
+    quality_cutoff_met: bool = False
+    matched_formats: list[dict[str, Any]] = field(default_factory=list)  # {id, name, score}
+    format_score: int = 0
+    total_score: int = 0
+    min_format_score: int = 0
+    cutoff_format_score: int = 0
+    kbps: dict[str, Any] = field(default_factory=dict)
+    release_profiles: list[dict[str, Any]] = field(default_factory=list)  # {id, name, result, detail}
+    rejections: list[dict[str, str]] = field(default_factory=list)  # {code, message}
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "title": self.title,
+            "release_group": self.release_group,
+            "protocol": self.protocol,
+            "source": self.source,
+            "quality": self.quality,
+            "tier": self.tier,
+            "tier_name": self.tier_name,
+            "quality_allowed": bool(self.quality_allowed),
+            "cutoff_tier": self.cutoff_tier,
+            "quality_cutoff_met": bool(self.quality_cutoff_met),
+            "matched_formats": [dict(m) for m in self.matched_formats],
+            "format_score": int(self.format_score),
+            "total_score": int(self.total_score),
+            "min_format_score": int(self.min_format_score),
+            "cutoff_format_score": int(self.cutoff_format_score),
+            "kbps": dict(self.kbps),
+            "release_profiles": [dict(r) for r in self.release_profiles],
+            "rejections": [dict(r) for r in self.rejections],
+            "notes": list(self.notes),
+        }
+
+
+@dataclass
 class EvaluationResult:
     is_acceptable: bool
     score: int
     rejection_reasons: list[str]
     parsed_quality: str
     meets_cutoff: bool
+    format_score: int = 0
+    tier: Optional[int] = None
+    kbps_distance: Optional[float] = None
+    breakdown: Optional[DecisionBreakdown] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -495,6 +563,10 @@ class EvaluationResult:
             "rejection_reasons": list(self.rejection_reasons),
             "parsed_quality": self.parsed_quality,
             "meets_cutoff": bool(self.meets_cutoff),
+            "format_score": int(self.format_score),
+            "tier": self.tier,
+            "kbps_distance": self.kbps_distance,
+            "breakdown": self.breakdown.to_dict() if self.breakdown is not None else None,
         }
 
 

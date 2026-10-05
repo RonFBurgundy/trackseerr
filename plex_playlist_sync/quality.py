@@ -6,7 +6,7 @@ release tag filtering, and score evaluation without Lidarr.
 
 import logging
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from plex_playlist_sync.models import (
     AudioQuality,
@@ -83,6 +83,42 @@ _TAG_SPECS: list[tuple[str, re.Pattern[str]]] = [
     ("explicit", re.compile(r"(?i)\bexplicit\b")),
     ("bonus", re.compile(r"(?i)\bbonus\b")),
 ]
+
+
+_NOISE_GROUPS = frozenset(
+    {
+        "flac", "mp3", "aac", "alac", "ape", "wav", "ogg", "opus", "m4a", "wv", "wavpack", "lossless", "cd", "cdda",
+        "web", "vinyl", "lp", "sacd", "dsd", "cbr", "vbr", "v0", "v2", "320", "256", "192", "128", "16bit", "24bit",
+        "16", "24", "44", "96", "192khz", "hires", "hi-res", "320kbps", "kbps", "mqa", "remaster", "remastered",
+        "deluxe", "edition", "single", "ep", "album", "live", "mono", "stereo", "ost", "rip", "retail", "proper",
+        "repack", "internal", "tape", "cassette",
+    }
+)
+_SCENE_SUFFIX = re.compile(r"(?<![\s-])-([A-Za-z0-9][A-Za-z0-9_.]{1,30})$")
+_BRACKET_GROUP = re.compile(r"[\[(]([^\[\]()\s]{1,29})[\])]")
+
+
+def _is_noise_group(token: str) -> bool:
+    t = token.strip().lower()
+    return (
+        t in _NOISE_GROUPS
+        or bool(re.fullmatch(r"(19|20)\d{2}", t))
+        or bool(re.fullmatch(r"\d+(?:[-/.]\d+)*(?:bit|khz|kbps|k)?", t))
+        or bool(re.fullmatch(r"(?:flac|mp3|web|cd)[-_ ]?\w*", t) and t.split("-")[0] in _NOISE_GROUPS)
+    )
+
+
+def extract_release_group(title: str) -> Optional[str]:
+    """Best-effort release group: a trailing ``-GROUP`` (scene), else the last ``[GROUP]`` / ``(GROUP)`` that is not a
+    format, source, year or other noise token."""
+    text = re.sub(r"\.(?:flac|mp3|m4a|zip|rar)$", "", (title or "").strip(), flags=re.IGNORECASE)
+    m = _SCENE_SUFFIX.search(text)
+    if m and not _is_noise_group(m.group(1)):
+        return m.group(1)
+    for token in reversed(_BRACKET_GROUP.findall(text)):
+        if not _is_noise_group(token):
+            return token.strip()
+    return None
 
 
 def parse_release_title(title: str) -> ParsedRelease:
@@ -206,6 +242,7 @@ def parse_release_title(title: str) -> ParsedRelease:
         source=detected_source,
         tags=detected_tags,
         bitrate_kbps=bitrate_kbps,
+        release_group=extract_release_group(raw_title),
     )
 
 
@@ -213,121 +250,27 @@ def evaluate_release(
     release: ParsedRelease,
     profile: QualityProfile,
     size_bytes: Optional[int] = None,
+    *,
+    protocol: Optional[str] = None,
+    indexer_id: Optional[Any] = None,
+    indexer_name: Optional[str] = None,
+    indexer_flags: int = 0,
+    duration: Optional[Any] = None,
 ) -> EvaluationResult:
-    """Evaluates a parsed release against a quality profile.
+    """Evaluates a parsed release against a quality profile via the decision engine.
 
-    Validates audio format allowances, ignored tags, file size bounds,
-    and calculates ranking score and cutoff fulfillment.
+    Applies release profiles, quality allowance, quality-definition kbps limits and custom-format scoring, and
+    records every decision in ``EvaluationResult.breakdown``. ``duration`` is a ``decision_engine.DurationInfo``.
     """
-    is_acceptable = True
-    rejection_reasons: list[str] = []
+    from plex_playlist_sync.decision_engine import evaluate_release_with_context
 
-    # 1. Size Constraints
-    if size_bytes is not None:
-        size_mb = size_bytes / (1024 * 1024)
-        if profile.min_size_mb is not None and size_mb < profile.min_size_mb:
-            rejection_reasons.append(
-                f"Release size ({size_mb:.1f} MB) is below minimum ({profile.min_size_mb:.1f} MB)"
-            )
-            is_acceptable = False
-        if profile.max_size_mb is not None and size_mb > profile.max_size_mb:
-            rejection_reasons.append(
-                f"Release size ({size_mb:.1f} MB) exceeds maximum ({profile.max_size_mb:.1f} MB)"
-            )
-            is_acceptable = False
-
-    # 2. Ignored Tags Check
-    raw_lower = release.raw_title.lower()
-    release_tags_lower = {t.lower() for t in release.tags}
-    for tag in profile.ignored_tags:
-        clean_tag = tag.strip().lower()
-        if not clean_tag:
-            continue
-        if clean_tag in release_tags_lower or re.search(r"\b" + re.escape(clean_tag) + r"\b", raw_lower):
-            rejection_reasons.append(f"Contains rejected keyword '{tag}'")
-            is_acceptable = False
-
-    # 3. Quality Allowed Check
-    matching_item = None
-    item_index = None
-    for idx, item in enumerate(profile.items):
-        if item.quality == release.quality:
-            matching_item = item
-            item_index = idx
-            break
-
-    if matching_item is None or not matching_item.allowed:
-        rejection_reasons.append(f"Quality '{release.quality}' is not allowed in profile")
-        is_acceptable = False
-
-    # 4. Score Calculation
-    base_score = 0
-    if matching_item is not None:
-        base_score = matching_item.weight if matching_item.weight else max(0, 1000 - (item_index * 100 if item_index is not None else 0))
-
-    bonus_score = 0
-    for pref in profile.preferred_tags:
-        clean_pref = pref.strip().lower()
-        if not clean_pref:
-            continue
-        source_matches = release.source is not None and clean_pref == release.source.lower()
-        tag_matches = clean_pref in release_tags_lower
-        raw_matches = bool(re.search(r"\b" + re.escape(clean_pref) + r"\b", raw_lower))
-        if source_matches or tag_matches or raw_matches:
-            bonus_score += 50
-
-    total_score = base_score + bonus_score
-
-    # Custom Formats (CF) regex scoring
-    for cf in (profile.custom_formats or []):
-        name = cf.get("name", "Custom Format")
-        try:
-            score = int(cf.get("score", 0))
-        except (ValueError, TypeError):
-            score = 0
-        pattern_str = cf.get("pattern", "")
-        negate = bool(cf.get("negate", False))
-        if not pattern_str:
-            continue
-        try:
-            pattern = re.compile(pattern_str, re.IGNORECASE)
-            matched = bool(pattern.search(release.raw_title))
-        except re.error as e:
-            logger.warning("Invalid regex pattern in custom format '%s': %s", name, e)
-            continue
-
-        if (matched and not negate) or (not matched and negate):
-            total_score += score
-
-    # Minimum score threshold check
-    if profile.min_score is not None and total_score < profile.min_score:
-        is_acceptable = False
-        rejection_reasons.append(
-            f"Score {total_score} is below profile minimum {profile.min_score}"
-        )
-
-    # 5. Cutoff Check
-    # Lower item index indicates higher quality/preference
-    cutoff_index = next(
-        (i for i, it in enumerate(profile.items) if it.quality == profile.cutoff), None
-    )
-    if item_index is not None and cutoff_index is not None:
-        meets_cutoff = item_index <= cutoff_index
-    elif matching_item is not None:
-        cutoff_item = next(
-            (it for it in profile.items if it.quality == profile.cutoff), None
-        )
-        if cutoff_item:
-            meets_cutoff = matching_item.weight >= cutoff_item.weight
-        else:
-            meets_cutoff = False
-    else:
-        meets_cutoff = False
-
-    return EvaluationResult(
-        is_acceptable=is_acceptable,
-        score=total_score,
-        rejection_reasons=rejection_reasons,
-        parsed_quality=release.quality,
-        meets_cutoff=meets_cutoff,
+    return evaluate_release_with_context(
+        release,
+        profile,
+        size_bytes,
+        protocol=protocol,
+        indexer_id=indexer_id,
+        indexer_name=indexer_name,
+        indexer_flags=indexer_flags,
+        duration=duration,
     )
