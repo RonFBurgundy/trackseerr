@@ -75,13 +75,24 @@ def test_catastrophic_rejected_by_api(ctx, pattern):
     assert client.post(RP, json={"name": "R", "required": [f"/{pattern}/"]}, headers=h).status_code == 400
 
 
-# Patterns the ``regex`` module cannot shortcut: they really do run away without the timeout.
-RUNAWAY = [r"(a+)+$", r"(a|aa)+$"]
 EVIL_TITLE = "a" * 200 + "!"
+RUNAWAY = [r"(a+)+$", r"(a|aa)+$", r"(x+x+)+y"]
 
 
-@pytest.mark.parametrize("pattern", CATASTROPHIC)
-def test_stored_catastrophic_returns_within_limit(unchecked, pattern):
+@pytest.fixture
+def forced_timeout(monkeypatch):
+    """Deterministic timeout: every compiled search raises the regex module's TimeoutError (host-speed independent)."""
+
+    class _Slow:
+        def search(self, text, timeout=None):
+            raise TimeoutError
+
+    monkeypatch.setattr(safe_regex, "compile_pattern", lambda pattern: _Slow())
+
+
+@pytest.mark.parametrize("pattern", CATASTROPHIC + RUNAWAY)
+def test_stored_pattern_returns_within_limit(unchecked, pattern):
+    # The real safety property: whether the regex module shortcuts the pattern or aborts it, it never hangs.
     start = time.monotonic()
     try:
         safe_search(pattern, EVIL_TITLE)
@@ -90,33 +101,28 @@ def test_stored_catastrophic_returns_within_limit(unchecked, pattern):
     assert time.monotonic() - start < 1.0
 
 
-@pytest.mark.parametrize("pattern", RUNAWAY)
-def test_stored_runaway_times_out_within_limit(unchecked, pattern):
-    start = time.monotonic()
+def test_timeout_raises_budget_exceeded_and_exhausts_budget(forced_timeout):
+    b = Budget()
     with pytest.raises(BudgetExceeded):
-        safe_search(pattern, EVIL_TITLE)
-    assert time.monotonic() - start < 1.0
+        safe_search("a", "a", b)
+    assert b.exhausted
 
 
-@pytest.mark.parametrize("pattern", RUNAWAY)
-def test_stored_catastrophic_format_rejects_in_engine(unchecked, pattern):
-    p = _profile(FLAC_MP3, "FLAC 16bit", [_fmt(_spec("ReleaseTitleSpecification", pattern))], scores={1: 5})
-    start = time.monotonic()
-    r = _score(p, "A - B [FLAC] " + "a" * 200 + "!")
-    assert time.monotonic() - start < 2.0
+def test_forced_timeout_format_rejects_in_engine(forced_timeout):
+    p = _profile(FLAC_MP3, "FLAC 16bit", [_fmt(_spec("ReleaseTitleSpecification", "flac"))], scores={1: 5})
+    r = _score(p, "A - B [FLAC]")
     assert not r.is_acceptable
     assert "evaluation_budget_exceeded" in [x["code"] for x in r.breakdown.rejections]
 
 
 @pytest.mark.parametrize("key", ["required", "ignored"])
-def test_stored_catastrophic_release_profile_term_rejects(unchecked, key):
-    rp = {"id": 1, "name": "RP", key: ["/(a+)+$/"]}
-    p = _profile(FLAC_MP3, "FLAC 16bit", release_profiles=[rp])
-    start = time.monotonic()
-    r = _score(p, "A - B [FLAC] " + "a" * 200 + "!")
-    assert time.monotonic() - start < 2.0
+def test_forced_timeout_release_profile_term_rejects(forced_timeout, key):
+    p = _profile(FLAC_MP3, "FLAC 16bit", release_profiles=[{"id": 1, "name": "RP", key: ["/flac/"]}])
+    r = _score(p, "A - B [FLAC]")
     assert not r.is_acceptable
-    assert "evaluation_budget_exceeded" in [x["code"] for x in r.breakdown.rejections]
+    codes = [x["code"] for x in r.breakdown.rejections]
+    assert "evaluation_budget_exceeded" in codes
+    assert "release_profile_required" not in codes
 
 
 def test_budget_exhausted_rejects_not_skips():

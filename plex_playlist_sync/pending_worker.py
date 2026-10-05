@@ -240,8 +240,9 @@ class PendingReleaseWorker:
                         logger.exception("Unexpected error in PendingReleaseWorker tick")
                     slept = 0.0
                     while slept < interval_seconds and not self._stop_event.is_set():
-                        time.sleep(min(1.0, interval_seconds - slept))
-                        slept += 1.0
+                        step = min(1.0, interval_seconds - slept)
+                        self._stop_event.wait(step)
+                        slept += step
 
             self._thread = threading.Thread(target=_loop, daemon=True, name="PendingReleaseWorkerThread")
             self._thread.start()

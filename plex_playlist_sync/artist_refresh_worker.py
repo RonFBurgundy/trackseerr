@@ -115,8 +115,9 @@ class ArtistRefreshWorker:
                     # Responsive sleep
                     slept = 0.0
                     while slept < float(self.interval_seconds) and not self._stop_event.is_set():
-                        time.sleep(min(1.0, float(self.interval_seconds) - slept))
-                        slept += 1.0
+                        step = min(1.0, float(self.interval_seconds) - slept)
+                        self._stop_event.wait(step)
+                        slept += step
 
                 with self._lock:
                     self._is_running = False
@@ -224,8 +225,9 @@ class ArtistRefreshWorker:
                     p_delay = self.pace_delay
                     slept = 0.0
                     while slept < p_delay and not self._stop_event.is_set():
-                        time.sleep(min(0.2, p_delay - slept))
-                        slept += 0.2
+                        step = min(0.2, p_delay - slept)
+                        self._stop_event.wait(step)
+                        slept += step
 
             final_stats = db.get_library_stats()
             new_albums = max(0, final_stats.get("album_count", 0) - prev_albums)
