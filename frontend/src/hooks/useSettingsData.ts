@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type {
   GeneralSettings,
-  QualityProfile,
   DownloadClientItem,
   IndexerItem,
   MediaManagementSettings,
@@ -11,7 +10,6 @@ import {
   getGeneralSettings,
   getMediaManagementSettings,
   getLidarrSettings,
-  getQualityProfiles,
   getClientSettings,
   getIndexerSettings,
 } from '@/services/settingsService';
@@ -24,8 +22,6 @@ export interface UseSettingsDataReturn {
   setMedia: React.Dispatch<React.SetStateAction<MediaManagementSettings | null>>;
   lidarr: LidarrSettings | null;
   setLidarr: React.Dispatch<React.SetStateAction<LidarrSettings | null>>;
-  profiles: QualityProfile[];
-  setProfiles: React.Dispatch<React.SetStateAction<QualityProfile[]>>;
   clients: DownloadClientItem[];
   indexers: IndexerItem[];
   reload: () => Promise<void>;
@@ -37,7 +33,6 @@ export function useSettingsData(enabled: boolean): UseSettingsDataReturn {
   const [general, setGeneral] = useState<GeneralSettings | null>(null);
   const [media, setMedia] = useState<MediaManagementSettings | null>(null);
   const [lidarr, setLidarr] = useState<LidarrSettings | null>(null);
-  const [profiles, setProfiles] = useState<QualityProfile[]>([]);
   const [clients, setClients] = useState<DownloadClientItem[]>([]);
   const [indexers, setIndexers] = useState<IndexerItem[]>([]);
 
@@ -45,18 +40,16 @@ export function useSettingsData(enabled: boolean): UseSettingsDataReturn {
     if (!enabled) return;
     setIsLoading(true);
     try {
-      const [gen, med, lid, prof, cli, idx] = await Promise.all([
+      const [gen, med, lid, cli, idx] = await Promise.all([
         getGeneralSettings().catch(() => null),
         getMediaManagementSettings().catch(() => null),
         getLidarrSettings().catch(() => null),
-        getQualityProfiles().catch(() => []),
         getClientSettings().catch(() => []),
         getIndexerSettings().catch(() => []),
       ]);
       if (gen) setGeneral(gen);
       if (med) setMedia(med);
       if (lid) setLidarr(lid);
-      setProfiles(prof);
       setClients(cli);
       setIndexers(idx);
     } finally {
@@ -69,5 +62,5 @@ export function useSettingsData(enabled: boolean): UseSettingsDataReturn {
     else setIsLoading(false);
   }, [enabled, reload]);
 
-  return { isLoading, general, setGeneral, media, setMedia, lidarr, setLidarr, profiles, setProfiles, clients, indexers, reload };
+  return { isLoading, general, setGeneral, media, setMedia, lidarr, setLidarr, clients, indexers, reload };
 }

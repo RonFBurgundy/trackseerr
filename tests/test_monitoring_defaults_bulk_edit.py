@@ -131,8 +131,10 @@ def test_refresh_new_albums_unmonitored_under_existing_but_existing_albums_keep_
         {"id": "rg-new2", "title": "New Single", "album_type": "single", "year": 2002},
     ]
     enricher.get_release_group_tracks.return_value = []
+    discovery = MagicMock()  # no real Deezer / iTunes lookups in tests
+    discovery.get_artist_details.return_value = None
     with patch.object(mediacover_service, "ensure_artwork", return_value=Path("/tmp/c.jpg")):
-        assert refresh_single_artist(artist_id="art-r", db=test_db, enricher=enricher)["success"] is True
+        assert refresh_single_artist(artist_id="art-r", db=test_db, discovery_client=discovery, enricher=enricher)["success"] is True
     by_title = {a["title"]: a["monitored"] for a in test_db.list_library_albums(artist_id="art-r")}
     assert by_title == {"Owned": True, "New One": False, "New Single": False}
 
@@ -145,8 +147,10 @@ def test_refresh_new_albums_follow_all_option(test_db: Database):
     enricher.get_artist_details.return_value = {"id": "mbid-b2"}
     enricher.get_artist_discography.return_value = [{"id": "rg-x", "title": "X", "album_type": "album", "year": 2001}]
     enricher.get_release_group_tracks.return_value = []
+    discovery = MagicMock()  # no real Deezer / iTunes lookups in tests
+    discovery.get_artist_details.return_value = None
     with patch.object(mediacover_service, "ensure_artwork", return_value=Path("/tmp/c.jpg")):
-        refresh_single_artist(artist_id="art-a", db=test_db, enricher=enricher)
+        refresh_single_artist(artist_id="art-a", db=test_db, discovery_client=discovery, enricher=enricher)
     assert [a["monitored"] for a in test_db.list_library_albums(artist_id="art-a")] == [True]
 
 

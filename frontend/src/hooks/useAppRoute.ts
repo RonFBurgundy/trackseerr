@@ -10,7 +10,7 @@ export type ActivitySub = 'queue' | 'history' | 'blocklist';
 export type WantedSub = WantedListName;
 
 export type SettingsSection = 'general' | 'media-management' | 'lidarr' | 'requests' | 'system' | 'account';
-export type MediaManagementLeaf = 'media' | 'profiles' | 'release-profiles' | 'clients' | 'indexers' | 'import-lists' | 'media-server';
+export type MediaManagementLeaf = 'media' | 'quality' | 'profiles' | 'custom-formats' | 'clients' | 'indexers' | 'import-lists' | 'media-server';
 export type RequestsLeaf = 'users' | 'scrobbling';
 export type SystemLeaf = 'status' | 'queue' | 'tasks' | 'events' | 'logs';
 export type SettingsLeafId = MediaManagementLeaf | RequestsLeaf | SystemLeaf;
@@ -53,8 +53,9 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 ];
 export const MEDIA_MANAGEMENT_LEAVES: readonly MediaManagementLeaf[] = [
   'media',
+  'quality',
   'profiles',
-  'release-profiles',
+  'custom-formats',
   'clients',
   'indexers',
   'import-lists',
@@ -108,6 +109,9 @@ export function routeToHash(route: AppRoute): string {
   return `#/${parts.join('/')}`;
 }
 
+/** Retired leaves that now live as sections of the Profiles page; old bookmarks are rewritten to it by `readRoute`. */
+const LEGACY_PROFILE_LEAVES: readonly string[] = ['release-profiles', 'metadata-profiles'];
+
 /** Parse and validate a hash; anything unknown falls back (per segment) to the nearest valid default. */
 export function parseRouteHash(hash: string): AppRoute | null {
   const segments = hash.replace(/^#\/?/, '').split('/').filter((s) => s.length > 0);
@@ -124,7 +128,7 @@ export function parseRouteHash(hash: string): AppRoute | null {
     case 'wanted':
       return { tab, sub: pick(WANTED_SUBS, sub) ?? 'missing' };
     case 'settings':
-      return settingsRouteFor(pick(SETTINGS_SECTIONS, sub) ?? 'general', segments[2]);
+      return settingsRouteFor(pick(SETTINGS_SECTIONS, sub) ?? 'general', LEGACY_PROFILE_LEAVES.includes(segments[2] ?? '') ? 'profiles' : segments[2]);
     default:
       return { tab };
   }

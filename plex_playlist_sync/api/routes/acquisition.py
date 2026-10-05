@@ -1,6 +1,7 @@
 """Interactive Manual Search & Release Browser API routes for TrackSeerr Phase 4."""
 
 import logging
+import sqlite3
 from typing import Any, Optional
 import uuid
 
@@ -9,8 +10,11 @@ from pydantic import BaseModel
 
 from plex_playlist_sync.acquisition_coordinator import (
     _to_quality_profile,
+    candidate_rank,
+    resolve_duration,
     acquisition_coordinator,
 )
+from plex_playlist_sync import delay_gate
 from plex_playlist_sync.api.dependencies import get_db, require_admin, require_core_tier
 from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from plex_playlist_sync.redaction import redact_text
@@ -22,6 +26,7 @@ from plex_playlist_sync.models import (
     QualityProfile,
     RequestStatus,
 )
+from plex_playlist_sync.decision_engine import candidate_context, evaluate_prepared, prepare_profile
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.storage import Database
 
@@ -49,6 +54,8 @@ class InteractiveReleaseItem(BaseModel):
     score: int
     meets_cutoff: bool
     rejection_reasons: list[str] = []
+    format_score: int = 0
+    breakdown: Optional[dict[str, Any]] = None
     extra: dict[str, Any] = {}
 
 
@@ -60,6 +67,8 @@ class InteractiveSearchQuery(BaseModel):
     album: Optional[str] = None
     item_type: str = "track"
     quality_profile_id: Optional[str] = None
+    album_id: Optional[str] = None
+    track_id: Optional[str] = None
 
 
 class ManualGrabPayload(BaseModel):
@@ -72,6 +81,8 @@ class ManualGrabPayload(BaseModel):
     album: Optional[str] = None
     item_type: str = "track"
     request_id: Optional[str] = None
+    album_id: Optional[str] = None
+    track_id: Optional[str] = None
 
 
 @router.post("/search", summary="Interactive multi-indexer search with quality evaluation")
@@ -132,14 +143,21 @@ def search_releases(
         candidates = []
 
     # 3. Parse and evaluate each candidate release
+    prepared = prepare_profile(profile)
+    duration = resolve_duration(db, query.album_id, query.track_id, query.item_type)
+    delay_profile = delay_gate.resolve_delay_profile(db, clean_artist)
+    preferred_protocol = delay_profile.get("preferred_protocol")
     results: list[InteractiveReleaseItem] = []
+    ranks: dict[int, tuple[Any, ...]] = {}
     for r in candidates:
         try:
             parsed = parse_release_title(r.title)
-            eval_res = evaluate_release(
-                release=parsed,
-                profile=profile,
-                size_bytes=r.size_bytes if r.size_bytes > 0 else None,
+            eval_res = evaluate_prepared(
+                parsed,
+                prepared,
+                r.size_bytes if r.size_bytes > 0 else None,
+                duration=duration,
+                **candidate_context(r),
             )
 
             # Determine protocol badge
@@ -176,19 +194,18 @@ def search_releases(
                 score=eval_res.score,
                 meets_cutoff=eval_res.meets_cutoff,
                 rejection_reasons=list(eval_res.rejection_reasons),
+                format_score=eval_res.format_score,
+                breakdown=eval_res.breakdown.to_dict() if eval_res.breakdown else None,
                 extra=extra_data,
             )
             results.append(release_item)
+            ranks[id(release_item)] = candidate_rank(r, eval_res, preferred_protocol)
         except Exception as e:
             logger.warning("Error evaluating release '%s': %s", r.title, e)
 
-    # 4. Sort results: is_acceptable candidates on top, score descending, seeders tiebreaking
-    def sort_key(item: InteractiveReleaseItem) -> tuple[int, int, int]:
-        is_acc = 1 if item.is_acceptable else 0
-        seeders = int(item.seeders or 0) if item.protocol == "torrent" else 0
-        return (is_acc, item.score, seeders)
-
-    results.sort(key=sort_key, reverse=True)
+    # 4. Sort: acceptable releases first, then the engine's full rank_key (quality tier > format score > kbps distance
+    # > protocol preference of the applicable delay profile > seeders).
+    results.sort(key=lambda item: (item.is_acceptable, ranks[id(item)]), reverse=True)
 
     return {
         "query": query.model_dump(),
@@ -327,6 +344,18 @@ def _grab_release(payload: ManualGrabPayload, db: Database) -> dict[str, Any]:
                 redact_text(str(e)),
             )
 
+    # A manual grab bypasses delay profiles and supersedes anything parked for the same item (by request, album or
+    # track id, or by name when the parked row has no ids).
+    try:
+        db.clear_pending_for_item(payload.request_id, payload.album_id, payload.track_id)
+        parked = db.get_pending_release_by_key(
+            delay_gate.item_key(None, None, None, payload.artist, payload.title, payload.album)
+        )
+        if parked:
+            db.delete_pending_release(parked["id"])
+    except sqlite3.Error as e:
+        logger.warning("Failed to clear pending release for '%s': %s", payload.title, type(e).__name__)
+
     client_name = client.get("name", "download client")
     logger.info(
         "Admin manual grab succeeded: '%s' via %s (download_id=%s)",
@@ -341,6 +370,79 @@ def _grab_release(payload: ManualGrabPayload, db: Database) -> dict[str, Any]:
         "client": client_name,
         "message": f"Successfully enqueued '{payload.release.title}'",
     }
+
+
+class PendingReleaseResponse(BaseModel):
+    id: int
+    title: str
+    album_id: Optional[str] = None
+    artist_name: str
+    protocol: str
+    quality: Optional[str] = None
+    format_score: int = 0
+    added_at: str
+    release_at: str
+    reason: str
+
+
+def _pending_view(row: dict[str, Any]) -> dict[str, Any]:
+    return {k: row.get(k) for k in PendingReleaseResponse.model_fields}
+
+
+@router.get(
+    "/pending",
+    response_model=list[PendingReleaseResponse],
+    summary="List releases held by a delay profile",
+    dependencies=[Depends(require_core_tier)],
+)
+def list_pending(
+    db: Database = Depends(get_db), _admin: dict[str, Any] = Depends(require_admin)
+) -> list[dict[str, Any]]:
+    return [_pending_view(r) for r in db.list_pending_releases()]
+
+
+@router.delete(
+    "/pending/{pending_id}", summary="Drop a pending release", dependencies=[Depends(require_core_tier)]
+)
+def drop_pending(
+    pending_id: int, db: Database = Depends(get_db), _admin: dict[str, Any] = Depends(require_admin)
+) -> dict[str, Any]:
+    if not db.delete_pending_release(pending_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending release not found")
+    return {"status": "deleted", "id": pending_id}
+
+
+@router.post(
+    "/pending/{pending_id}/grab",
+    summary="Grab a pending release now, skipping its delay",
+    dependencies=[Depends(require_core_tier)],
+)
+def grab_pending_now(
+    pending_id: int, db: Database = Depends(get_db), _admin: dict[str, Any] = Depends(require_admin)
+) -> dict[str, Any]:
+    from plex_playlist_sync.pending_worker import grab_pending  # local: pending_worker imports the coordinator
+
+    row = db.get_pending_release(pending_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending release not found")
+    try:
+        result = grab_pending(db, row, count_failure=False)
+    except ModeChanged as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Library manager is set to Lidarr; native grabs are disabled.",
+        ) from exc
+    except sqlite3.Error as exc:
+        logger.error("Grabbing pending release %s failed: %s", pending_id, exc)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Could not record the download") from exc
+    if result.get("claimed_elsewhere"):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Pending release was already grabbed or removed")
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=redact_text(str(result.get("message") or "Grab failed")),
+        )
+    return {"success": True, "id": pending_id, "download_id": result.get("download_id"), "release": result.get("release")}
 
 
 @router.get("/blocklist", summary="List blocklisted releases")

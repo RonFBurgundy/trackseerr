@@ -21,7 +21,7 @@ from plex_playlist_sync.library_monitoring import (
     DEFAULT_MONITOR_OPTION,
     RELEASE_PRIMARY_TYPES,
     RELEASE_SECONDARY_TYPES,
-    album_in_release_profile,
+    album_in_metadata_profile,
     normalize_secondary_types,
     validate_release_types,
     validate_list_monitor_mode,
@@ -29,6 +29,9 @@ from plex_playlist_sync.library_monitoring import (
     TRACK_HAS_FILE_SQL,
 )
 from plex_playlist_sync.list_index import SortDef, build_index, fold_search_text, library_sort_key, order_clause
+from plex_playlist_sync.delay_store import DelayProfileMixin
+from plex_playlist_sync.import_quality_check import CHECK_MODES, normalize_check_mode
+from plex_playlist_sync.quality_store import QualityCatalogMixin
 from plex_playlist_sync.models import (
     ActiveDownload,
     BlocklistItem,
@@ -70,7 +73,7 @@ def clean_library_name(text: str) -> str:
 
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
-SCHEMA_VERSION = 47  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 53  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _titles_near_equal(a: str, b: str) -> bool:
@@ -159,7 +162,7 @@ def lidarr_item_due(row: dict[str, Any], now: Optional[datetime] = None) -> bool
     return str(due_at) <= current
 
 
-class Database:
+class Database(QualityCatalogMixin, DelayProfileMixin):
     """Thread-safe SQLite database wrapper with WAL mode, foreign keys, and migrations."""
 
     def __init__(self, db_path: Optional[Union[str, Path]] = None) -> None:
@@ -326,6 +329,12 @@ class Database:
                 (45, self._migration_v45),
                 (46, self._migration_v46),
                 (47, self._migration_v47),
+                (48, self._migration_v48),
+                (49, self._migration_v49),
+                (50, self._migration_v50),
+                (51, self._migration_v51),
+                (52, self._migration_v52),
+                (53, self._migration_v53),
             ]
 
             applied = 0
@@ -1446,6 +1455,11 @@ class Database:
         (JSON list, NULL = unknown, treated as studio), ``library_artists.release_profile_id`` (NULL = no profile)
         and ``media_management_settings.add_release_profile_id`` (NULL = new artists get no profile).
         """
+        # Historical migration: keeps the pre-v48 names. A database that already carries the v48 names (migrations
+        # re-run over an upgraded schema) has nothing to add, and must not regrow the old table or columns.
+        cur.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'native_metadata_profiles'")
+        if cur.fetchone():
+            return
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS native_release_profiles (
@@ -1482,7 +1496,7 @@ class Database:
             )
 
     def _migration_v46(self, cur: sqlite3.Cursor) -> None:
-        """``library_artists.pending_profile_recompute``: set when an artist was added with a release profile before
+        """``library_artists.pending_profile_recompute``: set when an artist was added with a metadata profile before
         MusicBrainz secondary types were known; the first refresh that persists them recomputes monitoring once."""
         cur.execute("PRAGMA table_info(library_artists);")
         if "pending_profile_recompute" not in {row[1] for row in cur.fetchall()}:
@@ -1497,6 +1511,22 @@ class Database:
             cur.execute(f"PRAGMA table_info({table});")
             if "art_version" not in {row[1] for row in cur.fetchall()}:
                 cur.execute(f"ALTER TABLE {table} ADD COLUMN art_version TEXT;")
+
+    def _migration_v48(self, cur: sqlite3.Cursor) -> None:
+        """Renames the native "release profiles" feature to "metadata profiles" (Lidarr's name for the release-type
+        filter), freeing "release profile" for a term-based feature. Data, ids and the ON DELETE SET NULL foreign key
+        are preserved: SQLite (>= 3.25, ``legacy_alter_table`` OFF) rewrites the FK reference on table rename."""
+        cur.execute("PRAGMA table_info(media_management_settings);")
+        if "add_release_profile_id" in {row[1] for row in cur.fetchall()}:
+            cur.execute(
+                "ALTER TABLE media_management_settings RENAME COLUMN add_release_profile_id TO add_metadata_profile_id;"
+            )
+        cur.execute("PRAGMA table_info(library_artists);")
+        if "release_profile_id" in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE library_artists RENAME COLUMN release_profile_id TO metadata_profile_id;")
+        cur.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'native_release_profiles'")
+        if cur.fetchone():
+            cur.execute("ALTER TABLE native_release_profiles RENAME TO native_metadata_profiles;")
 
     def _migration_v43(self, cur: sqlite3.Cursor) -> None:
         """Collapse duplicate ``library_tracks`` rows (same album + foreign id, or same album/disc/number/title).
@@ -4269,8 +4299,9 @@ class Database:
             res["prefer_local_artwork"] = bool(res.get("prefer_local_artwork", 1))
             res["scan_monitor_option"] = str(res.get("scan_monitor_option") or "existing")
             res["add_monitor_option"] = str(res.get("add_monitor_option") or DEFAULT_MONITOR_OPTION)
-            res["add_release_profile_id"] = (
-                int(res["add_release_profile_id"]) if res.get("add_release_profile_id") is not None else None
+            res["import_bitrate_check"] = normalize_check_mode(res.get("import_bitrate_check"))
+            res["add_metadata_profile_id"] = (
+                int(res["add_metadata_profile_id"]) if res.get("add_metadata_profile_id") is not None else None
             )
             return res
 
@@ -4302,8 +4333,11 @@ class Database:
             "prefer_local_artwork",
             "scan_monitor_option",
             "add_monitor_option",
-            "add_release_profile_id",
+            "add_metadata_profile_id",
+            "import_bitrate_check",
         }
+        if settings.get("import_bitrate_check") is not None and str(settings["import_bitrate_check"]).strip().lower() not in CHECK_MODES:
+            raise ValueError("import_bitrate_check must be one of: off, warn, reject")
         for opt_key in ("scan_monitor_option", "add_monitor_option"):
             if settings.get(opt_key) is not None:
                 validate_monitor_option(settings[opt_key])
@@ -4322,9 +4356,9 @@ class Database:
                 ):
                     if v is not None:
                         updates[k] = 1 if bool(v) else 0
-                elif k == "add_release_profile_id":
-                    if v is not None and self.get_release_profile(int(v)) is None:
-                        raise ValueError(f"Release profile {v} does not exist")
+                elif k == "add_metadata_profile_id":
+                    if v is not None and self.get_metadata_profile(int(v)) is None:
+                        raise ValueError(f"Metadata profile {v} does not exist")
                     updates[k] = int(v) if v is not None else None
                 elif k == "seed_ratio_limit":
                     updates[k] = float(v) if v is not None else None
@@ -4332,6 +4366,9 @@ class Database:
                     updates[k] = int(v) if v is not None else None
                 elif k == "acoustid_api_key":
                     updates[k] = str(v) if v is not None else None
+                elif k == "import_bitrate_check":
+                    if v is not None:
+                        updates[k] = normalize_check_mode(v)
                 elif v is not None:
                     updates[k] = str(v)
 
@@ -5220,6 +5257,24 @@ class Database:
             self.conn.commit()
             return cur.rowcount > 0
 
+    def get_imported_release_title(
+        self, request_id: Optional[str] = None, track_id: Optional[str] = None, album_id: Optional[str] = None
+    ) -> Optional[str]:
+        """Release title of the most recent ``imported`` history event for a request, track or album (first key that
+        has one wins), or None when unknown. Used to score the current file's format score exactly like a candidate."""
+        with self._lock:
+            for column, value in (("request_id", request_id), ("track_id", track_id), ("album_id", album_id)):
+                if not value:
+                    continue
+                row = self.conn.execute(
+                    f"SELECT release_title FROM download_history WHERE event = 'imported' AND {column} = ? "
+                    "AND release_title IS NOT NULL AND release_title <> '' ORDER BY rowid DESC LIMIT 1",
+                    (str(value),),
+                ).fetchone()
+                if row:
+                    return str(row[0])
+        return None
+
     def record_download_grab(
         self,
         download_id: str,
@@ -5423,43 +5478,6 @@ class Database:
     # Quality Profiles CRUD
     # -------------------------------------------------------------------------
 
-    def _format_quality_profile_row(self, row: sqlite3.Row) -> dict[str, Any]:
-        res = dict(row)
-        res["is_default"] = bool(res.get("is_default", 0))
-        res["upgrade_allowed"] = bool(res.get("upgrade_allowed", 1))
-        res["min_size_mb"] = (
-            float(res["min_size_mb"]) if res.get("min_size_mb") is not None else None
-        )
-        res["max_size_mb"] = (
-            float(res["max_size_mb"]) if res.get("max_size_mb") is not None else None
-        )
-
-        try:
-            res["items"] = json.loads(res.get("items_json") or "[]")
-        except (json.JSONDecodeError, TypeError):
-            res["items"] = []
-
-        try:
-            res["preferred_tags"] = json.loads(res.get("preferred_tags_json") or "[]")
-        except (json.JSONDecodeError, TypeError):
-            res["preferred_tags"] = []
-
-        try:
-            res["ignored_tags"] = json.loads(res.get("ignored_tags_json") or "[]")
-        except (json.JSONDecodeError, TypeError):
-            res["ignored_tags"] = []
-
-        try:
-            res["custom_formats"] = json.loads(res.get("custom_formats_json") or "[]")
-        except (json.JSONDecodeError, TypeError):
-            res["custom_formats"] = []
-
-        res["min_score"] = (
-            int(res["min_score"]) if res.get("min_score") is not None else None
-        )
-
-        return res
-
     def list_quality_profiles(self) -> list[dict[str, Any]]:
         """Lists all quality profiles ordered by default first, then name."""
         with self._lock:
@@ -5468,33 +5486,6 @@ class Database:
             )
             rows = cur.fetchall()
             return [self._format_quality_profile_row(r) for r in rows]
-
-    def get_quality_profile(self, profile_id: str) -> Optional[dict[str, Any]]:
-        """Retrieves a single quality profile by ID."""
-        with self._lock:
-            cur = self.conn.execute(
-                "SELECT * FROM quality_profiles WHERE id = ?", (str(profile_id),)
-            )
-            row = cur.fetchone()
-            if not row:
-                return None
-            return self._format_quality_profile_row(row)
-
-    def get_default_quality_profile(self) -> dict[str, Any]:
-        """Retrieves the default quality profile."""
-        with self._lock:
-            cur = self.conn.execute(
-                "SELECT * FROM quality_profiles WHERE is_default = 1 LIMIT 1"
-            )
-            row = cur.fetchone()
-            if not row:
-                cur = self.conn.execute(
-                    "SELECT * FROM quality_profiles ORDER BY name ASC LIMIT 1"
-                )
-                row = cur.fetchone()
-            if not row:
-                raise ValueError("No quality profiles configured in the database")
-            return self._format_quality_profile_row(row)
 
     def create_quality_profile(
         self, profile: Union[QualityProfile, dict[str, Any]]
@@ -5511,101 +5502,6 @@ class Database:
             return None
         existing.update(updates)
         return self.upsert_quality_profile(existing)
-
-    def upsert_quality_profile(
-        self, profile: Union[QualityProfile, dict[str, Any]]
-    ) -> dict[str, Any]:
-        """Creates or updates a quality profile. If is_default=True, clears is_default on all others."""
-        if isinstance(profile, QualityProfile):
-            p_id = profile.id
-            name = profile.name
-            cutoff = profile.cutoff
-            items = [
-                i.to_dict() if hasattr(i, "to_dict") else i for i in profile.items
-            ]
-            preferred_tags = profile.preferred_tags
-            ignored_tags = profile.ignored_tags
-            min_size_mb = profile.min_size_mb
-            max_size_mb = profile.max_size_mb
-            is_default = bool(profile.is_default)
-            custom_formats = profile.custom_formats
-            min_score = profile.min_score
-            upgrade_allowed = bool(profile.upgrade_allowed)
-        else:
-            p_id = str(profile.get("id"))
-            name = str(profile.get("name"))
-            cutoff = str(profile.get("cutoff"))
-            items = profile.get("items", [])
-            items = [
-                i.to_dict() if hasattr(i, "to_dict") else i for i in items
-            ]
-            preferred_tags = profile.get("preferred_tags", [])
-            ignored_tags = profile.get("ignored_tags", [])
-            min_size_mb = profile.get("min_size_mb")
-            max_size_mb = profile.get("max_size_mb")
-            is_default = bool(profile.get("is_default", False))
-            custom_formats = profile.get("custom_formats", [])
-            min_score = profile.get("min_score")
-            upgrade_allowed = bool(profile.get("upgrade_allowed", True))
-
-        with self._lock:
-            if is_default:
-                self.conn.execute(
-                    "UPDATE quality_profiles SET is_default = 0 WHERE id != ?", (p_id,)
-                )
-
-            self.conn.execute(
-                """
-                INSERT INTO quality_profiles (
-                    id, name, cutoff, items_json, preferred_tags_json, ignored_tags_json,
-                    min_size_mb, max_size_mb, is_default, custom_formats_json, min_score, upgrade_allowed, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(id) DO UPDATE SET
-                    name = excluded.name,
-                    cutoff = excluded.cutoff,
-                    items_json = excluded.items_json,
-                    preferred_tags_json = excluded.preferred_tags_json,
-                    ignored_tags_json = excluded.ignored_tags_json,
-                    min_size_mb = excluded.min_size_mb,
-                    max_size_mb = excluded.max_size_mb,
-                    is_default = excluded.is_default,
-                    custom_formats_json = excluded.custom_formats_json,
-                    min_score = excluded.min_score,
-                    upgrade_allowed = excluded.upgrade_allowed,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (
-                    p_id,
-                    name,
-                    cutoff,
-                    json.dumps(items),
-                    json.dumps(preferred_tags),
-                    json.dumps(ignored_tags),
-                    min_size_mb,
-                    max_size_mb,
-                    1 if is_default else 0,
-                    json.dumps(custom_formats if isinstance(custom_formats, list) else []),
-                    int(min_score) if min_score is not None else None,
-                    1 if upgrade_allowed else 0,
-                ),
-            )
-
-            # Ensure at least one profile is marked default
-            cur = self.conn.execute(
-                "SELECT COUNT(*) FROM quality_profiles WHERE is_default = 1"
-            )
-            count = cur.fetchone()[0]
-            if count == 0:
-                self.conn.execute(
-                    "UPDATE quality_profiles SET is_default = 1 WHERE id = ?", (p_id,)
-                )
-
-            self.conn.commit()
-
-        result = self.get_quality_profile(p_id)
-        if not result:
-            raise sqlite3.OperationalError(f"Failed to retrieve upserted profile {p_id}")
-        return result
 
     def delete_quality_profile(self, profile_id: str) -> bool:
         """Deletes a quality profile. Raises ValueError if the profile is default."""
@@ -6032,7 +5928,7 @@ class Database:
         monitored = 1 if d.get("monitored", True) else 0
         monitor_option = str(d.get("monitor_option") or DEFAULT_MONITOR_OPTION)
         quality_profile_id = str(d["quality_profile_id"]) if d.get("quality_profile_id") is not None else None
-        release_profile_id = int(d["release_profile_id"]) if d.get("release_profile_id") is not None else None
+        metadata_profile_id = int(d["metadata_profile_id"]) if d.get("metadata_profile_id") is not None else None
         metadata_json = d.get("metadata_json")
         if isinstance(metadata_json, dict):
             metadata_json = json.dumps(metadata_json)
@@ -6052,7 +5948,7 @@ class Database:
                 INSERT INTO library_artists (
                     id, name, clean_name, sort_name, search_text, search_clean, foreign_artist_id, path, monitored,
                     monitor_option, quality_profile_id, metadata_json, mbid,
-                    image_url, banner_url, bio, genres, country, release_profile_id, created_at, updated_at
+                    image_url, banner_url, bio, genres, country, metadata_profile_id, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
@@ -6072,7 +5968,7 @@ class Database:
                     bio = COALESCE(excluded.bio, library_artists.bio),
                     genres = COALESCE(excluded.genres, library_artists.genres),
                     country = COALESCE(excluded.country, library_artists.country),
-                    release_profile_id = COALESCE(excluded.release_profile_id, library_artists.release_profile_id),
+                    metadata_profile_id = COALESCE(excluded.metadata_profile_id, library_artists.metadata_profile_id),
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -6094,7 +5990,7 @@ class Database:
                     bio,
                     genres,
                     country,
-                    release_profile_id,
+                    metadata_profile_id,
                     created_at,
                     1 if preserve_monitoring else 0,
                     1 if preserve_monitoring else 0,
@@ -6247,29 +6143,29 @@ class Database:
             self.conn.commit()
             return True
 
-    # ---- native release profiles (optional; shape automatic monitoring only) ----
+    # ---- native metadata profiles (optional; shape automatic monitoring only) ----
 
-    def _map_release_profile(self, row: sqlite3.Row) -> dict[str, Any]:
+    def _map_metadata_profile(self, row: sqlite3.Row) -> dict[str, Any]:
         res = dict(row)
         res["primary_types"] = self._decode_type_list(res.get("primary_types")) or []
         res["secondary_types"] = self._decode_type_list(res.get("secondary_types")) or []
         return res
 
-    def list_release_profiles(self) -> list[dict[str, Any]]:
-        """All release profiles (oldest first) with ``artist_count``, how many artists use each."""
+    def list_metadata_profiles(self) -> list[dict[str, Any]]:
+        """All metadata profiles (oldest first) with ``artist_count``, how many artists use each."""
         with self._lock:
             rows = self.conn.execute(
-                "SELECT p.*, (SELECT COUNT(*) FROM library_artists ar WHERE ar.release_profile_id = p.id) "
-                "AS artist_count FROM native_release_profiles p ORDER BY p.id"
+                "SELECT p.*, (SELECT COUNT(*) FROM library_artists ar WHERE ar.metadata_profile_id = p.id) "
+                "AS artist_count FROM native_metadata_profiles p ORDER BY p.id"
             ).fetchall()
-        return [{**self._map_release_profile(r), "artist_count": int(r["artist_count"])} for r in rows]
+        return [{**self._map_metadata_profile(r), "artist_count": int(r["artist_count"])} for r in rows]
 
-    def get_release_profile(self, profile_id: int) -> Optional[dict[str, Any]]:
+    def get_metadata_profile(self, profile_id: int) -> Optional[dict[str, Any]]:
         with self._lock:
-            row = self.conn.execute("SELECT * FROM native_release_profiles WHERE id = ?", (int(profile_id),)).fetchone()
-        return self._map_release_profile(row) if row else None
+            row = self.conn.execute("SELECT * FROM native_metadata_profiles WHERE id = ?", (int(profile_id),)).fetchone()
+        return self._map_metadata_profile(row) if row else None
 
-    def create_release_profile(self, name: str, primary_types: Any, secondary_types: Any) -> dict[str, Any]:
+    def create_metadata_profile(self, name: str, primary_types: Any, secondary_types: Any) -> dict[str, Any]:
         """Creates a profile; ValueError for a bad name/type list or a duplicate name."""
         clean_name = str(name or "").strip()
         if not clean_name:
@@ -6278,20 +6174,20 @@ class Database:
         with self._lock:
             try:
                 cur = self.conn.execute(
-                    "INSERT INTO native_release_profiles (name, primary_types, secondary_types) VALUES (?, ?, ?)",
+                    "INSERT INTO native_metadata_profiles (name, primary_types, secondary_types) VALUES (?, ?, ?)",
                     (clean_name, json.dumps(primary), json.dumps(secondary)),
                 )
                 self.conn.commit()
             except sqlite3.IntegrityError as exc:
                 self.conn.rollback()
-                raise ValueError(f"A release profile named {clean_name!r} already exists") from exc
+                raise ValueError(f"A metadata profile named {clean_name!r} already exists") from exc
             new_id = int(cur.lastrowid or 0)
-        created = self.get_release_profile(new_id)
+        created = self.get_metadata_profile(new_id)
         if created is None:
-            raise RuntimeError("Failed to create release profile")
+            raise RuntimeError("Failed to create metadata profile")
         return created
 
-    def update_release_profile(
+    def update_metadata_profile(
         self, profile_id: int, name: str, primary_types: Any, secondary_types: Any
     ) -> Optional[dict[str, Any]]:
         """Replaces a profile's fields; None when it does not exist, ValueError on bad input or duplicate name."""
@@ -6302,62 +6198,62 @@ class Database:
         with self._lock:
             try:
                 cur = self.conn.execute(
-                    "UPDATE native_release_profiles SET name = ?, primary_types = ?, secondary_types = ?, "
+                    "UPDATE native_metadata_profiles SET name = ?, primary_types = ?, secondary_types = ?, "
                     "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (clean_name, json.dumps(primary), json.dumps(secondary), int(profile_id)),
                 )
                 self.conn.commit()
             except sqlite3.IntegrityError as exc:
                 self.conn.rollback()
-                raise ValueError(f"A release profile named {clean_name!r} already exists") from exc
+                raise ValueError(f"A metadata profile named {clean_name!r} already exists") from exc
             if cur.rowcount <= 0:
                 return None
-        return self.get_release_profile(profile_id)
+        return self.get_metadata_profile(profile_id)
 
-    def delete_release_profile(self, profile_id: int) -> Optional[int]:
+    def delete_metadata_profile(self, profile_id: int) -> Optional[int]:
         """Deletes a profile, clearing it from artists and the add default; returns artists cleared (None = missing)."""
         with self._lock:
             try:
                 if self.conn.execute(
-                    "SELECT 1 FROM native_release_profiles WHERE id = ?", (int(profile_id),)
+                    "SELECT 1 FROM native_metadata_profiles WHERE id = ?", (int(profile_id),)
                 ).fetchone() is None:
                     return None
                 cleared = self.conn.execute(
-                    "UPDATE library_artists SET release_profile_id = NULL, updated_at = CURRENT_TIMESTAMP "
-                    "WHERE release_profile_id = ?",
+                    "UPDATE library_artists SET metadata_profile_id = NULL, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE metadata_profile_id = ?",
                     (int(profile_id),),
                 ).rowcount
                 self.conn.execute(
-                    "UPDATE media_management_settings SET add_release_profile_id = NULL WHERE add_release_profile_id = ?",
+                    "UPDATE media_management_settings SET add_metadata_profile_id = NULL WHERE add_metadata_profile_id = ?",
                     (int(profile_id),),
                 )
-                self.conn.execute("DELETE FROM native_release_profiles WHERE id = ?", (int(profile_id),))
+                self.conn.execute("DELETE FROM native_metadata_profiles WHERE id = ?", (int(profile_id),))
                 self.conn.commit()
             except sqlite3.Error:
                 self.conn.rollback()
-                logger.exception("delete_release_profile failed; transaction rolled back")
+                logger.exception("delete_metadata_profile failed; transaction rolled back")
                 raise
         return max(int(cleared), 0)
 
-    def release_profile_preview(
+    def metadata_profile_preview(
         self, artist_id: str, profile_id: Optional[int]
     ) -> Optional[dict[str, Any]]:
         """What assigning ``profile_id`` (None = clear) to an artist would do; None if the artist/profile is missing.
 
         Returns ``matching`` / ``total`` release-group counts under the profile plus ``would_change``: how many albums
         and tracks a recompute (``apply_monitor_to_albums``) would newly monitor / unmonitor against their CURRENT
-        flags. It evaluates the same SQL predicate as ``bulk_edit_library_artists`` with the artist's release profile
+        flags. It evaluates the same SQL predicate as ``bulk_edit_library_artists`` with the artist's metadata profile
         swapped for the candidate, and writes nothing.
         """
-        profile = self.get_release_profile(int(profile_id)) if profile_id is not None else None
+        profile = self.get_metadata_profile(int(profile_id)) if profile_id is not None else None
         if profile_id is not None and profile is None:
             return None
         if self.get_library_artist(artist_id) is None:
             return None
         album_expr = ALBUM_MONITORED_SQL.format(opt="ar.monitor_option", art_mon="ar.monitored")
-        # ``ar`` is the artist row with its release profile replaced, so the real predicate is reused unchanged.
+        # ``ar`` is the artist row with its metadata profile replaced, so the real predicate is reused unchanged.
         ar_sub = (
-            "(SELECT id, monitor_option, monitored, created_at, ? AS release_profile_id "
+            "(SELECT id, monitor_option, monitored, created_at, ? AS metadata_profile_id "
             "FROM library_artists WHERE id = ?) ar"
         )
         ar_params = [int(profile_id) if profile_id is not None else None, str(artist_id)]
@@ -6382,7 +6278,7 @@ class Database:
         matching = sum(
             1
             for r in rows
-            if album_in_release_profile(profile, r["album_type"], self._decode_type_list(r["secondary_types"]))
+            if album_in_metadata_profile(profile, r["album_type"], self._decode_type_list(r["secondary_types"]))
         )
         return {
             "matching": matching,
@@ -6396,7 +6292,7 @@ class Database:
         }
 
     def finish_pending_profile_recompute(self, artist_id: str) -> bool:
-        """Runs a deferred release-profile recompute once secondary types are known; True when it ran.
+        """Runs a deferred metadata-profile recompute once secondary types are known; True when it ran.
 
         The recompute and the ``pending_profile_recompute`` clear commit together in one transaction, and the check
         happens under the same lock hold, so a manual album/track edit (which clears the flag) can never be undone by
@@ -6429,7 +6325,7 @@ class Database:
         monitor_option: Optional[str] = None,
         quality_profile_id: Any = _UNSET,
         apply_monitor_to_albums: bool = False,
-        release_profile_id: Any = _UNSET,
+        metadata_profile_id: Any = _UNSET,
         recompute_when_option_changes: bool = False,
     ) -> dict[str, int]:
         """Set-based bulk edit of native artists (``artist_ids=None`` means every artist), in one transaction.
@@ -6438,7 +6334,7 @@ class Database:
         given. With ``apply_monitor_to_albums`` every album of the affected artists is recomputed from the artist's
         resulting option and monitored flag (see ``library_monitoring.ALBUM_MONITORED_SQL``; ``existing`` keeps
         albums having at least one track with a library file), and each album's tracks follow their album.
-        ``release_profile_id`` (None clears it) is the artist's optional release profile; an album outside it is not
+        ``metadata_profile_id`` (None clears it) is the artist's optional metadata profile; an album outside it is not
         auto-monitored by the recompute (files still win under ``existing``).
         ``recompute_when_option_changes`` (ignored when ``apply_monitor_to_albums``) recomputes only the artists whose
         ``monitor_option`` differs from the new ``monitor_option`` before this edit; the rest are just written.
@@ -6458,11 +6354,11 @@ class Database:
         if quality_profile_id is not self._UNSET:
             sets.append("quality_profile_id = ?")
             set_params.append(str(quality_profile_id) if quality_profile_id is not None else None)
-        if release_profile_id is not self._UNSET:
-            if release_profile_id is not None and self.get_release_profile(int(release_profile_id)) is None:
-                raise ValueError(f"Release profile {release_profile_id} does not exist")
-            sets.append("release_profile_id = ?")
-            set_params.append(int(release_profile_id) if release_profile_id is not None else None)
+        if metadata_profile_id is not self._UNSET:
+            if metadata_profile_id is not None and self.get_metadata_profile(int(metadata_profile_id)) is None:
+                raise ValueError(f"Metadata profile {metadata_profile_id} does not exist")
+            sets.append("metadata_profile_id = ?")
+            set_params.append(int(metadata_profile_id) if metadata_profile_id is not None else None)
         if not sets and not apply_monitor_to_albums:
             raise ValueError("No changes requested")
 
@@ -6806,7 +6702,7 @@ class Database:
             self.conn.commit()
 
     def set_pending_profile_recompute(self, artist_id: str, pending: bool) -> None:
-        """Sets or clears the deferred release-profile recompute flag of an artist."""
+        """Sets or clears the deferred metadata-profile recompute flag of an artist."""
         with self._lock:
             self.conn.execute(
                 "UPDATE library_artists SET pending_profile_recompute = ? WHERE id = ?",

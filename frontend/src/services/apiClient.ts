@@ -30,12 +30,34 @@ export interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
 /** Error carrying the HTTP status so callers can map specific failures. */
 export class ApiError extends Error {
   readonly status: number;
+  /** The server's raw `detail` (string, list of strings/validation items, or an object), for callers that need structure. */
+  readonly detail: unknown;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, detail?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.detail = detail;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Flattens FastAPI's `detail` (string, validation items, plain strings, or `{message}`) into one line. */
+function detailMessage(detail: unknown): string | null {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail.flatMap((item): string[] => {
+      if (typeof item === 'string') return [item];
+      if (isRecord(item) && typeof item.msg === 'string') return [item.msg];
+      return [];
+    });
+    return parts.length > 0 ? parts.join('; ') : null;
+  }
+  if (isRecord(detail) && typeof detail.message === 'string') return detail.message;
+  return null;
 }
 
 export async function apiRequest<T>(
@@ -103,16 +125,9 @@ export async function apiRequest<T>(
   const data: unknown = await response.json().catch(() => null);
 
   if (!response.ok) {
-    const errorData = data as { detail?: string | Array<{ msg: string }> } | null;
-    let detailMsg = `HTTP Error ${response.status}: ${response.statusText}`;
-    if (errorData?.detail) {
-      if (typeof errorData.detail === 'string') {
-        detailMsg = errorData.detail;
-      } else if (Array.isArray(errorData.detail)) {
-        detailMsg = errorData.detail.map((e) => e.msg).join('; ');
-      }
-    }
-    throw new ApiError(detailMsg, response.status);
+    const detail: unknown = isRecord(data) ? data.detail : undefined;
+    const detailMsg = detailMessage(detail) ?? `HTTP Error ${response.status}: ${response.statusText}`;
+    throw new ApiError(detailMsg, response.status, detail);
   }
 
   return data as T;

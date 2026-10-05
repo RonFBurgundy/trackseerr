@@ -138,8 +138,8 @@ export interface ArtistItem {
   path?: string | null;
   status?: string | null;
   added_at?: string | null;
-  /** Native artist detail only: the artist's release profile id, null when none. */
-  release_profile_id?: number | null;
+  /** Native artist detail only: the artist's metadata profile id, null when none. */
+  metadata_profile_id?: number | null;
   /** `lidarr` for records served live from Lidarr; absent or `native` otherwise. */
   source?: 'native' | 'lidarr';
 }
@@ -166,7 +166,7 @@ export interface AlbumItem {
   mb_release_id?: string;
   /** MusicBrainz secondary types; null/absent = unknown (treated as studio). */
   secondary_types?: string[] | null;
-  /** Native artist detail: false when outside the artist's release profile (informational only; never hidden). */
+  /** Native artist detail: false when outside the artist's metadata profile (informational only; never hidden). */
   in_profile?: boolean;
   source?: 'native' | 'lidarr';
 }
@@ -246,14 +246,6 @@ export interface BacklogStatus {
   total_missing: number;
   in_progress: number;
   last_run?: string;
-}
-
-export interface QualityProfile {
-  id: number;
-  name: string;
-  cutoff: number;
-  items?: Array<{ id: number; name: string; allowed: boolean; quality: string }>;
-  upgrade_allowed?: boolean;
 }
 
 export interface DownloadClientItem {
@@ -336,6 +328,8 @@ export interface GeneralSettings {
   music_directory?: string;
 }
 
+export type ImportBitrateCheck = 'off' | 'warn' | 'reject';
+
 export interface MediaManagementSettings {
   artist_folder_format: string;
   album_folder_format: string;
@@ -359,8 +353,10 @@ export interface MediaManagementSettings {
   scan_monitor_option?: MonitorOption;
   /** Monitoring applied to artists added manually (server default 'all'). */
   add_monitor_option?: MonitorOption;
-  /** Release profile given to artists added manually; null = none. */
-  add_release_profile_id?: number | null;
+  /** Metadata profile given to artists added manually; null = none. */
+  add_metadata_profile_id?: number | null;
+  /** Per-track bitrate check on import: warn (default) records out-of-range files, reject fails the import. */
+  import_bitrate_check?: ImportBitrateCheck;
 }
 
 export interface LidarrSettings {

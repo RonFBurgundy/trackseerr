@@ -5,7 +5,8 @@ import { StatusMessage } from '@/components/ui/FormField';
 import type { UseImportListEditorReturn } from '@/hooks/useImportListEditor';
 import type { ProviderMeta, ProviderField, ImportListItemOut } from '@/types/importLists';
 import { SECRET_MASK, SYNC_INTERVAL_OPTIONS } from '@/types/importLists';
-import type { LibraryManagerMode, QualityProfile } from '@/types/models';
+import type { LibraryManagerMode } from '@/types/models';
+import type { QualityProfile } from '@/types/qualityProfiles';
 import type { MonitorOption } from '@/types/monitoring';
 import { inputClass } from './formClasses';
 

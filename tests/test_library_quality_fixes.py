@@ -436,9 +436,9 @@ def test_fingerprinting_forces_the_fpcalc_backend(tmp_path, monkeypatch, fresh_f
 @pytest.mark.parametrize(
     "text, expected",
     [
-        ("AAC 128kbps", "Unknown"),
-        ("AAC 192kbps", "Unknown"),
-        ("M4A 160kbps", "Unknown"),
+        ("AAC 128kbps", "AAC (other)"),
+        ("AAC 192kbps", "AAC (other)"),
+        ("M4A 160kbps", "AAC (other)"),
         ("AAC 256kbps", "AAC 256"),
         ("AAC 320kbps", "AAC 256"),
         ("AAC", "AAC 256"),  # no bitrate stated: nothing to downgrade on

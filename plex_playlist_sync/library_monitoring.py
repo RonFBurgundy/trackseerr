@@ -20,7 +20,31 @@ DEFAULT_MONITOR_OPTION = "existing"
 # artist, or only record it.
 LIST_MONITOR_MODES: tuple[str, ...] = ("track", "album", "artist", "none")
 
-# Release profiles (native mode only, optional, off by default). They shape AUTOMATIC monitoring only: they never
+
+# Deprecated request-field aliases from before the "release profile" -> "metadata profile" rename (accepted for one
+# release; responses only ever use the new names).
+_DEPRECATED_PROFILE_KEYS = {
+    "release_profile_id": "metadata_profile_id",
+    "add_release_profile_id": "add_metadata_profile_id",
+}
+
+
+def accept_deprecated_profile_keys(data: Any) -> Any:
+    """Pydantic ``mode="before"`` hook: maps the old ``release_profile_id`` request keys onto the new names.
+
+    The new name wins when both are present. The mapped key lands in ``model_fields_set`` like any given field.
+    """
+    if not isinstance(data, dict):
+        return data
+    out = dict(data)
+    for old, new in _DEPRECATED_PROFILE_KEYS.items():
+        if old in out:
+            legacy = out.pop(old)
+            out.setdefault(new, legacy)
+    return out
+
+
+# Metadata profiles (native mode only, optional, off by default). They shape AUTOMATIC monitoring only: they never
 # hide a release from the catalog and never block a manual monitor or request.
 RELEASE_PRIMARY_TYPES: tuple[str, ...] = ("album", "ep", "single", "broadcast", "other")
 # MusicBrainz secondary types; ``studio`` is the pseudo type meaning "no secondary type at all".
@@ -65,7 +89,7 @@ def validate_list_monitor_mode(mode: object) -> str:
 def validate_release_types(
     primary_types: object, secondary_types: object
 ) -> tuple[list[str], list[str]]:
-    """Normalises and validates a release profile's type lists (lower-cased, de-duplicated, order kept).
+    """Normalises and validates a metadata profile's type lists (lower-cased, de-duplicated, order kept).
 
     Raises ValueError for non-lists, unknown types, or an empty primary or secondary list (such a profile would
     exclude every release).
@@ -87,7 +111,7 @@ def validate_release_types(
     return out[0], out[1]
 
 
-def album_in_release_profile(
+def album_in_metadata_profile(
     profile: Optional[Mapping[str, Any]],
     album_type: Optional[str],
     secondary_types: Optional[Sequence[str]] = None,
@@ -119,7 +143,7 @@ def normalize_secondary_types(raw: Any) -> Optional[list[str]]:
     """The single normaliser for MusicBrainz secondary types: lower-case, stripped, de-duplicated, order-kept list.
 
     ``None`` (unknown) and anything that is not a list/tuple/set stay ``None`` so inference applies; every writer of
-    ``library_albums.secondary_types`` and ``album_in_release_profile`` go through here.
+    ``library_albums.secondary_types`` and ``album_in_metadata_profile`` go through here.
     """
     if raw is None or isinstance(raw, (str, bytes)) or not isinstance(raw, (list, tuple, set, frozenset)):
         return None
@@ -195,7 +219,7 @@ def album_monitored_for_option(
     profile: Optional[Mapping[str, Any]] = None,
     secondary_types: Optional[Sequence[str]] = None,
 ) -> bool:
-    """Decides an album's monitored flag from its artist's monitor option and optional release profile.
+    """Decides an album's monitored flag from its artist's monitor option and optional metadata profile.
 
     ``existing`` ignores the profile (files win: the user owns those releases) and ``none`` is always False. For
     every other option an album outside ``profile`` is not auto-monitored. ``profile=None`` is the original
@@ -206,7 +230,7 @@ def album_monitored_for_option(
         return False
     if option == "existing":
         return bool(has_files)
-    if not album_in_release_profile(profile, album_type, secondary_types):
+    if not album_in_metadata_profile(profile, album_type, secondary_types):
         return False
     if option == "all":
         return True
@@ -266,11 +290,11 @@ _SECONDARY_JSON_SQL = (
     f"WHEN {ALBUM_TYPE_SQL} = 'live' THEN '[\"live\"]' "
     f"WHEN {ALBUM_TYPE_SQL} = 'compilation' THEN '[\"compilation\"]' ELSE '[]' END"
 )
-# SQL twin of album_in_release_profile; ``ar.release_profile_id`` NULL (or pointing at a deleted profile) = no profile.
+# SQL twin of album_in_metadata_profile; ``ar.metadata_profile_id`` NULL (or pointing at a deleted profile) = no profile.
 IN_PROFILE_SQL = (
-    "(ar.release_profile_id IS NULL "
-    "OR NOT EXISTS (SELECT 1 FROM native_release_profiles rp0 WHERE rp0.id = ar.release_profile_id) "
-    "OR EXISTS (SELECT 1 FROM native_release_profiles rp WHERE rp.id = ar.release_profile_id "
+    "(ar.metadata_profile_id IS NULL "
+    "OR NOT EXISTS (SELECT 1 FROM native_metadata_profiles rp0 WHERE rp0.id = ar.metadata_profile_id) "
+    "OR EXISTS (SELECT 1 FROM native_metadata_profiles rp WHERE rp.id = ar.metadata_profile_id "
     f"AND EXISTS (SELECT 1 FROM json_each(rp.primary_types) pt WHERE pt.value = ({_PRIMARY_SQL})) "
     f"AND NOT EXISTS (SELECT 1 FROM json_each({_SECONDARY_JSON_SQL}) st "
     "WHERE st.value NOT IN (SELECT value FROM json_each(rp.secondary_types))) "

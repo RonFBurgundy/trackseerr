@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import shutil
+import sqlite3
 import threading
 import time
 import urllib.parse
@@ -26,6 +27,7 @@ from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result
+from plex_playlist_sync.import_quality_check import CHECK_OFF, check_files, normalize_check_mode
 from plex_playlist_sync.library_monitoring import NATIVE_MONITOR_OPTIONS
 from plex_playlist_sync.library_manager import ModeChanged, run_guarded
 from plex_playlist_sync.library import (
@@ -54,6 +56,29 @@ from plex_playlist_sync.security import is_safe_service_url
 from plex_playlist_sync.storage import Database, clean_library_name
 
 logger = logging.getLogger(__name__)
+
+
+def _quality_from_codec(meta: dict[str, Any]) -> Optional[str]:
+    """Quality id for a file whose title said nothing, from its mutagen codec/bitrate (None when unrecognised)."""
+    codec = str(meta.get("codec", "")).upper()
+    bits = meta.get("bits_per_sample") or 16
+    raw_br = meta.get("bitrate") or 320
+    kbps = raw_br / 1000 if raw_br > 1000 else raw_br
+    if codec == "FLAC":
+        return "FLAC 24bit" if bits > 16 else "FLAC 16bit"
+    if codec == "ALAC":
+        return "ALAC"
+    if codec in ("WAV", "AIFF"):
+        return "WAV/AIFF"
+    if codec == "OPUS":
+        return "Opus"
+    if codec in ("VORBIS", "OGG"):
+        return "OGG Vorbis"
+    if codec == "MP3":
+        return "MP3 320" if kbps >= 310 else "MP3 192"
+    if codec in ("AAC", "M4A"):
+        return "AAC 256" if kbps >= 240 or not meta.get("bitrate") else "AAC (other)"
+    return None
 
 
 def _scan_monitor_option(media_settings: dict[str, Any]) -> str:
@@ -770,6 +795,71 @@ class AcquisitionWorker:
                     stats["failed"] += 1
                     continue
 
+                # Per-track bitrate check (media management: import_bitrate_check = off | warn | reject).
+                check_mode = normalize_check_mode(media_settings.get("import_bitrate_check"))
+                if check_mode != CHECK_OFF:
+                    try:
+                        definitions = {str(d["quality"]): d for d in db.list_quality_definitions()}
+                        check = check_files(audio_files, check_mode, definitions)
+                    except Exception as chk_err:  # noqa: BLE001 - the check is advisory; it must never crash the worker loop
+                        logger.warning(
+                            "Import bitrate check failed for download %s: %s: %s",
+                            download_id,
+                            type(chk_err).__name__,
+                            chk_err,
+                        )
+                        check = None
+                    if check is not None and (check.out_of_range or check.skipped):
+                        summary = check.reason()
+                        try:
+                            db.record_event(
+                                "import_bitrate_check",
+                                f"Bitrate check ({check_mode}) for '{item.get('title', '')}': {summary}",
+                                source="AcquisitionWorker",
+                                severity="error" if check.failed else "warning",
+                                details={
+                                    "download_id": download_id,
+                                    "mode": check_mode,
+                                    "checked": check.checked,
+                                    "out_of_range": [
+                                        {
+                                            "file": f.path,
+                                            "quality": f.quality,
+                                            "kbps": round(f.kbps, 1),
+                                            "min_kbps": f.min_kbps,
+                                            "max_kbps": f.max_kbps,
+                                            "severity": f.severity,
+                                            "detail": f.detail,
+                                        }
+                                        for f in check.out_of_range
+                                    ],
+                                    "skipped": [{"file": p, "reason": r} for p, r in check.skipped],
+                                },
+                            )
+                        except sqlite3.Error as ev_err:
+                            logger.warning("Failed to record import_bitrate_check event: %s", ev_err)
+                        logger.warning("Import bitrate check (%s) for download %s: %s", check_mode, download_id, summary)
+                    if check is not None and check.failed:
+                        err_msg = f"Bitrate check failed: {check.reason()}"
+                        db.update_download_status(
+                            download_id,
+                            status=DownloadStatus.FAILED.value,
+                            error_message=err_msg,
+                        )
+                        _notify_failed(err_msg)
+                        try:
+                            db.add_to_blocklist(
+                                source_title=item.get("title", ""),
+                                artist=item.get("artist"),
+                                release_guid=item.get("id"),
+                                info_hash=item.get("download_hash"),
+                                reason=err_msg,
+                            )
+                        except Exception as bl_err:
+                            logger.warning("Failed to add bitrate-rejected download to blocklist: %s", bl_err)
+                        stats["failed"] += 1
+                        continue
+
                 # Organize and move each audio file
                 imported_paths: list[str] = []
                 root_folder = media_settings.get("root_folder_path") or "/music"
@@ -1128,22 +1218,7 @@ class AcquisitionWorker:
 
                             parsed = parse_release_title(item.get("title") or placed_p.name)
                             if parsed.quality == "Unknown":
-                                codec_name = str(f_meta.get("codec", "")).upper()
-                                if codec_name == "FLAC":
-                                    parsed.quality = (
-                                        "FLAC 24bit"
-                                        if (f_meta.get("bits_per_sample") or 16) > 16
-                                        else "FLAC 16bit"
-                                    )
-                                elif codec_name == "MP3":
-                                    br = f_meta.get("bitrate") or 320
-                                    parsed.quality = (
-                                        "MP3 320"
-                                        if br >= 310 or br >= 300000
-                                        else "MP3 192"
-                                    )
-                                elif codec_name in ("AAC", "M4A"):
-                                    parsed.quality = "AAC 256"
+                                parsed.quality = _quality_from_codec(f_meta) or parsed.quality
 
                             file_size = (
                                 placed_p.stat().st_size
@@ -1199,14 +1274,7 @@ class AcquisitionWorker:
                     try:
                         parsed = parse_release_title(item.get("title") or "")
                         if parsed.quality == "Unknown" and last_metadata:
-                            codec = str(last_metadata.get("codec", "")).upper()
-                            if codec == "FLAC":
-                                parsed.quality = "FLAC 24bit" if (last_metadata.get("bits_per_sample") or 16) > 16 else "FLAC 16bit"
-                            elif codec == "MP3":
-                                br = last_metadata.get("bitrate") or 320
-                                parsed.quality = "MP3 320" if br >= 310 or br >= 300000 else "MP3 192"
-                            elif codec in ("AAC", "M4A"):
-                                parsed.quality = "AAC 256"
+                            parsed.quality = _quality_from_codec(last_metadata) or parsed.quality
 
                         profile_dict = None
                         if req and req.get("quality_profile_id"):

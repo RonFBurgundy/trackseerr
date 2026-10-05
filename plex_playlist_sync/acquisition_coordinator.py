@@ -25,10 +25,28 @@ from plex_playlist_sync.models import (
     QualityProfileItem,
 )
 from plex_playlist_sync.notifications import notification_dispatcher
+from plex_playlist_sync.decision_engine import (
+    DurationInfo,
+    candidate_context,
+    evaluate_prepared,
+    prepare_profile,
+    rank_key,
+    resolve_durations,
+)
+from plex_playlist_sync import delay_gate
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
+from plex_playlist_sync.quality_defaults import entry_qualities, is_v2_items, normalize_entries
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
+
+
+def candidate_rank(
+    cand: AcquisitionSearchResult, res: EvaluationResult, preferred_protocol: Optional[str] = None
+) -> tuple[Any, ...]:
+    """``rank_key`` for a search result (seeders only count for torrents)."""
+    is_torrent = cand.protocol == "torrent" or cand.source in ("torznab", "torrent") or bool(cand.magnet_url)
+    return rank_key(cand.protocol, int(cand.seeders or 0) if is_torrent else 0, res, preferred_protocol)
 
 
 _BTIH_RE = re.compile(r"urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})", re.IGNORECASE)
@@ -60,18 +78,27 @@ def _to_quality_profile(data: Union[QualityProfile, dict[str, Any]]) -> QualityP
     if isinstance(data, QualityProfile):
         return data
 
+    raw_items = data.get("items", []) or []
+    entries = normalize_entries(raw_items) if is_v2_items(raw_items) else []
     items: list[QualityProfileItem] = []
-    for item in data.get("items", []):
-        if isinstance(item, QualityProfileItem):
-            items.append(item)
-        elif isinstance(item, dict):
-            items.append(
-                QualityProfileItem(
-                    quality=str(item.get("quality", "Unknown")),
-                    allowed=bool(item.get("allowed", True)),
-                    weight=int(item.get("weight", 100)),
+    if entries:
+        # v2 entries carry no weights; derive descending ones so legacy readers keep a consistent order.
+        flat = [q for e in entries for q in entry_qualities(e)]
+        allowed = {q: bool(e.get("allowed", True)) for e in entries for q in entry_qualities(e)}
+        for idx, quality in enumerate(flat):
+            items.append(QualityProfileItem(quality=quality, allowed=allowed[quality], weight=(len(flat) - idx) * 100))
+    else:
+        for item in raw_items:
+            if isinstance(item, QualityProfileItem):
+                items.append(item)
+            elif isinstance(item, dict):
+                items.append(
+                    QualityProfileItem(
+                        quality=str(item.get("quality", "Unknown")),
+                        allowed=bool(item.get("allowed", True)),
+                        weight=int(item.get("weight", 100)),
+                    )
                 )
-            )
 
     return QualityProfile(
         id=str(data.get("id", "")),
@@ -91,7 +118,32 @@ def _to_quality_profile(data: Union[QualityProfile, dict[str, Any]]) -> QualityP
         min_score=(
             int(data["min_score"]) if data.get("min_score") is not None else None
         ),
+        upgrade_allowed=bool(data.get("upgrade_allowed", True)),
+        entries=entries,
+        format_items=list(data.get("format_items") or []),
+        min_format_score=int(data.get("min_format_score") or 0),
+        cutoff_format_score=int(data.get("cutoff_format_score") or 0),
+        min_upgrade_format_score=int(data.get("min_upgrade_format_score") or 1),
+        catalog=dict(data.get("catalog") or {}),
     )
+
+
+def resolve_duration(
+    db: Database, album_id: Optional[str], track_id: Optional[str], item_type: Optional[str]
+) -> Optional[DurationInfo]:
+    """Duration a release should be measured against: the track for track searches, the album otherwise."""
+    try:
+        if item_type == "track":
+            if track_id:
+                seconds = db.get_track_duration(str(track_id))
+                return DurationInfo(seconds, estimated=False, source="tracks") if seconds else None
+            return None
+        if album_id:
+            durations, total = db.get_album_track_durations(str(album_id))
+            return resolve_durations(durations, total)
+    except sqlite3.Error as e:
+        logger.warning("Could not resolve release duration for album %s / track %s: %s", album_id, track_id, e)
+    return None
 
 
 class AcquisitionCoordinator:
@@ -127,6 +179,12 @@ class AcquisitionCoordinator:
                 driver = get_indexer_driver(idx_cfg)
                 res = driver.search(artist=artist, title=title, album=album)
                 if res:
+                    for r in res:
+                        if isinstance(r.extra, dict) or r.extra is None:
+                            extra = dict(r.extra or {})
+                            extra.setdefault("indexer_id", idx_cfg.get("id"))
+                            extra.setdefault("indexer_name", idx_name)
+                            r.extra = extra
                     all_results.extend(res)
             except Exception as e:
                 logger.warning("Error searching indexer '%s' (%s): %s", idx_name, idx_cfg.get("host_url"), e)
@@ -173,15 +231,23 @@ class AcquisitionCoordinator:
         candidates: list[AcquisitionSearchResult],
         profile: Union[QualityProfile, dict[str, Any]],
         db: Optional[Database] = None,
+        album_id: Optional[str] = None,
+        track_id: Optional[str] = None,
+        item_type: Optional[str] = None,
+        preferred_protocol: Optional[str] = None,
     ) -> list[tuple[AcquisitionSearchResult, EvaluationResult]]:
-        """Evaluates candidates against QualityProfile and sorts by score descending.
+        """Evaluates candidates against the QualityProfile and ranks the acceptable ones.
 
-        Ties for torrent releases are broken using seeder counts.
+        Order: quality > custom-format score > distance to the preferred kbps > protocol preference > seeders.
+        ``preferred_protocol`` (from the applicable delay profile) puts that protocol first in the preference.
+        ``album_id`` / ``track_id`` give the duration the quality-definition kbps limits are measured against.
         """
         if not candidates:
             return []
 
         prof = _to_quality_profile(profile)
+        prepared = prepare_profile(prof)
+        duration = resolve_duration(db, album_id, track_id, item_type) if db is not None else None
         ranked: list[tuple[AcquisitionSearchResult, EvaluationResult]] = []
 
         for candidate in candidates:
@@ -196,21 +262,17 @@ class AcquisitionCoordinator:
                     continue
 
             parsed = parse_release_title(candidate.title)
-            eval_res = evaluate_release(
-                release=parsed,
-                profile=prof,
-                size_bytes=candidate.size_bytes if candidate.size_bytes > 0 else None,
+            eval_res = evaluate_prepared(
+                parsed,
+                prepared,
+                candidate.size_bytes if candidate.size_bytes > 0 else None,
+                duration=duration,
+                **candidate_context(candidate),
             )
             if eval_res.is_acceptable:
                 ranked.append((candidate, eval_res))
 
-        def sort_key(item: tuple[AcquisitionSearchResult, EvaluationResult]) -> tuple[int, int]:
-            cand, res = item
-            is_torrent = cand.protocol == "torrent" or cand.source in ("torznab", "torrent") or bool(cand.magnet_url)
-            seeders = int(cand.seeders or 0) if is_torrent else 0
-            return (res.score, seeders)
-
-        ranked.sort(key=sort_key, reverse=True)
+        ranked.sort(key=lambda item: candidate_rank(item[0], item[1], preferred_protocol), reverse=True)
         return ranked
 
     def find_client_for_protocol(
@@ -266,8 +328,13 @@ class AcquisitionCoordinator:
         min_score: Optional[int] = None,
         track_id: Optional[str] = None,
         album_id: Optional[str] = None,
+        bypass_delay: bool = False,
     ) -> dict[str, Any]:
         """Searches indexers, ranks releases against the Quality Profile, and dispatches grab.
+
+        The best release goes through the delay-profile gate: when its protocol has a delay it is parked in
+        ``pending_releases`` (result ``{"success": False, "delayed": True, ...}``) unless a bypass applies or
+        ``bypass_delay`` is set.
 
         Records active download transfer in the database upon successful dispatch. Runs under the native
         library-manager guard: if Lidarr manages the library it does nothing and reports ``mode_changed``.
@@ -277,7 +344,8 @@ class AcquisitionCoordinator:
         try:
             with work_guard(db, MODE_NATIVE):
                 return self._search_and_grab(
-                    artist, title, album, item_type, request_id, db, quality_profile_id, min_score, track_id, album_id
+                    artist, title, album, item_type, request_id, db, quality_profile_id, min_score, track_id, album_id,
+                    bypass_delay,
                 )
         except ModeChanged:
             logger.info("Native grab skipped for '%s - %s': library manager is Lidarr", artist, title)
@@ -299,6 +367,7 @@ class AcquisitionCoordinator:
         min_score: Optional[int],
         track_id: Optional[str],
         album_id: Optional[str],
+        bypass_delay: bool = False,
     ) -> dict[str, Any]:
 
         # 1. Retrieve quality profile
@@ -324,8 +393,18 @@ class AcquisitionCoordinator:
         # 2. Search indexers & slskd
         candidates = self.search_all_indexers(artist=artist, title=title, album=album, db=db)
 
-        # 3. Evaluate and rank
-        ranked = self.evaluate_and_rank(candidates=candidates, profile=profile, db=db)
+        # 3. Evaluate and rank (protocol preference comes from the delay profile that applies to this artist)
+        delay_profile = delay_gate.resolve_delay_profile(db, artist)
+        preferred_protocol = delay_profile.get("preferred_protocol")
+        ranked = self.evaluate_and_rank(
+            candidates=candidates,
+            profile=profile,
+            db=db,
+            album_id=album_id,
+            track_id=track_id,
+            item_type=item_type,
+            preferred_protocol=preferred_protocol,
+        )
         if min_score is not None:
             ranked = [item for item in ranked if item[1].score > min_score]
         if not ranked:
@@ -341,6 +420,74 @@ class AcquisitionCoordinator:
 
         top_candidate, eval_res = ranked[0]
 
+        # 3b. Delay gate (manual grabs never come through here with a delay: they pass bypass_delay or use /grab)
+        if not bypass_delay:
+            decision = delay_gate.apply_gate(
+                db,
+                profile=delay_profile,
+                top_tier=delay_gate.highest_allowed_tier(prepare_profile(profile)),
+                candidate=top_candidate,
+                result=eval_res,
+                rank=candidate_rank(top_candidate, eval_res, preferred_protocol),
+                artist=artist,
+                item_title=title,
+                album=album,
+                item_type=item_type,
+                request_id=request_id,
+                album_id=album_id,
+                track_id=track_id,
+                quality_profile_id=quality_profile_id,
+                upgrade_floor=min_score,
+            )
+            if not decision.grab:
+                pending = decision.pending or {}
+                logger.info("Holding '%s' for '%s - %s': %s", top_candidate.title, artist, title, decision.reason)
+                return {
+                    "success": False,
+                    "delayed": True,
+                    "pending_id": pending.get("id"),
+                    "release_at": pending.get("release_at"),
+                    "message": f"{decision.reason}; releases at {pending.get('release_at')}",
+                }
+
+        claimed = decision.claimed if not bypass_delay else None
+        grabbed = False
+        try:
+            result = self.grab_candidate(
+                db,
+                top_candidate,
+                parsed_quality=eval_res.parsed_quality,
+                score=eval_res.score,
+                artist=artist,
+                album=album,
+                item_type=item_type,
+                request_id=request_id,
+                track_id=track_id,
+                album_id=album_id,
+                upgrade=min_score is not None,
+            )
+            grabbed = bool(result.get("success"))
+            return result
+        finally:
+            if claimed is not None and not grabbed:  # the gate claimed the parked row; a failed grab must not lose it
+                db.restore_pending_release(claimed)
+
+    def grab_candidate(
+        self,
+        db: Database,
+        top_candidate: AcquisitionSearchResult,
+        *,
+        parsed_quality: Optional[str],
+        score: int,
+        artist: str,
+        album: Optional[str],
+        item_type: str,
+        request_id: Optional[str],
+        track_id: Optional[str],
+        album_id: Optional[str],
+        upgrade: bool = False,
+    ) -> dict[str, Any]:
+        """Dispatches a chosen candidate to its protocol's client and records the download (no delay gate)."""
         # 4. Find appropriate client for candidate's protocol
         client = self.find_client_for_protocol(protocol=top_candidate.protocol, db=db)
         if not client:
@@ -404,13 +551,17 @@ class AcquisitionCoordinator:
             album_id=album_id,
         )
         db.create_active_download(active_dl)
+        try:  # any grab of the item supersedes whatever is parked for it, under any of its identifiers
+            db.clear_pending_for_item(request_id, album_id, track_id)
+        except sqlite3.Error as clear_err:
+            logger.warning("Failed to clear pending releases for '%s': %s", top_candidate.title, type(clear_err).__name__)
         try:
             db.record_download_grab(
                 download_id,
                 indexer=str((top_candidate.extra or {}).get("indexer_name") or top_candidate.source or "") or None,
-                quality=eval_res.parsed_quality,
+                quality=parsed_quality,
                 protocol=top_candidate.protocol or None,
-                upgrade=min_score is not None,
+                upgrade=upgrade,
             )
         except sqlite3.Error as hist_err:
             logger.warning("Failed to record grab history for %s: %s", download_id, type(hist_err).__name__)
@@ -461,7 +612,7 @@ class AcquisitionCoordinator:
             top_candidate.title,
             client.get("name"),
             download_id,
-            eval_res.score,
+            score,
         )
 
         return {
@@ -470,7 +621,7 @@ class AcquisitionCoordinator:
             "download_hash": download_hash,
             "release": top_candidate.title,
             "client": client["name"],
-            "score": eval_res.score,
+            "score": score,
         }
 
 

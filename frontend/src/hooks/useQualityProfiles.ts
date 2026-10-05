@@ -1,42 +1,70 @@
-import { useEffect, useState } from 'react';
-import type { QualityProfile } from '@/types/models';
-import { getQualityProfiles } from '@/services/settingsService';
+import { useCallback } from 'react';
+import type { QualityProfile, QualityProfileInput } from '@/types/qualityProfiles';
+import {
+  copyQualityProfile,
+  deleteQualityProfile,
+  listQualityProfiles,
+  saveQualityProfile,
+  setDefaultQualityProfile,
+} from '@/services/qualityProfileService';
 import { errorMessage } from '@/services/apiClient';
+import { useLoadedList } from './useLoadedList';
 
 export interface UseQualityProfilesReturn {
   profiles: QualityProfile[];
   loading: boolean;
+  /** Creates (no id) or updates a profile; resolves an inline error message, or null on success. */
+  save: (input: QualityProfileInput) => Promise<string | null>;
+  copy: (id: string) => Promise<void>;
+  remove: (id: string) => Promise<void>;
+  makeDefault: (id: string) => Promise<void>;
+  reload: () => Promise<void>;
 }
 
-/** Quality profile list, fetched once while `enabled` first turns true. */
-export function useQualityProfiles(
-  enabled: boolean,
-  onError: (msg: string, tone: 'error') => void
-): UseQualityProfilesReturn {
-  const [profiles, setProfiles] = useState<QualityProfile[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [loaded, setLoaded] = useState<boolean>(false);
+type Toast = (msg: string, tone?: 'ok' | 'error') => void;
 
-  useEffect(() => {
-    if (!enabled || loaded) return;
-    let cancelled = false;
-    setLoading(true);
-    getQualityProfiles()
-      .then((list) => {
-        if (cancelled) return;
-        setProfiles(list);
-        setLoaded(true);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) onError(errorMessage(err, 'Failed to load quality profiles'), 'error');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, loaded, onError]);
+/** Native quality profiles (v2 shape) and their CRUD actions. */
+export function useQualityProfiles(enabled: boolean, onToast: Toast): UseQualityProfilesReturn {
+  const { items, loading, reload } = useLoadedList<QualityProfile>(
+    enabled,
+    listQualityProfiles,
+    'Failed to load quality profiles',
+    onToast
+  );
 
-  return { profiles, loading };
+  const save = useCallback(
+    async (input: QualityProfileInput): Promise<string | null> => {
+      try {
+        await saveQualityProfile(input);
+        await reload();
+        onToast(input.id ? 'Quality profile saved' : 'Quality profile created');
+        return null;
+      } catch (err: unknown) {
+        return errorMessage(err, 'Failed to save quality profile');
+      }
+    },
+    [reload, onToast]
+  );
+
+  const run = useCallback(
+    async (action: () => Promise<unknown>, done: string, failed: string): Promise<void> => {
+      try {
+        await action();
+        await reload();
+        onToast(done);
+      } catch (err: unknown) {
+        onToast(errorMessage(err, failed), 'error');
+      }
+    },
+    [reload, onToast]
+  );
+
+  const copy = useCallback((id: string) => run(() => copyQualityProfile(id), 'Profile copied', 'Failed to copy profile'), [run]);
+  const remove = useCallback((id: string) => run(() => deleteQualityProfile(id), 'Profile deleted', 'Failed to delete profile'), [run]);
+  const makeDefault = useCallback(
+    (id: string) => run(() => setDefaultQualityProfile(id), 'Default profile changed', 'Failed to set default profile'),
+    [run]
+  );
+
+  return { profiles: items, loading, save, copy, remove, makeDefault, reload };
 }

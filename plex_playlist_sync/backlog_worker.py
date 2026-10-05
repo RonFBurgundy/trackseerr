@@ -15,8 +15,10 @@ import time
 from typing import Any, Optional
 import uuid
 
+from plex_playlist_sync import delay_gate
 from plex_playlist_sync.acquisition_coordinator import (
     acquisition_coordinator,
+    candidate_rank,
     _to_quality_profile,
 )
 from plex_playlist_sync.clients.acquisition import (
@@ -28,9 +30,11 @@ from plex_playlist_sync.models import (
     ActiveDownload,
     DownloadStatus,
     NotificationEvent,
+    QualityProfile,
     RequestStatus,
 )
 from plex_playlist_sync.notifications import notification_dispatcher
+from plex_playlist_sync.decision_engine import prepare_profile, upgrade_floor
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.job_tracker import tracked
@@ -38,6 +42,29 @@ from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_gu
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
+
+
+def _current_floor(
+    db: Database,
+    prof: QualityProfile,
+    current_quality: str,
+    *,
+    request_id: Optional[str] = None,
+    track_id: Optional[str] = None,
+    album_id: Optional[str] = None,
+) -> int:
+    """Upgrade floor for the file currently held. The current file is scored from the release title it was imported
+    from (download history) so its format score is real; when that title is unknown (or no longer matches the stored
+    quality) only a better quality tier counts as an upgrade, so a same-tier candidate is never re-grabbed in a loop."""
+    bare = parse_release_title(current_quality)
+    if bare.quality == "Unknown":
+        bare.quality = current_quality
+    title = db.get_imported_release_title(request_id=request_id, track_id=track_id, album_id=album_id)
+    if title:
+        titled = parse_release_title(title)
+        if titled.quality in {current_quality, bare.quality}:
+            return upgrade_floor(evaluate_release(titled, prof), prof)
+    return upgrade_floor(evaluate_release(bare, prof), prof, title_known=False)
 
 
 def _matches_request(candidate: AcquisitionSearchResult, req: dict[str, Any]) -> bool:
@@ -273,10 +300,13 @@ class WantedBacklogWorker:
                         profile_dict = db.get_quality_profile(qp_id) if qp_id else db.get_default_quality_profile()
                         min_score = 0
                         if profile_dict:
-                            cur_p = parse_release_title(t["current_quality"])
-                            if cur_p.quality == "Unknown":
-                                cur_p.quality = t["current_quality"]
-                            min_score = evaluate_release(cur_p, _to_quality_profile(profile_dict)).score
+                            min_score = _current_floor(
+                                db,
+                                _to_quality_profile(profile_dict),
+                                t["current_quality"],
+                                track_id=t.get("track_id"),
+                                album_id=t.get("album_id"),
+                            )
                     res = acquisition_coordinator.search_and_grab(
                         artist=str(t["artist"]).strip(),
                         title=str(t["title"]).strip(),
@@ -424,10 +454,7 @@ class WantedBacklogWorker:
                     prof = _to_quality_profile(profile_dict)
                     cur_q = r.get("current_quality")
                     if cur_q:
-                        cur_p = parse_release_title(cur_q)
-                        if cur_p.quality == "Unknown":
-                            cur_p.quality = cur_q
-                        min_score = evaluate_release(cur_p, prof).score
+                        min_score = _current_floor(db, prof, cur_q, request_id=r.get("id"))
                     else:
                         min_score = 0
             items_to_search.append(
@@ -510,10 +537,9 @@ class WantedBacklogWorker:
                             prof = _to_quality_profile(profile_dict)
                             cur_q = t.get("quality_name")
                             if cur_q:
-                                cur_p = parse_release_title(cur_q)
-                                if cur_p.quality == "Unknown":
-                                    cur_p.quality = cur_q
-                                min_score = evaluate_release(cur_p, prof).score
+                                min_score = _current_floor(
+                                    db, prof, cur_q, track_id=t.get("track_id"), album_id=t.get("album_id")
+                                )
 
                         items_to_search.append(
                             (
@@ -842,10 +868,9 @@ class RSSSyncWorker:
                         current_quality = matched_req.get("current_quality")
                         current_score = 0
                         if current_quality:
-                            cur_p = parse_release_title(current_quality)
-                            if cur_p.quality == "Unknown":
-                                cur_p.quality = current_quality
-                            current_score = evaluate_release(cur_p, req_profile).score
+                            current_score = _current_floor(
+                                db, req_profile, current_quality, request_id=matched_req.get("id")
+                            )
 
                         if eval_res.score <= current_score:
                             logger.debug(
@@ -857,11 +882,40 @@ class RSSSyncWorker:
                             )
                             continue
 
+                # Delay gate: park the best release of the item until its protocol delay has elapsed
+                claimed_pending = None
+                if eval_res is not None and req_profile is not None:
+                    delay_profile = delay_gate.resolve_delay_profile(db, matched_req.get("artist") or candidate.artist)
+                    decision = delay_gate.apply_gate(
+                        db,
+                        profile=delay_profile,
+                        top_tier=delay_gate.highest_allowed_tier(prepare_profile(req_profile)),
+                        candidate=candidate,
+                        result=eval_res,
+                        rank=candidate_rank(candidate, eval_res, delay_profile.get("preferred_protocol")),
+                        artist=str(matched_req.get("artist") or candidate.artist or ""),
+                        item_title=str(matched_req.get("title") or ""),
+                        album=matched_req.get("album"),
+                        item_type=str(matched_req.get("item_type") or "track"),
+                        request_id=str(matched_req["id"]),
+                        album_id=None,
+                        track_id=None,
+                        quality_profile_id=matched_req.get("quality_profile_id"),
+                    )
+                    if not decision.grab:
+                        logger.info(
+                            "RSS held '%s' for request %s: %s", candidate.title, matched_req["id"], decision.reason
+                        )
+                        continue
+                    claimed_pending = decision.claimed
+
                 # Find download client for protocol
                 client = acquisition_coordinator.find_client_for_protocol(
                     protocol=candidate.protocol, db=db
                 )
                 if not client:
+                    if claimed_pending:
+                        db.restore_pending_release(claimed_pending)
                     logger.warning(
                         "RSS matched '%s' for request %s but no client available for protocol %s",
                         candidate.title,
@@ -882,6 +936,8 @@ class RSSSyncWorker:
                         e,
                     )
                     errors_count += 1
+                    if claimed_pending:
+                        db.restore_pending_release(claimed_pending)
                     continue
 
                 # Record active download in database
@@ -912,6 +968,7 @@ class RSSSyncWorker:
                         )
                     except sqlite3.Error as hist_err:
                         logger.warning("Failed to record grab history for %s: %s", download_id, type(hist_err).__name__)
+                    db.clear_pending_for_item(str(matched_req["id"]))
                     db.update_request_status(matched_req["id"], RequestStatus.PROCESSING)
                     active_req_ids.add(matched_req["id"])
                     grabs_triggered += 1

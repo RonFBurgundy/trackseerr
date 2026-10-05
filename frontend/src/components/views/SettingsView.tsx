@@ -12,8 +12,6 @@ import {
   LibraryManagerSwitch,
   GeneralPanel,
   MediaFoldersPanel,
-  ProfilesPanel,
-  ReleaseProfilesPanel,
   ClientsPanel,
   IndexersPanel,
   LidarrPanel,
@@ -24,6 +22,7 @@ import {
   MEDIA_MANAGEMENT_TABS,
 } from '@/components/settings';
 import type { ManagedExternally } from '@/components/settings';
+import { CustomFormatsPage, ProfilesPage, QualityDefinitionsPanel } from '@/components/profiles';
 import { SystemPage } from '@/components/system';
 import type { UseAccountReturn } from '@/hooks/useAccount';
 import { settingsRouteFor } from '@/hooks/useAppRoute';
@@ -182,6 +181,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </InactiveGate>
       )}
 
+      {!data.isLoading && activeTab === 'quality' && isAdmin && (
+        <InactiveGate
+          active={mediaActive}
+          activeManager={mode}
+          onRequestSwitch={requestSwitch}
+          managedExternally={managedByLidarr}
+        >
+          <QualityDefinitionsPanel enabled={mediaActive} onToast={showToast} />
+        </InactiveGate>
+      )}
+
       {!data.isLoading && activeTab === 'profiles' && isAdmin && (
         <InactiveGate
           active={mediaActive}
@@ -189,23 +199,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           onRequestSwitch={requestSwitch}
           managedExternally={managedByLidarr}
         >
-          <ProfilesPanel
-            profiles={data.profiles}
-            onProfilesChange={data.setProfiles}
-            reload={data.reload}
+          <ProfilesPage
+            enabled={mediaActive}
+            media={data.media}
+            onMediaChange={data.setMedia}
+            indexers={data.indexers}
             onToast={showToast}
           />
         </InactiveGate>
       )}
 
-      {!data.isLoading && activeTab === 'release-profiles' && isAdmin && (
+      {!data.isLoading && activeTab === 'custom-formats' && isAdmin && (
         <InactiveGate
           active={mediaActive}
           activeManager={mode}
           onRequestSwitch={requestSwitch}
           managedExternally={managedByLidarr}
         >
-          <ReleaseProfilesPanel enabled={mediaActive} settings={data.media} onChange={data.setMedia} onToast={showToast} />
+          <CustomFormatsPage enabled={mediaActive} onToast={showToast} />
         </InactiveGate>
       )}
 

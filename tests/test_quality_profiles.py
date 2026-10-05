@@ -487,7 +487,9 @@ def test_api_evaluate_title_rejection_and_custom_profile(app_and_client, test_db
     assert resp.status_code == 200
     body = resp.json()
     assert body["evaluation"]["is_acceptable"] is False
-    assert any("Contains rejected keyword 'live'" in r for r in body["evaluation"]["rejection_reasons"])
+    # v49 folds ignored tags into a per-profile release profile; the rejection now names it.
+    assert any("ignores term" in r and "live" in r for r in body["evaluation"]["rejection_reasons"])
+    assert body["breakdown"]["rejections"][0]["code"] == "release_profile_ignored"
 
     # 2. Evaluation against explicit custom profile
     payload_custom = {

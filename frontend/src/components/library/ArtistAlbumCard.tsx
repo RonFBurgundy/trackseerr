@@ -129,8 +129,8 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
               {album.in_profile === false && (
                 <span
                   className="ml-2 inline-block align-middle px-1.5 py-px rounded-[2px] border border-[#2a2a2a] bg-[#161616] text-[10px] uppercase text-neutral-500"
-                  title="Outside release profile — not auto-monitored"
-                  aria-label={`${album.album_type ?? 'album'}: outside release profile, not auto-monitored`}
+                  title="Outside metadata profile — not auto-monitored"
+                  aria-label={`${album.album_type ?? 'album'}: outside metadata profile, not auto-monitored`}
                 >
                   {album.album_type ?? 'album'}
                 </span>

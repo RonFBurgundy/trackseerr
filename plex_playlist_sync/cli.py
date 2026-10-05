@@ -470,6 +470,11 @@ def _start_local_workers(db: Database, config: Config) -> None:
         logger.info("Starting RSSSyncWorker (interval: %d min)", config.rss_sync_interval_minutes)
         rss_worker.start(db=db, interval_seconds=config.rss_sync_interval_minutes * 60)
 
+    from .pending_worker import pending_worker
+
+    logger.info("Starting PendingReleaseWorker (delay-profile releases, interval: 60s)")
+    pending_worker.start(db=db, interval_seconds=60)
+
     from .artist_refresh_worker import artist_refresh_worker
 
     logger.info("Starting ArtistRefreshWorker (interval: 24h, pace: 1.5s, first cycle in 10 min)")
@@ -865,6 +870,9 @@ def main() -> int:
 
                 backlog_worker.stop()
                 rss_worker.stop()
+                from .pending_worker import pending_worker
+
+                pending_worker.stop()
             except (ImportError, AttributeError, RuntimeError, OSError) as e:
                 logger.warning("Failed to stop backlog/RSS workers cleanly: %s", safe_exc(e))
         db.close()

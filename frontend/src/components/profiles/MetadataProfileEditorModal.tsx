@@ -8,16 +8,16 @@ import {
   RELEASE_SECONDARY_TYPES,
   type ReleaseOrNew,
   type ReleasePrimaryType,
-  type ReleaseProfileInput,
+  type MetadataProfileInput,
   type ReleaseSecondaryType,
-} from '@/types/releaseProfiles';
-import { inputClass } from './formClasses';
+} from '@/types/metadataProfiles';
+import { inputClass } from '@/components/settings/formClasses';
 
-export interface ReleaseProfileEditorModalProps {
+export interface MetadataProfileEditorModalProps {
   /** The profile being edited, or `'new'` for a blank one. Closed when null. */
   target: ReleaseOrNew | null;
   onClose: () => void;
-  onSave: (id: number | null, input: ReleaseProfileInput) => Promise<boolean>;
+  onSave: (id: number | null, input: MetadataProfileInput) => Promise<boolean>;
 }
 
 interface CheckGroupProps<T extends string> {
@@ -70,7 +70,7 @@ function toggled<T extends string>(list: readonly T[], value: T): T[] {
 }
 
 /** Name plus two labelled checkbox groups. Remounted per target so the form always starts from the saved values. */
-const EditorBody: React.FC<{ target: ReleaseOrNew; onClose: () => void; onSave: ReleaseProfileEditorModalProps['onSave'] }> = ({
+const EditorBody: React.FC<{ target: ReleaseOrNew; onClose: () => void; onSave: MetadataProfileEditorModalProps['onSave'] }> = ({
   target,
   onClose,
   onSave,
@@ -98,7 +98,7 @@ const EditorBody: React.FC<{ target: ReleaseOrNew; onClose: () => void; onSave: 
     <ObsidianModal
       isOpen
       onClose={onClose}
-      title={existing ? 'Edit Release Profile' : 'New Release Profile'}
+      title={existing ? 'Edit Metadata Profile' : 'New Metadata Profile'}
       subtitle="Shapes automatic monitoring only. Releases outside the profile stay in the catalog and can still be monitored by hand."
       footer={
         <>
@@ -121,7 +121,7 @@ const EditorBody: React.FC<{ target: ReleaseOrNew; onClose: () => void; onSave: 
         <FormField label="Profile name" htmlFor={`${uid}-name`}>
           <input
             id={`${uid}-name`}
-            name="release_profile_name"
+            name="metadata_profile_name"
             type="text"
             required
             maxLength={100}
@@ -154,7 +154,7 @@ const EditorBody: React.FC<{ target: ReleaseOrNew; onClose: () => void; onSave: 
   );
 };
 
-export const ReleaseProfileEditorModal: React.FC<ReleaseProfileEditorModalProps> = ({ target, onClose, onSave }) => {
+export const MetadataProfileEditorModal: React.FC<MetadataProfileEditorModalProps> = ({ target, onClose, onSave }) => {
   if (target === null) return null;
   return <EditorBody key={target === 'new' ? 'new' : target.id} target={target} onClose={onClose} onSave={onSave} />;
 };

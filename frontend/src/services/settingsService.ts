@@ -1,7 +1,6 @@
 import { apiRequest } from './apiClient';
 import type {
   GeneralSettings,
-  QualityProfile,
   DownloadClientItem,
   IndexerItem,
   SystemStatusInfo,
@@ -21,24 +20,6 @@ export async function updateGeneralSettings(settings: Partial<GeneralSettings>):
   return apiRequest<GeneralSettings>('/api/settings/general', {
     method: 'POST',
     body: settings,
-  });
-}
-
-export async function getQualityProfiles(): Promise<QualityProfile[]> {
-  const res = await apiRequest<QualityProfile[]>('/api/settings/quality-profiles');
-  return res || [];
-}
-
-export async function saveQualityProfile(profile: Partial<QualityProfile>): Promise<QualityProfile> {
-  return apiRequest<QualityProfile>('/api/settings/quality-profiles', {
-    method: 'POST',
-    body: profile,
-  });
-}
-
-export async function deleteQualityProfile(profileId: number): Promise<void> {
-  await apiRequest<void>(`/api/settings/quality-profiles/${profileId}`, {
-    method: 'DELETE',
   });
 }
 

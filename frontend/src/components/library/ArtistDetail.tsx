@@ -15,10 +15,10 @@ import {
 } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
 import { MONITOR_OPTIONS } from '@/types/monitoring';
-import type { ReleaseProfilePreview } from '@/types/releaseProfiles';
+import type { MetadataProfilePreview } from '@/types/metadataProfiles';
 import { useArtistDetail, type MonitorPreset } from '@/hooks/useArtistDetail';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
-import { useReleaseProfileDryRun, useReleaseProfilePreview, useReleaseProfiles } from '@/hooks/useReleaseProfiles';
+import { useMetadataProfileDryRun, useMetadataProfilePreview, useMetadataProfiles } from '@/hooks/useMetadataProfiles';
 import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { useAlbumBulkEdit } from '@/hooks/useAlbumBulkEdit';
 import { errorMessage } from '@/services/apiClient';
@@ -82,10 +82,10 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   const [tab, setTab] = useState<DiscographyTab>('studio');
   const categorized = useMemo(() => categorize(artist?.albums ?? []), [artist]);
   const [hideOutside, setHideOutside] = useState<boolean>(false);
-  const releaseProfiles = useReleaseProfiles(isAdmin && !lidarrMode, onToast);
-  const releaseProfileId = artist?.release_profile_id ?? null;
-  const dryRun = useReleaseProfileDryRun(artistId, onToast);
-  const [pendingProfile, setPendingProfile] = useState<{ id: number | null; preview: ReleaseProfilePreview } | null>(null);
+  const metadataProfiles = useMetadataProfiles(isAdmin && !lidarrMode, onToast);
+  const metadataProfileId = artist?.metadata_profile_id ?? null;
+  const dryRun = useMetadataProfileDryRun(artistId, onToast);
+  const [pendingProfile, setPendingProfile] = useState<{ id: number | null; preview: MetadataProfilePreview } | null>(null);
   const [profileBusy, setProfileBusy] = useState<boolean>(false);
 
   const requestProfileChange = async (id: number | null): Promise<void> => {
@@ -96,7 +96,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
       if (!preview) return;
       const w = preview.would_change;
       if (w.albums_to_monitor + w.albums_to_unmonitor + w.tracks_to_monitor + w.tracks_to_unmonitor === 0) {
-        await detail.applyReleaseProfile(id, true, w);
+        await detail.applyMetadataProfile(id, true, w);
       } else {
         setPendingProfile({ id, preview });
       }
@@ -110,7 +110,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
     const { id, preview } = pendingProfile;
     setProfileBusy(true);
     try {
-      await detail.applyReleaseProfile(id, applyToExisting, preview.would_change);
+      await detail.applyMetadataProfile(id, applyToExisting, preview.would_change);
     } finally {
       setPendingProfile(null);
       setProfileBusy(false);
@@ -119,8 +119,8 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
 
   const pendingName =
     pendingProfile?.id == null
-      ? 'no release profile'
-      : (releaseProfiles.profiles.find((p) => p.id === pendingProfile.id)?.name ?? 'the profile');
+      ? 'no metadata profile'
+      : (metadataProfiles.profiles.find((p) => p.id === pendingProfile.id)?.name ?? 'the profile');
   const pendingParts: string[] = [];
   if (pendingProfile) {
     const w = pendingProfile.preview.would_change;
@@ -131,8 +131,8 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
       pendingParts.push(`unmonitor ${plural(w.albums_to_unmonitor, 'album')} (${plural(w.tracks_to_unmonitor, 'track')})`);
   }
 
-  const profilePreview = useReleaseProfilePreview(artistId, releaseProfileId, artist?.albums?.length ?? 0);
-  const hasOutside = releaseProfileId !== null && (artist?.albums ?? []).some((a) => a.in_profile === false);
+  const profilePreview = useMetadataProfilePreview(artistId, metadataProfileId, artist?.albums?.length ?? 0);
+  const hasOutside = metadataProfileId !== null && (artist?.albums ?? []).some((a) => a.in_profile === false);
   const albums = useMemo(
     () => (hideOutside && hasOutside ? categorized[tab].filter((a) => a.in_profile !== false) : categorized[tab]),
     [categorized, tab, hideOutside, hasOutside]
@@ -187,7 +187,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
 
   const lidarrSearch = useLidarrSearch(onToast);
   const presetId = useId();
-  const releaseProfileSelectId = useId();
+  const metadataProfileSelectId = useId();
   const preset = (p: MonitorPreset): void => void detail.applyPreset(p);
   // Lidarr's own preset set has no existing/future; those are native-library only.
   const presetOptions = MONITOR_OPTIONS.filter(
@@ -337,19 +337,19 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
                   </select>
                   {!lidarrMode && (
                     <>
-                      <label htmlFor={releaseProfileSelectId} className="sr-only">
-                        Release profile
+                      <label htmlFor={metadataProfileSelectId} className="sr-only">
+                        Metadata profile
                       </label>
                       <select
-                        id={releaseProfileSelectId}
-                        name="release_profile"
+                        id={metadataProfileSelectId}
+                        name="metadata_profile"
                         className={`${COMPACT_SELECT} flex-[5_1_0] sm:flex-none sm:w-44`}
-                        value={releaseProfileId === null ? '' : String(releaseProfileId)}
+                        value={metadataProfileId === null ? '' : String(metadataProfileId)}
                         disabled={profileBusy}
                         onChange={(e) => void requestProfileChange(e.target.value === '' ? null : Number(e.target.value))}
                       >
                         <option value="">No profile</option>
-                        {releaseProfiles.profiles.map((p) => (
+                        {metadataProfiles.profiles.map((p) => (
                           <option key={p.id} value={String(p.id)}>
                             {p.name}
                           </option>
@@ -404,7 +404,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
               onChange={setHideOutside}
               label="Hide outside profile"
               className="shrink-0 max-sm:[&>span]:sr-only"
-              title="Hide releases that are outside the release profile (they are never hidden by default)"
+              title="Hide releases that are outside the metadata profile (they are never hidden by default)"
             />
           )}
           {canBulkEdit && !loading && !selection.active && (
@@ -470,7 +470,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
       )}
       <ConfirmDialog
         isOpen={pendingProfile !== null}
-        title="Apply release profile?"
+        title="Apply metadata profile?"
         confirmLabel="Apply to existing"
         onConfirm={() => void resolveProfileChange(true)}
         secondaryLabel="Future releases only"

@@ -18,7 +18,8 @@ import {
   Terminal,
   Boxes,
   Inbox,
-  Disc3,
+  Gauge,
+  Tags,
 } from 'lucide-react';
 import { settingsRouteFor } from '@/hooks/useAppRoute';
 import type { SettingsLeafId, SettingsRoute, SettingsSection } from '@/hooks/useAppRoute';
@@ -27,8 +28,9 @@ import type { SettingsLeafId, SettingsRoute, SettingsSection } from '@/hooks/use
 export type SettingsTab =
   | 'general'
   | 'media'
+  | 'quality'
   | 'profiles'
-  | 'release-profiles'
+  | 'custom-formats'
   | 'clients'
   | 'indexers'
   | 'lidarr'
@@ -91,8 +93,9 @@ export function buildSettingsTree(isAdmin: boolean, mfaEnrollmentRequired: boole
       icon: <Boxes className={ico} />,
       leaves: [
         leaf('media', 'Root Folders & Naming', <Folder className={ico} />),
+        leaf('quality', 'Quality', <Gauge className={ico} />),
         leaf('profiles', 'Profiles', <Layers className={ico} />),
-        leaf('release-profiles', 'Release Profiles', <Disc3 className={ico} />),
+        leaf('custom-formats', 'Custom Formats', <Tags className={ico} />),
         leaf('clients', 'Clients', <Download className={ico} />),
         leaf('indexers', 'Indexers', <Search className={ico} />),
         leaf('import-lists', 'Import Lists', <ListMusic className={ico} />),
@@ -161,8 +164,9 @@ export const SELF_SERVICE_TABS: ReadonlySet<SettingsTab> = new Set<SettingsTab>(
 
 export const MEDIA_MANAGEMENT_TABS: ReadonlySet<SettingsTab> = new Set<SettingsTab>([
   'media',
+  'quality',
   'profiles',
-  'release-profiles',
+  'custom-formats',
   'clients',
   'indexers',
 ]);

@@ -6,14 +6,14 @@ from typing import Any, Literal, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from plex_playlist_sync import library_manager, lidarr_library
 from plex_playlist_sync.api.dependencies import get_config, get_db, require_admin, require_core_tier
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.media_servers import JellyfinMediaServer, MediaServerError, SubsonicMediaServer
 from plex_playlist_sync.media_servers import settings as media_server_settings
-from plex_playlist_sync.library_monitoring import validate_monitor_option
+from plex_playlist_sync.library_monitoring import accept_deprecated_profile_keys, validate_monitor_option
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient, invalidate_add_defaults
 from plex_playlist_sync.naming import (
@@ -165,7 +165,8 @@ class MediaManagementSettingsModel(BaseModel):
     prefer_local_artwork: bool = Field(True, description="Whether to prefer local filesystem artwork over remote metadata art")
     scan_monitor_option: str = Field("existing", description="Monitor option given to artists created by a library scan")
     add_monitor_option: str = Field("existing", description="Default monitor option for artists added manually")
-    add_release_profile_id: int | None = Field(None, description="Default release profile for added artists (null = none)")
+    add_metadata_profile_id: int | None = Field(None, description="Default metadata profile for added artists (null = none)")
+    import_bitrate_check: str = Field("warn", description="Per-track bitrate check on import: off, warn or reject")
     updated_at: str | None = None
 
 
@@ -195,7 +196,13 @@ class MediaManagementUpdateModel(BaseModel):
     prefer_local_artwork: bool | None = None
     scan_monitor_option: str | None = None
     add_monitor_option: str | None = None
-    add_release_profile_id: int | None = None
+    add_metadata_profile_id: int | None = None
+    import_bitrate_check: Literal["off", "warn", "reject"] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _deprecated_profile_keys(cls, data: Any) -> Any:
+        return accept_deprecated_profile_keys(data)
 
     @field_validator("scan_monitor_option", "add_monitor_option")
     @classmethod

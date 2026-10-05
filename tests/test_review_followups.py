@@ -22,7 +22,7 @@ from tests.test_library_api import (  # noqa: F401
     test_config,
     test_db,
 )
-from tests.test_release_profiles import _a, _album, _artist, _profile_id
+from tests.test_metadata_profiles import _a, _album, _artist, _profile_id
 from tests.test_track_level_existing import _artist as _tl_artist
 from tests.test_track_level_existing import _file as _tl_file
 from tests.test_track_level_existing import _t
@@ -156,7 +156,7 @@ def test_preview_would_change_matches_the_real_recompute_and_writes_nothing(
     pid = _profile_fixture(test_db)
     before = [(a["id"], a["monitored"]) for a in test_db.list_library_albums(artist_id="ar")]
 
-    r = client.get(f"/api/library/artists/ar/release-profile-preview?profile_id={pid}", headers=h)
+    r = client.get(f"/api/library/artists/ar/metadata-profile-preview?profile_id={pid}", headers=h)
     assert r.status_code == 200, r.text
     body = r.json()
     assert (body["matching"], body["total"]) == (2, 3)
@@ -164,10 +164,10 @@ def test_preview_would_change_matches_the_real_recompute_and_writes_nothing(
         "albums_to_monitor": 1, "albums_to_unmonitor": 1, "tracks_to_monitor": 1, "tracks_to_unmonitor": 1,
     }
     assert [(a["id"], a["monitored"]) for a in test_db.list_library_albums(artist_id="ar")] == before
-    assert test_db.get_library_artist("ar")["release_profile_id"] is None
+    assert test_db.get_library_artist("ar")["metadata_profile_id"] is None
 
     # null / omitted profile_id previews clearing: the recompute under no profile monitors everything ('all')
-    r = client.get("/api/library/artists/ar/release-profile-preview", headers=h)
+    r = client.get("/api/library/artists/ar/metadata-profile-preview", headers=h)
     assert r.status_code == 200
     assert r.json()["would_change"] == {
         "albums_to_monitor": 1, "albums_to_unmonitor": 0, "tracks_to_monitor": 1, "tracks_to_unmonitor": 0,
@@ -175,17 +175,17 @@ def test_preview_would_change_matches_the_real_recompute_and_writes_nothing(
     assert r.json()["matching"] == r.json()["total"] == 3
 
     # the real recompute lands exactly where the preview said
-    test_db.bulk_edit_library_artists(["ar"], release_profile_id=pid, apply_monitor_to_albums=True)
+    test_db.bulk_edit_library_artists(["ar"], metadata_profile_id=pid, apply_monitor_to_albums=True)
     assert (_a(test_db, "studio"), _a(test_db, "live"), _a(test_db, "off_studio")) == (True, False, True)
-    assert client.get("/api/library/artists/ar/release-profile-preview?profile_id=9999", headers=h).status_code == 404
-    assert client.get("/api/library/artists/nope/release-profile-preview?profile_id=1", headers=h).status_code == 404
+    assert client.get("/api/library/artists/ar/metadata-profile-preview?profile_id=9999", headers=h).status_code == 404
+    assert client.get("/api/library/artists/nope/metadata-profile-preview?profile_id=1", headers=h).status_code == 404
 
 
 def test_preview_under_existing_counts_tracks_with_files(test_db: Database):
     _artist(test_db, option="existing")
     _album(test_db, "owned", file=True)
     _album(test_db, "wanted_no_file")  # manually monitored, no file: a recompute would unmonitor it
-    out = test_db.release_profile_preview("ar", None)
+    out = test_db.metadata_profile_preview("ar", None)
     assert out["would_change"] == {
         "albums_to_monitor": 0, "albums_to_unmonitor": 1, "tracks_to_monitor": 0, "tracks_to_unmonitor": 1,
     }
@@ -195,13 +195,13 @@ def test_profile_change_without_apply_leaves_albums_alone_via_api(app_and_client
     _, client = app_and_client
     h = _auth_headers(seeded_users["admin"], test_db, test_config)
     pid = _profile_fixture(test_db)
-    r = client.put("/api/library/artists/ar/monitored", json={"monitored": True, "release_profile_id": pid}, headers=h)
+    r = client.put("/api/library/artists/ar/monitored", json={"monitored": True, "metadata_profile_id": pid}, headers=h)
     assert r.status_code == 200, r.text
-    assert test_db.get_library_artist("ar")["release_profile_id"] == pid
+    assert test_db.get_library_artist("ar")["metadata_profile_id"] == pid
     assert (_a(test_db, "live"), _a(test_db, "off_studio")) == (True, False)  # untouched
     r = client.put(
         "/api/library/artists/ar/monitored",
-        json={"monitored": True, "release_profile_id": pid, "apply_monitor_to_albums": True}, headers=h,
+        json={"monitored": True, "metadata_profile_id": pid, "apply_monitor_to_albums": True}, headers=h,
     )
     assert (_a(test_db, "live"), _a(test_db, "off_studio")) == (False, True)
 
@@ -239,7 +239,7 @@ def test_unrelated_track_edit_keeps_other_artists_pending(test_db: Database):
 
 def test_finish_pending_recompute_is_one_transaction_and_runs_once(test_db: Database):
     pid = _profile_fixture(test_db)
-    test_db.bulk_edit_library_artists(["ar"], release_profile_id=pid)
+    test_db.bulk_edit_library_artists(["ar"], metadata_profile_id=pid)
     # no pending flag: nothing happens
     assert test_db.finish_pending_profile_recompute("ar") is False
     assert _a(test_db, "live") is True
@@ -262,7 +262,7 @@ def test_finish_pending_recompute_is_one_transaction_and_runs_once(test_db: Data
 def test_finish_pending_rolls_back_flag_with_the_recompute(test_db: Database, monkeypatch):
     """If the recompute fails mid-way, neither the album changes nor the flag clear persist."""
     pid = _profile_fixture(test_db)
-    test_db.bulk_edit_library_artists(["ar"], release_profile_id=pid)
+    test_db.bulk_edit_library_artists(["ar"], metadata_profile_id=pid)
     test_db.upsert_library_album({"id": "live", "artist_id": "ar", "title": "live", "album_type": "live",
                                   "secondary_types": ["live"], "mb_release_group_id": "rg-live"}, preserve_monitoring=True)
     test_db.set_pending_profile_recompute("ar", True)
@@ -297,24 +297,24 @@ def test_artist_put_with_profile_and_monitored_applies_both(app_and_client, test
     pid = _profile_fixture(test_db)
     r = client.put(
         "/api/library/artists/ar/monitored",
-        json={"monitored": False, "release_profile_id": pid, "apply_monitor_to_albums": True}, headers=h,
+        json={"monitored": False, "metadata_profile_id": pid, "apply_monitor_to_albums": True}, headers=h,
     )
     assert r.status_code == 200, r.text
     art = test_db.get_library_artist("ar")
-    assert art["monitored"] is False and art["release_profile_id"] == pid
+    assert art["monitored"] is False and art["metadata_profile_id"] == pid
     assert not any(a["monitored"] for a in test_db.list_library_albums(artist_id="ar"))
 
     # without apply: monitored changes and cascades (cascade_children default), profile written
     _artist(test_db, aid="b")
     _album(test_db, "ba", aid="b")
-    r = client.put("/api/library/artists/b/monitored", json={"monitored": False, "release_profile_id": pid}, headers=h)
-    assert test_db.get_library_artist("b")["monitored"] is False and test_db.get_library_artist("b")["release_profile_id"] == pid
+    r = client.put("/api/library/artists/b/monitored", json={"monitored": False, "metadata_profile_id": pid}, headers=h)
+    assert test_db.get_library_artist("b")["monitored"] is False and test_db.get_library_artist("b")["metadata_profile_id"] == pid
     assert _a(test_db, "ba") is False
     # cascade_children=false: only the flag
     _artist(test_db, aid="c")
     _album(test_db, "ca", aid="c")
     client.put("/api/library/artists/c/monitored",
-               json={"monitored": False, "cascade_children": False, "release_profile_id": pid}, headers=h)
+               json={"monitored": False, "cascade_children": False, "metadata_profile_id": pid}, headers=h)
     assert test_db.get_library_artist("c")["monitored"] is False and _a(test_db, "ca") is True
 
 
@@ -359,7 +359,7 @@ def test_every_writer_stores_normalised_secondary_types(test_db: Database):
 
 
 def test_sql_twin_multi_secondary_malformed_and_non_list_json(test_db: Database):
-    prof = test_db.create_release_profile("Live+Studio", ["album"], ["live", "studio"])
+    prof = test_db.create_metadata_profile("Live+Studio", ["album"], ["live", "studio"])
     _artist(test_db, option="all", profile=prof["id"])
     cases = {
         "studio": ("album", []),
@@ -378,7 +378,7 @@ def test_sql_twin_multi_secondary_malformed_and_non_list_json(test_db: Database)
             test_db.conn.execute("UPDATE library_albums SET secondary_types = ? WHERE id = ?", (raw, aid))
         test_db.conn.commit()
     test_db.bulk_edit_library_artists(["ar"], apply_monitor_to_albums=True)
-    profile = test_db.get_release_profile(prof["id"])
+    profile = test_db.get_metadata_profile(prof["id"])
     for aid, (t, _sec) in cases.items():
         decoded = test_db.get_library_album(aid)["secondary_types"]  # Python decode: malformed / non-list -> None
         expected = album_monitored_for_option(

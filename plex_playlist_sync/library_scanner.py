@@ -699,7 +699,13 @@ class LibraryScanner:
                                 if parsed.quality == "Unknown" and quality_input:
                                     parsed.quality = str(quality_input)
                                 eval_result = evaluate_release(parsed, qp, size_bytes=file_size)
-                                cutoff_met = bool(eval_result.meets_cutoff)
+                                # A library file is scored from a bare quality string (its release title is unknown), so
+                                # its format score is 0 and could never reach ``cutoff_format_score``: judge the quality
+                                # tier only, i.e. treat the format-score cutoff as met.
+                                bd = eval_result.breakdown
+                                cutoff_met = bool(
+                                    bd.quality_cutoff_met if bd is not None else eval_result.meets_cutoff
+                                )
                                 quality_name = eval_result.parsed_quality or str(quality_input)
                         except Exception as exc:
                             logger.warning(
