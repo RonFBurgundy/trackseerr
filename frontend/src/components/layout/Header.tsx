@@ -64,7 +64,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="sticky top-0 z-40 w-full flex-shrink-0 bg-[#0a0a0a]/95 backdrop-blur-md border-b border-[#1f1f1f] pt-safe">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 md:h-16 flex items-center justify-between gap-2 sm:gap-4">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 h-[52px] md:h-16 flex items-center justify-between gap-2 sm:gap-4">
         {/* Brand / Logo */}
         {/* Desktop Brand */}
         <div className="hidden md:flex items-center gap-3 select-none flex-shrink-0">
@@ -73,7 +73,7 @@ export const Header: React.FC<HeaderProps> = ({
             alt="TrackSeerr"
             className="h-8 w-8 object-contain"
             onError={(e) => {
-              (e.currentTarget as HTMLImageElement).src = '/static/trackseerr-logo.svg';
+              e.currentTarget.src = '/static/trackseerr-logo.svg';
             }}
           />
           <span className="hidden lg:inline text-base sm:text-lg font-black tracking-wider uppercase text-white font-mono leading-none">
@@ -83,41 +83,25 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         </div>
 
-        {/* Mobile Brand (Icon Home button when logged in, or Logo+Text when not) */}
-        {user ? (
-          <button
-            type="button"
-            onClick={() => onTabChange?.('discover')}
-            className="hidden min-[420px]:flex md:hidden items-center justify-center w-11 h-11 rounded-[3px] border border-[#222222] bg-[#121212] hover:border-[#383838] active:translate-y-[1px] transition-all flex-shrink-0"
-            aria-label="TrackSeerr Home"
-            title="TrackSeerr Home"
-          >
-            <img
-              src="/trackseerr-logo.svg"
-              alt="TrackSeerr"
-              className="h-6 w-6 object-contain"
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).src = '/static/trackseerr-logo.svg';
-              }}
-            />
-          </button>
-        ) : (
-          <div className="flex md:hidden items-center gap-2 select-none flex-shrink-0">
-            <img
-              src="/trackseerr-logo.svg"
-              alt="TrackSeerr"
-              className="h-7 w-7 object-contain"
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).src = '/static/trackseerr-logo.svg';
-              }}
-            />
-            <span className="text-base font-black tracking-wider uppercase text-white font-mono leading-none">
-              Track<span className="text-[#e5a00d]">Seerr</span>
-              {brandSuffix}
-              {coreBadge}
-            </span>
-          </div>
-        )}
+        {/* Mobile brand: compact logo key (always visible on phones) that returns to Discover */}
+        <button
+          type="button"
+          onClick={() => onTabChange?.('discover')}
+          className="md:hidden relative flex items-center justify-center w-9 h-9 rounded-[3px] border border-[#222222] bg-[#121212] hover:border-[#383838] active:translate-y-[1px] transition-all flex-shrink-0 after:absolute after:content-[''] after:-inset-[2px]"
+          aria-label="TrackSeerr Home"
+          title="TrackSeerr Home"
+        >
+          <img
+            src="/trackseerr-logo.svg"
+            alt=""
+            width={24}
+            height={24}
+            className="h-6 w-6 object-contain"
+            onError={(e) => {
+              e.currentTarget.src = '/static/trackseerr-logo.svg';
+            }}
+          />
+        </button>
 
         {/* Desktop Sticky Navigation Buttons */}
         {user && activeTab && onTabChange && (
@@ -164,7 +148,7 @@ export const Header: React.FC<HeaderProps> = ({
                         active={isActive}
                         onClick={() => onTabChange(item.id)}
                         icon={item.icon}
-                        className="w-10 h-11 !min-h-0 p-0 rounded-[3px] shrink-0"
+                        className="w-9 h-9 !min-h-0 p-0 rounded-[3px] shrink-0"
                         aria-label={item.label}
                         aria-current={isActive ? 'page' : undefined}
                         title={item.label}
@@ -231,7 +215,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <Menu className="h-4 w-4 text-neutral-300" />
                 )
               }
-              className="w-11 h-11 !min-h-0 p-0 rounded-[3px] shrink-0"
+              className="w-9 h-9 !min-h-0 p-0 rounded-[3px] shrink-0 md:w-11 md:h-11"
             />
           </div>
         ) : (

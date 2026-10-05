@@ -46,7 +46,7 @@ export const CollectionDetail: React.FC<CollectionDetailProps> = ({
         )}
       </div>
 
-      <MachinedCard className="p-6">
+      <MachinedCard className="p-3 sm:p-6">
         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
           <div className="h-32 w-32 rounded-[4px] bg-[#1a1a1a] border border-[#2a2a2a] overflow-hidden flex-shrink-0 flex items-center justify-center shadow-xl">
             {col && <CollectionArt collection={col} iconClass="h-16 w-16 text-neutral-600" gridBg="bg-[#1f1f1f]" />}
@@ -77,7 +77,7 @@ export const CollectionDetail: React.FC<CollectionDetailProps> = ({
           {col?.albums && col.albums.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {col.albums.map((alb) => (
-                <MachinedCard key={alb.id} className="p-4 flex flex-col justify-between gap-3 group">
+                <MachinedCard key={alb.id} className="p-3 sm:p-4 flex flex-col justify-between gap-3 group">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="h-12 w-12 rounded-[3px] bg-[#1a1a1a] border border-[#2a2a2a] overflow-hidden flex-shrink-0 flex items-center justify-center">
                       {alb.cover_url ? (

@@ -42,7 +42,7 @@ export const RequestPortalCard: React.FC = () => {
 
   if (!status) {
     return error ? (
-      <MachinedCard className="p-6 max-w-2xl">
+      <MachinedCard className="p-3 sm:p-6 max-w-2xl">
         <p className="text-xs font-mono text-[var(--status-error)]">{error}</p>
       </MachinedCard>
     ) : null;
@@ -52,7 +52,7 @@ export const RequestPortalCard: React.FC = () => {
   const style = STATE_STYLE[status.state];
 
   return (
-    <MachinedCard className="p-6 max-w-2xl space-y-4">
+    <MachinedCard className="p-3 sm:p-6 max-w-2xl space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h4 className="text-sm font-bold uppercase font-mono text-white">Request portal</h4>
         <span

@@ -47,7 +47,7 @@ function CheckGroup<T extends string>({
         {options.map((o) => {
           const id = `${prefix}-${o.replace(/[^a-z0-9]+/g, '-')}`;
           return (
-            <label key={o} htmlFor={id} className="flex items-center gap-2 min-h-[44px] sm:min-h-[34px] text-xs font-mono text-neutral-200 cursor-pointer">
+            <label key={o} htmlFor={id} className="flex items-center gap-2 min-h-[36px] sm:min-h-[34px] text-xs font-mono text-neutral-200 cursor-pointer">
               <input
                 id={id}
                 name={`${prefix}[]`}

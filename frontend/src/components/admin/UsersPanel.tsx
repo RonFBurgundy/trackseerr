@@ -162,9 +162,9 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({ adminHook, currentUserId
                         }
                       }}
                       tabIndex={0}
-                      className="border-b border-[var(--border-subtle)] last:border-0 cursor-pointer hover:bg-[var(--bg-card-hover)] focus:outline-none focus:bg-[var(--bg-card-hover)] min-h-[44px]"
+                      className="border-b border-[var(--border-subtle)] last:border-0 cursor-pointer hover:bg-[var(--bg-card-hover)] focus:outline-none focus:bg-[var(--bg-card-hover)] min-h-[36px]"
                     >
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2 md:py-3">
                         <div className="text-[var(--text-primary)]">
                           {u.username}
                           {String(currentUserId) === u.id && (
@@ -173,7 +173,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({ adminHook, currentUserId
                         </div>
                         {u.email && <div className="text-[var(--text-muted)]">{u.email}</div>}
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2 md:py-3">
                         <Badge tone={u.auth_type === 'local' ? 'amber' : 'muted'}>{u.auth_type}</Badge>
                         {u.is_admin && (
                           <>
@@ -182,12 +182,12 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({ adminHook, currentUserId
                           </>
                         )}
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2 md:py-3">
                         <Badge tone={u.disabled ? 'warn' : 'ok'}>
                           {u.disabled ? 'disabled' : 'active'}
                         </Badge>
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2 md:py-3">
                         {u.auth_type === 'local' ? (
                           <Badge tone={u.mfa_enabled ? 'ok' : 'muted'}>
                             {u.mfa_enabled ? 'on' : 'off'}
@@ -196,7 +196,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({ adminHook, currentUserId
                           <span className="text-[var(--text-muted)]">n/a</span>
                         )}
                       </td>
-                      <td className="px-3 py-3 text-[var(--text-secondary)]">
+                      <td className="px-3 py-2 md:py-3 text-[var(--text-secondary)]">
                         {formatDate(u.last_login_at)}
                       </td>
                     </tr>

@@ -24,7 +24,7 @@ export const LibrarySortControl: React.FC<LibrarySortControlProps> = ({ options,
         aria-label="Sort by"
         value={sortKey}
         onChange={(e) => onChange(e.target.value)}
-        className="tape-deck-btn min-h-[44px] sm:min-h-[32px] w-[84px] sm:w-auto rounded-[3px] px-2 text-xs font-mono font-semibold uppercase text-neutral-200 focus:border-[var(--accent-amber)] focus:outline-none"
+        className="tape-deck-btn min-h-[36px] sm:min-h-[32px] w-[84px] sm:w-auto rounded-[3px] px-2 text-xs font-mono font-semibold uppercase text-neutral-200 focus:border-[var(--accent-amber)] focus:outline-none"
       >
         {options.map((o) => (
           <option key={o.key} value={o.key}>

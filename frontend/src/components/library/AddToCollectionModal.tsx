@@ -26,7 +26,7 @@ export const AddToCollectionModal: React.FC<AddToCollectionModalProps> = ({ pick
               type="button"
               key={col.id}
               onClick={() => void picker.add(col.id, col.name)}
-              className="w-full text-left p-3 min-h-[44px] flex items-center justify-between gap-3 hover:bg-[#1c1c1c] transition-colors"
+              className="w-full text-left p-2.5 min-h-[36px] flex items-center justify-between gap-3 hover:bg-[#1c1c1c] transition-colors"
             >
               <div className="flex items-center gap-2.5 min-w-0">
                 <Layers className="h-4 w-4 text-[#e5a00d] flex-shrink-0" />

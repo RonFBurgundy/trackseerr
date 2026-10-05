@@ -12,9 +12,10 @@ import hashlib
 import logging
 import os
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import threading
-from typing import Optional
+from typing import Callable, Optional
 
 from PIL import Image, ImageOps
 
@@ -104,3 +105,143 @@ def ensure_thumb(src: Path, size: int, cache_dir: Path) -> Optional[tuple[Path, 
     except OSError as exc:
         logger.debug("Could not prune stale thumbnails for %s: %s", src, exc)
     return dest, etag
+
+
+def art_version(src: Path) -> Optional[str]:
+    """Short version token for a local art file (``<mtime_ns>-<size>`` in hex), from one ``stat``; None if unreadable.
+
+    It changes whenever the file is replaced, so it can ride in an art URL as ``?v=`` and let the browser cache the
+    response forever.
+    """
+    try:
+        st = src.stat()
+    except OSError:
+        return None
+    if not src.is_file() or st.st_size <= 0:
+        return None
+    return f"{st.st_mtime_ns:x}-{st.st_size:x}"
+
+
+def pregenerate(src: Path, cache_dir: Path, stop: Optional[threading.Event] = None) -> int:
+    """Generates every missing derivative of ``src`` now (idempotent: existing ones are untouched).
+
+    Returns how many sizes are present afterwards. Resizes go through the shared ``_RESIZE_SLOTS`` semaphore. A set
+    ``stop`` event ends the work between sizes (shutdown).
+    """
+    done = 0
+    for size in THUMB_SIZES:
+        if stop is not None and stop.is_set():
+            break
+        if ensure_thumb(src, size, cache_dir) is not None:
+            done += 1
+    return done
+
+
+def has_all_thumbs(src: Path, cache_dir: Path) -> bool:
+    """True when every derivative of ``src`` already exists (stat only, no decode)."""
+    for size in THUMB_SIZES:
+        key = thumb_key(src, size)
+        if key is None:
+            return False
+        try:
+            dest = cache_dir / f"{key[0]}.jpg"
+            if not (dest.is_file() and dest.stat().st_size > 0):
+                return False
+        except OSError:
+            return False
+    return True
+
+
+# Background pre-generation: two workers and a bounded backlog; anything dropped is generated lazily on first request
+# or by the backfill task, so nothing depends on this queue being lossless.
+_PREGEN_MAX_PENDING = 512
+_pregen_lock = threading.Lock()
+# source path -> callbacks to run once that source's derivatives are generated (merged when a caller dedupes onto it)
+_pregen_pending: dict[str, list[Callable[[], None]]] = {}
+_pregen_executor: Optional[ThreadPoolExecutor] = None
+# Set by ``shutdown``; each executor gets its own event so a later restart (tests) is not poisoned by an old stop.
+_pregen_stop = threading.Event()
+
+
+def schedule_pregenerate(src: Path, cache_dir: Path, on_done: Optional[Callable[[], None]] = None) -> bool:
+    """Queues ``pregenerate(src)`` on a small background pool. Never blocks; False when deduped or the queue is full.
+
+    ``on_done`` runs on the worker after the derivatives are generated (the art version is published from it). When
+    the call is deduped onto a queued job its ``on_done`` is merged and still runs; when the backlog is full the item
+    is dropped (logged) and ``on_done`` never runs, so nothing is published until a later request or the backfill heals it.
+    """
+    global _pregen_executor, _pregen_stop
+    key = str(src)
+    with _pregen_lock:
+        if key in _pregen_pending:
+            if on_done is not None:
+                _pregen_pending[key].append(on_done)
+            return False
+        if len(_pregen_pending) >= _PREGEN_MAX_PENDING:
+            logger.info("Thumbnail pre-generation backlog full (%d); dropping %s", _PREGEN_MAX_PENDING, src)
+            return False
+        _pregen_pending[key] = [on_done] if on_done is not None else []
+        if _pregen_executor is None:
+            _pregen_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="art-thumbs")
+            _pregen_stop = threading.Event()
+        executor, stop = _pregen_executor, _pregen_stop
+
+    def _job() -> None:
+        try:
+            if stop.is_set():
+                return
+            pregenerate(src, cache_dir, stop)
+            while not stop.is_set():  # drain until empty: a caller may merge in while callbacks run
+                with _pregen_lock:
+                    pending = _pregen_pending.get(key)
+                    callbacks = list(pending) if pending else []
+                    if pending:
+                        pending.clear()
+                    else:
+                        _pregen_pending.pop(key, None)
+                if not callbacks:
+                    break
+                for callback in callbacks:
+                    try:
+                        callback()
+                    except Exception as exc:
+                        logger.warning("Thumbnail completion callback failed for %s: %s", src, exc)
+        except Exception as exc:
+            logger.warning("Thumbnail pre-generation failed for %s: %s", src, exc)
+        finally:
+            with _pregen_lock:
+                if _pregen_executor is executor:
+                    _pregen_pending.pop(key, None)
+
+    try:
+        executor.submit(_job)
+    except RuntimeError as exc:
+        with _pregen_lock:
+            _pregen_pending.pop(key, None)
+        logger.warning("Thumbnail pool unavailable: %s", exc)
+        return False
+    return True
+
+
+def shutdown() -> None:
+    """Stops background pre-generation without waiting: queued work is cancelled and running work ends between sizes."""
+    global _pregen_executor
+    with _pregen_lock:
+        executor, _pregen_executor = _pregen_executor, None
+        _pregen_stop.set()
+        _pregen_pending.clear()
+    if executor is not None:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def wait_idle(timeout: float = 5.0) -> bool:
+    """Blocks until no background pre-generation is pending (tests and shutdown)."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with _pregen_lock:
+            if not _pregen_pending:
+                return True
+        time.sleep(0.01)
+    return False

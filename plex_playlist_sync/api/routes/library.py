@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import json
 import logging
 import os
+import re
 from pathlib import Path
 import threading
 import time
@@ -24,7 +25,7 @@ import httpx
 
 from plex_playlist_sync import library_paging as paging
 from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
-from plex_playlist_sync import art_thumbs
+from plex_playlist_sync import art_pipeline, art_thumbs
 from plex_playlist_sync import lidarr_library
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.acquisition_worker import (
@@ -102,6 +103,7 @@ from plex_playlist_sync.lidarr_migration import lidarr_migration_job
 from plex_playlist_sync.naming import build_track_path
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.storage import Database, clean_library_name
+from plex_playlist_sync.track_counts import positive_int as _positive_int
 
 logger = logging.getLogger(__name__)
 
@@ -383,6 +385,7 @@ def _lidarr_image(
     client: Optional[LidarrClient],
     if_none_match: Optional[str] = None,
     size: Optional[int] = None,
+    version: Optional[str] = None,
 ) -> Response:
     """Serves one Lidarr media cover through the core; the API key never leaves the server.
 
@@ -398,15 +401,21 @@ def _lidarr_image(
         return _placeholder()
     name = lidarr_library.sized_cover_name(base, size)
     identity = lidarr_library._identity(lidarr)
+    # Immutable only when the request's ``v`` is the token the stored body was fetched for.
+    def cache_for(stored_version: Optional[str]) -> str:
+        return _art_cache_control(version, stored_version)
+
     known = lidarr_library.known_cover_etag(identity, kind_cover, numeric, name)
     if known and lidarr_library.etag_matches(if_none_match, known):
-        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=_image_headers(_COVER_CACHE, known))
+        known_version = lidarr_library.known_cover_version(identity, kind_cover, numeric, name)
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=_image_headers(cache_for(known_version), known))
     cached = lidarr_library.read_cached_cover(identity, kind_cover, numeric, name)
     if cached is not None and cached.fresh:
-        lidarr_library.remember_cover_etag(identity, kind_cover, numeric, name, cached.etag)
+        lidarr_library.remember_cover_etag(identity, kind_cover, numeric, name, cached.etag, cached.version)
+        headers = _image_headers(cache_for(cached.version), cached.etag)
         if lidarr_library.etag_matches(if_none_match, cached.etag):
-            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=_image_headers(_COVER_CACHE, cached.etag))
-        return Response(content=cached.body, media_type=cached.content_type, headers=_image_headers(_COVER_CACHE, cached.etag))
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+        return Response(content=cached.body, media_type=cached.content_type, headers=headers)
 
     def fetch_one(filename: str) -> Optional[MediaCover]:
         try:
@@ -449,36 +458,64 @@ def _lidarr_image(
             return Response(content=cached.body, media_type=cached.content_type, headers=_image_headers(_COVER_CACHE, cached.etag))
         return _placeholder()
     etag = lidarr_library.cover_etag(identity, kind_cover, numeric, name, fetched.validator)
-    lidarr_library.remember_cover_etag(identity, kind_cover, numeric, name, etag)
-    lidarr_library.write_cached_cover(identity, kind_cover, numeric, name, fetched.body, fetched.content_type, etag)
+    lidarr_library.remember_cover_etag(identity, kind_cover, numeric, name, etag, version)
+    lidarr_library.write_cached_cover(
+        identity, kind_cover, numeric, name, fetched.body, fetched.content_type, etag, version
+    )
+    headers = _image_headers(cache_for(version), etag)
     if lidarr_library.etag_matches(if_none_match, etag):
-        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=_image_headers(_COVER_CACHE, etag))
-    return Response(content=fetched.body, media_type=fetched.content_type, headers=_image_headers(_COVER_CACHE, etag))
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    return Response(content=fetched.body, media_type=fetched.content_type, headers=headers)
 
 
 # Art sits behind require_admin, so it must be ``private``; a day of freshness plus a cheap ETag revalidation (304)
-# means replaced art shows up within a day. Never ``immutable``: the URL does not change when the file does.
+# means replaced art shows up within a day. Only URLs carrying a ``?v=`` version token (below) are ``immutable``.
 _COVER_CACHE = "private, max-age=86400"
 _NATIVE_ART_CACHE = _COVER_CACHE
+# A request whose ``?v=`` token equals the version of the exact file being served names one revision of the art, so it
+# can be cached for a year with no revalidation, as Lidarr does for ``?lastWrite=``. A token that does not match (stale,
+# forged, or for another file) never earns it.
+_IMMUTABLE_ART_CACHE = "private, max-age=31536000, immutable"
 
 
-def _native_art(src: Path, media_type: str, size: Optional[int], if_none_match: Optional[str]) -> Response:
+def _art_cache_control(requested: Optional[str], current: Optional[str]) -> str:
+    """Immutable only when the request's ``v`` equals the version ``current`` of the file actually served."""
+    return _IMMUTABLE_ART_CACHE if requested and current and requested == current else _NATIVE_ART_CACHE
+
+
+def _versioned_art_url(kind: str, item_id: Any, version: Optional[str], fallback: Optional[str]) -> Optional[str]:
+    """The art URL for a native record: the local proxy URL with ``?v=<version>`` once the art is local, else the
+    record's existing value (a remote URL or an unversioned proxy URL)."""
+    if not version:
+        return fallback
+    leaf = "image" if kind == "artist" else "cover"
+    return f"/api/library/{kind}s/{item_id}/{leaf}?v={version}"
+
+
+def _art_media_type(path: Path) -> str:
+    return "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+
+
+def _native_art(
+    src: Path, media_type: str, size: Optional[int], if_none_match: Optional[str], version: Optional[str] = None
+) -> Response:
     """Serves native artwork. ``size`` 250/500 returns a cached JPEG derivative (generated once, off the event loop
     because the routes are sync), with a strong ETag and a body-less 304 on a match; any other size serves the original."""
+    cache = _art_cache_control(version, art_thumbs.art_version(src))
     wanted = art_thumbs.normalize_size(size)
     if wanted:
         key = art_thumbs.thumb_key(src, wanted)
         if key and lidarr_library.etag_matches(if_none_match, key[1]):
-            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=_image_headers(_NATIVE_ART_CACHE, key[1]))
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=_image_headers(cache, key[1]))
         made = art_thumbs.ensure_thumb(src, wanted, mediacover_service.base_dir / "mediacover" / "thumbs")
         if made:
             return FileResponse(
-                str(made[0]), media_type="image/jpeg", headers=_image_headers(_NATIVE_ART_CACHE, made[1])
+                str(made[0]), media_type="image/jpeg", headers=_image_headers(cache, made[1])
             )
     original = art_thumbs.original_etag(src)
     if original and lidarr_library.etag_matches(if_none_match, original):
-        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=_image_headers(_NATIVE_ART_CACHE, original))
-    return FileResponse(str(src), media_type=media_type, headers=_image_headers(_NATIVE_ART_CACHE, original))
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=_image_headers(cache, original))
+    return FileResponse(str(src), media_type=media_type, headers=_image_headers(cache, original))
 
 
 def _library_sort_key(kind: str, sort_key: Optional[str]) -> str:
@@ -791,7 +828,7 @@ def _enrich_artists(db: Database, artists: list[dict[str, Any]]) -> list[dict[st
                 pass
         if not img:
             img = cover_urls.get(artist["id"])
-        a_dict["image_url"] = img
+        a_dict["image_url"] = _versioned_art_url("artist", artist["id"], a_dict.get("art_version"), img)
         results.append(a_dict)
     return results
 
@@ -842,6 +879,31 @@ def _rg_release_date(rg: dict[str, Any]) -> Optional[str]:
     return rg.get("first_release_date") or rg.get("release_date") or None
 
 
+def _store_total_tracks(db: Database, album_id: str, count: Any, authoritative: bool = False) -> None:
+    """Persists a provider-reported release track count on ``library_albums.total_tracks`` (ignored when unknown).
+
+    Rule: the stored value only ever grows (``max(existing, new)``), because a provider may describe a shorter edition
+    (Deezer's standard cut, a MusicBrainz first release without bonus discs) than the one already recorded. Pass
+    ``authoritative=True`` only for a full MusicBrainz release with all media, which may replace the value outright.
+    """
+    n = _positive_int(count)
+    if n is None:
+        return
+    db.set_library_album_total_tracks(album_id, n, authoritative=authoritative)
+
+
+def _album_track_counts(db: Database, artist_id: str) -> tuple[dict[str, int], dict[str, int]]:
+    """Per album of an artist: stored track rows, and rows that own at least one file."""
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT t.album_id, COUNT(*), "
+            "SUM(CASE WHEN EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) THEN 1 ELSE 0 END) "
+            "FROM library_tracks t WHERE t.artist_id = ? GROUP BY t.album_id",
+            (artist_id,),
+        ).fetchall()
+    return {r[0]: int(r[1]) for r in rows}, {r[0]: int(r[2] or 0) for r in rows}
+
+
 def _queue_release_date_update(
     existing_alb: dict[str, Any], rg: dict[str, Any], upd_album: list[str], upd_params: list[Any]
 ) -> None:
@@ -853,6 +915,9 @@ def _queue_release_date_update(
     if rg.get("year") is not None and existing_alb.get("year") is None:
         upd_album.append("year = ?")
         upd_params.append(rg["year"])
+    if _positive_int(rg.get("track_count")) is not None and not existing_alb.get("total_tracks"):
+        upd_album.append("total_tracks = ?")
+        upd_params.append(_positive_int(rg.get("track_count")))
 
 
 def _run_in_background(target: Callable[[], None], name: str) -> None:
@@ -1062,6 +1127,7 @@ def ingest_artist(
                         monitored=alb_monitored,
                         path=album_path,
                         cover_url=album.get("cover_url"),
+                        total_tracks=_positive_int(album.get("track_count")),
                     )
                 )
                 albums_ingested += 1
@@ -1078,6 +1144,8 @@ def ingest_artist(
                             exc,
                         )
 
+                    if album_details:
+                        _store_total_tracks(db, album_id, album_details.get("track_count"))
                     if album_details and isinstance(album_details.get("tracks"), list):
                         for trk in album_details["tracks"]:
                             foreign_track_id = trk.get("id")
@@ -1130,6 +1198,9 @@ def ingest_artist(
         # but a re-added folder may already own some).
         db.bulk_edit_library_artists([artist_id], apply_monitor_to_albums=True)
 
+    # Pre-cache the artist image and every album cover (throttled, background) so the first view is local.
+    art_pipeline.schedule_precache(db, artist_id)
+
     result = db.get_library_artist(artist_id) or artist_dict
     return {
         **result,
@@ -1161,9 +1232,14 @@ def get_artist(
     result["country"] = artist.get("country")
     albums = db.list_library_albums(artist_id=artist_id, limit=500)
     profile = db.get_release_profile(artist["release_profile_id"]) if artist.get("release_profile_id") else None
+    stored, with_files = _album_track_counts(db, artist_id)
     for alb in albums:
         # Informational only: albums outside the profile stay in the catalog and can be monitored manually.
         alb["in_profile"] = album_in_release_profile(profile, alb.get("album_type"), alb.get("secondary_types"))
+        alb["cover_url"] = _versioned_art_url("album", alb["id"], alb.get("art_version"), alb.get("cover_url"))
+        # Release track count (provider-reported, else the stored rows) and how many tracks own a file.
+        alb["track_count"] = alb.get("total_tracks") or stored.get(alb["id"], 0)
+        alb["track_file_count"] = with_files.get(alb["id"], 0)
     result["release_profile_id"] = profile["id"] if profile else None
     result["albums"] = albums
 
@@ -1189,7 +1265,7 @@ def get_artist(
             if alb.get("cover_url"):
                 img = alb["cover_url"]
                 break
-    result["image_url"] = img
+    result["image_url"] = _versioned_art_url("artist", artist_id, artist.get("art_version"), img)
     return result
 
 
@@ -1200,32 +1276,19 @@ def get_artist_image(
     client: Optional[LidarrClient] = Depends(get_lidarr_client),
     if_none_match: Optional[str] = Header(None),
     size: Optional[int] = Query(None, description="Thumbnail size: 250 or 500; anything else serves the original"),
+    v: Optional[str] = Query(None, description="Art version token; the response is immutable only when it equals the served file's version"),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> Any:
     """Serves local artist artwork or redirects to remote image / first album cover / placeholder."""
     if _is_lidarr(db):
-        return _lidarr_image("artists", "artist", artist_id, "Artist", ("poster", "cover"), client, if_none_match, size)
+        return _lidarr_image("artists", "artist", artist_id, "Artist", ("poster", "cover"), client, if_none_match, size, v)
     artist = db.get_library_artist(artist_id)
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
 
-    artist_path_str = artist.get("path")
-    if artist_path_str:
-        try:
-            validated = validate_media_path(artist_path_str, db=db)
-            if validated.is_dir():
-                for cand_name in ("artist.jpg", "artist.png", "folder.jpg"):
-                    cand = validated / cand_name
-                    if cand.is_file():
-                        media_type = "image/png" if cand_name.endswith(".png") else "image/jpeg"
-                        return _native_art(cand, media_type, size, if_none_match)
-        except Exception as exc:
-            logger.debug("Failed validating artist image path '%s': %s", artist_path_str, exc)
-
-    # Check mediacover cached artwork
-    cached_art = mediacover_service.ensure_artwork("artist_poster", artist_id, artist.get("image_url"))
-    if cached_art and cached_art.is_file() and cached_art.stat().st_size > 0:
-        return _native_art(cached_art, "image/jpeg", size, if_none_match)
+    served = art_pipeline.serve_art(db, "artist", artist, db.get_media_management_settings())
+    if served is not None:
+        return _native_art(served, _art_media_type(served), size, if_none_match, v)
 
     # Else if artist has image_url (http/https), return RedirectResponse
     image_url = artist.get("image_url")
@@ -1754,6 +1817,7 @@ def refresh_single_artist(
                                 secondary_types=rg.get("secondary_types"),
                                 monitored=alb_monitored,
                                 path=alb_path,
+                                total_tracks=_positive_int(rg.get("track_count")),
                             )
                         )
 
@@ -1794,6 +1858,7 @@ def refresh_single_artist(
                                 logger.debug("Deezer track fallback failed for %s - %s: %s", artist_name, title, dz_err)
 
                         if tracks:
+                            _store_total_tracks(db, album_id, len(tracks))
                             with album_hydration_lock(album_id):
                                 for trk in tracks:
                                     trk_title = trk.get("title") or "Unknown Track"
@@ -1974,6 +2039,7 @@ def refresh_single_artist(
                                         cover_url=upd_cov,
                                         mb_release_group_id=existing_alb.get("mb_release_group_id"),
                                         mb_release_id=existing_alb.get("mb_release_id"),
+                                        total_tracks=_positive_int(album.get("track_count")),
                                     )
                                 )
                             else:
@@ -2004,6 +2070,7 @@ def refresh_single_artist(
                                         monitored=alb_monitored,
                                         path=alb_path,
                                         cover_url=album.get("cover_url"),
+                                        total_tracks=_positive_int(album.get("track_count")),
                                     )
                                 )
 
@@ -2026,6 +2093,8 @@ def refresh_single_artist(
                                         exc,
                                     )
 
+                                if album_details:
+                                    _store_total_tracks(db, album_id, album_details.get("track_count"))
                                 if album_details and isinstance(album_details.get("tracks"), list):
                                     with album_hydration_lock(album_id):
                                         for trk in album_details["tracks"]:
@@ -2174,6 +2243,8 @@ def refresh_single_artist(
         except Exception:
             pass
 
+    art_pipeline.schedule_precache(db, artist_id)
+
     # Reconcile files
     try:
         reconcile_artist_files(db, artist_id)
@@ -2282,6 +2353,7 @@ def _enrich_albums(db: Database, albums: list[dict[str, Any]]) -> list[dict[str,
             artist_cache[art_id] = art["name"] if art else "Unknown Artist"
         a_dict["artist_name"] = artist_cache[art_id]
         a_dict["track_count"] = track_counts.get(album["id"], 0)
+        a_dict["cover_url"] = _versioned_art_url("album", album["id"], a_dict.get("art_version"), a_dict.get("cover_url"))
         results.append(a_dict)
     return results
 
@@ -2321,6 +2393,7 @@ def get_album(
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
     result = dict(album)
+    result["cover_url"] = _versioned_art_url("album", album_id, album.get("art_version"), album.get("cover_url"))
     tracks = db.list_library_tracks(album_id=album_id, limit=500)
     for t in tracks:
         file_info = db.get_library_file_for_track(t["id"])
@@ -2336,46 +2409,20 @@ def get_album_cover(
     client: Optional[LidarrClient] = Depends(get_lidarr_client),
     if_none_match: Optional[str] = Header(None),
     size: Optional[int] = Query(None, description="Thumbnail size: 250 or 500; anything else serves the original"),
+    v: Optional[str] = Query(None, description="Art version token; the response is immutable only when it equals the served file's version"),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> Any:
     """Serves local album cover artwork or redirects to remote artwork / placeholder."""
     if _is_lidarr(db):
-        return _lidarr_image("albums", "album", album_id, "Album", ("cover",), client, if_none_match, size)
+        return _lidarr_image("albums", "album", album_id, "Album", ("cover",), client, if_none_match, size, v)
     album = db.get_library_album(album_id)
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
 
-    media_settings = db.get_media_management_settings()
-    prefer_local = bool(media_settings.get("prefer_local_artwork", True))
-    album_path_str = album.get("path")
     remote_cover = album.get("cover_url")
-
-    def _find_local_cover(p_str: Optional[str]) -> Optional[Path]:
-        if not p_str:
-            return None
-        try:
-            validated = validate_media_path(p_str, db=db)
-            if validated.is_dir():
-                return find_folder_art(validated)
-            elif validated.is_file():
-                return validated
-        except Exception as exc:
-            logger.debug("Failed validating album cover path '%s': %s", p_str, exc)
-        return None
-
-    local_img = _find_local_cover(album_path_str)
-
-    if prefer_local and local_img:
-        media_type = "image/png" if local_img.suffix.lower() == ".png" else "image/jpeg"
-        return _native_art(local_img, media_type, size, if_none_match)
-
-    cached_cover = mediacover_service.ensure_artwork("album_cover", album_id, remote_cover)
-    if cached_cover and cached_cover.is_file() and cached_cover.stat().st_size > 0:
-        return _native_art(cached_cover, "image/jpeg", size, if_none_match)
-
-    if local_img:
-        media_type = "image/png" if local_img.suffix.lower() == ".png" else "image/jpeg"
-        return _native_art(local_img, media_type, size, if_none_match)
+    served = art_pipeline.serve_art(db, "album", album, db.get_media_management_settings())
+    if served is not None:
+        return _native_art(served, _art_media_type(served), size, if_none_match, v)
 
     if remote_cover and (remote_cover.startswith("http://") or remote_cover.startswith("https://")):
         return RedirectResponse(url=remote_cover, status_code=status.HTTP_307_TEMPORARY_REDIRECT)

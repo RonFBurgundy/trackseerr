@@ -48,7 +48,7 @@ export const LibraryManagerSwitch: React.FC<LibraryManagerSwitchProps> = ({
   };
 
   return (
-    <MachinedCard className="p-5 max-w-2xl space-y-4">
+    <MachinedCard className="p-3 sm:p-5 max-w-2xl space-y-4">
       <div>
         <h4 className="text-sm font-bold uppercase font-mono text-white">Library manager</h4>
         <p className="text-xs text-neutral-400 font-mono mt-0.5">

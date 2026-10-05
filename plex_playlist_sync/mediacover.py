@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import threading
 import time
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 from urllib.parse import urlparse
 import uuid
 
@@ -64,7 +64,8 @@ class MediaCoverService:
         self._negative: dict[str, float] = {}
         self._host_failures: dict[str, int] = {}
         self._host_open_until: dict[str, float] = {}
-        self._inflight: set[str] = set()
+        # target path -> callbacks to run when that download lands (merged when a second caller dedupes onto it)
+        self._inflight: dict[str, list[Callable[[Path], None]]] = {}
         self._executor: Optional[ThreadPoolExecutor] = None
 
     # ------------------------------------------------------------------ failure memory
@@ -124,15 +125,25 @@ class MediaCoverService:
             self._negative.pop(url, None)
 
     # ------------------------------------------------------------------ background pool
-    def schedule_cache(self, target_path: Path, remote_url: str) -> bool:
-        """Queues a background download. Never blocks; returns False if skipped, deduped, or dropped (queue full)."""
+    def schedule_cache(
+        self, target_path: Path, remote_url: str, on_cached: Optional[Callable[[Path], None]] = None
+    ) -> bool:
+        """Queues a background download. Never blocks; returns False if skipped, deduped, or dropped (queue full).
+
+        ``on_cached(target_path)`` runs on the worker once the file is on disk (thumbnail pre-generation, art version).
+        A call deduped onto a queued/running download still returns False, but its ``on_cached`` is merged and fires too.
+        """
         if not remote_url or not isinstance(remote_url, str) or self._should_skip(remote_url):
             return False
         key = str(target_path)
         with self._state_lock:
-            if key in self._inflight or len(self._inflight) >= _MAX_PENDING:
+            if key in self._inflight:
+                if on_cached is not None:
+                    self._inflight[key].append(on_cached)
                 return False
-            self._inflight.add(key)
+            if len(self._inflight) >= _MAX_PENDING:
+                return False
+            self._inflight[key] = [on_cached] if on_cached is not None else []
             if self._executor is None:
                 self._executor = ThreadPoolExecutor(
                     max_workers=_POOL_WORKERS, thread_name_prefix="mediacover"
@@ -141,18 +152,33 @@ class MediaCoverService:
 
         def _job() -> None:
             try:
-                self.cache_image(target_path, remote_url)
+                if self.cache_image(target_path, remote_url):
+                    while True:  # drain until empty: a caller may dedupe onto this download while callbacks run
+                        with self._state_lock:
+                            pending = self._inflight.get(key)
+                            callbacks = list(pending) if pending else []
+                            if pending:
+                                pending.clear()
+                            else:
+                                self._inflight.pop(key, None)  # atomic with the emptiness check: no late callback is lost
+                        if not callbacks:
+                            break
+                        for callback in callbacks:
+                            try:
+                                callback(target_path)
+                            except Exception as exc:
+                                logger.warning("MediaCoverService: on_cached callback for %s failed: %s", target_path, exc)
             except Exception as exc:
                 logger.warning("MediaCoverService: background cache of %s failed: %s", remote_url, exc)
             finally:
                 with self._state_lock:
-                    self._inflight.discard(key)
+                    self._inflight.pop(key, None)
 
         try:
             executor.submit(_job)
         except RuntimeError as exc:
             with self._state_lock:
-                self._inflight.discard(key)
+                self._inflight.pop(key, None)
             logger.warning("MediaCoverService: background pool unavailable: %s", exc)
             return False
         return True
@@ -284,7 +310,12 @@ class MediaCoverService:
             return False
 
     def ensure_artwork(
-        self, category: str, item_id: str, remote_url: Optional[str], block: bool = False
+        self,
+        category: str,
+        item_id: str,
+        remote_url: Optional[str],
+        block: bool = False,
+        on_cached: Optional[Callable[[Path], None]] = None,
     ) -> Optional[Path]:
         """Resolves target path for category, returning it if already cached.
 
@@ -309,8 +340,12 @@ class MediaCoverService:
         if not remote_url:
             return None
         if block:
-            return target if self.cache_image(target, remote_url) else None
-        self.schedule_cache(target, remote_url)
+            if not self.cache_image(target, remote_url):
+                return None
+            if on_cached is not None:
+                on_cached(target)
+            return target
+        self.schedule_cache(target, remote_url, on_cached)
         return None
 
 

@@ -44,8 +44,8 @@ const NodeRow: React.FC<NodeRowProps> = ({ node, depth, route, expanded, onToggl
   const panelId = `nav-hub-${node.key.replace(/[^a-z0-9-]/gi, '-')}`;
   const route0 = node.route;
 
-  const rowClass = `w-full flex items-center gap-3 rounded-[3px] text-left transition-all duration-75 border ${
-    depth === 0 ? 'min-h-[56px] p-3' : 'min-h-[44px] px-3 py-2'
+  const rowClass = `w-full flex items-center gap-2.5 rounded-[3px] text-left transition-all duration-75 border ${
+    depth === 0 ? 'min-h-[40px] px-2.5 py-1 md:min-h-[48px] md:px-3 md:py-2' : 'min-h-[36px] px-2.5 py-1 md:min-h-[40px]'
   } ${
     here
       ? 'bg-[#151515] border-[#e5a00d]/40 shadow-[inset_0_1px_3px_rgba(0,0,0,0.8)]'
@@ -56,7 +56,7 @@ const NodeRow: React.FC<NodeRowProps> = ({ node, depth, route, expanded, onToggl
     <>
       {node.icon && (
         <div
-          className={`${depth === 0 ? 'w-8 h-8' : 'w-6 h-6'} rounded-[3px] flex items-center justify-center flex-shrink-0 border ${
+          className={`${depth === 0 ? 'w-7 h-7' : 'w-6 h-6'} rounded-[3px] flex items-center justify-center flex-shrink-0 border ${
             here ? 'bg-[#0f0f0f] border-[#e5a00d] text-[#e5a00d]' : 'bg-[#181818] border-[#262626] text-neutral-300'
           }`}
         >
@@ -65,12 +65,12 @@ const NodeRow: React.FC<NodeRowProps> = ({ node, depth, route, expanded, onToggl
       )}
       <div className="flex-1 min-w-0">
         <span
-          className={`text-xs font-bold uppercase tracking-wider font-mono ${here ? 'text-[#e5a00d]' : 'text-neutral-200'}`}
+          className={`text-[13px] md:text-xs font-bold uppercase tracking-wider font-mono ${here ? 'text-[#e5a00d]' : 'text-neutral-200'}`}
         >
           {node.label}
         </span>
         {depth === 0 && node.description && (
-          <p className="text-[11px] text-neutral-400 font-mono truncate">{node.description}</p>
+          <p className="hidden md:block text-[11px] text-neutral-400 font-mono truncate">{node.description}</p>
         )}
       </div>
       {isCurrent && (
@@ -86,7 +86,7 @@ const NodeRow: React.FC<NodeRowProps> = ({ node, depth, route, expanded, onToggl
   );
 
   return (
-    <li className="flex flex-col gap-1.5">
+    <li className="flex flex-col gap-0.5">
       {node.children ? (
         <button
           type="button"
@@ -110,7 +110,7 @@ const NodeRow: React.FC<NodeRowProps> = ({ node, depth, route, expanded, onToggl
         </button>
       )}
       {node.children && isOpen && (
-        <ul id={panelId} className="flex flex-col gap-1.5 pl-4 border-l border-[#1f1f1f] ml-4">
+        <ul id={panelId} className="flex flex-col gap-0.5 border-l border-[#2a2a2a] ml-[22px] my-0.5 pl-1.5">
           {node.children.map((child) => (
             <NodeRow
               key={child.key}
@@ -206,18 +206,18 @@ const HubPanel: React.FC<NavHubProps> = ({
         onKeyDown={handleTrapTab}
         className="relative w-full max-w-none md:w-80 md:max-w-[320px] bg-[#0c0c0c] border-l md:border-l-0 md:border-r border-[#222222] shadow-2xl flex flex-col h-full pt-safe pb-safe z-10 outline-none"
       >
-        <div className="flex items-center justify-between px-4 py-3.5 border-b border-[#1f1f1f] bg-[#121212]">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-[#1f1f1f] bg-[#121212]">
           <div className="flex items-center gap-2.5">
             <img
               src="/trackseerr-logo.svg"
               alt="TrackSeerr"
-              className="h-7 w-7 object-contain"
+              width={24} height={24} className="h-6 w-6 object-contain"
               onError={(e) => {
                 e.currentTarget.src = '/static/trackseerr-logo.svg';
               }}
             />
             <div>
-              <span className="text-base font-black tracking-wider uppercase text-white font-mono leading-none">
+              <span className="text-sm font-black tracking-wider uppercase text-white font-mono leading-none">
                 Track<span className="text-[#e5a00d]">Seerr</span>
                 {tier === 'gateway' && ' Requests'}
                 {tier === 'core' && (
@@ -226,18 +226,18 @@ const HubPanel: React.FC<NavHubProps> = ({
                   </span>
                 )}
               </span>
-              <p className="text-[10px] text-neutral-400 font-mono tracking-tight uppercase">Deck Controls</p>
+              <p className="hidden md:block text-[10px] text-neutral-400 font-mono tracking-tight uppercase">Deck Controls</p>
             </div>
           </div>
           <TapeDeckButton size="sm" onClick={onClose} aria-label="Close menu" icon={<X className="h-4 w-4" />} />
         </div>
 
         {user && (
-          <div className="p-4 bg-[#121212]/70 border-b border-[#1c1c1c] space-y-3">
+          <div className="px-3 py-2 bg-[#121212]/70 border-b border-[#1c1c1c] space-y-1.5">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
-                <div className="w-8 h-8 rounded-[3px] bg-[#1c1c1c] border border-[#2c2c2c] flex items-center justify-center flex-shrink-0">
-                  <UserIcon className="h-4 w-4 text-[#e5a00d]" />
+                <div className="w-6 h-6 rounded-[3px] bg-[#1c1c1c] border border-[#2c2c2c] flex items-center justify-center flex-shrink-0">
+                  <UserIcon className="h-3.5 w-3.5 text-[#e5a00d]" />
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -254,16 +254,16 @@ const HubPanel: React.FC<NavHubProps> = ({
           </div>
         )}
 
-        <nav aria-label="Main navigation" className="flex-1 p-3 overflow-y-auto modal-body-scroll">
-          <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono px-2 pt-1 pb-2">Navigation Deck</div>
-          <ul className="flex flex-col gap-2">
+        <nav aria-label="Main navigation" className="flex-1 px-2 py-1.5 md:p-3 overflow-y-auto modal-body-scroll">
+          <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono px-1 pt-0.5 pb-1">Navigation Deck</div>
+          <ul className="flex flex-col gap-1">
             {tree.map((node) => (
               <NodeRow key={node.key} node={node} depth={0} route={route} expanded={expanded} onToggle={toggle} onGo={go} />
             ))}
           </ul>
         </nav>
 
-        <div className="p-3 border-t border-[#1f1f1f] bg-[#0e0e0e] space-y-2">
+        <div className="px-2 py-1.5 md:p-3 border-t border-[#1f1f1f] bg-[#0e0e0e] space-y-1">
           {user && onLogout && (
             <TapeDeckButton
               size="md"
@@ -278,8 +278,8 @@ const HubPanel: React.FC<NavHubProps> = ({
               Sign Out
             </TapeDeckButton>
           )}
-          <div className="text-center pt-1">
-            <span className="text-[9px] uppercase tracking-widest text-neutral-600 font-mono">TrackSeerr Analog Deck v1.0</span>
+          <div className="text-center">
+            <span className="text-[9px] leading-none uppercase tracking-widest text-neutral-600 font-mono">TrackSeerr Analog Deck v1.0</span>
           </div>
         </div>
       </div>

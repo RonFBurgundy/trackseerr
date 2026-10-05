@@ -62,7 +62,7 @@ export const ProfilesPanel: React.FC<ProfilesPanelProps> = ({ profiles, onProfil
       ) : (
         <ScrollFill ariaLabel="Quality profiles" className="grid grid-cols-1 md:grid-cols-2 gap-4 content-start">
           {profiles.map((p) => (
-            <MachinedCard key={p.id} className="p-4 flex items-center justify-between gap-3">
+            <MachinedCard key={p.id} className="p-3 sm:p-4 flex items-center justify-between gap-3">
               <div>
                 <span className="font-bold text-sm text-white">{p.name}</span>
                 <p className="text-xs text-neutral-400 font-mono mt-1">Cutoff Tier: {p.cutoff}</p>
@@ -85,7 +85,7 @@ export const ProfilesPanel: React.FC<ProfilesPanelProps> = ({ profiles, onProfil
         </ScrollFill>
       )}
 
-      <MachinedCard className="p-5 max-w-xl">
+      <MachinedCard className="p-3 sm:p-5 max-w-xl">
         <h4 className="text-xs font-bold uppercase font-mono text-white mb-4">Add Quality Profile</h4>
         <form onSubmit={handleAdd} className="space-y-4">
           <div>

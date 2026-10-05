@@ -66,7 +66,7 @@ const QuotaOverrideField: React.FC<QuotaOverrideFieldProps> = ({
         }}
         className={inputClass}
       />
-      <label className="flex items-center gap-2 min-h-[44px] sm:min-h-0 text-[11px] font-mono cursor-pointer">
+      <label className="flex items-center gap-2 min-h-[36px] sm:min-h-0 text-[11px] font-mono cursor-pointer">
         <input
           id={`${fieldId}-default`}
           name={`quota-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-use-default`}
@@ -263,7 +263,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                 return (
                   <label
                     key={flag.bit}
-                    className={`flex items-center gap-3 min-h-[44px] sm:min-h-[32px] text-xs font-mono ${
+                    className={`flex items-center gap-3 min-h-[36px] sm:min-h-[32px] text-xs font-mono ${
                       lockedAdmin ? 'opacity-60' : 'cursor-pointer'
                     }`}
                     title={lockedAdmin ? 'You cannot change your own admin permission' : undefined}
@@ -321,7 +321,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
             )}
           </fieldset>
 
-          <MachinedCard className="p-4 space-y-3">
+          <MachinedCard className="p-3 sm:p-4 space-y-3">
             <h4 className="text-xs uppercase font-mono tracking-wider text-[var(--text-secondary)]">
               Account actions
             </h4>

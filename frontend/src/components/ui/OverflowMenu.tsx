@@ -90,7 +90,7 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, label, classN
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex h-11 w-11 items-center justify-center rounded-[3px] text-neutral-400 hover:text-white hover:bg-[#1c1c1c] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#e5a00d]"
+        className="inline-flex h-9 w-9 items-center justify-center rounded-[3px] text-neutral-400 hover:text-white hover:bg-[#1c1c1c] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#e5a00d]"
       >
         <MoreVertical className="h-5 w-5" />
       </button>
@@ -113,7 +113,7 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, label, classN
                 close();
                 item.onSelect();
               }}
-              className="flex min-h-[44px] w-full items-center gap-2 px-3 text-left text-xs font-mono text-neutral-200 hover:bg-[#1c1c1c] disabled:opacity-50 focus:outline-none focus-visible:bg-[#1c1c1c]"
+              className="flex min-h-[36px] w-full items-center gap-2 px-3 text-left text-xs font-mono text-neutral-200 hover:bg-[#1c1c1c] disabled:opacity-50 focus:outline-none focus-visible:bg-[#1c1c1c]"
             >
               {item.icon}
               <span className="flex-1">{item.label}</span>

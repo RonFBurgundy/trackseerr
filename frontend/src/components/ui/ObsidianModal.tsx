@@ -69,7 +69,7 @@ export const ObsidianModal: React.FC<ObsidianModalProps> = ({
         className={`relative flex flex-col w-full h-full sm:h-auto sm:max-h-[90dvh] bg-[#121212] border-0 sm:border sm:border-[#2a2a2a] rounded-none sm:rounded-[4px] shadow-2xl pt-safe pb-safe ${maxWidth}`}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[#222222] px-4 py-3 sm:px-5 sm:py-3.5 bg-[#181818]/80 shrink-0">
+        <div className="flex items-center justify-between border-b border-[#222222] px-3 py-2.5 sm:px-5 sm:py-3 sm:py-3.5 bg-[#181818]/80 shrink-0">
           <div className="min-w-0">
             <h3 className="text-sm sm:text-base font-bold tracking-wider uppercase text-white">
               {title}
@@ -96,7 +96,7 @@ export const ObsidianModal: React.FC<ObsidianModalProps> = ({
         {footer && (
           <ActionBar
             align="end"
-            className="border-t border-[#222222] px-4 py-3 pb-safe sm:px-5 bg-[#0e0e0e] shrink-0"
+            className="border-t border-[#222222] px-3 py-2.5 pb-safe sm:px-5 sm:py-3 bg-[#0e0e0e] shrink-0"
           >
             {footer}
           </ActionBar>

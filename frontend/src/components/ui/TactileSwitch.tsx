@@ -36,7 +36,7 @@ export const TactileSwitch: React.FC<TactileSwitchProps> = ({
   return (
     <label
       title={title}
-      className={`inline-flex items-center gap-3 select-none cursor-pointer ${
+      className={`inline-flex items-center gap-2 sm:gap-3 select-none cursor-pointer ${
         disabled ? 'opacity-50 cursor-not-allowed' : ''
       } ${className}`}
     >
@@ -49,7 +49,7 @@ export const TactileSwitch: React.FC<TactileSwitchProps> = ({
         aria-checked={checked}
         disabled={disabled}
         onClick={() => !disabled && onChange(!checked)}
-        className="group relative inline-flex h-11 w-11 shrink-0 items-center justify-center focus:outline-none max-sm:-my-[10px] sm:h-6"
+        className="group relative inline-flex h-10 w-11 shrink-0 items-center justify-center focus:outline-none max-sm:-my-2 sm:h-6"
       >
         <span
           className={`tactile-switch relative inline-flex h-6 w-11 shrink-0 items-center rounded-[4px] border border-[#222222] bg-[#0d0d0d] p-0.5 transition-colors duration-100 ease-in-out group-focus-visible:border-[#e5a00d] ${

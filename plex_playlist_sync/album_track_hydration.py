@@ -160,6 +160,8 @@ def hydrate_album_tracks(
                 _mark_failed(album_id)
             return 0
 
+        # max(existing, new): the release group's first release may be a shorter edition than one already recorded.
+        db.set_library_album_total_tracks(album_id, len(fetched))
         created = 0
         for trk in fetched:
             title = trk.get("title") or "Unknown Track"

@@ -32,7 +32,7 @@ export const ScrobblingSettings: React.FC<ScrobblingSettingsProps> = ({ isAdmin,
         >
           {notice.kind === 'success' ? <Check className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
           <span className="flex-1">{notice.message}</span>
-          <button type="button" onClick={dismissNotice} className="min-h-[44px] sm:min-h-0 px-2 uppercase">
+          <button type="button" onClick={dismissNotice} className="min-h-[36px] sm:min-h-0 px-2 uppercase">
             Dismiss
           </button>
         </div>

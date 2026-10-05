@@ -39,7 +39,7 @@ export const MusicIdentityCard: React.FC<MusicIdentityCardProps> = ({
   const active = config.scrobbling_enabled && (config.lastfm_connected || config.listenbrainz_connected);
 
   return (
-    <MachinedCard className="p-4 sm:p-6 space-y-6">
+    <MachinedCard className="p-3 sm:p-6 space-y-6">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-sm font-bold uppercase tracking-wider text-white">Music Identity</h3>
         {active && (
@@ -95,7 +95,7 @@ export const MusicIdentityCard: React.FC<MusicIdentityCardProps> = ({
           type="button"
           aria-expanded={lbOpen}
           onClick={() => setLbOpen((v) => !v)}
-          className="w-full min-h-[44px] flex items-center justify-between text-left text-xs uppercase font-mono tracking-wider text-neutral-400 hover:text-white"
+          className="w-full min-h-[36px] flex items-center justify-between text-left text-xs uppercase font-mono tracking-wider text-neutral-400 hover:text-white"
         >
           <span>ListenBrainz</span>
           <span className="text-[#e5a00d]">{lbOpen ? '−' : '+'}</span>

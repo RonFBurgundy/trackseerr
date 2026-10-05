@@ -88,7 +88,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
   }
 
   return (
-    <MachinedCard className={`relative p-2.5 sm:p-4 space-y-2 sm:space-y-4 ${selected?.checked ? 'ring-1 ring-[#e5a00d]' : ''}`}>
+    <MachinedCard className={`relative p-2 sm:p-4 space-y-2 sm:space-y-4 ${selected?.checked ? 'ring-1 ring-[#e5a00d]' : ''}`}>
       <div className="flex flex-row items-center justify-between gap-2 sm:gap-4">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
           {selected && (
@@ -99,7 +99,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
               onChange={selected.onToggle}
             />
           )}
-          <div className="flex items-center gap-3 cursor-pointer min-w-0 flex-1" onClick={toggleExpanded}>
+          <div className="flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0 flex-1" onClick={toggleExpanded}>
           <div
             className={`h-10 w-10 sm:h-12 sm:w-12 rounded-[3px] bg-[#1a1a1a] border border-[#262626] overflow-hidden flex-shrink-0 flex items-center justify-center ${
               album.in_profile === false ? 'opacity-60' : ''
@@ -113,7 +113,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <h4 className="font-bold text-sm text-white truncate" title={album.title}>
+              <h4 className="font-bold text-[13px] sm:text-sm leading-tight text-white truncate" title={album.title}>
                 {album.title}
               </h4>
               {expanded ? (
@@ -122,9 +122,10 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
                 <ChevronDown className="hidden sm:block h-4 w-4 text-neutral-400 flex-shrink-0" />
               )}
             </div>
-            <p className="text-xs text-neutral-400 font-mono mt-0.5">
-              {album.release_date ? album.release_date.substring(0, 4) : 'Unknown Year'} &bull;{' '}
-              {album.track_count ?? tracks.length} Tracks
+            <p className="text-[11px] sm:text-xs text-neutral-400 font-mono mt-0.5">
+              {album.release_date ? album.release_date.substring(0, 4) : (album.year ?? 'Unknown Year')} &bull;{' '}
+              {album.track_count ?? tracks.length} {(album.track_count ?? tracks.length) === 1 ? 'track' : 'tracks'}
+              {(album.track_file_count ?? 0) > 0 && <> &bull; {album.track_file_count} in library</>}
               {album.in_profile === false && (
                 <span
                   className="ml-2 inline-block align-middle px-1.5 py-px rounded-[2px] border border-[#2a2a2a] bg-[#161616] text-[10px] uppercase text-neutral-500"
@@ -139,19 +140,19 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
           </div>
         </div>
 
-        <div className="flex sm:hidden items-center flex-shrink-0 -my-1">
+        <div className="flex sm:hidden items-center flex-shrink-0 -my-1.5">
           <button
             type="button"
             aria-label={expanded ? `Hide tracks for ${album.title}` : `Show tracks for ${album.title}`}
             aria-expanded={expanded}
             aria-controls={tracksId}
             onClick={toggleExpanded}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-[3px] text-neutral-400 hover:text-white focus:outline-none focus-visible:ring-1 focus-visible:ring-[#e5a00d]"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-[3px] text-neutral-400 hover:text-white focus:outline-none focus-visible:ring-1 focus-visible:ring-[#e5a00d]"
           >
             {loading ? (
-              <Loader2 className="h-5 w-5 animate-spin text-[#e5a00d]" />
+              <Loader2 className="h-4 w-4 animate-spin text-[#e5a00d]" />
             ) : (
-              <ChevronDown className={`h-5 w-5 transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`h-4 w-4 transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`} />
             )}
           </button>
           <OverflowMenu items={menuItems} label={`Actions for ${album.title}`} />

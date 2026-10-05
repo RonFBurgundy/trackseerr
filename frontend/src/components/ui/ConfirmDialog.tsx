@@ -83,13 +83,13 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         aria-labelledby={titleId}
         className="flex flex-col w-full max-w-none sm:max-w-md bg-[#121212] border-0 border-t sm:border border-[#2a2a2a] rounded-none sm:rounded-[4px] shadow-2xl pb-safe"
       >
-        <div className="border-b border-[#222222] px-4 py-3 sm:px-5 bg-[#181818]/80">
+        <div className="border-b border-[#222222] px-3 py-2.5 sm:px-5 sm:py-3 bg-[#181818]/80">
           <h3 id={titleId} className="text-sm sm:text-base font-bold tracking-wider uppercase text-white">
             {title}
           </h3>
         </div>
         <div className="p-4 sm:p-5 text-sm text-neutral-200">{children}</div>
-        <ActionBar align="end" className="border-t border-[#222222] px-4 py-3 sm:px-5 bg-[#0e0e0e] flex-wrap">
+        <ActionBar align="end" className="border-t border-[#222222] px-3 py-2.5 sm:px-5 sm:py-3 bg-[#0e0e0e] flex-wrap">
           <TapeDeckButton type="button" disabled={busy} onClick={onCancel}>
             {cancelLabel}
           </TapeDeckButton>

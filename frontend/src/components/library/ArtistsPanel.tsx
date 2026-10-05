@@ -68,7 +68,7 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
   const canBulkEdit = isAdmin && mode !== 'lidarr';
   const selection = useBulkSelection();
   const { toggle: toggleSelected, isSelected, allMatching, active: selecting, exit: exitSelection } = selection;
-  const bulk = useArtistBulkEdit(selection, list.total, onToast, reload);
+  const bulk = useArtistBulkEdit(selection, list.total, onToast, reload, JSON.stringify([query, monitoredOnly]));
   const profiles = useQualityProfiles(selecting, onToast);
   const releaseProfiles = useReleaseProfiles(selecting && canBulkEdit, onToast);
   const unfiltered = !query && !monitoredOnly;

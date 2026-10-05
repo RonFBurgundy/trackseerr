@@ -1,10 +1,10 @@
 import React, { useId } from 'react';
 
 export const inputClass =
-  'w-full bg-[var(--bg-canvas)] border border-[var(--border-default)] rounded-[3px] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-amber)] min-h-[44px] sm:min-h-[38px] disabled:opacity-50';
+  'w-full bg-[var(--bg-canvas)] border border-[var(--border-default)] rounded-[3px] px-2.5 sm:px-3 py-1.5 sm:py-2 text-[13px] sm:text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-amber)] min-h-[36px] sm:min-h-[38px] disabled:opacity-50';
 
 export const labelClass =
-  'block text-xs uppercase font-mono tracking-wider text-[var(--text-secondary)] mb-1.5';
+  'block text-xs uppercase font-mono tracking-wider text-[var(--text-secondary)] mb-1 sm:mb-1.5';
 
 export interface FormFieldProps {
   label: string;
@@ -90,7 +90,7 @@ export const StatusMessage: React.FC<StatusMessageProps> = ({
   return (
     <div
       role={variant === 'error' ? 'alert' : 'status'}
-      className={`p-3 bg-[var(--bg-surface)] border text-xs font-mono rounded-[4px] ${tone} ${className}`}
+      className={`p-2.5 sm:p-3 bg-[var(--bg-surface)] border text-xs font-mono rounded-[4px] ${tone} ${className}`}
     >
       {children}
     </div>

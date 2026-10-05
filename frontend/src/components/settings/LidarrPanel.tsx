@@ -101,7 +101,7 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
         />
       )}
 
-      <MachinedCard className="p-6 space-y-5">
+      <MachinedCard className="p-3 sm:p-6 space-y-5">
         <div className="flex items-center justify-between gap-3 border-b border-[#222222] pb-3">
           <div>
             <h4 className="text-sm font-bold uppercase font-mono text-white">Lidarr Integration</h4>

@@ -26,7 +26,7 @@ export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, li
     <div className="space-y-6">
       {isCore && <RequestPortalCard />}
 
-      <MachinedCard className="p-6 max-w-2xl space-y-4">
+      <MachinedCard className="p-3 sm:p-6 max-w-2xl space-y-4">
         <h4 className="text-sm font-bold uppercase font-mono text-white">System Diagnostics</h4>
         {isLoading && !status && !statusError && (
           <div className="flex items-center gap-2 text-xs font-mono text-neutral-400">
@@ -71,7 +71,7 @@ export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, li
       </MachinedCard>
 
       {libraryMode === 'lidarr' && (
-        <MachinedCard className="p-6 max-w-2xl space-y-4">
+        <MachinedCard className="p-3 sm:p-6 max-w-2xl space-y-4">
           <div className="flex items-center justify-between gap-3">
             <h4 className="text-sm font-bold uppercase font-mono text-white">Lidarr Health</h4>
             {lidarrHealth && (

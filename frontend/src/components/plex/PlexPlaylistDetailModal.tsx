@@ -135,7 +135,7 @@ const DetailBody: React.FC<BodyProps> = ({
           </form>
         ) : (
           <div className="flex items-center justify-between gap-2">
-            <h4 className="font-bold text-base text-white truncate" title={playlist.title}>
+            <h4 className="font-bold text-sm sm:text-base text-white truncate" title={playlist.title}>
               {playlist.title}
             </h4>
             <TapeDeckButton
@@ -269,7 +269,7 @@ const DetailBody: React.FC<BodyProps> = ({
                     type="button"
                     aria-pressed={on}
                     onClick={() => toggleTarget(u.username)}
-                    className={`px-2.5 py-2 min-h-[44px] sm:min-h-0 sm:py-1 rounded-[3px] text-xs font-mono transition-all ${
+                    className={`px-2.5 py-2 min-h-[36px] sm:min-h-0 sm:py-1 rounded-[3px] text-xs font-mono transition-all ${
                       on
                         ? 'bg-[#e5a00d]/20 border border-[#e5a00d] text-[#e5a00d]'
                         : 'bg-[#121212] border border-[#222222] text-neutral-500 hover:text-neutral-300'

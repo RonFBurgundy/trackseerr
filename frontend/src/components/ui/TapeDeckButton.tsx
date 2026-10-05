@@ -24,9 +24,10 @@ export const TapeDeckButton: React.FC<TapeDeckButtonProps> = ({
   ...props
 }) => {
   const sizeClasses = {
-    sm: 'text-xs px-2.5 py-1.5 min-h-[44px] sm:min-h-[32px]',
-    md: 'text-xs sm:text-sm px-3.5 py-2 min-h-[44px] sm:min-h-[38px]',
-    lg: 'text-sm sm:text-base px-5 py-2.5 min-h-[44px] sm:min-h-[44px]',
+    // Phones: sm and md are both the 36px compact key; lg is 40px. Desktop (sm+) keeps 32 / 38 / 44.
+    sm: 'text-xs px-2.5 py-1 min-h-[36px] sm:py-1.5 sm:min-h-[32px]',
+    md: 'text-xs sm:text-sm px-3 sm:px-3.5 py-1 sm:py-2 min-h-[36px] sm:min-h-[38px]',
+    lg: 'text-sm px-4 sm:px-5 py-1.5 sm:py-2.5 min-h-[40px] sm:min-h-[44px]',
   }[size];
 
   const variantClasses = {
@@ -44,7 +45,7 @@ export const TapeDeckButton: React.FC<TapeDeckButtonProps> = ({
   return (
     <button
       type="button"
-      className={`tape-deck-btn relative inline-flex items-center justify-center gap-2 font-semibold uppercase tracking-wider select-none rounded-[3px] transition-all duration-75 active:translate-y-[2px] ${sizeClasses} ${variantClasses} ${
+      className={`tape-deck-btn relative inline-flex items-center justify-center gap-1.5 sm:gap-2 font-semibold after:absolute after:content-[''] after:inset-x-0 after:-inset-y-[2px] sm:after:hidden uppercase tracking-wider select-none rounded-[3px] transition-all duration-75 active:translate-y-[2px] ${sizeClasses} ${variantClasses} ${
         active ? 'engaged' : ''
       } ${className}`}
       disabled={disabled}

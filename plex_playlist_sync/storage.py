@@ -70,7 +70,7 @@ def clean_library_name(text: str) -> str:
 
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
-SCHEMA_VERSION = 46  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 47  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _titles_near_equal(a: str, b: str) -> bool:
@@ -325,6 +325,7 @@ class Database:
                 (44, self._migration_v44),
                 (45, self._migration_v45),
                 (46, self._migration_v46),
+                (47, self._migration_v47),
             ]
 
             applied = 0
@@ -1488,6 +1489,14 @@ class Database:
             cur.execute(
                 "ALTER TABLE library_artists ADD COLUMN pending_profile_recompute INTEGER NOT NULL DEFAULT 0;"
             )
+
+    def _migration_v47(self, cur: sqlite3.Cursor) -> None:
+        """``art_version`` on library artists and albums: a token (local art file mtime + size) that rides in the art URL
+        as ``?v=`` so the browser can cache it as immutable. NULL until the art is first seen or backfilled."""
+        for table in ("library_artists", "library_albums"):
+            cur.execute(f"PRAGMA table_info({table});")
+            if "art_version" not in {row[1] for row in cur.fetchall()}:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN art_version TEXT;")
 
     def _migration_v43(self, cur: sqlite3.Cursor) -> None:
         """Collapse duplicate ``library_tracks`` rows (same album + foreign id, or same album/disc/number/title).
@@ -6108,6 +6117,34 @@ class Database:
             row = cur.fetchone()
             return self._map_library_artist(row) if row else None
 
+    _ART_TABLES = {"artist": "library_artists", "album": "library_albums"}
+
+    def set_library_art_version(self, kind: str, item_id: str, version: Optional[str]) -> bool:
+        """Records the art version token of an artist or album (``kind`` is "artist" or "album"). True if a row changed.
+
+        Deliberately does not touch ``updated_at``: art bookkeeping is not a user-visible edit.
+        """
+        table = self._ART_TABLES[kind]
+        with self._lock:
+            cur = self.conn.execute(
+                f"UPDATE {table} SET art_version = ? WHERE id = ? AND COALESCE(art_version, '') != COALESCE(?, '')",
+                (version, str(item_id), version),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def list_library_art_rows(self, kind: str, after_id: str = "", limit: int = 200) -> list[dict[str, Any]]:
+        """Keyset page (by id) of ``id``, ``path``, ``art_version`` and ``url`` (the row's ``image_url`` for artists,
+        ``cover_url`` for albums, aliased to ``url``) for the art backfill and art resolver."""
+        table = self._ART_TABLES[kind]
+        url_col = "image_url" if kind == "artist" else "cover_url"
+        with self._lock:
+            cur = self.conn.execute(
+                f"SELECT id, path, {url_col} AS url, art_version FROM {table} WHERE id > ? ORDER BY id LIMIT ?",
+                (str(after_id), int(limit)),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
     def get_library_artist_by_name(self, name: str) -> Optional[dict[str, Any]]:
         """Retrieves an artist by exact name or cleaned normalized name."""
         clean = clean_library_name(name)
@@ -6632,6 +6669,23 @@ class Database:
         if album is None:
             raise RuntimeError(f"Failed to upsert library album {album_id}")
         return album
+
+    def set_library_album_total_tracks(self, album_id: str, count: int, authoritative: bool = False) -> None:
+        """Stores the release's track count (ignored when not positive).
+
+        The stored value only grows (``max(existing, count)``): a provider can describe a shorter edition than the one
+        already recorded. ``authoritative=True`` (a full MusicBrainz release with all media) replaces it outright.
+        """
+        if int(count) <= 0:
+            return
+        sql = (
+            "UPDATE library_albums SET total_tracks = ? WHERE id = ?"
+            if authoritative
+            else "UPDATE library_albums SET total_tracks = MAX(COALESCE(total_tracks, 0), ?) WHERE id = ?"
+        )
+        with self._lock:
+            self.conn.execute(sql, (int(count), str(album_id)))
+            self.conn.commit()
 
     def get_library_album(self, album_id: str) -> Optional[dict[str, Any]]:
         """Retrieves a single library album by ID."""

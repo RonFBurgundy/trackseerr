@@ -31,7 +31,7 @@ export function gateRoute(route: AppRoute, access: RouteAccess): AppRoute {
   return route;
 }
 
-const ico = 'h-5 w-5';
+const ico = 'h-4 w-4';
 
 const leaf = (key: string, label: string, route: AppRoute): NavNode => ({ key, label, route });
 

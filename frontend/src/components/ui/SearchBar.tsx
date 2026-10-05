@@ -36,9 +36,9 @@ export const SearchBar: React.FC<SearchBarProps> = ({
 
   return (
     <div
-      className={`tape-transport-bay relative flex items-center w-full min-h-[44px] bg-[#0d0d0d] border border-[#1f1f1f] rounded-[4px] px-3 py-1 shadow-transport-bay ${className}`}
+      className={`tape-transport-bay relative flex items-center w-full min-h-[36px] sm:min-h-[40px] bg-[#0d0d0d] border border-[#1f1f1f] rounded-[4px] px-2.5 sm:px-3 py-0.5 sm:py-1 shadow-transport-bay ${className}`}
     >
-      <Search className="h-4 w-4 text-neutral-400 shrink-0 mr-2.5" />
+      <Search className="h-4 w-4 text-neutral-400 shrink-0 mr-2 sm:mr-2.5" />
       <input
         id={id ?? generatedId}
         name={name}
@@ -50,7 +50,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         disabled={disabled}
-        className="w-full bg-transparent text-sm text-white placeholder-neutral-500 focus:outline-none"
+        className="w-full min-h-0 bg-transparent text-[13px] sm:text-sm text-white placeholder-neutral-500 focus:outline-none"
       />
       {value && (
         <button

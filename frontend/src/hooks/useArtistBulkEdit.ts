@@ -9,17 +9,24 @@ export type ArtistBulkPatch = Omit<BulkArtistEditRequest, 'artist_ids' | 'all'>;
 
 export interface PendingArtistBulkEdit {
   patch: ArtistBulkPatch;
-  /** Short description of the change for the confirmation step. */
+  /** Plain sentence for the confirmation step ("Set 3 artists to Monitored ..."). */
   summary: string;
+  /** Short list of what changed, used in the success toast. */
+  changes: string;
+  /** Extra warning lines shown in the confirmation. */
+  warnings: string[];
   targetCount: number;
+  /** Filter/search signature at staging time; an "all" target is only valid while it still matches. */
+  scopeKey: string;
 }
 
 export interface UseArtistBulkEditReturn {
   busy: boolean;
   pending: PendingArtistBulkEdit | null;
-  /** Runs the patch, or stages it for inline confirmation when it is destructive-scale. */
-  request: (patch: ArtistBulkPatch, summary: string) => void;
-  confirm: () => void;
+  /** Stages the patch for confirmation; nothing is sent until `confirm`. */
+  request: (patch: ArtistBulkPatch, summary: string, changes: string, warnings?: string[]) => void;
+  /** Sends the staged patch. Resolves true on success. The selection is kept so edits can be chained. */
+  confirm: () => Promise<boolean>;
   cancel: () => void;
 }
 
@@ -30,55 +37,57 @@ export function formatBulkArtistResult(r: BulkArtistEditResult): string {
   return parts.join(' · ');
 }
 
-/** Applies bulk artist edits for the current selection, with a confirmation gate for all-artists or album cascades. */
+/** Applies bulk artist edits for the current selection after an explicit confirmation. */
 export function useArtistBulkEdit(
   selection: UseBulkSelectionReturn,
   total: number,
   onToast: (msg: string, tone?: 'ok' | 'error') => void,
-  onDone: () => void
+  onDone: () => void,
+  /** Signature of the current list filter/search; changes invalidate a staged "all" target. */
+  scopeKey = ''
 ): UseArtistBulkEditReturn {
   const [busy, setBusy] = useState<boolean>(false);
   const [pending, setPending] = useState<PendingArtistBulkEdit | null>(null);
-  const { allMatching, selected, exit } = selection;
+  const { allMatching, selected } = selection;
 
   const execute = useCallback(
-    async (patch: ArtistBulkPatch): Promise<void> => {
+    async (staged: PendingArtistBulkEdit): Promise<boolean> => {
+      if (allMatching && staged.scopeKey !== scopeKey) {
+        setPending(null);
+        onToast('The list filter changed since this edit was staged. Review the selection and apply again.', 'error');
+        return false;
+      }
       const target: BulkArtistEditRequest = allMatching
-        ? { ...patch, all: true }
-        : { ...patch, artist_ids: Array.from(selected, String) };
-      if (!allMatching && (target.artist_ids?.length ?? 0) === 0) return;
+        ? { ...staged.patch, all: true }
+        : { ...staged.patch, artist_ids: Array.from(selected, String) };
+      if (!allMatching && (target.artist_ids?.length ?? 0) === 0) return false;
       setBusy(true);
       try {
         const result = await bulkEditArtists(target);
-        onToast(formatBulkArtistResult(result));
+        onToast(`${staged.changes}: ${formatBulkArtistResult(result)}`);
         setPending(null);
-        exit();
         onDone();
+        return true;
       } catch (err: unknown) {
         onToast(errorMessage(err, 'Bulk edit failed'), 'error');
+        return false;
       } finally {
         setBusy(false);
       }
     },
-    [allMatching, selected, exit, onToast, onDone]
+    [allMatching, selected, scopeKey, onToast, onDone]
   );
 
   const request = useCallback(
-    (patch: ArtistBulkPatch, summary: string): void => {
+    (patch: ArtistBulkPatch, summary: string, changes: string, warnings: string[] = []): void => {
       const targetCount = allMatching ? total : selected.size;
       if (targetCount === 0) return;
-      if (allMatching || patch.apply_monitor_to_albums === true) {
-        setPending({ patch, summary, targetCount });
-        return;
-      }
-      void execute(patch);
+      setPending({ patch, summary, changes, warnings, targetCount, scopeKey });
     },
-    [allMatching, total, selected, execute]
+    [allMatching, total, selected, scopeKey]
   );
 
-  const confirm = useCallback((): void => {
-    if (pending) void execute(pending.patch);
-  }, [pending, execute]);
+  const confirm = useCallback(async (): Promise<boolean> => (pending ? execute(pending) : false), [pending, execute]);
   const cancel = useCallback((): void => setPending(null), []);
 
   return { busy, pending, request, confirm, cancel };

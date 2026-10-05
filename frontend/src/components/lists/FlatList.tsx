@@ -206,7 +206,7 @@ function RowInner<T>(props: RowProps<T>) {
       }`}
     >
       {selectable && (
-        <div role="cell" className="flex items-center min-h-[44px] lg:min-h-0">
+        <div role="cell" className="flex items-center min-h-[36px] lg:min-h-0">
           <input
             type="checkbox"
             id={`${rowUid}-select`}
@@ -502,7 +502,7 @@ export function FlatList<T>({
               {(!hideMobileSortBar || selectable) && (
               <div className="lg:hidden flex items-center gap-1.5 overflow-x-auto px-2 py-1.5 bg-[#121212] border-b border-[#2a2a2a]">
                 {selectable && (
-                  <label className="flex items-center gap-1.5 text-[10px] uppercase font-mono text-neutral-400 shrink-0 min-h-[44px] pr-2">
+                  <label className="flex items-center gap-1.5 text-[10px] uppercase font-mono text-neutral-400 shrink-0 min-h-[36px] pr-2">
                     <input
                       id={`${listUid}-select-all-mobile`}
                       name="select-all-loaded"

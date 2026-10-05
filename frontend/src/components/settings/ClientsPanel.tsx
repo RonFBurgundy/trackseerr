@@ -68,7 +68,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
       ) : (
         <ScrollFill ariaLabel="Download clients" className="grid grid-cols-1 md:grid-cols-2 gap-4 content-start">
           {clients.map((c) => (
-            <MachinedCard key={c.id} className="p-4 flex items-center justify-between gap-3">
+            <MachinedCard key={c.id} className="p-3 sm:p-4 flex items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-sm text-white">{c.name}</span>
@@ -96,7 +96,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
         </ScrollFill>
       )}
 
-      <MachinedCard className="p-5 max-w-xl">
+      <MachinedCard className="p-3 sm:p-5 max-w-xl">
         <h4 className="text-xs font-bold uppercase font-mono text-white mb-4">Add Download Client</h4>
         <form onSubmit={handleAdd} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">

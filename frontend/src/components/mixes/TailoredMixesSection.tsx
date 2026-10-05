@@ -28,7 +28,7 @@ export const TailoredMixesSection: React.FC<TailoredMixesSectionProps> = ({ isAd
             aria-label="Select user"
             value={m.selectedUserId ?? ''}
             onChange={(e) => m.setSelectedUserId(e.target.value || undefined)}
-            className="bg-[#0d0d0d] border border-[#2a2a2a] rounded-[3px] px-3 py-2 min-h-[44px] sm:min-h-0 text-sm text-white focus:outline-none focus:border-[#e5a00d]"
+            className="bg-[#0d0d0d] border border-[#2a2a2a] rounded-[3px] px-2.5 py-1.5 min-h-[36px] sm:min-h-0 text-[13px] sm:text-sm text-white focus:outline-none focus:border-[#e5a00d]"
           >
             <option value="">My mixes</option>
             {m.users.map((u) => (
@@ -46,7 +46,7 @@ export const TailoredMixesSection: React.FC<TailoredMixesSectionProps> = ({ isAd
           className="flex items-center gap-2 bg-[#161616] border border-[#ef4444] rounded-[4px] px-4 py-2.5 text-xs font-mono text-[#ef4444]"
         >
           <span className="flex-1">{m.error}</span>
-          <button type="button" onClick={m.clearError} className="min-h-[44px] sm:min-h-0 px-2 uppercase">
+          <button type="button" onClick={m.clearError} className="min-h-[36px] sm:min-h-0 px-2 uppercase">
             Dismiss
           </button>
         </div>

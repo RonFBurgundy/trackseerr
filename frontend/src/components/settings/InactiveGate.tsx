@@ -51,7 +51,7 @@ export const InactiveBanner: React.FC<InactiveBannerProps> = ({
   return (
     <div
       role="status"
-      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#121212] border border-[#2a2a2a] rounded-[4px] px-4 py-3"
+      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#121212] border border-[#2a2a2a] rounded-[4px] px-3 py-2 sm:px-4 sm:py-3"
     >
       <div className="flex items-start gap-2 text-xs font-mono text-neutral-300">
         <PowerOff className="h-4 w-4 shrink-0 text-neutral-500 mt-px" />

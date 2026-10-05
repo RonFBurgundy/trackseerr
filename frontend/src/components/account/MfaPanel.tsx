@@ -61,7 +61,7 @@ export const MfaPanel: React.FC<MfaPanelProps> = ({ accountHook, enrollmentBlock
   };
 
   return (
-    <MachinedCard className="p-4 sm:p-6 space-y-4">
+    <MachinedCard className="p-3 sm:p-6 space-y-4">
       <div className="flex items-center gap-2">
         <ShieldCheck className="h-4 w-4 text-[var(--accent-amber)]" />
         <h3 className="text-sm font-bold uppercase tracking-wider">Two-factor authentication</h3>

@@ -74,7 +74,7 @@ export const LocalLoginForm: React.FC<LocalLoginFormProps> = ({ login }) => {
           <div className="flex flex-wrap gap-4 text-[11px] font-mono">
             <button
               type="button"
-              className="text-[var(--accent-amber)] hover:underline min-h-[44px] sm:min-h-0"
+              className="text-[var(--accent-amber)] hover:underline min-h-[36px] sm:min-h-0"
               onClick={() => {
                 login.setUseRecoveryCode(!login.useRecoveryCode);
                 login.setCode('');
@@ -84,7 +84,7 @@ export const LocalLoginForm: React.FC<LocalLoginFormProps> = ({ login }) => {
             </button>
             <button
               type="button"
-              className="text-[var(--text-secondary)] hover:underline min-h-[44px] sm:min-h-0"
+              className="text-[var(--text-secondary)] hover:underline min-h-[36px] sm:min-h-0"
               onClick={login.backToCredentials}
             >
               Back
