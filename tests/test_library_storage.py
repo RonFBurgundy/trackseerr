@@ -489,9 +489,16 @@ class TestLibraryStorageMigrationAndCRUD:
         # Initial stats on empty library
         initial_stats = db.get_library_stats()
         assert initial_stats == {
+            "source": "native",
             "artist_count": 0,
+            "unmonitored_artist_count": 0,
+            "continuing_artist_count": None,
+            "ended_artist_count": None,
             "album_count": 0,
             "track_count": 0,
+            "total_track_count": 0,
+            "track_file_count": 0,
+            "missing_track_count": 0,
             "file_count": 0,
             "total_size_bytes": 0,
             "monitored_artist_count": 0,

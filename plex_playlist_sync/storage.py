@@ -62,6 +62,8 @@ def clean_library_name(text: str) -> str:
 
 
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
+_TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
+SCHEMA_VERSION = 43  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _titles_near_equal(a: str, b: str) -> bool:
@@ -310,6 +312,8 @@ class Database:
                 (39, self._migration_v39),
                 (40, self._migration_v40),
                 (41, self._migration_v41),
+                (42, self._migration_v42),
+                (43, self._migration_v43),
             ]
 
             applied = 0
@@ -1411,6 +1415,101 @@ class Database:
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN add_monitor_option TEXT NOT NULL DEFAULT 'all';"
             )
+
+    def _migration_v43(self, cur: sqlite3.Cursor) -> None:
+        """Collapse duplicate ``library_tracks`` rows (same album + foreign id, or same album/disc/number/title).
+
+        Refresh paths matched existing tracks by title only, so a re-hydration that carried a foreign id or a
+        differently-cased title inserted a second row. File links survive on the kept row.
+        """
+        merged = self._dedupe_library_tracks(cur)
+        if merged:
+            logger.info("[boot] migrations: merged %d duplicate library track rows", merged)
+
+    def _dedupe_library_tracks(self, cur: sqlite3.Cursor) -> int:
+        """Merges duplicate track rows into one survivor per group and returns how many rows were removed.
+
+        Two rows are duplicates when they share an album and a non-empty foreign track id, or share album, disc,
+        number and a NON-EMPTY clean title and both have a known duration within ``_TRACK_DURATION_TOLERANCE``
+        seconds (disc and number default to 1 in the schema, so they alone prove nothing; an unknown duration never
+        merges on the tuple). The survivor is the row that owns files, then the oldest. ``library_files`` /
+        ``active_downloads`` / ``download_history`` are repointed first so nothing cascades away; a monitored
+        duplicate keeps the survivor monitored, and the survivor's missing foreign_track_id / mb_recording_id /
+        isrc are backfilled from the duplicates.
+        """
+        logger.info("[boot] migrations: scanning library_tracks for duplicate rows")
+        removed = 0
+        groups: list[list[str]] = []
+        cur.execute(
+            "SELECT GROUP_CONCAT(id, char(31)) FROM library_tracks WHERE foreign_track_id IS NOT NULL "
+            "AND foreign_track_id != '' GROUP BY album_id, foreign_track_id HAVING COUNT(*) > 1"
+        )
+        groups += [str(r[0]).split("\x1f") for r in cur.fetchall()]
+        cur.execute(
+            "SELECT id, album_id, disc_number, track_number, clean_title, duration_seconds FROM library_tracks "
+            "WHERE clean_title != '' AND duration_seconds IS NOT NULL "
+            "ORDER BY album_id, disc_number, track_number, clean_title, duration_seconds"
+        )
+        cluster: list[str] = []
+        anchor: Optional[tuple[Any, ...]] = None
+        for tid, alb, disc, num, clean, dur in cur.fetchall() + [(None, None, None, None, None, None)]:
+            same = (
+                anchor is not None
+                and tid is not None
+                and anchor[:4] == (alb, disc, num, clean)
+                and abs(float(dur) - anchor[4]) <= _TRACK_DURATION_TOLERANCE
+            )
+            if same:
+                cluster.append(str(tid))
+                continue
+            if len(cluster) > 1:
+                groups.append(cluster)
+            cluster = [str(tid)] if tid is not None else []
+            anchor = (alb, disc, num, clean, float(dur)) if tid is not None else None
+        gone: set[str] = set()
+        for ids in groups:
+            ids = [i for i in ids if i not in gone]
+            if len(ids) < 2:
+                continue
+            marks = ",".join("?" for _ in ids)
+            cur.execute(
+                f"SELECT t.id, t.monitored, t.foreign_track_id, t.mb_recording_id, t.isrc, "
+                f"(SELECT COUNT(*) FROM library_files f WHERE f.track_id = t.id) AS nfiles "
+                f"FROM library_tracks t WHERE t.id IN ({marks}) ORDER BY nfiles DESC, t.created_at ASC, t.rowid ASC",
+                ids,
+            )
+            rows = cur.fetchall()
+            keep = str(rows[0][0])
+            dupes = [str(r[0]) for r in rows[1:]]
+            any_monitored = any(int(r[1] or 0) for r in rows)
+            dmarks = ",".join("?" for _ in dupes)
+            for table in ("library_files", "active_downloads", "download_history"):
+                cur.execute(f"UPDATE {table} SET track_id = ? WHERE track_id IN ({dmarks})", [keep, *dupes])
+            if any_monitored:
+                cur.execute("UPDATE library_tracks SET monitored = 1 WHERE id = ?", (keep,))
+            # Survivor keeps its own identifiers; any it lacks come from the first duplicate that has one.
+            for offset, column in enumerate(("foreign_track_id", "mb_recording_id", "isrc"), start=2):
+                value = next((r[offset] for r in rows if r[offset] not in (None, "")), None)
+                if value is not None:
+                    cur.execute(
+                        f"UPDATE library_tracks SET {column} = ? WHERE id = ? AND COALESCE({column}, '') = ''",
+                        (value, keep),
+                    )
+            cur.execute(f"DELETE FROM library_tracks WHERE id IN ({dmarks})", dupes)
+            gone.update(dupes)
+            removed += len(dupes)
+        return removed
+
+    def _migration_v42(self, cur: sqlite3.Cursor) -> None:
+        """Composite ``library_files(track_id, cutoff_met, id)`` index.
+
+        The Wanted "cutoff unmet" query resolves ``MIN(id) ... WHERE track_id = t.id AND cutoff_met = 0`` per track.
+        With only the single-column ``cutoff_met`` index SQLite picked that low-selectivity index and scanned every
+        unmet file for every track (quadratic); this index makes each lookup a point seek.
+        """
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib_files_track_cutoff ON library_files(track_id, cutoff_met, id);"
+        )
 
     def _migration_v41(self, cur: sqlite3.Cursor) -> None:
         """``media_server_settings.credentials_type``: which server type the saved url / username / password / api_key
@@ -6338,6 +6437,25 @@ class Database:
         created_at = d.get("created_at")
 
         with self._lock:
+            if self.conn.execute("SELECT 1 FROM library_tracks WHERE id = ?", (track_id,)).fetchone() is None:
+                # A new id for a track the album already holds is a duplicate, not a new track: reuse the row.
+                dup = None
+                if foreign_track_id:
+                    dup = self.conn.execute(
+                        "SELECT id FROM library_tracks WHERE album_id = ? AND foreign_track_id = ? LIMIT 1",
+                        (album_id, foreign_track_id),
+                    ).fetchone()
+                if dup is None and clean_title and duration_seconds is not None:
+                    # disc/number default to 1, so only a non-empty title AND a matching known duration prove identity.
+                    dup = self.conn.execute(
+                        "SELECT id FROM library_tracks WHERE album_id = ? AND disc_number = ? "
+                        "AND track_number = ? AND clean_title = ? AND duration_seconds IS NOT NULL "
+                        "AND ABS(duration_seconds - ?) <= ? LIMIT 1",
+                        (album_id, disc_number, track_number, clean_title, duration_seconds,
+                         _TRACK_DURATION_TOLERANCE),
+                    ).fetchone()
+                if dup is not None:
+                    track_id = str(dup[0])
             self.conn.execute(
                 """
                 INSERT INTO library_tracks (
@@ -6503,6 +6621,28 @@ class Database:
             )
             self.conn.commit()
             return cur.rowcount > 0
+
+    def bulk_set_tracks_monitored(self, track_ids: list[str], monitored: bool) -> int:
+        """Sets ``monitored`` on many tracks in one transaction; returns tracks updated."""
+        val = 1 if monitored else 0
+        unique = list(dict.fromkeys(str(i) for i in track_ids))
+        updated = 0
+        with self._lock:
+            try:
+                for i in range(0, len(unique), self._BULK_CHUNK):
+                    chunk = unique[i : i + self._BULK_CHUNK]
+                    marks = ", ".join("?" for _ in chunk)
+                    cur = self.conn.execute(
+                        f"UPDATE library_tracks SET monitored = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({marks})",
+                        [val, *chunk],
+                    )
+                    updated += max(int(cur.rowcount), 0)
+                self.conn.commit()
+            except sqlite3.Error:
+                self.conn.rollback()
+                logger.exception("bulk_set_tracks_monitored failed; transaction rolled back")
+                raise
+        return updated
 
     def upsert_library_file(
         self, file_data: Union[LibraryFile, dict[str, Any]]
@@ -6729,6 +6869,14 @@ class Database:
             album_count = int(cur.fetchone()[0] or 0)
 
             cur.execute("SELECT COUNT(*) FROM library_tracks")
+            total_track_count = int(cur.fetchone()[0] or 0)
+
+            # Lidarr semantics: ``track_count`` only covers tracks on monitored albums (unmonitored discography
+            # stays stored, as ``total_track_count``).
+            cur.execute(
+                "SELECT COUNT(*) FROM library_tracks t JOIN library_albums al ON al.id = t.album_id "
+                "WHERE al.monitored = 1"
+            )
             track_count = int(cur.fetchone()[0] or 0)
 
             cur.execute("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM library_files")
@@ -6745,7 +6893,25 @@ class Database:
             cur.execute("SELECT COUNT(DISTINCT track_id) FROM library_files WHERE cutoff_met = 0")
             cutoff_unmet_track_count = int(cur.fetchone()[0] or 0)
 
+            cur.execute("SELECT COUNT(DISTINCT track_id) FROM library_files")
+            track_file_count = int(cur.fetchone()[0] or 0)
+
+            cur.execute(
+                "SELECT COUNT(*) FROM library_tracks t JOIN library_albums al ON al.id = t.album_id "
+                "WHERE t.monitored = 1 AND al.monitored = 1 "
+                "AND NOT EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id)"
+            )
+            missing_track_count = int(cur.fetchone()[0] or 0)
+
             return {
+                "source": "native",
+                "unmonitored_artist_count": artist_count - monitored_artist_count,
+                # Native artists carry no continuing/ended status.
+                "continuing_artist_count": None,
+                "ended_artist_count": None,
+                "total_track_count": total_track_count,
+                "track_file_count": track_file_count,
+                "missing_track_count": missing_track_count,
                 "artist_count": artist_count,
                 "album_count": album_count,
                 "track_count": track_count,

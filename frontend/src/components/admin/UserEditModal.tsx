@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import {
   CopyBox,
@@ -43,15 +43,20 @@ const QuotaOverrideField: React.FC<QuotaOverrideFieldProps> = ({
   onChange,
 }) => {
   const useDefault = value === null;
+  const fieldId = useId();
   return (
     <div className="space-y-1.5">
-      <span className="block text-xs uppercase font-mono tracking-wider text-[var(--text-secondary)]">
+      <label
+        htmlFor={`${fieldId}-value`}
+        className="block text-xs uppercase font-mono tracking-wider text-[var(--text-secondary)]"
+      >
         {label}
-      </span>
+      </label>
       <input
+        id={`${fieldId}-value`}
+        name={`quota-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
         type="number"
         min={0}
-        aria-label={`${label} override`}
         value={useDefault ? '' : value}
         placeholder={effective !== undefined ? `Default (${effective})` : 'Default'}
         disabled={useDefault}
@@ -63,6 +68,8 @@ const QuotaOverrideField: React.FC<QuotaOverrideFieldProps> = ({
       />
       <label className="flex items-center gap-2 min-h-[44px] sm:min-h-0 text-[11px] font-mono cursor-pointer">
         <input
+          id={`${fieldId}-default`}
+          name={`quota-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-use-default`}
           type="checkbox"
           checked={useDefault}
           onChange={(e) => onChange(e.target.checked ? null : (effective ?? 0))}
@@ -262,6 +269,8 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                     title={lockedAdmin ? 'You cannot change your own admin permission' : undefined}
                   >
                     <input
+                      id={`edit-user-permission-${flag.bit}`}
+                      name={`permission-${flag.bit}`}
                       type="checkbox"
                       checked={(permissions & flag.bit) !== 0}
                       disabled={lockedAdmin}
@@ -414,6 +423,8 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
             confirm.
           </p>
           <input
+            id="delete-user-confirm"
+            name="delete-user-confirm"
             type="text"
             aria-label="Type the username to confirm"
             autoCapitalize="none"

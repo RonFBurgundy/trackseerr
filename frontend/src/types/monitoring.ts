@@ -39,3 +39,13 @@ export interface BulkAlbumEditRequest {
 export interface BulkAlbumEditResult {
   albums_updated: number;
 }
+
+/** Body of `POST /api/library/tracks/bulk-edit` (native mode only; 409 while Lidarr manages the library). */
+export interface BulkTrackEditRequest {
+  track_ids: string[];
+  monitored: boolean;
+}
+
+export interface BulkTrackEditResult {
+  tracks_updated: number;
+}

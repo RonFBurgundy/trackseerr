@@ -15,6 +15,8 @@ import type {
   BulkAlbumEditResult,
   BulkArtistEditRequest,
   BulkArtistEditResult,
+  BulkTrackEditRequest,
+  BulkTrackEditResult,
   MonitorOption,
 } from '@/types/monitoring';
 
@@ -268,6 +270,11 @@ export async function bulkEditArtists(body: BulkArtistEditRequest): Promise<Bulk
 
 export async function bulkEditAlbums(body: BulkAlbumEditRequest): Promise<BulkAlbumEditResult> {
   return apiRequest<BulkAlbumEditResult>('/api/library/albums/bulk-edit', { method: 'POST', body });
+}
+
+/** Native mode only: Lidarr cannot monitor tracks independently, so the route answers 409 there. */
+export async function bulkEditTracks(body: BulkTrackEditRequest): Promise<BulkTrackEditResult> {
+  return apiRequest<BulkTrackEditResult>('/api/library/tracks/bulk-edit', { method: 'POST', body });
 }
 
 export interface IngestArtistInput {

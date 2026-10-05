@@ -32,8 +32,8 @@ export const GeneralPanel: React.FC<GeneralPanelProps> = ({ settings, onChange, 
     <MachinedCard className="p-6 max-w-2xl">
       <form onSubmit={handleSave} className="space-y-5">
         <div>
-          <label className={labelClass}>Server Name</label>
-          <input
+          <label htmlFor="general-server-name" className={labelClass}>Server Name</label>
+          <input id="general-server-name" name="server-name"
             type="text"
             value={settings?.server_name || ''}
             onChange={(e) => onChange((prev) => (prev ? { ...prev, server_name: e.target.value } : null))}
@@ -41,8 +41,8 @@ export const GeneralPanel: React.FC<GeneralPanelProps> = ({ settings, onChange, 
           />
         </div>
         <div>
-          <label className={labelClass}>Base URL</label>
-          <input
+          <label htmlFor="general-base-url" className={labelClass}>Base URL</label>
+          <input id="general-base-url" name="base-url"
             type="text"
             value={settings?.base_url || ''}
             onChange={(e) => onChange((prev) => (prev ? { ...prev, base_url: e.target.value } : null))}

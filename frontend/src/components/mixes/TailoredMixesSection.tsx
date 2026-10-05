@@ -23,6 +23,8 @@ export const TailoredMixesSection: React.FC<TailoredMixesSectionProps> = ({ isAd
         </ActionBar>
         {isAdmin && (
           <select
+            id="tailored-mixes-user"
+            name="tailored-mixes-user"
             aria-label="Select user"
             value={m.selectedUserId ?? ''}
             onChange={(e) => m.setSelectedUserId(e.target.value || undefined)}

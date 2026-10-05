@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import { Save, Trash2, Loader2 } from 'lucide-react';
 import type { PlexMix, PlexMixSnapshot } from '@/types/models';
 import { MachinedCard, TapeDeckButton, TactileSwitch } from '@/components/ui';
@@ -21,6 +21,7 @@ const MixCard: React.FC<{
   isMutating: boolean;
   onSave: PlexMixesPanelProps['onSave'];
 }> = ({ mix, isMutating, onSave }) => {
+  const uid = useId();
   const [title, setTitle] = useState<string>(`${mix.title} (Saved)`);
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
 
@@ -36,13 +37,15 @@ const MixCard: React.FC<{
         )}
       </div>
       <input
+        id={`${uid}-title`}
+        name="playlist-title"
         type="text"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         className={INPUT}
         aria-label={`Playlist title for ${mix.title}`}
       />
-      <TactileSwitch checked={autoRefresh} onChange={setAutoRefresh} label="Auto-refresh" />
+      <TactileSwitch checked={autoRefresh} onChange={setAutoRefresh} label="Auto-refresh" ariaLabel={`Auto-refresh ${mix.title}`} />
       <TapeDeckButton
         size="sm"
         variant="amber"
@@ -108,6 +111,7 @@ export const PlexMixesPanel: React.FC<PlexMixesPanelProps> = ({
                     checked={s.auto_refresh}
                     onChange={(v) => void onToggleRefresh(s, v)}
                     label="Auto-refresh"
+                    ariaLabel={`Auto-refresh ${s.playlist_title}`}
                   />
                   <TapeDeckButton
                     size="sm"

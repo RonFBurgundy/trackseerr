@@ -5,9 +5,11 @@ import { errorMessage } from '@/services/apiClient';
 import { pagedFetcher } from '@/hooks/useVirtualPagedList';
 import { useLibraryCatalog, type LibrarySortOption } from '@/hooks/useLibraryCatalog';
 import { useMonitoredOverrides } from '@/hooks/useMonitoredOverrides';
+import { useBulkSelection } from '@/hooks/useBulkSelection';
+import { useTrackBulkEdit } from '@/hooks/useTrackBulkEdit';
+import { useSelectAllMatching } from '@/hooks/useSelectAllMatching';
 import {
   FlatList,
-  ListPanel,
   ScrubberRail,
   formatBytes,
   formatDateTime,
@@ -16,6 +18,8 @@ import {
 } from '@/components/lists';
 import { TactileSwitch } from '@/components/ui';
 import { LibrarySortControl } from './LibrarySortControl';
+import { LibrarySelectKey, LibraryToolbarPortal } from './LibraryToolbarPortal';
+import { AlbumBulkBar } from './AlbumBulkBar';
 import { getQualityBadge } from './trackFormat';
 
 const SORT_OPTIONS: ReadonlyArray<LibrarySortOption> = [
@@ -35,6 +39,10 @@ export interface TracksPanelProps {
   isAdmin: boolean;
   reloadToken: number;
   onToggleMonitored: (trackId: number | string, monitored: boolean) => Promise<void>;
+  /** Toolbar slot in the page header row; select and sort render there. */
+  toolbarSlot: HTMLElement | null;
+  /** Stats footer, rendered right after the list. */
+  footer: React.ReactNode;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
 }
 
@@ -45,6 +53,8 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
   isAdmin,
   reloadToken,
   onToggleMonitored,
+  toolbarSlot,
+  footer,
   onToast,
 }) => {
   const { list, index, sortKey, sortDir, changeSort } = useLibraryCatalog<TrackItem>({
@@ -57,6 +67,37 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
   });
   const overrides = useMonitoredOverrides();
   const { refresh, reload } = list;
+
+  // Track bulk edit is native-only: the route answers 409 when Lidarr manages the library.
+  const canBulkEdit = isAdmin && list.mode !== 'lidarr';
+  const selection = useBulkSelection();
+  const { active: selecting, exit: exitSelection, selectKeys } = selection;
+  const bulk = useTrackBulkEdit(onToast);
+  const filters = useMemo<Record<string, string>>(
+    () => ({ q: query.trim(), monitored_only: monitoredOnly ? 'true' : '' }),
+    [query, monitoredOnly]
+  );
+  const selectAll = useSelectAllMatching<TrackItem>(getTracksPaged, getKey, filters, 'title', onToast);
+  const { collect: collectAllIds } = selectAll;
+
+  useEffect(() => {
+    exitSelection();
+  }, [query, monitoredOnly, exitSelection]);
+
+  const handleSelectAll = useCallback(async (): Promise<void> => {
+    const keys = await collectAllIds();
+    if (keys) selectKeys(keys);
+  }, [collectAllIds, selectKeys]);
+
+  const handleBulkApply = useCallback(
+    async (monitored: boolean): Promise<void> => {
+      if (await bulk.apply(Array.from(selection.selected), monitored)) {
+        exitSelection();
+        reload();
+      }
+    },
+    [bulk, selection.selected, exitSelection, reload]
+  );
 
   useEffect(() => {
     if (reloadToken > 0) reload();
@@ -141,6 +182,7 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
               checked={monitored}
               onChange={(val) => void handleToggle(t.id, val)}
               title={monitored ? 'Monitored' : 'Unmonitored'}
+              ariaLabel={`Monitor ${t.title}`}
             />
           )}
         </div>
@@ -150,12 +192,24 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
   );
 
   return (
-    <ListPanel
-      title="Tracks"
-      mode={list.mode}
-      total={list.total}
-      toolbar={<LibrarySortControl options={SORT_OPTIONS} sortKey={sortKey} sortDir={sortDir} onChange={changeSort} />}
-    >
+    <section className="flex min-h-0 flex-col gap-2" aria-label="Tracks">
+      <LibraryToolbarPortal slot={toolbarSlot}>
+        {canBulkEdit && <LibrarySelectKey active={selecting} onToggle={selecting ? exitSelection : selection.enter} />}
+        <LibrarySortControl options={SORT_OPTIONS} sortKey={sortKey} sortDir={sortDir} onChange={changeSort} />
+      </LibraryToolbarPortal>
+      {canBulkEdit && selecting && (
+        <AlbumBulkBar
+          noun="tracks"
+          count={selection.selected.size}
+          busy={bulk.busy}
+          selectBusy={selectAll.busy}
+          selectLabel={`All ${list.total.toLocaleString()} tracks`}
+          onSelectAll={() => void handleSelectAll()}
+          onClear={selection.clear}
+          onDone={exitSelection}
+          onApply={(m) => void handleBulkApply(m)}
+        />
+      )}
       <FlatList<TrackItem>
         ariaLabel="Tracks"
         columns={columns}
@@ -164,6 +218,8 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
         sortKey={sortKey}
         sortDir={sortDir}
         onSortChange={onSortChange}
+        selectedKeys={canBulkEdit && selecting ? selection.selected : undefined}
+        onSelectedKeysChange={canBulkEdit && selecting ? selectKeys : undefined}
         rowActions={rowActions}
         actionsLabel="Monitoring"
         actionsWidth="200px"
@@ -172,6 +228,7 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
         emptyMessage={query ? 'No tracks match your search.' : 'No tracks found in library.'}
         rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
       />
-    </ListPanel>
+      {footer}
+    </section>
   );
 };

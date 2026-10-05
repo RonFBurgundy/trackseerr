@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import type { MixConfigCreateBody, MixType } from '@/types/models';
 import { MachinedCard, TapeDeckButton, TabStrip } from '@/components/ui';
 
@@ -18,6 +18,7 @@ export interface NewMixFormProps {
 }
 
 export const NewMixForm: React.FC<NewMixFormProps> = ({ onCreate, onCancel }) => {
+  const uid = useId();
   const [mixType, setMixType] = useState<MixType>('discover_weekly');
   const [name, setName] = useState<string>('');
   const [seedArtist, setSeedArtist] = useState<string>('');
@@ -65,8 +66,10 @@ export const NewMixForm: React.FC<NewMixFormProps> = ({ onCreate, onCancel }) =>
         </TabStrip>
         {isRadio && (
           <div>
-            <label className={labelClass}>Seed artist</label>
+            <label htmlFor={`${uid}-seed`} className={labelClass}>Seed artist</label>
             <input
+              id={`${uid}-seed`}
+              name="seed-artist"
               type="text"
               value={seedArtist}
               onChange={(e) => setSeedArtist(e.target.value)}
@@ -76,12 +79,14 @@ export const NewMixForm: React.FC<NewMixFormProps> = ({ onCreate, onCancel }) =>
           </div>
         )}
         <div>
-          <label className={labelClass}>Name (optional)</label>
-          <input type="text" value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
+          <label htmlFor={`${uid}-name`} className={labelClass}>Name (optional)</label>
+          <input id={`${uid}-name`} name="mix-name" type="text" value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
         </div>
         <div>
-          <label className={labelClass}>Track count (5-100)</label>
+          <label htmlFor={`${uid}-count`} className={labelClass}>Track count (5-100)</label>
           <input
+            id={`${uid}-count`}
+            name="track-count"
             type="number"
             min={5}
             max={100}

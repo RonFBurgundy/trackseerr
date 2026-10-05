@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 import { MONITOR_OPTIONS, type MonitorOption } from '@/types/monitoring';
 import { inputClass } from '@/components/settings/formClasses';
 
@@ -6,6 +6,9 @@ export interface MonitorOptionSelectProps {
   value: MonitorOption;
   onChange: (value: MonitorOption) => void;
   id?: string;
+  name?: string;
+  /** Visible label rendered above the select. */
+  label?: string;
   disabled?: boolean;
   'aria-label'?: string;
   className?: string;
@@ -16,15 +19,21 @@ export const MonitorOptionSelect: React.FC<MonitorOptionSelectProps> = ({
   value,
   onChange,
   id,
+  name = 'monitor-option',
+  label,
   disabled = false,
   className = '',
   ...rest
-}) => (
+}) => {
+  const generatedId = useId();
+  const selectId = id ?? generatedId;
+  const select = (
   <select
-    id={id}
+    id={selectId}
+    name={name}
     value={value}
     disabled={disabled}
-    aria-label={rest['aria-label']}
+    aria-label={rest['aria-label'] ?? (label || id ? undefined : 'Monitor option')}
     onChange={(e) => onChange(e.target.value as MonitorOption)}
     className={`${inputClass} ${className}`}
   >
@@ -34,4 +43,15 @@ export const MonitorOptionSelect: React.FC<MonitorOptionSelectProps> = ({
       </option>
     ))}
   </select>
-);
+  );
+  return label ? (
+    <div>
+      <label htmlFor={selectId} className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1.5">
+        {label}
+      </label>
+      {select}
+    </div>
+  ) : (
+    select
+  );
+};

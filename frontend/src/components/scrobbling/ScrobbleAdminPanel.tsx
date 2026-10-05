@@ -107,8 +107,11 @@ export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
         <h3 className="text-sm font-bold uppercase tracking-wider text-white mb-4">Server Scrobbling</h3>
         <form onSubmit={handleSaveServer} className="space-y-4 max-w-2xl">
           <div>
-            <label className={labelClass}>Last.fm API Key</label>
+            <label htmlFor="scrobble-lastfm-api-key" className={labelClass}>Last.fm API Key</label>
             <input
+              id="scrobble-lastfm-api-key"
+              name="lastfm-api-key"
+              autoComplete="off"
               type="text"
               value={apiKey}
               disabled={fromEnv}
@@ -118,8 +121,10 @@ export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
             />
           </div>
           <div>
-            <label className={labelClass}>Last.fm API Secret (write-only)</label>
+            <label htmlFor="scrobble-lastfm-api-secret" className={labelClass}>Last.fm API Secret (write-only)</label>
             <input
+              id="scrobble-lastfm-api-secret"
+              name="lastfm-api-secret"
               type="password"
               autoComplete="new-password"
               value={apiSecret}
@@ -136,8 +141,10 @@ export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
           )}
           {showPlexOptions && (
             <div>
-              <label className={labelClass}>Plex History Poll (minutes, 0 = off)</label>
+              <label htmlFor="scrobble-plex-poll-minutes" className={labelClass}>Plex History Poll (minutes, 0 = off)</label>
               <input
+                id="scrobble-plex-poll-minutes"
+                name="plex-poll-minutes"
                 type="number"
                 min={0}
                 value={pollMinutes}
@@ -255,6 +262,9 @@ export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
               <TactileSwitch checked={editUnlinkLfm} onChange={setEditUnlinkLfm} label="Unlink Last.fm" />
             )}
             <input
+              id="scrobble-edit-lastfm-username"
+              name="lastfm-username"
+              aria-label="Last.fm username"
               type="text"
               value={editLfmName}
               onChange={(e) => setEditLfmName(e.target.value)}
@@ -262,6 +272,9 @@ export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
               className={inputClass}
             />
             <input
+              id="scrobble-edit-lastfm-session-key"
+              name="lastfm-session-key"
+              aria-label="Last.fm session key"
               type="password"
               autoComplete="off"
               value={editLfmKey}
@@ -276,6 +289,9 @@ export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
               <TactileSwitch checked={editUnlinkLb} onChange={setEditUnlinkLb} label="Unlink ListenBrainz" />
             )}
             <input
+              id="scrobble-edit-listenbrainz-token"
+              name="listenbrainz-token"
+              aria-label="ListenBrainz token"
               type="password"
               autoComplete="off"
               value={editLbToken}

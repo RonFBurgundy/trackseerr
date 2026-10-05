@@ -100,6 +100,7 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
               </label>
               <select
                 id="media-server-type"
+                name="media-server-type"
                 value={form.type}
                 onChange={(e) => patch({ type: toSettableType(e.target.value) })}
                 className={inputClass}
@@ -121,6 +122,7 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
                   </label>
                   <input
                     id="media-server-url"
+                    name="media-server-url"
                     type="text"
                     value={form.url}
                     onChange={(e) => patch({ url: e.target.value })}
@@ -137,6 +139,7 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
                       </label>
                       <input
                         id="media-server-api-key"
+                        name="media-server-api-key"
                         type="password"
                         value={form.api_key}
                         onChange={(e) => patch({ api_key: e.target.value })}
@@ -151,6 +154,7 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
                       </label>
                       <input
                         id="media-server-user"
+                        name="media-server-user"
                         type="text"
                         value={form.username}
                         onChange={(e) => patch({ username: e.target.value })}
@@ -168,11 +172,12 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
                 {isSubsonic && (
                   <>
                 <div>
-                  <label htmlFor="media-server-user" className={labelClass}>
+                  <label htmlFor="media-server-subsonic-user" className={labelClass}>
                     Username
                   </label>
                   <input
-                    id="media-server-user"
+                    id="media-server-subsonic-user"
+                    name="media-server-subsonic-user"
                     type="text"
                     value={form.username}
                     onChange={(e) => patch({ username: e.target.value })}
@@ -186,6 +191,7 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
                   </label>
                   <input
                     id="media-server-password"
+                    name="media-server-password"
                     type="password"
                     value={form.password}
                     onChange={(e) => patch({ password: e.target.value })}
@@ -195,11 +201,12 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
                   />
                 </div>
                 <div>
-                  <label htmlFor="media-server-api-key" className={labelClass}>
+                  <label htmlFor="media-server-subsonic-api-key" className={labelClass}>
                     API key (optional, instead of a password)
                   </label>
                   <input
-                    id="media-server-api-key"
+                    id="media-server-subsonic-api-key"
+                    name="media-server-subsonic-api-key"
                     type="password"
                     value={form.api_key}
                     onChange={(e) => patch({ api_key: e.target.value })}

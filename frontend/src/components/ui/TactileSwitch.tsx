@@ -1,22 +1,38 @@
-import React from 'react';
+import React, { useId } from 'react';
 
-export interface TactileSwitchProps {
+interface TactileSwitchBaseProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
-  label?: string;
   disabled?: boolean;
   className?: string;
   title?: string;
+  /** Overrides the generated id. */
+  id?: string;
+  /** Form name on the switch button. */
+  name?: string;
 }
+
+/**
+ * Either a visible `label` or an `ariaLabel` is required. Per-row switches should pass an `ariaLabel`
+ * that names the row subject (e.g. "Monitor Track Title").
+ */
+export type TactileSwitchProps = TactileSwitchBaseProps &
+  ({ label: string; ariaLabel?: string } | { label?: undefined; ariaLabel: string });
 
 export const TactileSwitch: React.FC<TactileSwitchProps> = ({
   checked,
   onChange,
   label,
+  ariaLabel,
   disabled = false,
   className = '',
   title,
+  id,
+  name,
 }) => {
+  const generatedId = useId();
+  const switchId = id ?? generatedId;
+  const accessibleName = ariaLabel ?? label;
   return (
     <label
       title={title}
@@ -25,6 +41,9 @@ export const TactileSwitch: React.FC<TactileSwitchProps> = ({
       } ${className}`}
     >
       <button
+        id={switchId}
+        name={name ?? `switch-${switchId.replace(/:/g, '')}`}
+        aria-label={accessibleName}
         type="button"
         role="switch"
         aria-checked={checked}

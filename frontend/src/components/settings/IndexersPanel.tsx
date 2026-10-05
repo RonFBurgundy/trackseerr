@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Trash2, Plus } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar, ScrollFill } from '@/components/ui';
 import type { IndexerItem } from '@/types/models';
 import { saveIndexer, deleteIndexer, testIndexer } from '@/services/settingsService';
 import { compactInputClass, compactLabelClass } from './formClasses';
@@ -66,7 +66,7 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, reload, 
       {indexers.length === 0 ? (
         <p className="text-xs font-mono text-neutral-500 py-4">No indexers registered yet.</p>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <ScrollFill ariaLabel="Indexers" className="grid grid-cols-1 md:grid-cols-2 gap-4 content-start">
           {indexers.map((idx) => (
             <MachinedCard key={idx.id} className="p-4 flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -91,15 +91,15 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, reload, 
               </div>
             </MachinedCard>
           ))}
-        </div>
+        </ScrollFill>
       )}
 
       <MachinedCard className="p-5 max-w-xl">
         <h4 className="text-xs font-bold uppercase font-mono text-white mb-4">Add New Indexer (Torznab / Newznab)</h4>
         <form onSubmit={handleAdd} className="space-y-4">
           <div>
-            <label className={compactLabelClass}>Name</label>
-            <input
+            <label htmlFor="indexer-name" className={compactLabelClass}>Name</label>
+            <input id="indexer-name" name="name"
               type="text"
               required
               value={name}
@@ -109,8 +109,8 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, reload, 
             />
           </div>
           <div>
-            <label className={compactLabelClass}>URL</label>
-            <input
+            <label htmlFor="indexer-url" className={compactLabelClass}>URL</label>
+            <input id="indexer-url" name="url"
               type="url"
               required
               value={url}
@@ -120,8 +120,8 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, reload, 
             />
           </div>
           <div>
-            <label className={compactLabelClass}>API Key</label>
-            <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} className={compactInputClass} />
+            <label htmlFor="indexer-api-key" className={compactLabelClass}>API Key</label>
+            <input id="indexer-api-key" name="api-key" type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} className={compactInputClass} />
           </div>
           <ActionBar align="end" className="pt-2">
             <TapeDeckButton

@@ -43,6 +43,7 @@ export const TapeDeckButton: React.FC<TapeDeckButtonProps> = ({
 
   return (
     <button
+      type="button"
       className={`tape-deck-btn relative inline-flex items-center justify-center gap-2 font-semibold uppercase tracking-wider select-none rounded-[3px] transition-all duration-75 active:translate-y-[2px] ${sizeClasses} ${variantClasses} ${
         active ? 'engaged' : ''
       } ${className}`}

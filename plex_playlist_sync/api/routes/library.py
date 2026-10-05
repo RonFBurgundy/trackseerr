@@ -23,6 +23,7 @@ import httpx
 
 from plex_playlist_sync import library_paging as paging
 from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
+from plex_playlist_sync import art_thumbs
 from plex_playlist_sync import lidarr_library
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.acquisition_worker import (
@@ -133,7 +134,9 @@ class ArtistBulkEditRequest(BaseModel):
     monitored: Optional[bool] = None
     monitor_option: Optional[str] = Field(default=None, pattern=MONITOR_OPTION_PATTERN)
     quality_profile_id: Optional[str] = None  # an explicit null clears the profile; omitted leaves it alone
-    apply_monitor_to_albums: bool = False
+    # Omitted: an unmonitor (monitored=false) cascades to albums (and native tracks) by default, so artists never end
+    # up unmonitored with monitored children; an explicit value always wins.
+    apply_monitor_to_albums: Optional[bool] = None
 
 
 class AlbumBulkEditRequest(BaseModel):
@@ -142,6 +145,11 @@ class AlbumBulkEditRequest(BaseModel):
 
 
 class TrackMonitoredRequest(BaseModel):
+    monitored: bool
+
+
+class TrackBulkEditRequest(BaseModel):
+    track_ids: list[str]
     monitored: bool
 
 
@@ -264,9 +272,13 @@ def validate_media_path(path_str: str, db: Optional[Database] = None) -> Path:
 @router.get("/stats")
 def get_library_stats(
     db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
-    """Retrieves aggregate statistics for the native library."""
+    """Aggregate library statistics (Lidarr's own statistics in Lidarr mode, the native catalog otherwise)."""
+    if _is_lidarr(db):
+        lidarr = require_lidarr(client)
+        return _lidarr_fetch(lambda: lidarr_library.library_stats(lidarr), "Library")
     return db.get_library_stats()
 
 
@@ -345,26 +357,36 @@ def _lidarr_image(
     types: tuple[str, ...],
     client: Optional[LidarrClient],
     if_none_match: Optional[str] = None,
+    size: Optional[int] = None,
 ) -> Response:
-    """Streams one Lidarr media cover through the core; the API key never leaves the server.
+    """Serves one Lidarr media cover through the core; the API key never leaves the server.
 
-    Only raster types pass (JPEG/PNG/WebP/GIF); anything else becomes the placeholder. Concurrency is bounded, a
-    saturated proxy answers 503 + Retry-After, and a weak ETag lets browsers revalidate with a 304.
+    ``size`` (250 or 500) selects Lidarr's pre-rendered thumbnail variant, falling back to the original when Lidarr has
+    none. Fetched covers are kept on disk, so a repeat view (or another browser) never reaches Lidarr; a matching
+    ``If-None-Match`` is a body-less 304. Only raster types pass (JPEG/PNG/WebP/GIF); anything else becomes the
+    placeholder. Upstream concurrency is bounded and a saturated proxy answers 503 + Retry-After.
     """
     numeric = lidarr_numeric_id(raw_id, what)
     lidarr = require_lidarr(client)
-    name = _lidarr_fetch(lambda: lidarr_library.cover_file(kind_list, lidarr, numeric, types), what)
-    if name is None:
+    base = _lidarr_fetch(lambda: lidarr_library.cover_file(kind_list, lidarr, numeric, types), what)
+    if base is None:
         return _placeholder()
+    name = lidarr_library.sized_cover_name(base, size)
     identity = lidarr_library._identity(lidarr)
     known = lidarr_library.known_cover_etag(identity, kind_cover, numeric, name)
     if known and lidarr_library.etag_matches(if_none_match, known):
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=_image_headers(_COVER_CACHE, known))
+    cached = lidarr_library.read_cached_cover(identity, kind_cover, numeric, name)
+    if cached is not None and cached.fresh:
+        lidarr_library.remember_cover_etag(identity, kind_cover, numeric, name, cached.etag)
+        if lidarr_library.etag_matches(if_none_match, cached.etag):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=_image_headers(_COVER_CACHE, cached.etag))
+        return Response(content=cached.body, media_type=cached.content_type, headers=_image_headers(_COVER_CACHE, cached.etag))
 
-    def fetch() -> Optional[MediaCover]:
+    def fetch_one(filename: str) -> Optional[MediaCover]:
         try:
             return lidarr.fetch_mediacover(
-                kind_cover, numeric, name, lidarr_library.MAX_COVER_BYTES, lidarr_library.COVER_DEADLINE_SECONDS
+                kind_cover, numeric, filename, lidarr_library.MAX_COVER_BYTES, lidarr_library.COVER_DEADLINE_SECONDS
             )
         except LidarrNotFound:
             return None
@@ -374,9 +396,22 @@ def _lidarr_image(
             )
             return None
 
+    def fetch() -> Optional[MediaCover]:
+        got = fetch_one(name)
+        if got is None and name != base:
+            got = fetch_one(base)  # Lidarr has not rendered that size: serve the original under the sized key
+        return got
+
+    upstream_failed = False
     try:
         with lidarr_library.cover_slot():
-            fetched = _lidarr_fetch(fetch, what)
+            try:
+                fetched = _lidarr_fetch(fetch, what)
+            except HTTPException:
+                if cached is None:
+                    raise
+                logger.warning("Lidarr unreachable for %s %s artwork; serving the expired cached copy", kind_cover, numeric)
+                fetched, upstream_failed = None, True
     except lidarr_library.CoverBusy:
         logger.warning("Lidarr artwork proxy saturated; answering 503 for %s %s", kind_cover, numeric)
         raise HTTPException(
@@ -385,15 +420,40 @@ def _lidarr_image(
             headers={"Retry-After": "2"},
         )
     if fetched is None:
+        if cached is not None and upstream_failed:
+            return Response(content=cached.body, media_type=cached.content_type, headers=_image_headers(_COVER_CACHE, cached.etag))
         return _placeholder()
     etag = lidarr_library.cover_etag(identity, kind_cover, numeric, name, fetched.validator)
     lidarr_library.remember_cover_etag(identity, kind_cover, numeric, name, etag)
+    lidarr_library.write_cached_cover(identity, kind_cover, numeric, name, fetched.body, fetched.content_type, etag)
     if lidarr_library.etag_matches(if_none_match, etag):
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=_image_headers(_COVER_CACHE, etag))
     return Response(content=fetched.body, media_type=fetched.content_type, headers=_image_headers(_COVER_CACHE, etag))
 
 
+# Art sits behind require_admin, so it must be ``private``; a day of freshness plus a cheap ETag revalidation (304)
+# means replaced art shows up within a day. Never ``immutable``: the URL does not change when the file does.
 _COVER_CACHE = "private, max-age=86400"
+_NATIVE_ART_CACHE = _COVER_CACHE
+
+
+def _native_art(src: Path, media_type: str, size: Optional[int], if_none_match: Optional[str]) -> Response:
+    """Serves native artwork. ``size`` 250/500 returns a cached JPEG derivative (generated once, off the event loop
+    because the routes are sync), with a strong ETag and a body-less 304 on a match; any other size serves the original."""
+    wanted = art_thumbs.normalize_size(size)
+    if wanted:
+        key = art_thumbs.thumb_key(src, wanted)
+        if key and lidarr_library.etag_matches(if_none_match, key[1]):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=_image_headers(_NATIVE_ART_CACHE, key[1]))
+        made = art_thumbs.ensure_thumb(src, wanted, mediacover_service.base_dir / "mediacover" / "thumbs")
+        if made:
+            return FileResponse(
+                str(made[0]), media_type="image/jpeg", headers=_image_headers(_NATIVE_ART_CACHE, made[1])
+            )
+    original = art_thumbs.original_etag(src)
+    if original and lidarr_library.etag_matches(if_none_match, original):
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=_image_headers(_NATIVE_ART_CACHE, original))
+    return FileResponse(str(src), media_type=media_type, headers=_image_headers(_NATIVE_ART_CACHE, original))
 
 
 def _library_sort_key(kind: str, sort_key: Optional[str]) -> str:
@@ -999,11 +1059,12 @@ def get_artist_image(
     db: Database = Depends(get_db),
     client: Optional[LidarrClient] = Depends(get_lidarr_client),
     if_none_match: Optional[str] = Header(None),
+    size: Optional[int] = Query(None, description="Thumbnail size: 250 or 500; anything else serves the original"),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> Any:
     """Serves local artist artwork or redirects to remote image / first album cover / placeholder."""
     if _is_lidarr(db):
-        return _lidarr_image("artists", "artist", artist_id, "Artist", ("poster", "cover"), client, if_none_match)
+        return _lidarr_image("artists", "artist", artist_id, "Artist", ("poster", "cover"), client, if_none_match, size)
     artist = db.get_library_artist(artist_id)
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
@@ -1017,22 +1078,14 @@ def get_artist_image(
                     cand = validated / cand_name
                     if cand.is_file():
                         media_type = "image/png" if cand_name.endswith(".png") else "image/jpeg"
-                        return FileResponse(
-                            str(cand),
-                            media_type=media_type,
-                            headers=_image_headers("public, max-age=86400"),
-                        )
+                        return _native_art(cand, media_type, size, if_none_match)
         except Exception as exc:
             logger.debug("Failed validating artist image path '%s': %s", artist_path_str, exc)
 
     # Check mediacover cached artwork
     cached_art = mediacover_service.ensure_artwork("artist_poster", artist_id, artist.get("image_url"))
     if cached_art and cached_art.is_file() and cached_art.stat().st_size > 0:
-        return FileResponse(
-            str(cached_art),
-            media_type="image/jpeg",
-            headers=_image_headers("public, max-age=31536000, immutable"),
-        )
+        return _native_art(cached_art, "image/jpeg", size, if_none_match)
 
     # Else if artist has image_url (http/https), return RedirectResponse
     image_url = artist.get("image_url")
@@ -1088,21 +1141,13 @@ def get_artist_banner(
                     cand = validated / cand_name
                     if cand.is_file():
                         media_type = "image/png" if cand_name.endswith(".png") else "image/jpeg"
-                        return FileResponse(
-                            str(cand),
-                            media_type=media_type,
-                            headers=_image_headers("public, max-age=86400"),
-                        )
+                        return _native_art(cand, media_type, None, if_none_match)
         except Exception as exc:
             logger.debug("Failed validating artist banner path '%s': %s", artist_path_str, exc)
 
     cached_banner = mediacover_service.ensure_artwork("artist_banner", artist_id, artist.get("banner_url"))
     if cached_banner and cached_banner.is_file() and cached_banner.stat().st_size > 0:
-        return FileResponse(
-            str(cached_banner),
-            media_type="image/jpeg",
-            headers=_image_headers("public, max-age=31536000, immutable"),
-        )
+        return _native_art(cached_banner, "image/jpeg", None, if_none_match)
 
     banner_url = artist.get("banner_url")
     if banner_url and (banner_url.startswith("http://") or banner_url.startswith("https://")):
@@ -1132,7 +1177,8 @@ def set_artist_monitored(
             except ValueError as exc:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
         return _lidarr_mutation(
-            db, lambda: lidarr_library.set_artist_monitored(lidarr, numeric, body.monitored), "Artist"
+            db, lambda: lidarr_library.set_artist_monitored(lidarr, numeric, body.monitored, body.cascade_children),
+            "Artist"
         )
     artist = db.get_library_artist(artist_id)
     if artist is None:
@@ -1184,6 +1230,9 @@ def bulk_edit_artists(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Provide at least one of monitored, monitor_option or quality_profile_id",
         )
+    apply_to_albums = (
+        body.apply_monitor_to_albums if body.apply_monitor_to_albums is not None else body.monitored is False
+    )
     if _is_lidarr(db):
         lidarr = require_lidarr(client)
         numeric_ids = [lidarr_numeric_id(i, "Artist") for i in body.artist_ids] if has_ids else None
@@ -1199,7 +1248,7 @@ def bulk_edit_artists(
             return _lidarr_mutation(
                 db,
                 lambda: lidarr_library.bulk_edit_artists(
-                    lidarr, numeric_ids, body.monitored, body.monitor_option, profile_id
+                    lidarr, numeric_ids, body.monitored, body.monitor_option, profile_id, apply_to_albums
                 ),
                 "Artist",
             )
@@ -1211,7 +1260,7 @@ def bulk_edit_artists(
             monitored=body.monitored,
             monitor_option=body.monitor_option,
             quality_profile_id=body.quality_profile_id if profile_given else Database._UNSET,
-            apply_monitor_to_albums=body.apply_monitor_to_albums,
+            apply_monitor_to_albums=apply_to_albums,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -2024,11 +2073,12 @@ def get_album_cover(
     db: Database = Depends(get_db),
     client: Optional[LidarrClient] = Depends(get_lidarr_client),
     if_none_match: Optional[str] = Header(None),
+    size: Optional[int] = Query(None, description="Thumbnail size: 250 or 500; anything else serves the original"),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> Any:
     """Serves local album cover artwork or redirects to remote artwork / placeholder."""
     if _is_lidarr(db):
-        return _lidarr_image("albums", "album", album_id, "Album", ("cover",), client, if_none_match)
+        return _lidarr_image("albums", "album", album_id, "Album", ("cover",), client, if_none_match, size)
     album = db.get_library_album(album_id)
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
@@ -2055,27 +2105,15 @@ def get_album_cover(
 
     if prefer_local and local_img:
         media_type = "image/png" if local_img.suffix.lower() == ".png" else "image/jpeg"
-        return FileResponse(
-            str(local_img),
-            media_type=media_type,
-            headers=_image_headers("public, max-age=86400"),
-        )
+        return _native_art(local_img, media_type, size, if_none_match)
 
     cached_cover = mediacover_service.ensure_artwork("album_cover", album_id, remote_cover)
     if cached_cover and cached_cover.is_file() and cached_cover.stat().st_size > 0:
-        return FileResponse(
-            str(cached_cover),
-            media_type="image/jpeg",
-            headers=_image_headers("public, max-age=31536000, immutable"),
-        )
+        return _native_art(cached_cover, "image/jpeg", size, if_none_match)
 
     if local_img:
         media_type = "image/png" if local_img.suffix.lower() == ".png" else "image/jpeg"
-        return FileResponse(
-            str(local_img),
-            media_type=media_type,
-            headers=_image_headers("public, max-age=86400"),
-        )
+        return _native_art(local_img, media_type, size, if_none_match)
 
     if remote_cover and (remote_cover.startswith("http://") or remote_cover.startswith("https://")):
         return RedirectResponse(url=remote_cover, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
@@ -2240,6 +2278,18 @@ def set_track_monitored(
     db.set_track_monitored(track_id=track_id, monitored=body.monitored)
     updated = db.get_library_track(track_id)
     return updated or {}
+
+
+@router.post("/tracks/bulk-edit", dependencies=[Depends(require_core_tier), Depends(native_only)])
+def bulk_edit_tracks(
+    body: TrackBulkEditRequest,
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, int]:
+    """Sets ``monitored`` on many tracks at once (native mode only; 409 while Lidarr manages the library)."""
+    if not body.track_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="track_ids must not be empty")
+    return {"tracks_updated": db.bulk_set_tracks_monitored(body.track_ids, body.monitored)}
 
 
 @router.delete("/tracks/{track_id}", dependencies=[Depends(require_core_tier), Depends(native_only)])

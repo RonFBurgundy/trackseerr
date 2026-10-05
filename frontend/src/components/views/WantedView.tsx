@@ -1,18 +1,22 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { ArrowUpCircle, SearchX } from 'lucide-react';
 import { TabStrip, TapeDeckButton, ToastBanner } from '@/components/ui';
 import { WantedPanel } from '@/components/wanted';
 import { useToast } from '@/hooks/useToast';
-import type { WantedListName } from '@/types/activity';
+import type { WantedSub, NavigateOptions } from '@/hooks/useAppRoute';
 
-const TABS: Array<{ id: WantedListName; label: string; icon: React.ReactNode }> = [
+const TABS: Array<{ id: WantedSub; label: string; icon: React.ReactNode }> = [
   { id: 'missing', label: 'Missing', icon: <SearchX className="h-3.5 w-3.5" /> },
   { id: 'cutoff', label: 'Cutoff Unmet', icon: <ArrowUpCircle className="h-3.5 w-3.5" /> },
 ];
 
 /** Admin-only. Switching sub-tab remounts the panel, which resets sort and selection. */
-export const WantedView: React.FC = () => {
-  const [tab, setTab] = useState<WantedListName>('missing');
+export interface WantedViewProps {
+  sub: WantedSub;
+  onSubChange: (sub: WantedSub, options?: NavigateOptions) => void;
+}
+
+export const WantedView: React.FC<WantedViewProps> = ({ sub: tab, onSubChange }) => {
   const { toast, showToast } = useToast();
 
   return (
@@ -20,7 +24,7 @@ export const WantedView: React.FC = () => {
       {toast && <ToastBanner message={toast.message} tone={toast.tone} />}
       <TabStrip aria-label="Wanted sections">
         {TABS.map((t) => (
-          <TapeDeckButton key={t.id} size="sm" active={tab === t.id} onClick={() => setTab(t.id)} icon={t.icon}>
+          <TapeDeckButton key={t.id} size="sm" active={tab === t.id} onClick={() => onSubChange(t.id)} icon={t.icon}>
             {t.label}
           </TapeDeckButton>
         ))}

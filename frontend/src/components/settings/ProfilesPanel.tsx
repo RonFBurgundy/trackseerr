@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Trash2, Plus } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, TactileSwitch, ConfirmDangerButton, ActionBar } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, TactileSwitch, ConfirmDangerButton, ActionBar, ScrollFill } from '@/components/ui';
 import type { QualityProfile } from '@/types/models';
 import { saveQualityProfile, deleteQualityProfile } from '@/services/settingsService';
 import { compactInputClass, compactLabelClass } from './formClasses';
@@ -60,7 +60,7 @@ export const ProfilesPanel: React.FC<ProfilesPanelProps> = ({ profiles, onProfil
       {profiles.length === 0 ? (
         <p className="text-xs font-mono text-neutral-500 py-4">No quality profiles defined yet.</p>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <ScrollFill ariaLabel="Quality profiles" className="grid grid-cols-1 md:grid-cols-2 gap-4 content-start">
           {profiles.map((p) => (
             <MachinedCard key={p.id} className="p-4 flex items-center justify-between gap-3">
               <div>
@@ -82,15 +82,15 @@ export const ProfilesPanel: React.FC<ProfilesPanelProps> = ({ profiles, onProfil
               </div>
             </MachinedCard>
           ))}
-        </div>
+        </ScrollFill>
       )}
 
       <MachinedCard className="p-5 max-w-xl">
         <h4 className="text-xs font-bold uppercase font-mono text-white mb-4">Add Quality Profile</h4>
         <form onSubmit={handleAdd} className="space-y-4">
           <div>
-            <label className={compactLabelClass}>Profile Name</label>
-            <input
+            <label htmlFor="profile-profile-name" className={compactLabelClass}>Profile Name</label>
+            <input id="profile-profile-name" name="profile-name"
               type="text"
               required
               value={name}
@@ -100,8 +100,8 @@ export const ProfilesPanel: React.FC<ProfilesPanelProps> = ({ profiles, onProfil
             />
           </div>
           <div>
-            <label className={compactLabelClass}>Cutoff Score / Level</label>
-            <input
+            <label htmlFor="profile-cutoff-score-level" className={compactLabelClass}>Cutoff Score / Level</label>
+            <input id="profile-cutoff-score-level" name="cutoff-score-level"
               type="number"
               required
               value={cutoff}

@@ -117,3 +117,11 @@ def _reset_lidarr_add_defaults_cache():
     invalidate_add_defaults()
     yield
     invalidate_add_defaults()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_lidarr_cover_cache(tmp_path, monkeypatch):
+    """Fetched Lidarr covers are cached on disk under the mediacover base dir: keep that per-test, never shared."""
+    from plex_playlist_sync.mediacover import mediacover_service
+
+    monkeypatch.setattr(mediacover_service, "base_dir", tmp_path / "mediacover-base")

@@ -5,6 +5,7 @@ behaviour is covered without a real music library.
 """
 
 from __future__ import annotations
+from plex_playlist_sync.storage import SCHEMA_VERSION
 
 import logging
 import re
@@ -316,7 +317,7 @@ def test_migration_v39_recomputes_underscore_keys_and_is_idempotent(tmp_path):
     for _ in range(2):  # the second open runs v39 again over already-clean rows
         database = Database(path)
         try:
-            assert database.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 41
+            assert database.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
             assert database.get_library_artist("ar")["clean_name"] == "daft punk pharrell williams"
             assert database.get_library_album("al")["clean_title"] == "get lucky"
             assert database.get_library_track("t")["clean_title"] == "get lucky"

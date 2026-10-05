@@ -120,8 +120,8 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
 
         <form onSubmit={handleSave} className="space-y-4">
           <div>
-            <label className={labelClass}>Lidarr Host URL</label>
-            <input
+            <label htmlFor="lidarr-lidarr-host-url" className={labelClass}>Lidarr Host URL</label>
+            <input id="lidarr-lidarr-host-url" name="lidarr-host-url"
               type="text"
               value={settings?.url || ''}
               onChange={(e) => patch({ url: e.target.value })}
@@ -131,9 +131,10 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
           </div>
 
           <div>
-            <label className={labelClass}>Lidarr API Key</label>
-            <input
+            <label htmlFor="lidarr-lidarr-api-key" className={labelClass}>Lidarr API Key</label>
+            <input id="lidarr-lidarr-api-key" name="lidarr-api-key"
               type="password"
+              autoComplete="off"
               value={settings?.api_key || ''}
               onChange={(e) => patch({ api_key: e.target.value })}
               placeholder="Leave blank or masked to keep current key"
@@ -173,8 +174,8 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
               )}
 
               <div>
-                <label className={compactLabelClass}>Root Folder</label>
-                <select
+                <label htmlFor="lidarr-root-folder" className={compactLabelClass}>Root Folder</label>
+                <select id="lidarr-root-folder" name="root-folder"
                   value={settings?.root_folder ?? ''}
                   disabled={!defaults}
                   onChange={(e) => patch({ root_folder: e.target.value || undefined })}
@@ -296,8 +297,8 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
 
               <div className="grid grid-cols-2 gap-3 pt-2">
                 <div>
-                  <label className={compactLabelClass}>Trickle Rate (Seconds)</label>
-                  <input
+                  <label htmlFor="lidarr-trickle-rate-seconds" className={compactLabelClass}>Trickle Rate (Seconds)</label>
+                  <input id="lidarr-trickle-rate-seconds" name="trickle-rate-seconds"
                     type="number"
                     step="0.5"
                     min="0.5"
@@ -307,8 +308,8 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
                   />
                 </div>
                 <div>
-                  <label className={compactLabelClass}>Trickle Batch Size</label>
-                  <input
+                  <label htmlFor="lidarr-trickle-batch-size" className={compactLabelClass}>Trickle Batch Size</label>
+                  <input id="lidarr-trickle-batch-size" name="trickle-batch-size"
                     type="number"
                     min="1"
                     value={settings?.trickle_batch_size ?? 25}

@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 export interface SelectionCheckboxProps {
   checked: boolean;
   /** Locked while a server-side "select all" is active (the server takes no per-row exclusions). */
   disabled?: boolean;
   label: string;
+  /** Form name; defaults to `select-item`. */
+  name?: string;
   onChange: () => void;
   /** Flow with the layout (rows) instead of overlaying a tile corner. */
   inline?: boolean;
@@ -16,10 +18,13 @@ export const SelectionCheckbox: React.FC<SelectionCheckboxProps> = ({
   checked,
   disabled = false,
   label,
+  name = 'select-item',
   onChange,
   inline = false,
   className = '',
-}) => (
+}) => {
+  const id = useId();
+  return (
   <label
     onClick={(e) => e.stopPropagation()}
     className={`${inline ? 'relative shrink-0' : 'absolute top-1 left-1 z-10'} flex h-11 w-11 items-center justify-center rounded-[3px] border border-[#2a2a2a] bg-black/70 ${
@@ -27,6 +32,8 @@ export const SelectionCheckbox: React.FC<SelectionCheckboxProps> = ({
     } ${className}`}
   >
     <input
+      id={id}
+      name={name}
       type="checkbox"
       checked={checked}
       disabled={disabled}
@@ -35,4 +42,5 @@ export const SelectionCheckbox: React.FC<SelectionCheckboxProps> = ({
       className="h-5 w-5 accent-[#e5a00d] cursor-pointer disabled:cursor-not-allowed"
     />
   </label>
-);
+  );
+};

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Trash2, Plus } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar, ScrollFill } from '@/components/ui';
 import type { DownloadClientItem } from '@/types/models';
 import { saveClientSettings, deleteClientSettings, testClientConnection } from '@/services/settingsService';
 import { compactInputClass, compactLabelClass } from './formClasses';
@@ -66,7 +66,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
       {clients.length === 0 ? (
         <p className="text-xs font-mono text-neutral-500 py-4">No download clients configured yet.</p>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <ScrollFill ariaLabel="Download clients" className="grid grid-cols-1 md:grid-cols-2 gap-4 content-start">
           {clients.map((c) => (
             <MachinedCard key={c.id} className="p-4 flex items-center justify-between gap-3">
               <div>
@@ -93,7 +93,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
               </div>
             </MachinedCard>
           ))}
-        </div>
+        </ScrollFill>
       )}
 
       <MachinedCard className="p-5 max-w-xl">
@@ -101,8 +101,8 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
         <form onSubmit={handleAdd} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={compactLabelClass}>Name</label>
-              <input
+              <label htmlFor="client-name" className={compactLabelClass}>Name</label>
+              <input id="client-name" name="name"
                 type="text"
                 required
                 value={name}
@@ -112,8 +112,8 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
               />
             </div>
             <div>
-              <label className={compactLabelClass}>Type</label>
-              <select
+              <label htmlFor="client-type" className={compactLabelClass}>Type</label>
+              <select id="client-type" name="type"
                 value={type}
                 onChange={(e) => setType(e.target.value as DownloadClientItem['client_type'])}
                 className={compactInputClass}
@@ -126,12 +126,12 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={compactLabelClass}>Host</label>
-              <input type="text" required value={host} onChange={(e) => setHost(e.target.value)} className={compactInputClass} />
+              <label htmlFor="client-host" className={compactLabelClass}>Host</label>
+              <input id="client-host" name="host" type="text" required value={host} onChange={(e) => setHost(e.target.value)} className={compactInputClass} />
             </div>
             <div>
-              <label className={compactLabelClass}>Port</label>
-              <input
+              <label htmlFor="client-port" className={compactLabelClass}>Port</label>
+              <input id="client-port" name="port"
                 type="number"
                 required
                 value={port}

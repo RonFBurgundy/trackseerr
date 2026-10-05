@@ -73,7 +73,11 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
                   >
                     {t.monitored ? 'Monitored' : 'Unmonitored'}
                   </span>
-                  <TactileSwitch checked={t.monitored} onChange={() => onToggleMonitored(t.id, t.monitored === true)} />
+                  <TactileSwitch
+                    checked={t.monitored}
+                    onChange={() => onToggleMonitored(t.id, t.monitored === true)}
+                    ariaLabel={`Monitor ${t.title}`}
+                  />
                 </div>
               )}
             </div>

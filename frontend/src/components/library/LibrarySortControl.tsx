@@ -1,40 +1,30 @@
-import React from 'react';
+import React, { useId } from 'react';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import type { ListSortDir } from '@/types/activity';
 import type { LibrarySortOption } from '@/hooks/useLibraryCatalog';
-import { TapeDeckButton, TapeTransportBay } from '@/components/ui';
+import { TapeDeckButton } from '@/components/ui';
 
 export interface LibrarySortControlProps {
   options: ReadonlyArray<LibrarySortOption>;
   sortKey: string;
   sortDir: ListSortDir;
-  /** A key click flips the direction when it is already active; the arrow button always flips it. */
+  /** A new key starts at its default direction; the arrow key flips the current one. */
   onChange: (key: string, dir?: ListSortDir) => void;
 }
 
-/** Sort selector: segmented tape-deck keys from `sm` up, a select on phones, and a direction key. */
+/** Compact sort: a key-styled select plus a direction key. Two small controls, so it fits the one-row toolbar. */
 export const LibrarySortControl: React.FC<LibrarySortControlProps> = ({ options, sortKey, sortDir, onChange }) => {
+  const id = useId();
   const DirIcon = sortDir === 'asc' ? ArrowUp : ArrowDown;
   return (
-    <div className="flex w-full sm:w-auto items-stretch gap-1.5" role="group" aria-label="Sort">
-      <TapeTransportBay className="hidden sm:flex items-stretch gap-1">
-        {options.map((o) => (
-          <TapeDeckButton
-            key={o.key}
-            size="sm"
-            active={o.key === sortKey}
-            aria-pressed={o.key === sortKey}
-            onClick={() => (o.key === sortKey ? undefined : onChange(o.key))}
-          >
-            {o.label}
-          </TapeDeckButton>
-        ))}
-      </TapeTransportBay>
+    <div className="flex shrink-0 items-stretch gap-1" role="group" aria-label="Sort">
       <select
+        id={`${id}-sort`}
+        name="library-sort"
         aria-label="Sort by"
         value={sortKey}
         onChange={(e) => onChange(e.target.value)}
-        className="sm:hidden flex-1 min-w-0 min-h-[44px] bg-[#141414] border border-[#2a2a2a] rounded-[3px] px-2 text-xs font-mono uppercase text-neutral-200 focus:border-[#e5a00d] focus:outline-none"
+        className="tape-deck-btn min-h-[44px] sm:min-h-[32px] w-[84px] sm:w-auto rounded-[3px] px-2 text-xs font-mono font-semibold uppercase text-neutral-200 focus:border-[var(--accent-amber)] focus:outline-none"
       >
         {options.map((o) => (
           <option key={o.key} value={o.key}>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 import { Search, X } from 'lucide-react';
 
 export interface SearchBarProps {
@@ -8,6 +8,12 @@ export interface SearchBarProps {
   placeholder?: string;
   className?: string;
   disabled?: boolean;
+  /** Accessible name (the search box has no visible label). Default: the placeholder. */
+  ariaLabel?: string;
+  /** Form name. Default `search`. */
+  name?: string;
+  /** Overrides the generated id. */
+  id?: string;
 }
 
 export const SearchBar: React.FC<SearchBarProps> = ({
@@ -17,7 +23,11 @@ export const SearchBar: React.FC<SearchBarProps> = ({
   placeholder = 'Search...',
   className = '',
   disabled = false,
+  ariaLabel,
+  name = 'search',
+  id,
 }) => {
+  const generatedId = useId();
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && onSearch) {
       onSearch();
@@ -30,6 +40,10 @@ export const SearchBar: React.FC<SearchBarProps> = ({
     >
       <Search className="h-4 w-4 text-neutral-400 shrink-0 mr-2.5" />
       <input
+        id={id ?? generatedId}
+        name={name}
+        aria-label={ariaLabel ?? placeholder}
+        autoComplete="off"
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}

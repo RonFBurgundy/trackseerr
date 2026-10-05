@@ -38,6 +38,9 @@ export const ItunesImportCard: React.FC = () => {
         <div>
           <input
             ref={fileRef}
+            id="itunes-library-file"
+            name="itunes-library-file"
+            aria-label="iTunes library XML file"
             type="file"
             accept=".xml,application/xml,text/xml"
             className="hidden"
@@ -75,9 +78,11 @@ export const ItunesImportCard: React.FC = () => {
               </div>
             </div>
             <div className="max-h-80 overflow-y-auto border border-[#2a2a2a] rounded-[3px] divide-y divide-[#222222]">
-              {imp.preview.playlists.map((p) => (
+              {imp.preview.playlists.map((p, i) => (
                 <label key={p.key} className="flex items-center gap-3 px-3 min-h-[44px] cursor-pointer hover:bg-[#1c1c1c]">
                   <input
+                    id={`itunes-playlist-${i}`}
+                    name="playlist"
                     type="checkbox"
                     className={checkClass}
                     checked={imp.selected.has(p.key)}
@@ -108,6 +113,8 @@ export const ItunesImportCard: React.FC = () => {
                 <div key={i} className="space-y-1">
                   <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
                     <input
+                      id={`itunes-mapping-from-${i}`}
+                      name={`mapping-from-${i}`}
                       className={inputClass}
                       aria-label="Export path prefix"
                       placeholder="C:/Users/Aaron/iTunes/iTunes Media/Music"
@@ -115,6 +122,8 @@ export const ItunesImportCard: React.FC = () => {
                       onChange={(e) => imp.setMapping(i, { from: e.target.value })}
                     />
                     <input
+                      id={`itunes-mapping-to-${i}`}
+                      name={`mapping-to-${i}`}
                       className={inputClass}
                       aria-label="Library path prefix"
                       placeholder="/music"
@@ -139,6 +148,7 @@ export const ItunesImportCard: React.FC = () => {
               <label htmlFor="itunes-mode" className={labelClass}>Monitor missing tracks</label>
               <select
                 id="itunes-mode"
+                name="monitor-mode"
                 className={inputClass}
                 value={imp.monitorMode}
                 onChange={(e) => imp.setMonitorMode(e.target.value as ListMonitorMode)}
@@ -153,6 +163,7 @@ export const ItunesImportCard: React.FC = () => {
               <label htmlFor="itunes-prefix" className={labelClass}>Name prefix (optional)</label>
               <input
                 id="itunes-prefix"
+                name="name-prefix"
                 className={inputClass}
                 maxLength={100}
                 placeholder="iTunes: "
@@ -163,12 +174,12 @@ export const ItunesImportCard: React.FC = () => {
           </div>
 
           <label className="flex items-center gap-3 min-h-[44px] cursor-pointer text-sm text-neutral-200">
-            <input type="checkbox" className={checkClass} checked={imp.includeFolders} onChange={(e) => imp.setIncludeFolders(e.target.checked)} />
+            <input id="itunes-include-folders" name="include-folders" type="checkbox" className={checkClass} checked={imp.includeFolders} onChange={(e) => imp.setIncludeFolders(e.target.checked)} />
             Prefix playlist names with their folder ("Folder / Playlist")
           </label>
           <div>
             <label className="flex items-center gap-3 min-h-[44px] text-sm text-neutral-500">
-              <input type="checkbox" className={checkClass} checked={imp.importPlayStats} disabled onChange={() => undefined} />
+              <input id="itunes-import-play-stats" name="import-play-stats" type="checkbox" className={checkClass} checked={imp.importPlayStats} disabled onChange={() => undefined} />
               Import play counts and ratings
             </label>
             <p className="text-[11px] font-mono text-neutral-500">

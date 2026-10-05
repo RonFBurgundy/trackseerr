@@ -1,6 +1,6 @@
 import React from 'react';
 import { Loader2, Play, Square, RotateCw, AlertTriangle } from 'lucide-react';
-import { TapeDeckButton, ActionBar, MachinedCard } from '@/components/ui';
+import { TapeDeckButton, ActionBar, MachinedCard, ScrollFill } from '@/components/ui';
 import { useScheduledTasks } from '@/hooks/useScheduledTasks';
 import { formatTimestamp } from './formatters';
 
@@ -40,7 +40,7 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
       )}
 
       <MachinedCard className="overflow-hidden p-0 border-[#222222]">
-        <div className="overflow-x-auto">
+        <ScrollFill ariaLabel="Scheduled tasks" className="overflow-x-auto">
           <table className="w-full text-left border-collapse max-md:block">
             <thead className="max-md:hidden">
               <tr className="border-b border-[#222222] bg-[#121212] text-[11px] font-mono uppercase tracking-wider text-neutral-400">
@@ -130,7 +130,7 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollFill>
 
         {isLoading && tasks.length === 0 && (
           <div className="flex items-center justify-center gap-2 py-12 text-neutral-400 text-xs font-mono">

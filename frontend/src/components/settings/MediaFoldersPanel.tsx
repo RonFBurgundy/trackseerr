@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import { Loader2, Save } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, FormField, MonitorOptionSelect } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, FormField, MonitorOptionSelect, ScrollFill } from '@/components/ui';
 import type { MediaManagementSettings } from '@/types/models';
 import { updateMediaManagementSettings } from '@/services/settingsService';
 import { NamingFormatsEditor } from '@/components/naming/NamingFormatsEditor';
@@ -15,6 +15,11 @@ export interface MediaFoldersPanelProps {
 /** Root Folders & Naming (formerly the "Media" tab). */
 export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, onChange, onToast }) => {
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const rootId = useId();
+  const stagingId = useId();
+  const importModeId = useId();
+  const scanMonitorId = useId();
+  const addMonitorId = useId();
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,10 +47,13 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
         </p>
       </div>
 
+      <ScrollFill ariaLabel="Root folders and naming settings" className="-mr-2 pr-2">
       <form onSubmit={handleSave} className="space-y-4">
         <div>
-          <label className={labelClass}>Root Music Folder</label>
+          <label htmlFor={rootId} className={labelClass}>Root Music Folder</label>
           <input
+            id={rootId}
+            name="root_folder_path"
             type="text"
             value={settings?.root_folder_path || ''}
             onChange={(e) => onChange((prev) => (prev ? { ...prev, root_folder_path: e.target.value } : null))}
@@ -55,8 +63,10 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
         </div>
 
         <div>
-          <label className={labelClass}>Staging / Downloads Folder</label>
+          <label htmlFor={stagingId} className={labelClass}>Staging / Downloads Folder</label>
           <input
+            id={stagingId}
+            name="staging_folder_path"
             type="text"
             value={settings?.staging_folder_path || ''}
             onChange={(e) => onChange((prev) => (prev ? { ...prev, staging_folder_path: e.target.value } : null))}
@@ -82,8 +92,10 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-[#1f1f1f]">
           <div>
-            <label className={labelClass}>Import Mode</label>
+            <label htmlFor={importModeId} className={labelClass}>Import Mode</label>
             <select
+              id={importModeId}
+              name="import_mode"
               value={settings?.import_mode || 'move'}
               onChange={(e) =>
                 onChange((prev) =>
@@ -129,16 +141,16 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
             </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormField label="Artists found by library scan" htmlFor="scan-monitor-option">
+            <FormField label="Artists found by library scan" htmlFor={scanMonitorId}>
               <MonitorOptionSelect
-                id="scan-monitor-option"
+                id={scanMonitorId}
                 value={settings?.scan_monitor_option ?? 'existing'}
                 onChange={(v) => onChange((prev) => (prev ? { ...prev, scan_monitor_option: v } : null))}
               />
             </FormField>
-            <FormField label="Artists added manually" htmlFor="add-monitor-option">
+            <FormField label="Artists added manually" htmlFor={addMonitorId}>
               <MonitorOptionSelect
-                id="add-monitor-option"
+                id={addMonitorId}
                 value={settings?.add_monitor_option ?? 'all'}
                 onChange={(v) => onChange((prev) => (prev ? { ...prev, add_monitor_option: v } : null))}
               />
@@ -158,6 +170,7 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
           </TapeDeckButton>
         </ActionBar>
       </form>
+      </ScrollFill>
     </MachinedCard>
   );
 };

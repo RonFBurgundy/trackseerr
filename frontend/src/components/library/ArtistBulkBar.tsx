@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import { Check, Eye, EyeOff, Loader2, X } from 'lucide-react';
 import type { QualityProfile } from '@/types/models';
 import { MONITOR_OPTION_LABELS, type MonitorOption } from '@/types/monitoring';
@@ -29,6 +29,7 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
   profiles,
   profilesLoading,
 }) => {
+  const uid = useId();
   const [option, setOption] = useState<MonitorOption>('all');
   const [applyToAlbums, setApplyToAlbums] = useState<boolean>(true);
   const [profile, setProfile] = useState<string>('');
@@ -104,7 +105,7 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
         <TapeDeckButton
           size="sm"
           disabled={disabled}
-          onClick={() => apply({ monitored: true }, 'Monitor')}
+          onClick={() => apply({ monitored: true, apply_monitor_to_albums: applyToAlbums }, 'Monitor')}
           icon={<Eye className="h-3.5 w-3.5" />}
         >
           Monitor
@@ -112,7 +113,7 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
         <TapeDeckButton
           size="sm"
           disabled={disabled}
-          onClick={() => apply({ monitored: false }, 'Unmonitor')}
+          onClick={() => apply({ monitored: false, apply_monitor_to_albums: applyToAlbums }, 'Unmonitor')}
           icon={<EyeOff className="h-3.5 w-3.5" />}
         >
           Unmonitor
@@ -123,12 +124,16 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
         <MonitorOptionSelect
           value={option}
           onChange={setOption}
+          id={`${uid}-option`}
+          name="monitor-option"
           disabled={edit.busy}
           aria-label="Monitor option"
           className="sm:w-56"
         />
         <label className="flex items-center gap-2 min-h-[44px] sm:min-h-0 text-xs font-mono text-neutral-300 cursor-pointer">
           <input
+            id={`${uid}-albums`}
+            name="apply-to-albums"
             type="checkbox"
             checked={applyToAlbums}
             onChange={(e) => setApplyToAlbums(e.target.checked)}
@@ -154,6 +159,8 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
 
       <div className="flex flex-col sm:flex-row sm:items-center gap-2">
         <select
+          id={`${uid}-profile`}
+          name="quality-profile"
           value={profile}
           onChange={(e) => setProfile(e.target.value)}
           disabled={edit.busy || profilesLoading}
