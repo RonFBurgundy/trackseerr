@@ -18,8 +18,15 @@ from typing import Any, Optional, Union
 from plex_playlist_sync import local_auth
 from plex_playlist_sync.library_monitoring import (
     ALBUM_MONITORED_SQL,
+    DEFAULT_MONITOR_OPTION,
+    RELEASE_PRIMARY_TYPES,
+    RELEASE_SECONDARY_TYPES,
+    album_in_release_profile,
+    normalize_secondary_types,
+    validate_release_types,
     validate_list_monitor_mode,
     validate_monitor_option,
+    TRACK_HAS_FILE_SQL,
 )
 from plex_playlist_sync.list_index import SortDef, build_index, fold_search_text, library_sort_key, order_clause
 from plex_playlist_sync.models import (
@@ -63,7 +70,7 @@ def clean_library_name(text: str) -> str:
 
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
-SCHEMA_VERSION = 43  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 46  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _titles_near_equal(a: str, b: str) -> bool:
@@ -269,6 +276,7 @@ class Database:
             cur.execute("SELECT MAX(version) FROM schema_migrations")
             row = cur.fetchone()
             current_version = row[0] if (row and row[0] is not None) else 0
+            self._fresh_install = current_version == 0
 
             migrations = [
                 (1, self._migration_v1),
@@ -314,6 +322,9 @@ class Database:
                 (41, self._migration_v41),
                 (42, self._migration_v42),
                 (43, self._migration_v43),
+                (44, self._migration_v44),
+                (45, self._migration_v45),
+                (46, self._migration_v46),
             ]
 
             applied = 0
@@ -1414,6 +1425,68 @@ class Database:
         if "add_monitor_option" not in cols:
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN add_monitor_option TEXT NOT NULL DEFAULT 'all';"
+            )
+
+    def _migration_v44(self, cur: sqlite3.Cursor) -> None:
+        """Native monitoring defaults to ``existing`` (track-level: monitor exactly the tracks you have files for).
+
+        SQLite cannot change a column DEFAULT without a table rebuild, so the column defaults stay ``'all'`` and the
+        code paths supply ``DEFAULT_MONITOR_OPTION`` for new rows. This migration only seeds the saved add option on a
+        fresh database; an existing install's saved ``add_monitor_option`` and every artist's option are untouched.
+        """
+        if not getattr(self, "_fresh_install", False):
+            return
+        cur.execute("UPDATE media_management_settings SET add_monitor_option = ? WHERE id = 1", (DEFAULT_MONITOR_OPTION,))
+
+    def _migration_v45(self, cur: sqlite3.Cursor) -> None:
+        """Optional native release profiles: they only shape automatic monitoring, never hide releases.
+
+        Adds ``native_release_profiles`` (seeded with three editable presets), ``library_albums.secondary_types``
+        (JSON list, NULL = unknown, treated as studio), ``library_artists.release_profile_id`` (NULL = no profile)
+        and ``media_management_settings.add_release_profile_id`` (NULL = new artists get no profile).
+        """
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS native_release_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                primary_types TEXT NOT NULL,
+                secondary_types TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+            )
+            """
+        )
+        for table, column, ddl in (
+            ("library_albums", "secondary_types", "TEXT"),
+            (
+                "library_artists",
+                "release_profile_id",
+                "INTEGER REFERENCES native_release_profiles(id) ON DELETE SET NULL",
+            ),
+            ("media_management_settings", "add_release_profile_id", "INTEGER"),
+        ):
+            cur.execute(f"PRAGMA table_info({table});")
+            if column not in {row[1] for row in cur.fetchall()}:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl};")
+        presets = (
+            ("Studio Albums", ["album"], ["studio"]),
+            ("Studio Albums, EPs & Singles", ["album", "ep", "single"], ["studio"]),
+            ("Everything", list(RELEASE_PRIMARY_TYPES), list(RELEASE_SECONDARY_TYPES)),
+        )
+        for name, primary, secondary in presets:
+            cur.execute(
+                "INSERT OR IGNORE INTO native_release_profiles (name, primary_types, secondary_types) VALUES (?, ?, ?)",
+                (name, json.dumps(primary), json.dumps(secondary)),
+            )
+
+    def _migration_v46(self, cur: sqlite3.Cursor) -> None:
+        """``library_artists.pending_profile_recompute``: set when an artist was added with a release profile before
+        MusicBrainz secondary types were known; the first refresh that persists them recomputes monitoring once."""
+        cur.execute("PRAGMA table_info(library_artists);")
+        if "pending_profile_recompute" not in {row[1] for row in cur.fetchall()}:
+            cur.execute(
+                "ALTER TABLE library_artists ADD COLUMN pending_profile_recompute INTEGER NOT NULL DEFAULT 0;"
             )
 
     def _migration_v43(self, cur: sqlite3.Cursor) -> None:
@@ -4156,7 +4229,10 @@ class Database:
             cur = self.conn.execute("SELECT * FROM media_management_settings WHERE id = 1")
             row = cur.fetchone()
             if not row:
-                self.conn.execute("INSERT OR IGNORE INTO media_management_settings (id) VALUES (1)")
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO media_management_settings (id, add_monitor_option) VALUES (1, ?)",
+                    (DEFAULT_MONITOR_OPTION,),
+                )
                 self.conn.commit()
                 cur = self.conn.execute("SELECT * FROM media_management_settings WHERE id = 1")
                 row = cur.fetchone()
@@ -4183,7 +4259,10 @@ class Database:
             res["mb_mirror_url"] = str(res.get("mb_mirror_url") or "https://api.brainzmash.cc")
             res["prefer_local_artwork"] = bool(res.get("prefer_local_artwork", 1))
             res["scan_monitor_option"] = str(res.get("scan_monitor_option") or "existing")
-            res["add_monitor_option"] = str(res.get("add_monitor_option") or "all")
+            res["add_monitor_option"] = str(res.get("add_monitor_option") or DEFAULT_MONITOR_OPTION)
+            res["add_release_profile_id"] = (
+                int(res["add_release_profile_id"]) if res.get("add_release_profile_id") is not None else None
+            )
             return res
 
     def update_media_management_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
@@ -4214,6 +4293,7 @@ class Database:
             "prefer_local_artwork",
             "scan_monitor_option",
             "add_monitor_option",
+            "add_release_profile_id",
         }
         for opt_key in ("scan_monitor_option", "add_monitor_option"):
             if settings.get(opt_key) is not None:
@@ -4233,6 +4313,10 @@ class Database:
                 ):
                     if v is not None:
                         updates[k] = 1 if bool(v) else 0
+                elif k == "add_release_profile_id":
+                    if v is not None and self.get_release_profile(int(v)) is None:
+                        raise ValueError(f"Release profile {v} does not exist")
+                    updates[k] = int(v) if v is not None else None
                 elif k == "seed_ratio_limit":
                     updates[k] = float(v) if v is not None else None
                 elif k == "seed_time_limit_minutes":
@@ -5875,6 +5959,18 @@ class Database:
         res["monitor_option"] = str(res.get("monitor_option") or "all")
         return res
 
+    @staticmethod
+    def _decode_type_list(raw: Any) -> Optional[list[str]]:
+        """Decodes a JSON list column; NULL or unparseable data is None (unknown)."""
+        if raw is None:
+            return None
+        try:
+            val = json.loads(raw) if isinstance(raw, str) else raw
+        except json.JSONDecodeError:
+            logger.warning("Ignoring malformed type list in database: %r", raw)
+            return None
+        return [str(v) for v in val] if isinstance(val, list) else None
+
     def _map_library_album(self, row: sqlite3.Row) -> dict[str, Any]:
         res = dict(row)
         res.pop("search_text", None)
@@ -5884,6 +5980,7 @@ class Database:
             res["year"] = int(res["year"])
         if res.get("total_tracks") is not None:
             res["total_tracks"] = int(res["total_tracks"])
+        res["secondary_types"] = self._decode_type_list(res.get("secondary_types"))
         return res
 
     def _map_library_track(self, row: sqlite3.Row) -> dict[str, Any]:
@@ -5924,8 +6021,9 @@ class Database:
         foreign_artist_id = str(d["foreign_artist_id"]) if d.get("foreign_artist_id") is not None else None
         path = str(d["path"]) if d.get("path") is not None else None
         monitored = 1 if d.get("monitored", True) else 0
-        monitor_option = str(d.get("monitor_option") or "all")
+        monitor_option = str(d.get("monitor_option") or DEFAULT_MONITOR_OPTION)
         quality_profile_id = str(d["quality_profile_id"]) if d.get("quality_profile_id") is not None else None
+        release_profile_id = int(d["release_profile_id"]) if d.get("release_profile_id") is not None else None
         metadata_json = d.get("metadata_json")
         if isinstance(metadata_json, dict):
             metadata_json = json.dumps(metadata_json)
@@ -5945,8 +6043,8 @@ class Database:
                 INSERT INTO library_artists (
                     id, name, clean_name, sort_name, search_text, search_clean, foreign_artist_id, path, monitored,
                     monitor_option, quality_profile_id, metadata_json, mbid,
-                    image_url, banner_url, bio, genres, country, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+                    image_url, banner_url, bio, genres, country, release_profile_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     clean_name = excluded.clean_name,
@@ -5965,6 +6063,7 @@ class Database:
                     bio = COALESCE(excluded.bio, library_artists.bio),
                     genres = COALESCE(excluded.genres, library_artists.genres),
                     country = COALESCE(excluded.country, library_artists.country),
+                    release_profile_id = COALESCE(excluded.release_profile_id, library_artists.release_profile_id),
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -5986,6 +6085,7 @@ class Database:
                     bio,
                     genres,
                     country,
+                    release_profile_id,
                     created_at,
                     1 if preserve_monitoring else 0,
                     1 if preserve_monitoring else 0,
@@ -6110,6 +6210,177 @@ class Database:
             self.conn.commit()
             return True
 
+    # ---- native release profiles (optional; shape automatic monitoring only) ----
+
+    def _map_release_profile(self, row: sqlite3.Row) -> dict[str, Any]:
+        res = dict(row)
+        res["primary_types"] = self._decode_type_list(res.get("primary_types")) or []
+        res["secondary_types"] = self._decode_type_list(res.get("secondary_types")) or []
+        return res
+
+    def list_release_profiles(self) -> list[dict[str, Any]]:
+        """All release profiles (oldest first) with ``artist_count``, how many artists use each."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT p.*, (SELECT COUNT(*) FROM library_artists ar WHERE ar.release_profile_id = p.id) "
+                "AS artist_count FROM native_release_profiles p ORDER BY p.id"
+            ).fetchall()
+        return [{**self._map_release_profile(r), "artist_count": int(r["artist_count"])} for r in rows]
+
+    def get_release_profile(self, profile_id: int) -> Optional[dict[str, Any]]:
+        with self._lock:
+            row = self.conn.execute("SELECT * FROM native_release_profiles WHERE id = ?", (int(profile_id),)).fetchone()
+        return self._map_release_profile(row) if row else None
+
+    def create_release_profile(self, name: str, primary_types: Any, secondary_types: Any) -> dict[str, Any]:
+        """Creates a profile; ValueError for a bad name/type list or a duplicate name."""
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            raise ValueError("name must not be empty")
+        primary, secondary = validate_release_types(primary_types, secondary_types)
+        with self._lock:
+            try:
+                cur = self.conn.execute(
+                    "INSERT INTO native_release_profiles (name, primary_types, secondary_types) VALUES (?, ?, ?)",
+                    (clean_name, json.dumps(primary), json.dumps(secondary)),
+                )
+                self.conn.commit()
+            except sqlite3.IntegrityError as exc:
+                self.conn.rollback()
+                raise ValueError(f"A release profile named {clean_name!r} already exists") from exc
+            new_id = int(cur.lastrowid or 0)
+        created = self.get_release_profile(new_id)
+        if created is None:
+            raise RuntimeError("Failed to create release profile")
+        return created
+
+    def update_release_profile(
+        self, profile_id: int, name: str, primary_types: Any, secondary_types: Any
+    ) -> Optional[dict[str, Any]]:
+        """Replaces a profile's fields; None when it does not exist, ValueError on bad input or duplicate name."""
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            raise ValueError("name must not be empty")
+        primary, secondary = validate_release_types(primary_types, secondary_types)
+        with self._lock:
+            try:
+                cur = self.conn.execute(
+                    "UPDATE native_release_profiles SET name = ?, primary_types = ?, secondary_types = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (clean_name, json.dumps(primary), json.dumps(secondary), int(profile_id)),
+                )
+                self.conn.commit()
+            except sqlite3.IntegrityError as exc:
+                self.conn.rollback()
+                raise ValueError(f"A release profile named {clean_name!r} already exists") from exc
+            if cur.rowcount <= 0:
+                return None
+        return self.get_release_profile(profile_id)
+
+    def delete_release_profile(self, profile_id: int) -> Optional[int]:
+        """Deletes a profile, clearing it from artists and the add default; returns artists cleared (None = missing)."""
+        with self._lock:
+            try:
+                if self.conn.execute(
+                    "SELECT 1 FROM native_release_profiles WHERE id = ?", (int(profile_id),)
+                ).fetchone() is None:
+                    return None
+                cleared = self.conn.execute(
+                    "UPDATE library_artists SET release_profile_id = NULL, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE release_profile_id = ?",
+                    (int(profile_id),),
+                ).rowcount
+                self.conn.execute(
+                    "UPDATE media_management_settings SET add_release_profile_id = NULL WHERE add_release_profile_id = ?",
+                    (int(profile_id),),
+                )
+                self.conn.execute("DELETE FROM native_release_profiles WHERE id = ?", (int(profile_id),))
+                self.conn.commit()
+            except sqlite3.Error:
+                self.conn.rollback()
+                logger.exception("delete_release_profile failed; transaction rolled back")
+                raise
+        return max(int(cleared), 0)
+
+    def release_profile_preview(
+        self, artist_id: str, profile_id: Optional[int]
+    ) -> Optional[dict[str, Any]]:
+        """What assigning ``profile_id`` (None = clear) to an artist would do; None if the artist/profile is missing.
+
+        Returns ``matching`` / ``total`` release-group counts under the profile plus ``would_change``: how many albums
+        and tracks a recompute (``apply_monitor_to_albums``) would newly monitor / unmonitor against their CURRENT
+        flags. It evaluates the same SQL predicate as ``bulk_edit_library_artists`` with the artist's release profile
+        swapped for the candidate, and writes nothing.
+        """
+        profile = self.get_release_profile(int(profile_id)) if profile_id is not None else None
+        if profile_id is not None and profile is None:
+            return None
+        if self.get_library_artist(artist_id) is None:
+            return None
+        album_expr = ALBUM_MONITORED_SQL.format(opt="ar.monitor_option", art_mon="ar.monitored")
+        # ``ar`` is the artist row with its release profile replaced, so the real predicate is reused unchanged.
+        ar_sub = (
+            "(SELECT id, monitor_option, monitored, created_at, ? AS release_profile_id "
+            "FROM library_artists WHERE id = ?) ar"
+        )
+        ar_params = [int(profile_id) if profile_id is not None else None, str(artist_id)]
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT album_type, secondary_types FROM library_albums WHERE artist_id = ?", (str(artist_id),)
+            ).fetchall()
+            alb = self.conn.execute(
+                "SELECT COALESCE(SUM(a.monitored = 0 AND n = 1), 0), COALESCE(SUM(a.monitored = 1 AND n = 0), 0) FROM ("
+                f"SELECT a.monitored AS monitored, ({album_expr}) AS n FROM library_albums a "
+                f"JOIN {ar_sub} ON ar.id = a.artist_id WHERE a.artist_id = ?) a",
+                [*ar_params, str(artist_id)],
+            ).fetchone()
+            trk = self.conn.execute(
+                "SELECT COALESCE(SUM(m = 0 AND n = 1), 0), COALESCE(SUM(m = 1 AND n = 0), 0) FROM ("
+                "SELECT library_tracks.monitored AS m, CASE WHEN ar.monitor_option = 'existing' "
+                f"THEN ({album_expr}) AND {TRACK_HAS_FILE_SQL} ELSE ({album_expr}) END AS n "
+                "FROM library_tracks JOIN library_albums a ON a.id = library_tracks.album_id "
+                f"JOIN {ar_sub} ON ar.id = a.artist_id WHERE a.artist_id = ?)",
+                [*ar_params, str(artist_id)],
+            ).fetchone()
+        matching = sum(
+            1
+            for r in rows
+            if album_in_release_profile(profile, r["album_type"], self._decode_type_list(r["secondary_types"]))
+        )
+        return {
+            "matching": matching,
+            "total": len(rows),
+            "would_change": {
+                "albums_to_monitor": int(alb[0]),
+                "albums_to_unmonitor": int(alb[1]),
+                "tracks_to_monitor": int(trk[0]),
+                "tracks_to_unmonitor": int(trk[1]),
+            },
+        }
+
+    def finish_pending_profile_recompute(self, artist_id: str) -> bool:
+        """Runs a deferred release-profile recompute once secondary types are known; True when it ran.
+
+        The recompute and the ``pending_profile_recompute`` clear commit together in one transaction, and the check
+        happens under the same lock hold, so a manual album/track edit (which clears the flag) can never be undone by
+        a recompute that read a stale flag.
+        """
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT pending_profile_recompute FROM library_artists WHERE id = ?", (str(artist_id),)
+            ).fetchone()
+            if row is None or not row[0]:
+                return False
+            known = self.conn.execute(
+                "SELECT 1 FROM library_albums WHERE artist_id = ? AND secondary_types IS NOT NULL LIMIT 1",
+                (str(artist_id),),
+            ).fetchone()
+            if known is None:
+                return False
+            # Clears the flag in the same transaction as the album/track recompute.
+            self.bulk_edit_library_artists([str(artist_id)], apply_monitor_to_albums=True)
+            return True
+
     _BULK_CHUNK = 500
     _UNSET: Any = object()
 
@@ -6121,6 +6392,8 @@ class Database:
         monitor_option: Optional[str] = None,
         quality_profile_id: Any = _UNSET,
         apply_monitor_to_albums: bool = False,
+        release_profile_id: Any = _UNSET,
+        recompute_when_option_changes: bool = False,
     ) -> dict[str, int]:
         """Set-based bulk edit of native artists (``artist_ids=None`` means every artist), in one transaction.
 
@@ -6128,6 +6401,10 @@ class Database:
         given. With ``apply_monitor_to_albums`` every album of the affected artists is recomputed from the artist's
         resulting option and monitored flag (see ``library_monitoring.ALBUM_MONITORED_SQL``; ``existing`` keeps
         albums having at least one track with a library file), and each album's tracks follow their album.
+        ``release_profile_id`` (None clears it) is the artist's optional release profile; an album outside it is not
+        auto-monitored by the recompute (files still win under ``existing``).
+        ``recompute_when_option_changes`` (ignored when ``apply_monitor_to_albums``) recomputes only the artists whose
+        ``monitor_option`` differs from the new ``monitor_option`` before this edit; the rest are just written.
         Returns ``artists_updated`` plus the post-update count of ``albums_monitored`` / ``albums_unmonitored``
         among the affected artists' albums (0/0 when albums were not recomputed).
         """
@@ -6144,6 +6421,11 @@ class Database:
         if quality_profile_id is not self._UNSET:
             sets.append("quality_profile_id = ?")
             set_params.append(str(quality_profile_id) if quality_profile_id is not None else None)
+        if release_profile_id is not self._UNSET:
+            if release_profile_id is not None and self.get_release_profile(int(release_profile_id)) is None:
+                raise ValueError(f"Release profile {release_profile_id} does not exist")
+            sets.append("release_profile_id = ?")
+            set_params.append(int(release_profile_id) if release_profile_id is not None else None)
         if not sets and not apply_monitor_to_albums:
             raise ValueError("No changes requested")
 
@@ -6155,16 +6437,64 @@ class Database:
 
         album_expr = ALBUM_MONITORED_SQL.format(opt="ar.monitor_option", art_mon="ar.monitored")
         result = {"artists_updated": 0, "albums_monitored": 0, "albums_unmonitored": 0}
+
+        def recompute(target: Optional[list[str]]) -> None:
+            """Recomputes albums and tracks of ``target`` artists (None = all); caller holds the lock and commits."""
+            alb_where, alb_where_a, params = "", "", []
+            marks = ""
+            if target is not None:
+                marks = ", ".join("?" for _ in target)
+                alb_where = f" WHERE artist_id IN ({marks})"
+                alb_where_a = f" WHERE a.artist_id IN ({marks})"
+                params = target
+            # The recompute supersedes any deferred one, so it can never run again over this result.
+            self.conn.execute(
+                "UPDATE library_artists SET pending_profile_recompute = 0 WHERE pending_profile_recompute = 1"
+                + (f" AND id IN ({marks})" if target is not None else ""),
+                params,
+            )
+            self.conn.execute(
+                "UPDATE library_albums AS a SET monitored = ("
+                f"SELECT {album_expr} FROM library_artists ar WHERE ar.id = a.artist_id"
+                f"), updated_at = CURRENT_TIMESTAMP{alb_where_a}",
+                params,
+            )
+            # Tracks follow their album, except under ``existing`` where monitoring is track-granular: only
+            # tracks that have a file stay monitored (and only inside a monitored album).
+            self.conn.execute(
+                "UPDATE library_tracks SET monitored = ("
+                "SELECT CASE WHEN ar.monitor_option = 'existing' "
+                f"THEN al.monitored AND {TRACK_HAS_FILE_SQL} ELSE al.monitored END "
+                "FROM library_albums al JOIN library_artists ar ON ar.id = al.artist_id "
+                "WHERE al.id = library_tracks.album_id"
+                f"), updated_at = CURRENT_TIMESTAMP{alb_where}",
+                params,
+            )
+            counts = self.conn.execute(
+                "SELECT COALESCE(SUM(monitored), 0), COUNT(*) FROM library_albums" + alb_where, params
+            ).fetchone()
+            result["albums_monitored"] += int(counts[0])
+            result["albums_unmonitored"] += int(counts[1]) - int(counts[0])
+
         with self._lock:
             try:
                 for chunk in chunks:
-                    art_where, alb_where, alb_where_a, params = "", "", "", []
+                    art_where, params = "", []
                     if chunk is not None:
                         marks = ", ".join("?" for _ in chunk)
                         art_where = f" WHERE id IN ({marks})"
-                        alb_where = f" WHERE artist_id IN ({marks})"
-                        alb_where_a = f" WHERE a.artist_id IN ({marks})"
                         params = chunk
+                    changing: list[str] = []
+                    if recompute_when_option_changes and monitor_option is not None and not apply_monitor_to_albums:
+                        # Only artists whose option actually changes are recomputed; ones already on it are left alone.
+                        changing = [
+                            str(r[0])
+                            for r in self.conn.execute(
+                                f"SELECT id FROM library_artists{art_where}"
+                                f"{' AND' if art_where else ' WHERE'} monitor_option <> ?",
+                                [*params, monitor_option],
+                            ).fetchall()
+                        ]
                     if sets:
                         cur = self.conn.execute(
                             f"UPDATE library_artists SET {', '.join(sets)}, updated_at = CURRENT_TIMESTAMP{art_where}",
@@ -6174,25 +6504,11 @@ class Database:
                         cur = self.conn.execute(f"SELECT COUNT(*) FROM library_artists{art_where}", params)
                     updated = cur.rowcount if sets else int(cur.fetchone()[0])
                     result["artists_updated"] += max(int(updated), 0)
-                    if not apply_monitor_to_albums:
-                        continue
-                    self.conn.execute(
-                        "UPDATE library_albums AS a SET monitored = ("
-                        f"SELECT {album_expr} FROM library_artists ar WHERE ar.id = a.artist_id"
-                        f"), updated_at = CURRENT_TIMESTAMP{alb_where_a}",
-                        params,
-                    )
-                    self.conn.execute(
-                        "UPDATE library_tracks SET monitored = ("
-                        "SELECT monitored FROM library_albums WHERE library_albums.id = library_tracks.album_id"
-                        f"), updated_at = CURRENT_TIMESTAMP{alb_where}",
-                        params,
-                    )
-                    counts = self.conn.execute(
-                        "SELECT COALESCE(SUM(monitored), 0), COUNT(*) FROM library_albums" + alb_where, params
-                    ).fetchone()
-                    result["albums_monitored"] += int(counts[0])
-                    result["albums_unmonitored"] += int(counts[1]) - int(counts[0])
+                    if apply_monitor_to_albums:
+                        recompute(chunk)
+                    else:
+                        for i in range(0, len(changing), self._BULK_CHUNK):
+                            recompute(changing[i : i + self._BULK_CHUNK])
                 self.conn.commit()
             except sqlite3.Error:
                 self.conn.rollback()
@@ -6217,6 +6533,7 @@ class Database:
                         [val, *chunk],
                     )
                     updated += max(int(cur.rowcount), 0)
+                    self._cancel_pending_profile_recompute_for_albums(chunk)
                     if cascade_tracks:
                         self.conn.execute(
                             f"UPDATE library_tracks SET monitored = ?, updated_at = CURRENT_TIMESTAMP WHERE album_id IN ({marks})",
@@ -6250,6 +6567,9 @@ class Database:
         mb_release_group_id = str(d["mb_release_group_id"]) if d.get("mb_release_group_id") is not None else None
         mb_release_id = str(d["mb_release_id"]) if d.get("mb_release_id") is not None else None
         genres = str(d["genres"]) if d.get("genres") is not None else None
+        raw_secondary = d.get("secondary_types")
+        normalized_secondary = normalize_secondary_types(raw_secondary)
+        secondary_types = json.dumps(normalized_secondary) if normalized_secondary is not None else None
         created_at = d.get("created_at")
 
         with self._lock:
@@ -6258,9 +6578,9 @@ class Database:
                 INSERT INTO library_albums (
                     id, artist_id, title, clean_title, sort_title, search_text, search_clean, foreign_album_id,
                     release_date, year, album_type, monitored, path, cover_url, total_tracks,
-                    mb_release_group_id, mb_release_id, genres,
+                    mb_release_group_id, mb_release_id, genres, secondary_types,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     artist_id = excluded.artist_id,
                     title = excluded.title,
@@ -6279,6 +6599,7 @@ class Database:
                     mb_release_group_id = COALESCE(excluded.mb_release_group_id, library_albums.mb_release_group_id),
                     mb_release_id = COALESCE(excluded.mb_release_id, library_albums.mb_release_id),
                     genres = COALESCE(excluded.genres, library_albums.genres),
+                    secondary_types = COALESCE(excluded.secondary_types, library_albums.secondary_types),
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -6300,6 +6621,7 @@ class Database:
                     mb_release_group_id,
                     mb_release_id,
                     genres,
+                    secondary_types,
                     created_at,
                     1 if preserve_monitoring else 0,
                 ),
@@ -6396,6 +6718,48 @@ class Database:
             self.conn.commit()
             return cur.rowcount > 0
 
+    def _cancel_pending_profile_recompute_for_albums(self, album_ids: list[str]) -> None:
+        """A manual album monitor edit cancels a deferred profile recompute so it can never undo the user's choice.
+
+        Caller holds ``self._lock``; the surrounding transaction commits.
+        """
+        marks = ", ".join("?" for _ in album_ids)
+        self.conn.execute(
+            "UPDATE library_artists SET pending_profile_recompute = 0 WHERE pending_profile_recompute = 1 "
+            f"AND id IN (SELECT artist_id FROM library_albums WHERE id IN ({marks}))",
+            list(album_ids),
+        )
+
+    def _cancel_pending_profile_recompute_for_tracks(self, track_ids: list[str]) -> None:
+        """A manual track monitor edit cancels a deferred profile recompute (same rule as for albums).
+
+        Caller holds ``self._lock``; the surrounding transaction commits.
+        """
+        marks = ", ".join("?" for _ in track_ids)
+        self.conn.execute(
+            "UPDATE library_artists SET pending_profile_recompute = 0 WHERE pending_profile_recompute = 1 "
+            f"AND id IN (SELECT artist_id FROM library_tracks WHERE id IN ({marks}))",
+            list(track_ids),
+        )
+
+    def set_library_artist_mbid(self, artist_id: str, mbid: str) -> None:
+        """Stores a resolved MusicBrainz artist id."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE library_artists SET mbid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (str(mbid), str(artist_id)),
+            )
+            self.conn.commit()
+
+    def set_pending_profile_recompute(self, artist_id: str, pending: bool) -> None:
+        """Sets or clears the deferred release-profile recompute flag of an artist."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE library_artists SET pending_profile_recompute = ? WHERE id = ?",
+                (1 if pending else 0, str(artist_id)),
+            )
+            self.conn.commit()
+
     def set_album_monitored(
         self, album_id: str, monitored: bool, cascade_tracks: bool = True
     ) -> bool:
@@ -6408,6 +6772,7 @@ class Database:
             )
             if cur.rowcount == 0:
                 return False
+            self._cancel_pending_profile_recompute_for_albums([str(album_id)])
             if cascade_tracks:
                 self.conn.execute(
                     "UPDATE library_tracks SET monitored = ?, updated_at = CURRENT_TIMESTAMP WHERE album_id = ?",
@@ -6619,6 +6984,8 @@ class Database:
                 "UPDATE library_tracks SET monitored = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (val, str(track_id)),
             )
+            if cur.rowcount > 0:
+                self._cancel_pending_profile_recompute_for_tracks([str(track_id)])
             self.conn.commit()
             return cur.rowcount > 0
 
@@ -6637,12 +7004,50 @@ class Database:
                         [val, *chunk],
                     )
                     updated += max(int(cur.rowcount), 0)
+                    self._cancel_pending_profile_recompute_for_tracks(chunk)
                 self.conn.commit()
             except sqlite3.Error:
                 self.conn.rollback()
                 logger.exception("bulk_set_tracks_monitored failed; transaction rolled back")
                 raise
         return updated
+
+    def _file_link_is_new(self, file_id: str, track_id: str, file_path: str = "") -> bool:
+        """True when this file path is being linked to a track for the first time (caller holds the lock).
+
+        Only a path that has never been linked to ANY track counts. A rescan (same track) and a re-link of a known
+        path or id to a different track (dedupe merge, re-resolve) are not new, so they never re-monitor anything
+        or override a track the user unmonitored.
+        """
+        if not track_id:
+            return False
+        row = self.conn.execute(
+            "SELECT 1 FROM library_files WHERE (id = ? OR (? <> '' AND file_path = ?)) "
+            "AND COALESCE(track_id, '') <> '' LIMIT 1",
+            (file_id, file_path, file_path),
+        ).fetchone()
+        return row is None
+
+    def _monitor_track_for_new_file(self, track_id: str) -> None:
+        """A newly linked file monitors its track and album when the artist's option is ``existing``.
+
+        Caller holds the lock and commits. Other options and unmonitored artists are left alone.
+        """
+        owner = (
+            "EXISTS (SELECT 1 FROM library_artists ar WHERE ar.id = {col} "
+            "AND ar.monitor_option = 'existing' AND ar.monitored = 1)"
+        )
+        self.conn.execute(
+            "UPDATE library_albums SET monitored = 1, updated_at = CURRENT_TIMESTAMP "
+            "WHERE monitored = 0 AND id = (SELECT album_id FROM library_tracks WHERE id = ?) AND "
+            + owner.format(col="library_albums.artist_id"),
+            (track_id,),
+        )
+        self.conn.execute(
+            "UPDATE library_tracks SET monitored = 1, updated_at = CURRENT_TIMESTAMP "
+            "WHERE monitored = 0 AND id = ? AND " + owner.format(col="library_tracks.artist_id"),
+            (track_id,),
+        )
 
     def upsert_library_file(
         self, file_data: Union[LibraryFile, dict[str, Any]]
@@ -6662,6 +7067,7 @@ class Database:
                 file_id = str(d["id"])
 
             track_id = str(d.get("track_id") or "")
+            newly_linked = self._file_link_is_new(file_id, track_id, file_path)
             relative_path = str(d.get("relative_path") or "")
             codec = str(d.get("codec") or "")
             bitrate = int(d["bitrate"]) if d.get("bitrate") is not None else None
@@ -6707,6 +7113,8 @@ class Database:
                     date_added,
                 ),
             )
+            if newly_linked:
+                self._monitor_track_for_new_file(track_id)
             self.conn.commit()
 
         fl = self.get_library_file(file_id)
@@ -6735,6 +7143,7 @@ class Database:
                     file_id = str(d["id"])
 
                 track_id = str(d.get("track_id") or "")
+                newly_linked = self._file_link_is_new(file_id, track_id, file_path)
                 relative_path = str(d.get("relative_path") or "")
                 codec = str(d.get("codec") or "")
                 bitrate = int(d["bitrate"]) if d.get("bitrate") is not None else None
@@ -6780,6 +7189,8 @@ class Database:
                         date_added,
                     ),
                 )
+                if newly_linked:
+                    self._monitor_track_for_new_file(track_id)
             self.conn.commit()
             return [f.to_dict() if hasattr(f, "to_dict") else dict(f) for f in files]
 

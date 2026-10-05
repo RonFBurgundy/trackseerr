@@ -21,3 +21,4 @@ export * from './listUrl';
 export * from './importListsService';
 export * from './itunesImportService';
 export * from './mediaServerService';
+export * from './releaseProfileService';

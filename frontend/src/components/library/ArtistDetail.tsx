@@ -15,12 +15,14 @@ import {
 } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
 import { MONITOR_OPTIONS } from '@/types/monitoring';
+import type { ReleaseProfilePreview } from '@/types/releaseProfiles';
 import { useArtistDetail, type MonitorPreset } from '@/hooks/useArtistDetail';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
+import { useReleaseProfileDryRun, useReleaseProfilePreview, useReleaseProfiles } from '@/hooks/useReleaseProfiles';
 import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { useAlbumBulkEdit } from '@/hooks/useAlbumBulkEdit';
 import { errorMessage } from '@/services/apiClient';
-import { MachinedCard, TactileSwitch, TapeDeckButton, TabStrip } from '@/components/ui';
+import { ConfirmDialog, MachinedCard, TactileSwitch, TapeDeckButton, TabStrip } from '@/components/ui';
 import { ArtistAlbumCard } from './ArtistAlbumCard';
 import { AlbumBulkBar } from './AlbumBulkBar';
 
@@ -74,7 +76,62 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   const { artist, loading, refreshing, patchAlbumMonitored, patchArtistMonitored } = detail;
   const [tab, setTab] = useState<DiscographyTab>('studio');
   const categorized = useMemo(() => categorize(artist?.albums ?? []), [artist]);
-  const albums = categorized[tab];
+  const [hideOutside, setHideOutside] = useState<boolean>(false);
+  const releaseProfiles = useReleaseProfiles(isAdmin && !lidarrMode, onToast);
+  const releaseProfileId = artist?.release_profile_id ?? null;
+  const dryRun = useReleaseProfileDryRun(artistId, onToast);
+  const [pendingProfile, setPendingProfile] = useState<{ id: number | null; preview: ReleaseProfilePreview } | null>(null);
+  const [profileBusy, setProfileBusy] = useState<boolean>(false);
+
+  const requestProfileChange = async (id: number | null): Promise<void> => {
+    if (profileBusy) return;
+    setProfileBusy(true);
+    try {
+      const preview = await dryRun(id);
+      if (!preview) return;
+      const w = preview.would_change;
+      if (w.albums_to_monitor + w.albums_to_unmonitor + w.tracks_to_monitor + w.tracks_to_unmonitor === 0) {
+        await detail.applyReleaseProfile(id, true, w);
+      } else {
+        setPendingProfile({ id, preview });
+      }
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
+  const resolveProfileChange = async (applyToExisting: boolean): Promise<void> => {
+    if (!pendingProfile) return;
+    const { id, preview } = pendingProfile;
+    setProfileBusy(true);
+    try {
+      await detail.applyReleaseProfile(id, applyToExisting, preview.would_change);
+    } finally {
+      setPendingProfile(null);
+      setProfileBusy(false);
+    }
+  };
+
+  const pendingName =
+    pendingProfile?.id == null
+      ? 'no release profile'
+      : (releaseProfiles.profiles.find((p) => p.id === pendingProfile.id)?.name ?? 'the profile');
+  const pendingParts: string[] = [];
+  if (pendingProfile) {
+    const w = pendingProfile.preview.would_change;
+    const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`;
+    if (w.albums_to_monitor > 0 || w.tracks_to_monitor > 0)
+      pendingParts.push(`monitor ${plural(w.albums_to_monitor, 'album')} (${plural(w.tracks_to_monitor, 'track')})`);
+    if (w.albums_to_unmonitor > 0 || w.tracks_to_unmonitor > 0)
+      pendingParts.push(`unmonitor ${plural(w.albums_to_unmonitor, 'album')} (${plural(w.tracks_to_unmonitor, 'track')})`);
+  }
+
+  const profilePreview = useReleaseProfilePreview(artistId, releaseProfileId, artist?.albums?.length ?? 0);
+  const hasOutside = releaseProfileId !== null && (artist?.albums ?? []).some((a) => a.in_profile === false);
+  const albums = useMemo(
+    () => (hideOutside && hasOutside ? categorized[tab].filter((a) => a.in_profile !== false) : categorized[tab]),
+    [categorized, tab, hideOutside, hasOutside]
+  );
 
   const canBulkEdit = isAdmin && !lidarrMode;
   const selection = useBulkSelection();
@@ -124,6 +181,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
 
   const lidarrSearch = useLidarrSearch(onToast);
   const presetId = useId();
+  const releaseProfileSelectId = useId();
   const preset = (p: MonitorPreset): void => void detail.applyPreset(p);
   // Lidarr's own preset set has no existing/future; those are native-library only.
   const presetOptions = MONITOR_OPTIONS.filter(
@@ -243,6 +301,28 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
                     </option>
                   ))}
                 </select>
+                {!lidarrMode && (
+                  <>
+                    <label htmlFor={releaseProfileSelectId} className="sr-only">
+                      Release profile
+                    </label>
+                    <select
+                      id={releaseProfileSelectId}
+                      name="release_profile"
+                      className="bg-[#141414] border border-[#2a2a2a] text-xs font-mono text-neutral-300 rounded-[3px] px-2 min-h-[44px] sm:min-h-[36px] focus:border-[#e5a00d] focus:outline-none flex-1 min-w-0 sm:flex-none sm:w-44"
+                      value={releaseProfileId === null ? '' : String(releaseProfileId)}
+                      disabled={profileBusy}
+                      onChange={(e) => void requestProfileChange(e.target.value === '' ? null : Number(e.target.value))}
+                    >
+                      <option value="">No release profile</option>
+                      {releaseProfiles.profiles.map((p) => (
+                        <option key={p.id} value={String(p.id)}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
                 <TactileSwitch
                   checked={artist.monitored}
                   onChange={(val) => void toggleArtist(val)}
@@ -284,6 +364,14 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
           <span>{artist?.albums?.length || artist?.album_count || 0} Releases</span>
           <span aria-hidden="true">&bull;</span>
           <span>{artist?.track_count || 0} Tracks in Library</span>
+          {profilePreview.preview && (
+            <>
+              <span aria-hidden="true">&bull;</span>
+              <span title="Releases outside the profile are not auto-monitored but stay in the catalog">
+                {profilePreview.preview.matching} of {profilePreview.preview.total} releases in profile
+              </span>
+            </>
+          )}
         </div>
 
         <div className="relative z-10 flex items-center gap-2 border-t border-[#1f1f1f] p-1.5">
@@ -295,6 +383,15 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
               </TapeDeckButton>
             ))}
           </TabStrip>
+          {hasOutside && (
+            <TactileSwitch
+              checked={hideOutside}
+              onChange={setHideOutside}
+              label="Hide outside profile"
+              className="shrink-0 max-sm:[&>span]:sr-only"
+              title="Hide releases that are outside the release profile (they are never hidden by default)"
+            />
+          )}
           {canBulkEdit && !loading && !selection.active && (
             <TapeDeckButton
               size="sm"
@@ -355,6 +452,21 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
           )}
         </div>
       )}
+      <ConfirmDialog
+        isOpen={pendingProfile !== null}
+        title="Apply release profile?"
+        confirmLabel="Apply to existing"
+        onConfirm={() => void resolveProfileChange(true)}
+        secondaryLabel="Future releases only"
+        onSecondary={() => void resolveProfileChange(false)}
+        onCancel={() => setPendingProfile(null)}
+        busy={profileBusy}
+      >
+        <p>
+          Applying {pendingName} to existing releases will {pendingParts.join(' and ')}. Manual monitoring choices for
+          this artist will be replaced.
+        </p>
+      </ConfirmDialog>
     </div>
   );
 };

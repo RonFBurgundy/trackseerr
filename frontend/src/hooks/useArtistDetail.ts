@@ -3,6 +3,8 @@ import type { AlbumItem, ArtistItem } from '@/types/models';
 import type { MonitorOption } from '@/types/monitoring';
 import { errorMessage } from '@/services/apiClient';
 import { getArtistDetail, refreshArtist, setArtistMonitoringPreset } from '@/services/libraryService';
+import type { ReleaseProfileWouldChange } from '@/types/releaseProfiles';
+import { setArtistReleaseProfile } from '@/services/releaseProfileService';
 
 export type ArtistDetailData = ArtistItem & { albums?: AlbumItem[] };
 export type MonitorPreset = MonitorOption;
@@ -13,6 +15,15 @@ export interface UseArtistDetailReturn {
   refreshing: boolean;
   refreshDiscography: () => Promise<void>;
   applyPreset: (preset: MonitorPreset) => Promise<void>;
+  /**
+   * Sets (null clears) the artist's release profile. `applyToExisting` recomputes existing albums and tracks;
+   * false saves the profile for future releases only. `wouldChange` (the dry run) feeds the success toast.
+   */
+  applyReleaseProfile: (
+    profileId: number | null,
+    applyToExisting: boolean,
+    wouldChange?: ReleaseProfileWouldChange
+  ) => Promise<void>;
   patchAlbumMonitored: (albumId: number | string, monitored: boolean) => void;
   patchArtistMonitored: (monitored: boolean) => void;
 }
@@ -74,6 +85,31 @@ export function useArtistDetail(
     [artistId, onChanged, onToast]
   );
 
+  const monitored = artist?.monitored ?? true;
+  const applyReleaseProfile = useCallback(
+    async (
+      profileId: number | null,
+      applyToExisting: boolean,
+      wouldChange?: ReleaseProfileWouldChange
+    ): Promise<void> => {
+      try {
+        await setArtistReleaseProfile(artistId, monitored, profileId, applyToExisting);
+        setArtist(await getArtistDetail(artistId));
+        onChanged();
+        if (!applyToExisting) {
+          onToast('Profile saved; existing releases unchanged');
+        } else if (wouldChange && (wouldChange.albums_to_monitor > 0 || wouldChange.albums_to_unmonitor > 0)) {
+          onToast(`Profile applied: +${wouldChange.albums_to_monitor} / \u2212${wouldChange.albums_to_unmonitor} albums`);
+        } else {
+          onToast('Profile applied; no album changes');
+        }
+      } catch (err: unknown) {
+        onToast(errorMessage(err, 'Failed to apply release profile'), 'error');
+      }
+    },
+    [artistId, monitored, onChanged, onToast]
+  );
+
   const patchAlbumMonitored = useCallback((albumId: number | string, monitored: boolean): void => {
     setArtist((prev) =>
       prev ? { ...prev, albums: prev.albums?.map((a) => (a.id === albumId ? { ...a, monitored } : a)) } : prev
@@ -84,5 +120,14 @@ export function useArtistDetail(
     setArtist((prev) => (prev ? { ...prev, monitored } : prev));
   }, []);
 
-  return { artist, loading, refreshing, refreshDiscography, applyPreset, patchAlbumMonitored, patchArtistMonitored };
+  return {
+    artist,
+    loading,
+    refreshing,
+    refreshDiscography,
+    applyPreset,
+    applyReleaseProfile,
+    patchAlbumMonitored,
+    patchArtistMonitored,
+  };
 }

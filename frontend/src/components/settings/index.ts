@@ -5,6 +5,8 @@ export * from './LibraryManagerSwitch';
 export * from './GeneralPanel';
 export * from './MediaFoldersPanel';
 export * from './ProfilesPanel';
+export * from './ReleaseProfilesPanel';
+export * from './ReleaseProfileEditorModal';
 export * from './ClientsPanel';
 export * from './IndexersPanel';
 export * from './LidarrPanel';

@@ -691,3 +691,11 @@ def test_refresh_under_existing_leaves_hydrated_missing_tracks_unmonitored(db):
 def test_refresh_under_all_still_monitors_hydrated_tracks(db):
     tracks = {t["title"]: bool(t["monitored"]) for t in _refresh(db, "all")}
     assert tracks == {"Aerodynamic": True, "One More Time": True, "Digital Love": True}
+
+
+def test_manual_import_creates_artist_with_saved_add_monitor_option(env):
+    """An artist created by a manual import gets the saved add default, not the model default."""
+    env.db.update_media_management_settings({"add_monitor_option": "albums"})
+    src = make_mp3(env.staging / "x.mp3", TIT2="Aerodynamic", TPE1="Daft Punk", TALB="Discovery", TRCK="2")
+    _commit(env, src, write_tags=False)
+    assert env.db.get_library_artist_by_name("Daft Punk")["monitor_option"] == "albums"

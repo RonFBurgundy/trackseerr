@@ -13,6 +13,7 @@ import {
   GeneralPanel,
   MediaFoldersPanel,
   ProfilesPanel,
+  ReleaseProfilesPanel,
   ClientsPanel,
   IndexersPanel,
   LidarrPanel,
@@ -194,6 +195,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             reload={data.reload}
             onToast={showToast}
           />
+        </InactiveGate>
+      )}
+
+      {!data.isLoading && activeTab === 'release-profiles' && isAdmin && (
+        <InactiveGate
+          active={mediaActive}
+          activeManager={mode}
+          onRequestSwitch={requestSwitch}
+          managedExternally={managedByLidarr}
+        >
+          <ReleaseProfilesPanel enabled={mediaActive} settings={data.media} onChange={data.setMedia} onToast={showToast} />
         </InactiveGate>
       )}
 

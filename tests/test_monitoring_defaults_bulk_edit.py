@@ -335,7 +335,7 @@ def test_settings_defaults_roundtrip_and_validation(app_and_client, test_db, tes
     _, client = app_and_client
     h = _auth_headers(seeded_users["admin"], test_db, test_config)
     s = client.get("/api/settings/media-management", headers=h).json()["settings"]
-    assert s["scan_monitor_option"] == "existing" and s["add_monitor_option"] == "all"
+    assert s["scan_monitor_option"] == "existing" and s["add_monitor_option"] == "existing"
 
     r = client.post(
         "/api/settings/media-management", json={"scan_monitor_option": "future", "add_monitor_option": "albums"}, headers=h

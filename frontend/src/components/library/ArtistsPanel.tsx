@@ -7,6 +7,7 @@ import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { useArtistBulkEdit } from '@/hooks/useArtistBulkEdit';
 import { useQualityProfiles } from '@/hooks/useQualityProfiles';
+import { useReleaseProfiles } from '@/hooks/useReleaseProfiles';
 import { ScrubberRail, VirtualGrid } from '@/components/lists';
 import { LibrarySortControl } from './LibrarySortControl';
 import { LibrarySelectKey, LibraryToolbarPortal } from './LibraryToolbarPortal';
@@ -69,6 +70,7 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
   const { toggle: toggleSelected, isSelected, allMatching, active: selecting, exit: exitSelection } = selection;
   const bulk = useArtistBulkEdit(selection, list.total, onToast, reload);
   const profiles = useQualityProfiles(selecting, onToast);
+  const releaseProfiles = useReleaseProfiles(selecting && canBulkEdit, onToast);
   const unfiltered = !query && !monitoredOnly;
 
   // Filters change what "all" would mean in the user's head; drop the selection rather than act on a stale view.
@@ -111,6 +113,8 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
           edit={bulk}
           profiles={profiles.profiles}
           profilesLoading={profiles.loading}
+          releaseProfiles={releaseProfiles.profiles}
+          releaseProfilesLoading={releaseProfiles.loading}
         />
       )}
       <VirtualGrid<ArtistItem>

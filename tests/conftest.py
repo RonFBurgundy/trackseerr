@@ -125,3 +125,48 @@ def _isolated_lidarr_cover_cache(tmp_path, monkeypatch):
     from plex_playlist_sync.mediacover import mediacover_service
 
     monkeypatch.setattr(mediacover_service, "base_dir", tmp_path / "mediacover-base")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_album_hydration_state():
+    """The hydration negative cache is process-global; a failed attempt in one test must not skip the next."""
+    from plex_playlist_sync.album_track_hydration import clear_negative_cache
+
+    clear_negative_cache()
+    yield
+    clear_negative_cache()
+
+
+class _BackgroundJobs:
+    def __init__(self) -> None:
+        self.pending: list = []
+
+    def run(self) -> int:
+        """Runs the queued background jobs now, in order; returns how many ran."""
+        jobs, self.pending = self.pending, []
+        for _name, target in jobs:
+            target()
+        return len(jobs)
+
+
+@pytest.fixture(autouse=True)
+def background_jobs(monkeypatch):
+    """Route-layer background jobs (``library._run_in_background``) are queued, not threaded: drive them with
+    ``background_jobs.run()`` so tests stay deterministic and offline."""
+    from plex_playlist_sync.api.routes import library
+
+    jobs = _BackgroundJobs()
+    monkeypatch.setattr(library, "_run_in_background", lambda target, name: jobs.pending.append((name, target)))
+    return jobs
+
+
+@pytest.fixture(autouse=True)
+def _reset_artist_refresh_worker_stop_event():
+    """``cli.main`` shutdown calls ``artist_refresh_worker.stop()`` on the process-wide singleton, which sets its stop
+    event for good (only ``start()`` clears it, and tests stub ``start``). A later ``refresh_once`` would then abort
+    its cycle immediately and refresh nothing, so clear it around every test."""
+    from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
+
+    artist_refresh_worker._stop_event.clear()
+    yield
+    artist_refresh_worker._stop_event.clear()

@@ -100,7 +100,11 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
             />
           )}
           <div className="flex items-center gap-3 cursor-pointer min-w-0 flex-1" onClick={toggleExpanded}>
-          <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-[3px] bg-[#1a1a1a] border border-[#262626] overflow-hidden flex-shrink-0 flex items-center justify-center">
+          <div
+            className={`h-10 w-10 sm:h-12 sm:w-12 rounded-[3px] bg-[#1a1a1a] border border-[#262626] overflow-hidden flex-shrink-0 flex items-center justify-center ${
+              album.in_profile === false ? 'opacity-60' : ''
+            }`}
+          >
             {album.cover_url ? (
               <img src={album.cover_url} alt={album.title} className="w-full h-full object-cover" loading="lazy" />
             ) : (
@@ -121,6 +125,15 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
             <p className="text-xs text-neutral-400 font-mono mt-0.5">
               {album.release_date ? album.release_date.substring(0, 4) : 'Unknown Year'} &bull;{' '}
               {album.track_count ?? tracks.length} Tracks
+              {album.in_profile === false && (
+                <span
+                  className="ml-2 inline-block align-middle px-1.5 py-px rounded-[2px] border border-[#2a2a2a] bg-[#161616] text-[10px] uppercase text-neutral-500"
+                  title="Outside release profile — not auto-monitored"
+                  aria-label={`${album.album_type ?? 'album'}: outside release profile, not auto-monitored`}
+                >
+                  {album.album_type ?? 'album'}
+                </span>
+              )}
             </p>
           </div>
           </div>

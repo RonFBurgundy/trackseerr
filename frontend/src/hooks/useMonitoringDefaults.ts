@@ -13,7 +13,7 @@ export interface UseMonitoringDefaultsReturn {
 /** Server-configured monitoring defaults (media-management settings), falling back to the documented defaults. */
 export function useMonitoringDefaults(): UseMonitoringDefaultsReturn {
   const [state, setState] = useState<UseMonitoringDefaultsReturn>({
-    addMonitorOption: 'all',
+    addMonitorOption: 'existing',
     scanMonitorOption: 'existing',
     loaded: false,
   });
@@ -24,7 +24,7 @@ export function useMonitoringDefaults(): UseMonitoringDefaultsReturn {
       .then((s) => {
         if (cancelled) return;
         setState({
-          addMonitorOption: s.add_monitor_option ?? 'all',
+          addMonitorOption: s.add_monitor_option ?? 'existing',
           scanMonitorOption: s.scan_monitor_option ?? 'existing',
           loaded: true,
         });

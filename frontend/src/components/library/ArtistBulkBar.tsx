@@ -1,13 +1,15 @@
 import React, { useId, useState } from 'react';
 import { Check, Eye, EyeOff, Loader2, X } from 'lucide-react';
 import type { QualityProfile } from '@/types/models';
-import { MONITOR_OPTION_LABELS, type MonitorOption } from '@/types/monitoring';
+import type { ReleaseProfile } from '@/types/releaseProfiles';
+import { MONITOR_OPTION_HINTS, MONITOR_OPTION_LABELS, type MonitorOption } from '@/types/monitoring';
 import type { UseBulkSelectionReturn } from '@/hooks/useBulkSelection';
 import type { UseArtistBulkEditReturn } from '@/hooks/useArtistBulkEdit';
 import { ActionBar, MachinedCard, MonitorOptionSelect, TapeDeckButton } from '@/components/ui';
 import { inputClass } from '@/components/settings/formClasses';
 
 const NO_PROFILE = '__none__';
+const KEEP = '';
 
 export interface ArtistBulkBarProps {
   selection: UseBulkSelectionReturn;
@@ -18,6 +20,9 @@ export interface ArtistBulkBarProps {
   edit: UseArtistBulkEditReturn;
   profiles: QualityProfile[];
   profilesLoading: boolean;
+  /** Native release profiles for the "Release profile" select (optional, shape automatic monitoring only). */
+  releaseProfiles: ReleaseProfile[];
+  releaseProfilesLoading: boolean;
 }
 
 /** Lidarr-style mass editor for the artists grid. */
@@ -28,11 +33,14 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
   edit,
   profiles,
   profilesLoading,
+  releaseProfiles,
+  releaseProfilesLoading,
 }) => {
   const uid = useId();
-  const [option, setOption] = useState<MonitorOption>('all');
+  const [option, setOption] = useState<MonitorOption>('existing');
   const [applyToAlbums, setApplyToAlbums] = useState<boolean>(true);
   const [profile, setProfile] = useState<string>('');
+  const [releaseProfile, setReleaseProfile] = useState<string>(KEEP);
 
   const count = selection.count(total);
   const empty = count === 0;
@@ -55,6 +63,13 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
         {pending.patch.apply_monitor_to_albums === true && (
           <p className="text-[11px] font-mono text-neutral-400">
             This also changes monitoring on every existing album of each artist.
+          </p>
+        )}
+        {pending.patch.release_profile_id !== undefined && (
+          <p className="text-[11px] font-mono text-amber-300">
+            {pending.patch.apply_monitor_to_albums === true
+              ? `"Also apply to existing albums" is checked: this will recompute monitoring for ${pending.targetCount.toLocaleString()} ${pending.targetCount === 1 ? 'artist' : 'artists'} and replace manual monitoring choices.`
+              : `"Also apply to existing albums" is unchecked: the profile is saved for future releases only; existing albums are unchanged.`}
           </p>
         )}
         <ActionBar align="end">
@@ -120,7 +135,7 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
         </TapeDeckButton>
       </ActionBar>
 
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
         <MonitorOptionSelect
           value={option}
           onChange={setOption}
@@ -130,6 +145,23 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
           aria-label="Monitor option"
           className="sm:w-56"
         />
+        <select
+          id={`${uid}-release-profile`}
+          name="release-profile"
+          value={releaseProfile}
+          onChange={(e) => setReleaseProfile(e.target.value)}
+          disabled={edit.busy || releaseProfilesLoading}
+          aria-label="Release profile"
+          className={`${inputClass} sm:w-56`}
+        >
+          <option value={KEEP}>{releaseProfilesLoading ? 'Loading profiles...' : 'Release profile: unchanged'}</option>
+          <option value={NO_PROFILE}>No release profile (clear)</option>
+          {releaseProfiles.map((p) => (
+            <option key={p.id} value={String(p.id)}>
+              {p.name}
+            </option>
+          ))}
+        </select>
         <label className="flex items-center gap-2 min-h-[44px] sm:min-h-0 text-xs font-mono text-neutral-300 cursor-pointer">
           <input
             id={`${uid}-albums`}
@@ -146,16 +178,25 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
           variant="amber"
           disabled={disabled}
           className="sm:ml-auto"
-          onClick={() =>
-            apply(
-              { monitor_option: option, apply_monitor_to_albums: applyToAlbums },
-              `Set monitoring to "${MONITOR_OPTION_LABELS[option]}"`
-            )
-          }
+          onClick={() => {
+            const patch: Parameters<UseArtistBulkEditReturn['request']>[0] = {
+              monitor_option: option,
+              apply_monitor_to_albums: applyToAlbums,
+            };
+            let summary = `Set monitoring to "${MONITOR_OPTION_LABELS[option]}"`;
+            if (releaseProfile !== KEEP) {
+              const chosen = releaseProfile === NO_PROFILE ? null : Number(releaseProfile);
+              patch.release_profile_id = chosen;
+              const name = chosen === null ? 'no release profile' : (releaseProfiles.find((p) => p.id === chosen)?.name ?? String(chosen));
+              summary += ` with ${name}`;
+            }
+            apply(patch, summary);
+          }}
         >
           Apply monitoring
         </TapeDeckButton>
       </div>
+      <p className="text-[11px] font-mono text-neutral-500">{MONITOR_OPTION_HINTS[option]}</p>
 
       <div className="flex flex-col sm:flex-row sm:items-center gap-2">
         <select
