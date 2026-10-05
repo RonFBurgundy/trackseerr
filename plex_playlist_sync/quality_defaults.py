@@ -11,24 +11,50 @@ import re
 from typing import Any, Optional
 
 # Canonical quality order, best first (used to order quality definitions and group members in the UI).
+# Lossless (FLAC 24, FLAC 16, ALAC, WAV/AIFF) sits above lossy; lossy runs 320 > V0 > V1 > AAC 256 > Opus > OGG >
+# AAC other > 192 > V2. New quality profiles list their entries in this order.
 QUALITY_ORDER: list[str] = [
     "FLAC 24bit",
     "FLAC 16bit",
+    "ALAC",
+    "WAV/AIFF",
     "MP3 320",
     "MP3 V0",
+    "MP3 V1",
     "AAC 256",
+    "Opus",
+    "OGG Vorbis",
+    "AAC (other)",
     "MP3 192",
     "MP3 V2",
     "Unknown",
 ]
 
+# Qualities added in migration v51 (appended disallowed to existing profiles).
+V51_NEW_QUALITIES: list[str] = ["ALAC", "WAV/AIFF", "MP3 V1", "AAC (other)", "Opus", "OGG Vorbis"]
+
 # (quality, title, min_kbps, preferred_kbps, max_kbps); None = unbounded.
 DEFAULT_QUALITY_DEFINITIONS: list[tuple[str, str, Optional[float], Optional[float], Optional[float]]] = [
     ("FLAC 24bit", "FLAC 24bit", 0.0, 2000.0, 9500.0),
     ("FLAC 16bit", "FLAC 16bit", 0.0, 895.0, 1400.0),
+    # Derived (docs/QUALITY_RESEARCH.md), not community standards: ALAC compresses 16/44.1 PCM (1411 kbps) to roughly
+    # 50-70% (~700-1000 kbps), so 900 preferred, no floor (quiet or sparse material compresses far below that) and a
+    # 1600 ceiling that also admits 16/48 and light 24-bit.
+    ("ALAC", "ALAC", 0.0, 900.0, 1600.0),
+    # Uncompressed PCM is exact arithmetic: 44.1 kHz x 16 bit x 2 ch = 1411 kbps. The floor of 1300 rejects anything
+    # that is not full-rate stereo PCM; 5000 allows up to roughly 24/96 stereo (4608 kbps).
+    ("WAV/AIFF", "WAV/AIFF", 1300.0, 1411.0, 5000.0),
     ("MP3 320", "MP3 320", 290.0, 320.0, 350.0),
     ("MP3 V0", "MP3 V0", 160.0, 245.0, 350.0),
+    # LAME V1 averages ~225 kbps (range ~190-250), between V0 (245) and V2 (190); the ceiling is shared with 320.
+    ("MP3 V1", "MP3 V1", 150.0, 225.0, 320.0),
     ("AAC 256", "AAC 256", 200.0, 256.0, 280.0),
+    # Opus is transparent around 128-160 kbps, so 160 preferred; 64 is the floor for music, 256 above the useful range.
+    ("Opus", "Opus", 64.0, 160.0, 256.0),
+    # Vorbis q5-q8 span ~160-256 kbps with 320 as q10; 192 (q6) is a common archive choice.
+    ("OGG Vorbis", "OGG Vorbis", 96.0, 192.0, 320.0),
+    # Any other AAC (VBR/LC at lower rates up to 320): 192 preferred, sub-96 is unusable for music.
+    ("AAC (other)", "AAC (other)", 96.0, 192.0, 320.0),
     ("MP3 192", "MP3 192", 150.0, 192.0, 210.0),
     ("MP3 V2", "MP3 V2", 130.0, 190.0, 280.0),
     ("Unknown", "Unknown", 0.0, 195.0, 350.0),

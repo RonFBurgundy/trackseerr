@@ -328,6 +328,8 @@ export interface GeneralSettings {
   music_directory?: string;
 }
 
+export type ImportBitrateCheck = 'off' | 'warn' | 'reject';
+
 export interface MediaManagementSettings {
   artist_folder_format: string;
   album_folder_format: string;
@@ -353,6 +355,8 @@ export interface MediaManagementSettings {
   add_monitor_option?: MonitorOption;
   /** Metadata profile given to artists added manually; null = none. */
   add_metadata_profile_id?: number | null;
+  /** Per-track bitrate check on import: warn (default) records out-of-range files, reject fails the import. */
+  import_bitrate_check?: ImportBitrateCheck;
 }
 
 export interface LidarrSettings {

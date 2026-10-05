@@ -112,7 +112,7 @@ def grab(db, candidates, **kw):
 
 
 def test_v50_migration_seeds_default_and_pending_table(tmp_path):
-    assert SCHEMA_VERSION == 50
+    assert SCHEMA_VERSION == 51
     path = str(tmp_path / "m.db")
     Database(path).close()
     conn = sqlite3.connect(path)
@@ -123,7 +123,7 @@ def test_v50_migration_seeds_default_and_pending_table(tmp_path):
     conn.close()
     d = Database(path)
     try:
-        assert d.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 50
+        assert d.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 51
         profiles = d.list_delay_profiles()
         assert len(profiles) == 1
         p = profiles[0]

@@ -393,9 +393,15 @@ class AcquisitionSearchResult:
 class AudioQuality(str, Enum):
     FLAC_24BIT = "FLAC 24bit"
     FLAC_16BIT = "FLAC 16bit"
+    ALAC = "ALAC"
+    WAV_AIFF = "WAV/AIFF"
     MP3_320 = "MP3 320"
     MP3_V0 = "MP3 V0"
+    MP3_V1 = "MP3 V1"
     AAC_256 = "AAC 256"
+    OPUS = "Opus"
+    OGG_VORBIS = "OGG Vorbis"
+    AAC_OTHER = "AAC (other)"
     MP3_192 = "MP3 192"
     MP3_V2 = "MP3 V2"
     UNKNOWN = "Unknown"
@@ -846,6 +852,7 @@ class MediaManagementSettings:
     prefer_local_artwork: bool = True
     scan_monitor_option: str = "existing"
     add_monitor_option: str = "existing"
+    import_bitrate_check: str = "warn"
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -873,6 +880,7 @@ class MediaManagementSettings:
             "prefer_local_artwork": bool(self.prefer_local_artwork),
             "scan_monitor_option": self.scan_monitor_option,
             "add_monitor_option": self.add_monitor_option,
+            "import_bitrate_check": self.import_bitrate_check,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

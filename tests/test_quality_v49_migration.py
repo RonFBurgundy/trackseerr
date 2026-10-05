@@ -46,10 +46,10 @@ def _migrated(tmp_path):
 
 
 def test_schema_version_and_seeds(tmp_path):
-    assert SCHEMA_VERSION == 50
+    assert SCHEMA_VERSION == 51
     db = Database(str(tmp_path / "fresh.db"))
     try:
-        assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 50
+        assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 51
         defs = {d["quality"]: d for d in db.list_quality_definitions()}
         assert (defs["FLAC 24bit"]["min_kbps"], defs["FLAC 24bit"]["preferred_kbps"], defs["FLAC 24bit"]["max_kbps"]) == (0, 2000, 9500)
         assert (defs["MP3 320"]["min_kbps"], defs["MP3 320"]["preferred_kbps"], defs["MP3 320"]["max_kbps"]) == (290, 320, 350)
@@ -75,10 +75,13 @@ def test_profiles_migrated_to_ordered_items(tmp_path):
     db = _migrated(tmp_path)
     try:
         p = db.get_quality_profile("old-1")
-        assert [e["quality"] for e in p["items"]] == ["FLAC 24bit", "FLAC 16bit", "MP3 320", "Unknown"]
+        # v51 then appends the new codecs, disallowed, after the original entries
+        assert [e["quality"] for e in p["items"]][:4] == ["FLAC 24bit", "FLAC 16bit", "MP3 320", "Unknown"]
         assert all(e["type"] == "quality" for e in p["items"])
-        assert {e["quality"]: e["allowed"] for e in p["items"]} == {
+        allowed = {e["quality"]: e["allowed"] for e in p["items"]}
+        assert {q: allowed[q] for q in ("FLAC 24bit", "FLAC 16bit", "MP3 320", "Unknown")} == {
             "FLAC 24bit": False, "FLAC 16bit": True, "MP3 320": True, "Unknown": False}
+        assert not any(allowed[q] for q in allowed if q not in ("FLAC 16bit", "MP3 320"))
         assert p["cutoff"] == "FLAC 16bit"
         assert p["min_format_score"] == -100 and p["cutoff_format_score"] == 0 and p["min_upgrade_format_score"] == 1
         # legacy columns remain readable

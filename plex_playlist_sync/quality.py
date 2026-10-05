@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 
 # Format detection patterns in strict order of precedence
 _FORMAT_PATTERNS: list[tuple[AudioQuality, re.Pattern[str]]] = [
+    # ALAC and PCM are explicit-word only and yield to an explicit "flac" (e.g. "FLAC + WAV sampler").
+    (AudioQuality.ALAC, re.compile(r"(?i)^(?!.*\bflac\b).*\balac\b")),
+    (AudioQuality.WAV_AIFF, re.compile(r"(?i)^(?!.*\bflac\b).*\b(?:wav|aiff?|pcm)\b")),
     (
         AudioQuality.FLAC_24BIT,
         re.compile(
@@ -28,9 +31,11 @@ _FORMAT_PATTERNS: list[tuple[AudioQuality, re.Pattern[str]]] = [
     (
         AudioQuality.FLAC_16BIT,
         re.compile(
-            r"(?i)(?:\b16[-_ ]?bit\b|\b16[/_ -]44(?:\.1)?\b|\bflac\b|\blossless\b|\balac\b)",
+            r"(?i)(?:\b16[-_ ]?bit\b|\b16[/_ -]44(?:\.1)?\b|\bflac\b|\blossless\b)",
         ),
     ),
+    (AudioQuality.OPUS, re.compile(r"(?i)\bopus\b")),
+    (AudioQuality.OGG_VORBIS, re.compile(r"(?i)\b(?:ogg|oga|vorbis)\b")),
     (
         AudioQuality.MP3_320,
         re.compile(r"(?i)(?:\b320\s*(?:kbps|k)?\b|\bcbr\s*320\b)"),
@@ -39,6 +44,7 @@ _FORMAT_PATTERNS: list[tuple[AudioQuality, re.Pattern[str]]] = [
         AudioQuality.MP3_V0,
         re.compile(r"(?i)(?:\bv0\b|\bvbr[-_ ]?v0\b|\bvbr[-_ ]?0\b)"),
     ),
+    (AudioQuality.MP3_V1, re.compile(r"(?i)(?:\bv1\b|\bvbr[-_ ]?v1\b|\bvbr[-_ ]?1\b)")),
     (
         AudioQuality.AAC_256,
         re.compile(r"(?i)\b256\s*(?:kbps|k)?\b"),
@@ -55,7 +61,17 @@ _FORMAT_PATTERNS: list[tuple[AudioQuality, re.Pattern[str]]] = [
 
 _AAC_WORD = re.compile(r"(?i)\b(?:aac|m4a)\b")
 _AAC_256_MIN_KBPS = 256
-_LOSSLESS_QUALITIES = frozenset({AudioQuality.FLAC_24BIT.value, AudioQuality.FLAC_16BIT.value})
+_AAC_ADJACENT_KBPS = re.compile(r"(?i)(?:\b(?:aac|m4a)[-_ ]+(\d{2,3})\b(?!\s*(?:bit|khz|hz))|\b(\d{2,3})[-_ ]+(?:aac|m4a)\b)")
+_LOSSLESS_QUALITIES = frozenset(
+    {
+        AudioQuality.FLAC_24BIT.value,
+        AudioQuality.FLAC_16BIT.value,
+        AudioQuality.ALAC.value,
+        AudioQuality.WAV_AIFF.value,
+    }
+)
+# Codecs a stray "aac"/"m4a" word must not override (the title names the codec explicitly).
+_NON_AAC_QUALITIES = _LOSSLESS_QUALITIES | {AudioQuality.OPUS.value, AudioQuality.OGG_VORBIS.value}
 
 _SOURCE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
@@ -141,14 +157,18 @@ def parse_release_title(title: str) -> ParsedRelease:
     # Extract explicit bitrate if present
     br_match = re.search(r"(?i)\b(\d{2,4})\s*k(?:bps)?\b", raw_title)
 
-    # AAC is classified by bitrate: only >= 256 kbps (or an unstated bitrate) is "AAC 256". The quality model has no
-    # lower AAC tier, so a lower-bitrate AAC is "Unknown" (it must not satisfy a cutoff it does not meet).
-    if _AAC_WORD.search(raw_title) and detected_quality not in _LOSSLESS_QUALITIES:
+    # AAC is classified by bitrate: >= 256 kbps (or an unstated bitrate) is "AAC 256"; any lower bitrate is
+    # "AAC (other)", a separate quality so it cannot satisfy a cutoff set at AAC 256.
+    if _AAC_WORD.search(raw_title) and detected_quality not in _NON_AAC_QUALITIES:
         aac_kbps = int(br_match.group(1)) if br_match else None
+        if aac_kbps is None:  # "AAC 192" without a k/kbps suffix: a 2-3 digit number right next to the codec word
+            adj = _AAC_ADJACENT_KBPS.search(raw_title)
+            if adj:
+                aac_kbps = int(adj.group(1) or adj.group(2))
         if aac_kbps is None or aac_kbps >= _AAC_256_MIN_KBPS:
             detected_quality = AudioQuality.AAC_256.value
         else:
-            detected_quality = AudioQuality.UNKNOWN.value
+            detected_quality = AudioQuality.AAC_OTHER.value
     if br_match:
         try:
             bitrate_kbps = int(br_match.group(1))

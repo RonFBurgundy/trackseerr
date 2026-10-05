@@ -2,6 +2,7 @@ export * from './ProfileSection';
 export * from './EditorModalShell';
 export * from './QualityDefinitionRow';
 export * from './QualityDefinitionsPanel';
+export * from './ImportBitrateCheckSelect';
 export * from './QualityEntryList';
 export * from './FormatScoreTable';
 export * from './BreakdownView';

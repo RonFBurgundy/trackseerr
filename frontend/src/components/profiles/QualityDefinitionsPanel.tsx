@@ -4,6 +4,7 @@ import { ConfirmDialog, MachinedCard, ScrollFill, TapeDeckButton } from '@/compo
 import { useQualityDefinitions } from '@/hooks/useQualityDefinitions';
 import { EmptyNote } from './ProfileSection';
 import { QualityDefinitionRow } from './QualityDefinitionRow';
+import { ImportBitrateCheckSelect } from './ImportBitrateCheckSelect';
 
 export interface QualityDefinitionsPanelProps {
   enabled: boolean;
@@ -67,6 +68,8 @@ export const QualityDefinitionsPanel: React.FC<QualityDefinitionsPanelProps> = (
           ))}
         </ScrollFill>
       )}
+
+      <ImportBitrateCheckSelect enabled={enabled} onToast={onToast} />
 
       <ConfirmDialog
         isOpen={confirmAll}

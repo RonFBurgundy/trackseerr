@@ -166,6 +166,7 @@ class MediaManagementSettingsModel(BaseModel):
     scan_monitor_option: str = Field("existing", description="Monitor option given to artists created by a library scan")
     add_monitor_option: str = Field("existing", description="Default monitor option for artists added manually")
     add_metadata_profile_id: int | None = Field(None, description="Default metadata profile for added artists (null = none)")
+    import_bitrate_check: str = Field("warn", description="Per-track bitrate check on import: off, warn or reject")
     updated_at: str | None = None
 
 
@@ -196,6 +197,7 @@ class MediaManagementUpdateModel(BaseModel):
     scan_monitor_option: str | None = None
     add_monitor_option: str | None = None
     add_metadata_profile_id: int | None = None
+    import_bitrate_check: Literal["off", "warn", "reject"] | None = None
 
     @model_validator(mode="before")
     @classmethod

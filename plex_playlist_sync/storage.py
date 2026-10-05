@@ -30,6 +30,7 @@ from plex_playlist_sync.library_monitoring import (
 )
 from plex_playlist_sync.list_index import SortDef, build_index, fold_search_text, library_sort_key, order_clause
 from plex_playlist_sync.delay_store import DelayProfileMixin
+from plex_playlist_sync.import_quality_check import CHECK_MODES, normalize_check_mode
 from plex_playlist_sync.quality_store import QualityCatalogMixin
 from plex_playlist_sync.models import (
     ActiveDownload,
@@ -72,7 +73,7 @@ def clean_library_name(text: str) -> str:
 
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
-SCHEMA_VERSION = 50  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 51  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _titles_near_equal(a: str, b: str) -> bool:
@@ -331,6 +332,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 (48, self._migration_v48),
                 (49, self._migration_v49),
                 (50, self._migration_v50),
+                (51, self._migration_v51),
             ]
 
             applied = 0
@@ -4295,6 +4297,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             res["prefer_local_artwork"] = bool(res.get("prefer_local_artwork", 1))
             res["scan_monitor_option"] = str(res.get("scan_monitor_option") or "existing")
             res["add_monitor_option"] = str(res.get("add_monitor_option") or DEFAULT_MONITOR_OPTION)
+            res["import_bitrate_check"] = normalize_check_mode(res.get("import_bitrate_check"))
             res["add_metadata_profile_id"] = (
                 int(res["add_metadata_profile_id"]) if res.get("add_metadata_profile_id") is not None else None
             )
@@ -4329,7 +4332,10 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             "scan_monitor_option",
             "add_monitor_option",
             "add_metadata_profile_id",
+            "import_bitrate_check",
         }
+        if settings.get("import_bitrate_check") is not None and str(settings["import_bitrate_check"]).strip().lower() not in CHECK_MODES:
+            raise ValueError("import_bitrate_check must be one of: off, warn, reject")
         for opt_key in ("scan_monitor_option", "add_monitor_option"):
             if settings.get(opt_key) is not None:
                 validate_monitor_option(settings[opt_key])
@@ -4358,6 +4364,9 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                     updates[k] = int(v) if v is not None else None
                 elif k == "acoustid_api_key":
                     updates[k] = str(v) if v is not None else None
+                elif k == "import_bitrate_check":
+                    if v is not None:
+                        updates[k] = normalize_check_mode(v)
                 elif v is not None:
                     updates[k] = str(v)
 

@@ -14,10 +14,13 @@ from plex_playlist_sync.quality_defaults import (
     DEFAULT_QUALITY_DEFINITIONS,
     DEFAULT_RELEASE_PROFILE,
     QUALITY_ORDER,
+    V51_NEW_QUALITIES,
     legacy_format_name,
     legacy_tag_format_spec,
+    legacy_items_to_entries,
     legacy_items_to_entries_with_weight,
     legacy_tag_term,
+    entry_qualities,
     is_v2_items,
     normalize_entries,
 )
@@ -141,6 +144,36 @@ class QualityCatalogMixin:
                 "UPDATE quality_profiles SET items_json = ?, format_items_json = ?, min_format_score = ? WHERE id = ?",
                 (json.dumps(entries), json.dumps(fmt_items), MIGRATED_MIN_FORMAT_SCORE, pid),
             )
+
+    def _migration_v51(self, cur: sqlite3.Cursor) -> None:
+        """More codecs (ALAC, WAV/AIFF, MP3 V1, AAC other, Opus, OGG Vorbis) and the per-track import bitrate check.
+
+        Seeds the new quality_definitions rows (existing rows are never overwritten), appends the new qualities to every
+        quality profile as ``allowed=false`` entries (order, cutoff and existing entries untouched), and adds
+        ``media_management_settings.import_bitrate_check`` (default ``warn``). Idempotent.
+        """
+        for quality, title, lo, pref, hi in DEFAULT_QUALITY_DEFINITIONS:
+            if quality in V51_NEW_QUALITIES:
+                cur.execute(
+                    "INSERT OR IGNORE INTO quality_definitions (quality, title, min_kbps, preferred_kbps, max_kbps) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (quality, title, lo, pref, hi),
+                )
+        cur.execute("SELECT id, items_json FROM quality_profiles")
+        for pid, items_json in cur.fetchall():
+            raw = _loads(items_json, [])
+            # Append to the stored list untouched (order, cutoff, existing entries and weights stay exactly as saved);
+            # only a pre-v2 weight list is converted first.
+            entries = list(raw) if is_v2_items(raw) else legacy_items_to_entries(raw)
+            present = {q for e in normalize_entries(entries) for q in entry_qualities(e)}
+            missing = [q for q in V51_NEW_QUALITIES if q not in present]
+            if not missing:
+                continue
+            entries.extend({"type": "quality", "quality": q, "allowed": False} for q in missing)
+            cur.execute("UPDATE quality_profiles SET items_json = ? WHERE id = ?", (json.dumps(entries), pid))
+        cur.execute("PRAGMA table_info(media_management_settings);")
+        if "import_bitrate_check" not in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE media_management_settings ADD COLUMN import_bitrate_check TEXT NOT NULL DEFAULT 'warn';")
 
     def _apply_legacy_tags(
         self,
