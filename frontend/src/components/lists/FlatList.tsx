@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { ListSortDir } from '@/types/activity';
@@ -149,6 +149,7 @@ function CardInner<T>({
   rowActions,
   tone,
 }: RowProps<T> & { card: MobileCardLayout<T> }) {
+  const rowUid = useId();
   const actions = rowActions ? rowActions(item) : null;
   const hasEnd = card.end.length > 0 || actions !== null;
   return (
@@ -164,6 +165,8 @@ function CardInner<T>({
         <div role="cell" className="shrink-0 flex items-center justify-center w-6 self-stretch">
           <input
             type="checkbox"
+            id={`${rowUid}-select`}
+            name="select-row"
             checked={selected}
             onChange={() => onToggle(rowKey)}
             aria-label="Select row"
@@ -192,6 +195,7 @@ function CardInner<T>({
 
 function RowInner<T>(props: RowProps<T>) {
   const { item, rowKey, columns, selectable, selected, onToggle, rowActions, tone, card } = props;
+  const rowUid = useId();
   if (card) return <CardInner {...props} card={card} />;
   return (
     <div
@@ -205,6 +209,8 @@ function RowInner<T>(props: RowProps<T>) {
         <div role="cell" className="flex items-center min-h-[44px] lg:min-h-0">
           <input
             type="checkbox"
+            id={`${rowUid}-select`}
+            name="select-row"
             checked={selected}
             onChange={() => onToggle(rowKey)}
             aria-label="Select row"
@@ -292,6 +298,7 @@ export function FlatList<T>({
 }: FlatListProps<T>): React.ReactElement {
   const { total, loading, error, getItem, ensureRange, version, generation, reload, retry, bindScroller } = list;
   const selectable = selectedKeys !== undefined && onSelectedKeysChange !== undefined;
+  const listUid = useId();
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
@@ -452,6 +459,8 @@ export function FlatList<T>({
                   <div role="columnheader">
                     <input
                       ref={selectAllRef}
+                      id={`${listUid}-select-all-desktop`}
+                      name="select-all-loaded"
                       type="checkbox"
                       checked={allSelected}
                       onChange={toggleAll}
@@ -495,6 +504,8 @@ export function FlatList<T>({
                 {selectable && (
                   <label className="flex items-center gap-1.5 text-[10px] uppercase font-mono text-neutral-400 shrink-0 min-h-[44px] pr-2">
                     <input
+                      id={`${listUid}-select-all-mobile`}
+                      name="select-all-loaded"
                       type="checkbox"
                       checked={allSelected}
                       onChange={toggleAll}

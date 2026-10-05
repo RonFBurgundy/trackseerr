@@ -12,27 +12,35 @@ point at the existing ``/api/library/...`` artwork routes, which proxy Lidarr's 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+import os
+import re
 import sqlite3
 import threading
 import time
 from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
 from urllib.parse import urlsplit
 
 from plex_playlist_sync.clients.lidarr import _COVER_FILE_RE, LidarrApiError, LidarrClient
+from plex_playlist_sync.mediacover import mediacover_service
 from plex_playlist_sync.list_index import SortDef, build_index, fold_search_text, library_sort_key, order_clause
 from plex_playlist_sync.storage import clean_library_name
 
 logger = logging.getLogger(__name__)
 
 LIST_TTL_SECONDS = 60.0
+# A list older than LIST_TTL_SECONDS but younger than this is still served at once while one background fetch
+# refreshes it (stale-while-revalidate), so paging and artwork lookups never wait on a full Lidarr dump.
+LIST_STALE_SECONDS = 1800.0
 MAX_COVER_BYTES = 3 * 1024 * 1024
 COVER_DEADLINE_SECONDS = 10.0  # wall clock for one whole upstream cover fetch
-COVER_MAX_CONCURRENT = 8  # simultaneous upstream cover fetches
-COVER_SLOT_WAIT_SECONDS = 2.0  # how long a request waits for a free slot before the route answers 503
+COVER_MAX_CONCURRENT = 16  # simultaneous upstream cover fetches
+COVER_SLOT_WAIT_SECONDS = 5.0  # how long a request waits for a free slot before the route answers 503
 ORDER_CACHE_SIZE = 16  # sorted+filtered orders kept per snapshot
 VALIDATOR_CACHE_SIZE = 2048
 
@@ -146,7 +154,10 @@ def artist_row(raw: dict[str, Any]) -> Row:
         "added_at": added,
         "created_at": added,
         "album_count": album_count,
-        "track_count": _int(stats.get("totalTrackCount", stats.get("trackCount"))),
+        # Lidarr's trackCount is the tracks on monitored releases (what its own UI shows); totalTrackCount counts
+        # every track of every edition and is kept apart.
+        "track_count": _int(stats.get("trackCount", stats.get("totalTrackCount"))),
+        "total_track_count": _int(stats.get("totalTrackCount", stats.get("trackCount"))),
         "track_file_count": _int(stats.get("trackFileCount")),
         "size_bytes": _int(stats.get("sizeOnDisk")),
         "status": _text(raw.get("status")),
@@ -190,8 +201,8 @@ def album_row(raw: dict[str, Any], artist_names: Optional[dict[str, str]] = None
         "monitored": monitored,
         "added_at": added,
         "created_at": added,
-        "total_tracks": _int(stats.get("totalTrackCount", stats.get("trackCount"))),
-        "track_count": _int(stats.get("totalTrackCount", stats.get("trackCount"))),
+        "total_tracks": _int(stats.get("trackCount", stats.get("totalTrackCount"))),
+        "track_count": _int(stats.get("trackCount", stats.get("totalTrackCount"))),
         "track_file_count": _int(stats.get("trackFileCount")),
         "size_bytes": _int(stats.get("sizeOnDisk")),
         "cover_url": f"/api/library/albums/{alid}/cover" if pick_image(images, ("cover",)) else None,
@@ -341,12 +352,41 @@ def invalidate() -> None:
         _cover_validators.clear()
 
 
-def _peek(kind: str, identity: tuple[str, str]) -> Optional[Snapshot]:
+def _peek(kind: str, identity: tuple[str, str], max_age: float = LIST_TTL_SECONDS) -> Optional[Snapshot]:
     with _lock:
         entry = _entries.get(kind)
-        if entry and entry.identity == identity and _clock() - entry.fetched_at < LIST_TTL_SECONDS:
+        if entry and entry.identity == identity and _clock() - entry.fetched_at < max_age:
             return entry
     return None
+
+
+def _run_background(fn: Callable[[], None]) -> None:
+    threading.Thread(target=fn, name="lidarr-list-refresh", daemon=True).start()
+
+
+_refreshing: set[tuple[tuple[str, str], str]] = set()
+
+
+def _refresh_in_background(kind: str, client: LidarrClient) -> None:
+    """Starts one background refetch of ``kind`` (a second call while one runs is a no-op)."""
+    flight = (_identity(client), kind)
+    with _lock:
+        if flight in _refreshing:
+            return
+        _refreshing.add(flight)
+
+    def work() -> None:
+        try:
+            _load(kind, client)
+        except LidarrApiError as exc:
+            logger.warning("Background refresh of the Lidarr %s list failed: %s", kind, exc)
+        except Exception:
+            logger.exception("Background refresh of the Lidarr %s list crashed", kind)
+        finally:
+            with _lock:
+                _refreshing.discard(flight)
+
+    _run_background(work)
 
 
 def snapshot_state(kind: str, client: LidarrClient) -> Snapshot:
@@ -355,6 +395,16 @@ def snapshot_state(kind: str, client: LidarrClient) -> Snapshot:
     state = _peek(kind, identity)
     if state is not None:
         return state
+    stale = _peek(kind, identity, LIST_STALE_SECONDS)
+    if stale is not None:
+        _refresh_in_background(kind, client)
+        return stale
+    return _load(kind, client)
+
+
+def _load(kind: str, client: LidarrClient) -> Snapshot:
+    """Fetches ``kind`` from Lidarr under the single-flight lock (a fresh entry stored meanwhile is reused)."""
+    identity = _identity(client)
     with _fetch_locks[kind]:
         state = _peek(kind, identity)
         if state is not None:
@@ -413,6 +463,126 @@ def remember_cover_etag(identity: tuple[str, str], kind: str, entity_id: int, fi
         _cover_validators[(identity[0] + identity[1], kind, str(entity_id), filename)] = etag
         while len(_cover_validators) > VALIDATOR_CACHE_SIZE:
             _cover_validators.popitem(last=False)
+
+
+# Lidarr renders sized variants next to every cover (``poster-250.jpg``, ``cover-500.jpg``); the thumbnail grids ask
+# for those instead of the multi-hundred-KB original.
+COVER_SIZES = (250, 500)
+COVER_DISK_TTL_SECONDS = 7 * 86400
+
+
+def sized_cover_name(name: str, size: Optional[int]) -> str:
+    """``poster.jpg`` -> ``poster-250.jpg`` for a supported ``size``; any other size (or None) keeps ``name``."""
+    if size not in COVER_SIZES:
+        return name
+    stem, dot, ext = name.rpartition(".")
+    if not dot:
+        return name
+    return f"{re.sub(r'-[0-9]+$', '', stem)}-{size}.{ext}"
+
+
+@dataclass(frozen=True)
+class CachedCover:
+    body: bytes
+    content_type: str
+    etag: str
+    fresh: bool  # younger than COVER_DISK_TTL_SECONDS: served without asking Lidarr at all
+
+
+def _cover_path(identity: tuple[str, str], kind: str, entity_id: int, filename: str) -> Path:
+    who = hashlib.sha256((identity[0] + identity[1]).encode("utf-8")).hexdigest()[:12]
+    return mediacover_service.base_dir / "mediacover" / "lidarr" / who / kind / str(int(entity_id)) / filename
+
+
+def read_cached_cover(identity: tuple[str, str], kind: str, entity_id: int, filename: str) -> Optional[CachedCover]:
+    """The cover last fetched from Lidarr and kept on disk, or None. ``filename`` is regex-checked by the caller."""
+    path = _cover_path(identity, kind, entity_id, filename)
+    try:
+        info = json.loads(path.with_name(path.name + ".json").read_text(encoding="utf-8"))
+        body = path.with_name(str(info["body"])).read_bytes()
+        return CachedCover(
+            body,
+            str(info["content_type"]),
+            str(info["etag"]),
+            time.time() - float(info["fetched_at"]) < COVER_DISK_TTL_SECONDS,
+        )
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        logger.warning("Ignoring unreadable cached Lidarr cover %s: %s", path.name, exc)
+        return None
+
+
+_PRUNE_PER_WRITE = 50  # bounded work per write
+
+
+def _body_name(filename: str, etag: str) -> str:
+    """Body file name with the ETag digest embedded, so a body is only ever read through the sidecar naming it."""
+    return f"{filename}.{hashlib.sha256(etag.encode('utf-8')).hexdigest()[:16]}.bin"
+
+
+def _prune_old_covers(identity_dir: Path) -> None:
+    """Deletes up to ``_PRUNE_PER_WRITE`` cover entries under ``identity_dir`` older than 2x the TTL (best effort)."""
+    cutoff = time.time() - 2 * COVER_DISK_TTL_SECONDS
+    checked = 0
+    try:
+        for meta in identity_dir.rglob("*.json"):
+            if checked >= _PRUNE_PER_WRITE:
+                return
+            checked += 1
+            try:
+                info = json.loads(meta.read_text(encoding="utf-8"))
+                if float(info["fetched_at"]) >= cutoff:
+                    continue
+                body = meta.with_name(str(info["body"]))
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            for victim in (meta, body):
+                try:
+                    victim.unlink()
+                except FileNotFoundError:
+                    pass
+    except OSError as exc:
+        logger.warning("Could not prune old Lidarr covers under %s: %s", identity_dir.name, exc)
+
+
+def write_cached_cover(
+    identity: tuple[str, str], kind: str, entity_id: int, filename: str, body: bytes, content_type: str, etag: str
+) -> None:
+    """Stores a fetched cover; a disk error only costs a refetch.
+
+    The body lands under a name derived from its ETag, then the sidecar (which names that body and carries the same
+    ETag) is renamed into place last, so a reader never pairs a body with the wrong ETag. Superseded bodies and
+    entries older than 2x the TTL are pruned opportunistically.
+    """
+    path = _cover_path(identity, kind, entity_id, filename)
+    meta = path.with_name(path.name + ".json")
+    body_path = path.with_name(_body_name(filename, etag))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        old_body: Optional[Path] = None
+        try:
+            old_body = path.with_name(str(json.loads(meta.read_text(encoding="utf-8"))["body"]))
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        for target, data in (
+            (body_path, body),
+            (
+                meta,
+                json.dumps(
+                    {"content_type": content_type, "etag": etag, "fetched_at": time.time(), "body": body_path.name}
+                ).encode("utf-8"),
+            ),
+        ):
+            tmp = target.with_name(f"{target.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+            tmp.write_bytes(data)
+            os.replace(tmp, target)
+        if old_body is not None and old_body != body_path:
+            old_body.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Could not cache Lidarr cover %s: %s", filename, exc)
+        return
+    _prune_old_covers(path.parents[2])
 
 
 def etag_matches(header: Optional[str], etag: str) -> bool:
@@ -565,7 +735,10 @@ def cover_file(kind: str, client: LidarrClient, entity_id: int, cover_types: tup
     Looks at the cached list first; an id the cache has not seen (new since the last fetch) falls back to one live
     record fetch. Raises LidarrNotFound when Lidarr itself has no such id.
     """
-    row = snapshot_state(kind, client).by_id.get(str(entity_id))
+    # Any cached list (even a stale one) answers: artwork file names almost never change, and a miss costs one small
+    # record fetch. Never block a thumbnail on a full artists/albums dump.
+    cached = _peek(kind, _identity(client), LIST_STALE_SECONDS)
+    row = cached.by_id.get(str(entity_id)) if cached is not None else None
     if row is not None:
         return pick_image(row.images, cover_types)
     raw = client.fetch_artist(entity_id) if kind == "artists" else client.fetch_album(entity_id)
@@ -575,9 +748,20 @@ def cover_file(kind: str, client: LidarrClient, entity_id: int, cover_types: tup
 # ------------------------------------------------------------------------------------------------ mutations
 
 
-def set_artist_monitored(client: LidarrClient, artist_id: int, monitored: bool) -> dict[str, Any]:
+def set_artist_monitored(
+    client: LidarrClient, artist_id: int, monitored: bool, cascade_children: bool = False
+) -> dict[str, Any]:
+    """Sets the artist flag; with ``cascade_children`` its albums are unmonitored along with it.
+
+    The cascade only ever runs when unmonitoring (Lidarr does not do that itself). Monitoring an artist must not
+    re-monitor albums the user deliberately unmonitored, so it is a single PUT.
+    """
     try:
         raw = client.set_artist_monitored(artist_id, monitored)
+        if cascade_children and not monitored:
+            album_ids = [i for i in (_int(a.get("id")) for a in client.fetch_artist_albums(artist_id)) if i]
+            for start in range(0, len(album_ids), _ALBUM_BATCH):
+                client.set_albums_monitored(album_ids[start : start + _ALBUM_BATCH], monitored)
     finally:
         invalidate()
     return dict(artist_row(raw).record)
@@ -590,6 +774,9 @@ def set_album_monitored(client: LidarrClient, album_id: int, monitored: bool) ->
         invalidate()
     return dict(album_row(client.fetch_album(album_id)).record)
 
+
+_ALBUM_BATCH = 500
+_SMALL_SELECTION = 25  # at or below this many artists, per-artist album fetches beat one full album dump
 
 _PRESET_ALBUM_TYPES: dict[str, frozenset[str]] = {
     "albums": frozenset({"album", "studio"}),
@@ -636,15 +823,20 @@ def bulk_edit_artists(
     monitored: Optional[bool],
     monitor_option: Optional[str],
     quality_profile_id: Optional[int],
+    apply_to_albums: bool = False,
 ) -> dict[str, int]:
     """Bulk artist edit in Lidarr (``artist_ids=None`` means every artist).
 
     ``monitored`` and the quality profile go through ``PUT /artist/editor`` in one call. A ``monitor_option``
     preset (all / albums / singles_eps / none) is applied per artist, as it is for a single artist, and also sets
-    the artist's monitored flag; it takes precedence over ``monitored``. Album counts are not tracked in this mode.
+    the artist's monitored flag; it takes precedence over ``monitored``.
+
+    Lidarr's artist editor never touches albums, so with ``apply_to_albums`` and a ``monitored`` value (no preset)
+    every album of the affected artists is set to the same flag through batched ``PUT /album/monitor`` calls.
     """
     if monitor_option is not None and monitor_option not in ("all", "albums", "singles_eps", "none"):
         raise ValueError(f"Monitor option {monitor_option!r} is not supported in Lidarr mode")
+    albums_changed = 0
     try:
         ids = artist_ids
         if ids is None:
@@ -666,9 +858,43 @@ def bulk_edit_artists(
             client.bulk_edit_artists(
                 ids, monitored=monitored if monitor_option is None else None, quality_profile_id=quality_profile_id
             )
+        if apply_to_albums and monitored is not None and monitor_option is None and ids:
+            if len(ids) <= _SMALL_SELECTION:
+                album_ids = [
+                    i for artist_id in ids for i in (_int(a.get("id")) for a in client.fetch_artist_albums(artist_id)) if i
+                ]
+            else:
+                wanted = set(ids)
+                album_ids = [
+                    i
+                    for i in (
+                        _int(a.get("id")) for a in client.fetch_albums() if _int(a.get("artistId")) in wanted
+                    )
+                    if i
+                ]
+            applied = 0
+            for start in range(0, len(album_ids), _ALBUM_BATCH):
+                batch = album_ids[start : start + _ALBUM_BATCH]
+                try:
+                    client.set_albums_monitored(batch, monitored)
+                except LidarrApiError as exc:
+                    logger.warning(
+                        "Lidarr bulk album monitor failed at batch %d of %d; %d of %d albums were applied: %s",
+                        start // _ALBUM_BATCH + 1, -(-len(album_ids) // _ALBUM_BATCH), applied, len(album_ids), exc,
+                    )
+                    raise LidarrApiError(
+                        f"Bulk edit stopped after {applied} of {len(album_ids)} albums were updated: {exc}"
+                    ) from exc
+                applied += len(batch)
+                logger.info("Lidarr bulk album monitor: batch %d applied (%d/%d albums)", start // _ALBUM_BATCH + 1, applied, len(album_ids))
+            albums_changed = applied
     finally:
         invalidate()
-    return {"artists_updated": len(ids or []), "albums_monitored": 0, "albums_unmonitored": 0}
+    return {
+        "artists_updated": len(ids or []),
+        "albums_monitored": albums_changed if monitored else 0,
+        "albums_unmonitored": 0 if monitored else albums_changed,
+    }
 
 
 def set_albums_monitored(client: LidarrClient, album_ids: list[int], monitored: bool) -> int:
@@ -679,6 +905,35 @@ def set_albums_monitored(client: LidarrClient, album_ids: list[int], monitored: 
     finally:
         invalidate()
     return len(album_ids)
+
+
+def library_stats(client: LidarrClient) -> dict[str, Any]:
+    """Aggregate library stats from Lidarr's per-artist ``statistics``, matching Lidarr's own index footer.
+
+    Tracks are ``trackCount`` (monitored releases) and files ``trackFileCount``; ``missing_track_count`` is their
+    difference per artist (never negative). ``totalTrackCount`` (every edition) is only in ``total_track_count``.
+    """
+    artists = [r.record for r in snapshot("artists", client)]
+    monitored = sum(1 for a in artists if a["monitored"])
+    status_of = lambda a: str(a.get("status") or "").lower()  # noqa: E731
+    tracks = sum(int(a["track_count"]) for a in artists)
+    files = sum(int(a["track_file_count"]) for a in artists)
+    size = sum(int(a["size_bytes"]) for a in artists)
+    return {
+        "source": "lidarr",
+        "artist_count": len(artists),
+        "monitored_artist_count": monitored,
+        "unmonitored_artist_count": len(artists) - monitored,
+        "continuing_artist_count": sum(1 for a in artists if status_of(a) == "continuing"),
+        "ended_artist_count": sum(1 for a in artists if status_of(a) == "ended"),
+        "album_count": sum(int(a["album_count"]) for a in artists),
+        "track_count": tracks,
+        "total_track_count": sum(int(a["total_track_count"]) for a in artists),
+        "track_file_count": files,
+        "file_count": files,
+        "missing_track_count": sum(max(int(a["track_count"]) - int(a["track_file_count"]), 0) for a in artists),
+        "total_size_bytes": size,
+    }
 
 
 def search_artist(client: LidarrClient, artist_id: int) -> dict[str, Any]:

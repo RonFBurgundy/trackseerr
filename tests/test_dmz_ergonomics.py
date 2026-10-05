@@ -1,5 +1,6 @@
 """DMZ ergonomics: startup guardrails, handshake/heartbeat, gateway status, init-dmz, role flips."""
 
+from plex_playlist_sync.storage import SCHEMA_VERSION
 import io
 import json
 import logging
@@ -1083,7 +1084,7 @@ def test_migrations_are_idempotent_across_role_flips(tmp_path):
         db = Database(path)
         record_boot_role(db, role)
         versions = [r[0] for r in db.conn.execute("SELECT version FROM schema_migrations ORDER BY version")]
-        assert versions == list(range(1, 42))
+        assert versions == list(range(1, SCHEMA_VERSION + 1))
         db.close()
     db = Database(path)
     cols = [r[1] for r in db.conn.execute("PRAGMA table_info(general_settings)")]
@@ -1100,7 +1101,7 @@ def test_v30_adds_columns_to_a_v29_database(tmp_path):
     db.close()
     db = Database(path)  # re-running v30 over existing columns must not fail or lose data
     assert db.get_general_settings()["application_url"] == "https://music.example.com"
-    assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 41
+    assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
     db.close()
 
 

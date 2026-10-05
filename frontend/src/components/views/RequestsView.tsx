@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Check, X, Trash2, Clock, CheckCircle2, AlertCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import type { UseRequestsReturn, RequestFilter } from '@/hooks/useRequests';
 import type { RequestItem } from '@/types/models';
@@ -8,14 +8,17 @@ import {
   TapeDeckButton,
   MachinedCard,
   QuotaBadge,
-  ConfirmDangerButton,
-} from '@/components/ui';
+  ConfirmDangerButton, ScrollFill } from '@/components/ui';
 import { IssueReportButton, MyIssuesList } from '@/components/issues';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
 import type { AccountInfo } from '@/types/account';
 import { QuotaBars } from '@/components/account';
+import type { RequestsSub, NavigateOptions } from '@/hooks/useAppRoute';
 
 export interface RequestsViewProps {
+  /** Route sub-page: a request filter, or 'issues'. */
+  sub: RequestsSub;
+  onSubChange: (sub: RequestsSub, options?: NavigateOptions) => void;
   requestsHook: UseRequestsReturn;
   isAdmin?: boolean;
   issuesHook: UseIssuesReturn;
@@ -25,6 +28,8 @@ export interface RequestsViewProps {
 }
 
 export const RequestsView: React.FC<RequestsViewProps> = ({
+  sub,
+  onSubChange,
   requestsHook,
   isAdmin = false,
   issuesHook,
@@ -34,7 +39,6 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
   const {
     requests,
     quota,
-    filter,
     setFilter,
     isLoading,
     error,
@@ -44,7 +48,12 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
   } = requestsHook;
 
   const [processingId, setProcessingId] = useState<number | null>(null);
-  const [section, setSection] = useState<'requests' | 'issues'>('requests');
+  const section: 'requests' | 'issues' = sub === 'issues' ? 'issues' : 'requests';
+
+  // The request list loads through the hook's filter; keep it in step with the route.
+  useEffect(() => {
+    if (sub !== 'issues') setFilter(sub);
+  }, [sub, setFilter]);
 
   const filters: Array<{ id: RequestFilter; label: string }> = [
     { id: 'all', label: 'All' },
@@ -122,11 +131,8 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
             <TapeDeckButton
               key={f.id}
               size="sm"
-              active={section === 'requests' && filter === f.id}
-              onClick={() => {
-                setSection('requests');
-                setFilter(f.id);
-              }}
+              active={sub === f.id}
+              onClick={() => onSubChange(f.id)}
             >
               {f.label}
             </TapeDeckButton>
@@ -134,7 +140,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
           <TapeDeckButton
             size="sm"
             active={section === 'issues'}
-            onClick={() => setSection('issues')}
+            onClick={() => onSubChange('issues')}
           >
             My issues
           </TapeDeckButton>
@@ -180,7 +186,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
       )}
 
       {section === 'requests' && !isLoading && requests.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <ScrollFill ariaLabel="Requests" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 content-start">
           {requests.map((req) => {
             const isBusy = processingId === req.id;
 
@@ -275,7 +281,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
               </MachinedCard>
             );
           })}
-        </div>
+        </ScrollFill>
       )}
     </div>
   );

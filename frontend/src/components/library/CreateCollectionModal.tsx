@@ -70,8 +70,10 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({ is
     >
       <form onSubmit={(e) => void submit(e)} className="space-y-4">
         <div>
-          <label className={LABEL}>Collection Name *</label>
+          <label htmlFor="collection-name" className={LABEL}>Collection Name *</label>
           <input
+            id="collection-name"
+            name="collection-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -81,8 +83,10 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({ is
           />
         </div>
         <div>
-          <label className={LABEL}>Summary / Notes (Optional)</label>
+          <label htmlFor="collection-summary" className={LABEL}>Summary / Notes (Optional)</label>
           <textarea
+            id="collection-summary"
+            name="collection-summary"
             value={summary}
             onChange={(e) => setSummary(e.target.value)}
             placeholder="Brief description of this collection..."
@@ -91,8 +95,10 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({ is
           />
         </div>
         <div>
-          <label className={LABEL}>Poster URL (Optional)</label>
+          <label htmlFor="collection-poster-url" className={LABEL}>Poster URL (Optional)</label>
           <input
+            id="collection-poster-url"
+            name="collection-poster-url"
             type="url"
             value={posterUrl}
             onChange={(e) => setPosterUrl(e.target.value)}

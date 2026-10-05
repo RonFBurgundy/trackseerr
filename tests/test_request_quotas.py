@@ -1,5 +1,6 @@
 """Per-type request quotas, discography batches, per-type auto-approve and the v28 migration."""
 
+from plex_playlist_sync.storage import SCHEMA_VERSION
 import json
 import threading
 import time
@@ -683,7 +684,7 @@ def test_v28_migrates_legacy_single_quota_window_and_auto_approve_bits(tmp_path,
     d = Database(str(path))  # opening runs migration v28 for real
     try:
         top = d.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
-        assert top == 41
+        assert top == SCHEMA_VERSION
         cols = {r[1] for r in d.conn.execute("PRAGMA table_info(music_requests)")}
         assert {"batch_id", "batch_kind"} <= cols
         ov = d.get_user_quota_overrides
@@ -773,6 +774,6 @@ def test_v28_does_not_override_defaults_an_admin_already_changed(tmp_path, monke
 def test_fresh_database_has_batch_columns_and_defaults(db):
     cols = {r[1] for r in db.conn.execute("PRAGMA table_info(music_requests)")}
     assert {"batch_id", "batch_kind"} <= cols
-    assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 41
+    assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
     created = db.create_request(MusicRequest(id="r", user_id="1001", item_type="album", title="t", artist="a"))
     assert created["batch_id"] is None and created["batch_kind"] is None

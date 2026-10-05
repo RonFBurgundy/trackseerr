@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import { Loader2, Play, Eye, Trash2 } from 'lucide-react';
 import type {
   MixConfig,
@@ -54,6 +54,7 @@ export const MixCard: React.FC<MixCardProps> = ({
   onPreview,
   onGenerate,
 }) => {
+  const uid = useId();
   const [ratio, setRatio] = useState<number>(Math.round(mix.discovery_ratio * 100));
   const [confirmDelete, setConfirmDelete] = useState<boolean>(false);
 
@@ -72,17 +73,23 @@ export const MixCard: React.FC<MixCardProps> = ({
           disabled={isBusy}
           onChange={(v) => void onUpdate(mix.id, { enabled: v })}
           title="Enabled"
+          ariaLabel={`Enable mix ${mix.name}`}
         />
       </div>
 
       <div className="text-xs font-mono text-neutral-400">{mix.track_count} tracks</div>
 
       <div>
-        <label className="flex items-center justify-between text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1.5">
+        <label
+          htmlFor={`${uid}-ratio`}
+          className="flex items-center justify-between text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1.5"
+        >
           <span>Familiar hits ↔ Deep discoveries</span>
           <span className="text-[#e5a00d]">{ratio}%</span>
         </label>
         <input
+          id={`${uid}-ratio`}
+          name="discovery-ratio"
           type="range"
           min={0}
           max={100}
@@ -98,10 +105,15 @@ export const MixCard: React.FC<MixCardProps> = ({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1.5">
+          <label
+            htmlFor={`${uid}-seed-window`}
+            className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1.5"
+          >
             Seed window (days)
           </label>
           <input
+            id={`${uid}-seed-window`}
+            name="seed-window-days"
             type="number"
             min={1}
             max={90}
@@ -115,10 +127,15 @@ export const MixCard: React.FC<MixCardProps> = ({
           />
         </div>
         <div>
-          <label className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1.5">
+          <label
+            htmlFor={`${uid}-weekly-quota`}
+            className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1.5"
+          >
             Weekly acquisition quota
           </label>
           <input
+            id={`${uid}-weekly-quota`}
+            name="max-weekly-acquisitions"
             type="number"
             min={0}
             max={100}

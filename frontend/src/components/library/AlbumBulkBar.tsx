@@ -5,7 +5,11 @@ import { ActionBar, MachinedCard, TapeDeckButton } from '@/components/ui';
 export interface AlbumBulkBarProps {
   count: number;
   busy: boolean;
-  /** Label for the select-everything-loaded key, e.g. "Select loaded" or "Select tab". */
+  /** Plural noun for the labels. Default `albums`. */
+  noun?: string;
+  /** True while the full filtered selection is being fetched. */
+  selectBusy?: boolean;
+  /** Label for the select-everything key, e.g. "All 120 albums". */
   selectLabel: string;
   onSelectAll: () => void;
   onClear: () => void;
@@ -13,23 +17,30 @@ export interface AlbumBulkBarProps {
   onApply: (monitored: boolean) => void;
 }
 
-/** Monitor/Unmonitor bar for a selection of albums (ids only; the albums endpoint has no server-side "all"). */
+/** Monitor/Unmonitor bar for a selection of albums or tracks (explicit ids; "all" is resolved client-side by paging the filtered list). */
 export const AlbumBulkBar: React.FC<AlbumBulkBarProps> = ({
   count,
   busy,
+  noun = 'albums',
+  selectBusy = false,
   selectLabel,
   onSelectAll,
   onClear,
   onDone,
   onApply,
 }) => {
-  const disabled = count === 0 || busy;
+  const disabled = count === 0 || busy || selectBusy;
   return (
-    <MachinedCard className="p-3 space-y-3" aria-label="Bulk edit albums">
+    <MachinedCard className="p-3 space-y-3" aria-label={`Bulk edit ${noun}`}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <span className="text-xs font-mono font-bold uppercase text-[#e5a00d]">{count.toLocaleString()} selected</span>
         <ActionBar align="end">
-          <TapeDeckButton size="sm" onClick={onSelectAll} disabled={busy}>
+          <TapeDeckButton
+            size="sm"
+            onClick={onSelectAll}
+            disabled={busy || selectBusy}
+            icon={selectBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : undefined}
+          >
             {selectLabel}
           </TapeDeckButton>
           <TapeDeckButton size="sm" onClick={onClear} disabled={count === 0 || busy}>

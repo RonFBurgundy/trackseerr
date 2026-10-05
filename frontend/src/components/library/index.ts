@@ -1,7 +1,9 @@
 export * from './trackFormat';
 export * from './LibrarySortControl';
+export * from './LibraryToolbarPortal';
 export * from './LibraryStatsBar';
 export * from './LibraryScanBanner';
+export * from './ArtistStatusBadge';
 export * from './ArtistTile';
 export * from './AlbumTile';
 export * from './ArtistsPanel';
@@ -18,3 +20,4 @@ export * from './CollectionsPanel';
 export * from './CollectionDetail';
 export * from './ArtistBulkBar';
 export * from './AlbumBulkBar';
+export * from './artSrc';

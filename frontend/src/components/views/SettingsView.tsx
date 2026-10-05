@@ -17,13 +17,16 @@ import {
   IndexersPanel,
   LidarrPanel,
   ImportListsPanel,
-  buildSettingsGroups,
+  buildSettingsTree,
+  settingsPanel,
   SELF_SERVICE_TABS,
   MEDIA_MANAGEMENT_TABS,
 } from '@/components/settings';
-import type { SettingsTab, ManagedExternally } from '@/components/settings';
+import type { ManagedExternally } from '@/components/settings';
 import { SystemPage } from '@/components/system';
 import type { UseAccountReturn } from '@/hooks/useAccount';
+import { settingsRouteFor } from '@/hooks/useAppRoute';
+import type { SettingsRoute } from '@/hooks/useAppRoute';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useSettingsData } from '@/hooks/useSettingsData';
 import { useLibraryManager } from '@/hooks/useLibraryManager';
@@ -31,6 +34,9 @@ import { useLibraryManager } from '@/hooks/useLibraryManager';
 export type { SettingsTab } from '@/components/settings';
 
 export interface SettingsViewProps {
+  /** Current location, already clamped to what this user may see. */
+  route: SettingsRoute;
+  onNavigate: (route: SettingsRoute) => void;
   isAdmin?: boolean;
   showGatewayNote?: boolean;
   /** Core tier only: shows the Request portal card under System. */
@@ -49,6 +55,8 @@ interface ToastState {
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
+  route,
+  onNavigate,
   isAdmin = false,
   showGatewayNote = false,
   isCore = false,
@@ -57,14 +65,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   mfaEnrollmentRequired = false,
   hasMediaServer = true,
 }) => {
-  const [activeTab, setActiveTab] = useState<SettingsTab>(() =>
-    mfaEnrollmentRequired
-      ? 'account'
-      : !isAdmin || new URLSearchParams(window.location.search).has('connected') ||
-    new URLSearchParams(window.location.search).has('scrobble_error')
-      ? 'scrobbling'
-      : 'general'
-  );
+  const activeTab = settingsPanel(route);
   const adminUsersHook = useAdminUsers(isAdmin && activeTab === 'users' && !mfaEnrollmentRequired);
   const data = useSettingsData(isAdmin);
   const libraryManager = useLibraryManager(isAdmin && !mfaEnrollmentRequired);
@@ -85,30 +86,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     []
   );
 
-  useEffect(() => {
-    if (mfaEnrollmentRequired) setActiveTab('account');
-  }, [mfaEnrollmentRequired]);
-
   // Server value wins; fall back to the media-settings field when the library-manager endpoint is unavailable.
   const mode: LibraryManagerMode =
     libraryManager.state?.mode ?? (data.media?.library_mode === 'lidarr' ? 'lidarr' : 'native');
 
-  const groups = buildSettingsGroups(isAdmin, mfaEnrollmentRequired);
-  const inactiveTabs = new Set<SettingsTab>();
+  const sections = buildSettingsTree(isAdmin, mfaEnrollmentRequired);
+  const inactiveIds = new Set<string>();
   if (isAdmin && !mfaEnrollmentRequired) {
-    if (mode === 'lidarr') MEDIA_MANAGEMENT_TABS.forEach((t) => inactiveTabs.add(t));
-    else inactiveTabs.add('lidarr');
+    if (mode === 'lidarr') MEDIA_MANAGEMENT_TABS.forEach((t) => inactiveIds.add(t));
+    else inactiveIds.add('lidarr');
   }
 
   const requestSwitch = (target: LibraryManagerMode) => {
     setPendingMode(target);
-    setActiveTab('general');
+    onNavigate(settingsRouteFor('general'));
   };
 
   const lidarrUrl = data.lidarr?.url || data.general?.lidarr_url || null;
   const managedByLidarr: ManagedExternally = {
     url: lidarrUrl,
-    onOpenLidarrSettings: () => setActiveTab('lidarr'),
+    onOpenLidarrSettings: () => onNavigate(settingsRouteFor('lidarr')),
   };
 
   const isSelfServiceTab = SELF_SERVICE_TABS.has(activeTab);
@@ -136,7 +133,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       )}
 
-      <SettingsNav groups={groups} activeTab={activeTab} onSelect={setActiveTab} inactiveTabs={inactiveTabs} />
+      <SettingsNav sections={sections} route={route} onNavigate={onNavigate} inactiveIds={inactiveIds} />
 
       {activeTab === 'scrobbling' && !mfaEnrollmentRequired && <ScrobblingSettings isAdmin={isAdmin} hasMediaServer={hasMediaServer} />}
 
@@ -153,7 +150,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {activeTab === 'media-server' && isAdmin && !mfaEnrollmentRequired && <MediaServerPanel onToast={showToast} />}
 
       {activeTab === 'system' && isAdmin && !mfaEnrollmentRequired && (
-        <SystemPage isCore={isCore} libraryMode={mode} onToast={showToast} />
+        <SystemPage tab={route.sub === 'system' ? route.leaf : 'status'} isCore={isCore} libraryMode={mode} onToast={showToast} />
       )}
 
       {data.isLoading && !isSelfServiceTab && (

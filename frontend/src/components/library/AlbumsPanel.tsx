@@ -1,16 +1,15 @@
-import React, { useCallback, useEffect } from 'react';
-import { CheckSquare } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import type { AlbumItem } from '@/types/models';
 import { getAlbumsIndex, getAlbumsPaged } from '@/services/libraryService';
-import { errorMessage } from '@/services/apiClient';
 import { pagedFetcher } from '@/hooks/useVirtualPagedList';
 import { useLibraryCatalog, type LibrarySortOption } from '@/hooks/useLibraryCatalog';
-import { useMonitoredOverrides } from '@/hooks/useMonitoredOverrides';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { useSelectAllMatching } from '@/hooks/useSelectAllMatching';
 import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { useAlbumBulkEdit } from '@/hooks/useAlbumBulkEdit';
-import { TapeDeckButton } from '@/components/ui';
-import { ListPanel, ScrubberRail, VirtualGrid } from '@/components/lists';
+import { ScrubberRail, VirtualGrid } from '@/components/lists';
 import { LibrarySortControl } from './LibrarySortControl';
+import { LibrarySelectKey, LibraryToolbarPortal } from './LibraryToolbarPortal';
 import { AlbumTile } from './AlbumTile';
 import { AlbumBulkBar } from './AlbumBulkBar';
 
@@ -21,6 +20,9 @@ const SORT_OPTIONS: ReadonlyArray<LibrarySortOption> = [
   { key: 'added_at', label: 'Added', defaultDir: 'desc' },
 ];
 
+/** Exact height under the square art: p-1.5 padding, 16px title, 2px gap, 14px detail line, 2px borders. */
+const CAPTION_HEIGHT = 46;
+
 const fetchAlbums = pagedFetcher<AlbumItem>(getAlbumsPaged);
 const getKey = (a: AlbumItem): string | number => a.id;
 
@@ -28,11 +30,12 @@ export interface AlbumsPanelProps {
   query: string;
   monitoredOnly: boolean;
   isAdmin: boolean;
-  canCollect: boolean;
   reloadToken: number;
   onOpenAlbum: (album: AlbumItem) => void;
-  onCollectAlbum: (album: AlbumItem) => void;
-  onToggleMonitored: (albumId: number | string, monitored: boolean) => Promise<void>;
+  /** Toolbar slot in the page header row; select and sort render there. */
+  toolbarSlot: HTMLElement | null;
+  /** Stats footer, rendered after the last row inside the scroll area. */
+  footer: React.ReactNode;
   onModeChange: (mode: string | null) => void;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
 }
@@ -42,11 +45,10 @@ export const AlbumsPanel: React.FC<AlbumsPanelProps> = ({
   query,
   monitoredOnly,
   isAdmin,
-  canCollect,
   reloadToken,
   onOpenAlbum,
-  onCollectAlbum,
-  onToggleMonitored,
+  toolbarSlot,
+  footer,
   onModeChange,
   onToast,
 }) => {
@@ -58,14 +60,24 @@ export const AlbumsPanel: React.FC<AlbumsPanelProps> = ({
     query,
     monitoredOnly,
   });
-  const overrides = useMonitoredOverrides();
-  const { refresh, reload, mode } = list;
+  const phone = useMediaQuery('(max-width: 639px)');
+  const { reload, mode } = list;
 
   const canBulkEdit = isAdmin && mode !== 'lidarr';
   const selection = useBulkSelection();
   const { toggle: toggleSelected, isSelected, active: selecting, exit: exitSelection, selectKeys } = selection;
   const bulk = useAlbumBulkEdit(onToast);
-  const { getLoadedItems } = list;
+  const filters = useMemo<Record<string, string>>(
+    () => ({ q: query.trim(), monitored_only: monitoredOnly ? 'true' : '' }),
+    [query, monitoredOnly]
+  );
+  const selectAll = useSelectAllMatching<AlbumItem>(getAlbumsPaged, getKey, filters, 'title', onToast);
+  const { collect: collectAllIds } = selectAll;
+
+  const handleSelectAll = useCallback(async (): Promise<void> => {
+    const keys = await collectAllIds();
+    if (keys) selectKeys(keys);
+  }, [collectAllIds, selectKeys]);
 
   useEffect(() => {
     exitSelection();
@@ -86,67 +98,33 @@ export const AlbumsPanel: React.FC<AlbumsPanelProps> = ({
     if (reloadToken > 0) reload();
   }, [reloadToken, reload]);
 
-  const handleToggle = useCallback(
-    async (albumId: number | string, next: boolean): Promise<void> => {
-      overrides.set(albumId, next);
-      try {
-        await onToggleMonitored(albumId, next);
-        await refresh();
-      } catch (err: unknown) {
-        onToast(errorMessage(err, 'Failed to update monitoring'), 'error');
-      } finally {
-        overrides.clear(albumId);
-      }
-    },
-    [overrides, onToggleMonitored, refresh, onToast]
-  );
-
   const renderItem = useCallback(
     (album: AlbumItem): React.ReactNode => (
       <AlbumTile
         album={album}
-        monitored={overrides.resolve(album.id, album.monitored)}
-        isAdmin={isAdmin}
-        canCollect={canCollect}
+        monitored={album.monitored}
         onOpen={onOpenAlbum}
-        onCollect={onCollectAlbum}
-        onToggleMonitored={(id, val) => void handleToggle(id, val)}
         selection={
           selecting ? { checked: isSelected(album.id), locked: false, onToggle: () => toggleSelected(album.id) } : undefined
         }
       />
     ),
-    [overrides, isAdmin, canCollect, onOpenAlbum, onCollectAlbum, handleToggle, selecting, isSelected, toggleSelected]
+    [onOpenAlbum, selecting, isSelected, toggleSelected]
   );
 
   return (
-    <ListPanel
-      title="Albums"
-      mode={mode}
-      total={list.total}
-      toolbar={
-        <>
-          {canBulkEdit && (
-            <TapeDeckButton
-              size="sm"
-              active={selecting}
-              aria-pressed={selecting}
-              icon={<CheckSquare className="h-3.5 w-3.5" />}
-              onClick={selecting ? exitSelection : selection.enter}
-            >
-              Select
-            </TapeDeckButton>
-          )}
-          <LibrarySortControl options={SORT_OPTIONS} sortKey={sortKey} sortDir={sortDir} onChange={changeSort} />
-        </>
-      }
-    >
+    <section className="flex min-h-0 flex-col gap-2" aria-label="Albums">
+      <LibraryToolbarPortal slot={toolbarSlot}>
+        {canBulkEdit && <LibrarySelectKey active={selecting} onToggle={selecting ? exitSelection : selection.enter} />}
+        <LibrarySortControl options={SORT_OPTIONS} sortKey={sortKey} sortDir={sortDir} onChange={changeSort} />
+      </LibraryToolbarPortal>
       {canBulkEdit && selecting && (
         <AlbumBulkBar
           count={selection.selected.size}
           busy={bulk.busy}
-          selectLabel="Select loaded"
-          onSelectAll={() => selectKeys(getLoadedItems().map((a) => a.id))}
+          selectBusy={selectAll.busy}
+          selectLabel={`All ${list.total.toLocaleString()} albums`}
+          onSelectAll={() => void handleSelectAll()}
           onClear={selection.clear}
           onDone={exitSelection}
           onApply={(m) => void handleBulkApply(m)}
@@ -156,11 +134,15 @@ export const AlbumsPanel: React.FC<AlbumsPanelProps> = ({
         list={list}
         getKey={getKey}
         renderItem={renderItem}
-        captionHeight={93}
+        fixedColumns={phone ? 3 : undefined}
+        minTileWidth={128}
+        gap={phone ? 8 : 12}
+        captionHeight={CAPTION_HEIGHT}
         emptyMessage={query ? 'No albums match your search.' : 'No albums found in library.'}
         ariaLabel="Albums"
         rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
+        footer={footer}
       />
-    </ListPanel>
+    </section>
   );
 };

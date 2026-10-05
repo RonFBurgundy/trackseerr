@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 export const inputClass =
   'w-full bg-[var(--bg-canvas)] border border-[var(--border-default)] rounded-[3px] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-amber)] min-h-[44px] sm:min-h-[38px] disabled:opacity-50';
@@ -8,27 +8,68 @@ export const labelClass =
 
 export interface FormFieldProps {
   label: string;
+  /** Overrides the generated id. When the child is a single element it receives this id automatically. */
   htmlFor?: string;
+  /** Form name injected into a native input/select/textarea child that has none. Default: slug of the label. */
+  name?: string;
   hint?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }
 
+interface FieldChildProps {
+  id?: string;
+  name?: string;
+  'aria-describedby'?: string;
+}
+
+const slug = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'field';
+
+const NATIVE_FIELDS: ReadonlyArray<string> = ['input', 'select', 'textarea'];
+
+/**
+ * Labelled field wrapper. Generates a stable id (or uses `htmlFor`), wires `<label htmlFor>`, and injects
+ * `id` / `name` into a single child element that lacks them so call sites cannot forget.
+ */
 export const FormField: React.FC<FormFieldProps> = ({
   label,
   htmlFor,
+  name,
   hint,
   children,
   className = '',
-}) => (
-  <div className={className}>
-    <label htmlFor={htmlFor} className={labelClass}>
-      {label}
-    </label>
-    {children}
-    {hint && <div className="mt-1 text-[11px] font-mono text-[var(--text-muted)]">{hint}</div>}
-  </div>
-);
+}) => {
+  const generatedId = useId();
+  const child = React.isValidElement<FieldChildProps>(children) ? children : null;
+  const id = htmlFor ?? child?.props.id ?? generatedId;
+  const hintId = hint ? `${id}-hint` : undefined;
+  let content: React.ReactNode = children;
+  if (child) {
+    const native = typeof child.type === 'string' && NATIVE_FIELDS.includes(child.type);
+    content = React.cloneElement(child, {
+      id,
+      ...(native && !child.props.name ? { name: name ?? slug(label) } : {}),
+      ...(hintId && !child.props['aria-describedby'] ? { 'aria-describedby': hintId } : {}),
+    });
+  }
+  return (
+    <div className={className}>
+      <label htmlFor={id} className={labelClass}>
+        {label}
+      </label>
+      {content}
+      {hint && (
+        <div id={hintId} className="mt-1 text-[11px] font-mono text-[var(--text-muted)]">
+          {hint}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export interface StatusMessageProps {
   variant: 'error' | 'success' | 'info';

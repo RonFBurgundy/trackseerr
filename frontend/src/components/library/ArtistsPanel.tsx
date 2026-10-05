@@ -1,17 +1,15 @@
 import React, { useCallback, useEffect } from 'react';
-import { CheckSquare } from 'lucide-react';
 import type { ArtistItem } from '@/types/models';
 import { getArtistsIndex, getArtistsPaged } from '@/services/libraryService';
-import { errorMessage } from '@/services/apiClient';
 import { pagedFetcher } from '@/hooks/useVirtualPagedList';
 import { useLibraryCatalog, type LibrarySortOption } from '@/hooks/useLibraryCatalog';
-import { useMonitoredOverrides } from '@/hooks/useMonitoredOverrides';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { useArtistBulkEdit } from '@/hooks/useArtistBulkEdit';
 import { useQualityProfiles } from '@/hooks/useQualityProfiles';
-import { TapeDeckButton } from '@/components/ui';
-import { ListPanel, ScrubberRail, VirtualGrid } from '@/components/lists';
+import { ScrubberRail, VirtualGrid } from '@/components/lists';
 import { LibrarySortControl } from './LibrarySortControl';
+import { LibrarySelectKey, LibraryToolbarPortal } from './LibraryToolbarPortal';
 import { ArtistTile } from './ArtistTile';
 import { ArtistBulkBar } from './ArtistBulkBar';
 
@@ -20,6 +18,9 @@ const SORT_OPTIONS: ReadonlyArray<LibrarySortOption> = [
   { key: 'added_at', label: 'Added', defaultDir: 'desc' },
   { key: 'album_count', label: 'Albums', defaultDir: 'desc' },
 ];
+
+/** Exact height under the square art: p-1.5 padding, 16px title, 2px gap, 14px detail line, 2px borders. */
+const CAPTION_HEIGHT = 46;
 
 const fetchArtists = pagedFetcher<ArtistItem>(getArtistsPaged);
 const getKey = (a: ArtistItem): string | number => a.id;
@@ -31,7 +32,10 @@ export interface ArtistsPanelProps {
   /** Changes when the catalog was rebuilt (scan finished); the list reloads. */
   reloadToken: number;
   onOpenArtist: (artistId: number | string) => void;
-  onToggleMonitored: (artistId: number | string, monitored: boolean) => Promise<void>;
+  /** Toolbar slot in the page header row; select and sort render there. */
+  toolbarSlot: HTMLElement | null;
+  /** Stats footer, rendered after the last row inside the scroll area. */
+  footer: React.ReactNode;
   onModeChange: (mode: string | null) => void;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
 }
@@ -43,7 +47,8 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
   isAdmin,
   reloadToken,
   onOpenArtist,
-  onToggleMonitored,
+  toolbarSlot,
+  footer,
   onModeChange,
   onToast,
 }) => {
@@ -55,8 +60,8 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
     query,
     monitoredOnly,
   });
-  const overrides = useMonitoredOverrides();
-  const { refresh, reload, mode } = list;
+  const phone = useMediaQuery('(max-width: 639px)');
+  const { reload, mode } = list;
 
   // Bulk editing is a native-library, admin-only action; Lidarr owns monitoring in its own mode.
   const canBulkEdit = isAdmin && mode !== 'lidarr';
@@ -76,29 +81,12 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
     if (reloadToken > 0) reload();
   }, [reloadToken, reload]);
 
-  const handleToggle = useCallback(
-    async (artistId: number | string, next: boolean): Promise<void> => {
-      overrides.set(artistId, next);
-      try {
-        await onToggleMonitored(artistId, next);
-        await refresh();
-      } catch (err: unknown) {
-        onToast(errorMessage(err, 'Failed to update monitoring'), 'error');
-      } finally {
-        overrides.clear(artistId);
-      }
-    },
-    [overrides, onToggleMonitored, refresh, onToast]
-  );
-
   const renderItem = useCallback(
     (artist: ArtistItem): React.ReactNode => (
       <ArtistTile
         artist={artist}
-        monitored={overrides.resolve(artist.id, artist.monitored)}
-        isAdmin={isAdmin}
+        monitored={artist.monitored}
         onOpen={onOpenArtist}
-        onToggleMonitored={(id, val) => void handleToggle(id, val)}
         selection={
           selecting
             ? { checked: isSelected(artist.id), locked: allMatching, onToggle: () => toggleSelected(artist.id) }
@@ -106,31 +94,15 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
         }
       />
     ),
-    [overrides, isAdmin, onOpenArtist, handleToggle, selecting, isSelected, allMatching, toggleSelected]
+    [onOpenArtist, selecting, isSelected, allMatching, toggleSelected]
   );
 
   return (
-    <ListPanel
-      title="Artists"
-      mode={mode}
-      total={list.total}
-      toolbar={
-        <>
-          {canBulkEdit && (
-            <TapeDeckButton
-              size="sm"
-              active={selecting}
-              aria-pressed={selecting}
-              icon={<CheckSquare className="h-3.5 w-3.5" />}
-              onClick={selecting ? exitSelection : selection.enter}
-            >
-              Select
-            </TapeDeckButton>
-          )}
-          <LibrarySortControl options={SORT_OPTIONS} sortKey={sortKey} sortDir={sortDir} onChange={changeSort} />
-        </>
-      }
-    >
+    <section className="flex min-h-0 flex-col gap-2" aria-label="Artists">
+      <LibraryToolbarPortal slot={toolbarSlot}>
+        {canBulkEdit && <LibrarySelectKey active={selecting} onToggle={selecting ? exitSelection : selection.enter} />}
+        <LibrarySortControl options={SORT_OPTIONS} sortKey={sortKey} sortDir={sortDir} onChange={changeSort} />
+      </LibraryToolbarPortal>
       {canBulkEdit && selecting && (
         <ArtistBulkBar
           selection={selection}
@@ -145,11 +117,15 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
         list={list}
         getKey={getKey}
         renderItem={renderItem}
-        captionHeight={89}
+        fixedColumns={phone ? 3 : undefined}
+        minTileWidth={128}
+        gap={phone ? 8 : 12}
+        captionHeight={CAPTION_HEIGHT}
         emptyMessage={query ? 'No artists match your search.' : 'No artists found in library.'}
         ariaLabel="Artists"
         rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
+        footer={footer}
       />
-    </ListPanel>
+    </section>
   );
 };

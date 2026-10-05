@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Loader2, LogIn } from 'lucide-react';
 import type { ArtistDiscographyAlbum, Playlist, User } from '@/types/models';
 import type { ListMonitorMode } from '@/types/importLists';
@@ -14,10 +14,15 @@ import {
   useDeploymentIdentity,
   useMediaServer,
   useStartupStatus,
+  useAppRoute,
+  defaultRoute,
 } from '@/hooks';
+import type { AppRoute, MainTab, NavigateOptions } from '@/hooks';
 import {
   Header,
-  MobileDrawer,
+  NavHub,
+  gateRoute,
+  routesEqual,
   AudioPlayerBar,
   DiscoverView,
   RequestsView,
@@ -33,7 +38,6 @@ import {
   LocalLoginForm,
   StartupScreen,
 } from '@/components';
-import type { MainTab } from '@/components/layout/Navigation';
 import {
   getPlaylists,
   toggleUserTarget,
@@ -82,18 +86,17 @@ const MainApp: React.FC = () => {
   const issuesHook = useIssues(auth.user?.id);
   const libraryHook = useLibrary(auth.canUseAdminUi);
 
-  const [requestedTab, setActiveTab] = useState<MainTab>(() => {
-    const q = new URLSearchParams(window.location.search);
-    return q.has('connected') || q.has('scrobble_error') ? 'settings' : 'discover';
-  });
-  // Library, Activity and Wanted are admin-only: any other source of those tabs falls back to Discover.
-  const activeTab: MainTab = mfaEnrollmentRequired
-    ? 'settings'
-    : !auth.canUseAdminUi && (requestedTab === 'library' || requestedTab === 'activity' || requestedTab === 'wanted')
-      ? 'discover'
-      : requestedTab;
+  const { route, navigate } = useAppRoute();
+  // Gate the requested location: MFA enrollment confines to Settings > Account, admin-only tabs fall back to
+  // Discover, and hidden settings pages fall back to the first visible one.
+  const activeRoute: AppRoute = useMemo(
+    () => gateRoute(route, { isAdmin: auth.canUseAdminUi, mfaEnrollmentRequired }),
+    [route, auth.canUseAdminUi, mfaEnrollmentRequired]
+  );
+  const activeTab: MainTab = activeRoute.tab;
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
+  const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
+  const closeMenu = useCallback(() => setIsMenuOpen(false), []);
   const mainRef = useRef<HTMLElement | null>(null);
 
   // Playlists & users data
@@ -128,12 +131,25 @@ const MainApp: React.FC = () => {
     }
   }, [auth.isAuthenticated, loadPlaylistsAndUsers]);
 
+  const handleNavigate = useCallback(
+    (next: AppRoute, options?: NavigateOptions) => {
+      navigate(next, options);
+      if (!options?.replace && mainRef.current) {
+        mainRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    },
+    [navigate]
+  );
+
+  // Header keys jump to a tab's landing page; the tab already open keeps its sub-page.
   const handleTabChange = (tab: MainTab) => {
-    setActiveTab(tab);
-    if (mainRef.current) {
-      mainRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+    if (tab !== activeTab) handleNavigate(defaultRoute(tab));
   };
+
+  // Persist the gated location once signed in, so the URL always names the page actually shown.
+  useEffect(() => {
+    if (auth.isAuthenticated && !routesEqual(activeRoute, route)) navigate(activeRoute, { replace: true });
+  }, [auth.isAuthenticated, activeRoute, route, navigate]);
 
   // Request an item from discovery
   const handleRequestItem = async (item: {
@@ -228,19 +244,20 @@ const MainApp: React.FC = () => {
           else setShowLocalLogin(true);
         }}
         onLogout={auth.logout}
-        isMobileMenuOpen={isMobileMenuOpen}
-        onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
+        isMenuOpen={isMenuOpen}
+        onToggleMenu={() => setIsMenuOpen((prev) => !prev)}
       />
 
-      {/* Mobile Drawer (Deck Controls) */}
-      <MobileDrawer
-        isOpen={isMobileMenuOpen}
-        onClose={() => setIsMobileMenuOpen(false)}
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
+      {/* Hub navigator: full-screen drawer on phones, side panel on desktop */}
+      <NavHub
+        isOpen={isMenuOpen}
+        onClose={closeMenu}
+        route={activeRoute}
+        onNavigate={handleNavigate}
         user={auth.user}
         quota={requestsHook.quota}
         isAdmin={auth.canUseAdminUi}
+        mfaEnrollmentRequired={mfaEnrollmentRequired}
         tier={identity.tier}
         onLogout={auth.logout}
       />
@@ -385,8 +402,10 @@ const MainApp: React.FC = () => {
               />
             )}
 
-            {activeTab === 'requests' && (
+            {activeRoute.tab === 'requests' && (
               <RequestsView
+                sub={activeRoute.sub}
+                onSubChange={(sub, o) => handleNavigate({ tab: 'requests', sub }, o)}
                 requestsHook={requestsHook}
                 isAdmin={auth.canUseAdminUi}
                 issuesHook={issuesHook}
@@ -395,8 +414,10 @@ const MainApp: React.FC = () => {
               />
             )}
 
-            {activeTab === 'library' && auth.canUseAdminUi && (
+            {activeRoute.tab === 'library' && auth.canUseAdminUi && (
               <LibraryView
+                sub={activeRoute.sub}
+                onSubChange={(sub, o) => handleNavigate({ tab: 'library', sub }, o)}
                 libraryHook={libraryHook}
                 isAdmin={auth.canUseAdminUi}
               />
@@ -423,16 +444,24 @@ const MainApp: React.FC = () => {
               />
             )}
 
-            {activeTab === 'activity' && auth.canUseAdminUi && (
-              <ActivityView />
+            {activeRoute.tab === 'activity' && auth.canUseAdminUi && (
+              <ActivityView
+                sub={activeRoute.sub}
+                onSubChange={(sub, o) => handleNavigate({ tab: 'activity', sub }, o)}
+              />
             )}
 
-            {activeTab === 'wanted' && auth.canUseAdminUi && (
-              <WantedView />
+            {activeRoute.tab === 'wanted' && auth.canUseAdminUi && (
+              <WantedView
+                sub={activeRoute.sub}
+                onSubChange={(sub, o) => handleNavigate({ tab: 'wanted', sub }, o)}
+              />
             )}
 
-            {activeTab === 'settings' && (
+            {activeRoute.tab === 'settings' && (
               <SettingsView
+                route={activeRoute}
+                onNavigate={handleNavigate}
                 isAdmin={auth.canUseAdminUi}
                 showGatewayNote={auth.isAdmin && auth.tier === 'gateway'}
                 isCore={identity.isCore}

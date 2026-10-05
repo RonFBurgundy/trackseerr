@@ -36,6 +36,8 @@ export const PlexPlaylistsSection: React.FC<PlexPlaylistsSectionProps> = ({ isAd
         <div className="flex flex-wrap items-center gap-3">
           {plex.users.length > 1 && (
             <select
+              id="plex-user"
+              name="plex-user"
               value={plex.selectedUser ?? ''}
               onChange={(e) => plex.setSelectedUser(e.target.value)}
               aria-label="Plex user"

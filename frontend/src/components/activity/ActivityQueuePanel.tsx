@@ -148,6 +148,8 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
           <div className="flex flex-col gap-1.5 w-full lg:items-end">
             <label className="flex items-center gap-1.5 text-[10px] font-mono text-neutral-300 min-h-[32px]">
               <input
+                id={`queue-remove-client-${r.id}`}
+                name="remove-from-client"
                 type="checkbox"
                 checked={removeFromClient}
                 onChange={(e) => setRemoveFromClient(e.target.checked)}
@@ -157,6 +159,8 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
             </label>
             <label className="flex items-center gap-1.5 text-[10px] font-mono text-neutral-300 min-h-[32px]">
               <input
+                id={`queue-blocklist-${r.id}`}
+                name="blocklist-release"
                 type="checkbox"
                 checked={blocklist}
                 onChange={(e) => setBlocklist(e.target.checked)}

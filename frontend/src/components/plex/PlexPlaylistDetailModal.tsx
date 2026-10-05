@@ -105,6 +105,8 @@ const DetailBody: React.FC<BodyProps> = ({
         {isRenaming ? (
           <form onSubmit={submitRename} className="flex items-center gap-2">
             <input
+              id="plex-playlist-title"
+              name="playlist-title"
               type="text"
               autoFocus
               value={draftTitle}
@@ -162,6 +164,7 @@ const DetailBody: React.FC<BodyProps> = ({
             checked={playlist.owner === 'user'}
             onChange={(on) => void onSetOwner(playlist, on ? 'user' : 'trackseerr')}
             title="Protect from sync"
+            ariaLabel={`Protect ${playlist.title} from sync`}
           />
         </div>
       )}

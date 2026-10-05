@@ -9,6 +9,7 @@ import {
   MachinedCard,
   SearchBar,
   ObsidianModal,
+  ScrollFill,
 } from '@/components/ui';
 import { IssueReportButton } from '@/components/issues';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
@@ -112,6 +113,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
         </TabStrip>
       </div>
 
+      <ScrollFill ariaLabel="Discover results" className="space-y-6">
       {/* Loading state */}
       {discovery.isLoading && (
         <div className="flex flex-col items-center justify-center py-20 gap-3">
@@ -268,6 +270,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
           })}
         </div>
       )}
+      </ScrollFill>
 
       <ArtistDiscographyModal
         artist={selectedArtist}
@@ -407,6 +410,11 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                         {t.preview_url && (
                           <TapeDeckButton
                             size="sm"
+                            aria-label={
+                              currentPreviewTrackId === t.id && isPreviewPlaying
+                                ? `Pause preview of ${t.title}`
+                                : `Play preview of ${t.title}`
+                            }
                             onClick={() =>
                               onPlayTrack({
                                 id: t.id,
@@ -431,7 +439,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                             Requested
                           </span>
                         ) : isTrackProcessing ? (
-                          <TapeDeckButton size="sm" variant="default" disabled icon={<Loader2 className="h-3 w-3 animate-spin" />}>
+                          <TapeDeckButton size="sm" variant="default" disabled aria-label="Requesting track" icon={<Loader2 className="h-3 w-3 animate-spin" />}>
                             ...
                           </TapeDeckButton>
                         ) : (

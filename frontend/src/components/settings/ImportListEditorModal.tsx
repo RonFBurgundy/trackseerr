@@ -31,7 +31,7 @@ const ProviderFieldInput: React.FC<{
   return (
     <FormField label={`${field.label}${field.required ? ' *' : ''}`} htmlFor={id}>
       {field.type === 'select' ? (
-        <select id={id} className={inputClass} value={String(v)} onChange={(e) => onChange(e.target.value)}>
+        <select id={id} name={field.key} className={inputClass} value={String(v)} onChange={(e) => onChange(e.target.value)}>
           {(field.options ?? []).map((o) => (
             <option key={o} value={o}>
               {o}
@@ -41,6 +41,7 @@ const ProviderFieldInput: React.FC<{
       ) : field.type === 'number' ? (
         <input
           id={id}
+          name={field.key}
           type="number"
           inputMode="numeric"
           className={inputClass}
@@ -50,6 +51,7 @@ const ProviderFieldInput: React.FC<{
       ) : (
         <input
           id={id}
+          name={field.key}
           type={field.type === 'secret' ? 'password' : 'text'}
           autoComplete={field.type === 'secret' ? 'new-password' : 'off'}
           className={inputClass}
@@ -102,12 +104,13 @@ export const ImportListEditorModal: React.FC<ImportListEditorModalProps> = ({ ed
         {editor.error && <StatusMessage variant="error">{editor.error}</StatusMessage>}
 
         <FormField label="Name *" htmlFor="il-name">
-          <input id="il-name" className={inputClass} value={draft.name} onChange={(e) => editor.patch({ name: e.target.value })} />
+          <input id="il-name" name="name" className={inputClass} value={draft.name} onChange={(e) => editor.patch({ name: e.target.value })} />
         </FormField>
 
         <FormField label="Provider" htmlFor="il-provider">
           <select
             id="il-provider"
+            name="provider"
             className={inputClass}
             value={draft.provider}
             disabled={!!editor.editingId}
@@ -153,6 +156,7 @@ export const ImportListEditorModal: React.FC<ImportListEditorModalProps> = ({ ed
         <FormField label="Quality profile" htmlFor="il-quality">
           <select
             id="il-quality"
+            name="quality-profile"
             className={inputClass}
             value={draft.quality_profile_id ?? ''}
             onChange={(e) => editor.patch({ quality_profile_id: e.target.value === '' ? null : e.target.value })}
@@ -169,6 +173,7 @@ export const ImportListEditorModal: React.FC<ImportListEditorModalProps> = ({ ed
         <FormField label="Sync interval" htmlFor="il-interval">
           <select
             id="il-interval"
+            name="sync-interval"
             className={inputClass}
             value={draft.sync_interval_minutes}
             onChange={(e) => editor.patch({ sync_interval_minutes: Number(e.target.value) })}

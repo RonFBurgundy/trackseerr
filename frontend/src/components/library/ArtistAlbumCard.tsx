@@ -1,10 +1,17 @@
-import React, { useCallback, useState } from 'react';
-import { BookmarkPlus, ChevronDown, ChevronUp, Disc, Loader2, Search } from 'lucide-react';
+import React, { useCallback, useId, useState } from 'react';
+import { BookmarkPlus, ChevronDown, ChevronUp, Disc, Loader2, Search, Sliders } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
 import { useAlbumTracks } from '@/hooks/useAlbumTracks';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
 import { errorMessage } from '@/services/apiClient';
-import { MachinedCard, SelectionCheckbox, TactileSwitch, TapeDeckButton } from '@/components/ui';
+import {
+  MachinedCard,
+  OverflowMenu,
+  SelectionCheckbox,
+  TactileSwitch,
+  TapeDeckButton,
+  type OverflowMenuItem,
+} from '@/components/ui';
 import { AlbumTrackList } from './AlbumTrackList';
 
 export interface ArtistAlbumCardProps {
@@ -33,6 +40,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
   selected,
 }) => {
   const [expanded, setExpanded] = useState<boolean>(false);
+  const tracksId = useId();
   const { tracks, loading, error, patchMonitored } = useAlbumTracks(expanded ? album.id : null);
   const lidarrSearch = useLidarrSearch(onToast);
   const searching = lidarrSearch.busyKey === `album:${album.id}`;
@@ -51,10 +59,38 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
 
   const toggleExpanded = (): void => setExpanded((v) => !v);
 
+  const menuItems: OverflowMenuItem[] = [];
+  if (isAdmin) {
+    menuItems.push({
+      key: 'monitor',
+      label: 'Monitored',
+      icon: <Sliders className="h-3.5 w-3.5 text-[#e5a00d]" />,
+      checked: album.monitored,
+      onSelect: () => onToggleAlbumMonitored(album.id, album.monitored),
+    });
+  }
+  if (isAdmin && lidarrMode) {
+    menuItems.push({
+      key: 'search',
+      label: 'Search',
+      icon: <Search className="h-3.5 w-3.5" />,
+      disabled: searching,
+      onSelect: () => void lidarrSearch.searchAlbum(album.id),
+    });
+  }
+  if (canCollect) {
+    menuItems.push({
+      key: 'collect',
+      label: 'Add to Collection',
+      icon: <BookmarkPlus className="h-3.5 w-3.5 text-[#e5a00d]" />,
+      onSelect: () => onCollect(album),
+    });
+  }
+
   return (
-    <MachinedCard className={`relative p-4 space-y-4 ${selected?.checked ? 'ring-1 ring-[#e5a00d]' : ''}`}>
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
-        <div className="flex items-center gap-3 min-w-0 w-full sm:w-auto flex-1">
+    <MachinedCard className={`relative p-2.5 sm:p-4 space-y-2 sm:space-y-4 ${selected?.checked ? 'ring-1 ring-[#e5a00d]' : ''}`}>
+      <div className="flex flex-row items-center justify-between gap-2 sm:gap-4">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
           {selected && (
             <SelectionCheckbox
               inline
@@ -64,7 +100,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
             />
           )}
           <div className="flex items-center gap-3 cursor-pointer min-w-0 flex-1" onClick={toggleExpanded}>
-          <div className="h-12 w-12 rounded-[3px] bg-[#1a1a1a] border border-[#262626] overflow-hidden flex-shrink-0 flex items-center justify-center">
+          <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-[3px] bg-[#1a1a1a] border border-[#262626] overflow-hidden flex-shrink-0 flex items-center justify-center">
             {album.cover_url ? (
               <img src={album.cover_url} alt={album.title} className="w-full h-full object-cover" loading="lazy" />
             ) : (
@@ -77,9 +113,9 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
                 {album.title}
               </h4>
               {expanded ? (
-                <ChevronUp className="h-4 w-4 text-neutral-400 flex-shrink-0" />
+                <ChevronUp className="hidden sm:block h-4 w-4 text-neutral-400 flex-shrink-0" />
               ) : (
-                <ChevronDown className="h-4 w-4 text-neutral-400 flex-shrink-0" />
+                <ChevronDown className="hidden sm:block h-4 w-4 text-neutral-400 flex-shrink-0" />
               )}
             </div>
             <p className="text-xs text-neutral-400 font-mono mt-0.5">
@@ -90,7 +126,25 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3 self-stretch sm:self-center justify-between sm:justify-end flex-wrap sm:flex-nowrap">
+        <div className="flex sm:hidden items-center flex-shrink-0 -my-1">
+          <button
+            type="button"
+            aria-label={expanded ? `Hide tracks for ${album.title}` : `Show tracks for ${album.title}`}
+            aria-expanded={expanded}
+            aria-controls={tracksId}
+            onClick={toggleExpanded}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-[3px] text-neutral-400 hover:text-white focus:outline-none focus-visible:ring-1 focus-visible:ring-[#e5a00d]"
+          >
+            {loading ? (
+              <Loader2 className="h-5 w-5 animate-spin text-[#e5a00d]" />
+            ) : (
+              <ChevronDown className={`h-5 w-5 transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`} />
+            )}
+          </button>
+          <OverflowMenu items={menuItems} label={`Actions for ${album.title}`} />
+        </div>
+
+        <div className="hidden sm:flex items-center gap-3 justify-end">
           {isAdmin && (
             <div className="flex items-center gap-2">
               <TactileSwitch
@@ -143,7 +197,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
       </div>
 
       {expanded && (
-        <div className="pt-2 border-t border-[#1f1f1f]">
+        <div id={tracksId} className="pt-2 border-t border-[#1f1f1f]">
           <AlbumTrackList
             tracks={tracks}
             loading={loading}

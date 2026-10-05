@@ -1,6 +1,7 @@
 """Regression tests for the Lidarr follow-settings audit: schema v38, retry scheduling, title normalisation,
 partial-load settling, acquisition-layer outcomes, removed env vars."""
 
+from plex_playlist_sync.storage import SCHEMA_VERSION
 import inspect
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -70,7 +71,7 @@ class TestMigrationV38:
 
         db = Database(path)  # runs v38 over the v37 schema
         try:
-            assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 41
+            assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
             assert db.get_request("r1")["status_reason"] is None
             assert [r["id"] for r in db.list_requests()] == ["r1"]
             assert db.set_request_outcome("r1", "not_in_metadata_profile", "nope")
@@ -90,7 +91,7 @@ class TestMigrationV38:
         db.close()
         db = Database(path)  # columns already exist: must not raise
         try:
-            assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 41
+            assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
         finally:
             db.close()
 

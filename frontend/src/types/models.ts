@@ -205,6 +205,20 @@ export interface LibraryStats {
   album_count: number;
   track_count: number;
   monitored_artist_count?: number;
+  /** 'lidarr' when the numbers are Lidarr's own statistics, 'native' for the TrackSeerr catalog. */
+  source?: 'lidarr' | 'native';
+  unmonitored_artist_count?: number;
+  /** Null in native mode (native artists carry no status). */
+  continuing_artist_count?: number | null;
+  ended_artist_count?: number | null;
+  /** Tracks on every edition (Lidarr totalTrackCount); `track_count` is Lidarr's trackCount (monitored releases). */
+  total_track_count?: number;
+  track_file_count?: number;
+  file_count?: number;
+  missing_track_count?: number;
+  total_size_bytes?: number;
+  monitored_track_count?: number;
+  cutoff_unmet_track_count?: number;
 }
 
 export interface QueueItem {

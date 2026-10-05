@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { Plus, RefreshCw, Pencil, History, Trash2, Loader2 } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, ConfirmDangerButton } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, ConfirmDangerButton, ScrollFill } from '@/components/ui';
 import { useImportLists } from '@/hooks/useImportLists';
 import { useImportListEditor } from '@/hooks/useImportListEditor';
 import { useMonitoringDefaults } from '@/hooks/useMonitoringDefaults';
@@ -62,7 +62,7 @@ export const ImportListsPanel: React.FC<ImportListsPanelProps> = ({ libraryMode,
         <div className="text-center py-12 text-neutral-500 font-mono text-sm">No import lists configured.</div>
       )}
 
-      <div className="grid grid-cols-1 gap-3">
+      <ScrollFill ariaLabel="Import lists" className="grid grid-cols-1 gap-3 content-start">
         {lists.lists.map((l) => (
           <MachinedCard key={l.id} className="p-4 space-y-3">
             <div className="flex items-start justify-between gap-3">
@@ -81,6 +81,7 @@ export const ImportListsPanel: React.FC<ImportListsPanelProps> = ({ libraryMode,
                 checked={l.enabled}
                 onChange={(v) => void lists.setEnabled(l, v)}
                 title={l.enabled ? 'Disable list' : 'Enable list'}
+                ariaLabel={`Enable import list ${l.name}`}
               />
             </div>
 
@@ -131,7 +132,7 @@ export const ImportListsPanel: React.FC<ImportListsPanelProps> = ({ libraryMode,
             </ActionBar>
           </MachinedCard>
         ))}
-      </div>
+      </ScrollFill>
 
       <ItunesImportCard />
 

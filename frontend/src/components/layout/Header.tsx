@@ -14,14 +14,15 @@ import {
   X,
 } from 'lucide-react';
 import type { DeploymentTier, User, UserQuota } from '@/types/models';
-import type { MainTab } from './Navigation';
+import type { MainTab } from '@/hooks/useAppRoute';
 import { TapeDeckButton, TapeTransportBay, QuotaBadge } from '@/components/ui';
 
 export interface HeaderProps {
   user: User | null;
   quota: UserQuota | null;
-  isMobileMenuOpen?: boolean;
-  onToggleMobileMenu?: () => void;
+  /** Hub navigator state; the Menu key is shown on every viewport. */
+  isMenuOpen?: boolean;
+  onToggleMenu?: () => void;
   onLogin: () => void;
   onLogout: () => void;
   activeTab?: MainTab;
@@ -33,8 +34,8 @@ export interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   user,
   quota,
-  isMobileMenuOpen = false,
-  onToggleMobileMenu,
+  isMenuOpen = false,
+  onToggleMenu,
   onLogin,
   onLogout,
   activeTab,
@@ -58,15 +59,6 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'activity', label: 'Activity', icon: <Activity className="h-4 w-4" />, adminOnly: true },
     { id: 'wanted', label: 'Wanted', icon: <ListTodo className="h-4 w-4" />, adminOnly: true },
     { id: 'settings', label: 'Settings', icon: <Settings className="h-4 w-4" /> },
-  ];
-
-  const mobileNavItems: Array<{ id: MainTab; label: string; icon: React.ReactNode; adminOnly?: boolean }> = [
-    { id: 'discover', label: 'Discover', icon: <Compass className="h-4 w-4" /> },
-    { id: 'requests', label: 'Requests', icon: <Inbox className="h-4 w-4" /> },
-    { id: 'library', label: 'Library', icon: <Library className="h-4 w-4" />, adminOnly: true },
-    { id: 'playlists', label: 'Playlists', icon: <ListMusic className="h-4 w-4" /> },
-    { id: 'activity', label: 'Activity', icon: <Activity className="h-4 w-4" />, adminOnly: true },
-    { id: 'wanted', label: 'Wanted', icon: <ListTodo className="h-4 w-4" />, adminOnly: true },
   ];
 
   return (
@@ -155,31 +147,6 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         )}
 
-        {/* Mobile Symbol-Based Tape Transport Bay */}
-        {user && activeTab && onTabChange && (
-          <div className="md:hidden flex items-center justify-center flex-1 min-w-0">
-            <TapeTransportBay className="p-[2px]">
-              <div className="flex items-stretch gap-1">
-                {mobileNavItems.filter((item) => !item.adminOnly || isAdmin).map((item) => {
-                  const isActive = activeTab === item.id;
-                  return (
-                    <TapeDeckButton
-                      key={item.id}
-                      size="sm"
-                      active={isActive}
-                      onClick={() => onTabChange(item.id)}
-                      icon={item.icon}
-                      className="w-10 h-11 !min-h-0 p-0 rounded-[3px] shrink-0"
-                      aria-label={item.label}
-                      title={item.label}
-                    />
-                  );
-                })}
-              </div>
-            </TapeTransportBay>
-          </div>
-        )}
-
         {/* User Status / Actions (Desktop) */}
         <div className="hidden md:flex items-center gap-3 flex-shrink-0">
           {user && <QuotaBadge quota={quota} className="hidden sm:inline-flex" />}
@@ -216,18 +183,20 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* Mobile Right Action: Dedicated Menu Key (Option B) or Sign In */}
-        <div className="md:hidden flex items-center flex-shrink-0">
-          {user ? (
+        {/* Hub key (every viewport): right edge on phones, left edge on desktop. Sign In stands in when signed out. */}
+        {user ? (
+          <div className="order-last md:order-first ml-auto md:ml-0 flex items-center flex-shrink-0">
             <TapeDeckButton
               size="sm"
               variant="default"
-              active={isMobileMenuOpen}
-              onClick={onToggleMobileMenu}
-              title={isMobileMenuOpen ? 'Close Menu' : 'Open Menu'}
-              aria-label={isMobileMenuOpen ? 'Close Menu' : 'Open Menu'}
+              active={isMenuOpen}
+              onClick={onToggleMenu}
+              title={isMenuOpen ? 'Close Menu' : 'Open Menu'}
+              aria-label={isMenuOpen ? 'Close Menu' : 'Open Menu'}
+              aria-expanded={isMenuOpen}
+              aria-haspopup="dialog"
               icon={
-                isMobileMenuOpen ? (
+                isMenuOpen ? (
                   <X className="h-4 w-4 text-[#e5a00d]" />
                 ) : (
                   <Menu className="h-4 w-4 text-neutral-300" />
@@ -235,7 +204,9 @@ export const Header: React.FC<HeaderProps> = ({
               }
               className="w-11 h-11 !min-h-0 p-0 rounded-[3px] shrink-0"
             />
-          ) : (
+          </div>
+        ) : (
+          <div className="md:hidden flex items-center flex-shrink-0">
             <TapeDeckButton
               size="sm"
               variant="amber"
@@ -244,8 +215,8 @@ export const Header: React.FC<HeaderProps> = ({
             >
               Sign In
             </TapeDeckButton>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </header>
   );

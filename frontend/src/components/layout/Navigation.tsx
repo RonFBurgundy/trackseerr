@@ -2,7 +2,9 @@ import React from 'react';
 import { Compass, Inbox, Library, ListMusic, Activity, ListTodo, Settings } from 'lucide-react';
 import { TapeTransportBay, TapeDeckButton } from '@/components/ui';
 
-export type MainTab = 'discover' | 'requests' | 'library' | 'playlists' | 'activity' | 'wanted' | 'settings';
+import type { MainTab } from '@/hooks/useAppRoute';
+
+export type { MainTab };
 
 export interface NavigationProps {
   activeTab: MainTab;
@@ -26,7 +28,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   ];
 
   return (
-    <nav className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-4 pb-2">
+    <nav aria-label="Main sections" className="hidden md:block w-full max-w-7xl mx-auto px-4 sm:px-6 pt-4 pb-2">
       <TapeTransportBay className="flex items-center justify-between gap-1 overflow-x-auto p-1.5">
         <div className="flex items-center gap-1.5 w-full sm:w-auto">
           {navItems

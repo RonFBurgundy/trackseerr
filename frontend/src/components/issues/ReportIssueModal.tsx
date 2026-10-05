@@ -156,6 +156,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({
             </label>
             <select
               id="issue-type"
+              name="issue-type"
               value={issueType}
               onChange={(e) => setIssueType(e.target.value as IssueType)}
               disabled={isSending}
@@ -178,6 +179,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({
             </label>
             <textarea
               id="issue-details"
+              name="issue-details"
               value={details}
               onChange={(e) => setDetails(e.target.value)}
               disabled={isSending}

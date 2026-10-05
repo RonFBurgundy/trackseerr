@@ -10,8 +10,7 @@ import {
   ObsidianModal,
   TactileSwitch,
   ConfirmDangerButton,
-  MonitorModeSelect,
-} from '@/components/ui';
+  MonitorModeSelect, ScrollFill } from '@/components/ui';
 import { LIST_MONITOR_MODES, type ListMonitorMode } from '@/types/importLists';
 
 /** Album and artist modes add to the library without a quota, so the server only accepts them from admins. */
@@ -176,7 +175,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
       )}
 
       {!isLoading && playlists.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <ScrollFill ariaLabel="Playlists" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 content-start">
           {playlists.map((pl) => (
             <MachinedCard key={pl.id} className="p-4 flex flex-col justify-between gap-4">
               <div>
@@ -188,7 +187,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                     <TactileSwitch
                       checked={pl.is_active}
                       onChange={(val) => onToggleActive(pl.id, val)}
-                      aria-label="Toggle playlist active"
+                      ariaLabel={`Playlist ${pl.name} active`}
                     />
                   )}
                 </div>
@@ -292,7 +291,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
               </div>
             </MachinedCard>
           ))}
-        </div>
+        </ScrollFill>
       )}
 
       {/* Add / Import Playlist Modal */}
@@ -332,10 +331,15 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
 
           <form onSubmit={handleImportSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1">
+              <label
+                htmlFor="import-playlist-name"
+                className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1"
+              >
                 Playlist Name
               </label>
               <input
+                id="import-playlist-name"
+                name="playlist-name"
                 type="text"
                 required
                 value={playlistName}
@@ -347,10 +351,15 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
 
             {importTab === 'link' && (
               <div>
-                <label className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1">
+                <label
+                  htmlFor="import-playlist-url"
+                  className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1"
+                >
                   Playlist URL (Spotify or Deezer)
                 </label>
                 <input
+                  id="import-playlist-url"
+                  name="playlist-url"
                   type="url"
                   required
                   value={playlistUrl}
@@ -366,10 +375,15 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
 
             {importTab === 'paste' && (
               <div>
-                <label className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1">
+                <label
+                  htmlFor="import-playlist-tracks"
+                  className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1"
+                >
                   Tracks (one per line: Artist - Title)
                 </label>
                 <textarea
+                  id="import-playlist-tracks"
+                  name="playlist-tracks"
                   rows={6}
                   required
                   value={pastedTracks}

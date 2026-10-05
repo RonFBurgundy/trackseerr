@@ -1,6 +1,6 @@
 import React from 'react';
 import { Loader2, AlertTriangle } from 'lucide-react';
-import { MachinedCard } from '@/components/ui';
+import { MachinedCard, ScrollFill } from '@/components/ui';
 import { useSystemQueue } from '@/hooks/useSystemQueue';
 import type { SystemJob, SystemJobState } from '@/types/models';
 import { formatDuration, formatTimestamp } from './formatters';
@@ -35,7 +35,7 @@ export const SystemQueuePanel: React.FC = () => {
       )}
 
       <MachinedCard className="overflow-hidden p-0">
-        <div className="overflow-x-auto">
+        <ScrollFill ariaLabel="Background job queue" className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs font-mono">
             <thead>
               <tr className="border-b border-[#222222] bg-[#121212] text-[11px] uppercase tracking-wider text-neutral-400">
@@ -65,7 +65,7 @@ export const SystemQueuePanel: React.FC = () => {
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollFill>
 
         {isLoading && rows.length === 0 && (
           <div className="flex items-center justify-center gap-2 py-12 text-neutral-400 text-xs font-mono">

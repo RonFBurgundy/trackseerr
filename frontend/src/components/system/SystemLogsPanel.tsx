@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { Download, Trash2, Loader2, Search, AlertTriangle } from 'lucide-react';
-import { TapeDeckButton, ActionBar, TabStrip, MachinedCard } from '@/components/ui';
+import { TapeDeckButton, ActionBar, TabStrip, MachinedCard, ScrollFill } from '@/components/ui';
 import { useSystemLogs } from '@/hooks/useSystemLogs';
 
 const LEVELS = ['all', 'info', 'warning', 'error', 'debug'] as const;
@@ -9,7 +9,9 @@ export const SystemLogsPanel: React.FC = () => {
   const logsHook = useSystemLogs();
   const { logs, filteredLogs } = logsHook;
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const searchId = useId();
+  const autoScrollId = useId();
 
   useEffect(() => {
     if (autoScroll && containerRef.current) {
@@ -76,7 +78,10 @@ export const SystemLogsPanel: React.FC = () => {
           <div className="relative flex-1 md:flex-none">
             <Search className="h-3 w-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-500" />
             <input
+              id={searchId}
+              name="log-filter"
               type="text"
+              aria-label="Filter log stream"
               placeholder="Filter log stream..."
               value={logsHook.searchTerm}
               onChange={(e) => logsHook.setSearchTerm(e.target.value)}
@@ -84,8 +89,10 @@ export const SystemLogsPanel: React.FC = () => {
             />
           </div>
 
-          <label className="flex items-center gap-1.5 min-h-[44px] sm:min-h-0 text-xs font-mono text-neutral-400 cursor-pointer select-none">
+          <label htmlFor={autoScrollId} className="flex items-center gap-1.5 min-h-[44px] sm:min-h-0 text-xs font-mono text-neutral-400 cursor-pointer select-none">
             <input
+              id={autoScrollId}
+              name="log-auto-scroll"
               type="checkbox"
               checked={autoScroll}
               onChange={(e) => setAutoScroll(e.target.checked)}
@@ -103,10 +110,11 @@ export const SystemLogsPanel: React.FC = () => {
         </div>
       </div>
 
-      <MachinedCard className="p-3 bg-[#0a0a0a] border border-[#222222]">
-        <div
-          ref={containerRef}
-          className="h-[60dvh] sm:h-[550px] overflow-y-auto space-y-1 font-mono text-[11px] leading-relaxed select-text"
+      <MachinedCard className="p-1.5 bg-[#0a0a0a] border border-[#222222]">
+        <ScrollFill
+          scrollRef={containerRef}
+          ariaLabel="Application log entries"
+          className="space-y-1 p-1.5 font-mono text-[11px] leading-relaxed select-text"
         >
           {filteredLogs.length === 0 && (
             <div className="py-20 text-center text-neutral-500">
@@ -134,7 +142,7 @@ export const SystemLogsPanel: React.FC = () => {
               </div>
             );
           })}
-        </div>
+        </ScrollFill>
       </MachinedCard>
     </div>
   );

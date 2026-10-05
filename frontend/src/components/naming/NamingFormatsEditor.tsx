@@ -236,6 +236,7 @@ export const NamingFormatsEditor: React.FC<NamingFormatsEditorProps> = ({ value,
               </label>
               <input
                 id={`naming-${field.key}`}
+                name={field.key}
                 ref={(el) => {
                   inputRefs.current[field.key] = el;
                 }}
@@ -287,6 +288,7 @@ export const NamingFormatsEditor: React.FC<NamingFormatsEditorProps> = ({ value,
         </label>
         <input
           id="naming-compilation_track_format"
+          name="compilation_track_format"
           type="text"
           spellCheck={false}
           value={compilation}

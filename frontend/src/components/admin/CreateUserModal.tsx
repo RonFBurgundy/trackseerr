@@ -134,6 +134,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ isOpen, onClos
                 className="flex items-center gap-3 min-h-[44px] sm:min-h-0 cursor-pointer text-xs font-mono"
               >
                 <input
+                  id={`create-user-preset-${p.id}`}
                   type="radio"
                   name="preset"
                   checked={presetId === p.id}

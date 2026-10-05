@@ -1,6 +1,28 @@
 import React from 'react';
-import { Sliders, Folder, Download, Search, Radio, Layers, UserRound, Users, Server, ListMusic, HardDrive } from 'lucide-react';
+import {
+  Sliders,
+  Folder,
+  Download,
+  Search,
+  Radio,
+  Layers,
+  UserRound,
+  Users,
+  Server,
+  ListMusic,
+  HardDrive,
+  Activity,
+  List,
+  ListChecks,
+  ScrollText,
+  Terminal,
+  Boxes,
+  Inbox,
+} from 'lucide-react';
+import { settingsRouteFor } from '@/hooks/useAppRoute';
+import type { SettingsLeafId, SettingsRoute, SettingsSection } from '@/hooks/useAppRoute';
 
+/** Panel ids: what SettingsView actually renders for a location. */
 export type SettingsTab =
   | 'general'
   | 'media'
@@ -15,73 +37,113 @@ export type SettingsTab =
   | 'system'
   | 'account';
 
-export interface SettingsNavItem {
-  id: SettingsTab;
+export interface SettingsLeafNode {
+  id: SettingsLeafId;
   label: string;
   icon: React.ReactNode;
 }
 
-export interface SettingsNavGroup {
-  id: string;
+export interface SettingsSectionNode {
+  id: SettingsSection;
   label: string;
-  items: SettingsNavItem[];
+  icon: React.ReactNode;
+  /** Visible child pages. Empty for single-page sections. */
+  leaves: SettingsLeafNode[];
 }
 
 const ico = 'h-3.5 w-3.5';
 
-const item = (id: SettingsTab, label: string, icon: React.ReactNode): SettingsNavItem => ({ id, label, icon });
+const leaf = (id: SettingsLeafId, label: string, icon: React.ReactNode): SettingsLeafNode => ({ id, label, icon });
+
+/** A section shows a child row only when it has more than one page to choose from. */
+export const hasChildRow = (section: SettingsSectionNode): boolean => section.leaves.length > 1;
 
 /**
- * Grouped settings navigation. Visibility rules (unchanged from the flat tab bar):
- * MFA enrollment pending -> Account only; non-admins -> Scrobbling + Account; admins -> everything.
+ * Settings tree, in display order. Visibility rules: MFA enrollment pending -> Account only;
+ * non-admins -> Requests (Scrobbling only) + Account; admins -> everything.
  */
-export function buildSettingsGroups(isAdmin: boolean, mfaEnrollmentRequired: boolean): SettingsNavGroup[] {
-  const account: SettingsNavGroup = {
+export function buildSettingsTree(isAdmin: boolean, mfaEnrollmentRequired: boolean): SettingsSectionNode[] {
+  const account: SettingsSectionNode = {
     id: 'account',
     label: 'Account',
-    items: [item('account', 'Account', <UserRound className={ico} />)],
+    icon: <UserRound className={ico} />,
+    leaves: [],
   };
   if (mfaEnrollmentRequired) return [account];
   if (!isAdmin) {
     return [
-      { id: 'requests', label: 'Requests', items: [item('scrobbling', 'Scrobbling', <Radio className={ico} />)] },
+      {
+        id: 'requests',
+        label: 'Requests',
+        icon: <Inbox className={ico} />,
+        leaves: [leaf('scrobbling', 'Scrobbling', <Radio className={ico} />)],
+      },
       account,
     ];
   }
   return [
-    { id: 'general', label: 'General', items: [item('general', 'General', <Sliders className={ico} />)] },
+    { id: 'general', label: 'General', icon: <Sliders className={ico} />, leaves: [] },
     {
       id: 'media-management',
       label: 'Media Management',
-      items: [
-        item('media', 'Root Folders & Naming', <Folder className={ico} />),
-        item('profiles', 'Profiles', <Layers className={ico} />),
-        item('clients', 'Clients', <Download className={ico} />),
-        item('indexers', 'Indexers', <Search className={ico} />),
+      icon: <Boxes className={ico} />,
+      leaves: [
+        leaf('media', 'Root Folders & Naming', <Folder className={ico} />),
+        leaf('profiles', 'Profiles', <Layers className={ico} />),
+        leaf('clients', 'Clients', <Download className={ico} />),
+        leaf('indexers', 'Indexers', <Search className={ico} />),
+        leaf('import-lists', 'Import Lists', <ListMusic className={ico} />),
+        leaf('media-server', 'Media Server', <HardDrive className={ico} />),
       ],
     },
-    { id: 'lidarr', label: 'Lidarr', items: [item('lidarr', 'Lidarr', <Radio className={ico} />)] },
-    {
-      id: 'media-server',
-      label: 'Media Server',
-      items: [item('media-server', 'Media Server', <HardDrive className={ico} />)],
-    },
-    {
-      id: 'import-lists',
-      label: 'Import Lists',
-      items: [item('import-lists', 'Import Lists', <ListMusic className={ico} />)],
-    },
+    { id: 'lidarr', label: 'Lidarr', icon: <Radio className={ico} />, leaves: [] },
     {
       id: 'requests',
       label: 'Requests',
-      items: [
-        item('users', 'Users', <Users className={ico} />),
-        item('scrobbling', 'Scrobbling', <Radio className={ico} />),
+      icon: <Inbox className={ico} />,
+      leaves: [leaf('users', 'Users', <Users className={ico} />), leaf('scrobbling', 'Scrobbling', <Radio className={ico} />)],
+    },
+    {
+      id: 'system',
+      label: 'System',
+      icon: <Server className={ico} />,
+      leaves: [
+        leaf('status', 'Status', <Activity className={ico} />),
+        leaf('queue', 'Queue', <List className={ico} />),
+        leaf('tasks', 'Tasks', <ListChecks className={ico} />),
+        leaf('events', 'Events', <ScrollText className={ico} />),
+        leaf('logs', 'Logs', <Terminal className={ico} />),
       ],
     },
-    { id: 'system', label: 'System', items: [item('system', 'System', <Server className={ico} />)] },
     account,
   ];
+}
+
+/** Clamp a settings route to what this user may see (unknown or hidden section/leaf -> first visible). */
+export function resolveSettingsRoute(
+  route: SettingsRoute,
+  isAdmin: boolean,
+  mfaEnrollmentRequired: boolean
+): SettingsRoute {
+  const sections = buildSettingsTree(isAdmin, mfaEnrollmentRequired);
+  const section = sections.find((s) => s.id === route.sub) ?? sections[0];
+  const requestedLeaf = 'leaf' in route ? route.leaf : undefined;
+  const visibleLeaf =
+    section.leaves.find((l) => l.id === requestedLeaf)?.id ?? section.leaves[0]?.id;
+  return settingsRouteFor(section.id, visibleLeaf);
+}
+
+/** The panel SettingsView renders for a (resolved) route. */
+export function settingsPanel(route: SettingsRoute): SettingsTab {
+  switch (route.sub) {
+    case 'media-management':
+    case 'requests':
+      return route.leaf;
+    case 'system':
+      return 'system';
+    default:
+      return route.sub;
+  }
 }
 
 /** Tabs that only touch the signed-in user's own data and need no admin settings load. */

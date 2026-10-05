@@ -17,6 +17,8 @@ export interface VirtualGridProps<T> {
   renderPlaceholder?: (index: number) => React.ReactNode;
   /** Narrowest a tile may get (px); the column count is the most that fit the container width. Default 150. */
   minTileWidth?: number;
+  /** Forces the column count (e.g. 3 on phones) instead of deriving it from `minTileWidth`. */
+  fixedColumns?: number;
   /** Space between tiles (px). Default 12. */
   gap?: number;
   /** Exact height of whatever sits under the square cover in a tile (caption, borders), px. Default 48. */
@@ -28,6 +30,8 @@ export interface VirtualGridProps<T> {
   rail?: React.ReactNode;
   /** Max height of the scrolling area (CSS length). Default: fill exactly the remaining viewport height. */
   maxHeight?: string;
+  /** Rendered as the last item of the scrolling area, after the final row (visible when scrolled to the bottom). */
+  footer?: React.ReactNode;
 }
 
 /** Side padding inside the scroll area (px). */
@@ -56,6 +60,7 @@ export function VirtualGrid<T>({
   renderItem,
   renderPlaceholder,
   minTileWidth = 150,
+  fixedColumns,
   gap = 12,
   captionHeight = 48,
   emptyMessage,
@@ -63,6 +68,7 @@ export function VirtualGrid<T>({
   ariaLabel,
   rail,
   maxHeight,
+  footer,
 }: VirtualGridProps<T>): React.ReactElement {
   const { total, loading, error, getItem, ensureRange, version, generation, reload, retry, bindScroller } = list;
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
@@ -86,7 +92,11 @@ export function VirtualGrid<T>({
     return () => observer.disconnect();
   }, [scrollEl]);
 
-  const columns = Math.max(1, Math.floor((width + gap) / (minTileWidth + gap)));
+  const computedColumns = Math.max(1, Math.floor((width + gap) / (minTileWidth + gap)));
+  const columns =
+    fixedColumns !== undefined && Number.isFinite(fixedColumns) && fixedColumns > 0
+      ? Math.floor(fixedColumns)
+      : computedColumns;
   const tileWidth = width > 0 ? (width - gap * (columns - 1)) / columns : minTileWidth;
   const rowCount = Math.ceil(total / columns);
   // Integer, so the laid-out height and the virtualizer's size are the same number (no drift over thousands of rows).
@@ -96,7 +106,7 @@ export function VirtualGrid<T>({
     count: rowCount,
     getScrollElement: () => scrollEl,
     estimateSize: () => rowHeight,
-    overscan: 3,
+    overscan: 4,
     gap,
     paddingStart: PAD,
     paddingEnd: PAD,
@@ -214,6 +224,7 @@ export function VirtualGrid<T>({
                 })}
               </div>
             )}
+            {footer}
           </div>
           {error !== null && hasRows && <ListErrorBar error={error} onRetry={retry} />}
         </div>

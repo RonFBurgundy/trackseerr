@@ -502,11 +502,20 @@ class TestDetailAndActions:
         assert api.get("/api/library/albums/1;2", headers=admin_h).status_code == 404
 
     def test_artist_monitor_is_fetch_modify_put(self, api, admin_h, lidarr):
-        res = api.put("/api/library/artists/2/monitored", json={"monitored": False}, headers=admin_h)
+        res = api.put("/api/library/artists/2/monitored", json={"monitored": True}, headers=admin_h)
         assert res.status_code == 200 and res.json()["id"] == "2"
-        (url, body), = lidarr.puts
+        # Monitoring must not re-monitor albums the user deliberately unmonitored: exactly one PUT, the artist.
+        ((url, body),) = lidarr.puts
         assert url == "http://lidarr.test:8686/api/v1/artist/2"
-        assert body["monitored"] is False and body["artistName"] == "Beatles Tribute" and body["path"] == "/music/Beatles Tribute"
+        assert body["monitored"] is True and body["artistName"] == "Beatles Tribute" and body["path"] == "/music/Beatles Tribute"
+
+    def test_artist_unmonitor_cascades_to_albums(self, api, admin_h, lidarr):
+        res = api.put("/api/library/artists/1/monitored", json={"monitored": False}, headers=admin_h)
+        assert res.status_code == 200
+        (url, body), *album_puts = lidarr.puts
+        assert url == "http://lidarr.test:8686/api/v1/artist/1" and body["monitored"] is False
+        assert album_puts, "unmonitoring an artist must unmonitor its albums"
+        assert all(u.endswith("/api/v1/album/monitor") and b["monitored"] is False for u, b in album_puts)
 
     def test_album_monitor(self, api, admin_h, lidarr):
         res = api.put("/api/library/albums/101/monitored", json={"monitored": False}, headers=admin_h)
@@ -798,7 +807,8 @@ class TestCoverProxyHardening:
         assert res.status_code == 503 and res.headers["retry-after"] == "2"
         lidarr.http.stream.assert_not_called()
 
-    def test_slot_is_released_after_each_fetch(self, api, admin_h, lidarr):
+    def test_slot_is_released_after_each_fetch(self, api, admin_h, lidarr, monkeypatch):
+        monkeypatch.setattr(lidarr_library, "COVER_DISK_TTL_SECONDS", 0)  # these test the upstream proxy, not the disk cache:
         lidarr.stream_image()
         slots = threading.BoundedSemaphore(1)
         with patch.object(lidarr_library, "_cover_slots", slots):
@@ -818,7 +828,8 @@ class TestCoverProxyHardening:
         assert again.status_code == 304 and again.content == b"" and again.headers["etag"] == etag
         assert lidarr.http.stream.call_count == 1  # answered without another upstream fetch
 
-    def test_etag_changes_with_upstream_validator(self, api, admin_h, lidarr):
+    def test_etag_changes_with_upstream_validator(self, api, admin_h, lidarr, monkeypatch):
+        monkeypatch.setattr(lidarr_library, "COVER_DISK_TTL_SECONDS", 0)  # these test the upstream proxy, not the disk cache:
         resp = lidarr.stream_image()
         resp.headers["etag"] = '"v1"'
         e1 = _img(api, admin_h).headers["etag"]

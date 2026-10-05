@@ -146,6 +146,10 @@ export const SystemEventsPanel: React.FC = () => {
           <div className="relative flex-1">
             <Search className="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
             <input
+              id="system-events-search"
+              name="event-search"
+              aria-label="Filter events"
+              autoComplete="off"
               type="text"
               placeholder="Filter event message or source..."
               value={ev.searchInput}
@@ -162,6 +166,8 @@ export const SystemEventsPanel: React.FC = () => {
           <label className="flex items-center gap-1.5 text-xs font-mono text-neutral-400">
             <span>Severity:</span>
             <select
+              id="system-events-severity"
+              name="event-severity"
               value={ev.severity}
               onChange={(e) => ev.setSeverity(e.target.value)}
               className="bg-[#171717] border border-[#262626] text-neutral-200 text-xs font-mono rounded-[3px] px-2 py-1 focus:outline-none focus:border-[#e5a00d]"
@@ -175,6 +181,8 @@ export const SystemEventsPanel: React.FC = () => {
           <label className="flex items-center gap-1.5 text-xs font-mono text-neutral-400">
             <span>Type:</span>
             <select
+              id="system-events-type"
+              name="event-type"
               value={ev.eventType}
               onChange={(e) => ev.setEventType(e.target.value)}
               className="bg-[#171717] border border-[#262626] text-neutral-200 text-xs font-mono rounded-[3px] px-2 py-1 focus:outline-none focus:border-[#e5a00d]"

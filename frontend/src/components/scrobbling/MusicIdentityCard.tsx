@@ -115,6 +115,9 @@ export const MusicIdentityCard: React.FC<MusicIdentityCardProps> = ({
             )}
             <form onSubmit={handleSaveLb} className="flex flex-col sm:flex-row gap-2">
               <input
+                id="music-identity-lb-token"
+                name="listenbrainz-token"
+                aria-label="ListenBrainz user token"
                 type="password"
                 autoComplete="off"
                 value={lbToken}

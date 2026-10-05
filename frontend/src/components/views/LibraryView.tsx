@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Disc, Eye, Layers, Loader2, Music, RefreshCw, User } from 'lucide-react';
 import type { UseLibraryReturn, LibraryTab } from '@/hooks/useLibrary';
+import type { NavigateOptions } from '@/hooks/useAppRoute';
 import type { AlbumItem } from '@/types/models';
 import { useAddToCollection } from '@/hooks/useAddToCollection';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
@@ -26,6 +27,9 @@ import {
 export interface LibraryViewProps {
   libraryHook: UseLibraryReturn;
   isAdmin?: boolean;
+  /** Route sub-page (artists/albums/tracks/collections). */
+  sub: LibraryTab;
+  onSubChange: (sub: LibraryTab, options?: NavigateOptions) => void;
 }
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -37,9 +41,8 @@ const TABS: Array<{ id: LibraryTab; label: string; icon: React.ReactNode }> = [
   { id: 'collections', label: 'Collections', icon: <Layers className="h-3.5 w-3.5" /> },
 ];
 
-export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin = false }) => {
+export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin = false, sub: activeTab, onSubChange }) => {
   const {
-    activeTab,
     collections,
     stats,
     isScanning,
@@ -61,6 +64,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
   const { toast, showToast } = useToast();
   const manager = useLibraryManager(isAdmin);
 
+  const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null);
   const [searchInput, setSearchInput] = useState<string>('');
   const query = useDebouncedValue(searchInput, SEARCH_DEBOUNCE_MS);
   const [monitoredOnly, setMonitoredOnly] = useState<boolean>(false);
@@ -75,6 +79,11 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
   const canCollect = !lidarrMode;
 
   // Collections search is still resolved by the collections endpoint; the paged lists take `query` directly.
+  // The paged catalog loads through the hook's tab; keep it in step with the route.
+  useEffect(() => {
+    setTab(activeTab);
+  }, [activeTab, setTab]);
+
   useEffect(() => {
     setSearch(query);
   }, [query, setSearch]);
@@ -85,6 +94,11 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
 
   // Collections reference native album ids, so the tab only exists when TrackSeerr manages the library.
   const visibleTabs = lidarrMode ? TABS.filter((t) => t.id !== 'collections') : TABS;
+
+  // A deep link to a tab this mode does not offer lands on Artists without leaving a Back trap.
+  useEffect(() => {
+    if (lidarrMode && activeTab === 'collections') onSubChange('artists', { replace: true });
+  }, [lidarrMode, activeTab, onSubChange]);
 
   const picker = useAddToCollection(showToast, refresh);
 
@@ -166,33 +180,61 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
   const showScanBanner = !lidarrMode && (isScanning || Boolean(scanStatus?.is_scanning));
   const pagedTab = activeTab !== 'collections';
 
-  return (
-    <div className="space-y-3 sm:space-y-6">
-      {toastNode}
+  const statsFooter = <LibraryStatsBar stats={stats} showLegend={activeTab === 'artists'} />;
 
-      {stats && <LibraryStatsBar stats={stats} />}
+  return (
+    <div className="space-y-2">
+      {toastNode}
 
       {showScanBanner && <LibraryScanBanner scanStatus={scanStatus} onCancel={() => void cancelScan()} />}
 
-      <div className="flex items-stretch justify-between gap-2 sm:gap-4">
-        <TabStrip className="min-w-0 flex-1 sm:flex-none">
+      {/* One toolbar row on desktop (keys, search, filter/sort/scan); two on phones (keys, then search + icon keys). */}
+      <div className="flex flex-col gap-2 md:flex-row md:items-stretch">
+        <TabStrip className="min-w-0 md:shrink-0" aria-label="Library sections">
           {visibleTabs.map((tab) => (
-            <TapeDeckButton key={tab.id} size="sm" active={activeTab === tab.id} onClick={() => setTab(tab.id)} icon={tab.icon}>
+            <TapeDeckButton key={tab.id} size="sm" active={activeTab === tab.id} onClick={() => onSubChange(tab.id)} icon={tab.icon}>
               {tab.label}
             </TapeDeckButton>
           ))}
         </TabStrip>
 
-        {/* Scanning is a native-library action; Lidarr manages its own files. */}
-        {isAdmin && !lidarrMode && (
-          <div className="flex shrink-0 items-stretch gap-2">
-            {isScanning ? (
+        <div className="flex min-w-0 flex-1 items-stretch gap-1.5">
+          <SearchBar
+            name="library-filter"
+            ariaLabel={`Filter ${activeTab}`}
+            value={searchInput}
+            onChange={setSearchInput}
+            placeholder={`Filter ${activeTab}...`}
+            className="flex-1 min-w-0"
+          />
+          {pagedTab && (
+            <TapeDeckButton
+              size="sm"
+              className="shrink-0"
+              active={monitoredOnly}
+              aria-pressed={monitoredOnly}
+              aria-label="Monitored only"
+              title="Monitored only"
+              icon={<Eye className="h-3.5 w-3.5" />}
+              collapseLabel="xl"
+              onClick={() => setMonitoredOnly((v) => !v)}
+            >
+              Monitored
+            </TapeDeckButton>
+          )}
+          {/* Select and sort controls from the active panel are portaled here. */}
+          <div ref={setToolbarSlot} className="contents" />
+          {/* Scanning is a native-library action; Lidarr manages its own files. */}
+          {isAdmin && !lidarrMode && (
+            isScanning ? (
               <TapeDeckButton
                 size="sm"
                 variant="danger"
+                className="shrink-0"
                 onClick={() => void cancelScan()}
                 icon={<Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                collapseLabel
+                collapseLabel="xl"
+                title="Cancel scan"
               >
                 Cancel Scan
               </TapeDeckButton>
@@ -200,36 +242,20 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
               <TapeDeckButton
                 size="sm"
                 variant="amber"
+                className="shrink-0"
                 onClick={() => void triggerScan(false)}
                 icon={<RefreshCw className="h-3.5 w-3.5" />}
-                collapseLabel
+                collapseLabel="xl"
+                title="Scan library"
               >
                 Scan Library
               </TapeDeckButton>
-            )}
-          </div>
-        )}
+            )
+          )}
+        </div>
       </div>
 
       {lidarrStatus && lidarrStatus.is_migrating && <LidarrMigrationBanner status={lidarrStatus} />}
-
-      <div className="flex items-stretch gap-2">
-        <SearchBar value={searchInput} onChange={setSearchInput} placeholder={`Filter ${activeTab}...`} className="flex-1 min-w-0" />
-        {pagedTab && (
-          <TapeDeckButton
-            size="sm"
-            className="shrink-0"
-            active={monitoredOnly}
-            aria-pressed={monitoredOnly}
-            aria-label="Monitored only"
-            icon={<Eye className="h-3.5 w-3.5" />}
-            collapseLabel
-            onClick={() => setMonitoredOnly((v) => !v)}
-          >
-            Monitored only
-          </TapeDeckButton>
-        )}
-      </div>
 
       {error && !isLoading && (
         <div role="alert" className="p-4 bg-red-950/40 border border-red-800/50 rounded-[4px] text-xs text-red-300 font-mono">
@@ -244,7 +270,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
           isAdmin={isAdmin}
           reloadToken={catalogVersion}
           onOpenArtist={setSelectedArtistId}
-          onToggleMonitored={toggleArtistMonitored}
+          toolbarSlot={toolbarSlot}
+          footer={statsFooter}
           onModeChange={setListMode}
           onToast={showToast}
         />
@@ -255,11 +282,10 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
           query={query}
           monitoredOnly={monitoredOnly}
           isAdmin={isAdmin}
-          canCollect={canCollect}
           reloadToken={catalogVersion}
           onOpenAlbum={setAlbumForModal}
-          onCollectAlbum={openCollectPicker}
-          onToggleMonitored={toggleAlbumMonitored}
+          toolbarSlot={toolbarSlot}
+          footer={statsFooter}
           onModeChange={setListMode}
           onToast={showToast}
         />
@@ -277,6 +303,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
             isAdmin={isAdmin}
             reloadToken={catalogVersion}
             onToggleMonitored={toggleTrackMonitored}
+            toolbarSlot={toolbarSlot}
+            footer={statsFooter}
             onToast={showToast}
           />
         ))}
