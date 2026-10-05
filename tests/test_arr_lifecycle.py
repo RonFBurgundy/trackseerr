@@ -40,6 +40,7 @@ from plex_playlist_sync.clients.acquisition.qbittorrent import QbittorrentDriver
 from plex_playlist_sync.clients.acquisition.sabnzbd import SabnzbdDriver
 from plex_playlist_sync.clients.acquisition.slskd import SlskdDriver
 from plex_playlist_sync.config import Config
+from tests.audio_fixtures import write_flac, write_mp3
 from plex_playlist_sync.library import extract_archive, is_archive_file
 from plex_playlist_sync.models import (
     AcquisitionSearchResult,
@@ -108,22 +109,13 @@ def _auth_headers(user: dict[str, Any], test_db: Database, config: Config) -> di
 
 
 def _create_minimal_flac(path: Path) -> None:
-    """Writes a valid minimal FLAC header with STREAMINFO block."""
-    streaminfo = (
-        (44100).to_bytes(4, "big")
-        + (1).to_bytes(1, "big")
-        + (16).to_bytes(2, "big")
-        + (1000).to_bytes(4, "big")
-        + b"\x00" * 16
-    )
-    header = b"fLaC\x80\x00\x00\x22" + streaminfo
-    path.write_bytes(header)
+    """Writes a valid minimal FLAC (STREAMINFO) that mutagen parses and the import security gate accepts."""
+    write_flac(path)
 
 
 def _create_minimal_mp3(path: Path) -> None:
-    """Writes a valid minimal MPEG-1 Layer 3 audio frame."""
-    frame = b"\xff\xfb\x90\x00" + b"\x00" * 413
-    path.write_bytes(frame * 2)
+    """Writes a few valid MPEG-1 Layer 3 frames that mutagen parses and the import security gate accepts."""
+    write_mp3(path)
 
 
 # ---------------------------------------------------------------------------

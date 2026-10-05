@@ -8,6 +8,7 @@ Covers:
 5. Seeding Governance preserving hardlink torrents in download client until ratio/time limits are reached.
 """
 
+from tests.audio_fixtures import write_flac
 import sqlite3
 import time
 from pathlib import Path
@@ -373,7 +374,7 @@ def test_seeding_governance_preserves_hardlink_until_ratio_and_time_limits(
     )
 
     torrent_file = staging / "01 - Around the World.flac"
-    torrent_file.write_bytes(b"hardlink torrent audio data")
+    write_flac(torrent_file)
 
     test_db.create_active_download(
         ActiveDownload(
@@ -490,7 +491,7 @@ def test_seeding_governance_time_limit_only(test_db: Database, tmp_path: Path):
     )
 
     tfile = staging / "time_track.flac"
-    tfile.write_bytes(b"time audio data")
+    write_flac(tfile)
 
     test_db.create_active_download(
         ActiveDownload(

@@ -7,6 +7,7 @@ import base64
 import logging
 import os
 import re
+import stat
 import tarfile
 import zipfile
 from pathlib import Path
@@ -716,6 +717,25 @@ def embed_album_artwork(file_path: str | Path, image_data: bytes) -> bool:
     return write_audio_tags(file_path=file_path, tags={}, cover_art_bytes=image_data)
 
 
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 10 * 1024**3
+MAX_ARCHIVE_MEMBERS = 5000
+MAX_ARCHIVE_RATIO = 200
+ARCHIVE_RATIO_MIN_COMPRESSED = 1024 * 1024
+
+
+class ArchiveLimitError(ValueError):
+    """An archive exceeds the bomb limits or contains a forbidden member type (symlink/hardlink)."""
+
+
+def _check_archive_limits(count: int, total: int, kind: str) -> None:
+    if count > MAX_ARCHIVE_MEMBERS:
+        raise ArchiveLimitError(f"{kind} archive has {count} members (limit {MAX_ARCHIVE_MEMBERS})")
+    if total > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+        raise ArchiveLimitError(
+            f"{kind} archive uncompressed size {total} bytes exceeds limit {MAX_ARCHIVE_UNCOMPRESSED_BYTES}"
+        )
+
+
 def extract_archive(archive_path: Path | str, target_dir: Path | str) -> list[Path]:
     """Extracts an archive (.zip, .tar, .tar.gz, .tgz, .tar.bz2) safely into target_dir.
 
@@ -735,7 +755,15 @@ def extract_archive(archive_path: Path | str, target_dir: Path | str) -> list[Pa
     name = archive.name.lower()
     if name.endswith(".zip"):
         with zipfile.ZipFile(archive, "r") as zf:
-            for member in zf.infolist():
+            infos = zf.infolist()
+            _check_archive_limits(len(infos), sum(m.file_size for m in infos), "zip")
+            for member in infos:
+                if member.compress_size > ARCHIVE_RATIO_MIN_COMPRESSED and member.file_size > member.compress_size * MAX_ARCHIVE_RATIO:
+                    raise ArchiveLimitError(
+                        f"zip member {member.filename} compression ratio exceeds {MAX_ARCHIVE_RATIO}:1"
+                    )
+                if stat.S_ISLNK((member.external_attr >> 16) & 0xFFFF):
+                    raise ArchiveLimitError(f"zip archive contains a symlink member: {member.filename}")
                 norm_name = member.filename.replace("\\", "/")
                 member_target = (target / norm_name).resolve()
                 if not member_target.is_relative_to(target):
@@ -748,7 +776,9 @@ def extract_archive(archive_path: Path | str, target_dir: Path | str) -> list[Pa
         or name.endswith(".tar")
     ):
         with tarfile.open(archive, "r:*") as tf:
-            for member in tf.getmembers():
+            members = tf.getmembers()
+            _check_archive_limits(len(members), sum(m.size for m in members if m.isreg()), "tar")
+            for member in members:
                 norm_name = member.name.replace("\\", "/")
                 member_target = (target / norm_name).resolve()
                 if not member_target.is_relative_to(target):

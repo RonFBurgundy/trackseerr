@@ -1,5 +1,6 @@
 """Comprehensive unit and integration test suite for Outbound Notification & Webhooks Engine."""
 
+from tests.audio_fixtures import write_flac
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -897,7 +898,7 @@ class TestNotificationEventTriggers:
 
         # Create audio file in staging
         sample_audio = staging_dir / "track.flac"
-        sample_audio.write_bytes(b"FLAC\x00")
+        write_flac(sample_audio)
 
         test_db.create_download_client(
             DownloadClientConfig(

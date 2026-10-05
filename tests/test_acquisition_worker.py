@@ -1,5 +1,6 @@
 """Integration and unit tests for AcquisitionWorker and safe atomic library placement."""
 
+from tests.audio_fixtures import write_flac, write_mp3
 import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -197,13 +198,13 @@ def test_worker_poll_once_completed_and_organizes(test_db, workspace_dirs):
 
     # Create dummy downloaded audio file in downloads directory
     dl_file = downloads_dir / "03 - Get Lucky.mp3"
-    dl_file.write_text("dummy mp3 audio content")
+    write_mp3(dl_file)
 
     mock_driver = MagicMock()
     mock_driver.get_status.return_value = {
         "status": DownloadStatus.COMPLETED.value,
         "progress": 100.0,
-        "size_bytes": len("dummy mp3 audio content"),
+        "size_bytes": dl_file.stat().st_size,
         "speed_bps": 0,
         "eta_seconds": 0,
         "source_path": str(dl_file),
@@ -316,7 +317,7 @@ def test_worker_rejects_candidate_src_outside_staging(test_db, workspace_dirs, t
     outside_dir = tmp_path / "outside"
     outside_dir.mkdir()
     evil_file = outside_dir / "secret.mp3"
-    evil_file.write_text("evil secret content")
+    write_mp3(evil_file)
 
     client = test_db.create_download_client(
         DownloadClientConfig(
@@ -366,7 +367,7 @@ def test_worker_rejects_target_escaping_root_folder(test_db, workspace_dirs):
 
     # Valid audio file in staging
     audio_file = downloads_dir / "valid_track.mp3"
-    audio_file.write_text("audio binary data")
+    write_mp3(audio_file)
 
     client = test_db.create_download_client(
         DownloadClientConfig(
