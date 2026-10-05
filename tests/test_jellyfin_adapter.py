@@ -18,7 +18,7 @@ from plex_playlist_sync.media_servers.jellyfin import (
 )
 from plex_playlist_sync.models import Playlist, Track
 from plex_playlist_sync.redaction import redact_text
-from tests.jellyfin_fake import API_KEY, FakeAudio, FakeJellyfin, default_state
+from tests.jellyfin_fake import API_KEY, FakeAudio, FakeEntry, FakeJellyfin, FakePlaylist, FakeUser, default_state
 
 SONGS = [
     ("Song A", "Artist 1", "Album X"),
@@ -248,7 +248,8 @@ def test_resync_keeps_playlist_id_and_issues_no_writes_when_unchanged():
     fake.state.calls.clear()
     server.sync_playlist(pl("Song A", "Song B"), ["admin"], PlaylistSyncOptions())
     assert list(fake.state.playlists) == [pid]
-    assert [c for c in fake.state.calls if c[0] != "GET"] == []
+    # the only non-GET is the empty-add ownership probe, which changes nothing
+    assert [c for c in fake.state.calls if c[0] != "GET" and c[2].get("Ids") != ""] == []
 
 
 def test_update_removes_adds_and_reorders_in_place():
@@ -368,3 +369,118 @@ def test_song_without_runtime_has_no_duration():
     fake.state.songs.append(FakeAudio("s9", "Song Z", "Artist 1", "Album X", seconds=0))
     (hit,) = server.search_tracks("song z")
     assert hit["duration"] is None
+
+
+# ----------------------------------------------------------------------------- ownership (J1)
+
+
+def _foreign_public(fake: FakeJellyfin, *titles: str, owner="u-kid", name="Mix") -> FakePlaylist:
+    foreign = FakePlaylist("pl-foreign", name, owner, public=True)
+    foreign.entries = [FakeEntry(f"ef{i}", next(s.id for s in fake.state.songs if s.title == t)) for i, t in enumerate(titles)]
+    fake.state.playlists[foreign.id] = foreign
+    return foreign
+
+
+def test_same_named_public_playlist_of_another_user_is_never_modified():
+    server, fake, _ = make()
+    foreign = _foreign_public(fake, "Song C", "Song D")
+    before = [(e.entry_id, e.item_id) for e in foreign.entries]
+    (result,) = server.sync_playlist(pl("Song A", "Song B"), ["admin"], PlaylistSyncOptions())
+    assert result.success
+    assert [(e.entry_id, e.item_id) for e in foreign.entries] == before and foreign.public
+    assert order(fake, owner="u-admin") == ["Song A", "Song B"]  # the target got its own playlist
+    deletes = [c for c in fake.state.calls if c[0] == "DELETE"]
+    assert deletes == []
+
+
+def test_owned_playlist_is_preferred_over_a_foreign_public_one_and_updated_in_place():
+    server, fake, _ = make()
+    server.sync_playlist(pl("Song A"), ["admin"], PlaylistSyncOptions())
+    own_id = next(p.id for p in fake.state.playlists.values() if p.owner_id == "u-admin")
+    foreign = _foreign_public(fake, "Song C")
+    server.sync_playlist(pl("Song A", "Song B"), ["admin"], PlaylistSyncOptions())
+    assert fake.state.playlists[own_id].entries and order(fake, owner="u-admin") == ["Song A", "Song B"]
+    assert [e.item_id for e in foreign.entries] == ["s3"]
+    assert len([p for p in fake.state.playlists.values() if p.owner_id == "u-admin"]) == 1
+
+
+def test_non_admin_target_also_ignores_the_admins_public_playlist():
+    server, fake, _ = make()
+    admin_pl = _foreign_public(fake, "Song D", owner="u-admin")
+    server.sync_playlist(pl("Song A"), ["kid"], PlaylistSyncOptions())
+    assert [e.item_id for e in admin_pl.entries] == ["s4"] and order(fake, owner="u-kid") == ["Song A"]
+
+
+def test_ownership_probe_failing_for_a_bad_key_is_not_swallowed():
+    server, fake, _ = make()
+    _foreign_public(fake, "Song C")
+    fake.state.api_keys.clear()
+    with pytest.raises(MediaServerAuthError):
+        server._can_edit("pl-foreign", "u-admin")
+
+
+# ----------------------------------------------------------------------------- stale override (J4)
+
+
+@pytest.mark.parametrize("status", [400, 403, 500])
+def test_stale_override_lookup_failure_falls_back_to_search(status, caplog):
+    server, fake, _ = make()
+
+    class DB:
+        def get_match_override(self, title, artist):
+            return {"plex_rating_key": "gone"}
+
+    def respond(method, path, n):
+        # only the pinned lookup (Ids=...) is broken; the later search must still work
+        return httpx.Response(status) if n == 1 and path == "/Items" else None
+
+    fake.state.respond_with = respond
+    with caplog.at_level(logging.WARNING):
+        ref = server.match_track(Track("Song A", "Artist 1", "Album X"), db=DB())
+    assert ref is not None and ref.id == "s1"
+    assert any("Pinned match" in r.getMessage() and "MediaServer" in r.getMessage() for r in caplog.records)
+
+
+# ----------------------------------------------------------------------------- users, paging, targets (J5)
+
+
+def test_disabled_users_are_not_listed_or_targeted_but_login_screen_hidden_ones_are():
+    server, fake, _ = make()
+    fake.state.users.append(FakeUser("u-off", "off", disabled=True))
+    fake.state.users.append(FakeUser("u-shown", "shown", hidden=False))
+    # IsHidden only hides from the login screen (a real server sets it for ordinary accounts), so it is not a filter
+    assert all(u.hidden for u in fake.state.users if u.id in ("u-admin", "u-kid"))
+    assert [u.name for u in server.list_users()] == ["admin", "kid", "shown"]
+    (r,) = server.sync_playlist(pl("Song A"), ["off"], PlaylistSyncOptions())
+    assert not r.success and "not found" in r.error and not fake.state.playlists
+
+
+def test_listing_stops_when_the_server_ignores_start_index():
+    server, fake, _ = make()
+    fake.state.max_page = 2
+    fake.state.ignore_start_index = True
+    for i in range(5):
+        fake.state.playlists[f"p{i}"] = FakePlaylist(f"p{i}", f"n{i}", "u-admin", public=False)
+    found = list(server._paged("/Items", [("IncludeItemTypes", "Playlist"), ("UserId", "u-admin")], page=2))
+    assert len(found) == 2  # the repeated page is detected instead of looping forever
+    assert fake.state.request_counts["GET /Items"] <= 3
+
+
+def test_listing_has_a_page_cap(monkeypatch):
+    import plex_playlist_sync.media_servers.jellyfin as jf
+
+    monkeypatch.setattr(jf, "_MAX_PAGES", 3)
+    server, fake, _ = make()
+    fake.state.max_page = 1
+    for i in range(10):
+        fake.state.playlists[f"p{i}"] = FakePlaylist(f"p{i}", f"n{i}", "u-admin", public=False)
+    found = list(server._paged("/Items", [("IncludeItemTypes", "Playlist"), ("UserId", "u-admin")], page=1))
+    assert len(found) == 3 and fake.state.request_counts["GET /Items"] == 3
+
+
+def test_target_without_library_access_fails_alone_and_others_still_sync():
+    server, fake, _ = make()
+    fake.state.add_refused_for.add("u-kid")
+    results = server.sync_playlist(pl("Song A"), ["kid", "admin"], PlaylistSyncOptions())
+    assert [r.success for r in results] == [False, True]
+    assert results[0].error and order(fake, owner="u-admin") == ["Song A"]

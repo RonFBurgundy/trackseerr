@@ -180,6 +180,28 @@ def test_second_user_gets_its_own_playlist(
     assert raw.playlist_id(jellyfin_target.admin_id, name) != raw.playlist_id(jellyfin_target.kid_id, name)
 
 
+def test_another_users_public_playlist_with_the_same_name_is_never_modified(
+    server: JellyfinMediaServer, raw: Raw, name: str, jellyfin_target: JellyfinTarget
+) -> None:
+    """Jellyfin lists other users' PUBLIC playlists for a user and lets an API key remove entries from them, so the
+    adapter must prove ownership (an empty add authorised as the target: 403 for someone else's playlist)."""
+    t = jellyfin_target
+    created = raw.http.post("/Playlists", json={"Name": name, "Ids": [], "UserId": t.kid_id, "MediaType": "Audio", "IsPublic": True})
+    created.raise_for_status()
+    kid_playlist = created.json()["Id"]
+    kid_songs = [i["Id"] for i in raw.get("/Items", IncludeItemTypes="Audio", Recursive="true")["Items"]][:2]
+    raw.http.post(f"/Playlists/{kid_playlist}/Items", params={"Ids": ",".join(kid_songs), "UserId": t.kid_id}).raise_for_status()
+    before = [e["PlaylistItemId"] for e in raw.get(f"/Playlists/{kid_playlist}/Items", UserId=t.kid_id)["Items"]]
+
+    (result,) = server.sync_playlist(playlist_of(name, T[3]), [t.admin_name], PlaylistSyncOptions())
+
+    assert result.success
+    assert [e["PlaylistItemId"] for e in raw.get(f"/Playlists/{kid_playlist}/Items", UserId=t.kid_id)["Items"]] == before
+    own = [p["Id"] for p in raw.playlists(t.admin_id, name) if p["Id"] != kid_playlist]
+    assert len(own) == 1
+    assert [e["Name"] for e in raw.get(f"/Playlists/{own[0]}/Items", UserId=t.admin_id)["Items"]] == [T[3]]
+
+
 def test_full_reversal_and_repeated_tracks_collapse(
     server: JellyfinMediaServer, raw: Raw, name: str, jellyfin_target: JellyfinTarget
 ) -> None:

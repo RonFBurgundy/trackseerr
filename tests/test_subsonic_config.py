@@ -126,14 +126,19 @@ def test_reapplying_overlay_on_a_live_config_follows_changes():
 
 def test_db_roundtrip_and_validation():
     db = Database(":memory:")
-    assert db.get_media_server_settings() == {"type": "", "url": "", "username": "", "password": "", "api_key": ""}
+    assert db.get_media_server_settings() == {
+        "type": "", "url": "", "username": "", "password": "", "api_key": "", "credentials_type": ""
+    }
     saved = ms_settings.save(db, {"type": "subsonic", "url": URL, "username": "u", "password": "p", "api_key": ""})
     assert saved["password"] == "p" and get_media_server_overlay()["type"] == "subsonic"
     # masked secret keeps the stored value
-    again = ms_settings.save(db, {"type": "subsonic", "url": URL, "username": "u2", "password": "********", "api_key": ""})
-    assert again["password"] == "p" and again["username"] == "u2"
-    # switching to none clears everything
-    assert ms_settings.save(db, {"type": "none"}) == {"type": "none", "url": "", "username": "", "password": "", "api_key": ""}
+    again = ms_settings.save(db, {"type": "subsonic", "url": URL, "username": "u", "password": "********", "api_key": ""})
+    assert again["password"] == "p" and again["username"] == "u"
+    # switching to none only deactivates: the saved credentials (and which type they belong to) are kept
+    assert ms_settings.save(db, {"type": "none"}) == {
+        "type": "none", "url": URL, "username": "u", "password": "p", "api_key": "", "credentials_type": "subsonic"
+    }
+    assert get_media_server_overlay()["type"] == "none"
     for bad in (
         {"type": "subsonic", "url": "navidrome", "username": "u", "password": "p"},
         {"type": "subsonic", "url": URL, "username": "u"},
@@ -230,19 +235,24 @@ def test_save_masks_secrets_and_activates(env, monkeypatch):
     assert env.db.get_media_server_settings()["password"] == "hunter2"
     assert "hunter2" not in env.tc.get("/api/settings/media-server", headers=env.admin).text
     # the round trip of the masked value keeps the stored secret
-    again = env.tc.put("/api/settings/media-server", json={**BODY, "password": "********", "username": "bobby"}, headers=env.admin)
+    again = env.tc.put("/api/settings/media-server", json={**BODY, "password": "********"}, headers=env.admin)
     assert again.status_code == 200 and env.db.get_media_server_settings()["password"] == "hunter2"
-    assert env.db.get_media_server_settings()["username"] == "bobby"
     assert Config.from_env().subsonic_configured
 
 
-def test_save_none_clears(env, monkeypatch):
+def test_save_none_deactivates_but_keeps_the_saved_credentials(env, monkeypatch):
     for name in ("MEDIA_SERVER", "PLEX_URL", "PLEX_TOKEN"):
         monkeypatch.delenv(name, raising=False)
     env.tc.put("/api/settings/media-server", json=BODY, headers=env.admin)
     res = env.tc.put("/api/settings/media-server", json={"type": "none"}, headers=env.admin)
     assert res.status_code == 200 and res.json()["effective_type"] == "none"
-    assert env.db.get_media_server_settings()["password"] == ""
+    stored = env.db.get_media_server_settings()
+    assert stored["type"] == "none" and stored["password"] == "hunter2" and stored["credentials_type"] == "subsonic"
+    assert not Config.from_env().subsonic_configured  # inactive: nothing is connected to
+    # switching back with the masked secret still resolves it (same type, URL and username)
+    back = env.tc.put("/api/settings/media-server", json={**BODY, "password": "********"}, headers=env.admin)
+    assert back.status_code == 200 and env.db.get_media_server_settings()["password"] == "hunter2"
+    assert Config.from_env().subsonic_configured
 
 
 def test_incomplete_and_unsafe_saves_are_rejected(env):

@@ -23,6 +23,7 @@ import logging
 import re
 import secrets
 import time
+import weakref
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Callable, Iterator, Optional, Sequence
@@ -82,6 +83,7 @@ _MAX_ATTEMPTS = 3
 _BACKOFF_BASE = 0.5
 _BACKOFF_CAP = 10.0
 _RETRY_STATUS = frozenset({429, 502, 503, 504})
+_MUTATING_RETRY_STATUS = frozenset({429})  # a 5xx may follow a change the server already applied
 # Subsonic error codes -> generic hierarchy. 40-44: auth; 50: not authorised for the operation; 70: not found.
 _AUTH_CODES = frozenset({40, 41, 42, 43, 44})
 _ARTIST_SPLIT = re.compile(r"\s*(?:,|;|/|&|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bwith\b|\band\b|\bx\b)\s*", re.IGNORECASE)
@@ -212,6 +214,9 @@ class SubsonicMediaServer(MediaServer):
         self._password = password
         self._api_key = api_key
         self._http = httpx.Client(verify=verify_ssl, timeout=timeout, transport=transport, follow_redirects=False)
+        # A replaced adapter is simply dropped by the builder: its pooled client is closed once the last in-flight
+        # user lets go of it, never while a sync still holds it (the callback holds the client, not the adapter).
+        self._finalizer = weakref.finalize(self, self._http.close)
         self._sleep = sleep
         self._api_key_checked = False
 
@@ -247,13 +252,15 @@ class SubsonicMediaServer(MediaServer):
     def _request(self, endpoint: str, extra: Sequence[tuple[str, Any]] = (), *, mutating: bool = False) -> dict[str, Any]:
         """One Subsonic call; returns the unwrapped ``subsonic-response`` dict, raises the generic hierarchy.
 
-        429 and 502/503/504 are retried with exponential backoff (honouring Retry-After). Transport failures are
-        retried too for read-only calls; a mutating call is never replayed after a transport failure because the
-        server may already have applied it.
+        Read-only calls retry 429 and 502/503/504 with exponential backoff (honouring Retry-After) and retry transport
+        failures too. A mutating call retries only on 429 (the server rejected it unprocessed): after a 5xx or a
+        transport failure it may already have applied the change, and replaying it would double-apply (a repeated
+        ``createPlaylist`` makes a duplicate playlist, a repeated index removal drops the wrong tracks).
         """
         if self._api_key and not self._api_key_checked:
             self._require_api_key_support()
         url = f"{self._base}/rest/{endpoint}"
+        retry_status = _MUTATING_RETRY_STATUS if mutating else _RETRY_STATUS
         response: Optional[httpx.Response] = None
         for attempt in range(_MAX_ATTEMPTS):
             last = attempt == _MAX_ATTEMPTS - 1
@@ -265,7 +272,7 @@ class SubsonicMediaServer(MediaServer):
                 logger.debug("Subsonic %s transport failure (%s); retrying", endpoint, type(exc).__name__)
                 self._sleep(self._backoff(attempt, None))
                 continue
-            if response.status_code in _RETRY_STATUS and not last:
+            if response.status_code in retry_status and not last:
                 logger.warning("Subsonic %s answered HTTP %s; retrying", endpoint, response.status_code)
                 self._sleep(self._backoff(attempt, response))
                 continue
@@ -373,7 +380,13 @@ class SubsonicMediaServer(MediaServer):
                 logger.debug("Match override lookup failed for '%s': %s", track.title, type(exc).__name__)
                 override = None
             if override and override.get("plex_rating_key"):  # the column holds the server's own item id for every server
-                pinned = self._get_song(str(override["plex_rating_key"]))
+                try:
+                    pinned = self._get_song(str(override["plex_rating_key"]))
+                except MediaServerError as exc:  # stale or unreachable pin: fall back to a normal search, never abort the sync
+                    logger.warning(
+                        "Pinned match for '%s' could not be looked up (%s); searching instead", track.title, type(exc).__name__
+                    )
+                    pinned = None
                 if pinned is not None:
                     return pinned
         # Servers AND every query word, so the query uses the noise-free title (no "(feat. X)" / "Remastered") and
@@ -500,7 +513,9 @@ class SubsonicMediaServer(MediaServer):
         params: list[tuple[str, Any]] = [("playlistId", playlist_id)]
         if change_comment is not None:
             params.append(("comment", change_comment))
-        params.extend(("songIndexToRemove", i) for i in removals)
+        # Highest index first: correct whether a server applies the indexes against the original list or one at a time
+        # against the live list (a lower index removed first would shift every later one).
+        params.extend(("songIndexToRemove", i) for i in sorted(removals, reverse=True))
         params.extend(("songIdToAdd", i) for i in first_add)
         self._request("updatePlaylist", params, mutating=True)
         for chunk in _chunks(rest_add):

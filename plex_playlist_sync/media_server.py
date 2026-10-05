@@ -65,10 +65,11 @@ def _plex_reachable(config: Config, connect: Callable[[], Optional[Any]]) -> boo
     """Whether Plex answers, cached for ``_PROBE_TTL_SECONDS``. The status endpoint is unauthenticated, so it must
     never block on Plex: one caller starts a background refresh and waits at most ``_PROBE_TIMEOUT_SECONDS`` for
     it; every other caller gets the cached (possibly stale) value immediately. With no cache yet, they get False."""
+    view = config.media_server_view()  # one snapshot: a settings save must not mix its URL with the old credentials
     if config.media_server_type == MEDIA_SERVER_SUBSONIC:
-        key = (f"subsonic:{config.subsonic_url}", f"{config.subsonic_user}:{config.subsonic_password}:{config.subsonic_api_key}")
+        key = (f"subsonic:{view.subsonic_url}", f"{view.subsonic_user}:{view.subsonic_password}:{view.subsonic_api_key}")
     elif config.media_server_type == MEDIA_SERVER_JELLYFIN:
-        key = (f"jellyfin:{config.jellyfin_url}", f"{config.jellyfin_user}:{config.jellyfin_api_key}")
+        key = (f"jellyfin:{view.jellyfin_url}", f"{view.jellyfin_user}:{view.jellyfin_api_key}")
     else:
         key = (config.plex_url, config.plex_token)
     with _probe_lock:

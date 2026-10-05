@@ -77,8 +77,8 @@ def test_cli_web_mode_default(mock_plex_class, mock_db_class, mock_server_class,
         code = main()
         assert code == 0
         mock_plex.get_home_users.assert_called_once()
-        mock_db.upsert_user.assert_called_once_with(
-            user_id="user-1", username="Ron", email="ron@test.local", is_admin=True
+        mock_db.import_media_server_user.assert_called_once_with(
+            "user-1", "Ron", "ron@test.local", auth_type="plex", grant_admin=True
         )
         mock_server.run.assert_called_once()
 

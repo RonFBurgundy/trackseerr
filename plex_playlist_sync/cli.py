@@ -6,7 +6,7 @@ import sqlite3
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional, Union
 
 import uvicorn
@@ -19,7 +19,7 @@ from .api.routes.system import get_log_file_path, log_ring_buffer
 from .clients.deezer import DeezerClient
 from .clients.plex import PlexClient
 from .media_server import NO_MEDIA_SERVER_BOOT_MESSAGE
-from .media_servers import MediaServer, MediaServerError, build_jellyfin, build_subsonic
+from .media_servers import MediaServer, MediaServerError, build_jellyfin, build_subsonic, import_server_users
 from .media_servers import settings as media_server_settings
 from .clients.spotify import SpotifyClient
 from .clients.spotify_scraper import SpotifyWebScraper
@@ -175,6 +175,9 @@ class _Clients:
     plex: Optional[Union[PlexClient, MediaServer]] = None
     spotify: Optional[Union[SpotifyClient, SpotifyWebScraper]] = None
     deezer: Optional[DeezerClient] = None
+    # Serialises replacing ``plex`` (the boot connect and Settings-triggered reconnects run on different threads).
+    # Readers just read the attribute once: a reference swap is atomic and the old adapter lives on for whoever holds it.
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
 
 def _connect_clients(config: Config, clients: _Clients, *, fatal_plex: bool) -> bool:
@@ -182,10 +185,14 @@ def _connect_clients(config: Config, clients: _Clients, *, fatal_plex: bool) -> 
     Plex is configured, ``fatal_plex`` is set and Plex is unreachable. With no media server nothing is connected."""
     if config.subsonic_configured:
         with boot_state.step_timer("connecting to Subsonic"):
-            clients.plex = build_subsonic(config)  # lazy: no network here; unreachability surfaces per operation
+            adapter = build_subsonic(config)  # lazy: no network here; unreachability surfaces per operation
+            with clients.lock:
+                clients.plex = adapter
     if config.jellyfin_configured:
         with boot_state.step_timer("connecting to Jellyfin"):
-            clients.plex = build_jellyfin(config)  # lazy: no network here; unreachability surfaces per operation
+            adapter = build_jellyfin(config)  # lazy: no network here; unreachability surfaces per operation
+            with clients.lock:
+                clients.plex = adapter
     if config.plex_enabled:
         with boot_state.step_timer("connecting to Plex"):
             try:
@@ -260,6 +267,32 @@ def _make_plex_provider(
     return provider
 
 
+def _db_base_dir(config: Config) -> str:
+    return config.config_dir if (os.getenv("CONFIG_DIR") or os.path.isdir("/config")) else config.data_dir
+
+
+def _apply_saved_media_server_settings(config: Config) -> None:
+    """Run-once and headless runs open no database, but they usually share the data directory with a web instance
+    where the media server was chosen on the Settings page. When the environment names no media server and that
+    database already exists, load the saved choice (read once, then closed) so these runs sync to the same server.
+    A missing or unreadable database leaves the environment-only behaviour in place."""
+    if config.media_server_env_controlled:
+        return
+    try:
+        db_path = safe_data_path("sync_db.sqlite", base_dir=_db_base_dir(config))
+        if not os.path.exists(db_path):
+            return
+        db = Database(str(db_path))
+    except (PermissionError, sqlite3.Error, OSError, ValueError) as e:
+        logger.warning("Could not read the saved media-server settings: %s", safe_exc(e))
+        return
+    try:
+        media_server_settings.load_into_process(db)
+        config.apply_media_server_overlay()
+    finally:
+        db.close()
+
+
 def _discover_plex_users(db: Database, plex_client: PlexClient) -> None:
     """Auto-discover Plex Home users and populate the database."""
     try:
@@ -269,14 +302,10 @@ def _discover_plex_users(db: Database, plex_client: PlexClient) -> None:
             admin_flag = bool(u.get("is_admin", u.get("admin", False)))
             if db.is_tombstoned(str(u["id"])):
                 continue  # deleted by an admin; only an explicit restore lets them back in
-            known = db.get_user(str(u["id"]))
-            admin_flag = admin_flag or bool(known and known["is_admin"])
-            db.upsert_user(
-                user_id=str(u["id"]),
-                username=str(uname),
-                email=u.get("email"),
-                is_admin=admin_flag,
-            )
+            if db.import_media_server_user(
+                str(u["id"]), str(uname), u.get("email"), auth_type="plex", grant_admin=admin_flag
+            ) is None:
+                logger.warning("Skipped Plex user '%s': that name already belongs to a different Trackseerr account", uname)
         logger.info("Successfully discovered %d Plex Home users", len(home_users))
     except Exception as e:  # network + plexapi + sqlite; startup must continue, root cause is logged
         logger.warning("Could not auto-discover Plex Home users on startup: %s", safe_exc(e))
@@ -284,23 +313,24 @@ def _discover_plex_users(db: Database, plex_client: PlexClient) -> None:
 
 def _discover_media_server_users(db: Database, server: MediaServer) -> None:
     """Populate the user table from a non-Plex media server that has real accounts (Jellyfin), so playlists can be
-    targeted at them. Startup continues when the server is unreachable; the cause is logged."""
+    targeted at them. Never raises: startup (or the Settings reconnect thread) continues when the server is unreachable
+    or one account cannot be stored; the cause is logged."""
     try:
         users = server.list_users()
     except MediaServerError as exc:
         logger.warning("Could not discover %s users on startup: %s", server.kind, exc.safe_detail)
         return
-    for u in users:
-        if db.is_tombstoned(u.id):
-            continue  # deleted by an admin; only an explicit restore lets them back in
-        known = db.get_user(u.id)
-        db.upsert_user(
-            user_id=u.id,
-            username=u.name,
-            email=u.extra.get("email") or None,
-            is_admin=u.is_admin or bool(known and known["is_admin"]),
-        )
-    logger.info("Discovered %d %s users", len(users), server.kind)
+    except Exception as exc:  # an adapter bug or an unexpected payload must not stop the boot; root cause is logged
+        logger.warning("Could not discover %s users on startup: %s", server.kind, safe_exc(exc))
+        logger.debug("User discovery traceback", exc_info=True)
+        return
+    try:
+        imported, skipped = import_server_users(db, server.kind, users)
+    except Exception as exc:  # the import loop guards each account; this is the last resort for the loop itself
+        logger.warning("Importing %s users failed: %s", server.kind, safe_exc(exc))
+        logger.debug("User import traceback", exc_info=True)
+        return
+    logger.info("Discovered %d %s users (%d imported, %d skipped)", len(users), server.kind, imported, skipped)
 
 
 def _start_sync_scheduler(
@@ -549,8 +579,12 @@ def _background_init(
     finally:
         clients_ready.set()  # success or failure: the scheduler must not wait forever
     if isinstance(clients.plex, MediaServer) and clients.plex.capabilities.users:
-        with boot_state.step_timer(f"discovering {clients.plex.kind} users", publish=False):
-            _discover_media_server_users(db, clients.plex)
+        try:
+            with boot_state.step_timer(f"discovering {clients.plex.kind} users", publish=False):
+                _discover_media_server_users(db, clients.plex)
+        except Exception as e:  # mirrors the Plex path: user discovery degrades, it never blocks the workers below
+            logger.error("%s user discovery failed; continuing degraded: %s", clients.plex.kind, safe_exc(e))
+            logger.debug("User discovery traceback", exc_info=True)
     if clients.plex is not None and not isinstance(clients.plex, MediaServer):  # a raw Plex client, not a MediaServer adapter
         try:
             with boot_state.step_timer("discovering Plex Home users", publish=False):
@@ -626,6 +660,7 @@ def main() -> int:
 
     # Run-once and headless modes have no web server, so the connection checks stay synchronous.
     if role != "gateway" and (config.run_once or config.headless):
+        _apply_saved_media_server_settings(config)
         if not _connect_clients(config, clients, fatal_plex=True):
             return 1
         coordinator = SyncCoordinator(
@@ -658,7 +693,7 @@ def main() -> int:
         return 0
 
     # 3. Web UI & REST Server Mode (Default)
-    db_base_dir = config.config_dir if (os.getenv("CONFIG_DIR") or os.path.isdir("/config")) else config.data_dir
+    db_base_dir = _db_base_dir(config)
     with boot_state.step_timer("database open + migrations", publish=False):
         if role == "gateway":
             try:
@@ -703,21 +738,24 @@ def main() -> int:
         config.apply_media_server_overlay()
 
         def _reconnect_media_server() -> None:
-            config.apply_media_server_overlay()
-            if clients.plex is None or isinstance(clients.plex, MediaServer):  # never replace a connected Plex client
-                if config.subsonic_configured:
-                    clients.plex = build_subsonic(config)
-                elif config.jellyfin_configured:
-                    clients.plex = build_jellyfin(config)
-                else:
-                    clients.plex = None
-                if isinstance(clients.plex, MediaServer) and clients.plex.capabilities.users:
-                    threading.Thread(  # off the request thread: the server may be slow or down
-                        target=_discover_media_server_users,
-                        args=(db, clients.plex),
-                        name="media-server-user-discovery",
-                        daemon=True,
-                    ).start()
+            with clients.lock:  # one reconnect at a time: the overlay, the new adapter and the assignment go together
+                config.apply_media_server_overlay()
+                adapter: Optional[Union[PlexClient, MediaServer]] = clients.plex
+                if clients.plex is None or isinstance(clients.plex, MediaServer):  # never replace a connected Plex client
+                    if config.subsonic_configured:
+                        adapter = build_subsonic(config)
+                    elif config.jellyfin_configured:
+                        adapter = build_jellyfin(config)
+                    else:
+                        adapter = None
+                    clients.plex = adapter  # a sync in flight keeps the adapter it already holds
+            if isinstance(adapter, MediaServer) and adapter.capabilities.users:
+                threading.Thread(  # off the request thread: the server may be slow or down
+                    target=_discover_media_server_users,
+                    args=(db, adapter),
+                    name="media-server-user-discovery",
+                    daemon=True,
+                ).start()
             logger.info("Media server settings changed: now using '%s'", config.media_server_type)
 
         media_server_settings.on_change(_reconnect_media_server)

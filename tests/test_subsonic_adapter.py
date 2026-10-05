@@ -178,6 +178,24 @@ class TestRetry:
             server.refresh_library()
         assert calls["n"] == 1  # a startScan / playlist write is never replayed after a transport failure
 
+    @pytest.mark.parametrize("code", [502, 503, 504])
+    @pytest.mark.parametrize("endpoint", ["createPlaylist", "updatePlaylist"])
+    def test_playlist_writes_are_not_replayed_on_5xx(self, code: int, endpoint: str) -> None:
+        server, fake, sleeps = make()
+        if endpoint == "updatePlaylist":
+            server.sync_playlist(pl("Song A"), [""], PlaylistSyncOptions())
+        fake.state.respond_with = lambda ep, n: raw_json(code, {}) if ep == endpoint else None
+        fake.state.request_counts.clear()
+        with pytest.raises(MediaServerConnectionError):
+            server.sync_playlist(pl("Song A", "Song B") if endpoint == "updatePlaylist" else pl("Song B", name="New"), [""], PlaylistSyncOptions())
+        assert fake.state.request_counts[endpoint] == 1 and sleeps == []
+
+    def test_playlist_write_is_retried_on_429(self) -> None:
+        server, fake, sleeps = make()
+        fake.state.respond_with = lambda ep, n: raw_json(429, {}) if (ep == "createPlaylist" and n == 1) else None
+        server.sync_playlist(pl("Song A"), [""], PlaylistSyncOptions())
+        assert fake.state.request_counts["createPlaylist"] == 2 and sleeps == [0.5]
+
     def test_html_response_is_a_clear_error(self) -> None:
         server, fake, _ = make()
         fake.state.respond_with = lambda ep, n: httpx.Response(200, text="<html>login</html>")
@@ -400,3 +418,30 @@ def test_song_from_api_collects_opensubsonic_artists() -> None:
         {"id": "1", "title": "T", "artist": "A feat. B", "artists": [{"name": "A"}, {"name": "B"}], "duration": 10}
     )
     assert song.artists == ("A feat. B", "A", "B") and song.duration == 10.0
+
+
+@pytest.mark.parametrize("sequential", [False, True])
+def test_index_removals_are_sent_highest_first_and_correct_under_both_server_semantics(sequential: bool) -> None:
+    server, fake, _ = make()
+    fake.state.sequential_removal = sequential
+    server.sync_playlist(pl("Song A", "Song B", "Song C", "Song D"), [""], PlaylistSyncOptions())
+    fake.state.calls.clear()
+    server.sync_playlist(pl("Song A", "Song C"), [""], PlaylistSyncOptions())  # drops indexes 1 and 3
+    (update,) = [params for ep, params in fake.state.calls if ep == "updatePlaylist"]
+    sent = [int(v) for k, v in update if k == "songIndexToRemove"]
+    assert sent == sorted(sent, reverse=True) == [3, 1]
+    assert titles(fake) == ["Song A", "Song C"]
+
+
+def test_stale_override_lookup_failure_falls_back_to_search(caplog) -> None:
+    server, fake, _ = make()
+
+    class DB:
+        def get_match_override(self, title, artist):
+            return {"plex_rating_key": "gone"}
+
+    fake.state.respond_with = lambda ep, n: raw_json(500, {}) if ep == "getSong" else None
+    with caplog.at_level(logging.WARNING):
+        ref = server.match_track(Track("Song A", "Artist 1", "Album X"), db=DB())
+    assert ref is not None and ref.id == "s1"
+    assert any("Pinned match" in r.getMessage() for r in caplog.records)

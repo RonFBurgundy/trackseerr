@@ -108,7 +108,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({ adminHook, currentUserId
             </div>
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
               <TabStrip fill>
-                {(['all', 'plex', 'local'] as const).map((t) => (
+                {(['all', 'plex', 'local', 'jellyfin'] as const).map((t) => (
                   <TapeDeckButton
                     key={t}
                     size="sm"

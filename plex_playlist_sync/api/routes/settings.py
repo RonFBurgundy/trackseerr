@@ -612,6 +612,7 @@ def _media_server_values(payload: MediaServerSettingsPayload) -> dict[str, str]:
     "/media-server",
     response_model=MediaServerSettingsResponse,
     summary="Get the saved media-server settings (secrets masked)",
+    dependencies=[Depends(require_core_tier)],
 )
 def get_media_server_settings(
     db: Database = Depends(get_db),
@@ -666,6 +667,7 @@ def update_media_server_settings(
     "/media-server/test",
     response_model=MediaServerTestResponse,
     summary="Test a media-server connection without saving it (Admin Only)",
+    dependencies=[Depends(require_core_tier)],
 )
 def test_media_server_settings(
     payload: MediaServerSettingsPayload,

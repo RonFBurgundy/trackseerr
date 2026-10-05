@@ -4,7 +4,13 @@ import logging
 import threading
 from typing import Any, Optional
 
-from plex_playlist_sync.config import MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_PLEX, MEDIA_SERVER_SUBSONIC, Config
+from plex_playlist_sync.config import (
+    MEDIA_SERVER_JELLYFIN,
+    MEDIA_SERVER_PLEX,
+    MEDIA_SERVER_SOURCE_SETTINGS,
+    MEDIA_SERVER_SUBSONIC,
+    Config,
+)
 from plex_playlist_sync.media_servers.base import (
     NO_CAPABILITIES,
     ConnectionTest,
@@ -24,7 +30,9 @@ from plex_playlist_sync.media_servers.base import (
 from plex_playlist_sync.media_servers.jellyfin import JELLYFIN_CAPABILITIES, JellyfinMediaServer
 from plex_playlist_sync.media_servers.plex import PLEX_CAPABILITIES, PlexMediaServer, plex_extras
 from plex_playlist_sync.media_servers.subsonic import SUBSONIC_CAPABILITIES, SubsonicMediaServer
+from plex_playlist_sync.media_servers.user_import import import_server_users
 from plex_playlist_sync.redaction import safe_exc
+from plex_playlist_sync.security import is_safe_service_url
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +63,15 @@ def get_media_server(config: Config, *, plex_client: Optional[Any] = None) -> Op
     return None
 
 
+def _saved_url_is_unsafe(source: str, kind: str, url: str) -> bool:
+    """True (and logged) when a URL that came from the Settings page, not the operator's environment, fails the SSRF
+    check. The save/test routes check it too; this covers rows saved before the check existed or written directly."""
+    if source != MEDIA_SERVER_SOURCE_SETTINGS or is_safe_service_url(url):
+        return False
+    logger.error("Refusing to connect to the saved %s URL: it is not an allowed service address", kind)
+    return True
+
+
 _subsonic_lock = threading.Lock()
 _subsonic_cached: Optional[tuple[tuple[Any, ...], SubsonicMediaServer]] = None
 
@@ -62,36 +79,33 @@ _subsonic_cached: Optional[tuple[tuple[Any, ...], SubsonicMediaServer]] = None
 def build_subsonic(config: Config) -> Optional[SubsonicMediaServer]:
     """The Subsonic adapter for ``config`` (env, else the Settings page), or None when it is incomplete.
 
-    One adapter (one pooled HTTP client) is shared per distinct configuration and replaced, with the old client
-    closed, when the settings change. No network call is made here: connectivity is checked by ``test_connection``
-    and surfaces per operation.
+    One adapter (one pooled HTTP client) is shared per distinct configuration. When the settings change a new adapter
+    replaces it; the old one is NOT closed here because a running sync may still be using it. Its HTTP client closes
+    when the last holder lets go of it. All values come from one ``config.media_server_view()`` snapshot, so a save that
+    lands mid-call can never pair the new URL with the old credentials. No network call is made here: connectivity is
+    checked by ``test_connection`` and surfaces per operation.
     """
     global _subsonic_cached
-    if not config.subsonic_configured:
+    view = config.media_server_view()
+    if not config.subsonic_ready(view):
         return None
-    key = (
-        config.subsonic_url,
-        config.subsonic_user,
-        config.subsonic_password,
-        config.subsonic_api_key,
-        config.plex_verify_ssl,
-    )
+    if _saved_url_is_unsafe(view.source, "Subsonic", view.subsonic_url):
+        return None
+    key = (view.subsonic_url, view.subsonic_user, view.subsonic_password, view.subsonic_api_key, config.plex_verify_ssl)
     with _subsonic_lock:
         if _subsonic_cached is not None and _subsonic_cached[0] == key:
             return _subsonic_cached[1]
         try:
             server = SubsonicMediaServer(
-                config.subsonic_url,
-                config.subsonic_user,
-                config.subsonic_password,
-                api_key=config.subsonic_api_key,
+                view.subsonic_url,
+                view.subsonic_user,
+                view.subsonic_password,
+                api_key=view.subsonic_api_key,
                 verify_ssl=config.plex_verify_ssl,
             )
         except MediaServerError as exc:
             logger.error("Failed to initialize Subsonic media server: %s", exc.safe_detail)
             return None
-        if _subsonic_cached is not None:
-            _subsonic_cached[1].close()
         _subsonic_cached = (key, server)
         return server
 
@@ -103,24 +117,26 @@ _jellyfin_cached: Optional[tuple[tuple[Any, ...], JellyfinMediaServer]] = None
 def build_jellyfin(config: Config) -> Optional[JellyfinMediaServer]:
     """The Jellyfin adapter for ``config`` (env, else the Settings page), or None when it is incomplete.
 
-    Shared per distinct configuration like :func:`build_subsonic`; no network call is made here.
+    Shared per distinct configuration like :func:`build_subsonic` (one consistent snapshot, replaced adapters are not
+    closed under a running sync); no network call is made here.
     """
     global _jellyfin_cached
-    if not config.jellyfin_configured:
+    view = config.media_server_view()
+    if not config.jellyfin_ready(view):
         return None
-    key = (config.jellyfin_url, config.jellyfin_api_key, config.jellyfin_user, config.plex_verify_ssl)
+    if _saved_url_is_unsafe(view.source, "Jellyfin", view.jellyfin_url):
+        return None
+    key = (view.jellyfin_url, view.jellyfin_api_key, view.jellyfin_user, config.plex_verify_ssl)
     with _jellyfin_lock:
         if _jellyfin_cached is not None and _jellyfin_cached[0] == key:
             return _jellyfin_cached[1]
         try:
             server = JellyfinMediaServer(
-                config.jellyfin_url, config.jellyfin_api_key, config.jellyfin_user, verify_ssl=config.plex_verify_ssl
+                view.jellyfin_url, view.jellyfin_api_key, view.jellyfin_user, verify_ssl=config.plex_verify_ssl
             )
         except MediaServerError as exc:
             logger.error("Failed to initialize Jellyfin media server: %s", exc.safe_detail)
             return None
-        if _jellyfin_cached is not None:
-            _jellyfin_cached[1].close()
         _jellyfin_cached = (key, server)
         return server
 
@@ -176,5 +192,6 @@ __all__ = [
     "capabilities_for",
     "describe_error",
     "get_media_server",
+    "import_server_users",
     "plex_extras",
 ]

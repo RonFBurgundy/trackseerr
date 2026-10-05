@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 SECRET_PLACEHOLDER = "********"
 SECRET_FIELDS = ("password", "api_key")
+_SECRET_FIELDS_BY_TYPE = {MEDIA_SERVER_SUBSONIC: ("password", "api_key"), MEDIA_SERVER_JELLYFIN: ("api_key",)}
 SETTABLE_TYPES = (MEDIA_SERVER_SUBSONIC, MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_NONE)  # Plex is environment-only
 
 _listeners: list[Callable[[], None]] = []
@@ -86,19 +87,34 @@ def _norm_url(url: str) -> str:
     return (url or "").strip().rstrip("/").lower()
 
 
+def _credentials_owner(stored: dict[str, str]) -> str:
+    """The server type the saved credentials belong to (``type`` is only the active choice and can be ``none``)."""
+    return (stored.get("credentials_type") or stored.get("type") or "").strip().lower()
+
+
 def merge_secrets(incoming: dict[str, str], stored: dict[str, str]) -> dict[str, str]:
     """``incoming`` with each ``********`` secret replaced by the stored value (empty when there is none).
 
-    A saved Jellyfin API key is only ever resolved for the server it was saved for: a masked key submitted with a
-    different URL raises :class:`SecretReuseError`, so the saved key cannot be sent to a new host.
+    A saved secret is only ever resolved for the server it was saved for, so it can never be sent to another host or
+    be reinterpreted as another server type's credential. A masked secret submitted with a different server type, a
+    different URL or (for a Subsonic password) a different username raises :class:`SecretReuseError`.
     """
     merged = dict(incoming)
-    if (merged.get("type") or "").strip().lower() == MEDIA_SERVER_JELLYFIN and merged.get("api_key") == SECRET_PLACEHOLDER:
-        same_server = (stored.get("type") or "").strip().lower() == MEDIA_SERVER_JELLYFIN and _norm_url(
-            merged.get("url", "")
-        ) == _norm_url(stored.get("url", ""))
-        if stored.get("api_key") and not same_server:
-            raise SecretReuseError("The server URL changed: enter the API key again instead of keeping the saved one")
+    kind = (merged.get("type") or "").strip().lower()
+    used = [
+        f for f in _SECRET_FIELDS_BY_TYPE.get(kind, ()) if merged.get(f) == SECRET_PLACEHOLDER and stored.get(f)
+    ]
+    if used:
+        if _credentials_owner(stored) != kind:
+            raise SecretReuseError("The saved credentials belong to a different media server type: enter them again")
+        if _norm_url(merged.get("url", "")) != _norm_url(stored.get("url", "")):
+            raise SecretReuseError(
+                "The server URL changed: enter the "
+                + ("password" if used == ["password"] else "API key" if used == ["api_key"] else "credentials")
+                + " again instead of keeping the saved one"
+            )
+        if "password" in used and (merged.get("username") or "").strip() != (stored.get("username") or "").strip():
+            raise SecretReuseError("The username changed: enter the password again instead of keeping the saved one")
     for key in SECRET_FIELDS:
         if merged.get(key) == SECRET_PLACEHOLDER:
             merged[key] = stored.get(key, "")
@@ -132,8 +148,20 @@ def validate(values: dict[str, str]) -> dict[str, str]:
 
 def save(db: Any, incoming: dict[str, str]) -> dict[str, str]:
     """Validate, persist and activate ``incoming``; returns the stored (unmasked) values."""
-    merged = merge_secrets(incoming, db.get_media_server_settings())
+    stored = db.get_media_server_settings()
+    merged = merge_secrets(incoming, stored)
     clean = validate(merged)
+    if clean["type"] == MEDIA_SERVER_NONE:
+        # Turning the server off only changes which one is active: what was saved for the previous type stays.
+        owner = _credentials_owner(stored)
+        keep = owner in _SECRET_FIELDS_BY_TYPE
+        clean = {
+            "type": MEDIA_SERVER_NONE,
+            "credentials_type": owner if keep else "",
+            **{k: (stored[k] if keep else "") for k in ("url", "username", "password", "api_key")},
+        }
+    else:
+        clean = {**clean, "credentials_type": clean["type"]}
     saved = db.save_media_server_settings(clean)
     set_media_server_overlay(saved)
     _notify()

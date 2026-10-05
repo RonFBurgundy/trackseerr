@@ -13,6 +13,13 @@ Protocol notes
     noise-free title and candidates are ranked with the same scorer as the Subsonic adapter, including the +-3 s
     duration check (``RunTimeTicks`` is 100 ns ticks).
 
+Ownership: the playlist list for a user (``/Items?IncludeItemTypes=Playlist&UserId=``) also contains other accounts'
+PUBLIC playlists, and Jellyfin lets an API key remove entries from any of them. Before touching a same-named playlist
+the adapter therefore asks the server whether the target may edit it, with an empty ``POST /Playlists/{id}/Items?UserId=``
+(204 = may edit, 403 = visible but not theirs, 404 = not visible). ``GET /Playlists/{id}`` cannot be used: with an API key
+it answers 400 (it needs a user session). A playlist the target does not own is never modified; the target gets its own
+(a playlist another account explicitly shared with edit rights counts as editable).
+
 Playlist ordering: a sync keeps the playlist id (and with it sharing / cover art). ``/Playlists/{id}/Items/{entry}/Move``
 exists but needs a user session: with an API key Jellyfin answers 400 (found against a real 12.1 server). So the order is
 expressed with remove-by-``EntryIds`` and append, like the Subsonic adapter: the longest prefix of the wanted order that
@@ -26,6 +33,7 @@ never sent twice.
 
 import logging
 import time
+import weakref
 from typing import Any, Callable, Iterator, Optional, Sequence
 
 import httpx
@@ -66,6 +74,7 @@ JELLYFIN_CAPABILITIES = ServerCapabilities(playlists=True, users=True, library_r
 CLIENT_NAME = "Trackseerr"
 _TICKS_PER_SECOND = 10_000_000
 _PAGE = 200  # list pages (playlists, playlist entries)
+_MAX_PAGES = 1000  # hard stop for a listing (200k rows at the default page size)
 _SEARCH_PAGE = 50
 _SEARCH_MAX = 150  # candidates inspected per query before giving up
 _ID_CHUNK = 50  # item / entry ids per request: keeps query strings far below common 8 KB proxy limits
@@ -73,6 +82,11 @@ _MAX_ATTEMPTS = 3
 _BACKOFF_BASE = 0.5
 _BACKOFF_CAP = 10.0
 _RETRY_STATUS = frozenset({429, 502, 503, 504})
+
+
+def _page_key(item: dict[str, Any]) -> str:
+    """Identity of a list row: the playlist entry id when there is one (a track may repeat), else the item id."""
+    return str(item.get("PlaylistItemId") or item.get("Id") or repr(sorted(item.items(), key=lambda kv: kv[0]))[:200])
 
 
 def _song_from_item(item: dict[str, Any]) -> _Song:
@@ -145,6 +159,9 @@ class JellyfinMediaServer(MediaServer):
         self._http = httpx.Client(
             verify=verify_ssl, timeout=timeout, transport=transport, follow_redirects=False, headers=headers
         )
+        # A replaced adapter is simply dropped by the builder: its pooled client is closed once the last in-flight
+        # user lets go of it, never while a sync still holds it (the callback holds the client, not the adapter).
+        self._finalizer = weakref.finalize(self, self._http.close)
         self._sleep = sleep
 
     @property
@@ -226,16 +243,27 @@ class JellyfinMediaServer(MediaServer):
             raise MediaServerError(detail, safe_detail=detail) from exc
 
     def _paged(self, path: str, params: Sequence[tuple[str, Any]], page: int = _PAGE) -> Iterator[dict[str, Any]]:
-        """Every item of a list endpoint, following ``StartIndex`` / ``Limit`` until ``TotalRecordCount`` is reached."""
+        """Every item of a list endpoint, following ``StartIndex`` / ``Limit`` until ``TotalRecordCount`` is reached.
+
+        Never loops forever: it stops after ``_MAX_PAGES`` requests and as soon as a page brings nothing new (a server
+        that ignores ``StartIndex`` would otherwise serve the same page endlessly).
+        """
         start = 0
-        while True:
+        seen: set[str] = set()
+        for _ in range(_MAX_PAGES):
             body = self._request("GET", path, [*params, ("StartIndex", start), ("Limit", page)])
             items = [i for i in (body or {}).get("Items") or [] if isinstance(i, dict)]
-            yield from items
+            fresh = [i for i in items if _page_key(i) not in seen]
+            if items and not fresh:
+                logger.warning("Jellyfin repeated a page of %s; stopping the listing", path)
+                return
+            seen.update(_page_key(i) for i in fresh)
+            yield from fresh
             total = (body or {}).get("TotalRecordCount")
             start += len(items)  # a server may cap Limit below what was asked: continue from what actually arrived
             if not items or (start >= total if isinstance(total, int) else len(items) < page):
                 return
+        logger.warning("Jellyfin listing of %s exceeded %d pages; stopping", path, _MAX_PAGES)
 
     # ------------------------------------------------------------------ MediaServer
 
@@ -290,7 +318,10 @@ class JellyfinMediaServer(MediaServer):
             if override and override.get("plex_rating_key"):  # the column holds the server's own item id for every server
                 try:
                     pinned = self._get_song(str(override["plex_rating_key"]))
-                except MediaServerNotFound:
+                except MediaServerError as exc:  # stale or unreachable pin: fall back to a normal search, never abort the sync
+                    logger.warning(
+                        "Pinned match for '%s' could not be looked up (%s); searching instead", track.title, type(exc).__name__
+                    )
                     pinned = None
                 if pinned is not None:
                     return pinned
@@ -355,6 +386,8 @@ class JellyfinMediaServer(MediaServer):
     def list_users(self) -> list[ServerUser]:
         body = self._request("GET", "/Users")
         users = body if isinstance(body, list) else []
+        # A disabled account is neither imported nor offered as a playlist target. ``Policy.IsHidden`` is NOT used: it only
+        # hides a user from the login screen and a real 12.1 server sets it to true for ordinary accounts by default.
         return [
             ServerUser(
                 id=str(u["Id"]),
@@ -363,7 +396,10 @@ class JellyfinMediaServer(MediaServer):
                 extra={"email": ""},
             )
             for u in users
-            if isinstance(u, dict) and u.get("Id") and u.get("Name")
+            if isinstance(u, dict)
+            and u.get("Id")
+            and u.get("Name")
+            and not (u.get("Policy") or {}).get("IsDisabled", False)
         ]
 
     # ------------------------------------------------------------------ playlists
@@ -375,18 +411,36 @@ class JellyfinMediaServer(MediaServer):
             return next((u for u in users if u.name.lower() == wanted or u.id.lower() == wanted), None)
         return next((u for u in users if u.is_admin), None)
 
+    def _can_edit(self, playlist_id: str, user_id: str) -> bool:
+        """Whether ``user_id`` may edit the playlist, asked with an empty add (a no-op write the server authorises as
+        that user): 204 yes, 403 visible but someone else's, 404 not visible to them."""
+        try:
+            self._request("POST", f"/Playlists/{playlist_id}/Items", [("Ids", ""), ("UserId", user_id)])
+        except MediaServerNotFound:
+            return False
+        except MediaServerAuthError as exc:
+            if "HTTP 403" in exc.safe_detail:  # a 403 here is about this playlist; a 401 (bad key) is not
+                return False
+            raise
+        return True
+
     def _find_playlist(self, user_id: str, name: str) -> Optional[str]:
-        found = [
-            str(p["Id"])
-            for p in self._paged(
-                "/Items",
-                [("IncludeItemTypes", "Playlist"), ("Recursive", "true"), ("MediaTypes", "Audio"), ("UserId", user_id)],
-            )
-            if p.get("Id") and p.get("Name") == name
-        ]
-        if len(found) > 1:
-            logger.warning("Jellyfin has %d playlists named '%s'; updating the first", len(found), name)
-        return found[0] if found else None
+        """The id of the target's own playlist called ``name``. Other accounts' public playlists that carry the same
+        name are listed too but are never returned, so they are never modified."""
+        owned: list[str] = []
+        for p in self._paged(
+            "/Items",
+            [("IncludeItemTypes", "Playlist"), ("Recursive", "true"), ("MediaTypes", "Audio"), ("UserId", user_id)],
+        ):
+            if not p.get("Id") or p.get("Name") != name:
+                continue
+            if self._can_edit(str(p["Id"]), user_id):
+                owned.append(str(p["Id"]))
+            else:
+                logger.info("Ignoring another account's playlist named '%s'; the user gets their own", name)
+        if len(owned) > 1:
+            logger.warning("Jellyfin has %d playlists named '%s' for this user; updating the first", len(owned), name)
+        return owned[0] if owned else None
 
     def _entries(self, playlist_id: str, user_id: str) -> list[tuple[str, str]]:
         return [
@@ -456,8 +510,15 @@ class JellyfinMediaServer(MediaServer):
                 logger.warning("No tracks in playlist '%s' could be matched on the Jellyfin server", playlist.name)
                 outcome = SyncResult(playlist.name, total, 0, len(missing), False, "Zero tracks matched on the Jellyfin server")
             else:
-                self._push(playlist, user, ids, options)
-                outcome = SyncResult(playlist.name, total, len(matched), len(missing), True)
+                try:
+                    self._push(playlist, user, ids, options)
+                except (MediaServerAuthError, MediaServerConnectionError):
+                    raise  # the key or the server is the problem: it applies to every target
+                except MediaServerError as exc:  # e.g. this user cannot see the library: the other targets still sync
+                    logger.warning("Jellyfin sync of '%s' failed for one target: %s", playlist.name, exc.safe_detail)
+                    outcome = SyncResult(playlist.name, total, len(matched), len(missing), False, exc.safe_detail)
+                else:
+                    outcome = SyncResult(playlist.name, total, len(matched), len(missing), True)
             done[user.id] = outcome
             results.append(outcome)
         return results

@@ -259,8 +259,9 @@ def verify_pin(
             )
 
     # A Plex name may not shadow a local account's username (impersonation).
-    shadowed = db.get_user_by_username(username)
-    if shadowed is not None and shadowed["id"] != str(user_id) and shadowed.get("auth_type") == "local":
+    if any(
+        other["id"] != str(user_id) and other.get("auth_type") == "local" for other in db.list_users_by_username(username)
+    ):
         logger.warning("Refused Plex login: username collides with a local account")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

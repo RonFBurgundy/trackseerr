@@ -252,7 +252,10 @@ def test_discover_media_server_users_populates_the_user_table():
     adapter = JellyfinMediaServer(URL, API_KEY, transport=fake.transport(), sleep=lambda _s: None)
     _discover_media_server_users(db, adapter)
     users = {u["username"]: u for u in db.list_users()}
-    assert {"admin", "kid"} <= set(users) and users["admin"]["is_admin"] and not users["kid"]["is_admin"]
+    assert {"admin", "kid"} <= set(users)
+    # a Jellyfin administrator is NOT a Trackseerr administrator, and imported accounts have no Trackseerr login
+    assert not users["admin"]["is_admin"] and not users["kid"]["is_admin"]
+    assert users["admin"]["auth_type"] == "jellyfin" and users["kid"]["auth_type"] == "jellyfin"
 
 
 def test_discover_media_server_users_survives_an_unreachable_server():

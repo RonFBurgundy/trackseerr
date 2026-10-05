@@ -19,7 +19,7 @@ from plex_playlist_sync.api.dependencies import (
 )
 from plex_playlist_sync.api.routes.admin_users import MAX_QUOTA, MAX_WINDOW_DAYS, apply_user_changes
 from plex_playlist_sync.clients.plex import PlexClient
-from plex_playlist_sync.media_servers import MediaServer, as_media_server, describe_error
+from plex_playlist_sync.media_servers import MediaServer, as_media_server, describe_error, import_server_users
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.models import UserPermission
 from plex_playlist_sync.redaction import safe_exc
@@ -172,17 +172,7 @@ def refresh_users(
             detail=f"Failed to query Plex users: {describe_error(e)}",
         )
 
-    for u in discovered_users:
-        uid = u.id
-        if db.is_tombstoned(uid):
-            continue  # deleted by an admin; only an explicit restore lets them back in
-        existing = db.get_user(uid)
-        db.upsert_user(
-            user_id=uid,
-            username=u.name,
-            email=u.extra.get("email") or None,
-            # Never silently demote an admin that was granted in the UI.
-            is_admin=u.is_admin or bool(existing and existing["is_admin"]),
-        )
+    imported, skipped = import_server_users(db, server.kind, discovered_users)
+    logger.info("User refresh: %d imported, %d skipped", imported, skipped)
 
     return db.list_users()

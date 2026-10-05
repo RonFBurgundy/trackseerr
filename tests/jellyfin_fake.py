@@ -6,6 +6,11 @@ Modelled on the Jellyfin 10.10 REST API and checked against a real server by
 pages ``/Items`` and ``/Playlists/{id}/Items`` with ``StartIndex`` / ``Limit`` / ``TotalRecordCount``, matches
 ``SearchTerm`` against the item name only, gives every playlist entry its own ``PlaylistItemId``, removes by
 ``EntryIds`` and answers ``Move/{newIndex}`` with 400 like a real server does for an API key (it needs a user session).
+
+Ownership (probed on a real 12.1 server): ``/Items?IncludeItemTypes=Playlist&UserId=`` lists the user's own playlists
+AND every other account's PUBLIC ones; ``GET /Playlists/{id}`` answers 400 for an API key; ``POST /Playlists/{id}/Items
+?UserId=`` is authorised as that user (204 owner, 403 visible but not theirs, 404 not visible; an empty ``Ids`` is a
+no-op used as a permission probe); ``DELETE /Playlists/{id}/Items`` has no user and removes from ANY playlist.
 """
 
 import re
@@ -47,6 +52,8 @@ class FakeUser:
     id: str
     name: str
     admin: bool = False
+    disabled: bool = False
+    hidden: bool = True  # real Jellyfin 12.1 defaults IsHidden (hidden from the login screen) to true
 
 
 @dataclass
@@ -67,6 +74,8 @@ class JellyfinState:
     transport_failure: Optional[Callable[[], Exception]] = None
     respond_with: Optional[Callable[[str, str, int], Optional[httpx.Response]]] = None
     request_counts: dict[str, int] = field(default_factory=dict)
+    ignore_start_index: bool = False  # a misbehaving server that serves the first page for every StartIndex
+    add_refused_for: set[str] = field(default_factory=set)  # user ids whose playlist writes answer 400 (no library access)
 
     def song(self, item_id: str) -> Optional[FakeAudio]:
         return next((s for s in self.songs if s.id == item_id), None)
@@ -126,15 +135,15 @@ class FakeJellyfin:
             route("GET", r"/Items", self._items),
             route("POST", r"/Library/Refresh", self._refresh),
             route("POST", r"/Playlists", self._create_playlist),
+            route("GET", r"/Playlists/([^/]+)", lambda request, query, playlist_id: httpx.Response(400, text="Error processing request.")),
             route("GET", r"/Playlists/([^/]+)/Items", self._playlist_items),
             route("POST", r"/Playlists/([^/]+)/Items", self._add_items),
             route("DELETE", r"/Playlists/([^/]+)/Items", self._remove_items),
             route("POST", r"/Playlists/([^/]+)/Items/([^/]+)/Move/(\d+)", self._move),
         ]
 
-    @staticmethod
-    def _page(items: list[dict[str, Any]], query: dict[str, str], cap: int) -> dict[str, Any]:
-        start = int(query.get("StartIndex", "0"))
+    def _page(self, items: list[dict[str, Any]], query: dict[str, str], cap: int) -> dict[str, Any]:
+        start = 0 if self.state.ignore_start_index else int(query.get("StartIndex", "0"))
         limit = min(int(query.get("Limit", str(cap))), cap)
         return {"Items": items[start : start + limit], "TotalRecordCount": len(items), "StartIndex": start}
 
@@ -144,7 +153,12 @@ class FakeJellyfin:
         return self._json({"ServerName": "fake-jellyfin", "Version": "10.10.0", "Id": "srv"})
 
     def _users(self, request: httpx.Request, query: dict[str, str]) -> httpx.Response:
-        return self._json([{"Id": u.id, "Name": u.name, "Policy": {"IsAdministrator": u.admin}} for u in self.state.users])
+        return self._json(
+            [
+                {"Id": u.id, "Name": u.name, "Policy": {"IsAdministrator": u.admin, "IsDisabled": u.disabled, "IsHidden": u.hidden}}
+                for u in self.state.users
+            ]
+        )
 
     @staticmethod
     def _audio_json(s: FakeAudio) -> dict[str, Any]:
@@ -188,7 +202,7 @@ class FakeJellyfin:
         self.state.scans += 1
         return httpx.Response(204)
 
-    def _owned(self, playlist_id: str, user_id: str) -> Optional[FakePlaylist]:
+    def _visible(self, playlist_id: str, user_id: str) -> Optional[FakePlaylist]:
         playlist = self.state.playlists.get(playlist_id)
         return playlist if playlist is not None and (playlist.owner_id == user_id or playlist.public) else None
 
@@ -203,7 +217,7 @@ class FakeJellyfin:
         st = self.state
         body = json.loads(request.content or b"{}")
         user = st.user(str(body.get("UserId") or ""))
-        if user is None or not body.get("Name") or body.get("MediaType") != "Audio":
+        if user is None or not body.get("Name") or body.get("MediaType") != "Audio" or user.id in st.add_refused_for:
             return httpx.Response(400)
         ids = [str(i) for i in body.get("Ids") or []]
         if any(st.song(i) is None for i in ids):
@@ -215,7 +229,7 @@ class FakeJellyfin:
         return self._json({"Id": playlist.id})
 
     def _playlist_items(self, request: httpx.Request, query: dict[str, str], playlist_id: str) -> httpx.Response:
-        playlist = self._owned(playlist_id, query.get("UserId", ""))
+        playlist = self._visible(playlist_id, query.get("UserId", ""))
         if playlist is None:
             return httpx.Response(404)
         rows = []
@@ -226,9 +240,14 @@ class FakeJellyfin:
         return self._json(self._page(rows, query, self.state.max_page))
 
     def _add_items(self, request: httpx.Request, query: dict[str, str], playlist_id: str) -> httpx.Response:
-        playlist = self._owned(playlist_id, query.get("UserId", ""))
+        user_id = query.get("UserId", "")
+        playlist = self._visible(playlist_id, user_id)
         if playlist is None:
-            return httpx.Response(404)
+            return httpx.Response(404, text="Playlist not found")
+        if playlist.owner_id != user_id:
+            return httpx.Response(403)  # visible (public) but not theirs: only the owner may edit
+        if user_id in self.state.add_refused_for:
+            return httpx.Response(400)
         ids = [i for i in query.get("Ids", "").split(",") if i]
         if any(self.state.song(i) is None for i in ids):
             return httpx.Response(400)

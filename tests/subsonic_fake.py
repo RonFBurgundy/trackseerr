@@ -75,6 +75,9 @@ class SubsonicState:
     fault: Optional[Callable[[], Fault]] = None
     respond_with: Optional[Callable[[str, int], Optional[httpx.Response]]] = None
     request_counts: dict[str, int] = field(default_factory=dict)
+    # Servers differ on ``songIndexToRemove``: the spec says every index refers to the playlist before the call, but some
+    # implementations remove one index at a time from the live list. Setting this models the latter.
+    sequential_removal: bool = False
 
     def song(self, song_id: str) -> Optional[FakeSong]:
         return next((s for s in self.songs if s.id == song_id), None)
@@ -245,13 +248,20 @@ class FakeSubsonic:
         p = dict(params)
         target = self._own(user, p.get("playlistId", ""))
         add = [v for k, v in params if k == "songIdToAdd"]
-        remove = sorted({int(v) for k, v in params if k == "songIndexToRemove"})
+        sent = [int(v) for k, v in params if k == "songIndexToRemove"]
+        remove = sorted(set(sent))
         self._check_songs(add)
-        for idx in remove:
-            if not 0 <= idx < len(target.entries):
-                raise Fault(ERR_GENERIC, f"Index {idx} out of range")
-        for idx in reversed(remove):
-            del target.entries[idx]
+        if self.state.sequential_removal:
+            for idx in sent:  # in the order received, each against the list as it is now
+                if not 0 <= idx < len(target.entries):
+                    raise Fault(ERR_GENERIC, f"Index {idx} out of range")
+                del target.entries[idx]
+        else:
+            for idx in remove:
+                if not 0 <= idx < len(target.entries):
+                    raise Fault(ERR_GENERIC, f"Index {idx} out of range")
+            for idx in reversed(remove):
+                del target.entries[idx]
         target.entries.extend(add)
         if "name" in p:
             target.name = p["name"]

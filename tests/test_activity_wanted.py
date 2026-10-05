@@ -150,7 +150,7 @@ def _library(db):
 
 class TestMigrationAndSeed:
     def test_schema_has_v33_objects(self, test_db):
-        assert test_db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 40
+        assert test_db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 41
         cols = {r[1] for r in test_db.conn.execute("PRAGMA table_info(active_downloads)")}
         assert {"progress_updated_at", "indexer", "quality", "protocol"} <= cols
         assert "last_searched_at" in {r[1] for r in test_db.conn.execute("PRAGMA table_info(library_tracks)")}

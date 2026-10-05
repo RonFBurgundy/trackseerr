@@ -141,4 +141,10 @@ Findings on Jellyfin 12.1.0:
    metadata pass, so the fixture waits for the real titles.
 5. `SearchTerm` matches the item name only, so the adapter searches by title and scores the artist itself.
 6. An API key has no user context, so every playlist call names the account with `UserId`.
+7. `/Items?IncludeItemTypes=Playlist&UserId=` lists the user's own playlists AND every other account's public ones, and
+   `DELETE /Playlists/{id}/Items` (no user) removes entries from any of them. `GET /Playlists/{id}` and `/Users` answer
+   400 for an API key, so ownership is probed with an empty `POST /Playlists/{id}/Items?UserId=` (204 owner, 403 visible but
+   not theirs, 404 not visible). The adapter only touches playlists the target may edit.
+8. `Policy.IsHidden` is **true** for ordinary accounts (it only hides them from the login screen), so it cannot filter
+   users; only `Policy.IsDisabled` does.
 

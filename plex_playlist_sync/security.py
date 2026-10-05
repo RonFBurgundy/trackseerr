@@ -4,6 +4,7 @@ import ipaddress
 import logging
 import os
 import re
+import socket
 import unicodedata
 import urllib.parse
 from pathlib import Path
@@ -278,6 +279,29 @@ _INTEGER_HOST_RE = re.compile(r"^\d+$")
 _AWS_IMDSV6_NET = ipaddress.ip_network("fd00:ec2::/64")
 _AWS_IMDSV6_IP = ipaddress.ip_address("fd00:ec2::254")
 _LINK_LOCAL_IPV4_NET = ipaddress.ip_network("169.254.0.0/16")
+_ALIBABA_METADATA_IP = ipaddress.ip_address("100.100.100.200")  # inside CGNAT space, so not caught by is_link_local
+_NUMERIC_DOTTED_RE = re.compile(r"^[0-9.]+$")
+
+
+def _resolve_host(hostname: str) -> list[str]:
+    """Every address ``hostname`` resolves to; empty when it does not resolve (e.g. a container that is not up yet)."""
+    try:
+        infos = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, UnicodeError, OSError):
+        return []
+    return list(dict.fromkeys(str(info[4][0]).split("%", 1)[0] for info in infos))
+
+
+def _is_forbidden_address(ip: "ipaddress.IPv4Address | ipaddress.IPv6Address") -> bool:
+    """Addresses a service URL may never point at, whatever the LAN setting: unspecified, link-local, multicast,
+    reserved, the cloud metadata endpoints (AWS IMDS v4/v6, Alibaba)."""
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    if ip.is_unspecified or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+        return True
+    if ip in _LINK_LOCAL_IPV4_NET or ip == _ALIBABA_METADATA_IP:
+        return True
+    return isinstance(ip, ipaddress.IPv6Address) and (ip in _AWS_IMDSV6_NET or ip == _AWS_IMDSV6_IP)
 
 
 def is_safe_service_url(url: Optional[str], allow_lan: bool = True) -> bool:
@@ -290,7 +314,11 @@ def is_safe_service_url(url: Optional[str], allow_lan: bool = True) -> bool:
     - Link-local and cloud metadata addresses (169.254.169.254, 169.254.0.0/16, fd00:ec2::254)
     - Unspecified IP addresses (0.0.0.0, ::)
     - Loopback IP addresses unless allow_lan=True
-    - Integer, hex, and octal numeric IP representations
+    - Integer, hex, octal and shorthand (``127.1``) numeric IP representations
+    - Hostnames that RESOLVE to a loopback, link-local, metadata (incl. 169.254.169.254 and 100.100.100.200) or
+      unspecified address. RFC1918 ranges stay allowed (homelab LANs). A name that does not resolve is allowed (a
+      container that is not up yet); the connection is made by the HTTP client later, so this is a configuration-time
+      check, not protection against DNS that changes between the check and the request.
     - Cloud metadata hostnames (metadata.google.internal, instance-data)
     - Userinfo URL components (embedded username/password)
     - Malformed or illegal hostname characters
@@ -333,19 +361,18 @@ def is_safe_service_url(url: Optional[str], allow_lan: bool = True) -> bool:
     # Check IP addresses
     try:
         ip = ipaddress.ip_address(hostname)
-        if ip.is_unspecified:
+        if _is_forbidden_address(ip):
             return False
         if ip.is_loopback and not allow_lan:
-            return False
-        if ip.is_link_local or ip.is_multicast or ip.is_reserved:
-            return False
-        if ip in _LINK_LOCAL_IPV4_NET:
-            return False
-        if isinstance(ip, ipaddress.IPv6Address) and (ip in _AWS_IMDSV6_NET or ip == _AWS_IMDSV6_IP):
             return False
         return True
     except ValueError:
         pass
+
+    # Digits and dots that are not a canonical dotted quad (``127.1``, ``10.1``, ``1.2.3``) are shorthand an HTTP
+    # client may expand to a different address than a validator reads: refuse them outright.
+    if _NUMERIC_DOTTED_RE.fullmatch(hostname):
+        return False
 
     # Hostname syntax validation
     if hostname == "localhost":
@@ -353,6 +380,16 @@ def is_safe_service_url(url: Optional[str], allow_lan: bool = True) -> bool:
 
     if not re.fullmatch(r"^[a-z0-9][a-z0-9_\.-]*[a-z0-9]$", hostname):
         return False
+
+    # A name is only as safe as what it resolves to: refuse one that points at loopback, link-local or a metadata
+    # address (every record counts, not only the first).
+    for address in _resolve_host(hostname):
+        try:
+            resolved = ipaddress.ip_address(address)
+        except ValueError:
+            return False
+        if _is_forbidden_address(resolved) or resolved.is_loopback:
+            return False
 
     return True
 
