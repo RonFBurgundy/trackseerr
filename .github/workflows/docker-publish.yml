@@ -1,8 +1,12 @@
 name: Publish container
 
 on:
-  push:
+  # Main-branch publishes are triggered by a successful CI run (no duplicate tests)
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
+  push:
     tags: ["v*"]
   schedule:
     # Rebuild weekly so base image security updates reach users
@@ -17,8 +21,14 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   test:
+    # Tag pushes only; main publishes are gated by the CI workflow_run
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,9 +59,20 @@ jobs:
 
   publish:
     needs: test
+    # workflow_run: only publish pushes to main whose CI passed.
+    # schedule / workflow_dispatch run with test skipped; tag pushes need test to pass.
+    if: >-
+      always() &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped') &&
+      (github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Build the exact commit CI tested (falls back to github.sha on other triggers)
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
