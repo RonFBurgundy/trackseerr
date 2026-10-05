@@ -166,7 +166,7 @@ class ScrobbleWorker:
     def _get_plex(self, config: Config) -> Optional[PlexClient]:
         if self._plex is not None:
             return self._plex
-        if not config.plex_url or not config.plex_token:
+        if not config.plex_enabled:
             return None
         try:
             self._plex = PlexClient(config.plex_url, config.plex_token, verify_ssl=config.plex_verify_ssl)

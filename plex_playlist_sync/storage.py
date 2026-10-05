@@ -308,6 +308,8 @@ class Database:
                 (37, self._migration_v37),
                 (38, self._migration_v38),
                 (39, self._migration_v39),
+                (40, self._migration_v40),
+                (41, self._migration_v41),
             ]
 
             applied = 0
@@ -1410,6 +1412,38 @@ class Database:
                 "ALTER TABLE media_management_settings ADD COLUMN add_monitor_option TEXT NOT NULL DEFAULT 'all';"
             )
 
+    def _migration_v41(self, cur: sqlite3.Cursor) -> None:
+        """``media_server_settings.credentials_type``: which server type the saved url / username / password / api_key
+        belong to. ``type`` is the ACTIVE choice, which can be ``none`` while the credentials are kept, so a masked
+        secret can only be resolved for the type it was saved for."""
+        cur.execute("PRAGMA table_info(media_server_settings);")
+        if "credentials_type" not in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE media_server_settings ADD COLUMN credentials_type TEXT NOT NULL DEFAULT '';")
+        cur.execute(
+            "UPDATE media_server_settings SET credentials_type = type WHERE credentials_type = '' "
+            "AND type IN ('subsonic', 'jellyfin')"
+        )
+
+    def _migration_v40(self, cur: sqlite3.Cursor) -> None:
+        """``media_server_settings``: the media server chosen on the Settings page (singleton row; Plex stays env-only).
+
+        ``password`` / ``api_key`` are stored the same way ``lidarr_settings.api_key`` is; they are never returned by
+        the API (masked) and a gateway database must not hold them (see ``role_guard``).
+        """
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS media_server_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                type TEXT NOT NULL DEFAULT '',
+                url TEXT NOT NULL DEFAULT '',
+                username TEXT NOT NULL DEFAULT '',
+                password TEXT NOT NULL DEFAULT '',
+                api_key TEXT NOT NULL DEFAULT '',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
     def _migration_v39(self, cur: sqlite3.Cursor) -> None:
         """Recompute ``clean_name`` / ``clean_title`` (and the folded ``search_clean``) for rows containing '_'.
 
@@ -1792,6 +1826,59 @@ class Database:
             raise RuntimeError(f"Failed to upsert user {uid}")
         return user
 
+    def import_media_server_user(
+        self,
+        user_id: str,
+        username: str,
+        email: Optional[str] = None,
+        *,
+        auth_type: str,
+        grant_admin: bool = False,
+    ) -> Optional[dict[str, Any]]:
+        """Records an account discovered on the media server (a playlist target), without letting it take over a name.
+
+        Returns None, writing nothing, when the username (case-insensitive) already belongs to a DIFFERENT user id:
+        an imported name must never shadow a local account (or another import), the same rule ``ensure_user`` applies
+        to gateway identities. A new row gets ``auth_type`` (``plex`` / ``jellyfin`` / ...; imported accounts have no
+        Trackseerr login except Plex's own OAuth) and default non-admin permissions. ``grant_admin`` only ever
+        raises: an existing admin flag (for instance one granted in the UI) is never demoted. A row that is already
+        a local account keeps ``local``.
+        """
+        uid = str(user_id)
+        name = str(username or "").strip()
+        if not uid or not name:
+            return None
+        with self._lock:
+            clash = self.conn.execute(
+                "SELECT 1 FROM users WHERE lower(username) = lower(?) AND id != ?", (name, uid)
+            ).fetchone()
+            if clash:
+                return None
+            if self.conn.execute("SELECT 1 FROM users WHERE id = ?", (uid,)).fetchone():
+                self.conn.execute(
+                    """
+                    UPDATE users SET
+                        username = ?,
+                        email = ?,
+                        auth_type = CASE WHEN auth_type = 'local' THEN auth_type ELSE ? END,
+                        is_admin = CASE WHEN ? THEN 1 ELSE is_admin END,
+                        permissions = CASE WHEN ? THEN permissions | 1 ELSE permissions END,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (name, email, auth_type, 1 if grant_admin else 0, 1 if grant_admin else 0, uid),
+                )
+            else:
+                self.conn.execute(
+                    """
+                    INSERT INTO users (id, username, email, is_admin, permissions, auth_type, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """,
+                    (uid, name, email, 1 if grant_admin else 0, 35 if grant_admin else 34, auth_type),
+                )
+            self.conn.commit()
+        return self.get_user(uid)
+
     def ensure_user(self, user_id: str, username: str) -> dict[str, Any]:
         """Creates a non-admin user with default permissions if absent; never modifies an existing row.
 
@@ -1814,6 +1901,8 @@ class Database:
             raise PermissionError("Invalid asserted user id")
         existing = self.get_user(uid)
         if existing is not None:
+            if existing.get("auth_type") == "jellyfin":
+                raise PermissionError("Imported media-server accounts cannot sign in")
             return existing
         name = str(username or "").strip() or uid
         with self._lock:
@@ -1988,6 +2077,52 @@ class Database:
                 (str(exclude_user_id) if exclude_user_id is not None else "",),
             ).fetchone()
         return int(row[0])
+
+    def count_local_login_admins(self) -> int:
+        """Enabled admins that can sign in without a media server: local accounts holding a password hash."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) FROM users WHERE is_admin = 1 AND disabled = 0 AND auth_type = 'local' "
+                "AND password_hash IS NOT NULL AND password_hash != ''"
+            ).fetchone()
+        return int(row[0])
+
+    def create_local_user_with_password(
+        self, username: str, password_hash: str, permissions: int, email: Optional[str] = None
+    ) -> dict[str, Any]:
+        """Creates a local user and its password in ONE transaction (no invite row). Either the whole row exists
+        or nothing does. Raises ``ValueError`` for an invalid/taken username or unknown permission bits."""
+        name = local_auth.normalize_username(username)
+        problem = local_auth.validate_username(name)
+        if problem:
+            raise ValueError(problem)
+        perms = int(permissions)
+        if perms < 0 or perms & ~_KNOWN_PERMISSION_MASK:
+            raise ValueError("Unknown permission bits")
+        if not password_hash:
+            raise ValueError("Password hash required")
+        user_id = "local-" + secrets.token_hex(12)
+        now = _utcnow().isoformat()
+        with self._lock:
+            try:
+                if self.conn.execute("SELECT 1 FROM users WHERE lower(username) = lower(?)", (name,)).fetchone():
+                    raise ValueError("Username is already taken")
+                self.conn.execute(
+                    """
+                    INSERT INTO users (id, username, email, is_admin, permissions, auth_type, password_hash,
+                                       password_changed_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 'local', ?, ?, CURRENT_TIMESTAMP)
+                    """,
+                    (user_id, name, email, 1 if perms & int(UserPermission.ADMIN) else 0, perms, password_hash, now),
+                )
+                self.conn.commit()
+            except (ValueError, sqlite3.Error):
+                self.conn.rollback()
+                raise
+        user = self.get_user(user_id)
+        if user is None:
+            raise RuntimeError("Failed to create local user")
+        return user
 
     def list_users_admin(self) -> list[dict[str, Any]]:
         """Admin listing rows: profile, state, quota overrides and MFA flag. Never selects any secret value."""
@@ -3070,13 +3205,25 @@ class Database:
     )
 
     def get_user_by_username(self, username: str) -> Optional[dict[str, Any]]:
-        """Case-insensitive lookup across ALL users (Plex and local)."""
+        """Case-insensitive lookup across ALL users. When several share a name the result is deterministic: a local
+        account wins (it is the one that can sign in with a password), then the oldest, then the lowest id."""
         with self._lock:
             row = self.conn.execute(
-                "SELECT id FROM users WHERE lower(username) = lower(?) ORDER BY created_at ASC LIMIT 1",
+                "SELECT id FROM users WHERE lower(username) = lower(?) "
+                "ORDER BY (auth_type = 'local') DESC, created_at ASC, id ASC LIMIT 1",
                 (str(username or ""),),
             ).fetchone()
         return self.get_user(row["id"]) if row else None
+
+    def list_users_by_username(self, username: str) -> list[dict[str, Any]]:
+        """EVERY user whose name matches case-insensitively, in the same order as ``get_user_by_username``."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id FROM users WHERE lower(username) = lower(?) "
+                "ORDER BY (auth_type = 'local') DESC, created_at ASC, id ASC",
+                (str(username or ""),),
+            ).fetchall()
+        return [u for u in (self.get_user(r["id"]) for r in rows) if u is not None]
 
     def get_local_credentials(self, user_id: str) -> Optional[dict[str, Any]]:
         """Secret-bearing columns for one user. Server-side use only; never serialise this dict."""
@@ -4270,6 +4417,34 @@ class Database:
                 self.conn.commit()
 
         return self.get_lidarr_settings()
+
+    # -------------------------------------------------------------------------
+    # Media server settings (Settings page)
+    # -------------------------------------------------------------------------
+
+    _MEDIA_SERVER_SETTING_KEYS = ("type", "url", "username", "password", "api_key", "credentials_type")
+
+    def get_media_server_settings(self) -> dict[str, str]:
+        """The saved media-server choice; every key is present, all empty when nothing was ever saved."""
+        with self._lock:
+            row = self.conn.execute("SELECT * FROM media_server_settings WHERE id = 1").fetchone()
+        stored = dict(row) if row else {}
+        return {k: str(stored.get(k) or "") for k in self._MEDIA_SERVER_SETTING_KEYS}
+
+    def save_media_server_settings(self, settings: dict[str, str]) -> dict[str, str]:
+        """Replace the saved media-server choice (all keys; missing ones are stored empty)."""
+        values = [str(settings.get(k) or "") for k in self._MEDIA_SERVER_SETTING_KEYS]
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO media_server_settings (id, type, url, username, password, api_key, credentials_type) "
+                "VALUES (1, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET type = excluded.type, url = excluded.url, username = excluded.username, "
+                "password = excluded.password, api_key = excluded.api_key, credentials_type = excluded.credentials_type, "
+                "updated_at = CURRENT_TIMESTAMP",
+                values,
+            )
+            self.conn.commit()
+        return self.get_media_server_settings()
 
     # -------------------------------------------------------------------------
     # Download Clients CRUD

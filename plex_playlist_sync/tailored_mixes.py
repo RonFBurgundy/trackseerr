@@ -6,12 +6,10 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-import requests
-from plexapi.exceptions import BadRequest, NotFound, Unauthorized
-
 from plex_playlist_sync.library_availability import get_item_availability
 from plex_playlist_sync.models import Playlist, RequestStatus, Track
-from plex_playlist_sync.redaction import redact_text, safe_exc
+from plex_playlist_sync.media_servers import MediaServerError, PlaylistSyncOptions, as_media_server
+from plex_playlist_sync.redaction import redact_text, safe_exc  # noqa: F401 - pinned by test_exception_redaction
 from plex_playlist_sync.request_submission import (
     RequestRejected,
     RequestSubmission,
@@ -318,8 +316,10 @@ def generate_and_sync(
         tracks=out_tracks,
     )
 
-    if plex_client is None:
-        result.sync_error = "Plex is not configured"
+    server = as_media_server(plex_client)
+    if server is None:
+        no_server = getattr(app_config, "media_server_type", None) == "none"
+        result.sync_error = "No media server connected" if no_server else "Plex is not configured"
     elif not user:
         result.sync_error = "Mix owner not found"
     elif not available_tracks:
@@ -332,16 +332,8 @@ def generate_and_sync(
             tracks=[Track(title=t.title, artist=t.artist, album=t.album or "") for t in available_tracks],
         )
         try:
-            sync_results = plex_client.sync_playlist_to_users(
-                playlist=playlist,
-                target_usernames=[user["username"]],
-                append=app_config.append_instead_of_sync,
-                add_description=app_config.add_playlist_description,
-                add_poster=app_config.add_playlist_poster,
-                write_missing_as_csv=app_config.write_missing_as_csv,
-                data_dir=app_config.data_dir,
-                threshold=app_config.search_similarity_threshold,
-                db=db,
+            sync_results = server.sync_playlist(
+                playlist, [user["username"]], PlaylistSyncOptions.from_config(app_config, db=db)
             )
             result.synced = any(r.success for r in sync_results)
             errors = [r.error for r in sync_results if getattr(r, "error", "")]
@@ -349,11 +341,11 @@ def generate_and_sync(
                 result.sync_error = redact_text(str(errors[0]))
             elif not result.synced:
                 result.sync_error = "Plex sync did not complete"
-        except (NotFound, BadRequest, Unauthorized, requests.RequestException) as exc:
-            # Plex/requests exception text can embed the X-Plex-Token URL: safe_exc redacts or drops it.
-            logger.warning("Tailored mix %s Plex sync failed (%s)", mix_id, safe_exc(exc))
+        except MediaServerError as exc:
+            # The adapter already redacted the cause (Plex/requests text can embed the X-Plex-Token URL).
+            logger.warning("Tailored mix %s Plex sync failed (%s)", mix_id, exc.safe_detail)
             logger.debug("Tailored mix Plex sync traceback", exc_info=True)
-            result.sync_error = f"Plex sync failed ({safe_exc(exc)})"
+            result.sync_error = f"Plex sync failed ({exc.safe_detail})"
 
     db.record_mix_result(mix_id, json.dumps(result.to_dict()))
     return result

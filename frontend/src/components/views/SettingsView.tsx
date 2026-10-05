@@ -5,6 +5,7 @@ import { ScrobblingSettings } from '@/components/scrobbling';
 import { AccountPanel } from '@/components/account';
 import { UsersPanel } from '@/components/admin';
 import { RoleChangeBanner } from '@/components/deployment';
+import { MediaServerPanel } from '@/components/mediaServer';
 import {
   SettingsNav,
   InactiveGate,
@@ -38,6 +39,8 @@ export interface SettingsViewProps {
   currentUserId?: string | number;
   /** Local sign-in succeeded but MFA enrollment is mandatory: only the Account tab is usable. */
   mfaEnrollmentRequired?: boolean;
+  /** False unless Plex is the media server: Plex-only settings are hidden. */
+  hasMediaServer?: boolean;
 }
 
 interface ToastState {
@@ -52,6 +55,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   accountHook,
   currentUserId,
   mfaEnrollmentRequired = false,
+  hasMediaServer = true,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(() =>
     mfaEnrollmentRequired
@@ -134,7 +138,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       <SettingsNav groups={groups} activeTab={activeTab} onSelect={setActiveTab} inactiveTabs={inactiveTabs} />
 
-      {activeTab === 'scrobbling' && !mfaEnrollmentRequired && <ScrobblingSettings isAdmin={isAdmin} />}
+      {activeTab === 'scrobbling' && !mfaEnrollmentRequired && <ScrobblingSettings isAdmin={isAdmin} hasMediaServer={hasMediaServer} />}
 
       {activeTab === 'account' && (
         <AccountPanel accountHook={accountHook} isAdmin={isAdmin} enrollmentBlocking={mfaEnrollmentRequired} />
@@ -145,6 +149,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       )}
 
       {activeTab === 'import-lists' && isAdmin && !mfaEnrollmentRequired && <ImportListsPanel libraryMode={mode} onToast={showToast} />}
+
+      {activeTab === 'media-server' && isAdmin && !mfaEnrollmentRequired && <MediaServerPanel onToast={showToast} />}
 
       {activeTab === 'system' && isAdmin && !mfaEnrollmentRequired && (
         <SystemPage isCore={isCore} libraryMode={mode} onToast={showToast} />

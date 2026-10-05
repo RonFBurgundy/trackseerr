@@ -22,7 +22,9 @@ from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.clients.spotify_scraper import SpotifyWebScraper
 from plex_playlist_sync.clients.core_client import SESSION_ISSUED_AT_KEY, CoreClient
-from plex_playlist_sync.config import Config
+from plex_playlist_sync.config import MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_NONE, MEDIA_SERVER_SUBSONIC, Config
+from plex_playlist_sync.media_server import MediaServerUnavailable
+from plex_playlist_sync.media_servers import MediaServer, as_media_server, build_jellyfin, build_subsonic
 from plex_playlist_sync.internal_auth import (
     HEADER_SIGNATURE,
     InvalidAssertion,
@@ -108,9 +110,15 @@ def get_db() -> Database:
         return _db_instances[key]
 
 
+def require_media_server(config: Config = Depends(get_config)) -> None:
+    """Route dependency: 409 ``media_server_unavailable`` unless a media server is configured."""
+    if config.media_server_type == MEDIA_SERVER_NONE:
+        raise MediaServerUnavailable()
+
+
 def get_plex_client(config: Config = Depends(get_config)) -> Optional[PlexClient]:
     """Dependency providing PlexClient instance if configured."""
-    if not config.plex_url or not config.plex_token:
+    if not config.plex_enabled:
         return None
     try:
         return PlexClient(
@@ -121,6 +129,31 @@ def get_plex_client(config: Config = Depends(get_config)) -> Optional[PlexClient
     except Exception as e:
         logger.error("Failed to initialize PlexClient: %s", e)
         return None
+
+
+def get_media_client(
+    config: Config = Depends(get_config), plex_client: Optional[PlexClient] = Depends(get_plex_client)
+) -> Optional[Union[PlexClient, MediaServer]]:
+    """The connected client of whichever media server is configured: the Plex client, or the Subsonic adapter.
+
+    Generic routes depend on this (they only go through ``as_media_server``); Plex-only routes keep
+    ``get_plex_client``, which is None whenever Plex is not the active server.
+    """
+    if plex_client is not None:
+        return plex_client
+    if config.media_server_type == MEDIA_SERVER_SUBSONIC:
+        return build_subsonic(config)
+    if config.media_server_type == MEDIA_SERVER_JELLYFIN:
+        return build_jellyfin(config)
+    return None
+
+
+def get_active_media_server(client: Optional[Union[PlexClient, MediaServer]] = Depends(get_media_client)) -> Optional[MediaServer]:
+    """Dependency providing the configured media-server adapter, or None when none is configured/reachable.
+
+    Built on ``get_plex_client`` (via ``get_media_client``) so existing dependency overrides keep working.
+    """
+    return as_media_server(client)
 
 
 def get_spotify_client(

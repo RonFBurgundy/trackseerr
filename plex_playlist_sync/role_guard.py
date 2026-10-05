@@ -24,12 +24,16 @@ README_HINT = 'See the README "Two-tier deployment" section.'
 # Secrets and credentials that must never reach the internet-facing gateway.
 GATEWAY_FORBIDDEN_ENV: tuple[str, ...] = (
     "PLEX_TOKEN",
+    "SUBSONIC_PASSWORD",
+    "SUBSONIC_API_KEY",
+    "JELLYFIN_API_KEY",
     "LASTFM_API_SECRET",
     "LASTFM_API_KEY",
     "SPOTIFY_CLIENT_SECRET",
     "SPOTIFY_CLIENT_ID",
     "LIDARR_API_KEY",
     "FEED_TOKEN",
+    "ADMIN_PASSWORD",
 )
 
 # Download-client / indexer credentials supplied through the environment.
@@ -106,6 +110,8 @@ def core_like_reasons(conn: sqlite3.Connection) -> list[str]:
             reasons.append(f"{table} rows")
     checks = (
         ("lidarr_settings", "api_key", "a Lidarr API key"),
+        ("media_server_settings", "password", "a media server password"),
+        ("media_server_settings", "api_key", "a media server API key"),
         ("user_scrobble_configs", "lastfm_session_key", "per-user Last.fm credentials"),
         ("user_scrobble_configs", "listenbrainz_token", "per-user ListenBrainz credentials"),
         ("users", "password_hash", "local accounts with passwords"),

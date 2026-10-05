@@ -213,7 +213,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
         isOpen
         onClose={onClose}
         title={user.username}
-        subtitle={`${isLocal ? 'Local' : 'Plex'} user${isSelf ? ' (you)' : ''}`}
+        subtitle={`${isLocal ? 'Local' : user.auth_type === 'jellyfin' ? 'Jellyfin' : 'Plex'} user${isSelf ? ' (you)' : ''}`}
         maxWidth="sm:max-w-3xl"
         footer={
           <>

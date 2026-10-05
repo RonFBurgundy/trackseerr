@@ -9,25 +9,26 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from plexapi.exceptions import BadRequest, NotFound, Unauthorized
-import requests
 
 from plex_playlist_sync.api.dependencies import (
     get_config,
     get_db,
     get_deezer_client,
-    get_plex_client,
+    get_media_client,
     get_spotify_client,
     require_admin,
     verify_feed_access,
 )
 from plex_playlist_sync.clients.deezer import DeezerClient
 from plex_playlist_sync.clients.plex import PlexClient
+from plex_playlist_sync.media_servers import MediaServerError, PlaylistSyncOptions, as_media_server, describe_error
+from plex_playlist_sync.media_servers.plex import read_playlist_items, refresh_mix_snapshots
 from plex_playlist_sync.clients.spotify import SpotifyClient
-from plex_playlist_sync.config import Config
+from plex_playlist_sync.config import MEDIA_SERVER_NONE, Config
 from plex_playlist_sync.job_tracker import tracked
 from plex_playlist_sync.list_monitoring import apply_playlist_missing_safely
 from plex_playlist_sync.models import Playlist, RequestStatus, Track
+from plex_playlist_sync.native_match import match_playlist_tracks_native
 from plex_playlist_sync.storage import Database
 from plex_playlist_sync.redaction import redact_text, safe_exc
 
@@ -107,12 +108,10 @@ class SyncState:
         if plex_client is None:
             return skip
         try:
-            server = plex_client.get_user_server(registry["plex_user"])
-            source = plex_client.get_playlist(server, registry["rating_key"])
-            items = plex_client.get_playlist_items(source)
-        except (NotFound, BadRequest, Unauthorized, requests.exceptions.RequestException) as e:
+            items = read_playlist_items(as_media_server(plex_client), registry["plex_user"], registry["rating_key"])
+        except MediaServerError as e:
             logger.warning(
-                "Source Plex playlist for adopted '%s' unavailable (%s); using stored snapshot", pl["name"], safe_exc(e)
+                "Source Plex playlist for adopted '%s' unavailable (%s); using stored snapshot", pl["name"], e.safe_detail
             )
             return skip
         snapshot = [
@@ -151,32 +150,37 @@ class SyncState:
         }
 
         try:
-            if plex_client:
+            server = as_media_server(plex_client)
+            if server:
                 try:
-                    refreshed = plex_client.refresh_auto_mix_snapshots(db)
+                    refreshed = refresh_mix_snapshots(server, db)
                     if refreshed:
                         logger.info("Refreshed %d Plexamp mix snapshot(s)", refreshed)
-                except (NotFound, BadRequest, Unauthorized, requests.exceptions.RequestException) as e:
-                    logger.warning("Mix snapshot refresh failed: %s", safe_exc(e))
+                except MediaServerError as e:
+                    logger.warning("Mix snapshot refresh failed: %s", e.safe_detail)
             playlists = db.list_playlists(enabled_only=True)
             stats["total_playlists"] = len(playlists)
 
+            no_media_server = config.media_server_type == MEDIA_SERVER_NONE
             for pl in playlists:
                 pl_id = pl["id"]
-                target_uids = db.get_playlist_targets(pl_id)
-                if not target_uids:
-                    logger.info("Playlist '%s' has no target users assigned; skipping", pl["name"])
-                    continue
-
                 target_usernames: list[str] = []
-                for uid in target_uids:
-                    user_row = db.get_user(uid)
-                    if user_row:
-                        target_usernames.append(user_row["username"])
+                if not no_media_server:
+                    # Target users only matter for pushing to a media server; without one the playlist is
+                    # still matched against the native library below.
+                    target_uids = db.get_playlist_targets(pl_id)
+                    if not target_uids:
+                        logger.info("Playlist '%s' has no target users assigned; skipping", pl["name"])
+                        continue
 
-                if not target_usernames:
-                    logger.info("No valid usernames found for playlist '%s' targets", pl["name"])
-                    continue
+                    for uid in target_uids:
+                        user_row = db.get_user(uid)
+                        if user_row:
+                            target_usernames.append(user_row["username"])
+
+                    if not target_usernames:
+                        logger.info("No valid usernames found for playlist '%s' targets", pl["name"])
+                        continue
 
                 tracks: list[Track] = []
                 service = pl.get("service", "spotify")
@@ -215,21 +219,28 @@ class SyncState:
                     poster=pl.get("poster_url", ""),
                 )
 
-                if plex_client:
+                if no_media_server:
+                    # No media server: nothing is pushed, but the source playlist is matched against the native
+                    # library so its missing tracks reach monitoring / wanted.
                     try:
-                        results = plex_client.sync_playlist_to_users(
-                            playlist=model_playlist,
-                            target_usernames=target_usernames,
-                            append=config.append_instead_of_sync,
-                            add_description=config.add_playlist_description,
-                            add_poster=config.add_playlist_poster,
-                            write_missing_as_csv=config.write_missing_as_csv,
-                            data_dir=config.data_dir,
-                            threshold=config.search_similarity_threshold,
-                            db=db,
-                            skip_rating_keys=skip_rating_keys,
+                        matched, missing = match_playlist_tracks_native(db, tracks)
+                        db.record_sync_result(playlist_id=pl_id, status="success", missing_tracks=missing)
+                        apply_playlist_missing_safely(db, config, pl_id)
+                        stats["success_count"] += 1
+                        stats["total_matched"] += len(matched)
+                        stats["total_missing"] += len(missing)
+                    except Exception as e:  # one playlist must not stop the cycle; the root cause is logged
+                        logger.error("Native library match failed for playlist '%s': %s", pl["name"], safe_exc(e))
+                        logger.debug("Native match traceback", exc_info=True)
+                        db.record_sync_result(playlist_id=pl_id, status="failed")
+                elif server:
+                    try:
+                        results = server.sync_playlist(
+                            model_playlist,
+                            target_usernames,
+                            PlaylistSyncOptions.from_config(config, db=db, skip_item_ids=skip_rating_keys),
                         )
-                        matched, missing = plex_client.match_playlist_tracks(
+                        matched, missing = server.match_playlist_tracks(
                             tracks, threshold=config.search_similarity_threshold
                         )
                         success = any(r.success for r in results) if results else False
@@ -244,7 +255,7 @@ class SyncState:
                         stats["total_matched"] += len(matched)
                         stats["total_missing"] += len(missing)
                     except Exception as e:
-                        logger.error("Error syncing playlist '%s' to Plex: %s", pl["name"], safe_exc(e))
+                        logger.error("Error syncing playlist '%s' to Plex: %s", pl["name"], describe_error(e))
                         logger.debug("Playlist sync traceback", exc_info=True)
                         db.record_sync_result(playlist_id=pl_id, status="failed")
                 else:
@@ -288,7 +299,7 @@ def trigger_sync(
     _admin: dict[str, Any] = Depends(require_admin),
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     spotify_client: Optional[SpotifyClient] = Depends(get_spotify_client),
     deezer_client: Optional[DeezerClient] = Depends(get_deezer_client),
 ) -> dict[str, Any]:
@@ -376,7 +387,7 @@ async def handle_sync_webhook(
     _auth: dict[str, Any] = Depends(verify_feed_access),
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     spotify_client: Optional[SpotifyClient] = Depends(get_spotify_client),
     deezer_client: Optional[DeezerClient] = Depends(get_deezer_client),
 ) -> dict[str, Any]:

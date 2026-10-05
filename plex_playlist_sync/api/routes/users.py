@@ -1,7 +1,7 @@
 """Plex Home users management routes."""
 
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -11,12 +11,15 @@ from plex_playlist_sync.api.dependencies import (
     tier_of,
     get_config,
     get_db,
+    get_media_client,
     get_plex_client,
+    require_media_server,
     require_admin,
     require_user,
 )
 from plex_playlist_sync.api.routes.admin_users import MAX_QUOTA, MAX_WINDOW_DAYS, apply_user_changes
 from plex_playlist_sync.clients.plex import PlexClient
+from plex_playlist_sync.media_servers import MediaServer, as_media_server, describe_error, import_server_users
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.models import UserPermission
 from plex_playlist_sync.redaction import safe_exc
@@ -146,39 +149,30 @@ def update_user_governance_route(
     return updated
 
 
-@router.post("/refresh")
+@router.post("/refresh", dependencies=[Depends(require_media_server)])
 def refresh_users(
     _admin: dict[str, Any] = Depends(require_admin),
     db: Database = Depends(get_db),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Union[PlexClient, MediaServer]] = Depends(get_media_client),
 ) -> list[dict[str, Any]]:
-    """Discovers users from Plex server and upserts them to DB (admin only)."""
-    if not plex_client:
+    """Discovers users from the media server and upserts them to DB (admin only)."""
+    server = as_media_server(plex_client)
+    if not server:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Plex client is not configured on hub",
         )
 
     try:
-        discovered_users = plex_client.get_home_users()
+        discovered_users = server.list_users()
     except Exception as e:
-        logger.error("Failed to discover Plex Home users: %s", safe_exc(e))
+        logger.error("Failed to discover Plex Home users: %s", describe_error(e))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to query Plex users: {safe_exc(e)}",
+            detail=f"Failed to query Plex users: {describe_error(e)}",
         )
 
-    for u in discovered_users:
-        uid = str(u["id"])
-        if db.is_tombstoned(uid):
-            continue  # deleted by an admin; only an explicit restore lets them back in
-        existing = db.get_user(uid)
-        db.upsert_user(
-            user_id=uid,
-            username=str(u["username"]),
-            email=u.get("email") or None,
-            # Never silently demote an admin that was granted in the UI.
-            is_admin=bool(u.get("is_admin", False)) or bool(existing and existing["is_admin"]),
-        )
+    imported, skipped = import_server_users(db, server.kind, discovered_users)
+    logger.info("User refresh: %d imported, %d skipped", imported, skipped)
 
     return db.list_users()

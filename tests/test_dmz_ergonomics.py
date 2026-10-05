@@ -307,11 +307,12 @@ def test_cli_core_warns_but_starts_checks(tmp_path, caplog):
     env = {
         "ROLE": "core",
         "INTERNAL_CORE_SECRET": SECRET,
+        "MEDIA_SERVER": "plex",
         "DATA_DIR": str(tmp_path),
         "CONFIG_DIR": str(tmp_path),
     }
     with patch.dict(os.environ, env, clear=True), caplog.at_level(logging.WARNING):
-        assert main() == 1  # no PLEX_URL/TOKEN: refuses for that old reason, after the new warning
+        assert main() == 1  # explicit MEDIA_SERVER=plex without PLEX_URL/TOKEN refuses, after the new warning
     assert any("CORE_LAN_BIND" in r.getMessage() for r in caplog.records)
 
 
@@ -1082,7 +1083,7 @@ def test_migrations_are_idempotent_across_role_flips(tmp_path):
         db = Database(path)
         record_boot_role(db, role)
         versions = [r[0] for r in db.conn.execute("SELECT version FROM schema_migrations ORDER BY version")]
-        assert versions == list(range(1, 40))
+        assert versions == list(range(1, 42))
         db.close()
     db = Database(path)
     cols = [r[1] for r in db.conn.execute("PRAGMA table_info(general_settings)")]
@@ -1099,7 +1100,7 @@ def test_v30_adds_columns_to_a_v29_database(tmp_path):
     db.close()
     db = Database(path)  # re-running v30 over existing columns must not fail or lose data
     assert db.get_general_settings()["application_url"] == "https://music.example.com"
-    assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 39
+    assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 41
     db.close()
 
 

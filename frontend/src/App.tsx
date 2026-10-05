@@ -12,6 +12,7 @@ import {
   useAccount,
   useLocalLogin,
   useDeploymentIdentity,
+  useMediaServer,
   useStartupStatus,
 } from '@/hooks';
 import {
@@ -60,6 +61,7 @@ export function parseInviteToken(pathname: string): string | null {
 const MainApp: React.FC = () => {
   const auth = useAuth();
   const identity = useDeploymentIdentity(auth.tier, auth.isAuthenticated);
+  const mediaServer = useMediaServer();
   const accountHook = useAccount(auth.isAuthenticated);
   const localLogin = useLocalLogin({ onSignedIn: auth.completeLocalSignIn });
   const [showLocalLogin, setShowLocalLogin] = useState<boolean>(false);
@@ -221,7 +223,10 @@ const MainApp: React.FC = () => {
         onTabChange={handleTabChange}
         isAdmin={auth.canUseAdminUi}
         tier={identity.tier}
-        onLogin={() => setIsAuthModalOpen(true)}
+        onLogin={() => {
+          if (mediaServer.isPlex) setIsAuthModalOpen(true);
+          else setShowLocalLogin(true);
+        }}
         onLogout={auth.logout}
         isMobileMenuOpen={isMobileMenuOpen}
         onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
@@ -286,67 +291,79 @@ const MainApp: React.FC = () => {
               )}
 
               <div className="space-y-3 pt-2">
-                {auth.isAuthenticating ? (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-center gap-2 text-xs font-mono text-[#e5a00d]">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Connecting to Plex...</span>
-                    </div>
-                    <p className="text-[11px] text-neutral-400 font-mono">
-                      {auth.plexAuthPhase === 'popup' &&
-                        'Popup window opened. Complete sign-in in the Plex window.'}
-                      {auth.plexAuthPhase === 'redirecting' &&
-                        'Finishing Plex sign-in. Redirecting to Plex...'}
-                      {auth.plexAuthPhase === 'starting' && 'Contacting Plex...'}
-                      {auth.plexAuthPhase === 'blocked' &&
-                        'Your browser blocked the sign-in popup. Tap the button below to open Plex sign-in.'}
-                    </p>
-                    {auth.plexAuthPhase === 'blocked' && auth.plexAuthUrl && (
-                      <a
-                        href={auth.plexAuthUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="tape-deck-btn flex min-h-[44px] w-full items-center justify-center rounded-[3px] px-4 text-xs sm:min-h-[38px]"
-                      >
-                        Open Plex Sign-In
-                      </a>
-                    )}
-                    <TapeDeckButton
-                      size="md"
-                      variant="default"
-                      onClick={auth.cancelLogin}
-                      className="w-full"
-                    >
-                      Cancel Sign In
-                    </TapeDeckButton>
+                {!mediaServer.isLoaded ? (
+                  <div className="flex items-center justify-center gap-2 text-xs font-mono text-neutral-400">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Loading...</span>
                   </div>
+                ) : !mediaServer.isPlex ? (
+                  /* No Plex (none, or a Subsonic server): there is no Plex to sign in with, local accounts only. */
+                  <LocalLoginForm login={localLogin} />
                 ) : (
                   <>
-                    <TapeDeckButton
-                      size="lg"
-                      variant="amber"
-                      onClick={auth.loginWithPlex}
-                      icon={<LogIn className="h-5 w-5" />}
-                      className="w-full"
-                    >
-                      Sign In with Plex
-                    </TapeDeckButton>
-                    <div className="flex items-center gap-3 text-[10px] font-mono uppercase text-[var(--text-muted)]">
-                      <span className="h-px flex-1 bg-[var(--border-default)]" />
-                      or
-                      <span className="h-px flex-1 bg-[var(--border-default)]" />
-                    </div>
-                    {showLocalLogin ? (
-                      <LocalLoginForm login={localLogin} />
+                    {auth.isAuthenticating ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-center gap-2 text-xs font-mono text-[#e5a00d]">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Connecting to Plex...</span>
+                        </div>
+                        <p className="text-[11px] text-neutral-400 font-mono">
+                          {auth.plexAuthPhase === 'popup' &&
+                            'Popup window opened. Complete sign-in in the Plex window.'}
+                          {auth.plexAuthPhase === 'redirecting' &&
+                            'Finishing Plex sign-in. Redirecting to Plex...'}
+                          {auth.plexAuthPhase === 'starting' && 'Contacting Plex...'}
+                          {auth.plexAuthPhase === 'blocked' &&
+                            'Your browser blocked the sign-in popup. Tap the button below to open Plex sign-in.'}
+                        </p>
+                        {auth.plexAuthPhase === 'blocked' && auth.plexAuthUrl && (
+                          <a
+                            href={auth.plexAuthUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="tape-deck-btn flex min-h-[44px] w-full items-center justify-center rounded-[3px] px-4 text-xs sm:min-h-[38px]"
+                          >
+                            Open Plex Sign-In
+                          </a>
+                        )}
+                        <TapeDeckButton
+                          size="md"
+                          variant="default"
+                          onClick={auth.cancelLogin}
+                          className="w-full"
+                        >
+                          Cancel Sign In
+                        </TapeDeckButton>
+                      </div>
                     ) : (
-                      <TapeDeckButton
-                        size="md"
-                        className="w-full"
-                        onClick={() => setShowLocalLogin(true)}
-                      >
-                        Sign in with username
-                      </TapeDeckButton>
-                    )}
+                      <>
+                        <TapeDeckButton
+                          size="lg"
+                          variant="amber"
+                          onClick={auth.loginWithPlex}
+                          icon={<LogIn className="h-5 w-5" />}
+                          className="w-full"
+                        >
+                          Sign In with Plex
+                        </TapeDeckButton>
+                        <div className="flex items-center gap-3 text-[10px] font-mono uppercase text-[var(--text-muted)]">
+                          <span className="h-px flex-1 bg-[var(--border-default)]" />
+                          or
+                          <span className="h-px flex-1 bg-[var(--border-default)]" />
+                        </div>
+                        {showLocalLogin ? (
+                          <LocalLoginForm login={localLogin} />
+                        ) : (
+                          <TapeDeckButton
+                            size="md"
+                            className="w-full"
+                            onClick={() => setShowLocalLogin(true)}
+                          >
+                            Sign in with username
+                          </TapeDeckButton>
+                        )}
+                    </>
+                  )}
                   </>
                 )}
               </div>
@@ -398,6 +415,11 @@ const MainApp: React.FC = () => {
                 onDelete={handleDeletePlaylist}
                 isLoading={isPlaylistsLoading}
                 isAdmin={auth.canUseAdminUi}
+                hasMediaServer={mediaServer.hasMediaServer}
+                serverType={mediaServer.type}
+                serverLabel={mediaServer.label}
+                canTargetUsers={mediaServer.capabilities.users}
+                mixesEnabled={mediaServer.capabilities.mixes}
               />
             )}
 
@@ -417,6 +439,7 @@ const MainApp: React.FC = () => {
                 accountHook={accountHook}
                 currentUserId={auth.user?.id}
                 mfaEnrollmentRequired={mfaEnrollmentRequired}
+                hasMediaServer={mediaServer.isPlex}
               />
             )}
             {identity.isGateway && (
@@ -442,7 +465,7 @@ const MainApp: React.FC = () => {
 
       {/* Plex Sign-In Modal */}
       <ObsidianModal
-        isOpen={isAuthModalOpen}
+        isOpen={isAuthModalOpen && mediaServer.isPlex}
         onClose={() => {
           setIsAuthModalOpen(false);
           auth.cancelLogin();

@@ -15,6 +15,7 @@ from starlette.staticfiles import StaticFiles
 
 from plex_playlist_sync import __version__
 from plex_playlist_sync.boot import boot_state
+from plex_playlist_sync.media_server import MediaServerUnavailable, media_server_unavailable_response
 from plex_playlist_sync.api.routes import (
     account,
     acquisition,
@@ -205,6 +206,8 @@ def create_app(
                 allow_methods=["*"],
                 allow_headers=["*"],
             )
+
+    app.add_exception_handler(MediaServerUnavailable, media_server_unavailable_response)
 
     # 3. Mount Routers under /api
     api_router = APIRouter(prefix="/api")

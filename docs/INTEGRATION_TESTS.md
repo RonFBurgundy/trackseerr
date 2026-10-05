@@ -73,3 +73,78 @@ Confirmed as the client and the fake assume: rootfolder `default*` field names; 
    name, so no effect.
 5. A metadata profile that allows nothing (stock "None") makes a new artist list zero albums forever;
    `wait_for_artist_albums` then returns `([], False)` and requests end `albums_pending`.
+
+
+# Navidrome (Subsonic adapter) integration tests
+
+`tests/integration/test_navidrome_contract.py` runs `SubsonicMediaServer` against a real Navidrome
+(`deluan/navidrome:0.64.2`, pinned) with the same opt-in as the Lidarr tests (`RUN_INTEGRATION=1`, marker `integration`).
+`tests/subsonic_fake.py` (used by the unit and contract tests) is the in-process stand-in; these tests are the check
+that the real server still behaves as the fake assumes.
+
+```bash
+docker compose -f docker-compose.integration.yml up -d navidrome        # 127.0.0.1:14533, ~15s, 512m / 1 cpu
+RUN_INTEGRATION=1 pytest tests/integration/test_navidrome_contract.py -m integration -p no:xdist
+docker compose -f docker-compose.integration.yml down -v                # then `docker ps` must show only your own containers
+```
+
+The music library is **generated**, nothing audio is committed: `tests/integration/navidrome/make_music.py` writes six
+~16 KB MP3s (silent MPEG frames, tags by mutagen) into the git-ignored `tests/integration/navidrome/music/` before the
+stack starts. `/data` is a tmpfs. The first admin is created by the fixture with `POST /auth/createAdmin` (TEST-ONLY
+credentials in `tests/integration/conftest.py`). `NAVIDROME_IT_URL` / `_USER` / `_PASSWORD` select another throwaway
+instance. The container name and port differ from any Navidrome you run yourself.
+
+Covered: ping, wrong password -> `MediaServerAuthError`, unreachable server, search / match (remaster suffix, wrong
+artist), playlist create -> reorder + add -> remove -> append mode verified with raw `getPlaylist` (same playlist id, so
+updated in place), idempotent re-sync, description as comment, other-account target rejected, 150-entry playlist
+(request chunking), `startScan` starts a scan, `getUsers`.
+
+Findings on Navidrome 0.64.2: `getUsers` works for an admin; it does not advertise `apiKeyAuthentication`; a fresh
+instance scans on first start and reports `Full scan required after migration`.
+
+
+# Jellyfin (adapter) integration tests
+
+`tests/integration/test_jellyfin_contract.py` runs `JellyfinMediaServer` against a real Jellyfin
+(`jellyfin/jellyfin:12.1.20260915-010956`, i.e. server 12.1.0, pinned) with the same opt-in as the other suites
+(`RUN_INTEGRATION=1`, marker `integration`). `tests/jellyfin_fake.py` is the in-process stand-in; these tests check that
+the real server still behaves as the fake assumes.
+
+```bash
+docker compose -f docker-compose.integration.yml up -d jellyfin         # 127.0.0.1:18096, ~40s, 1g / 1 cpu
+RUN_INTEGRATION=1 pytest tests/integration/test_jellyfin_contract.py -m integration -p no:xdist
+docker compose -f docker-compose.integration.yml down -v                # then `docker ps` must show only your own containers
+```
+
+Inside the test image use `--network host` and `JELLYFIN_IT_URL=http://127.0.0.1:18096` (the container has no docker
+CLI to start the stack itself). Config, cache and temp are tmpfs (a 3 GB cap: Jellyfin refuses to start with under 2 GiB
+free; real usage is a few MB), so every start is a first run. The fixture completes the Startup wizard
+(`/Startup/Configuration`, `/Startup/User`, `/Startup/RemoteAccess`, `/Startup/Complete`), logs in with
+`/Users/AuthenticateByName`, adds a music library over the SAME generated folder Navidrome uses
+(`tests/integration/navidrome/music`, mounted read-only at `/media/music`), creates a second user and an API key
+(`/Auth/Keys`). TEST-ONLY credentials live in `tests/integration/conftest.py`.
+
+Covered: ping, bad key -> `MediaServerAuthError`, unreachable server, scan + search, match (remaster suffix, wrong
+artist), playlist create -> reorder / drop / add -> removal -> append mode (same playlist id throughout), idempotent
+re-sync, a second user getting its own private playlist (and an unknown target reported), full reversal, repeated tracks,
+`/Users`, `/Library/Refresh`.
+
+Findings on Jellyfin 12.1.0:
+
+1. `POST /Playlists` without `IsPublic` creates a **public** playlist (`OpenAccess: true`), visible to every user. The
+   adapter always sends `IsPublic: false`.
+2. `POST /Playlists/{id}/Items/{entry}/Move/{index}` answers **400** for an API key (it needs a user session). The adapter
+   therefore orders with remove-by-`EntryIds` plus append and never calls Move.
+3. Adding an item that is repeated in one update is silently collapsed; only creation accepts repeats. The adapter syncs
+   a repeated source track once.
+4. Right after the first scan tracks are named after their file (`01 - Kettle Song`); the tag read follows in the
+   metadata pass, so the fixture waits for the real titles.
+5. `SearchTerm` matches the item name only, so the adapter searches by title and scores the artist itself.
+6. An API key has no user context, so every playlist call names the account with `UserId`.
+7. `/Items?IncludeItemTypes=Playlist&UserId=` lists the user's own playlists AND every other account's public ones, and
+   `DELETE /Playlists/{id}/Items` (no user) removes entries from any of them. `GET /Playlists/{id}` and `/Users` answer
+   400 for an API key, so ownership is probed with an empty `POST /Playlists/{id}/Items?UserId=` (204 owner, 403 visible but
+   not theirs, 404 not visible). The adapter only touches playlists the target may edit.
+8. `Policy.IsHidden` is **true** for ordinary accounts (it only hides them from the login screen), so it cannot filter
+   users; only `Policy.IsDisabled` does.
+

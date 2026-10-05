@@ -3,7 +3,7 @@
  * Mirrors docs/users-and-accounts.md.
  */
 
-export type AuthType = 'plex' | 'local';
+export type AuthType = 'plex' | 'local' | 'jellyfin';
 export type QuotaKind = 'tracks' | 'albums' | 'discographies';
 
 export const QUOTA_KINDS: readonly QuotaKind[] = ['tracks', 'albums', 'discographies'] as const;

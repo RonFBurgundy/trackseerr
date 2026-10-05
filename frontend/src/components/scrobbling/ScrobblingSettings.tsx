@@ -7,9 +7,11 @@ import { ScrobbleAdminPanel } from './ScrobbleAdminPanel';
 
 export interface ScrobblingSettingsProps {
   isAdmin: boolean;
+  /** False when no media server is connected (hides the Plex-only admin controls). */
+  hasMediaServer?: boolean;
 }
 
-export const ScrobblingSettings: React.FC<ScrobblingSettingsProps> = ({ isAdmin }) => {
+export const ScrobblingSettings: React.FC<ScrobblingSettingsProps> = ({ isAdmin, hasMediaServer = true }) => {
   const s = useScrobbling(isAdmin);
   const { notice, dismissNotice } = s;
 
@@ -69,6 +71,7 @@ export const ScrobblingSettings: React.FC<ScrobblingSettingsProps> = ({ isAdmin 
             onSaveServerConfig={s.saveServerConfig}
             onRotateWebhook={s.rotateWebhook}
             onSaveUser={s.saveUserConfig}
+            showPlexOptions={hasMediaServer}
           />
         </div>
       )}

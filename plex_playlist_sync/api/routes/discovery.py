@@ -12,12 +12,13 @@ from plex_playlist_sync.api.dependencies import (
     get_config,
     get_db,
     get_discovery_client,
-    get_plex_client,
+    get_media_client,
     require_user,
 )
 from plex_playlist_sync.clients.core_client import CoreClient
 from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.plex import PlexClient
+from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.library_availability import get_item_availability
 from plex_playlist_sync.storage import Database
@@ -149,7 +150,8 @@ def annotate_item_statuses(
 
     # For items without matches, skip individual per-track network round trips on batch discovery lists (> 5 items).
     # For small sets (<= 5 items) when plex_client is provided, resolve concurrently via ThreadPoolExecutor.
-    if plex_client is not None and len(items) <= 5:
+    server = as_media_server(plex_client)
+    if server is not None and len(items) <= 5:
         plex_lookups: list[tuple[int, str, str]] = []
         for idx, it in enumerate(annotated):
             if it.get("status") in (None, "none") and not it.get("request_id"):
@@ -162,7 +164,7 @@ def annotate_item_statuses(
             def _check_plex(entry: tuple[int, str, str]) -> tuple[int, bool]:
                 i, a, t = entry
                 try:
-                    plex_matches = plex_client.search_library_tracks(query=t, limit=5)
+                    plex_matches = server.search_tracks(t, limit=5)
                     for pm in plex_matches:
                         pm_artist = (pm.get("artist") or "").lower().strip()
                         pm_title = (pm.get("title") or "").lower().strip()
@@ -190,7 +192,7 @@ def get_trending(
     limit: int = Query(default=25, ge=1, le=50),
     discovery: DiscoveryClient = Depends(get_discovery_client),
     db: Database = Depends(get_db),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     config: Config = Depends(get_config),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
@@ -205,7 +207,7 @@ def get_new_releases(
     limit: int = Query(default=25, ge=1, le=50),
     discovery: DiscoveryClient = Depends(get_discovery_client),
     db: Database = Depends(get_db),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     config: Config = Depends(get_config),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
@@ -222,7 +224,7 @@ def search_discovery(
     limit: int = Query(default=25, ge=1, le=50),
     discovery: DiscoveryClient = Depends(get_discovery_client),
     db: Database = Depends(get_db),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     config: Config = Depends(get_config),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
@@ -237,7 +239,7 @@ def get_album(
     album_id: str,
     discovery: DiscoveryClient = Depends(get_discovery_client),
     db: Database = Depends(get_db),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     config: Config = Depends(get_config),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
@@ -267,7 +269,7 @@ def get_artist(
     artist_id: str,
     discovery: DiscoveryClient = Depends(get_discovery_client),
     db: Database = Depends(get_db),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
     config: Config = Depends(get_config),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:

@@ -3,6 +3,7 @@ import { Loader2, AlertTriangle, ExternalLink } from 'lucide-react';
 import { MachinedCard } from '@/components/ui';
 import { RequestPortalCard } from '@/components/deployment';
 import { useSystemOverview } from '@/hooks/useSystemOverview';
+import { useMediaServer } from '@/hooks/useMediaServer';
 import type { LibraryManagerMode, LidarrHealthItem } from '@/types/models';
 
 export interface SystemStatusPanelProps {
@@ -19,6 +20,7 @@ const HEALTH_STYLE: Record<LidarrHealthItem['type'], string> = {
 
 export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, libraryMode }) => {
   const { status, statusError, lidarrHealth, healthError, isLoading } = useSystemOverview(libraryMode === 'lidarr');
+  const mediaServer = useMediaServer();
 
   return (
     <div className="space-y-6">
@@ -47,9 +49,15 @@ export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, li
               <span className="text-green-400">{status.database_status || 'SQLite OK'}</span>
             </div>
             <div className="py-2.5 flex justify-between gap-3">
-              <span className="text-neutral-400">Plex Server Connection:</span>
-              <span className={status.plex_connected ? 'text-green-400' : 'text-neutral-400'}>
-                {status.plex_connected ? 'Connected' : 'Configured'}
+              <span className="text-neutral-400">
+                {mediaServer.isPlex ? 'Plex Server Connection:' : 'Media Server:'}
+              </span>
+              <span className={mediaServer.isPlex ? (status.plex_connected ? 'text-green-400' : 'text-neutral-400') : mediaServer.status?.connected ? 'text-green-400' : 'text-neutral-400'}>
+                {!mediaServer.hasMediaServer
+                  ? 'Not configured'
+                  : (mediaServer.isPlex ? status.plex_connected : mediaServer.status?.connected)
+                    ? 'Connected'
+                    : 'Configured'}
               </span>
             </div>
             <div className="py-2.5 flex justify-between gap-3">

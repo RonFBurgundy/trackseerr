@@ -65,6 +65,7 @@ GATEWAY_LOCAL_ALLOWLIST: tuple[tuple[frozenset[str], str], ...] = (
 # Rate-limited per end-user IP at the gateway.
 GATEWAY_FORWARD_SERVICE_ALLOWLIST: tuple[tuple[frozenset[str], str], ...] = (
     (frozenset({"GET", "POST"}), "/api/auth/invite/{}"),  # invite / password-reset link
+    (READ, "/api/system/media-server"),  # which sign-in methods to offer (the media server lives on core)
 )
 
 # User-scoped endpoints the gateway relays to core as the signed-in user.

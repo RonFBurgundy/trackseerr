@@ -45,11 +45,13 @@ from plex_playlist_sync.clients.acquisition import (
 from plex_playlist_sync.clients.deezer import DeezerClient
 from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient
 from plex_playlist_sync.clients.plex import PlexClient
+from plex_playlist_sync.media_servers import as_media_server, build_jellyfin, build_subsonic
 from plex_playlist_sync.clients.spotify import SpotifyClient
-from plex_playlist_sync.config import Config
+from plex_playlist_sync.config import MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_SUBSONIC, Config
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result, track_job
 from plex_playlist_sync.library_manager import MODE_LIDARR, MODE_NATIVE, build_lidarr_client, get_library_mode
 from plex_playlist_sync.library_scanner import library_scanner
+from plex_playlist_sync.media_server import media_server_status
 from plex_playlist_sync.lidarr_queue import lidarr_worker
 from plex_playlist_sync.models import DownloadClientConfig, IndexerConfig, UserPermission
 from plex_playlist_sync.security import is_safe_service_url
@@ -572,27 +574,9 @@ def _ping_plex(
 
     t0 = time.perf_counter()
     try:
-        if hasattr(plex_client, "test_connection"):
-            res = plex_client.test_connection()
-            if isinstance(res, tuple):
-                online = bool(res[0])
-                msg = redact_text(str(res[1]))
-            elif isinstance(res, bool):
-                online = res
-                msg = "Connected to Plex" if online else "Plex unreachable"
-            elif isinstance(res, dict):
-                online = bool(res.get("online", False))
-                msg = str(
-                    res.get("message")
-                    or res.get("error")
-                    or ("Connected to Plex" if online else "Plex unreachable")
-                )
-            else:
-                online = bool(res)
-                msg = "Connected to Plex" if online else "Plex unreachable"
-        else:
-            online = True
-            msg = "Connected to Plex"
+        result = as_media_server(plex_client).test_connection()
+        online = result.ok
+        msg = result.message
         latency_ms = round((time.perf_counter() - t0) * 1000.0, 2) if online else None
     except Exception as e:
         logger.warning("Error testing connection to Plex: %s", safe_exc(e))
@@ -680,6 +664,24 @@ def _get_worker_statuses() -> WorkerStatus:
         backlog_worker=backlog_status,
         rss_worker=rss_status,
     )
+
+
+def _connected_media_client(config: Config) -> Optional[Any]:
+    """A reachable client of the configured media server, or None (probe helper for the status endpoint)."""
+    if config.media_server_type in (MEDIA_SERVER_SUBSONIC, MEDIA_SERVER_JELLYFIN):
+        server = build_subsonic(config) if config.media_server_type == MEDIA_SERVER_SUBSONIC else build_jellyfin(config)
+        if server is None:
+            return None
+        return True if server.test_connection().ok else None  # the probe only needs "reachable or not"
+    return get_plex_client(config)
+
+
+@router.get("/media-server", summary="Active media server and the features it enables")
+def get_media_server_status(
+    config: Config = Depends(get_config),
+) -> dict[str, Any]:
+    """Unauthenticated (the login screen needs it) and non-sensitive: type, connectivity, capability flags."""
+    return media_server_status(config, lambda: _connected_media_client(config))
 
 
 @router.get("/status", response_model=SystemStatusResponse, summary="Get system status and diagnostics")

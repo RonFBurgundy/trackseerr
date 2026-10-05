@@ -14,14 +14,17 @@ from plex_playlist_sync.api.dependencies import (
     get_current_user,
     get_db,
     get_deezer_client,
-    get_plex_client,
+    get_media_client,
+    require_media_server,
     get_spotify_client,
 )
 from plex_playlist_sync.clients.deezer import DeezerClient
 from plex_playlist_sync.clients.plex import PlexClient
+from plex_playlist_sync.media_servers import PlaylistSyncOptions, as_media_server, describe_error, plex_extras
 from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.clients.spotify_scraper import SpotifyWebScraper
-from plex_playlist_sync.config import Config
+from plex_playlist_sync.config import MEDIA_SERVER_NONE, Config
+from plex_playlist_sync.native_match import match_playlist_tracks_native
 from plex_playlist_sync.library_monitoring import validate_list_monitor_mode
 from plex_playlist_sync.list_monitoring import apply_playlist_missing_safely
 from plex_playlist_sync.m3u import parse_m3u
@@ -361,19 +364,26 @@ def get_smart_mix_presets(
     return SMART_MIX_PRESETS
 
 
-@router.post("/smart-mix", status_code=status.HTTP_201_CREATED)
+@router.post("/smart-mix", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_media_server)])
 def create_smart_mix(
     req: SmartMixRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
 ) -> dict[str, Any]:
     """Generates a smart playlist in Plex from local listening history."""
-    if not plex_client:
+    server = as_media_server(plex_client)
+    if not server:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Plex Media Server client is not configured",
+        )
+    mix_client = plex_extras(server)
+    if not server.capabilities.mixes or mix_client is None:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Smart mixes are not supported by the connected media server",
         )
 
     valid_types = {p["mix_type"]: p for p in SMART_MIX_PRESETS}
@@ -386,7 +396,7 @@ def create_smart_mix(
     preset_info = valid_types[req.mix_type]
     pl_name = sanitize_text(req.name or preset_info["name"])
 
-    tracks = plex_client.get_smart_mix_tracks(req.mix_type, limit=50)
+    tracks = mix_client.get_smart_mix_tracks(req.mix_type, limit=50)
     if not tracks:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -530,7 +540,7 @@ def import_playlist_tracks(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
 ) -> dict[str, Any]:
     """Imports playlist and tracks directly from browser helpers, clipboard, or bookmarklet."""
     clean_name = sanitize_text(req.name)
@@ -584,7 +594,8 @@ def import_playlist_tracks(
 
     matched_count = 0
     missing_count = 0
-    if plex_client and model_tracks:
+    server = as_media_server(plex_client)
+    if server and model_tracks:
         target_usernames = []
         for uid in targets:
             user_row = db.get_user(uid)
@@ -600,18 +611,10 @@ def import_playlist_tracks(
                 poster=poster_url,
             )
             try:
-                results = plex_client.sync_playlist_to_users(
-                    playlist=model_playlist,
-                    target_usernames=target_usernames,
-                    append=config.append_instead_of_sync,
-                    add_description=config.add_playlist_description,
-                    add_poster=config.add_playlist_poster,
-                    write_missing_as_csv=config.write_missing_as_csv,
-                    data_dir=config.data_dir,
-                    threshold=config.search_similarity_threshold,
-                    db=db,
+                results = server.sync_playlist(
+                    model_playlist, target_usernames, PlaylistSyncOptions.from_config(config, db=db)
                 )
-                matched, missing = plex_client.match_playlist_tracks(
+                matched, missing = server.match_playlist_tracks(
                     model_tracks, threshold=config.search_similarity_threshold
                 )
                 matched_count = len(matched)
@@ -623,11 +626,29 @@ def import_playlist_tracks(
                     missing_tracks=missing,
                 )
             except Exception as e:
-                logger.error("Error during direct import sync to Plex: %s", safe_exc(e))
+                logger.error("Error during direct import sync to Plex: %s", describe_error(e))
                 logger.debug("Direct import sync traceback", exc_info=True)
                 db.record_sync_result(import_id, status="error")
             else:
                 _apply_missing_in_background(db, config, import_id)
+    elif config.media_server_type == MEDIA_SERVER_NONE and model_tracks:
+        # No media server: nothing to push, but the playlist is still matched against the native library so its
+        # missing tracks feed monitoring / wanted.
+        try:
+            matched, missing = match_playlist_tracks_native(db, model_tracks)
+            matched_count = len(matched)
+            missing_count = len(missing)
+            db.record_sync_result(
+                import_id,
+                status="success" if not missing else "partial",
+                missing_tracks=missing,
+            )
+        except Exception as e:  # the playlist is already stored; the root cause is logged
+            logger.error("Native library match failed for imported playlist: %s", safe_exc(e))
+            logger.debug("Native match traceback", exc_info=True)
+            db.record_sync_result(import_id, status="error")
+        else:
+            _apply_missing_in_background(db, config, import_id)
 
     return {
         "id": import_id,
@@ -647,7 +668,7 @@ def import_m3u_playlist(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
 ) -> dict[str, Any]:
     """Imports a playlist from raw M3U / M3U8 file contents."""
     parsed_tracks = parse_m3u(req.content)

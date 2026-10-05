@@ -16,12 +16,14 @@ from plex_playlist_sync.api.dependencies import (
     get_config,
     get_db,
     get_lidarr_client,
-    get_plex_client,
+    get_media_client,
+    require_media_server,
     require_admin,
     verify_feed_access,
 )
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.clients.plex import PlexClient
+from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.lidarr_queue import lidarr_worker
 from plex_playlist_sync.lidarr_release import norm_title
@@ -454,20 +456,21 @@ def cancel_lidarr_queue(
     return {**status, "action_status": res.get("status"), "action_message": res.get("message")}
 
 
-@router.get("/search")
+@router.get("/search", dependencies=[Depends(require_media_server)])
 def search_plex_tracks(
     query: str = Query(..., min_length=1, description="Query string to search Plex library tracks"),
     limit: int = Query(default=15, ge=1, le=50),
     current_user: dict[str, Any] = Depends(require_admin),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Any] = Depends(get_media_client),
 ) -> list[dict[str, Any]]:
     """Searches the Plex library for tracks to enable manual matching and correction."""
-    if not plex_client:
+    server = as_media_server(plex_client)
+    if not server:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Plex Media Server client is not configured",
         )
-    return plex_client.search_library_tracks(query, limit=limit)
+    return server.search_tracks(query, limit=limit)
 
 
 @router.post("/match", status_code=status.HTTP_201_CREATED)

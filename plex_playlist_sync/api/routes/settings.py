@@ -2,7 +2,7 @@
 
 import logging
 import sqlite3
-from typing import Any, Literal
+from typing import Any, Literal, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field, field_validator
 from plex_playlist_sync import library_manager, lidarr_library
 from plex_playlist_sync.api.dependencies import get_config, get_db, require_admin, require_core_tier
 from plex_playlist_sync.config import Config
+from plex_playlist_sync.media_servers import JellyfinMediaServer, MediaServerError, SubsonicMediaServer
+from plex_playlist_sync.media_servers import settings as media_server_settings
 from plex_playlist_sync.library_monitoring import validate_monitor_option
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient, invalidate_add_defaults
@@ -573,6 +575,144 @@ def test_lidarr_connection(
 
 
 # -----------------------------------------------------------------------------
+# Media Server Settings Endpoints
+# -----------------------------------------------------------------------------
+
+
+class MediaServerSettingsPayload(BaseModel):
+    """What the Settings page submits. A secret sent back as ``********`` keeps the stored value."""
+
+    type: Literal["subsonic", "jellyfin", "none"]
+    url: str = Field("", max_length=2048)
+    username: str = Field("", max_length=256)
+    password: str = Field("", max_length=1024)
+    api_key: str = Field("", max_length=1024)
+
+
+class MediaServerSettingsResponse(BaseModel):
+    type: str
+    url: str
+    username: str
+    password: str
+    api_key: str
+    effective_type: str
+    locked_by_env: bool
+
+
+class MediaServerTestResponse(BaseModel):
+    ok: bool
+    message: str
+
+
+def _media_server_values(payload: MediaServerSettingsPayload) -> dict[str, str]:
+    return payload.model_dump()
+
+
+@router.get(
+    "/media-server",
+    response_model=MediaServerSettingsResponse,
+    summary="Get the saved media-server settings (secrets masked)",
+    dependencies=[Depends(require_core_tier)],
+)
+def get_media_server_settings(
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+    admin_user: dict[str, Any] = Depends(require_admin),
+) -> MediaServerSettingsResponse:
+    return MediaServerSettingsResponse(**media_server_settings.present(config, db))
+
+
+@router.put(
+    "/media-server",
+    response_model=MediaServerSettingsResponse,
+    summary="Save the media-server settings (Admin Only)",
+    dependencies=[Depends(require_core_tier)],
+)
+def update_media_server_settings(
+    payload: MediaServerSettingsPayload,
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+    admin_user: dict[str, Any] = Depends(require_admin),
+) -> MediaServerSettingsResponse:
+    """Saves the choice. The environment takes precedence: while it configures a media server this is refused (409)."""
+    if config.media_server_env_controlled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The media server is configured through environment variables; remove them to manage it here.",
+        )
+    values = _media_server_values(payload)
+    if values["type"] in ("subsonic", "jellyfin"):
+        clean_url = values["url"].strip().rstrip("/")
+        if clean_url and not is_safe_service_url(clean_url):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Prohibited or invalid host URL (SSRF defense)",
+            )
+        values["url"] = clean_url
+    try:
+        media_server_settings.save(db, values)
+    except media_server_settings.SecretReuseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except media_server_settings.MediaServerSettingsError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except sqlite3.Error as exc:
+        logger.error("Failed to save media-server settings: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database update failed"
+        ) from exc
+    return MediaServerSettingsResponse(**media_server_settings.present(Config.from_env(), db))
+
+
+@router.post(
+    "/media-server/test",
+    response_model=MediaServerTestResponse,
+    summary="Test a media-server connection without saving it (Admin Only)",
+    dependencies=[Depends(require_core_tier)],
+)
+def test_media_server_settings(
+    payload: MediaServerSettingsPayload,
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+    admin_user: dict[str, Any] = Depends(require_admin),
+) -> MediaServerTestResponse:
+    """Builds the adapter from the submitted values (masked secrets resolved from the saved ones) and pings it."""
+    if payload.type == "none":
+        return MediaServerTestResponse(ok=False, message="Nothing to test: no media server selected")
+    try:
+        values = media_server_settings.validate(
+            media_server_settings.merge_secrets(_media_server_values(payload), db.get_media_server_settings())
+        )
+    except media_server_settings.SecretReuseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except media_server_settings.MediaServerSettingsError as exc:
+        return MediaServerTestResponse(ok=False, message=str(exc))
+    clean_url = values["url"].rstrip("/")
+    if not is_safe_service_url(clean_url):
+        return MediaServerTestResponse(ok=False, message="Prohibited or invalid host URL (SSRF defense)")
+    try:
+        server: Union[SubsonicMediaServer, JellyfinMediaServer]
+        if values["type"] == "jellyfin":
+            server = JellyfinMediaServer(
+                clean_url, values["api_key"], values["username"], verify_ssl=config.plex_verify_ssl
+            )
+        else:
+            server = SubsonicMediaServer(
+                clean_url,
+                values["username"],
+                values["password"],
+                api_key=values["api_key"],
+                verify_ssl=config.plex_verify_ssl,
+            )
+    except MediaServerError as exc:
+        return MediaServerTestResponse(ok=False, message=exc.safe_detail)
+    try:
+        result = server.test_connection()
+    finally:
+        server.close()
+    return MediaServerTestResponse(ok=result.ok, message=result.message)
+
+
+# -----------------------------------------------------------------------------
 # General Application Settings Endpoints
 # -----------------------------------------------------------------------------
 
@@ -722,7 +862,7 @@ def set_library_manager(
 
     if payload.mode == library_manager.MODE_LIDARR and not library_manager.lidarr_is_configured(db, config):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail="Configure Lidarr (URL and API key) before switching the library manager to Lidarr.",
         )
 
@@ -757,7 +897,7 @@ def get_lidarr_defaults(
     client = library_manager.build_lidarr_client(db, config)
     if client is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail="Lidarr is not configured (URL and API key are required).",
         )
     try:
@@ -804,7 +944,7 @@ def get_lidarr_options(
     client = library_manager.build_lidarr_client(db, config)
     if client is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail="Lidarr is not configured (URL and API key are required).",
         )
     try:

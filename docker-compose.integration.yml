@@ -1,4 +1,4 @@
-# Throwaway real Lidarr for the contract tests in tests/integration (see docs/INTEGRATION_TESTS.md).
+# Throwaway real Lidarr, Navidrome and Jellyfin for the contract tests in tests/integration (see docs/INTEGRATION_TESTS.md).
 # No download clients, no indexers. Bound to loopback only. /config is a tmpfs: nothing persists.
 # The API key in tests/integration/lidarr/config.xml is a TEST-ONLY value, not a secret.
 services:
@@ -20,3 +20,50 @@ services:
     volumes:
       - ./tests/integration/lidarr/config.xml:/seed/config.xml:ro
       - ./tests/integration/lidarr/10-seed-config.sh:/custom-cont-init.d/10-seed-config.sh:ro
+
+  # Navidrome (Subsonic API) for tests/integration/test_navidrome_contract.py. The music folder holds GENERATED tiny
+  # tagged files (tests/integration/navidrome/make_music.py writes it before the stack starts); /data is a tmpfs, so
+  # nothing persists. Loopback only; deliberately not the user's own Navidrome (different name and port).
+  navidrome:
+    image: deluan/navidrome:0.64.2
+    container_name: trackseerr-it-navidrome
+    mem_limit: 512m
+    cpus: 1.0
+    user: "1000:1000"
+    environment:
+      ND_MUSICFOLDER: /music
+      ND_DATAFOLDER: /data
+      ND_LOGLEVEL: warn
+      ND_SCANSCHEDULE: "0"
+      ND_ENABLEINSIGHTSCOLLECTOR: "false"
+      ND_ENABLEGRAVATAR: "false"
+      ND_ENABLETRANSCODINGCONFIG: "false"
+    ports:
+      - "127.0.0.1:14533:4533"
+    tmpfs:
+      - /data:uid=1000,gid=1000,mode=0755
+    volumes:
+      - ./tests/integration/navidrome/music:/music:ro
+
+  # Jellyfin for tests/integration/test_jellyfin_contract.py: pinned stable release (12.1), the SAME generated music
+  # folder as Navidrome (mounted read-only). Config and cache are tmpfs, so nothing persists and every run starts at
+  # the first-run wizard, which the fixture completes through the Startup API. Loopback only.
+  jellyfin:
+    image: jellyfin/jellyfin:12.1.20260915-010956
+    container_name: trackseerr-it-jellyfin
+    mem_limit: 1g
+    cpus: 1.0
+    user: "1000:1000"
+    environment:
+      JELLYFIN_LOG_DIR: /tmp/jellyfin-log
+      JELLYFIN_CONFIG_DIR: /config/config
+      JELLYFIN_DATA_DIR: /config/data
+      JELLYFIN_CACHE_DIR: /cache
+    ports:
+      - "127.0.0.1:18096:8096"
+    tmpfs:
+      - /config:uid=1000,gid=1000,mode=0755,size=3g  # Jellyfin refuses to start with under 2 GiB free; real usage is a few MB
+      - /cache:uid=1000,gid=1000,mode=0755,size=3g
+      - /tmp:uid=1000,gid=1000,mode=1777,size=64m
+    volumes:
+      - ./tests/integration/navidrome/music:/media/music:ro

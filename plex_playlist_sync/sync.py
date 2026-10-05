@@ -3,9 +3,11 @@ from typing import TYPE_CHECKING, List, Optional
 
 from .clients.deezer import DeezerClient
 from .clients.plex import PlexClient
+from .media_servers import PlaylistSyncOptions, as_media_server
 from .clients.spotify import SpotifyClient
 from .config import Config
-from .models import SyncResult
+from .models import Playlist, SyncResult
+from .native_match import match_playlist_tracks_native
 
 if TYPE_CHECKING:
     from .storage import Database
@@ -14,12 +16,16 @@ logger = logging.getLogger(__name__)
 
 
 class SyncCoordinator:
-    """Orchestrates syncing Spotify and Deezer playlists into Plex Media Server."""
+    """Orchestrates syncing Spotify and Deezer playlists into Plex Media Server.
+
+    ``plex_client`` is None when no media server is configured: playlists are then fetched and matched against the
+    native library (when a ``db`` is given) but nothing is pushed anywhere.
+    """
 
     def __init__(
         self,
         config: Config,
-        plex_client: PlexClient,
+        plex_client: Optional[PlexClient],
         spotify_client: Optional[SpotifyClient] = None,
         deezer_client: Optional[DeezerClient] = None,
         db: Optional["Database"] = None,
@@ -29,6 +35,29 @@ class SyncCoordinator:
         self.spotify = spotify_client
         self.deezer = deezer_client
         self.db = db
+
+    def _sync_one(self, pl: Playlist) -> SyncResult:
+        server = as_media_server(self.plex)
+        if server is not None:
+            return server.sync_playlist(pl, [], PlaylistSyncOptions.from_config(self.config))[0]
+        return self._match_without_media_server(pl)
+
+    def _match_without_media_server(self, pl: Playlist) -> SyncResult:
+        """No media server: nothing is pushed. With a database the playlist is matched against the native library
+        and its missing tracks are recorded, so monitoring and wanted keep working."""
+        if self.db is None:
+            logger.info("No media server: playlist push skipped for '%s'", pl.name)
+            return SyncResult(pl.name, len(pl.tracks), 0, 0, True)
+        matched, missing = match_playlist_tracks_native(self.db, pl.tracks)
+        if self.db.get_playlist(pl.id) is not None:
+            self.db.record_sync_result(pl.id, status="success", missing_tracks=missing)
+        logger.info(
+            "No media server: matched '%s' against the native library (%d matched, %d missing)",
+            pl.name,
+            len(matched),
+            len(missing),
+        )
+        return SyncResult(pl.name, len(pl.tracks), len(matched), len(missing), True)
 
     def run_sync_cycle(self) -> List[SyncResult]:
         """Execute one complete sync cycle across all configured music providers."""
@@ -47,16 +76,7 @@ class SyncCoordinator:
 
             if sp_playlists:
                 for pl in sp_playlists:
-                    res = self.plex.sync_playlist(
-                        playlist=pl,
-                        append=self.config.append_instead_of_sync,
-                        add_description=self.config.add_playlist_description,
-                        add_poster=self.config.add_playlist_poster,
-                        write_missing_as_csv=self.config.write_missing_as_csv,
-                        data_dir=self.config.data_dir,
-                        threshold=self.config.search_similarity_threshold,
-                    )
-                    results.append(res)
+                    results.append(self._sync_one(pl))
             else:
                 logger.info("No Spotify playlists discovered for configured user/IDs")
         else:
@@ -74,16 +94,7 @@ class SyncCoordinator:
 
             if dz_playlists:
                 for pl in dz_playlists:
-                    res = self.plex.sync_playlist(
-                        playlist=pl,
-                        append=self.config.append_instead_of_sync,
-                        add_description=self.config.add_playlist_description,
-                        add_poster=self.config.add_playlist_poster,
-                        write_missing_as_csv=self.config.write_missing_as_csv,
-                        data_dir=self.config.data_dir,
-                        threshold=self.config.search_similarity_threshold,
-                    )
-                    results.append(res)
+                    results.append(self._sync_one(pl))
             else:
                 logger.info("No Deezer playlists discovered for configured user/IDs")
         else:

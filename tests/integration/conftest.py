@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
@@ -146,7 +147,7 @@ def lidarr_target():
     if shutil.which("docker") is None:
         pytest.skip("no Lidarr reachable and no docker CLI: run `docker compose -f docker-compose.integration.yml up -d`")
     started = subprocess.run(
-        ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d"], capture_output=True, text=True, timeout=600
+        ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d", "lidarr"], capture_output=True, text=True, timeout=600
     )
     if started.returncode != 0:
         pytest.skip(f"docker compose up failed: {started.stderr.strip()[-300:]}")
@@ -319,3 +320,187 @@ def recorded_calls(monkeypatch) -> list[tuple[str, str, Any]]:
     _Recorder.calls = calls
     monkeypatch.setattr(lidarr_mod.httpx, "Client", _Recorder)
     return calls
+
+
+# --------------------------------------------------------------------------- Navidrome (Subsonic API)
+
+NAVIDROME_DEFAULT_URL = "http://127.0.0.1:14533"
+# TEST-ONLY credentials for the throwaway container. Not secrets.
+NAVIDROME_USER = "it-admin"
+NAVIDROME_PASSWORD = "it-admin-password-1"
+
+
+def _navidrome_up(url: str) -> bool:
+    try:
+        return httpx.get(f"{url}/ping", timeout=3.0).status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+def _navidrome_ensure_admin(url: str, user: str, password: str) -> bool:
+    """First start has no users: ``POST /auth/createAdmin`` makes the first admin. Later starts already have one;
+    either way the credentials must then log in."""
+    httpx.post(f"{url}/auth/createAdmin", json={"username": user, "password": password}, timeout=15.0)
+    login = httpx.post(f"{url}/auth/login", json={"username": user, "password": password}, timeout=15.0)
+    return login.status_code == 200
+
+
+@pytest.fixture(scope="session")
+def navidrome_target():
+    """``(url, user, password)`` of a ready Navidrome holding the generated library; starts the compose stack when
+    none is running (and then tears it down). NAVIDROME_IT_URL / _USER / _PASSWORD select an existing throwaway one."""
+    from tests.integration.navidrome.make_music import generate
+
+    url = os.environ.get("NAVIDROME_IT_URL")
+    if url:
+        user = os.environ.get("NAVIDROME_IT_USER", NAVIDROME_USER)
+        password = os.environ.get("NAVIDROME_IT_PASSWORD", NAVIDROME_PASSWORD)
+        if not _navidrome_up(url.rstrip("/")):
+            pytest.skip(f"Navidrome at {url} did not answer /ping")
+        yield url.rstrip("/"), user, password
+        return
+    generate()
+    started_here = False
+    if not _navidrome_up(NAVIDROME_DEFAULT_URL):
+        if shutil.which("docker") is None:
+            pytest.skip("no Navidrome reachable and no docker CLI: run `docker compose -f docker-compose.integration.yml up -d navidrome`")
+        started = subprocess.run(
+            ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d", "navidrome"], capture_output=True, text=True, timeout=600
+        )
+        if started.returncode != 0:
+            pytest.skip(f"docker compose up failed: {started.stderr.strip()[-300:]}")
+        started_here = True
+    try:
+        deadline = time.monotonic() + 120.0
+        while not _navidrome_up(NAVIDROME_DEFAULT_URL):
+            if time.monotonic() > deadline:
+                pytest.skip("the integration Navidrome did not become ready within 120s")
+            time.sleep(1.0)
+        if not _navidrome_ensure_admin(NAVIDROME_DEFAULT_URL, NAVIDROME_USER, NAVIDROME_PASSWORD):
+            pytest.skip("could not create or log in the integration Navidrome admin (is it a fresh throwaway instance?)")
+        yield NAVIDROME_DEFAULT_URL, NAVIDROME_USER, NAVIDROME_PASSWORD
+    finally:
+        if started_here:
+            subprocess.run(["docker", "compose", "-f", str(COMPOSE_FILE), "down", "-v"], capture_output=True, timeout=120)
+
+
+# --------------------------------------------------------------------------- Jellyfin
+
+JELLYFIN_DEFAULT_URL = "http://127.0.0.1:18096"
+# TEST-ONLY credentials for the throwaway container. Not secrets.
+JELLYFIN_ADMIN = "it-admin"
+JELLYFIN_ADMIN_PASSWORD = "it-admin-password-1"
+JELLYFIN_SECOND_USER = "it-kid"
+JELLYFIN_SECOND_PASSWORD = "it-kid-password-1"
+JELLYFIN_MUSIC_PATH = "/media/music"
+_JF_CLIENT = 'Client="trackseerr-it", Device="it", DeviceId="trackseerr-it", Version="1"'
+
+
+@dataclass(frozen=True)
+class JellyfinTarget:
+    url: str
+    api_key: str
+    admin_name: str
+    admin_id: str
+    kid_name: str
+    kid_id: str
+
+
+def _jellyfin_public(url: str) -> Optional[dict[str, Any]]:
+    try:
+        resp = httpx.get(f"{url}/System/Info/Public", timeout=3.0)
+    except httpx.HTTPError:
+        return None
+    return resp.json() if resp.status_code == 200 else None
+
+
+def _jellyfin_complete_wizard(url: str) -> None:
+    """Runs the first-run Startup wizard (no-op once ``StartupWizardCompleted``)."""
+    info = _jellyfin_public(url)
+    if info is None or info.get("StartupWizardCompleted"):
+        return
+    http = httpx.Client(base_url=url, timeout=60.0)
+    http.post("/Startup/Configuration", json={"UICulture": "en-US", "MetadataCountryCode": "US", "PreferredMetadataLanguage": "en"}).raise_for_status()
+    http.get("/Startup/User")  # the first call creates the default user the next one renames
+    http.post("/Startup/User", json={"Name": JELLYFIN_ADMIN, "Password": JELLYFIN_ADMIN_PASSWORD}).raise_for_status()
+    http.post("/Startup/RemoteAccess", json={"EnableRemoteAccess": True, "EnableAutomaticPortMapping": False}).raise_for_status()
+    http.post("/Startup/Complete").raise_for_status()
+
+
+def _jellyfin_setup(url: str) -> Optional[JellyfinTarget]:
+    """Wizard, admin login, music library over the generated folder, second user and an API key. Idempotent."""
+    _jellyfin_complete_wizard(url)
+    http = httpx.Client(base_url=url, timeout=60.0)
+
+    def login(name: str, password: str) -> Optional[dict[str, Any]]:
+        resp = http.post(
+            "/Users/AuthenticateByName",
+            headers={"Authorization": f"MediaBrowser {_JF_CLIENT}"},
+            json={"Username": name, "Pw": password},
+        )
+        return resp.json() if resp.status_code == 200 else None
+
+    session = login(JELLYFIN_ADMIN, JELLYFIN_ADMIN_PASSWORD)
+    if session is None:
+        return None
+    auth = {"Authorization": f'MediaBrowser {_JF_CLIENT}, Token="{session["AccessToken"]}"'}
+    folders = http.get("/Library/VirtualFolders", headers=auth).json()
+    if not any(f.get("Name") == "Music" for f in folders):
+        http.post(
+            "/Library/VirtualFolders",
+            params={"name": "Music", "collectionType": "music", "refreshLibrary": "true"},
+            headers=auth,
+            json={"LibraryOptions": {"EnableInternetProviders": False, "PathInfos": [{"Path": JELLYFIN_MUSIC_PATH}]}},
+        ).raise_for_status()
+    users = {u["Name"]: u["Id"] for u in http.get("/Users", headers=auth).json()}
+    if JELLYFIN_SECOND_USER not in users:
+        created = http.post("/Users/New", headers=auth, json={"Name": JELLYFIN_SECOND_USER, "Password": JELLYFIN_SECOND_PASSWORD})
+        created.raise_for_status()
+        users[JELLYFIN_SECOND_USER] = created.json()["Id"]
+    keys = http.get("/Auth/Keys", headers=auth).json().get("Items", [])
+    key = next((k["AccessToken"] for k in keys if k.get("AppName") == "trackseerr-it"), None)
+    if key is None:
+        http.post("/Auth/Keys", params={"app": "trackseerr-it"}, headers=auth).raise_for_status()
+        keys = http.get("/Auth/Keys", headers=auth).json().get("Items", [])
+        key = next(k["AccessToken"] for k in keys if k.get("AppName") == "trackseerr-it")
+    return JellyfinTarget(url, key, JELLYFIN_ADMIN, users[JELLYFIN_ADMIN], JELLYFIN_SECOND_USER, users[JELLYFIN_SECOND_USER])
+
+
+@pytest.fixture(scope="session")
+def jellyfin_target():
+    """A ready Jellyfin with the generated library, an admin, a second user and an API key; starts the compose
+    stack's ``jellyfin`` service when none is running (and then tears the stack down with ``down -v``).
+    JELLYFIN_IT_URL selects an existing throwaway instance that was already set up by this fixture."""
+    from tests.integration.navidrome.make_music import generate
+
+    url = os.environ.get("JELLYFIN_IT_URL")
+    if url:
+        target = _jellyfin_setup(url.rstrip("/"))
+        if target is None:
+            pytest.skip(f"could not log in to Jellyfin at {url} as {JELLYFIN_ADMIN} (is it a fresh throwaway instance?)")
+        yield target
+        return
+    generate()
+    started_here = False
+    if _jellyfin_public(JELLYFIN_DEFAULT_URL) is None:
+        if shutil.which("docker") is None:
+            pytest.skip("no Jellyfin reachable and no docker CLI: run `docker compose -f docker-compose.integration.yml up -d jellyfin`")
+        started = subprocess.run(
+            ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d", "jellyfin"], capture_output=True, text=True, timeout=900
+        )
+        if started.returncode != 0:
+            pytest.skip(f"docker compose up failed: {started.stderr.strip()[-300:]}")
+        started_here = True
+    try:
+        deadline = time.monotonic() + 180.0
+        while _jellyfin_public(JELLYFIN_DEFAULT_URL) is None:
+            if time.monotonic() > deadline:
+                pytest.skip("the integration Jellyfin did not become ready within 180s")
+            time.sleep(2.0)
+        target = _jellyfin_setup(JELLYFIN_DEFAULT_URL)
+        if target is None:
+            pytest.skip("could not set up the integration Jellyfin (is it a fresh throwaway instance?)")
+        yield target
+    finally:
+        if started_here:
+            subprocess.run(["docker", "compose", "-f", str(COMPOSE_FILE), "down", "-v"], capture_output=True, timeout=120)
