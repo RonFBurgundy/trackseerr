@@ -5,7 +5,7 @@ export * from './deployment';
 export * from './health';
 export * from './activity';
 export * from './monitoring';
-export * from './releaseProfiles';
+export * from './metadataProfiles';
 export * from './importLists';
 export * from './itunesImport';
 export * from './mediaServer';

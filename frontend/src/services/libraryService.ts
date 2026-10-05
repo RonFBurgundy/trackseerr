@@ -285,7 +285,7 @@ export interface IngestArtistInput {
   quality_profile_id?: string | null;
   root_folder?: string | null;
   /** Omitted: the saved default for added artists; an explicit null means no profile. */
-  release_profile_id?: number | null;
+  metadata_profile_id?: number | null;
 }
 
 /** Ingest an artist discography from discovery metadata into the native catalog. */

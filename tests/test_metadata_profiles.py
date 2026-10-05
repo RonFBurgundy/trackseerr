@@ -1,4 +1,4 @@
-"""Native release profiles: optional, off by default, shape only AUTOMATIC monitoring, never hide releases."""
+"""Native metadata profiles: optional, off by default, shape only AUTOMATIC monitoring, never hide releases."""
 
 import json
 from pathlib import Path
@@ -13,7 +13,7 @@ from plex_playlist_sync.api.routes.library import refresh_single_artist
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.library_monitoring import (
     NATIVE_MONITOR_OPTIONS,
-    album_in_release_profile,
+    album_in_metadata_profile,
     album_monitored_for_option,
 )
 from plex_playlist_sync.mediacover import mediacover_service
@@ -32,13 +32,13 @@ ADDED = "2020-01-01"
 
 
 def _profile_id(db: Database, name: str) -> int:
-    return next(p["id"] for p in db.list_release_profiles() if p["name"] == name)
+    return next(p["id"] for p in db.list_metadata_profiles() if p["name"] == name)
 
 
 def _artist(db: Database, aid: str = "ar", option: str = "all", profile: Optional[int] = None) -> None:
     db.upsert_library_artist(
         {"id": aid, "name": aid, "monitored": True, "monitor_option": option, "mbid": "mb-" + aid,
-         "release_profile_id": profile, "created_at": ADDED}
+         "metadata_profile_id": profile, "created_at": ADDED}
     )
 
 
@@ -65,7 +65,7 @@ def _a(db: Database, album_id: str) -> bool:
 
 def test_migration_seeds_presets_and_columns(test_db: Database):
     assert SCHEMA_VERSION >= 45
-    profiles = {p["name"]: p for p in test_db.list_release_profiles()}
+    profiles = {p["name"]: p for p in test_db.list_metadata_profiles()}
     assert set(profiles) >= {"Studio Albums", "Studio Albums, EPs & Singles", "Everything"}
     assert profiles["Studio Albums"]["primary_types"] == ["album"]
     assert profiles["Studio Albums"]["secondary_types"] == ["studio"]
@@ -74,9 +74,9 @@ def test_migration_seeds_presets_and_columns(test_db: Database):
     assert all(p["artist_count"] == 0 for p in profiles.values())
     cols = {r[1] for r in test_db.conn.execute("PRAGMA table_info(library_albums)")}
     assert "secondary_types" in cols
-    assert "release_profile_id" in {r[1] for r in test_db.conn.execute("PRAGMA table_info(library_artists)")}
+    assert "metadata_profile_id" in {r[1] for r in test_db.conn.execute("PRAGMA table_info(library_artists)")}
     mm = test_db.get_media_management_settings()
-    assert mm["add_release_profile_id"] is None  # off by default
+    assert mm["add_metadata_profile_id"] is None  # off by default
 
 
 # ------------------------------------------------------------------ semantics: option x profile
@@ -121,16 +121,16 @@ def test_no_profile_is_exactly_old_behaviour(option, album_type, secondary):
 
 
 def test_null_secondary_is_studio_and_matching_rules():
-    assert album_in_release_profile(STUDIO_ALBUMS, "album", None) is True
-    assert album_in_release_profile(STUDIO_ALBUMS, "album", []) is True
+    assert album_in_metadata_profile(STUDIO_ALBUMS, "album", None) is True
+    assert album_in_metadata_profile(STUDIO_ALBUMS, "album", []) is True
     no_studio = {"primary_types": ["album"], "secondary_types": ["live"]}
-    assert album_in_release_profile(no_studio, "album", None) is False
-    assert album_in_release_profile(no_studio, "album", ["live"]) is True
+    assert album_in_metadata_profile(no_studio, "album", None) is False
+    assert album_in_metadata_profile(no_studio, "album", ["live"]) is True
     # every secondary type must be allowed
-    assert album_in_release_profile(no_studio, "album", ["live", "remix"]) is False
+    assert album_in_metadata_profile(no_studio, "album", ["live", "remix"]) is False
     # album_type fallback when secondary unknown
-    assert album_in_release_profile(STUDIO_ALBUMS, "live", None) is False
-    assert album_in_release_profile(STUDIO_ALBUMS, "compilation", None) is False
+    assert album_in_metadata_profile(STUDIO_ALBUMS, "live", None) is False
+    assert album_in_metadata_profile(STUDIO_ALBUMS, "compilation", None) is False
 
 
 @pytest.mark.parametrize("option", NATIVE_MONITOR_OPTIONS)
@@ -145,7 +145,7 @@ def test_sql_twin_agrees_with_python(test_db: Database, option):
     for aid, (t, sec) in cases.items():
         _album(test_db, aid, album_type=t, secondary=sec, file=aid == "owned_live")
     test_db.bulk_edit_library_artists(["ar"], monitor_option=option, apply_monitor_to_albums=True)
-    profile = test_db.get_release_profile(pid)
+    profile = test_db.get_metadata_profile(pid)
     for aid, (t, sec) in cases.items():
         expected = album_monitored_for_option(
             option, artist_monitored=option != "none" and True, album_type=t, has_files=aid == "owned_live",
@@ -161,19 +161,19 @@ def test_profile_change_recomputes_and_clearing_restores(test_db: Database):
     _album(test_db, "studio")
     _album(test_db, "live", album_type="live", secondary=["live"])
     pid = _profile_id(test_db, "Studio Albums")
-    test_db.bulk_edit_library_artists(["ar"], release_profile_id=pid, apply_monitor_to_albums=True)
-    assert test_db.get_library_artist("ar")["release_profile_id"] == pid
+    test_db.bulk_edit_library_artists(["ar"], metadata_profile_id=pid, apply_monitor_to_albums=True)
+    assert test_db.get_library_artist("ar")["metadata_profile_id"] == pid
     assert (_a(test_db, "studio"), _a(test_db, "live")) == (True, False)
     assert test_db.get_library_track("live-t1")["monitored"] is False
-    test_db.bulk_edit_library_artists(["ar"], release_profile_id=None, apply_monitor_to_albums=True)
-    assert test_db.get_library_artist("ar")["release_profile_id"] is None
+    test_db.bulk_edit_library_artists(["ar"], metadata_profile_id=None, apply_monitor_to_albums=True)
+    assert test_db.get_library_artist("ar")["metadata_profile_id"] is None
     assert _a(test_db, "live") is True
 
 
 def test_profile_change_without_apply_leaves_albums_alone(test_db: Database):
     _artist(test_db, option="all")
     _album(test_db, "live", album_type="live", secondary=["live"])
-    test_db.bulk_edit_library_artists(["ar"], release_profile_id=_profile_id(test_db, "Studio Albums"))
+    test_db.bulk_edit_library_artists(["ar"], metadata_profile_id=_profile_id(test_db, "Studio Albums"))
     assert _a(test_db, "live") is True
 
 
@@ -189,7 +189,7 @@ def test_existing_option_files_win_over_profile_on_recompute(test_db: Database):
 def test_bulk_edit_rejects_unknown_profile(test_db: Database):
     _artist(test_db)
     with pytest.raises(ValueError):
-        test_db.bulk_edit_library_artists(["ar"], release_profile_id=9999)
+        test_db.bulk_edit_library_artists(["ar"], metadata_profile_id=9999)
 
 
 # ------------------------------------------------------------------ ingest / refresh
@@ -256,40 +256,40 @@ def test_manual_album_monitor_of_out_of_profile_album_works(app_and_client, test
 def test_crud_and_artist_counts_and_delete_nulls(app_and_client, test_db, test_config, seeded_users):
     _, client = app_and_client
     h = _auth_headers(seeded_users["admin"], test_db, test_config)
-    r = client.get("/api/library/release-profiles", headers=h)
+    r = client.get("/api/library/metadata-profiles", headers=h)
     assert r.status_code == 200
     names = [p["name"] for p in r.json()["profiles"]]
     assert "Studio Albums" in names and "studio" in r.json()["secondary_types"]
 
     body = {"name": "Mine", "primary_types": ["Album", "ep"], "secondary_types": ["studio", "live"]}
-    r = client.post("/api/library/release-profiles", json=body, headers=h)
+    r = client.post("/api/library/metadata-profiles", json=body, headers=h)
     assert r.status_code == 201, r.text
     pid = r.json()["id"]
     assert r.json()["primary_types"] == ["album", "ep"]
-    assert client.post("/api/library/release-profiles", json=body, headers=h).status_code == 400  # duplicate name
-    bad = client.post("/api/library/release-profiles", json={**body, "name": "B", "primary_types": ["nope"]}, headers=h)
+    assert client.post("/api/library/metadata-profiles", json=body, headers=h).status_code == 400  # duplicate name
+    bad = client.post("/api/library/metadata-profiles", json={**body, "name": "B", "primary_types": ["nope"]}, headers=h)
     assert bad.status_code == 400
-    empty = client.post("/api/library/release-profiles", json={**body, "name": "E", "secondary_types": []}, headers=h)
+    empty = client.post("/api/library/metadata-profiles", json={**body, "name": "E", "secondary_types": []}, headers=h)
     assert empty.status_code == 400
 
-    r = client.put(f"/api/library/release-profiles/{pid}", json={**body, "name": "Renamed"}, headers=h)
+    r = client.put(f"/api/library/metadata-profiles/{pid}", json={**body, "name": "Renamed"}, headers=h)
     assert r.status_code == 200 and r.json()["name"] == "Renamed"
-    assert client.put("/api/library/release-profiles/9999", json=body, headers=h).status_code == 404
+    assert client.put("/api/library/metadata-profiles/9999", json=body, headers=h).status_code == 404
 
     _artist(test_db, "a1", profile=pid)
     _artist(test_db, "a2", profile=pid)
-    test_db.update_media_management_settings({"add_release_profile_id": pid})
-    counts = {p["id"]: p["artist_count"] for p in client.get("/api/library/release-profiles", headers=h).json()["profiles"]}
+    test_db.update_media_management_settings({"add_metadata_profile_id": pid})
+    counts = {p["id"]: p["artist_count"] for p in client.get("/api/library/metadata-profiles", headers=h).json()["profiles"]}
     assert counts[pid] == 2
 
-    r = client.delete(f"/api/library/release-profiles/{pid}", headers=h)
+    r = client.delete(f"/api/library/metadata-profiles/{pid}", headers=h)
     assert r.status_code == 200 and r.json()["artists_cleared"] == 2
-    assert test_db.get_library_artist("a1")["release_profile_id"] is None
-    assert test_db.get_media_management_settings()["add_release_profile_id"] is None
-    assert client.delete(f"/api/library/release-profiles/{pid}", headers=h).status_code == 404
+    assert test_db.get_library_artist("a1")["metadata_profile_id"] is None
+    assert test_db.get_media_management_settings()["add_metadata_profile_id"] is None
+    assert client.delete(f"/api/library/metadata-profiles/{pid}", headers=h).status_code == 404
 
 
-def test_single_and_bulk_edit_release_profile(app_and_client, test_db, test_config, seeded_users):
+def test_single_and_bulk_edit_metadata_profile(app_and_client, test_db, test_config, seeded_users):
     _, client = app_and_client
     h = _auth_headers(seeded_users["admin"], test_db, test_config)
     pid = _profile_id(test_db, "Studio Albums")
@@ -299,25 +299,25 @@ def test_single_and_bulk_edit_release_profile(app_and_client, test_db, test_conf
         _album(test_db, aid + "-l", album_type="live", secondary=["live"], aid=aid)
 
     r = client.put("/api/library/artists/a1/monitored",
-                   json={"monitored": True, "release_profile_id": pid, "apply_monitor_to_albums": True}, headers=h)
+                   json={"monitored": True, "metadata_profile_id": pid, "apply_monitor_to_albums": True}, headers=h)
     assert r.status_code == 200, r.text
-    assert test_db.get_library_artist("a1")["release_profile_id"] == pid
+    assert test_db.get_library_artist("a1")["metadata_profile_id"] == pid
     assert (_a(test_db, "a1-s"), _a(test_db, "a1-l")) == (True, False)
     assert client.put("/api/library/artists/a1/monitored",
-                      json={"monitored": True, "release_profile_id": 9999}, headers=h).status_code == 400
+                      json={"monitored": True, "metadata_profile_id": 9999}, headers=h).status_code == 400
 
     r = client.post("/api/library/artists/bulk-edit",
-                    json={"artist_ids": ["a2"], "release_profile_id": pid, "apply_monitor_to_albums": True}, headers=h)
+                    json={"artist_ids": ["a2"], "metadata_profile_id": pid, "apply_monitor_to_albums": True}, headers=h)
     assert r.status_code == 200, r.text
     assert (_a(test_db, "a2-s"), _a(test_db, "a2-l")) == (True, False)
 
     # explicit null clears; omitted leaves alone
     r = client.post("/api/library/artists/bulk-edit", json={"all": True, "monitored": True}, headers=h)
     assert r.status_code == 200
-    assert test_db.get_library_artist("a2")["release_profile_id"] == pid
-    r = client.post("/api/library/artists/bulk-edit", json={"all": True, "release_profile_id": None}, headers=h)
+    assert test_db.get_library_artist("a2")["metadata_profile_id"] == pid
+    r = client.post("/api/library/artists/bulk-edit", json={"all": True, "metadata_profile_id": None}, headers=h)
     assert r.status_code == 200
-    assert test_db.get_library_artist("a2")["release_profile_id"] is None
+    assert test_db.get_library_artist("a2")["metadata_profile_id"] is None
 
 
 def test_preview_counts(app_and_client, test_db, test_config, seeded_users):
@@ -328,16 +328,16 @@ def test_preview_counts(app_and_client, test_db, test_config, seeded_users):
     _album(test_db, "l", album_type="live", secondary=["live"])
     _album(test_db, "e", album_type="ep")
     pid = _profile_id(test_db, "Studio Albums")
-    r = client.get(f"/api/library/artists/ar/release-profile-preview?profile_id={pid}", headers=h)
+    r = client.get(f"/api/library/artists/ar/metadata-profile-preview?profile_id={pid}", headers=h)
     assert r.status_code == 200
     assert {k: r.json()[k] for k in ("matching", "total")} == {"matching": 1, "total": 3}
     assert r.json()["would_change"]["albums_to_unmonitor"] == 2  # option 'all', all three currently monitored
     pid2 = _profile_id(test_db, "Everything")
-    r2 = client.get(f"/api/library/artists/ar/release-profile-preview?profile_id={pid2}", headers=h).json()
+    r2 = client.get(f"/api/library/artists/ar/metadata-profile-preview?profile_id={pid2}", headers=h).json()
     assert (r2["matching"], r2["total"]) == (3, 3)
     assert r2["would_change"] == {"albums_to_monitor": 0, "albums_to_unmonitor": 0,
                                   "tracks_to_monitor": 0, "tracks_to_unmonitor": 0}
-    assert client.get("/api/library/artists/nope/release-profile-preview?profile_id=1", headers=h).status_code == 404
+    assert client.get("/api/library/artists/nope/metadata-profile-preview?profile_id=1", headers=h).status_code == 404
 
 
 def test_detail_payload_in_profile(app_and_client, test_db, test_config, seeded_users):
@@ -347,17 +347,17 @@ def test_detail_payload_in_profile(app_and_client, test_db, test_config, seeded_
     _album(test_db, "s")
     _album(test_db, "l", album_type="live", secondary=["live"])
     d = client.get("/api/library/artists/ar", headers=h).json()
-    assert d["release_profile_id"] is None
+    assert d["metadata_profile_id"] is None
     assert all(a["in_profile"] is True for a in d["albums"])  # no profile: everything in profile
     pid = _profile_id(test_db, "Studio Albums")
-    test_db.bulk_edit_library_artists(["ar"], release_profile_id=pid)
+    test_db.bulk_edit_library_artists(["ar"], metadata_profile_id=pid)
     d = client.get("/api/library/artists/ar", headers=h).json()
-    assert d["release_profile_id"] == pid
+    assert d["metadata_profile_id"] == pid
     assert {a["id"]: a["in_profile"] for a in d["albums"]} == {"s": True, "l": False}
     assert len(d["albums"]) == 2  # never hidden
 
 
-def test_ingest_defaults_to_add_release_profile(app_and_client, test_db, test_config, seeded_users):
+def test_ingest_defaults_to_add_metadata_profile(app_and_client, test_db, test_config, seeded_users):
     app, client = app_and_client
     h = _auth_headers(seeded_users["admin"], test_db, test_config)
     discovery = MagicMock()
@@ -373,31 +373,31 @@ def test_ingest_defaults_to_add_release_profile(app_and_client, test_db, test_co
     r = client.post("/api/library/artists/ingest", json={"foreign_artist_id": "deezer:artist:1", "artist_name": "NoProf"}, headers=h)
     assert r.status_code == 200, r.text
     art = test_db.get_library_artist_by_name("NoProf")
-    assert art["release_profile_id"] is None
+    assert art["metadata_profile_id"] is None
     assert [a["monitored"] for a in test_db.list_library_albums(artist_id=art["id"])] == [True, True]
 
     pid = _profile_id(test_db, "Studio Albums")
-    test_db.update_media_management_settings({"add_release_profile_id": pid})
+    test_db.update_media_management_settings({"add_metadata_profile_id": pid})
     r = client.post("/api/library/artists/ingest", json={"foreign_artist_id": "deezer:artist:2", "artist_name": "Dflt"}, headers=h)
     art = test_db.get_library_artist_by_name("Dflt")
-    assert art["release_profile_id"] == pid
+    assert art["metadata_profile_id"] == pid
     assert {a["title"]: a["monitored"] for a in test_db.list_library_albums(artist_id=art["id"])} == {"LP": True, "Hits": False}
 
     # explicit null overrides the default
     client.post("/api/library/artists/ingest",
-                json={"foreign_artist_id": "deezer:artist:3", "artist_name": "Over", "release_profile_id": None}, headers=h)
-    assert test_db.get_library_artist_by_name("Over")["release_profile_id"] is None
+                json={"foreign_artist_id": "deezer:artist:3", "artist_name": "Over", "metadata_profile_id": None}, headers=h)
+    assert test_db.get_library_artist_by_name("Over")["metadata_profile_id"] is None
 
 
-def test_settings_roundtrip_add_release_profile(app_and_client, test_db, test_config, seeded_users):
+def test_settings_roundtrip_add_metadata_profile(app_and_client, test_db, test_config, seeded_users):
     _, client = app_and_client
     h = _auth_headers(seeded_users["admin"], test_db, test_config)
     pid = _profile_id(test_db, "Everything")
-    assert client.post("/api/settings/media-management", json={"add_release_profile_id": pid}, headers=h).status_code == 200
-    assert client.get("/api/settings/media-management", headers=h).json()["settings"]["add_release_profile_id"] == pid
-    assert client.post("/api/settings/media-management", json={"add_release_profile_id": None}, headers=h).status_code == 200
-    assert test_db.get_media_management_settings()["add_release_profile_id"] is None
-    assert client.post("/api/settings/media-management", json={"add_release_profile_id": 9999}, headers=h).status_code == 400
+    assert client.post("/api/settings/media-management", json={"add_metadata_profile_id": pid}, headers=h).status_code == 200
+    assert client.get("/api/settings/media-management", headers=h).json()["settings"]["add_metadata_profile_id"] == pid
+    assert client.post("/api/settings/media-management", json={"add_metadata_profile_id": None}, headers=h).status_code == 200
+    assert test_db.get_media_management_settings()["add_metadata_profile_id"] is None
+    assert client.post("/api/settings/media-management", json={"add_metadata_profile_id": 9999}, headers=h).status_code == 400
 
 
 def test_native_only_guard_409_in_lidarr_mode(app_and_client, test_db, test_config, seeded_users):
@@ -409,13 +409,13 @@ def test_native_only_guard_409_in_lidarr_mode(app_and_client, test_db, test_conf
     test_db.conn.commit()
     app.dependency_overrides[get_lidarr_client] = lambda: MagicMock()
     body = {"name": "X", "primary_types": ["album"], "secondary_types": ["studio"]}
-    assert client.get("/api/library/release-profiles", headers=h).status_code == 409
-    assert client.post("/api/library/release-profiles", json=body, headers=h).status_code == 409
-    assert client.put("/api/library/release-profiles/1", json=body, headers=h).status_code == 409
-    assert client.delete("/api/library/release-profiles/1", headers=h).status_code == 409
-    assert client.get("/api/library/artists/1/release-profile-preview?profile_id=1", headers=h).status_code == 409
-    assert client.post("/api/library/artists/bulk-edit", json={"all": True, "release_profile_id": 1}, headers=h).status_code == 409
-    assert client.put("/api/library/artists/1/monitored", json={"monitored": True, "release_profile_id": 1}, headers=h).status_code == 409
+    assert client.get("/api/library/metadata-profiles", headers=h).status_code == 409
+    assert client.post("/api/library/metadata-profiles", json=body, headers=h).status_code == 409
+    assert client.put("/api/library/metadata-profiles/1", json=body, headers=h).status_code == 409
+    assert client.delete("/api/library/metadata-profiles/1", headers=h).status_code == 409
+    assert client.get("/api/library/artists/1/metadata-profile-preview?profile_id=1", headers=h).status_code == 409
+    assert client.post("/api/library/artists/bulk-edit", json={"all": True, "metadata_profile_id": 1}, headers=h).status_code == 409
+    assert client.put("/api/library/artists/1/monitored", json={"monitored": True, "metadata_profile_id": 1}, headers=h).status_code == 409
 
 
 # --- profile effectiveness on add (MusicBrainz secondary types) and the refresh release date --------------------
@@ -473,7 +473,7 @@ def _ingest(app, client, db, config, users, enricher, option: str = "all", name:
     r = client.post(
         "/api/library/artists/ingest",
         json={"foreign_artist_id": f"deezer:artist:{name}", "artist_name": name, "monitor_option": option,
-              "release_profile_id": _profile_id(db, "Studio Albums")},
+              "metadata_profile_id": _profile_id(db, "Studio Albums")},
         headers=h,
     )
     assert r.status_code == 200, r.text
@@ -587,3 +587,82 @@ def test_future_option_works_off_refresh_release_date(test_db: Database):
     by = _by_title(test_db, "ar")
     assert by["New"]["release_date"] == "2030-06-01" and by["New"]["monitored"] is True
     assert by["Old"]["monitored"] is False
+
+
+# ------------------------------------------------------------------ v48 rename migration + deprecated aliases
+
+def _downgrade_to_v47(db: Database) -> None:
+    """Puts an upgraded DB back into its v47 shape (old table/column names, v48 not recorded)."""
+    db.conn.execute("ALTER TABLE native_metadata_profiles RENAME TO native_release_profiles")
+    db.conn.execute("ALTER TABLE library_artists RENAME COLUMN metadata_profile_id TO release_profile_id")
+    db.conn.execute(
+        "ALTER TABLE media_management_settings RENAME COLUMN add_metadata_profile_id TO add_release_profile_id"
+    )
+    db.conn.execute("DELETE FROM schema_migrations WHERE version >= 48")
+    db.conn.commit()
+
+
+def test_v48_renames_release_profiles_preserving_data(tmp_path: Path):
+    path = tmp_path / "v47.db"
+    db = Database(path)
+    custom = db.create_metadata_profile("Custom", ["album", "ep"], ["studio", "live"])
+    seeded = _profile_id(db, "Studio Albums")
+    _artist(db, "a1", profile=custom["id"])
+    _artist(db, "a2", profile=seeded)
+    _artist(db, "a3", profile=None)
+    db.update_media_management_settings({"add_metadata_profile_id": custom["id"]})
+    _downgrade_to_v47(db)
+    old_tables = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "native_release_profiles" in old_tables and "native_metadata_profiles" not in old_tables
+    db.close()
+
+    up = Database(path)
+    assert up.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION == 48
+    tables = {r[0] for r in up.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "native_metadata_profiles" in tables and "native_release_profiles" not in tables
+    artist_cols = {r[1] for r in up.conn.execute("PRAGMA table_info(library_artists)")}
+    assert "metadata_profile_id" in artist_cols and "release_profile_id" not in artist_cols
+    mm_cols = {r[1] for r in up.conn.execute("PRAGMA table_info(media_management_settings)")}
+    assert "add_metadata_profile_id" in mm_cols and "add_release_profile_id" not in mm_cols
+
+    profiles = {p["name"]: p for p in up.list_metadata_profiles()}
+    assert set(profiles) >= {"Custom", "Studio Albums", "Everything"}
+    assert profiles["Custom"]["id"] == custom["id"]
+    assert profiles["Custom"]["primary_types"] == ["album", "ep"]
+    assert profiles["Custom"]["secondary_types"] == ["studio", "live"]
+    assert profiles["Custom"]["artist_count"] == 1 and profiles["Studio Albums"]["artist_count"] == 1
+    assert up.get_library_artist("a1")["metadata_profile_id"] == custom["id"]
+    assert up.get_library_artist("a2")["metadata_profile_id"] == seeded
+    assert up.get_library_artist("a3")["metadata_profile_id"] is None
+    assert up.get_media_management_settings()["add_metadata_profile_id"] == custom["id"]
+
+    # The FK reference was rewritten with the table: it resolves, and ON DELETE SET NULL still fires.
+    fks = [r for r in up.conn.execute("PRAGMA foreign_key_list(library_artists)") if r[3] == "metadata_profile_id"]
+    assert [r[2] for r in fks] == ["native_metadata_profiles"] and fks[0][6] == "SET NULL"
+    assert up.conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert up.delete_metadata_profile(custom["id"]) == 1
+    assert up.get_library_artist("a1")["metadata_profile_id"] is None
+    assert up.get_media_management_settings()["add_metadata_profile_id"] is None
+    up.close()
+
+
+def test_deprecated_release_profile_request_aliases(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    h = _auth_headers(seeded_users["admin"], test_db, test_config)
+    pid = _profile_id(test_db, "Studio Albums")
+    _artist(test_db, "a1")
+    r = client.post("/api/library/artists/bulk-edit", json={"artist_ids": ["a1"], "release_profile_id": pid}, headers=h)
+    assert r.status_code == 200, r.text
+    assert test_db.get_library_artist("a1")["metadata_profile_id"] == pid
+    r = client.put("/api/library/artists/a1/monitored", json={"monitored": True, "release_profile_id": None}, headers=h)
+    assert r.status_code == 200, r.text
+    assert test_db.get_library_artist("a1")["metadata_profile_id"] is None  # explicit null via the alias clears
+    r = client.post("/api/settings/media-management", json={"add_release_profile_id": pid}, headers=h)
+    assert r.status_code == 200, r.text
+    assert "release_profile_id" not in r.text
+    assert test_db.get_media_management_settings()["add_metadata_profile_id"] == pid
+    # The new name wins when both are sent.
+    r = client.post("/api/library/artists/bulk-edit",
+                    json={"artist_ids": ["a1"], "release_profile_id": None, "metadata_profile_id": pid}, headers=h)
+    assert r.status_code == 200, r.text
+    assert test_db.get_library_artist("a1")["metadata_profile_id"] == pid

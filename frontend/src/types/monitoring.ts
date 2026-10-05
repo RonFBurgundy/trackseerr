@@ -31,8 +31,8 @@ export interface BulkArtistEditRequest {
   monitored?: boolean;
   monitor_option?: MonitorOption;
   quality_profile_id?: string | null;
-  /** Native only: release profile id; an explicit null clears it, omitted leaves it alone. */
-  release_profile_id?: number | null;
+  /** Native only: metadata profile id; an explicit null clears it, omitted leaves it alone. */
+  metadata_profile_id?: number | null;
   apply_monitor_to_albums?: boolean;
 }
 

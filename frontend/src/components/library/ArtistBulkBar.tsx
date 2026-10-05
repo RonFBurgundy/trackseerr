@@ -1,7 +1,7 @@
 import React, { useEffect, useId, useState } from 'react';
 import { X } from 'lucide-react';
 import type { QualityProfile } from '@/types/models';
-import type { ReleaseProfile } from '@/types/releaseProfiles';
+import type { MetadataProfile } from '@/types/metadataProfiles';
 import { MONITOR_OPTIONS, MONITOR_OPTION_HINTS, MONITOR_OPTION_LABELS, type MonitorOption } from '@/types/monitoring';
 import type { UseBulkSelectionReturn } from '@/hooks/useBulkSelection';
 import type { ArtistBulkPatch, UseArtistBulkEditReturn } from '@/hooks/useArtistBulkEdit';
@@ -32,9 +32,9 @@ export interface ArtistBulkBarProps {
   edit: UseArtistBulkEditReturn;
   profiles: QualityProfile[];
   profilesLoading: boolean;
-  /** Native release profiles for the "Release profile" select (optional, shape automatic monitoring only). */
-  releaseProfiles: ReleaseProfile[];
-  releaseProfilesLoading: boolean;
+  /** Native metadata profiles for the "Metadata profile" select (optional, shape automatic monitoring only). */
+  metadataProfiles: MetadataProfile[];
+  metadataProfilesLoading: boolean;
 }
 
 /** Lidarr-style mass editor for the artists grid: choose the changes, then press Apply once. */
@@ -45,14 +45,14 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
   edit,
   profiles,
   profilesLoading,
-  releaseProfiles,
-  releaseProfilesLoading,
+  metadataProfiles,
+  metadataProfilesLoading,
 }) => {
   const uid = useId();
   const [monitored, setMonitored] = useState<MonitoredChoice>('');
   const [option, setOption] = useState<string>(KEEP);
   const [quality, setQuality] = useState<string>(KEEP);
-  const [releaseProfile, setReleaseProfile] = useState<string>(KEEP);
+  const [metadataProfile, setMetadataProfile] = useState<string>(KEEP);
   const [applyToAlbums, setApplyToAlbums] = useState<boolean>(false);
   // Until the user touches the checkbox it mirrors the server default; only a touched value is sent.
   const [applyTouched, setApplyTouched] = useState<boolean>(false);
@@ -60,8 +60,8 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
   const count = selection.count(total);
   const empty = count === 0;
   const countLabel = selection.allMatching ? `All ${total.toLocaleString()} artists` : `${count.toLocaleString()} selected`;
-  const dirty = monitored !== '' || option !== KEEP || quality !== KEEP || releaseProfile !== KEEP;
-  const cascadeRelevant = monitored !== '' || option !== KEEP || releaseProfile !== KEEP;
+  const dirty = monitored !== '' || option !== KEEP || quality !== KEEP || metadataProfile !== KEEP;
+  const cascadeRelevant = monitored !== '' || option !== KEEP || metadataProfile !== KEEP;
 
   // Server default: cascade on unmonitor, otherwise recompute only artists whose monitor option changes.
   const serverDefaultApply = monitored === 'false';
@@ -73,7 +73,7 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
     setMonitored('');
     setOption(KEEP);
     setQuality(KEEP);
-    setReleaseProfile(KEEP);
+    setMetadataProfile(KEEP);
     setApplyToAlbums(false);
     setApplyTouched(false);
   };
@@ -81,7 +81,7 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
   const qualityName = (v: string): string =>
     v === NONE ? 'no quality profile' : (profiles.find((p) => String(p.id) === v)?.name ?? v);
   const releaseName = (v: string): string =>
-    v === NONE ? 'no release profile' : (releaseProfiles.find((p) => String(p.id) === v)?.name ?? v);
+    v === NONE ? 'no metadata profile' : (metadataProfiles.find((p) => String(p.id) === v)?.name ?? v);
 
   const stage = (): void => {
     const patch: ArtistBulkPatch = {};
@@ -99,9 +99,9 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
       patch.quality_profile_id = quality === NONE ? null : quality;
       changes.push(`quality profile ${qualityName(quality)}`);
     }
-    if (releaseProfile !== KEEP) {
-      patch.release_profile_id = releaseProfile === NONE ? null : Number(releaseProfile);
-      changes.push(`release profile ${releaseName(releaseProfile)}`);
+    if (metadataProfile !== KEEP) {
+      patch.metadata_profile_id = metadataProfile === NONE ? null : Number(metadataProfile);
+      changes.push(`metadata profile ${releaseName(metadataProfile)}`);
     }
     if (cascadeRelevant) {
       if (applyTouched) {
@@ -221,18 +221,18 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
             ))}
           </select>
         </BulkField>
-        <BulkField id={field('release')} label="Release profile">
+        <BulkField id={field('metadata')} label="Metadata profile">
           <select
-            id={field('release')}
-            name="bulk-release-profile"
-            value={releaseProfile}
-            disabled={edit.busy || releaseProfilesLoading}
-            onChange={(e) => setReleaseProfile(e.target.value)}
+            id={field('metadata')}
+            name="bulk-metadata-profile"
+            value={metadataProfile}
+            disabled={edit.busy || metadataProfilesLoading}
+            onChange={(e) => setMetadataProfile(e.target.value)}
             className={bulkSelectClass}
           >
-            <option value={KEEP}>{releaseProfilesLoading ? 'Loading...' : 'No change'}</option>
+            <option value={KEEP}>{metadataProfilesLoading ? 'Loading...' : 'No change'}</option>
             <option value={NONE}>None</option>
-            {releaseProfiles.map((p) => (
+            {metadataProfiles.map((p) => (
               <option key={p.id} value={String(p.id)}>
                 {p.name}
               </option>

@@ -576,7 +576,7 @@ class LibraryArtist:
     monitored: bool = True
     monitor_option: str = "existing"
     quality_profile_id: Optional[str] = None
-    release_profile_id: Optional[int] = None
+    metadata_profile_id: Optional[int] = None
     metadata_json: Optional[str] = None
     mbid: Optional[str] = None
     image_url: Optional[str] = None
@@ -597,7 +597,7 @@ class LibraryArtist:
             "monitored": bool(self.monitored),
             "monitor_option": self.monitor_option,
             "quality_profile_id": self.quality_profile_id,
-            "release_profile_id": self.release_profile_id,
+            "metadata_profile_id": self.metadata_profile_id,
             "metadata_json": self.metadata_json,
             "mbid": self.mbid,
             "image_url": self.image_url,

@@ -19,7 +19,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import FileResponse, RedirectResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 import httpx
 
@@ -71,7 +71,8 @@ from plex_playlist_sync.library_monitoring import (
     NATIVE_MONITOR_OPTIONS,
     RELEASE_PRIMARY_TYPES,
     RELEASE_SECONDARY_TYPES,
-    album_in_release_profile,
+    accept_deprecated_profile_keys,
+    album_in_metadata_profile,
     album_monitored_for_option,
     normalize_secondary_types,
     DEFAULT_MONITOR_OPTION,
@@ -129,21 +130,31 @@ class IngestArtistRequest(BaseModel):
     monitor_option: Optional[str] = Field(default=None, pattern=MONITOR_OPTION_PATTERN)
     monitored: bool = True
     root_folder: Optional[str] = None
-    # Native only. Omitted: the saved ``add_release_profile_id`` default (NULL = no profile); explicit null = none.
-    release_profile_id: Optional[int] = None
+    # Native only. Omitted: the saved ``add_metadata_profile_id`` default (NULL = no profile); explicit null = none.
+    metadata_profile_id: Optional[int] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _deprecated_profile_keys(cls, data: Any) -> Any:
+        return accept_deprecated_profile_keys(data)
 
 
 class ArtistMonitoredRequest(BaseModel):
     monitored: bool
     cascade_children: bool = True
     monitor_option: Optional[str] = Field(default=None, pattern=MONITOR_OPTION_PATTERN)
-    # Native only. Present (even null = clear) sets the artist's release profile; ``apply_monitor_to_albums`` then
+    # Native only. Present (even null = clear) sets the artist's metadata profile; ``apply_monitor_to_albums`` then
     # recomputes the albums like an option change (omitted: no recompute for a profile-only change).
-    release_profile_id: Optional[int] = None
+    metadata_profile_id: Optional[int] = None
     apply_monitor_to_albums: Optional[bool] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _deprecated_profile_keys(cls, data: Any) -> Any:
+        return accept_deprecated_profile_keys(data)
 
-class ReleaseProfileBody(BaseModel):
+
+class MetadataProfileBody(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     primary_types: list[str]
     secondary_types: list[str]
@@ -160,10 +171,15 @@ class ArtistBulkEditRequest(BaseModel):
     monitored: Optional[bool] = None
     monitor_option: Optional[str] = Field(default=None, pattern=MONITOR_OPTION_PATTERN)
     quality_profile_id: Optional[str] = None  # an explicit null clears the profile; omitted leaves it alone
-    release_profile_id: Optional[int] = None  # native only; an explicit null clears it, omitted leaves it alone
+    metadata_profile_id: Optional[int] = None  # native only; an explicit null clears it, omitted leaves it alone
     # Omitted: an unmonitor (monitored=false) cascades to albums (and native tracks) by default, so artists never end
     # up unmonitored with monitored children; an explicit value always wins.
     apply_monitor_to_albums: Optional[bool] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _deprecated_profile_keys(cls, data: Any) -> Any:
+        return accept_deprecated_profile_keys(data)
 
 
 class AlbumBulkEditRequest(BaseModel):
@@ -954,7 +970,7 @@ def _deferred_profile_recompute_job(
         )
     except Exception as exc:  # background thread: nothing above us can handle it, so log the cause and keep the flag
         logger.warning(
-            "Deferred release-profile recompute failed for %s (%s): %s", artist_name, artist_id, exc, exc_info=True
+            "Deferred metadata-profile recompute failed for %s (%s): %s", artist_name, artist_id, exc, exc_info=True
         )
 
 
@@ -965,7 +981,7 @@ def _defer_profile_recompute_after_ingest(
     artist_id: str,
     artist_name: str,
 ) -> None:
-    """Makes a release profile effective for a freshly ingested artist without blocking the request.
+    """Makes a metadata profile effective for a freshly ingested artist without blocking the request.
 
     Discovery albums carry no secondary types, so everything would pass a studio-only profile. Ingest always sets
     ``pending_profile_recompute`` and queues a background MusicBrainz refresh that persists the types and recomputes
@@ -1017,20 +1033,20 @@ def ingest_artist(
     artist_folder = str(root_path / body.artist_name)
 
     monitor_option = body.monitor_option or str(mm.get("add_monitor_option") or DEFAULT_MONITOR_OPTION)
-    release_profile_id: Optional[int] = (
-        body.release_profile_id
-        if "release_profile_id" in body.model_fields_set
-        else mm.get("add_release_profile_id")
+    metadata_profile_id: Optional[int] = (
+        body.metadata_profile_id
+        if "metadata_profile_id" in body.model_fields_set
+        else mm.get("add_metadata_profile_id")
     )
-    release_profile: Optional[dict[str, Any]] = None
-    if release_profile_id is not None:
-        release_profile = db.get_release_profile(release_profile_id)
-        if release_profile is None:
-            if "release_profile_id" in body.model_fields_set:
+    metadata_profile: Optional[dict[str, Any]] = None
+    if metadata_profile_id is not None:
+        metadata_profile = db.get_metadata_profile(metadata_profile_id)
+        if metadata_profile is None:
+            if "metadata_profile_id" in body.model_fields_set:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail=f"Release profile {release_profile_id} not found"
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=f"Metadata profile {metadata_profile_id} not found"
                 )
-            release_profile_id = None
+            metadata_profile_id = None
     artist_added_at = datetime.now(timezone.utc).date().isoformat()
 
     artist_id = str(uuid.uuid4())
@@ -1044,7 +1060,7 @@ def ingest_artist(
             monitored=body.monitored,
             monitor_option=monitor_option,
             quality_profile_id=body.quality_profile_id,
-            release_profile_id=release_profile_id,
+            metadata_profile_id=metadata_profile_id,
         )
     )
 
@@ -1085,7 +1101,7 @@ def ingest_artist(
                     release_date=album.get("release_date"),
                     year=album.get("year"),
                     artist_added_at=artist_added_at,
-                    profile=release_profile,
+                    profile=metadata_profile,
                 )
                 album_title = album.get("title") or "Unknown Album"
                 year_val: Optional[int] = None
@@ -1190,7 +1206,7 @@ def ingest_artist(
                             )
                             tracks_ingested += 1
 
-    if release_profile is not None and body.monitored and monitor_option not in ("existing", "none") and albums_ingested:
+    if metadata_profile is not None and body.monitored and monitor_option not in ("existing", "none") and albums_ingested:
         _defer_profile_recompute_after_ingest(db, enricher, discovery_client, artist_id, body.artist_name)
 
     if monitor_option == "existing":
@@ -1231,16 +1247,16 @@ def get_artist(
     result["genres"] = artist.get("genres")
     result["country"] = artist.get("country")
     albums = db.list_library_albums(artist_id=artist_id, limit=500)
-    profile = db.get_release_profile(artist["release_profile_id"]) if artist.get("release_profile_id") else None
+    profile = db.get_metadata_profile(artist["metadata_profile_id"]) if artist.get("metadata_profile_id") else None
     stored, with_files = _album_track_counts(db, artist_id)
     for alb in albums:
         # Informational only: albums outside the profile stay in the catalog and can be monitored manually.
-        alb["in_profile"] = album_in_release_profile(profile, alb.get("album_type"), alb.get("secondary_types"))
+        alb["in_profile"] = album_in_metadata_profile(profile, alb.get("album_type"), alb.get("secondary_types"))
         alb["cover_url"] = _versioned_art_url("album", alb["id"], alb.get("art_version"), alb.get("cover_url"))
         # Release track count (provider-reported, else the stored rows) and how many tracks own a file.
         alb["track_count"] = alb.get("total_tracks") or stored.get(alb["id"], 0)
         alb["track_file_count"] = with_files.get(alb["id"], 0)
-    result["release_profile_id"] = profile["id"] if profile else None
+    result["metadata_profile_id"] = profile["id"] if profile else None
     result["albums"] = albums
 
     img: Optional[str] = artist.get("image_url")
@@ -1369,7 +1385,7 @@ def set_artist_monitored(
 ) -> dict[str, Any]:
     """Updates monitoring status for an artist, optionally cascading to albums and tracks or applying a preset."""
     if _is_lidarr(db):
-        if "release_profile_id" in body.model_fields_set:
+        if "metadata_profile_id" in body.model_fields_set:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NATIVE_ONLY_DETAIL)
         numeric = lidarr_numeric_id(artist_id, "Artist")
         lidarr = require_lidarr(client)
@@ -1389,7 +1405,7 @@ def set_artist_monitored(
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
 
-    profile_given = "release_profile_id" in body.model_fields_set
+    profile_given = "metadata_profile_id" in body.model_fields_set
     if body.monitor_option is not None or profile_given:
         # Same set-based rules as bulk edit: the artist's option / profile and monitored flag are written, then
         # every album is recomputed from them and its tracks follow the album.
@@ -1411,7 +1427,7 @@ def set_artist_monitored(
                 [str(artist_id)],
                 monitored=monitored_value,
                 monitor_option=body.monitor_option,
-                release_profile_id=body.release_profile_id if profile_given else Database._UNSET,
+                metadata_profile_id=body.metadata_profile_id if profile_given else Database._UNSET,
                 apply_monitor_to_albums=apply_recompute,
             )
         except ValueError as exc:
@@ -1454,11 +1470,11 @@ def bulk_edit_artists(
             detail="Provide exactly one of a non-empty artist_ids or all=true",
         )
     profile_given = "quality_profile_id" in body.model_fields_set
-    release_given = "release_profile_id" in body.model_fields_set
+    release_given = "metadata_profile_id" in body.model_fields_set
     if body.monitored is None and body.monitor_option is None and not profile_given and not release_given:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Provide at least one of monitored, monitor_option, quality_profile_id or release_profile_id",
+            detail="Provide at least one of monitored, monitor_option, quality_profile_id or metadata_profile_id",
         )
     if release_given and _is_lidarr(db):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NATIVE_ONLY_DETAIL)
@@ -1498,7 +1514,7 @@ def bulk_edit_artists(
             monitor_option=body.monitor_option,
             quality_profile_id=body.quality_profile_id if profile_given else Database._UNSET,
             apply_monitor_to_albums=apply_to_albums,
-            release_profile_id=body.release_profile_id if release_given else Database._UNSET,
+            metadata_profile_id=body.metadata_profile_id if release_given else Database._UNSET,
             recompute_when_option_changes=recompute_on_change,
         )
     except ValueError as exc:
@@ -1508,60 +1524,60 @@ def bulk_edit_artists(
 _NATIVE_ADMIN = [Depends(require_core_tier), Depends(native_only)]
 
 
-@router.get("/release-profiles", dependencies=_NATIVE_ADMIN)
-def list_release_profiles(db: Database = Depends(get_db)) -> dict[str, Any]:
-    """Native release profiles with ``artist_count`` (artists using each) and the default for newly added artists."""
+@router.get("/metadata-profiles", dependencies=_NATIVE_ADMIN)
+def list_metadata_profiles(db: Database = Depends(get_db)) -> dict[str, Any]:
+    """Native metadata profiles with ``artist_count`` (artists using each) and the default for newly added artists."""
     return {
-        "profiles": db.list_release_profiles(),
-        "default_profile_id": db.get_media_management_settings().get("add_release_profile_id"),
+        "profiles": db.list_metadata_profiles(),
+        "default_profile_id": db.get_media_management_settings().get("add_metadata_profile_id"),
         "primary_types": list(RELEASE_PRIMARY_TYPES),
         "secondary_types": list(RELEASE_SECONDARY_TYPES),
     }
 
 
-@router.post("/release-profiles", dependencies=_NATIVE_ADMIN, status_code=status.HTTP_201_CREATED)
-def create_release_profile(body: ReleaseProfileBody, db: Database = Depends(get_db)) -> dict[str, Any]:
+@router.post("/metadata-profiles", dependencies=_NATIVE_ADMIN, status_code=status.HTTP_201_CREATED)
+def create_metadata_profile(body: MetadataProfileBody, db: Database = Depends(get_db)) -> dict[str, Any]:
     try:
-        return {**db.create_release_profile(body.name, body.primary_types, body.secondary_types), "artist_count": 0}
+        return {**db.create_metadata_profile(body.name, body.primary_types, body.secondary_types), "artist_count": 0}
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
-@router.put("/release-profiles/{profile_id}", dependencies=_NATIVE_ADMIN)
-def update_release_profile(profile_id: int, body: ReleaseProfileBody, db: Database = Depends(get_db)) -> dict[str, Any]:
+@router.put("/metadata-profiles/{profile_id}", dependencies=_NATIVE_ADMIN)
+def update_metadata_profile(profile_id: int, body: MetadataProfileBody, db: Database = Depends(get_db)) -> dict[str, Any]:
     """Edits a profile. Existing monitoring is untouched until an artist's albums are recomputed."""
     try:
-        updated = db.update_release_profile(profile_id, body.name, body.primary_types, body.secondary_types)
+        updated = db.update_metadata_profile(profile_id, body.name, body.primary_types, body.secondary_types)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if updated is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Release profile not found")
-    count = next((p["artist_count"] for p in db.list_release_profiles() if p["id"] == profile_id), 0)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Metadata profile not found")
+    count = next((p["artist_count"] for p in db.list_metadata_profiles() if p["id"] == profile_id), 0)
     return {**updated, "artist_count": count}
 
 
-@router.delete("/release-profiles/{profile_id}", dependencies=_NATIVE_ADMIN)
-def delete_release_profile(profile_id: int, db: Database = Depends(get_db)) -> dict[str, int]:
+@router.delete("/metadata-profiles/{profile_id}", dependencies=_NATIVE_ADMIN)
+def delete_metadata_profile(profile_id: int, db: Database = Depends(get_db)) -> dict[str, int]:
     """Deletes a profile; artists using it fall back to no profile (their albums keep their monitored flags)."""
-    cleared = db.delete_release_profile(profile_id)
+    cleared = db.delete_metadata_profile(profile_id)
     if cleared is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Release profile not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Metadata profile not found")
     return {"deleted": 1, "artists_cleared": cleared}
 
 
-@router.get("/artists/{artist_id}/release-profile-preview", dependencies=_NATIVE_ADMIN)
-def preview_release_profile(
+@router.get("/artists/{artist_id}/metadata-profile-preview", dependencies=_NATIVE_ADMIN)
+def preview_metadata_profile(
     artist_id: str, profile_id: Optional[int] = None, db: Database = Depends(get_db)
 ) -> dict[str, Any]:
-    """What a release profile would do for an artist; ``profile_id`` omitted/null previews clearing the profile.
+    """What a metadata profile would do for an artist; ``profile_id`` omitted/null previews clearing the profile.
 
     Returns ``{matching, total, would_change}`` where ``would_change`` is ``{albums_to_monitor, albums_to_unmonitor,
     tracks_to_monitor, tracks_to_unmonitor}``: the effect of a recompute (``apply_monitor_to_albums``) against the
     current flags, computed with the same predicate as the bulk edit, without writing anything.
     """
-    result = db.release_profile_preview(artist_id, profile_id)
+    result = db.metadata_profile_preview(artist_id, profile_id)
     if result is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist or release profile not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist or metadata profile not found")
     return result
 
 
@@ -1689,8 +1705,8 @@ def refresh_single_artist(
 
     artist_name = str(artist.get("name") or "").strip()
     foreign_artist_id = artist.get("foreign_artist_id")
-    # Optional release profile: shapes only the monitored flag of albums created by this refresh.
-    release_profile = db.get_release_profile(artist["release_profile_id"]) if artist.get("release_profile_id") else None
+    # Optional metadata profile: shapes only the monitored flag of albums created by this refresh.
+    metadata_profile = db.get_metadata_profile(artist["metadata_profile_id"]) if artist.get("metadata_profile_id") else None
 
     # 1. Enrich with MusicBrainz metadata and discography
     mbid = artist.get("mbid")
@@ -1765,7 +1781,7 @@ def refresh_single_artist(
                         release_date=_rg_release_date(rg),
                         year=rg.get("year"),
                         artist_added_at=artist.get("created_at"),
-                        profile=release_profile,
+                        profile=metadata_profile,
                         secondary_types=rg.get("secondary_types"),
                     )
 
@@ -2053,7 +2069,7 @@ def refresh_single_artist(
                                     release_date=album.get("release_date"),
                                     year=year_val,
                                     artist_added_at=artist.get("created_at"),
-                                    profile=release_profile,
+                                    profile=metadata_profile,
                                 )
 
                                 alb_path = str(Path(artist_path) / album_title) if artist_path else None

@@ -45,7 +45,7 @@ export * from './useAlbumBulkEdit';
 export * from './useTrackBulkEdit';
 export * from './useSelectAllMatching';
 export * from './useMonitoringDefaults';
-export * from './useReleaseProfiles';
+export * from './useMetadataProfiles';
 export * from './useImportLists';
 export * from './useImportListEditor';
 export * from './useImportListItems';

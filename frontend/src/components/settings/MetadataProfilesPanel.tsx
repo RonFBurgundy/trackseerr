@@ -6,15 +6,15 @@ import {
   RELEASE_PRIMARY_LABELS,
   RELEASE_SECONDARY_LABELS,
   type ReleaseOrNew,
-  type ReleaseProfile,
-} from '@/types/releaseProfiles';
+  type MetadataProfile,
+} from '@/types/metadataProfiles';
 import { updateMediaManagementSettings } from '@/services/settingsService';
 import { errorMessage } from '@/services/apiClient';
-import { useReleaseProfiles } from '@/hooks/useReleaseProfiles';
+import { useMetadataProfiles } from '@/hooks/useMetadataProfiles';
 import { inputClass } from './formClasses';
-import { ReleaseProfileEditorModal } from './ReleaseProfileEditorModal';
+import { MetadataProfileEditorModal } from './MetadataProfileEditorModal';
 
-export interface ReleaseProfilesPanelProps {
+export interface MetadataProfilesPanelProps {
   /** False while Lidarr manages the library: the routes answer 409 there, so nothing is fetched. */
   enabled: boolean;
   settings: MediaManagementSettings | null;
@@ -24,35 +24,35 @@ export interface ReleaseProfilesPanelProps {
 
 const NONE = '';
 
-function summarize(p: ReleaseProfile): string {
+function summarize(p: MetadataProfile): string {
   const primary = p.primary_types.map((t) => RELEASE_PRIMARY_LABELS[t]).join(', ');
   const secondary = p.secondary_types.map((t) => RELEASE_SECONDARY_LABELS[t].replace(' (no secondary type)', '')).join(', ');
   return `${primary} / ${secondary}`;
 }
 
-/** Optional release profiles for the native library: they shape automatic monitoring and never hide releases. */
-export const ReleaseProfilesPanel: React.FC<ReleaseProfilesPanelProps> = ({ enabled, settings, onChange, onToast }) => {
+/** Optional metadata profiles for the native library: they shape automatic monitoring and never hide releases. */
+export const MetadataProfilesPanel: React.FC<MetadataProfilesPanelProps> = ({ enabled, settings, onChange, onToast }) => {
   const defaultId = useId();
-  const { profiles, loading, save, remove } = useReleaseProfiles(enabled, onToast);
+  const { profiles, loading, save, remove } = useMetadataProfiles(enabled, onToast);
   const [editing, setEditing] = useState<ReleaseOrNew | null>(null);
 
-  const currentDefault = settings?.add_release_profile_id ?? null;
+  const currentDefault = settings?.add_metadata_profile_id ?? null;
 
   const changeDefault = async (raw: string): Promise<void> => {
     const next = raw === NONE ? null : Number(raw);
     try {
-      const updated = await updateMediaManagementSettings({ add_release_profile_id: next });
-      onChange((prev) => (prev ? { ...prev, add_release_profile_id: updated.add_release_profile_id ?? null } : prev));
-      onToast(next === null ? 'New artists get no release profile' : 'Default release profile saved');
+      const updated = await updateMediaManagementSettings({ add_metadata_profile_id: next });
+      onChange((prev) => (prev ? { ...prev, add_metadata_profile_id: updated.add_metadata_profile_id ?? null } : prev));
+      onToast(next === null ? 'New artists get no metadata profile' : 'Default metadata profile saved');
     } catch (err: unknown) {
-      onToast(errorMessage(err, 'Failed to save default release profile'), 'error');
+      onToast(errorMessage(err, 'Failed to save default metadata profile'), 'error');
     }
   };
 
   const handleDelete = async (id: number): Promise<void> => {
     const cleared = await remove(id);
     if (cleared !== null && currentDefault === id) {
-      onChange((prev) => (prev ? { ...prev, add_release_profile_id: null } : prev));
+      onChange((prev) => (prev ? { ...prev, add_metadata_profile_id: null } : prev));
     }
   };
 
@@ -60,7 +60,7 @@ export const ReleaseProfilesPanel: React.FC<ReleaseProfilesPanelProps> = ({ enab
     <div className="flex min-h-0 flex-col gap-4">
       <MachinedCard className="p-3 sm:p-4 space-y-3">
         <p className="text-xs font-mono text-neutral-400">
-          Release profiles are optional and off by default. They only decide which releases are monitored
+          Metadata profiles are optional and off by default. They only decide which releases are monitored
           automatically; every release stays in the catalog and can always be monitored or requested by hand. Files
           you already own stay monitored under &ldquo;Existing tracks&rdquo; whatever the profile says.
         </p>
@@ -68,7 +68,7 @@ export const ReleaseProfilesPanel: React.FC<ReleaseProfilesPanelProps> = ({ enab
           <FormField label="Default for new artists" htmlFor={defaultId} className="sm:w-72">
             <select
               id={defaultId}
-              name="add_release_profile_id"
+              name="add_metadata_profile_id"
               className={inputClass}
               value={currentDefault === null ? NONE : String(currentDefault)}
               disabled={settings === null}
@@ -91,11 +91,11 @@ export const ReleaseProfilesPanel: React.FC<ReleaseProfilesPanelProps> = ({ enab
       </MachinedCard>
 
       {loading && profiles.length === 0 ? (
-        <p className="text-xs font-mono text-neutral-500 py-4">Loading release profiles...</p>
+        <p className="text-xs font-mono text-neutral-500 py-4">Loading metadata profiles...</p>
       ) : profiles.length === 0 ? (
-        <p className="text-xs font-mono text-neutral-500 py-4">No release profiles defined. Artists are monitored by their option alone.</p>
+        <p className="text-xs font-mono text-neutral-500 py-4">No metadata profiles defined. Artists are monitored by their option alone.</p>
       ) : (
-        <ScrollFill ariaLabel="Release profiles" className="grid grid-cols-1 md:grid-cols-2 gap-3 content-start">
+        <ScrollFill ariaLabel="Metadata profiles" className="grid grid-cols-1 md:grid-cols-2 gap-3 content-start">
           {profiles.map((p) => (
             <MachinedCard key={p.id} className="p-3 sm:p-4 flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -124,7 +124,7 @@ export const ReleaseProfilesPanel: React.FC<ReleaseProfilesPanelProps> = ({ enab
         </ScrollFill>
       )}
 
-      <ReleaseProfileEditorModal target={editing} onClose={() => setEditing(null)} onSave={save} />
+      <MetadataProfileEditorModal target={editing} onClose={() => setEditing(null)} onSave={save} />
     </div>
   );
 };

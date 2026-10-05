@@ -3,8 +3,8 @@ import type { AlbumItem, ArtistItem } from '@/types/models';
 import type { MonitorOption } from '@/types/monitoring';
 import { errorMessage } from '@/services/apiClient';
 import { getArtistDetail, refreshArtist, setArtistMonitoringPreset } from '@/services/libraryService';
-import type { ReleaseProfileWouldChange } from '@/types/releaseProfiles';
-import { setArtistReleaseProfile } from '@/services/releaseProfileService';
+import type { MetadataProfileWouldChange } from '@/types/metadataProfiles';
+import { setArtistMetadataProfile } from '@/services/metadataProfileService';
 
 export type ArtistDetailData = ArtistItem & { albums?: AlbumItem[] };
 export type MonitorPreset = MonitorOption;
@@ -16,13 +16,13 @@ export interface UseArtistDetailReturn {
   refreshDiscography: () => Promise<void>;
   applyPreset: (preset: MonitorPreset) => Promise<void>;
   /**
-   * Sets (null clears) the artist's release profile. `applyToExisting` recomputes existing albums and tracks;
+   * Sets (null clears) the artist's metadata profile. `applyToExisting` recomputes existing albums and tracks;
    * false saves the profile for future releases only. `wouldChange` (the dry run) feeds the success toast.
    */
-  applyReleaseProfile: (
+  applyMetadataProfile: (
     profileId: number | null,
     applyToExisting: boolean,
-    wouldChange?: ReleaseProfileWouldChange
+    wouldChange?: MetadataProfileWouldChange
   ) => Promise<void>;
   patchAlbumMonitored: (albumId: number | string, monitored: boolean) => void;
   patchArtistMonitored: (monitored: boolean) => void;
@@ -86,14 +86,14 @@ export function useArtistDetail(
   );
 
   const monitored = artist?.monitored ?? true;
-  const applyReleaseProfile = useCallback(
+  const applyMetadataProfile = useCallback(
     async (
       profileId: number | null,
       applyToExisting: boolean,
-      wouldChange?: ReleaseProfileWouldChange
+      wouldChange?: MetadataProfileWouldChange
     ): Promise<void> => {
       try {
-        await setArtistReleaseProfile(artistId, monitored, profileId, applyToExisting);
+        await setArtistMetadataProfile(artistId, monitored, profileId, applyToExisting);
         setArtist(await getArtistDetail(artistId));
         onChanged();
         if (!applyToExisting) {
@@ -104,7 +104,7 @@ export function useArtistDetail(
           onToast('Profile applied; no album changes');
         }
       } catch (err: unknown) {
-        onToast(errorMessage(err, 'Failed to apply release profile'), 'error');
+        onToast(errorMessage(err, 'Failed to apply metadata profile'), 'error');
       }
     },
     [artistId, monitored, onChanged, onToast]
@@ -126,7 +126,7 @@ export function useArtistDetail(
     refreshing,
     refreshDiscography,
     applyPreset,
-    applyReleaseProfile,
+    applyMetadataProfile,
     patchAlbumMonitored,
     patchArtistMonitored,
   };
