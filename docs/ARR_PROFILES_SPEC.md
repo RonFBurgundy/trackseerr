@@ -78,3 +78,11 @@ Existing table `quality_profiles` (v10) already has `items_json`, `cutoff`, `cus
 - `GET /api/acquisition/pending` → `[{id, title, album_id, artist_name, protocol, quality, format_score, added_at, release_at, reason}]`; `DELETE /api/acquisition/pending/{id}` drops one; `POST /api/acquisition/pending/{id}/grab` grabs now.
 
 Decision on min score (2026-10-05): default `min_format_score` = **−100** for new and migrated profiles, so Vinyl/Mono/Censored penalties are soft (strong preference, not a ban). Users can raise it to 0 to make them bans.
+
+## Phase B3 — more codecs + per-track check on import (queued after B2)
+
+User direction (2026-10-05): control every codec with a min/preferred/max slider in a unit that makes sense per time.
+- Unit stays **kbps** (shown alongside **MB/min** = kbps × 0.0075). Size-per-time is identical for a track or an album: the release's average bitrate.
+- Add qualities: ALAC, WAV/AIFF (PCM), MP3 V1, AAC (other/VBR), Opus, OGG Vorbis — enum values, title parser patterns, defaults (derived), migration seeding new quality_definitions rows, and ensure they appear (disallowed by default) in existing quality profiles.
+- **At grab time** only the release total size is known (indexers report one size per release), so the check is on the release average.
+- **At import time** each track file is checked individually (mutagen gives duration + bitrate): a file outside its codec's [min, max] is flagged; setting `import_bitrate_check: off|warn|reject` (default warn) in media management. Rejected imports go to the existing failed-import path with a clear reason (catches fake FLAC upconverts with suspiciously low bitrate, truncated files).
