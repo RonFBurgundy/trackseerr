@@ -141,7 +141,7 @@ export const ImportListEditorModal: React.FC<ImportListEditorModalProps> = ({ ed
           <FormField label="Artist monitor option" htmlFor="il-artist-opt">
             <MonitorOptionSelect
               id="il-artist-opt"
-              value={draft.artist_monitor_option ?? 'all'}
+              value={draft.artist_monitor_option ?? 'existing'}
               onChange={(v: MonitorOption) => editor.patch({ artist_monitor_option: v })}
             />
           </FormField>

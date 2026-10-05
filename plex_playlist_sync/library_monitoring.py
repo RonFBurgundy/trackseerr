@@ -9,13 +9,36 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime
-from typing import Optional
+from typing import Any, Mapping, Optional, Sequence
 
 NATIVE_MONITOR_OPTIONS: tuple[str, ...] = ("all", "albums", "singles_eps", "existing", "future", "none")
+
+# Default for new native artists and a fresh install's "add" setting: monitor exactly the tracks with files.
+DEFAULT_MONITOR_OPTION = "existing"
 
 # How a playlist or import list reacts to an item: request just the track, monitor its album, monitor its whole
 # artist, or only record it.
 LIST_MONITOR_MODES: tuple[str, ...] = ("track", "album", "artist", "none")
+
+# Release profiles (native mode only, optional, off by default). They shape AUTOMATIC monitoring only: they never
+# hide a release from the catalog and never block a manual monitor or request.
+RELEASE_PRIMARY_TYPES: tuple[str, ...] = ("album", "ep", "single", "broadcast", "other")
+# MusicBrainz secondary types; ``studio`` is the pseudo type meaning "no secondary type at all".
+RELEASE_SECONDARY_TYPES: tuple[str, ...] = (
+    "studio",
+    "compilation",
+    "soundtrack",
+    "spokenword",
+    "interview",
+    "audiobook",
+    "audio drama",
+    "live",
+    "remix",
+    "dj-mix",
+    "mixtape/street",
+    "demo",
+    "field recording",
+)
 
 _ALBUM_TYPE_ALIASES = {"studio": "album", "singles": "single", "eps": "ep"}
 # Release dates are only trusted in exactly these shapes (the SQL twin GLOBs the same set); anything else
@@ -37,6 +60,75 @@ def validate_list_monitor_mode(mode: object) -> str:
     if not isinstance(mode, str) or mode not in LIST_MONITOR_MODES:
         raise ValueError(f"Invalid monitor mode {mode!r}; expected one of: {', '.join(LIST_MONITOR_MODES)}")
     return mode
+
+
+def validate_release_types(
+    primary_types: object, secondary_types: object
+) -> tuple[list[str], list[str]]:
+    """Normalises and validates a release profile's type lists (lower-cased, de-duplicated, order kept).
+
+    Raises ValueError for non-lists, unknown types, or an empty primary or secondary list (such a profile would
+    exclude every release).
+    """
+    out: list[list[str]] = []
+    for label, value, allowed in (
+        ("primary", primary_types, RELEASE_PRIMARY_TYPES),
+        ("secondary", secondary_types, RELEASE_SECONDARY_TYPES),
+    ):
+        if not isinstance(value, (list, tuple)):
+            raise ValueError(f"{label}_types must be a list")
+        cleaned = list(dict.fromkeys(str(v).strip().lower() for v in value))
+        bad = [v for v in cleaned if v not in allowed]
+        if bad:
+            raise ValueError(f"Invalid {label} type(s) {bad}; expected a subset of: {', '.join(allowed)}")
+        if not cleaned:
+            raise ValueError(f"{label}_types must contain at least one type")
+        out.append(cleaned)
+    return out[0], out[1]
+
+
+def album_in_release_profile(
+    profile: Optional[Mapping[str, Any]],
+    album_type: Optional[str],
+    secondary_types: Optional[Sequence[str]] = None,
+) -> bool:
+    """True when ``profile`` is None (no profile) or the release matches it.
+
+    The primary type is the stored ``album_type`` when it is a primary type, else ``album`` (live/compilation are
+    secondary types of an album). A release with no secondary types (or unknown, NULL, ones) is ``studio`` and
+    needs the profile to allow ``studio``; otherwise EVERY secondary type must be allowed. When the secondary list
+    is unknown but ``album_type`` is ``live`` or ``compilation`` that type is inferred. Mirrors ``IN_PROFILE_SQL``.
+    """
+    if profile is None:
+        return True
+    t = normalize_album_type(album_type)
+    primary = t if t in RELEASE_PRIMARY_TYPES else "album"
+    if secondary_types is None:
+        secondary = [t] if t in ("live", "compilation") else []
+    else:
+        secondary = normalize_secondary_types(secondary_types) or []
+    if primary not in {str(p).lower() for p in profile.get("primary_types") or []}:
+        return False
+    allowed = {str(s).lower() for s in profile.get("secondary_types") or []}
+    if not secondary:
+        return "studio" in allowed
+    return all(s in allowed for s in secondary)
+
+
+def normalize_secondary_types(raw: Any) -> Optional[list[str]]:
+    """The single normaliser for MusicBrainz secondary types: lower-case, stripped, de-duplicated, order-kept list.
+
+    ``None`` (unknown) and anything that is not a list/tuple/set stay ``None`` so inference applies; every writer of
+    ``library_albums.secondary_types`` and ``album_in_release_profile`` go through here.
+    """
+    if raw is None or isinstance(raw, (str, bytes)) or not isinstance(raw, (list, tuple, set, frozenset)):
+        return None
+    out: list[str] = []
+    for item in raw:
+        t = str(item).strip().lower() if item else ""
+        if t and t not in out:
+            out.append(t)
+    return out
 
 
 def normalize_album_type(album_type: Optional[str]) -> str:
@@ -100,13 +192,21 @@ def album_monitored_for_option(
     release_date: Optional[str] = None,
     year: Optional[int] = None,
     artist_added_at: object = None,
+    profile: Optional[Mapping[str, Any]] = None,
+    secondary_types: Optional[Sequence[str]] = None,
 ) -> bool:
-    """Decides an album's monitored flag from its artist's monitor option.
+    """Decides an album's monitored flag from its artist's monitor option and optional release profile.
 
-    Unknown options and unknown/unparseable dates (for ``future``) yield False. ``future`` means the album's
+    ``existing`` ignores the profile (files win: the user owns those releases) and ``none`` is always False. For
+    every other option an album outside ``profile`` is not auto-monitored. ``profile=None`` is the original
+    behaviour. Unknown options and unknown/unparseable dates (for ``future``) yield False. ``future`` means the album's
     release date (year-only dates pad to Jan 1) is strictly after the date the artist was added.
     """
     if not artist_monitored:
+        return False
+    if option == "existing":
+        return bool(has_files)
+    if not album_in_release_profile(profile, album_type, secondary_types):
         return False
     if option == "all":
         return True
@@ -114,8 +214,6 @@ def album_monitored_for_option(
         return normalize_album_type(album_type) == "album"
     if option == "singles_eps":
         return normalize_album_type(album_type) in ("single", "ep")
-    if option == "existing":
-        return bool(has_files)
     if option == "future":
         released = _album_date(release_date, year)
         added = _added_date(artist_added_at)
@@ -125,13 +223,16 @@ def album_monitored_for_option(
     return False
 
 
-def hydrated_track_monitored(option: Optional[str]) -> bool:
+def hydrated_track_monitored(option: Optional[str], has_file: bool = False) -> bool:
     """Monitored flag for a track created from catalog (MusicBrainz/Deezer) data rather than from a file.
 
-    Under ``existing`` only owned tracks are monitored, so a hydrated track with no file is created unmonitored even
-    inside an owned, monitored album. Every other option keeps the tracks following their album.
+    Monitoring is track-granular. Under ``existing`` exactly the tracks with a file are monitored, so a hydrated
+    track with no file is created unmonitored even inside an owned, monitored album. Every other option keeps the
+    tracks following their album.
     """
-    return option != "existing"
+    if option == "existing":
+        return bool(has_file)
+    return True
 
 
 # SQL twin of album_monitored_for_option for set-based updates. Expects tables aliased as ``a`` (library_albums)
@@ -154,12 +255,35 @@ ALBUM_TYPE_SQL = (
 HAS_FILES_SQL = (
     "EXISTS (SELECT 1 FROM library_tracks t JOIN library_files f ON f.track_id = t.id WHERE t.album_id = a.id)"
 )
+TRACK_HAS_FILE_SQL = "EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = library_tracks.id)"
+_PRIMARY_SQL = (
+    "CASE WHEN " + ALBUM_TYPE_SQL + " IN ('album', 'ep', 'single', 'broadcast', 'other') THEN " + ALBUM_TYPE_SQL
+    + " ELSE 'album' END"
+)
+_SECONDARY_JSON_SQL = (
+    "CASE WHEN a.secondary_types IS NOT NULL AND json_valid(a.secondary_types) "
+    "AND json_type(a.secondary_types) = 'array' THEN a.secondary_types "
+    f"WHEN {ALBUM_TYPE_SQL} = 'live' THEN '[\"live\"]' "
+    f"WHEN {ALBUM_TYPE_SQL} = 'compilation' THEN '[\"compilation\"]' ELSE '[]' END"
+)
+# SQL twin of album_in_release_profile; ``ar.release_profile_id`` NULL (or pointing at a deleted profile) = no profile.
+IN_PROFILE_SQL = (
+    "(ar.release_profile_id IS NULL "
+    "OR NOT EXISTS (SELECT 1 FROM native_release_profiles rp0 WHERE rp0.id = ar.release_profile_id) "
+    "OR EXISTS (SELECT 1 FROM native_release_profiles rp WHERE rp.id = ar.release_profile_id "
+    f"AND EXISTS (SELECT 1 FROM json_each(rp.primary_types) pt WHERE pt.value = ({_PRIMARY_SQL})) "
+    f"AND NOT EXISTS (SELECT 1 FROM json_each({_SECONDARY_JSON_SQL}) st "
+    "WHERE st.value NOT IN (SELECT value FROM json_each(rp.secondary_types))) "
+    f"AND (json_array_length({_SECONDARY_JSON_SQL}) > 0 "
+    "OR EXISTS (SELECT 1 FROM json_each(rp.secondary_types) sx WHERE sx.value = 'studio'))))"
+)
 ALBUM_MONITORED_SQL = (
     "CASE WHEN {art_mon} = 0 THEN 0 "
+    f"WHEN {{opt}} = 'existing' THEN {HAS_FILES_SQL} "
+    f"WHEN NOT {IN_PROFILE_SQL} THEN 0 "
     "WHEN {opt} = 'all' THEN 1 "
     f"WHEN {{opt}} = 'albums' THEN ({ALBUM_TYPE_SQL} = 'album') "
     f"WHEN {{opt}} = 'singles_eps' THEN ({ALBUM_TYPE_SQL} IN ('single', 'ep')) "
-    f"WHEN {{opt}} = 'existing' THEN {HAS_FILES_SQL} "
     f"WHEN {{opt}} = 'future' THEN COALESCE(({ALBUM_DATE_SQL}) > date(ar.created_at), 0) "
     "ELSE 0 END"
 )

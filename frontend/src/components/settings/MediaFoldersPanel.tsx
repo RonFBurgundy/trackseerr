@@ -137,7 +137,7 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
           <div>
             <h5 className="text-xs font-bold uppercase font-mono text-white">Monitoring</h5>
             <p className="text-[11px] text-neutral-400 font-mono mt-0.5">
-              &ldquo;Existing albums only&rdquo; monitors only the albums already on disk; future releases stay unmonitored.
+              &ldquo;Existing tracks&rdquo; monitors exactly the tracks you have files for; every other track and album stays unmonitored until you choose it.
             </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -151,7 +151,7 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
             <FormField label="Artists added manually" htmlFor={addMonitorId}>
               <MonitorOptionSelect
                 id={addMonitorId}
-                value={settings?.add_monitor_option ?? 'all'}
+                value={settings?.add_monitor_option ?? 'existing'}
                 onChange={(v) => onChange((prev) => (prev ? { ...prev, add_monitor_option: v } : null))}
               />
             </FormField>

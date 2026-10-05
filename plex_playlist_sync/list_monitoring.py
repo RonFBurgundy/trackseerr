@@ -35,6 +35,7 @@ from plex_playlist_sync.library_monitoring import (
     LIST_MONITOR_MODES,
     NATIVE_MONITOR_OPTIONS,
     validate_list_monitor_mode,
+    DEFAULT_MONITOR_OPTION,
     validate_monitor_option,
 )
 from plex_playlist_sync.models import LibraryAlbum, LibraryArtist, LibraryTrack
@@ -406,7 +407,7 @@ def _item_from(item: Any) -> ListItem:
 def _default_artist_option(db: Database, artist_monitor_option: Optional[str]) -> str:
     if artist_monitor_option:
         return validate_monitor_option(artist_monitor_option)
-    fallback = str(db.get_media_management_settings().get("add_monitor_option") or "all")
+    fallback = str(db.get_media_management_settings().get("add_monitor_option") or DEFAULT_MONITOR_OPTION)
     return fallback if fallback in NATIVE_MONITOR_OPTIONS else "all"
 
 

@@ -11,6 +11,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import threading
 import time
 from typing import Any, Callable, Optional
 import uuid
@@ -60,13 +61,19 @@ from plex_playlist_sync.clients.lidarr import (
     MediaCover,
     _exc_text,
 )
+from plex_playlist_sync.album_track_hydration import album_hydration_lock, hydrate_album_tracks
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.library_monitoring import (
     NATIVE_MONITOR_OPTIONS,
+    RELEASE_PRIMARY_TYPES,
+    RELEASE_SECONDARY_TYPES,
+    album_in_release_profile,
     album_monitored_for_option,
+    normalize_secondary_types,
+    DEFAULT_MONITOR_OPTION,
     hydrated_track_monitored,
     section_to_album_type,
 )
@@ -100,6 +107,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Most albums whose tracklists one bulk "monitor" request will fetch on demand.
+BULK_HYDRATE_LIMIT = 25
+# Total wall-clock budget for all hydration in one bulk "monitor" request.
+BULK_HYDRATE_DEADLINE_SECONDS = 15.0
+
 
 # -------------------------------------------------------------------------
 # Request Models
@@ -115,12 +127,24 @@ class IngestArtistRequest(BaseModel):
     monitor_option: Optional[str] = Field(default=None, pattern=MONITOR_OPTION_PATTERN)
     monitored: bool = True
     root_folder: Optional[str] = None
+    # Native only. Omitted: the saved ``add_release_profile_id`` default (NULL = no profile); explicit null = none.
+    release_profile_id: Optional[int] = None
 
 
 class ArtistMonitoredRequest(BaseModel):
     monitored: bool
     cascade_children: bool = True
     monitor_option: Optional[str] = Field(default=None, pattern=MONITOR_OPTION_PATTERN)
+    # Native only. Present (even null = clear) sets the artist's release profile; ``apply_monitor_to_albums`` then
+    # recomputes the albums like an option change (omitted: no recompute for a profile-only change).
+    release_profile_id: Optional[int] = None
+    apply_monitor_to_albums: Optional[bool] = None
+
+
+class ReleaseProfileBody(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    primary_types: list[str]
+    secondary_types: list[str]
 
 
 class AlbumMonitoredRequest(BaseModel):
@@ -134,6 +158,7 @@ class ArtistBulkEditRequest(BaseModel):
     monitored: Optional[bool] = None
     monitor_option: Optional[str] = Field(default=None, pattern=MONITOR_OPTION_PATTERN)
     quality_profile_id: Optional[str] = None  # an explicit null clears the profile; omitted leaves it alone
+    release_profile_id: Optional[int] = None  # native only; an explicit null clears it, omitted leaves it alone
     # Omitted: an unmonitor (monitored=false) cascades to albums (and native tracks) by default, so artists never end
     # up unmonitored with monitored children; an explicit value always wins.
     apply_monitor_to_albums: Optional[bool] = None
@@ -682,11 +707,20 @@ def paged_tracks(
     album_id: Optional[str] = None,
     db: Database = Depends(get_db),
     client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    enricher: MbidEnricherClient = Depends(get_mbid_enricher),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
-    """A page of library tracks (with artist, album and file details) plus the filtered total."""
+    """A page of library tracks (with artist, album and file details) plus the filtered total.
+
+    Opening an album whose tracklist was never fetched (unmonitored albums are not hydrated on add/refresh) fetches it
+    from MusicBrainz once, stored unmonitored, before the first page is read. NOTE: this GET therefore has a write
+    side effect (it may create track rows). It is single-flight per album, and an album whose fetch failed or came
+    back empty is not retried for 10 minutes (see ``hydrate_album_tracks``).
+    """
     if _is_lidarr(db):
         return _lidarr_tracks_paged(page, page_size, sort_key, sort_dir, q, monitored_only, album_id, client)
+    if album_id and page == 1 and not q and not monitored_only:
+        hydrate_album_tracks(db, enricher, album_id)
     return _paged(
         "tracks", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, album_id, db, _enrich_tracks
     )
@@ -803,6 +837,82 @@ def _ingest_artist_lidarr(db: Database, lidarr: LidarrClient, body: IngestArtist
     }
 
 
+def _rg_release_date(rg: dict[str, Any]) -> Optional[str]:
+    """Release date of an enricher release group (``first_release_date``; legacy ``release_date`` accepted)."""
+    return rg.get("first_release_date") or rg.get("release_date") or None
+
+
+def _queue_release_date_update(
+    existing_alb: dict[str, Any], rg: dict[str, Any], upd_album: list[str], upd_params: list[Any]
+) -> None:
+    """Queues a backfill of an existing album's missing release date / year from a MusicBrainz release group."""
+    rdate = _rg_release_date(rg)
+    if rdate and not existing_alb.get("release_date"):
+        upd_album.append("release_date = ?")
+        upd_params.append(str(rdate))
+    if rg.get("year") is not None and existing_alb.get("year") is None:
+        upd_album.append("year = ?")
+        upd_params.append(rg["year"])
+
+
+def _run_in_background(target: Callable[[], None], name: str) -> None:
+    """Runs ``target`` on a daemon thread (a seam tests replace to drive the job deterministically)."""
+    threading.Thread(target=target, daemon=True, name=name).start()
+
+
+def _deferred_profile_recompute_job(
+    db: Database,
+    enricher: MbidEnricherClient,
+    discovery_client: Optional[DiscoveryClient],
+    artist_id: str,
+    artist_name: str,
+) -> None:
+    """Background half of a profile-bearing ingest: resolve the MBID, then run the normal artist refresh.
+
+    The refresh persists MusicBrainz secondary types and (via ``Database.finish_pending_profile_recompute``) runs the
+    deferred recompute once. Failures are logged and leave ``pending_profile_recompute`` set for the next refresh.
+    """
+    from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
+
+    try:
+        artist = db.get_library_artist(artist_id)
+        if artist is None:
+            return
+        if not artist.get("mbid"):
+            resolved = enricher.lookup_artist_mbid(artist_name)
+            if not resolved:
+                logger.warning("No MusicBrainz match for %s; profile recompute stays deferred", artist_name)
+                return
+            db.set_library_artist_mbid(artist_id, str(resolved))
+        artist_refresh_worker.refresh_once(
+            db=db, discovery_client=discovery_client, enricher=enricher, artist_ids=[artist_id]
+        )
+    except Exception as exc:  # background thread: nothing above us can handle it, so log the cause and keep the flag
+        logger.warning(
+            "Deferred release-profile recompute failed for %s (%s): %s", artist_name, artist_id, exc, exc_info=True
+        )
+
+
+def _defer_profile_recompute_after_ingest(
+    db: Database,
+    enricher: MbidEnricherClient,
+    discovery_client: Optional[DiscoveryClient],
+    artist_id: str,
+    artist_name: str,
+) -> None:
+    """Makes a release profile effective for a freshly ingested artist without blocking the request.
+
+    Discovery albums carry no secondary types, so everything would pass a studio-only profile. Ingest always sets
+    ``pending_profile_recompute`` and queues a background MusicBrainz refresh that persists the types and recomputes
+    once; a manual album/track edit before it finishes clears the flag and wins.
+    """
+    db.set_pending_profile_recompute(artist_id, True)
+    _run_in_background(
+        lambda: _deferred_profile_recompute_job(db, enricher, discovery_client, artist_id, artist_name),
+        "ProfileRecomputeAfterIngest",
+    )
+
+
 @router.post("/artists/ingest", dependencies=[Depends(require_core_tier)])
 def ingest_artist(
     body: IngestArtistRequest,
@@ -810,6 +920,7 @@ def ingest_artist(
     discovery_client: DiscoveryClient = Depends(get_discovery_client),
     _admin: dict[str, Any] = Depends(require_admin),
     lidarr_client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    enricher: MbidEnricherClient = Depends(get_mbid_enricher),
 ) -> dict[str, Any]:
     """Ingests an artist discography from discovery metadata into the native catalog.
 
@@ -840,7 +951,21 @@ def ingest_artist(
     root_path = Path(root_folder_str).resolve()
     artist_folder = str(root_path / body.artist_name)
 
-    monitor_option = body.monitor_option or str(mm.get("add_monitor_option") or "all")
+    monitor_option = body.monitor_option or str(mm.get("add_monitor_option") or DEFAULT_MONITOR_OPTION)
+    release_profile_id: Optional[int] = (
+        body.release_profile_id
+        if "release_profile_id" in body.model_fields_set
+        else mm.get("add_release_profile_id")
+    )
+    release_profile: Optional[dict[str, Any]] = None
+    if release_profile_id is not None:
+        release_profile = db.get_release_profile(release_profile_id)
+        if release_profile is None:
+            if "release_profile_id" in body.model_fields_set:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=f"Release profile {release_profile_id} not found"
+                )
+            release_profile_id = None
     artist_added_at = datetime.now(timezone.utc).date().isoformat()
 
     artist_id = str(uuid.uuid4())
@@ -854,6 +979,7 @@ def ingest_artist(
             monitored=body.monitored,
             monitor_option=monitor_option,
             quality_profile_id=body.quality_profile_id,
+            release_profile_id=release_profile_id,
         )
     )
 
@@ -894,6 +1020,7 @@ def ingest_artist(
                     release_date=album.get("release_date"),
                     year=album.get("year"),
                     artist_added_at=artist_added_at,
+                    profile=release_profile,
                 )
                 album_title = album.get("title") or "Unknown Album"
                 year_val: Optional[int] = None
@@ -995,6 +1122,14 @@ def ingest_artist(
                             )
                             tracks_ingested += 1
 
+    if release_profile is not None and body.monitored and monitor_option not in ("existing", "none") and albums_ingested:
+        _defer_profile_recompute_after_ingest(db, enricher, discovery_client, artist_id, body.artist_name)
+
+    if monitor_option == "existing":
+        # Track-level "existing" on add: monitor exactly the tracks that already have files (none for a new artist,
+        # but a re-added folder may already own some).
+        db.bulk_edit_library_artists([artist_id], apply_monitor_to_albums=True)
+
     result = db.get_library_artist(artist_id) or artist_dict
     return {
         **result,
@@ -1025,6 +1160,11 @@ def get_artist(
     result["genres"] = artist.get("genres")
     result["country"] = artist.get("country")
     albums = db.list_library_albums(artist_id=artist_id, limit=500)
+    profile = db.get_release_profile(artist["release_profile_id"]) if artist.get("release_profile_id") else None
+    for alb in albums:
+        # Informational only: albums outside the profile stay in the catalog and can be monitored manually.
+        alb["in_profile"] = album_in_release_profile(profile, alb.get("album_type"), alb.get("secondary_types"))
+    result["release_profile_id"] = profile["id"] if profile else None
     result["albums"] = albums
 
     img: Optional[str] = artist.get("image_url")
@@ -1166,6 +1306,8 @@ def set_artist_monitored(
 ) -> dict[str, Any]:
     """Updates monitoring status for an artist, optionally cascading to albums and tracks or applying a preset."""
     if _is_lidarr(db):
+        if "release_profile_id" in body.model_fields_set:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NATIVE_ONLY_DETAIL)
         numeric = lidarr_numeric_id(artist_id, "Artist")
         lidarr = require_lidarr(client)
         preset = body.monitor_option
@@ -1184,15 +1326,39 @@ def set_artist_monitored(
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
 
-    if body.monitor_option is not None:
-        # Same set-based rules as bulk edit: the artist's option and monitored flag are written, then every album
-        # is recomputed from them and its tracks follow the album.
-        db.bulk_edit_library_artists(
-            [str(artist_id)],
-            monitored=body.monitor_option != "none",
-            monitor_option=body.monitor_option,
-            apply_monitor_to_albums=True,
+    profile_given = "release_profile_id" in body.model_fields_set
+    if body.monitor_option is not None or profile_given:
+        # Same set-based rules as bulk edit: the artist's option / profile and monitored flag are written, then
+        # every album is recomputed from them and its tracks follow the album.
+        apply_recompute = (
+            True
+            if body.monitor_option is not None and body.apply_monitor_to_albums is None
+            else bool(body.apply_monitor_to_albums)
         )
+        # A profile-only edit still honours ``monitored``: a recompute folds it in (an unmonitored artist unmonitors
+        # its children); without one, albums stay as they are unless the flag actually changes and cascades.
+        if body.monitor_option is not None:
+            monitored_value: Optional[bool] = body.monitor_option != "none"
+        elif apply_recompute:
+            monitored_value = body.monitored
+        else:
+            monitored_value = None
+        try:
+            db.bulk_edit_library_artists(
+                [str(artist_id)],
+                monitored=monitored_value,
+                monitor_option=body.monitor_option,
+                release_profile_id=body.release_profile_id if profile_given else Database._UNSET,
+                apply_monitor_to_albums=apply_recompute,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        if (
+            body.monitor_option is None
+            and not apply_recompute
+            and body.monitored != bool(artist.get("monitored", True))
+        ):
+            db.set_artist_monitored(artist_id=artist_id, monitored=body.monitored, cascade_children=body.cascade_children)
     else:
         db.set_artist_monitored(
             artist_id=artist_id,
@@ -1225,14 +1391,21 @@ def bulk_edit_artists(
             detail="Provide exactly one of a non-empty artist_ids or all=true",
         )
     profile_given = "quality_profile_id" in body.model_fields_set
-    if body.monitored is None and body.monitor_option is None and not profile_given:
+    release_given = "release_profile_id" in body.model_fields_set
+    if body.monitored is None and body.monitor_option is None and not profile_given and not release_given:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Provide at least one of monitored, monitor_option or quality_profile_id",
+            detail="Provide at least one of monitored, monitor_option, quality_profile_id or release_profile_id",
         )
+    if release_given and _is_lidarr(db):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NATIVE_ONLY_DETAIL)
+    # Omitted: unmonitoring cascades, and switching to "existing" recomputes (track-level: only tracks with files) --
+    # but only the artists whose option actually changes; artists already on "existing" are left alone unless the
+    # flag is explicitly true.
     apply_to_albums = (
         body.apply_monitor_to_albums if body.apply_monitor_to_albums is not None else body.monitored is False
     )
+    recompute_on_change = body.apply_monitor_to_albums is None and body.monitor_option == "existing"
     if _is_lidarr(db):
         lidarr = require_lidarr(client)
         numeric_ids = [lidarr_numeric_id(i, "Artist") for i in body.artist_ids] if has_ids else None
@@ -1248,7 +1421,8 @@ def bulk_edit_artists(
             return _lidarr_mutation(
                 db,
                 lambda: lidarr_library.bulk_edit_artists(
-                    lidarr, numeric_ids, body.monitored, body.monitor_option, profile_id, apply_to_albums
+                    lidarr, numeric_ids, body.monitored, body.monitor_option, profile_id,
+                    apply_to_albums or recompute_on_change,
                 ),
                 "Artist",
             )
@@ -1261,9 +1435,71 @@ def bulk_edit_artists(
             monitor_option=body.monitor_option,
             quality_profile_id=body.quality_profile_id if profile_given else Database._UNSET,
             apply_monitor_to_albums=apply_to_albums,
+            release_profile_id=body.release_profile_id if release_given else Database._UNSET,
+            recompute_when_option_changes=recompute_on_change,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+_NATIVE_ADMIN = [Depends(require_core_tier), Depends(native_only)]
+
+
+@router.get("/release-profiles", dependencies=_NATIVE_ADMIN)
+def list_release_profiles(db: Database = Depends(get_db)) -> dict[str, Any]:
+    """Native release profiles with ``artist_count`` (artists using each) and the default for newly added artists."""
+    return {
+        "profiles": db.list_release_profiles(),
+        "default_profile_id": db.get_media_management_settings().get("add_release_profile_id"),
+        "primary_types": list(RELEASE_PRIMARY_TYPES),
+        "secondary_types": list(RELEASE_SECONDARY_TYPES),
+    }
+
+
+@router.post("/release-profiles", dependencies=_NATIVE_ADMIN, status_code=status.HTTP_201_CREATED)
+def create_release_profile(body: ReleaseProfileBody, db: Database = Depends(get_db)) -> dict[str, Any]:
+    try:
+        return {**db.create_release_profile(body.name, body.primary_types, body.secondary_types), "artist_count": 0}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.put("/release-profiles/{profile_id}", dependencies=_NATIVE_ADMIN)
+def update_release_profile(profile_id: int, body: ReleaseProfileBody, db: Database = Depends(get_db)) -> dict[str, Any]:
+    """Edits a profile. Existing monitoring is untouched until an artist's albums are recomputed."""
+    try:
+        updated = db.update_release_profile(profile_id, body.name, body.primary_types, body.secondary_types)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Release profile not found")
+    count = next((p["artist_count"] for p in db.list_release_profiles() if p["id"] == profile_id), 0)
+    return {**updated, "artist_count": count}
+
+
+@router.delete("/release-profiles/{profile_id}", dependencies=_NATIVE_ADMIN)
+def delete_release_profile(profile_id: int, db: Database = Depends(get_db)) -> dict[str, int]:
+    """Deletes a profile; artists using it fall back to no profile (their albums keep their monitored flags)."""
+    cleared = db.delete_release_profile(profile_id)
+    if cleared is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Release profile not found")
+    return {"deleted": 1, "artists_cleared": cleared}
+
+
+@router.get("/artists/{artist_id}/release-profile-preview", dependencies=_NATIVE_ADMIN)
+def preview_release_profile(
+    artist_id: str, profile_id: Optional[int] = None, db: Database = Depends(get_db)
+) -> dict[str, Any]:
+    """What a release profile would do for an artist; ``profile_id`` omitted/null previews clearing the profile.
+
+    Returns ``{matching, total, would_change}`` where ``would_change`` is ``{albums_to_monitor, albums_to_unmonitor,
+    tracks_to_monitor, tracks_to_unmonitor}``: the effect of a recompute (``apply_monitor_to_albums``) against the
+    current flags, computed with the same predicate as the bulk edit, without writing anything.
+    """
+    result = db.release_profile_preview(artist_id, profile_id)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist or release profile not found")
+    return result
 
 
 def reconcile_artist_files(db: Database, artist_id: str) -> int:
@@ -1390,6 +1626,8 @@ def refresh_single_artist(
 
     artist_name = str(artist.get("name") or "").strip()
     foreign_artist_id = artist.get("foreign_artist_id")
+    # Optional release profile: shapes only the monitored flag of albums created by this refresh.
+    release_profile = db.get_release_profile(artist["release_profile_id"]) if artist.get("release_profile_id") else None
 
     # 1. Enrich with MusicBrainz metadata and discography
     mbid = artist.get("mbid")
@@ -1461,9 +1699,11 @@ def refresh_single_artist(
                         artist_monitored=bool(artist.get("monitored", True)),
                         album_type=album_type,
                         has_files=False,
-                        release_date=rg.get("release_date"),
+                        release_date=_rg_release_date(rg),
                         year=rg.get("year"),
                         artist_added_at=artist.get("created_at"),
+                        profile=release_profile,
+                        secondary_types=rg.get("secondary_types"),
                     )
 
                     existing_alb = None
@@ -1483,6 +1723,13 @@ def refresh_single_artist(
                         if not existing_alb.get("cover_url") and rg.get("cover_url"):
                             upd_album.append("cover_url = ?")
                             upd_params.append(rg["cover_url"])
+                        _queue_release_date_update(existing_alb, rg, upd_album, upd_params)
+                        # Backfill/refresh the MusicBrainz secondary types; never touches the monitored flag.
+                        if normalize_secondary_types(rg.get("secondary_types")) is not None and normalize_secondary_types(
+                            rg["secondary_types"]
+                        ) != existing_alb.get("secondary_types"):
+                            upd_album.append("secondary_types = ?")
+                            upd_params.append(json.dumps(normalize_secondary_types(rg["secondary_types"])))
                         if upd_album:
                             upd_album.append("updated_at = CURRENT_TIMESTAMP")
                             alb_sql = f"UPDATE library_albums SET {', '.join(upd_album)} WHERE id = ?"
@@ -1501,8 +1748,10 @@ def refresh_single_artist(
                                 clean_title=clean_library_name(title),
                                 mb_release_group_id=rg_id,
                                 album_type=album_type,
+                                release_date=_rg_release_date(rg),
                                 year=rg.get("year"),
                                 cover_url=rg.get("cover_url"),
+                                secondary_types=rg.get("secondary_types"),
                                 monitored=alb_monitored,
                                 path=alb_path,
                             )
@@ -1545,41 +1794,44 @@ def refresh_single_artist(
                                 logger.debug("Deezer track fallback failed for %s - %s: %s", artist_name, title, dz_err)
 
                         if tracks:
-                            for trk in tracks:
-                                trk_title = trk.get("title") or "Unknown Track"
-                                trk_num = int(trk.get("track_number") or 1)
-                                disc_num = int(trk.get("disc_number") or 1)
-                                dur = trk.get("duration_seconds")
-                                mb_rec_id = trk.get("mb_recording_id")
+                            with album_hydration_lock(album_id):
+                                for trk in tracks:
+                                    trk_title = trk.get("title") or "Unknown Track"
+                                    trk_num = int(trk.get("track_number") or 1)
+                                    disc_num = int(trk.get("disc_number") or 1)
+                                    dur = trk.get("duration_seconds")
+                                    mb_rec_id = trk.get("mb_recording_id")
 
-                                existing_trk = db.get_library_track_by_title(
-                                    album_id,
-                                    trk_title,
-                                    track_number=trk_num,
-                                )
-                                if existing_trk:
-                                    trk_id = existing_trk["id"]
-                                    t_monitored = bool(existing_trk["monitored"])
-                                else:
-                                    trk_id = str(uuid.uuid4())
-                                    t_monitored = hydrated_track_monitored(monitor_opt)
-
-                                db.upsert_library_track(
-                                    LibraryTrack(
-                                        id=trk_id,
-                                        album_id=album_id,
-                                        artist_id=artist_id,
-                                        title=trk_title,
-                                        clean_title=clean_library_name(trk_title),
+                                    existing_trk = db.get_library_track_by_title(
+                                        album_id,
+                                        trk_title,
                                         track_number=trk_num,
-                                        disc_number=disc_num,
-                                        duration_seconds=dur,
-                                        monitored=t_monitored,
-                                        mb_recording_id=mb_rec_id,
                                     )
-                                )
+                                    if existing_trk:
+                                        trk_id = existing_trk["id"]
+                                        t_monitored = bool(existing_trk["monitored"])
+                                    else:
+                                        trk_id = str(uuid.uuid4())
+                                        t_monitored = hydrated_track_monitored(monitor_opt)
+
+                                    db.upsert_library_track(
+                                        LibraryTrack(
+                                            id=trk_id,
+                                            album_id=album_id,
+                                            artist_id=artist_id,
+                                            title=trk_title,
+                                            clean_title=clean_library_name(trk_title),
+                                            track_number=trk_num,
+                                            disc_number=disc_num,
+                                            duration_seconds=dur,
+                                            monitored=t_monitored,
+                                            mb_recording_id=mb_rec_id,
+                                        )
+                                    )
         except Exception as exc:
             logger.warning("Error enriching artist %s via MusicBrainz: %s", artist_id, exc)
+        else:
+            db.finish_pending_profile_recompute(artist_id)
 
     # 2. Retrieve discography and artwork from Deezer only if MusicBrainz discography was not found
     if not mb_discography_found:
@@ -1735,6 +1987,7 @@ def refresh_single_artist(
                                     release_date=album.get("release_date"),
                                     year=year_val,
                                     artist_added_at=artist.get("created_at"),
+                                    profile=release_profile,
                                 )
 
                                 alb_path = str(Path(artist_path) / album_title) if artist_path else None
@@ -1774,50 +2027,51 @@ def refresh_single_artist(
                                     )
 
                                 if album_details and isinstance(album_details.get("tracks"), list):
-                                    for trk in album_details["tracks"]:
-                                        foreign_track_id = trk.get("id")
-                                        existing_trk = None
-                                        if foreign_track_id:
-                                            existing_trk = db.get_library_track_by_foreign_id(
-                                                foreign_track_id, album_id=album_id
-                                            )
-                                        if not existing_trk:
-                                            existing_trk = db.get_library_track_by_title(
-                                                album_id,
-                                                trk.get("title", ""),
-                                                track_number=trk.get("track_number"),
+                                    with album_hydration_lock(album_id):
+                                        for trk in album_details["tracks"]:
+                                            foreign_track_id = trk.get("id")
+                                            existing_trk = None
+                                            if foreign_track_id:
+                                                existing_trk = db.get_library_track_by_foreign_id(
+                                                    foreign_track_id, album_id=album_id
+                                                )
+                                            if not existing_trk:
+                                                existing_trk = db.get_library_track_by_title(
+                                                    album_id,
+                                                    trk.get("title", ""),
+                                                    track_number=trk.get("track_number"),
+                                                )
+
+                                            if existing_trk:
+                                                track_id = existing_trk["id"]
+                                                trk_monitored = bool(existing_trk["monitored"])
+                                            else:
+                                                track_id = str(uuid.uuid4())
+                                                trk_monitored = hydrated_track_monitored(artist.get("monitor_option", "all"))
+
+                                            trk_title = trk.get("title") or "Unknown Track"
+                                            trk_num = int(trk.get("track_number") or 1)
+                                            disc_num = int(trk.get("disc_number") or 1)
+                                            dur = (
+                                                float(trk["duration_seconds"])
+                                                if trk.get("duration_seconds") is not None
+                                                else None
                                             )
 
-                                        if existing_trk:
-                                            track_id = existing_trk["id"]
-                                            trk_monitored = bool(existing_trk["monitored"])
-                                        else:
-                                            track_id = str(uuid.uuid4())
-                                            trk_monitored = hydrated_track_monitored(artist.get("monitor_option", "all"))
-
-                                        trk_title = trk.get("title") or "Unknown Track"
-                                        trk_num = int(trk.get("track_number") or 1)
-                                        disc_num = int(trk.get("disc_number") or 1)
-                                        dur = (
-                                            float(trk["duration_seconds"])
-                                            if trk.get("duration_seconds") is not None
-                                            else None
-                                        )
-
-                                        db.upsert_library_track(
-                                            LibraryTrack(
-                                                id=track_id,
-                                                album_id=album_id,
-                                                artist_id=artist_id,
-                                                title=trk_title,
-                                                clean_title=clean_library_name(trk_title),
-                                                track_number=trk_num,
-                                                disc_number=disc_num,
-                                                duration_seconds=dur,
-                                                monitored=trk_monitored,
-                                                foreign_track_id=foreign_track_id,
+                                            db.upsert_library_track(
+                                                LibraryTrack(
+                                                    id=track_id,
+                                                    album_id=album_id,
+                                                    artist_id=artist_id,
+                                                    title=trk_title,
+                                                    clean_title=clean_library_name(trk_title),
+                                                    track_number=trk_num,
+                                                    disc_number=disc_num,
+                                                    duration_seconds=dur,
+                                                    monitored=trk_monitored,
+                                                    foreign_track_id=foreign_track_id,
+                                                )
                                             )
-                                        )
             except Exception as exc:
                 logger.warning("Discovery client get_artist_details failed for refresh of %s: %s", foreign_artist_id, exc)
 
@@ -1890,6 +2144,12 @@ def refresh_single_artist(
                             if not existing_alb.get("cover_url") and rg.get("cover_url"):
                                 upd_album.append("cover_url = ?")
                                 upd_params.append(rg["cover_url"])
+                            _queue_release_date_update(existing_alb, rg, upd_album, upd_params)
+                            if normalize_secondary_types(rg.get("secondary_types")) is not None and normalize_secondary_types(
+                                rg["secondary_types"]
+                            ) != existing_alb.get("secondary_types"):
+                                upd_album.append("secondary_types = ?")
+                                upd_params.append(json.dumps(normalize_secondary_types(rg["secondary_types"])))
                             if upd_album:
                                 upd_album.append("updated_at = CURRENT_TIMESTAMP")
                                 alb_sql = f"UPDATE library_albums SET {', '.join(upd_album)} WHERE id = ?"
@@ -1899,6 +2159,8 @@ def refresh_single_artist(
                                     db.conn.commit()
             except Exception as exc:
                 logger.warning("Error enriching artist %s via MusicBrainz: %s", artist_id, exc)
+            else:
+                db.finish_pending_profile_recompute(artist_id)
 
     # Cache artist poster & banner
     if artist.get("image_url"):
@@ -2127,6 +2389,7 @@ def set_album_monitored(
     body: AlbumMonitoredRequest,
     db: Database = Depends(get_db),
     client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    enricher: MbidEnricherClient = Depends(get_mbid_enricher),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Updates monitoring status for an album and optionally cascades to child tracks."""
@@ -2140,6 +2403,8 @@ def set_album_monitored(
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
 
+    if body.monitored and body.cascade_tracks:
+        hydrate_album_tracks(db, enricher, album_id)  # no tracks yet: fetch them so the cascade has rows to monitor
     db.set_album_monitored(
         album_id=album_id,
         monitored=body.monitored,
@@ -2154,6 +2419,7 @@ def bulk_edit_albums(
     body: AlbumBulkEditRequest,
     db: Database = Depends(get_db),
     client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    enricher: MbidEnricherClient = Depends(get_mbid_enricher),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, int]:
     """Monitors or unmonitors many albums at once (native: albums and their tracks; Lidarr: one album/monitor call)."""
@@ -2166,6 +2432,15 @@ def bulk_edit_albums(
             db, lambda: lidarr_library.set_albums_monitored(lidarr, numeric_ids, body.monitored), "Album"
         )
         return {"albums_updated": int(updated)}
+    if body.monitored:
+        # Albums without a tracklist are hydrated first, bounded by BULK_HYDRATE_LIMIT albums AND one TOTAL deadline
+        # for the whole batch (each fetch is a rate-limited MusicBrainz call). Albums not reached in time are still
+        # monitored and simply hydrate lazily on first open.
+        deadline = time.monotonic() + BULK_HYDRATE_DEADLINE_SECONDS
+        for alb_id in body.album_ids[:BULK_HYDRATE_LIMIT]:
+            if time.monotonic() >= deadline:
+                break
+            hydrate_album_tracks(db, enricher, alb_id, deadline=deadline)
     return {"albums_updated": db.bulk_set_albums_monitored(body.album_ids, body.monitored)}
 
 
@@ -2635,6 +2910,7 @@ def manual_import_commit(
                         "name": art_name,
                         "clean_name": clean_library_name(art_name),
                         "monitored": True,
+                        "monitor_option": str(media_settings.get("add_monitor_option") or DEFAULT_MONITOR_OPTION),
                     })
             artist_id = artist["id"]
 

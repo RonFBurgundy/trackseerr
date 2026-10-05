@@ -1,6 +1,7 @@
 export * from './TapeTransportBay';
 export * from './TapeDeckButton';
 export * from './TactileSwitch';
+export * from './ConfirmDialog';
 export * from './ObsidianModal';
 export * from './MachinedCard';
 export * from './SearchBar';

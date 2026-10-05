@@ -164,7 +164,8 @@ class MediaManagementSettingsModel(BaseModel):
     mb_mirror_url: str = Field("https://api.brainzmash.cc", description="MusicBrainz / BrainzMash API mirror base URL")
     prefer_local_artwork: bool = Field(True, description="Whether to prefer local filesystem artwork over remote metadata art")
     scan_monitor_option: str = Field("existing", description="Monitor option given to artists created by a library scan")
-    add_monitor_option: str = Field("all", description="Default monitor option for artists added manually")
+    add_monitor_option: str = Field("existing", description="Default monitor option for artists added manually")
+    add_release_profile_id: int | None = Field(None, description="Default release profile for added artists (null = none)")
     updated_at: str | None = None
 
 
@@ -194,6 +195,7 @@ class MediaManagementUpdateModel(BaseModel):
     prefer_local_artwork: bool | None = None
     scan_monitor_option: str | None = None
     add_monitor_option: str | None = None
+    add_release_profile_id: int | None = None
 
     @field_validator("scan_monitor_option", "add_monitor_option")
     @classmethod

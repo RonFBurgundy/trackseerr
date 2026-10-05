@@ -138,6 +138,8 @@ export interface ArtistItem {
   path?: string | null;
   status?: string | null;
   added_at?: string | null;
+  /** Native artist detail only: the artist's release profile id, null when none. */
+  release_profile_id?: number | null;
   /** `lidarr` for records served live from Lidarr; absent or `native` otherwise. */
   source?: 'native' | 'lidarr';
 }
@@ -162,6 +164,10 @@ export interface AlbumItem {
   added_at?: string | null;
   mb_release_group_id?: string;
   mb_release_id?: string;
+  /** MusicBrainz secondary types; null/absent = unknown (treated as studio). */
+  secondary_types?: string[] | null;
+  /** Native artist detail: false when outside the artist's release profile (informational only; never hidden). */
+  in_profile?: boolean;
   source?: 'native' | 'lidarr';
 }
 
@@ -353,6 +359,8 @@ export interface MediaManagementSettings {
   scan_monitor_option?: MonitorOption;
   /** Monitoring applied to artists added manually (server default 'all'). */
   add_monitor_option?: MonitorOption;
+  /** Release profile given to artists added manually; null = none. */
+  add_release_profile_id?: number | null;
 }
 
 export interface LidarrSettings {

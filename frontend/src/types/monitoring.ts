@@ -5,9 +5,19 @@ export const MONITOR_OPTION_LABELS: Readonly<Record<MonitorOption, string>> = {
   all: 'All albums',
   albums: 'Albums only',
   singles_eps: 'Singles & EPs only',
-  existing: 'Existing albums only',
+  existing: 'Existing tracks',
   future: 'Future releases only',
   none: 'None',
+};
+
+/** One-line explanation shown under the select. */
+export const MONITOR_OPTION_HINTS: Readonly<Record<MonitorOption, string>> = {
+  all: 'Monitor every album and track of the artist.',
+  albums: 'Monitor studio albums only.',
+  singles_eps: 'Monitor singles and EPs only.',
+  existing: 'Monitor only the tracks you already have files for. Other tracks and albums stay unmonitored.',
+  future: 'Monitor only releases dated after the artist was added.',
+  none: 'Monitor nothing.',
 };
 
 export const MONITOR_OPTIONS: ReadonlyArray<{ value: MonitorOption; label: string }> = (
@@ -21,6 +31,8 @@ export interface BulkArtistEditRequest {
   monitored?: boolean;
   monitor_option?: MonitorOption;
   quality_profile_id?: string | null;
+  /** Native only: release profile id; an explicit null clears it, omitted leaves it alone. */
+  release_profile_id?: number | null;
   apply_monitor_to_albums?: boolean;
 }
 

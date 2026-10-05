@@ -184,6 +184,8 @@ class LidarrMigrationJob:
                     foreign_artist_id=foreign_artist_id,
                     path=path,
                     monitored=monitored,
+                    # Lidarr's per-album/track flags are copied as-is, so never reinterpret them under "existing".
+                    monitor_option="all",
                     image_url=image_url,
                     banner_url=banner_url,
                 )

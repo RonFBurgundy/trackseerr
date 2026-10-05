@@ -60,6 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'wanted', label: 'Wanted', icon: <ListTodo className="h-4 w-4" />, adminOnly: true },
     { id: 'settings', label: 'Settings', icon: <Settings className="h-4 w-4" /> },
   ];
+  const mobileNavItems = navItems.filter((item) => item.id !== 'settings');
 
   return (
     <header className="sticky top-0 z-40 w-full flex-shrink-0 bg-[#0a0a0a]/95 backdrop-blur-md border-b border-[#1f1f1f] pt-safe">
@@ -140,6 +141,34 @@ export const Header: React.FC<HeaderProps> = ({
                       >
                         {item.label}
                       </TapeDeckButton>
+                    );
+                  })}
+              </div>
+            </TapeTransportBay>
+          </div>
+        )}
+
+        {/* Mobile shortcut bay: icon-only keys inside the header; the hub stays the full navigator */}
+        {user && activeTab && onTabChange && (
+          <div className="md:hidden flex flex-1 min-w-0 overflow-x-auto tab-strip">
+            <TapeTransportBay className="p-[2px] mx-auto">
+              <div className="flex items-stretch gap-1">
+                {mobileNavItems
+                  .filter((item) => !item.adminOnly || isAdmin)
+                  .map((item) => {
+                    const isActive = activeTab === item.id;
+                    return (
+                      <TapeDeckButton
+                        key={item.id}
+                        size="sm"
+                        active={isActive}
+                        onClick={() => onTabChange(item.id)}
+                        icon={item.icon}
+                        className="w-10 h-11 !min-h-0 p-0 rounded-[3px] shrink-0"
+                        aria-label={item.label}
+                        aria-current={isActive ? 'page' : undefined}
+                        title={item.label}
+                      />
                     );
                   })}
               </div>

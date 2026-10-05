@@ -574,8 +574,9 @@ class LibraryArtist:
     foreign_artist_id: Optional[str] = None
     path: Optional[str] = None
     monitored: bool = True
-    monitor_option: str = "all"
+    monitor_option: str = "existing"
     quality_profile_id: Optional[str] = None
+    release_profile_id: Optional[int] = None
     metadata_json: Optional[str] = None
     mbid: Optional[str] = None
     image_url: Optional[str] = None
@@ -596,6 +597,7 @@ class LibraryArtist:
             "monitored": bool(self.monitored),
             "monitor_option": self.monitor_option,
             "quality_profile_id": self.quality_profile_id,
+            "release_profile_id": self.release_profile_id,
             "metadata_json": self.metadata_json,
             "mbid": self.mbid,
             "image_url": self.image_url,
@@ -625,6 +627,7 @@ class LibraryAlbum:
     mb_release_group_id: Optional[str] = None
     mb_release_id: Optional[str] = None
     genres: Optional[str] = None
+    secondary_types: Optional[list[str]] = None  # MusicBrainz secondary types; None = unknown (treated as studio)
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -645,6 +648,7 @@ class LibraryAlbum:
             "mb_release_group_id": self.mb_release_group_id,
             "mb_release_id": self.mb_release_id,
             "genres": self.genres,
+            "secondary_types": list(self.secondary_types) if self.secondary_types is not None else None,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -769,7 +773,7 @@ class MediaManagementSettings:
     mb_mirror_url: str = "https://api.brainzmash.cc"
     prefer_local_artwork: bool = True
     scan_monitor_option: str = "existing"
-    add_monitor_option: str = "all"
+    add_monitor_option: str = "existing"
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
