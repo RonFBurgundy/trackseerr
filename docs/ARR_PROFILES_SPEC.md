@@ -69,3 +69,12 @@ Existing table `quality_profiles` (v10) already has `items_json`, `cutoff`, `cus
 2. Frontend: Quality page, Profiles page sections, Custom Formats page with import.
 3. Metadata Profiles rename (code + UI) — can run alongside 2 if file scopes are split.
 4. Decision visibility: manual search shows per-release score breakdown and rejection reasons.
+
+## Delay Profiles API contract (phase B2)
+
+`/api/settings/delay-profiles` (admin + core tier):
+- `GET ""` → `[{id, order, name, preferred_protocol: "usenet"|"torrent"|"soulseek", delays: {usenet:int, torrent:int, soulseek:int} (minutes), bypass_if_highest_quality: bool, bypass_if_above_score: int|null, tags: [str], is_default: bool}]` ordered by `order`. The default profile (tags empty, `is_default`) always exists, sorts last and cannot be deleted.
+- `POST ""`, `PUT /{id}`, `DELETE /{id}`, `POST /reorder` body `{ids:[...]}`.
+- `GET /api/acquisition/pending` → `[{id, title, album_id, artist_name, protocol, quality, format_score, added_at, release_at, reason}]`; `DELETE /api/acquisition/pending/{id}` drops one; `POST /api/acquisition/pending/{id}/grab` grabs now.
+
+Decision on min score (2026-10-05): default `min_format_score` = **−100** for new and migrated profiles, so Vinyl/Mono/Censored penalties are soft (strong preference, not a ban). Users can raise it to 0 to make them bans.
