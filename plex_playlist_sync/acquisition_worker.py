@@ -36,6 +36,7 @@ from plex_playlist_sync.library import (
     embed_album_artwork,
     ArchiveLimitError,
     extract_archive,
+    fingerprint_audio_file,
     inspect_audio_file,
     is_archive_file,
     resolve_collision,
@@ -183,15 +184,35 @@ def reconcile_audio_file_to_track(
     meta: dict[str, Any],
     candidate_tracks: list[dict[str, Any]],
 ) -> Optional[dict[str, Any]]:
+    """Reconciles an audio file's metadata against expected library tracks; returns only the track.
+
+    Thin wrapper over reconcile_audio_file_to_track_scored (see it for the matching hierarchy).
+    """
+    return reconcile_audio_file_to_track_scored(meta, candidate_tracks)[0]
+
+
+MATCH_STRONG = "strong"
+MATCH_WEAK = "weak"
+MATCH_NONE = "none"
+
+
+def reconcile_audio_file_to_track_scored(
+    meta: dict[str, Any],
+    candidate_tracks: list[dict[str, Any]],
+) -> tuple[Optional[dict[str, Any]], str]:
     """Reconciles an audio file's metadata against a list of expected library tracks.
 
     Matching hierarchy:
     1. Exact match on disc_number and track_number (if mutagen extracted valid track number).
     2. Clean title similarity match (clean_library_name(t["title"]) == clean_library_name(meta["title"]) or ratio >= 0.85).
     3. Duration tolerance match (within 5 seconds) if multiple candidates match title.
+
+    Returns (track, strength). Strength is "strong" for a unique disc+track number match, a number match
+    disambiguated to one by exact title, or a unique exact clean-title match; "weak" for every fallback pick
+    (ambiguous picks, duration tie-breaks, fuzzy matches); "none" when nothing matched.
     """
     if not candidate_tracks:
-        return None
+        return None, MATCH_NONE
 
     file_track = meta.get("track_number")
     file_disc = meta.get("disc_number") or 1
@@ -206,7 +227,7 @@ def reconcile_audio_file_to_track(
             and int(t.get("disc_number") or 1) == int(file_disc)
         ]
         if len(num_matches) == 1:
-            return num_matches[0]
+            return num_matches[0], MATCH_STRONG
         elif len(num_matches) > 1:
             clean_title = clean_library_name(meta.get("title") or "")
             title_matches = [
@@ -215,7 +236,7 @@ def reconcile_audio_file_to_track(
                 if clean_library_name(t.get("title") or "") == clean_title
             ]
             if len(title_matches) == 1:
-                return title_matches[0]
+                return title_matches[0], MATCH_STRONG
             file_dur = meta.get("duration") or meta.get("duration_seconds")
             if file_dur is not None:
                 dur_matches = [
@@ -228,8 +249,8 @@ def reconcile_audio_file_to_track(
                     return min(
                         dur_matches,
                         key=lambda t: abs(float(t["duration_seconds"]) - float(file_dur)),
-                    )
-            return num_matches[0]
+                    ), MATCH_WEAK
+            return num_matches[0], MATCH_WEAK
 
     # 2. Clean title similarity match
     meta_title = meta.get("title") or ""
@@ -245,7 +266,7 @@ def reconcile_audio_file_to_track(
             if clean_library_name(t.get("title") or "") == clean_meta
         ]
         if len(exact_title_matches) == 1:
-            return exact_title_matches[0]
+            return exact_title_matches[0], MATCH_STRONG
         elif len(exact_title_matches) > 1:
             # 3. Duration tolerance match (within 5 seconds) if multiple candidates match title
             file_dur = meta.get("duration") or meta.get("duration_seconds")
@@ -257,13 +278,13 @@ def reconcile_audio_file_to_track(
                     and abs(float(t["duration_seconds"]) - float(file_dur)) <= 5.0
                 ]
                 if len(dur_matches) == 1:
-                    return dur_matches[0]
+                    return dur_matches[0], MATCH_WEAK
                 elif dur_matches:
                     return min(
                         dur_matches,
                         key=lambda t: abs(float(t["duration_seconds"]) - float(file_dur)),
-                    )
-            return exact_title_matches[0]
+                    ), MATCH_WEAK
+            return exact_title_matches[0], MATCH_WEAK
 
         # Fuzzy title match with ratio >= 0.85
         fuzzy_candidates: list[tuple[float, dict[str, Any]]] = []
@@ -280,7 +301,7 @@ def reconcile_audio_file_to_track(
             top_ratio = fuzzy_candidates[0][0]
             top_matches = [t for r, t in fuzzy_candidates if abs(r - top_ratio) < 0.001]
             if len(top_matches) == 1:
-                return top_matches[0]
+                return top_matches[0], MATCH_WEAK
 
             # 3. Duration tolerance match if multiple fuzzy candidates
             file_dur = meta.get("duration") or meta.get("duration_seconds")
@@ -292,15 +313,56 @@ def reconcile_audio_file_to_track(
                     and abs(float(t["duration_seconds"]) - float(file_dur)) <= 5.0
                 ]
                 if len(dur_matches) == 1:
-                    return dur_matches[0]
+                    return dur_matches[0], MATCH_WEAK
                 elif dur_matches:
                     return min(
                         dur_matches,
                         key=lambda t: abs(float(t["duration_seconds"]) - float(file_dur)),
-                    )
-            return top_matches[0]
+                    ), MATCH_WEAK
+            return top_matches[0], MATCH_WEAK
 
-    return None
+    return None, MATCH_NONE
+
+
+FINGERPRINT_MIN_SCORE = 0.80
+
+
+def _fingerprint_fallback_match(
+    file_path: Path,
+    media_settings: dict[str, Any],
+    remaining_tracks: list[dict[str, Any]],
+    tag_track: Optional[dict[str, Any]],
+    strength: str,
+) -> Optional[dict[str, Any]]:
+    """Resolves a weak or missing tag match via AcoustID fingerprinting; returns the tag result when it cannot improve.
+
+    Only runs when the tag match is not strong, fingerprint_on_weak_match is enabled and an AcoustID key is set.
+    fingerprint_audio_file never raises, so a lookup failure leaves the tag result untouched.
+    """
+    if strength == MATCH_STRONG:
+        logger.info("Import match for %s decided by tag-strong", file_path.name)
+        return tag_track
+    api_key = media_settings.get("acoustid_api_key")
+    if not (media_settings.get("fingerprint_on_weak_match") and api_key):
+        logger.info("Import match for %s decided by tag-weak-kept (fingerprint fallback disabled)", file_path.name)
+        return tag_track
+
+    fp = fingerprint_audio_file(file_path, api_key)
+    if fp and float(fp.get("score") or 0.0) >= FINGERPRINT_MIN_SCORE:
+        rec_id = fp.get("recording_id")
+        if rec_id:
+            rec_hits = [t for t in remaining_tracks if t.get("mb_recording_id") == rec_id]
+            if rec_hits:
+                logger.info("Import match for %s decided by fingerprint-recording (%s)", file_path.name, rec_id)
+                return rec_hits[0]
+        fp_title = clean_library_name(fp.get("title") or "")
+        if fp_title:
+            title_hits = [t for t in remaining_tracks if clean_library_name(t.get("title") or "") == fp_title]
+            if len(title_hits) == 1:
+                logger.info("Import match for %s decided by fingerprint-title (%s)", file_path.name, fp_title)
+                return title_hits[0]
+    logger.info("Import match for %s decided by tag-weak-kept (strength=%s)", file_path.name, strength)
+    return tag_track
 
 
 def translate_remote_path(
@@ -1016,7 +1078,12 @@ class AcquisitionWorker:
                     # Reconcile against expected catalog tracks if present
                     matched_expected_track = None
                     if remaining_expected_tracks:
-                        matched_expected_track = reconcile_audio_file_to_track(metadata, remaining_expected_tracks)
+                        matched_expected_track, match_strength = reconcile_audio_file_to_track_scored(
+                            metadata, remaining_expected_tracks
+                        )
+                        matched_expected_track = _fingerprint_fallback_match(
+                            af, media_settings, remaining_expected_tracks, matched_expected_track, match_strength
+                        )
                         if matched_expected_track:
                             remaining_expected_tracks.remove(matched_expected_track)
                             metadata["title"] = matched_expected_track["title"]

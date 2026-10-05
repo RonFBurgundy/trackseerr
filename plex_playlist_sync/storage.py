@@ -73,7 +73,7 @@ def clean_library_name(text: str) -> str:
 
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
-SCHEMA_VERSION = 53  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 54  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _titles_near_equal(a: str, b: str) -> bool:
@@ -335,6 +335,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 (51, self._migration_v51),
                 (52, self._migration_v52),
                 (53, self._migration_v53),
+                (54, self._migration_v54),
             ]
 
             applied = 0
@@ -1048,6 +1049,15 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         if "seed_time_limit_minutes" not in mm_cols:
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN seed_time_limit_minutes INTEGER;"
+            )
+
+    def _migration_v54(self, cur: sqlite3.Cursor) -> None:
+        """AcoustID fingerprint fallback toggle for weak tag matches on download import (off by default)."""
+        cur.execute("PRAGMA table_info(media_management_settings);")
+        mm_cols = [row[1] for row in cur.fetchall()]
+        if "fingerprint_on_weak_match" not in mm_cols:
+            cur.execute(
+                "ALTER TABLE media_management_settings ADD COLUMN fingerprint_on_weak_match INTEGER NOT NULL DEFAULT 0;"
             )
 
     def _migration_v20(self, cur: sqlite3.Cursor) -> None:
@@ -4295,6 +4305,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             res["acoustid_api_key"] = (
                 str(res["acoustid_api_key"]) if res.get("acoustid_api_key") is not None else None
             )
+            res["fingerprint_on_weak_match"] = bool(res.get("fingerprint_on_weak_match", 0))
             res["mb_mirror_url"] = str(res.get("mb_mirror_url") or "https://api.brainzmash.cc")
             res["prefer_local_artwork"] = bool(res.get("prefer_local_artwork", 1))
             res["scan_monitor_option"] = str(res.get("scan_monitor_option") or "existing")
@@ -4329,6 +4340,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             "seed_time_limit_minutes",
             "enrich_mbids",
             "acoustid_api_key",
+            "fingerprint_on_weak_match",
             "mb_mirror_url",
             "prefer_local_artwork",
             "scan_monitor_option",
@@ -4352,6 +4364,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                     "delete_completed_transfers",
                     "enable_quality_upgrades",
                     "enrich_mbids",
+                    "fingerprint_on_weak_match",
                     "prefer_local_artwork",
                 ):
                     if v is not None:
@@ -6829,6 +6842,18 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             cur = self.conn.execute(
                 "SELECT * FROM library_tracks WHERE id = ?",
                 (str(track_id),),
+            )
+            row = cur.fetchone()
+            return self._map_library_track(row) if row else None
+
+    def get_library_track_by_mb_recording_id(self, mb_recording_id: str) -> Optional[dict[str, Any]]:
+        """Retrieves a library track by MusicBrainz recording id (first match), or None."""
+        if not mb_recording_id:
+            return None
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT * FROM library_tracks WHERE mb_recording_id = ? LIMIT 1",
+                (str(mb_recording_id),),
             )
             row = cur.fetchone()
             return self._map_library_track(row) if row else None

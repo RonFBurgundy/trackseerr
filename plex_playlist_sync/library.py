@@ -9,6 +9,8 @@ import os
 import re
 import stat
 import tarfile
+import threading
+import time
 import zipfile
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -802,6 +804,21 @@ def extract_archive(archive_path: Path | str, target_dir: Path | str) -> list[Pa
 
 _fingerprint_warned = False
 
+# AcoustID allows ~3 requests/second; keep calls at least this far apart (tests monkeypatch to 0).
+ACOUSTID_MIN_INTERVAL_SECONDS = 0.34
+_acoustid_rate_lock = threading.Lock()
+_acoustid_last_call = 0.0
+
+
+def _acoustid_rate_limit() -> None:
+    """Blocks until at least ACOUSTID_MIN_INTERVAL_SECONDS has passed since the previous AcoustID call."""
+    global _acoustid_last_call
+    with _acoustid_rate_lock:
+        wait = ACOUSTID_MIN_INTERVAL_SECONDS - (time.monotonic() - _acoustid_last_call)
+        if wait > 0:
+            time.sleep(wait)
+        _acoustid_last_call = time.monotonic()
+
 
 def _warn_fingerprint_unavailable(reason: str) -> None:
     """Logs once per process why audio fingerprinting cannot run, instead of failing silently on every call."""
@@ -838,6 +855,7 @@ def fingerprint_audio_file(
     try:
         # force_fpcalc: pyacoustid otherwise prefers its audioread decoder when the chromaprint library is present,
         # and audioread has no backend in the slim image (no ffmpeg/gstreamer), so every fingerprint would fail.
+        _acoustid_rate_limit()
         results = acoustid.match(api_key, str(path), force_fpcalc=True)
         for score, recording_id, title, artist in results:
             return {

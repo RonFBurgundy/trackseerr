@@ -3394,7 +3394,18 @@ def fingerprint_file(
         api_key=settings.get("acoustid_api_key"),
     )
     if fp:
-        return {"success": True, "fingerprint": fp}
+        library_track: Optional[dict[str, Any]] = None
+        if fp.get("recording_id"):
+            row = db.get_library_track_by_mb_recording_id(fp["recording_id"])
+            if row:
+                artist_row = db.get_library_artist(row["artist_id"]) if row.get("artist_id") else None
+                library_track = {
+                    "id": row["id"],
+                    "title": row.get("title"),
+                    "album_id": row.get("album_id"),
+                    "artist": artist_row["name"] if artist_row else None,
+                }
+        return {"success": True, "fingerprint": fp, "library_track": library_track}
     return {
         "success": False,
         "message": "Fingerprinting unavailable or no match found",

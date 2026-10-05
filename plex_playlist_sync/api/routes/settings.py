@@ -160,7 +160,10 @@ class MediaManagementSettingsModel(BaseModel):
     seed_ratio_limit: float | None = Field(None, description="Target seed ratio before transfer cleanup")
     seed_time_limit_minutes: int | None = Field(None, description="Target seeding duration in minutes before transfer cleanup")
     enrich_mbids: bool = Field(True, description="Whether to enrich tracks and albums with MusicBrainz IDs")
-    acoustid_api_key: str | None = Field(None, description="AcoustID API key for Chromaprint fingerprinting")
+    acoustid_api_key: str | None = Field(None, description="AcoustID API key for Chromaprint fingerprinting (masked on read)")
+    fingerprint_on_weak_match: bool = Field(
+        False, description="Fingerprint files via AcoustID during download import when the tag match is weak or missing"
+    )
     mb_mirror_url: str = Field("https://api.brainzmash.cc", description="MusicBrainz / BrainzMash API mirror base URL")
     prefer_local_artwork: bool = Field(True, description="Whether to prefer local filesystem artwork over remote metadata art")
     scan_monitor_option: str = Field("existing", description="Monitor option given to artists created by a library scan")
@@ -192,6 +195,7 @@ class MediaManagementUpdateModel(BaseModel):
     seed_time_limit_minutes: int | None = None
     enrich_mbids: bool | None = None
     acoustid_api_key: str | None = None
+    fingerprint_on_weak_match: bool | None = None
     mb_mirror_url: str | None = None
     prefer_local_artwork: bool | None = None
     scan_monitor_option: str | None = None
@@ -368,6 +372,14 @@ def _render_format_previews(settings: dict[str, Any]) -> dict[str, FormatPreview
     return result
 
 
+def _mask_media_management_secrets(settings: dict[str, Any]) -> dict[str, Any]:
+    """Returns a copy with the AcoustID key masked (trailing 4 chars visible), like the Lidarr key."""
+    res = dict(settings)
+    if res.get("acoustid_api_key"):
+        res["acoustid_api_key"] = mask_secret(res["acoustid_api_key"])
+    return res
+
+
 @router.get(
     "/media-management",
     response_model=MediaManagementGetResponse,
@@ -378,7 +390,7 @@ def get_media_management_settings(
     current_user: dict[str, Any] = Depends(require_admin),
 ) -> MediaManagementGetResponse:
     """Retrieves current media management settings and preset templates."""
-    settings_dict = db.get_media_management_settings()
+    settings_dict = _mask_media_management_secrets(db.get_media_management_settings())
     return MediaManagementGetResponse(
         settings=MediaManagementSettingsModel(**settings_dict),
         presets=PRESETS,
@@ -418,11 +430,22 @@ def update_media_management_settings(
         updates.pop("library_mode")
     if not updates:
         current = db.get_media_management_settings()
-        return MediaManagementSettingsModel(**current)
+        return MediaManagementSettingsModel(**_mask_media_management_secrets(current))
+
+    if "acoustid_api_key" in updates:
+        key = updates["acoustid_api_key"]
+        if key is None:
+            updates.pop("acoustid_api_key")
+        elif "*" in key or "•" in key:
+            # The masked value echoed back by the UI must never overwrite the real key.
+            updates.pop("acoustid_api_key")
+        else:
+            # An empty string clears the key.
+            updates["acoustid_api_key"] = key.strip() or None
 
     try:
         updated = db.update_media_management_settings(updates)
-        return MediaManagementSettingsModel(**updated)
+        return MediaManagementSettingsModel(**_mask_media_management_secrets(updated))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except Exception as e:
