@@ -1524,6 +1524,8 @@ def bulk_edit_artists(
 _NATIVE_ADMIN = [Depends(require_core_tier), Depends(native_only)]
 
 
+# Deprecated alias (pre-v48 name), kept for one release.
+@router.get("/release-profiles", dependencies=_NATIVE_ADMIN, deprecated=True)
 @router.get("/metadata-profiles", dependencies=_NATIVE_ADMIN)
 def list_metadata_profiles(db: Database = Depends(get_db)) -> dict[str, Any]:
     """Native metadata profiles with ``artist_count`` (artists using each) and the default for newly added artists."""
@@ -1535,6 +1537,8 @@ def list_metadata_profiles(db: Database = Depends(get_db)) -> dict[str, Any]:
     }
 
 
+# Deprecated alias (pre-v48 name), kept for one release.
+@router.post("/release-profiles", dependencies=_NATIVE_ADMIN, status_code=status.HTTP_201_CREATED, deprecated=True)
 @router.post("/metadata-profiles", dependencies=_NATIVE_ADMIN, status_code=status.HTTP_201_CREATED)
 def create_metadata_profile(body: MetadataProfileBody, db: Database = Depends(get_db)) -> dict[str, Any]:
     try:
@@ -1543,6 +1547,8 @@ def create_metadata_profile(body: MetadataProfileBody, db: Database = Depends(ge
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+# Deprecated alias (pre-v48 name), kept for one release.
+@router.put("/release-profiles/{profile_id}", dependencies=_NATIVE_ADMIN, deprecated=True)
 @router.put("/metadata-profiles/{profile_id}", dependencies=_NATIVE_ADMIN)
 def update_metadata_profile(profile_id: int, body: MetadataProfileBody, db: Database = Depends(get_db)) -> dict[str, Any]:
     """Edits a profile. Existing monitoring is untouched until an artist's albums are recomputed."""
@@ -1556,6 +1562,8 @@ def update_metadata_profile(profile_id: int, body: MetadataProfileBody, db: Data
     return {**updated, "artist_count": count}
 
 
+# Deprecated alias (pre-v48 name), kept for one release.
+@router.delete("/release-profiles/{profile_id}", dependencies=_NATIVE_ADMIN, deprecated=True)
 @router.delete("/metadata-profiles/{profile_id}", dependencies=_NATIVE_ADMIN)
 def delete_metadata_profile(profile_id: int, db: Database = Depends(get_db)) -> dict[str, int]:
     """Deletes a profile; artists using it fall back to no profile (their albums keep their monitored flags)."""
@@ -1565,6 +1573,8 @@ def delete_metadata_profile(profile_id: int, db: Database = Depends(get_db)) -> 
     return {"deleted": 1, "artists_cleared": cleared}
 
 
+# Deprecated alias (pre-v48 name), kept for one release.
+@router.get("/artists/{artist_id}/release-profile-preview", dependencies=_NATIVE_ADMIN, deprecated=True)
 @router.get("/artists/{artist_id}/metadata-profile-preview", dependencies=_NATIVE_ADMIN)
 def preview_metadata_profile(
     artist_id: str, profile_id: Optional[int] = None, db: Database = Depends(get_db)
@@ -3038,7 +3048,16 @@ def manual_import_commit(
                         parsed.quality = str(quality_input)
                     fsize = source_path.stat().st_size
                     eval_result = evaluate_release(parsed, qp, size_bytes=fsize)
-                    cutoff_met = bool(eval_result.meets_cutoff)
+                    # A bare quality string scores 0 format points and could never reach ``cutoff_format_score``, so
+                    # judge the quality tier only; when the imported release title is known (and its quality matches)
+                    # score from it instead, exactly as ``backlog_worker._current_floor`` does.
+                    bd = eval_result.breakdown
+                    cutoff_met = bool(bd.quality_cutoff_met if bd is not None else eval_result.meets_cutoff)
+                    title = db.get_imported_release_title(track_id=track_id, album_id=album_id)
+                    if title:
+                        titled = parse_release_title(title)
+                        if titled.quality in {parsed.quality, str(quality_input)}:
+                            cutoff_met = bool(evaluate_release(titled, qp, size_bytes=fsize).meets_cutoff)
                     quality_name = eval_result.parsed_quality or str(quality_input)
             except Exception as exc:
                 logger.warning("Cutoff evaluation error during manual import for %s: %s", source_path, exc)

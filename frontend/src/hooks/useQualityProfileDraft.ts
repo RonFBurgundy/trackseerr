@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { QualityDefinition } from '@/types/qualityDefinitions';
 import {
   DEFAULT_MIN_FORMAT_SCORE,
@@ -46,7 +46,10 @@ export interface UseQualityProfileDraftReturn {
   ungroup: (index: number) => void;
   cutoff: string;
   setCutoff: (v: string) => void;
+  /** Allowed entry labels, plus the stored cutoff when it names a disallowed entry. */
   cutoffOptions: string[];
+  /** True when the selected cutoff names an entry that is not allowed (the backend permits it; the editor warns). */
+  cutoffNotAllowed: boolean;
   scores: Readonly<Record<number, string>>;
   setScore: (formatId: number, value: string) => void;
   minScore: string;
@@ -80,8 +83,21 @@ export function useQualityProfileDraft(profile: QualityProfile | null, definitio
   const [cutoffScore, setCutoffScore] = useState<string>(String(profile?.cutoff_format_score ?? 0));
   const [minUpgrade, setMinUpgrade] = useState<string>(String(profile?.min_upgrade_format_score ?? 1));
 
-  const cutoffOptions = useMemo(() => entries.filter((e) => e.allowed).map(entryLabel), [entries]);
-  const cutoff = cutoffOptions.includes(cutoffRaw) ? cutoffRaw : (cutoffOptions[0] ?? '');
+  // Definitions can arrive after the modal opens: append any quality not yet listed, as disallowed, keeping order and edits.
+  useEffect(() => {
+    const all = definitions.map((d) => d.quality);
+    setEntries((prev) => {
+      const present = new Set(prev.flatMap(entryQualities));
+      return all.some((q) => !present.has(q)) ? withAllQualities(prev, all) : prev;
+    });
+  }, [definitions]);
+
+  const allowedLabels = useMemo(() => entries.filter((e) => e.allowed).map(entryLabel), [entries]);
+  const knownLabels = useMemo(() => entries.map(entryLabel), [entries]);
+  // The stored cutoff is kept even when disallowed; it only falls back when blank or no longer an entry at all.
+  const cutoff = cutoffRaw !== '' && knownLabels.includes(cutoffRaw) ? cutoffRaw : (allowedLabels[0] ?? '');
+  const cutoffNotAllowed = cutoff !== '' && !allowedLabels.includes(cutoff);
+  const cutoffOptions = useMemo(() => (cutoffNotAllowed ? [...allowedLabels, cutoff] : allowedLabels), [allowedLabels, cutoffNotAllowed, cutoff]);
 
   const reorder = useCallback((next: QualityEntry[]): void => setEntries(next), []);
 
@@ -141,7 +157,7 @@ export function useQualityProfileDraft(profile: QualityProfile | null, definitio
 
   const validated = useMemo((): { input: Omit<QualityProfileInput, 'id' | 'is_default'> | null; problem: string | null } => {
     if (!name.trim()) return { input: null, problem: 'Give the profile a name.' };
-    if (cutoffOptions.length === 0) return { input: null, problem: 'Allow at least one quality.' };
+    if (allowedLabels.length === 0) return { input: null, problem: 'Allow at least one quality.' };
     const min = parseInteger(minScore);
     const upto = parseInteger(cutoffScore);
     const inc = parseInteger(minUpgrade);
@@ -168,7 +184,7 @@ export function useQualityProfileDraft(profile: QualityProfile | null, definitio
         format_items: formatItems,
       },
     };
-  }, [name, cutoffOptions, minScore, cutoffScore, minUpgrade, scores, cutoff, entries, upgradeAllowed]);
+  }, [name, allowedLabels, minScore, cutoffScore, minUpgrade, scores, cutoff, entries, upgradeAllowed]);
 
   const toInput = useCallback((): QualityProfileInput | null => {
     if (!validated.input) return null;
@@ -191,6 +207,7 @@ export function useQualityProfileDraft(profile: QualityProfile | null, definitio
     cutoff,
     setCutoff: setCutoffRaw,
     cutoffOptions,
+    cutoffNotAllowed,
     scores,
     setScore,
     minScore,

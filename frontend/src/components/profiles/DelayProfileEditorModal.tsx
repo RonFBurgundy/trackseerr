@@ -1,5 +1,5 @@
 import React, { useId, useState } from 'react';
-import { FormField, TactileSwitch, TokenInput } from '@/components/ui';
+import { FormField, TactileSwitch } from '@/components/ui';
 import type { DelayProfile, DelayProfileInput } from '@/types/delayProfiles';
 import { RELEASE_PROTOCOLS, type ReleaseProtocol } from '@/types/qualityProfiles';
 import { useDelayProfileDraft } from '@/hooks/useDelayProfileDraft';
@@ -127,18 +127,9 @@ const EditorBody: React.FC<{ target: DelayProfileTarget; onClose: () => void; on
             className={`${inputClass} font-mono`}
           />
         </FormField>
-        {isDefault ? (
-          <p className="text-[11px] font-mono text-[var(--text-muted)]">The default profile applies to everything no tagged profile matches, so it has no tags.</p>
-        ) : (
-          <TokenInput
-            label="Tags"
-            name="delay_profile_tags"
-            tokens={draft.tags}
-            onChange={(tags) => patch({ tags })}
-            placeholder="Type a tag, press Enter"
-            hint="The profile applies only to items carrying one of these tags."
-          />
-        )}
+        <p className="text-[11px] font-mono text-[var(--text-muted)]">
+          Only the default delay profile applies until artists can carry tags; additional profiles are saved but not matched yet.
+        </p>
       </form>
     </EditorModalShell>
   );

@@ -9,6 +9,9 @@ from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.storage import SCHEMA_VERSION, Database
 
 
+V51_NEW = ("WAV/AIFF", "MP3 V1", "AAC (other)", "Opus", "OGG Vorbis")
+
+
 def _downgrade_to_v48(path: str) -> None:
     """Rewinds a freshly migrated DB to its v48 shape and plants old-style profiles."""
     conn = sqlite3.connect(path)
@@ -46,13 +49,13 @@ def _migrated(tmp_path):
 
 
 def test_schema_version_and_seeds(tmp_path):
-    assert SCHEMA_VERSION == 51
+    assert SCHEMA_VERSION >= 52
     db = Database(str(tmp_path / "fresh.db"))
     try:
-        assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 51
+        assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
         defs = {d["quality"]: d for d in db.list_quality_definitions()}
         assert (defs["FLAC 24bit"]["min_kbps"], defs["FLAC 24bit"]["preferred_kbps"], defs["FLAC 24bit"]["max_kbps"]) == (0, 2000, 9500)
-        assert (defs["MP3 320"]["min_kbps"], defs["MP3 320"]["preferred_kbps"], defs["MP3 320"]["max_kbps"]) == (290, 320, 350)
+        assert (defs["MP3 320"]["min_kbps"], defs["MP3 320"]["preferred_kbps"], defs["MP3 320"]["max_kbps"]) == (290, 320, 400)
         assert (defs["MP3 V2"]["min_kbps"], defs["MP3 V2"]["max_kbps"]) == (130, 280)
         names = {f["name"] for f in db.list_custom_formats()}
         assert {"Preferred Groups", "CD", "Lossless", "Hi-Res 24bit", "WEB", "Vinyl", "Mono",
@@ -75,13 +78,14 @@ def test_profiles_migrated_to_ordered_items(tmp_path):
     db = _migrated(tmp_path)
     try:
         p = db.get_quality_profile("old-1")
-        # v51 then appends the new codecs, disallowed, after the original entries
-        assert [e["quality"] for e in p["items"]][:4] == ["FLAC 24bit", "FLAC 16bit", "MP3 320", "Unknown"]
+        # v51 then slots the new codecs in after the quality each used to parse as (ALAC after FLAC 16bit, rest after Unknown)
+        assert [e["quality"] for e in p["items"]][:5] == ["FLAC 24bit", "FLAC 16bit", "ALAC", "MP3 320", "Unknown"]
         assert all(e["type"] == "quality" for e in p["items"])
         allowed = {e["quality"]: e["allowed"] for e in p["items"]}
         assert {q: allowed[q] for q in ("FLAC 24bit", "FLAC 16bit", "MP3 320", "Unknown")} == {
             "FLAC 24bit": False, "FLAC 16bit": True, "MP3 320": True, "Unknown": False}
-        assert not any(allowed[q] for q in allowed if q not in ("FLAC 16bit", "MP3 320"))
+        # new codecs inherit allowed from their pre-v51 parse target: ALAC <- FLAC 16bit (True), the rest <- Unknown (False)
+        assert allowed["ALAC"] is True and not any(allowed[q] for q in V51_NEW if q != "ALAC")
         assert p["cutoff"] == "FLAC 16bit"
         assert p["min_format_score"] == -100 and p["cutoff_format_score"] == 0 and p["min_upgrade_format_score"] == 1
         # legacy columns remain readable

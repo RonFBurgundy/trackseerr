@@ -6,11 +6,12 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from PIL import Image
 import pytest
 
+from plex_playlist_sync.api.dependencies import get_discovery_client, get_mbid_enricher
 from plex_playlist_sync import art_pipeline, art_thumbs, lidarr_library
 from plex_playlist_sync.library_scanner import library_scanner
 from plex_playlist_sync.mediacover import mediacover_service
@@ -211,7 +212,8 @@ def test_precache_downloads_artist_image_and_every_album_cover(test_db, tmp_path
     with patch("plex_playlist_sync.mediacover.MediaCoverService.cache_image", fake_cache):
         fut = art_pipeline.schedule_precache(test_db, "pa", delay=0)
         assert fut is not None and fut.result(timeout=10) == 4
-    assert sorted(seen) == sorted(
+    ours = [u for u in seen if u.startswith("https://img.example/")]  # assert only on this test's own downloads
+    assert sorted(ours) == sorted(
         ["https://img.example/a.jpg", *(f"https://img.example/{i}.jpg" for i in range(3))]
     )
     assert test_db.get_library_artist("pa")["art_version"]
@@ -220,7 +222,12 @@ def test_precache_downloads_artist_image_and_every_album_cover(test_db, tmp_path
 
 
 def test_ingest_and_refresh_schedule_precache(app_and_client, test_db, test_config, seeded_users):
-    _, client = app_and_client
+    app, client = app_and_client
+    discovery, enricher = MagicMock(), MagicMock()  # no real Deezer / MusicBrainz in tests
+    discovery.get_artist_details.return_value = None
+    discovery.get_artist_albums.return_value = []
+    app.dependency_overrides[get_discovery_client] = lambda: discovery
+    app.dependency_overrides[get_mbid_enricher] = lambda: enricher
     h = _auth_headers(seeded_users["admin"], test_db, test_config)
     test_db.upsert_library_artist({"id": "ra", "name": "Refreshable", "foreign_artist_id": "deezer:1", "mbid": "m-1"})
     with patch.object(art_pipeline, "schedule_precache") as sched:

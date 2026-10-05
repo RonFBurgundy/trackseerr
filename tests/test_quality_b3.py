@@ -140,8 +140,8 @@ def test_migration_v51_on_v50_db(tmp_path):
     original = _downgrade_to_v50(path)
     db = Database(path)
     try:
-        assert SCHEMA_VERSION == 51
-        assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 51
+        assert SCHEMA_VERSION >= 52
+        assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
         defs = {d["quality"]: d for d in db.list_quality_definitions()}
         assert (defs["ALAC"]["min_kbps"], defs["ALAC"]["preferred_kbps"], defs["ALAC"]["max_kbps"]) == (0, 900, 1600)
         assert (defs["Opus"]["min_kbps"], defs["Opus"]["max_kbps"]) == (64, 256)
@@ -149,10 +149,12 @@ def test_migration_v51_on_v50_db(tmp_path):
         assert [d["quality"] for d in db.list_quality_definitions()] == QUALITY_ORDER
         p = db.get_quality_profile("p-v50")
         # existing entries, their order and the cutoff are untouched
-        assert p["items"][:3] == original
+        # (ALAC joins the allowed Lossless group after FLAC 16bit; the rest follow the disallowed Unknown)
+        assert p["items"][0] == original[0] and p["items"][2] == original[2]
+        assert p["items"][1]["items"] == ["FLAC 24bit", "FLAC 16bit", "ALAC"]
         assert p["cutoff"] == "Lossless"
         added = p["items"][3:]
-        assert [e["quality"] for e in added] == V51_NEW_QUALITIES
+        assert [e["quality"] for e in added] == [q for q in V51_NEW_QUALITIES if q != "ALAC"]
         assert all(e["type"] == "quality" and e["allowed"] is False for e in added)
         assert db.get_media_management_settings()["import_bitrate_check"] == "warn"
     finally:
@@ -255,21 +257,21 @@ def test_check_flags_fake_flac_and_ok_files(tmp_path):
     files = _files(tmp_path, ["ok.mp3", "bad.mp3", "low.opus", "open.m4a", "tiny.flac"])
     results = {
         "ok.mp3": _fake(MP3, bitrate=320000, bitrate_mode=BitrateMode.CBR),
-        "bad.mp3": _fake(MP3, bitrate=360000, bitrate_mode=BitrateMode.CBR),  # above max 350
+        "bad.mp3": _fake(MP3, bitrate=400000, bitrate_mode=BitrateMode.CBR),  # above max 350 + 10%
         "low.opus": _fake(OggOpus, bitrate=None, length=100.0),  # 1000 B / 100 s = 0.08 kbps from size
-        "open.m4a": _fake(MP4, codec="alac", bitrate=5000000),  # max 0 = unbounded
-        "tiny.flac": _fake(FLAC, bitrate=None, length=1.0, bits_per_sample=16),  # 8 kbps -> min 0, in range
+        "open.m4a": _fake(MP4, codec="alac", bitrate=800000, bits_per_sample=16, sample_rate=44100, channels=2),
+        "tiny.flac": _fake(FLAC, bitrate=None, length=1.0, bits_per_sample=16),  # no sample rate/channels: skipped
     }
     with _patched(results):
         res = check_files(files, "warn", DEFS)
-    assert res.checked == 5
+    assert res.checked == 4 and [Path(p).name for p, _ in res.skipped] == ["tiny.flac"]
     flagged = {Path(f.path).name: f for f in res.out_of_range}
     assert set(flagged) == {"bad.mp3", "low.opus"}
-    assert flagged["bad.mp3"].quality == "MP3 320" and round(flagged["bad.mp3"].kbps) == 360
+    assert flagged["bad.mp3"].quality == "MP3 320" and round(flagged["bad.mp3"].kbps) == 400
     assert flagged["low.opus"].min_kbps == 64
     assert not res.failed  # warn never fails
     text = res.reason()
-    assert "bad.mp3: MP3 320 360 kbps (allowed 290-350 kbps)" in text and "low.opus" in text
+    assert "bad.mp3: MP3 320 400 kbps (allowed 290-350 kbps)" in text and "low.opus" in text
 
 
 def test_check_reject_marks_failed(tmp_path):
@@ -277,7 +279,8 @@ def test_check_reject_marks_failed(tmp_path):
     with _patched({"bad.mp3": _fake(MP3, bitrate=128000, bitrate_mode=BitrateMode.CBR)}):
         # 128 kbps CBR -> MP3 192 tier; give it a definition so it is out of range
         res = check_files(files, "reject", {**DEFS, "MP3 192": {"min_kbps": 150.0, "max_kbps": 210.0}})
-    assert res.failed and res.out_of_range[0].quality == "MP3 192"
+    # lossy range misses are warnings only, even in reject mode
+    assert res.out_of_range[0].quality == "MP3 192" and not res.failed
 
 
 def test_check_skips_unreadable_duration_and_unknown(tmp_path):
@@ -302,8 +305,8 @@ def test_check_skips_unreadable_duration_and_unknown(tmp_path):
 
 def test_probe_missing_definition_is_skipped(tmp_path):
     files = _files(tmp_path, ["w.wav"])
-    with _patched({"w.wav": _fake(WAVE, bitrate=1411000)}):
-        res = check_files(files, "reject", DEFS)  # no WAV/AIFF definition supplied
+    with _patched({"w.mp3": _fake(MP3, bitrate=320000, bitrate_mode=BitrateMode.CBR)}):
+        res = check_files(_files(tmp_path, ["w.mp3"]), "reject", {})  # no definition supplied for a lossy file
     assert res.skipped and not res.failed
     assert probe_audio_file  # imported API stays public
 
@@ -380,14 +383,14 @@ def test_worker_warn_imports_and_records_event(tmp_path):
 
 
 def test_worker_reject_fails_import_with_reason(tmp_path):
-    bad = _fake(MP3, bitrate=128000, bitrate_mode=BitrateMode.CBR)
+    bad = _fake(FLAC, bitrate=320000, bits_per_sample=16, sample_rate=44100, channels=2)  # fake lossless
     db, stats, audio = _run_import(tmp_path, "reject", bad)
     try:
         assert stats["failed"] == 1 and stats["imported"] == 0
         dl = db.get_active_download("dl-1")
         assert dl["status"] == DownloadStatus.FAILED.value
-        assert "Bitrate check failed" in dl["error_message"] and "128 kbps" in dl["error_message"]
-        assert "150-210" in dl["error_message"]
+        assert "Bitrate check failed" in dl["error_message"] and "320 kbps" in dl["error_message"]
+        assert "lossless floor" in dl["error_message"]
         assert audio.exists()  # nothing was moved into the library
     finally:
         db.close()
@@ -452,3 +455,11 @@ def test_quality_definitions_api_lists_new_qualities(api):
     client, _db, h = api
     body = client.get("/api/settings/quality-definitions", headers=h).json()
     assert [d["quality"] for d in body] == QUALITY_ORDER
+
+
+def test_worker_reject_does_not_fail_on_lossy_out_of_range(tmp_path):
+    db, stats, _ = _run_import(tmp_path, "reject", _fake(MP3, bitrate=128000, bitrate_mode=BitrateMode.CBR))
+    try:
+        assert stats["imported"] == 1 and stats["failed"] == 0
+    finally:
+        db.close()

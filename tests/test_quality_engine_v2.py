@@ -20,7 +20,7 @@ from plex_playlist_sync.decision_engine import (
 )
 from plex_playlist_sync.models import AcquisitionSearchResult
 from plex_playlist_sync.quality import evaluate_release, extract_release_group, parse_release_title
-from plex_playlist_sync.safe_regex import Budget, UnsafeRegexError, safe_search, validate_pattern
+from plex_playlist_sync.safe_regex import Budget, BudgetExceeded, UnsafeRegexError, safe_search, validate_pattern
 from plex_playlist_sync.storage import Database
 
 MB = 1024 * 1024
@@ -296,13 +296,13 @@ def test_kbps_known_duration_min_and_max():
     assert high.breakdown.rejections[0]["code"] == "kbps_above_max"
 
 
-def test_kbps_estimated_duration_only_enforces_max():
+def test_kbps_estimated_duration_enforces_neither_bound():
     p = _profile(FLAC_MP3, "FLAC 16bit", definitions=DEFS)
     est = DurationInfo(2400, estimated=True, source="estimate")
     assert _score(p, "A - B [MP3 320]", size_bytes=_size(128, 2400), duration=est).is_acceptable is True
     r = _score(p, "A - B [MP3 320]", size_bytes=_size(900, 2400), duration=est)
-    assert r.is_acceptable is False and "estimated duration" in r.rejection_reasons[0]
-    assert r.breakdown.kbps["estimated"] is True
+    assert r.is_acceptable is True and r.kbps_distance is None
+    assert r.breakdown.kbps["estimated"] is True and "estimated" in r.breakdown.kbps["skipped_reason"]
 
 
 def test_kbps_unknown_duration_or_size_never_rejects():
@@ -393,13 +393,13 @@ def test_evaluate_and_rank_applies_kbps_with_album_duration_from_db(db):
     assert len(coord.evaluate_and_rank(cands, prof, db=db)) == 2  # no album context: no kbps rejection
 
 
-def test_estimated_album_duration_enforces_max_only(db):
+def test_estimated_album_duration_enforces_nothing(db):
     artist = db.upsert_library_artist({"name": "A"})
     album = db.upsert_library_album({"artist_id": artist["id"], "title": "B", "total_tracks": 10})  # no tracks
     prof = db.get_quality_profile("profile-high-quality")
     cands = [_cand("A - B [MP3 320]", size=_size(100, 2400), idx=1), _cand("A - B [MP3 320]", size=_size(900, 2400), idx=2)]
     ranked = AcquisitionCoordinator().evaluate_and_rank(cands, prof, db=db, album_id=album["id"], item_type="album")
-    assert [c.download_id for c, _ in ranked] == ["id1"]
+    assert [c.download_id for c, _ in ranked] == ["id1", "id2"]
 
 
 # ------------------------------------------------------------------ upgrades
@@ -476,7 +476,9 @@ def test_catastrophic_pattern_never_runs_in_engine():
 def test_budget_skips_remaining_regexes():
     b = Budget(0)
     time.sleep(0.001)
-    assert safe_search("a", "a", b) is None and b.exhausted
+    with pytest.raises(BudgetExceeded):
+        safe_search("a", "a", b)
+    assert b.exhausted
 
 
 def test_input_is_truncated():

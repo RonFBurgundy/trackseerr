@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from plex_playlist_sync.api.dependencies import get_db, require_admin, require_core_tier
 from plex_playlist_sync.decision_engine import (
     export_format,
+    check_raw_format,
     normalize_format,
     validate_format,
     validate_term,
@@ -112,7 +113,7 @@ def reset_definition(quality: str, db: Database = Depends(get_db)) -> dict[str, 
 
 
 class SpecificationModel(BaseModel):
-    name: str = ""
+    name: str = Field("", max_length=200)
     implementation: str = Field(..., min_length=1, max_length=80)
     negate: bool = False
     required: bool = False
@@ -120,9 +121,9 @@ class SpecificationModel(BaseModel):
 
 
 class CustomFormatPayload(BaseModel):
-    name: str = Field(..., min_length=1, max_length=120)
+    name: str = Field(..., min_length=1, max_length=200)
     include_in_rename: bool = False
-    specifications: list[SpecificationModel] = Field(default_factory=list, max_length=100)
+    specifications: list[SpecificationModel] = Field(default_factory=list, max_length=50)
 
 
 class CustomFormatResponse(BaseModel):
@@ -136,6 +137,9 @@ class CustomFormatResponse(BaseModel):
 
 
 def _checked_format(raw: dict[str, Any]) -> dict[str, Any]:
+    shape = check_raw_format(raw)
+    if shape:
+        raise _bad(shape)
     fmt = normalize_format(raw)
     problems = validate_format(fmt)
     if problems:
@@ -175,6 +179,11 @@ def import_formats(payload: Any = Body(...), db: Database = Depends(get_db)) -> 
     imported: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     for idx, raw in enumerate(items):
+        shape = check_raw_format(raw)
+        if shape:
+            raw_name = raw.get("name")
+            errors.append({"index": idx, "name": raw_name[:200] if isinstance(raw_name, str) else None, "errors": shape})
+            continue
         fmt = normalize_format(raw)
         problems = validate_format(fmt)
         if problems:
@@ -182,7 +191,9 @@ def import_formats(payload: Any = Body(...), db: Database = Depends(get_db)) -> 
             continue
         existing = db.get_custom_format_by_name(fmt["name"])
         saved = db.update_custom_format(existing["id"], fmt) if existing else db.create_custom_format(fmt)
-        assert saved is not None
+        if saved is None:  # the format vanished between lookup and update (concurrent delete)
+            errors.append({"index": idx, "name": fmt["name"], "errors": ["could not be saved; try again"]})
+            continue
         saved["action"] = "updated" if existing else "created"
         imported.append(saved)
     if not imported:

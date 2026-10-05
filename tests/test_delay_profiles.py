@@ -112,7 +112,7 @@ def grab(db, candidates, **kw):
 
 
 def test_v50_migration_seeds_default_and_pending_table(tmp_path):
-    assert SCHEMA_VERSION == 51
+    assert SCHEMA_VERSION >= 51
     path = str(tmp_path / "m.db")
     Database(path).close()
     conn = sqlite3.connect(path)
@@ -123,7 +123,7 @@ def test_v50_migration_seeds_default_and_pending_table(tmp_path):
     conn.close()
     d = Database(path)
     try:
-        assert d.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 51
+        assert d.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
         profiles = d.list_delay_profiles()
         assert len(profiles) == 1
         p = profiles[0]
@@ -228,11 +228,11 @@ def test_delay_holds_then_releases_on_tick(db, clients, clock):
     driver = MagicMock()
     driver.download.return_value = HASH
     with patch("plex_playlist_sync.acquisition_coordinator.get_acquisition_driver", return_value=driver):
-        assert pending_worker.release_due(db, now=clock.now) == {"due": 0, "released": 0, "failed": 0}
+        assert pending_worker.release_due(db, now=clock.now) == {"due": 0, "released": 0, "failed": 0, "dropped": 0}
         assert len(db.list_pending_releases()) == 1
         clock.advance(31)
         stats = pending_worker.release_due(db, now=clock.now)
-    assert stats == {"due": 1, "released": 1, "failed": 0}
+    assert stats == {"due": 1, "released": 1, "failed": 0, "dropped": 0}
     driver.download.assert_called_once()
     assert db.list_pending_releases() == []
     assert len(db.list_active_downloads()) == 1

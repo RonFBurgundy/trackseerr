@@ -1,20 +1,25 @@
 """Validation and guarded evaluation of user-supplied regular expressions.
 
 The decision engine evaluates admin-authored (or imported Lidarr/TRaSH) regexes against untrusted indexer titles.
-Neither the ``regex`` module (with its per-call timeout) nor ``rapidfuzz`` is a dependency, so protection is layered
-on the standard ``re`` module:
+Python's ``re`` holds the GIL and cannot be interrupted, so protection is layered:
 
-1. **Validation on save** (``validate_pattern``): length cap (500), must compile, and catastrophic-backtracking
-   shapes are rejected by walking the parsed pattern tree: a variable-width repeat nested inside another
-   variable-width repeat (``(a+)+``, ``(\\w*\\s?)*``), and a variable repeat over alternatives that can begin with the
-   same character (``(a|aa)+``).
-2. **Bounded input**: titles are truncated to ``MAX_INPUT_LEN`` characters before matching, which caps the cost of
-   any pattern that slips past validation to a small polynomial.
-3. **Per-title time budget** (``Budget``): the engine checks the clock between regex evaluations and skips the
-   remaining regexes once the budget is spent, flagging it in the breakdown. This is cooperative: it cannot
-   interrupt a single ``re.search`` already running, which is why (1) and (2) exist.
+1. **Hard timeout** (the real guarantee): every user pattern is compiled and run with the third-party ``regex``
+   module, whose ``search(..., timeout=)`` aborts a runaway match (``SEARCH_TIMEOUT_SECONDS``, 50 ms). A
+   ``TimeoutError`` is surfaced as ``BudgetExceeded``.
+2. **Validation on save** (``validate_pattern``): length cap (500), must parse, and catastrophic shapes are rejected
+   by walking the parsed tree: a variable repeat nested in a variable repeat (``(a+)+``, ``(a+){2,10}b``), a
+   repeat over alternatives that can begin with the same character (``(a|aa)+``), more than 3 variable-width
+   repeats in one sequence (``.*.*.*.*x``), and backreferences under a repeat or to a group inside one
+   (``(a|b)*\\1``).
+3. **Bounded input**: titles are truncated to ``REGEX_INPUT_LEN`` (256) characters before matching.
+4. **Per-title time budget** (``Budget``): cooperative wall-clock budget across all regexes of one evaluation.
 
-.NET named groups (``(?<name>...)``), as found in Lidarr/Servarr JSON, are translated to Python syntax.
+Semantics: a spent budget or a timeout raises ``BudgetExceeded`` from ``safe_search``. The decision engine treats it
+as a REJECT (code ``evaluation_budget_exceeded``) for required terms, ignored terms and format specs, so a verdict
+never fails open. An invalid or unsafe stored pattern returns ``None`` (skipped, noted in the breakdown).
+
+Validation parses with ``re``'s parser, so only syntax valid in both ``re`` and ``regex`` is accepted. .NET named
+groups (``(?<name>...)``), as found in Lidarr/Servarr JSON, are translated to Python syntax.
 """
 
 from __future__ import annotations
@@ -24,11 +29,16 @@ import re
 import time
 from typing import Optional
 
+import regex as _regex
+
 import re._constants as _sre_const  # type: ignore[import-not-found]
 import re._parser as _sre_parse  # type: ignore[import-not-found]
 
 MAX_PATTERN_LEN = 500
 MAX_INPUT_LEN = 1024
+REGEX_INPUT_LEN = 256
+SEARCH_TIMEOUT_SECONDS = 0.05
+MAX_VARIABLE_REPEATS = 3
 DEFAULT_BUDGET_SECONDS = 0.25
 
 _NAMED_GROUP = re.compile(r"\(\?<([A-Za-z_][A-Za-z0-9_]*)>")
@@ -41,6 +51,10 @@ _BIG_REPEAT = 10
 
 class UnsafeRegexError(ValueError):
     """Raised when a pattern is too long, does not compile, or has a catastrophic-backtracking shape."""
+
+
+class BudgetExceeded(Exception):
+    """The per-title budget is spent or a single search hit its timeout; the verdict must reject, not skip."""
 
 
 def translate_pattern(pattern: str) -> str:
@@ -98,48 +112,81 @@ def _children(op, av) -> list[list]:
     return []
 
 
+def _overlapping_branch(o, a) -> bool:
+    if o != _sre_const.BRANCH:
+        return False
+    seen: set[str] = set()
+    for alt in a[1]:
+        first = _first_chars(list(alt))
+        if not list(alt):
+            return True  # an empty alternative (e.g. the factored form of ``a|aa``) overlaps
+        if first is None or (seen & first):
+            return True
+        seen |= first
+    return False
+
+
 def _check(items: list) -> None:
+    variable = 0
     for op, av in items:
         if op in _REPEAT_OPS:
             lo, hi, sub = av
             sub = list(sub)
-            # Only repeats that can run long matter: an optional group (``?``) cannot multiply backtracking.
-            if _is_variable(lo, hi) and hi > _BIG_REPEAT:
-                if _contains(sub, lambda o, a: o in _REPEAT_OPS and _is_variable(a[0], a[1]) and a[1] > 1):
-                    raise UnsafeRegexError("nested quantifier (a variable repeat inside a variable repeat)")
-
-                def _overlapping_branch(o, a) -> bool:
-                    if o != _sre_const.BRANCH:
-                        return False
-                    seen: set[str] = set()
-                    for alt in a[1]:
-                        first = _first_chars(list(alt))
-                        if not list(alt):
-                            return True  # an empty alternative (e.g. the factored form of ``a|aa``) overlaps
-                        if first is None or (seen & first):
-                            return True
-                        seen |= first
-                    return False
-
-                if _contains(sub, _overlapping_branch):
-                    raise UnsafeRegexError("repeated alternation with overlapping branches")
+            if _is_variable(lo, hi):
+                variable += 1
+                # A ``?`` (hi == 1) cannot multiply backtracking; any longer variable repeat can, whatever its bound.
+                if hi > 1:
+                    if _contains(sub, lambda o, a: o in _REPEAT_OPS and _is_variable(a[0], a[1]) and a[1] > 1):
+                        raise UnsafeRegexError("nested quantifier (a variable repeat inside a variable repeat)")
+                    if _contains(sub, _overlapping_branch):
+                        raise UnsafeRegexError("repeated alternation with overlapping branches")
         for child in _children(op, av):
             _check(child)
+    if variable > MAX_VARIABLE_REPEATS:
+        raise UnsafeRegexError(f"more than {MAX_VARIABLE_REPEATS} variable-width repeats in one sequence")
 
 
-@functools.lru_cache(maxsize=2048)
-def _validated(pattern: str) -> re.Pattern[str]:
+def _check_backrefs(items: list, in_repeat: bool, refs: list, repeated_groups: set) -> None:
+    for op, av in items:
+        if op == _sre_const.GROUPREF:
+            refs.append((av, in_repeat))
+        if op == _sre_const.SUBPATTERN and in_repeat and av[0] is not None:
+            repeated_groups.add(av[0])
+        child_repeat = in_repeat or (op in _REPEAT_OPS and av[1] > 1)
+        for child in _children(op, av):
+            _check_backrefs(child, child_repeat, refs, repeated_groups)
+
+
+def _check_backreferences(items: list) -> None:
+    refs: list = []
+    repeated: set = set()
+    _check_backrefs(items, False, refs, repeated)
+    for group, under_repeat in refs:
+        if under_repeat or group in repeated:
+            raise UnsafeRegexError("backreference under a repeat (or to a repeated group)")
+
+
+def _compile(pattern: str):
+    """Compiles with the ``regex`` module (supports ``search(timeout=)``); raises ``UnsafeRegexError``."""
     if not isinstance(pattern, str) or not pattern:
         raise UnsafeRegexError("pattern is empty")
     if len(pattern) > MAX_PATTERN_LEN:
         raise UnsafeRegexError(f"pattern is longer than {MAX_PATTERN_LEN} characters")
     translated = translate_pattern(pattern)
     try:
-        compiled = re.compile(translated, re.IGNORECASE)
+        compiled = _regex.compile(translated, _regex.IGNORECASE)
         tree = _sre_parse.parse(translated, re.IGNORECASE)
-    except (re.error, RecursionError, OverflowError) as exc:
+    except (re.error, _regex.error, RecursionError, OverflowError) as exc:
         raise UnsafeRegexError(f"invalid regular expression: {exc}") from exc
-    _check(list(tree))
+    return compiled, tree
+
+
+@functools.lru_cache(maxsize=2048)
+def _validated(pattern: str):
+    compiled, tree = _compile(pattern)
+    items = list(tree)
+    _check(items)
+    _check_backreferences(items)
     return compiled
 
 
@@ -148,8 +195,8 @@ def validate_pattern(pattern: str) -> None:
     _validated(pattern)
 
 
-def compile_pattern(pattern: str) -> re.Pattern[str]:
-    """Returns the validated, case-insensitive compiled pattern (cached). Raises ``UnsafeRegexError``."""
+def compile_pattern(pattern: str):
+    """Returns the validated, case-insensitive compiled ``regex`` pattern (cached). Raises ``UnsafeRegexError``."""
     return _validated(pattern)
 
 
@@ -167,11 +214,19 @@ class Budget:
 
 
 def safe_search(pattern: str, text: str, budget: Optional[Budget] = None) -> Optional[bool]:
-    """Case-insensitive ``search``; True/False on a result, None when skipped (invalid pattern or budget spent)."""
+    """Case-insensitive ``search``; True/False on a result, None for an invalid/unsafe pattern.
+
+    Raises ``BudgetExceeded`` when the budget is spent or the search times out (the budget is then marked exhausted).
+    """
     if budget is not None and budget.spent():
-        return None
+        raise BudgetExceeded("evaluation budget spent")
     try:
         compiled = compile_pattern(pattern)
     except UnsafeRegexError:
         return None
-    return compiled.search((text or "")[:MAX_INPUT_LEN]) is not None
+    try:
+        return compiled.search((text or "")[:REGEX_INPUT_LEN], timeout=SEARCH_TIMEOUT_SECONDS) is not None
+    except TimeoutError as exc:
+        if budget is not None:
+            budget.exhausted = True
+        raise BudgetExceeded("regex search timed out") from exc

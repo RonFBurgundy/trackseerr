@@ -1,5 +1,5 @@
-import React, { useId, useState } from 'react';
-import { FormField, TactileSwitch, TokenInput } from '@/components/ui';
+import React, { useId, useRef, useState } from 'react';
+import { FormField, TactileSwitch, TokenInput, type TokenInputHandle } from '@/components/ui';
 import type { IndexerItem } from '@/types/models';
 import type { QualityProfile } from '@/types/qualityProfiles';
 import { SEEDED_RELEASE_PROFILE_NAME, type ReleaseProfile, type ReleaseProfileInput } from '@/types/releaseProfiles';
@@ -70,6 +70,8 @@ const EditorBody: React.FC<Omit<ReleaseProfileEditorModalProps, 'target'> & { ta
   const uid = useId();
   const existing = target === 'new' ? null : target;
   const draft = useReleaseProfileDraft(existing);
+  const requiredRef = useRef<TokenInputHandle>(null);
+  const ignoredRef = useRef<TokenInputHandle>(null);
   const [saving, setSaving] = useState<boolean>(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const formId = `${uid}-form`;
@@ -79,7 +81,10 @@ const EditorBody: React.FC<Omit<ReleaseProfileEditorModalProps, 'target'> & { ta
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
-    const input = draft.toInput();
+    const input = draft.toInput({
+      required: requiredRef.current?.flush() ?? draft.required,
+      ignored: ignoredRef.current?.flush() ?? draft.ignored,
+    });
     if (!input) return;
     setSaving(true);
     setServerError(null);
@@ -122,6 +127,7 @@ const EditorBody: React.FC<Omit<ReleaseProfileEditorModalProps, 'target'> & { ta
           <TactileSwitch id={`${uid}-enabled`} name="release_profile_enabled" label="Enabled" checked={draft.enabled} onChange={draft.setEnabled} />
         </div>
         <TokenInput
+          ref={requiredRef}
           label="Must contain (any of)"
           name="release_profile_required"
           tokens={draft.required}
@@ -131,6 +137,7 @@ const EditorBody: React.FC<Omit<ReleaseProfileEditorModalProps, 'target'> & { ta
           error={requiredError}
         />
         <TokenInput
+          ref={ignoredRef}
           label="Must not contain"
           name="release_profile_ignored"
           tokens={draft.ignored}

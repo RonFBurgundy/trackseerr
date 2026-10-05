@@ -801,8 +801,13 @@ class AcquisitionWorker:
                     try:
                         definitions = {str(d["quality"]): d for d in db.list_quality_definitions()}
                         check = check_files(audio_files, check_mode, definitions)
-                    except (sqlite3.Error, OSError) as chk_err:
-                        logger.warning("Import bitrate check failed for download %s: %s", download_id, chk_err)
+                    except Exception as chk_err:  # noqa: BLE001 - the check is advisory; it must never crash the worker loop
+                        logger.warning(
+                            "Import bitrate check failed for download %s: %s: %s",
+                            download_id,
+                            type(chk_err).__name__,
+                            chk_err,
+                        )
                         check = None
                     if check is not None and (check.out_of_range or check.skipped):
                         summary = check.reason()
@@ -823,6 +828,8 @@ class AcquisitionWorker:
                                             "kbps": round(f.kbps, 1),
                                             "min_kbps": f.min_kbps,
                                             "max_kbps": f.max_kbps,
+                                            "severity": f.severity,
+                                            "detail": f.detail,
                                         }
                                         for f in check.out_of_range
                                     ],

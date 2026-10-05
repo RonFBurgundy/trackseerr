@@ -81,6 +81,8 @@ class ManualGrabPayload(BaseModel):
     album: Optional[str] = None
     item_type: str = "track"
     request_id: Optional[str] = None
+    album_id: Optional[str] = None
+    track_id: Optional[str] = None
 
 
 @router.post("/search", summary="Interactive multi-indexer search with quality evaluation")
@@ -342,14 +344,17 @@ def _grab_release(payload: ManualGrabPayload, db: Database) -> dict[str, Any]:
                 redact_text(str(e)),
             )
 
-    # A manual grab bypasses delay profiles and supersedes anything parked for the same request.
-    if payload.request_id:
-        try:
-            parked = db.get_pending_release_by_key(delay_gate.item_key(payload.request_id, None, None, "", "", None))
-            if parked:
-                db.delete_pending_release(parked["id"])
-        except sqlite3.Error as e:
-            logger.warning("Failed to clear pending release for request '%s': %s", payload.request_id, type(e).__name__)
+    # A manual grab bypasses delay profiles and supersedes anything parked for the same item (by request, album or
+    # track id, or by name when the parked row has no ids).
+    try:
+        db.clear_pending_for_item(payload.request_id, payload.album_id, payload.track_id)
+        parked = db.get_pending_release_by_key(
+            delay_gate.item_key(None, None, None, payload.artist, payload.title, payload.album)
+        )
+        if parked:
+            db.delete_pending_release(parked["id"])
+    except sqlite3.Error as e:
+        logger.warning("Failed to clear pending release for '%s': %s", payload.title, type(e).__name__)
 
     client_name = client.get("name", "download client")
     logger.info(
@@ -421,7 +426,7 @@ def grab_pending_now(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending release not found")
     try:
-        result = grab_pending(db, row)
+        result = grab_pending(db, row, count_failure=False)
     except ModeChanged as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -430,6 +435,8 @@ def grab_pending_now(
     except sqlite3.Error as exc:
         logger.error("Grabbing pending release %s failed: %s", pending_id, exc)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Could not record the download") from exc
+    if result.get("claimed_elsewhere"):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Pending release was already grabbed or removed")
     if not result.get("success"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

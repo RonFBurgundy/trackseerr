@@ -450,19 +450,27 @@ class AcquisitionCoordinator:
                     "message": f"{decision.reason}; releases at {pending.get('release_at')}",
                 }
 
-        return self.grab_candidate(
-            db,
-            top_candidate,
-            parsed_quality=eval_res.parsed_quality,
-            score=eval_res.score,
-            artist=artist,
-            album=album,
-            item_type=item_type,
-            request_id=request_id,
-            track_id=track_id,
-            album_id=album_id,
-            upgrade=min_score is not None,
-        )
+        claimed = decision.claimed if not bypass_delay else None
+        grabbed = False
+        try:
+            result = self.grab_candidate(
+                db,
+                top_candidate,
+                parsed_quality=eval_res.parsed_quality,
+                score=eval_res.score,
+                artist=artist,
+                album=album,
+                item_type=item_type,
+                request_id=request_id,
+                track_id=track_id,
+                album_id=album_id,
+                upgrade=min_score is not None,
+            )
+            grabbed = bool(result.get("success"))
+            return result
+        finally:
+            if claimed is not None and not grabbed:  # the gate claimed the parked row; a failed grab must not lose it
+                db.restore_pending_release(claimed)
 
     def grab_candidate(
         self,
@@ -543,6 +551,10 @@ class AcquisitionCoordinator:
             album_id=album_id,
         )
         db.create_active_download(active_dl)
+        try:  # any grab of the item supersedes whatever is parked for it, under any of its identifiers
+            db.clear_pending_for_item(request_id, album_id, track_id)
+        except sqlite3.Error as clear_err:
+            logger.warning("Failed to clear pending releases for '%s': %s", top_candidate.title, type(clear_err).__name__)
         try:
             db.record_download_grab(
                 download_id,

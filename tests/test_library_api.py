@@ -654,6 +654,65 @@ def test_manual_import_scan_and_commit(
         mock_plex.refresh_music_library.assert_called_once()
 
 
+def _manual_import_cutoff(app, client, test_db, test_config, seeded_users, tmp_path, history_title=None):
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    music_dir, staging_dir = tmp_path / "music", tmp_path / "downloads"
+    music_dir.mkdir(parents=True)
+    staging_dir.mkdir(parents=True)
+    test_db.update_media_management_settings({
+        "root_folder_path": str(music_dir),
+        "staging_folder_path": str(staging_dir),
+        "standard_track_format": "{track:00} - {Track Title}",
+        "album_folder_format": "{Album Title} ({Release Year})",
+    })
+    prof = test_db.get_default_quality_profile()
+    test_db.update_quality_profile(prof["id"], {"cutoff_format_score": 500})
+    test_db.upsert_library_artist({"id": "art-c", "name": "Radiohead", "monitored": True})
+    test_db.upsert_library_album({"id": "alb-c", "artist_id": "art-c", "title": "OK Computer", "year": 1997, "monitored": True})
+    test_db.upsert_library_track({
+        "id": "trk-c", "album_id": "alb-c", "artist_id": "art-c", "title": "Karma Police", "track_number": 6, "monitored": True
+    })
+    if history_title:
+        test_db.record_download_event("imported", track_id="trk-c", release_title=history_title)
+    audio = staging_dir / "06 - Karma Police.flac"
+    _create_minimal_flac(audio)
+    meta = {
+        "title": "Karma Police", "artist": "Radiohead", "album": "OK Computer", "album_artist": "Radiohead",
+        "year": 1997, "track_number": 6, "disc_number": 1, "codec": "FLAC", "bitrate": 950, "sample_rate": 44100,
+        "bits_per_sample": 16, "quality_full": "FLAC 16bit 44.1kHz", "file_path": str(audio), "duration": 261.0,
+    }
+    app.dependency_overrides[get_plex_client] = lambda: MagicMock()
+    item = {
+        "source_path": str(audio), "artist_id": "art-c", "album_id": "alb-c", "track_id": "trk-c",
+        "artist_name": "Radiohead", "album_title": "OK Computer", "track_title": "Karma Police",
+        "track_number": 6, "disc_number": 1, "year": 1997, "mode": "move", "write_tags": False,
+    }
+    with patch("plex_playlist_sync.api.routes.library.inspect_audio_file", return_value=meta):
+        resp = client.post("/api/library/manual-import/commit", json={"items": [item]}, headers=admin_headers)
+    assert resp.status_code == 200 and resp.json()["imported_count"] == 1
+    return test_db.get_library_file_for_track("trk-c")
+
+
+def test_manual_import_bare_quality_meets_cutoff_despite_format_score(
+    app_and_client, test_db, test_config, seeded_users, tmp_path
+):
+    """A bare quality has no release title, so format score 0 must not defeat a cutoff_format_score."""
+    app, client = app_and_client
+    f = _manual_import_cutoff(app, client, test_db, test_config, seeded_users, tmp_path)
+    assert f["cutoff_met"]
+
+
+def test_manual_import_uses_imported_release_title_for_cutoff(
+    app_and_client, test_db, test_config, seeded_users, tmp_path
+):
+    """When the imported release title is known and matches the quality, its (low) format score decides."""
+    app, client = app_and_client
+    f = _manual_import_cutoff(
+        app, client, test_db, test_config, seeded_users, tmp_path, history_title="Radiohead - OK Computer (1997) [FLAC]"
+    )
+    assert not f["cutoff_met"]
+
+
 # =========================================================================
 # 6. Token-Template Preview & Batch Renamer
 # =========================================================================

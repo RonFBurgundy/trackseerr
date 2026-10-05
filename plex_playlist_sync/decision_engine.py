@@ -37,6 +37,7 @@ from plex_playlist_sync.quality_defaults import (
 from plex_playlist_sync.safe_regex import (
     MAX_INPUT_LEN,
     Budget,
+    BudgetExceeded,
     UnsafeRegexError,
     compile_pattern,
     safe_search,
@@ -184,6 +185,40 @@ def normalize_spec(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+MAX_FORMAT_NAME = 200
+MAX_SPEC_NAME = 200
+MAX_SPECS_PER_FORMAT = 50
+
+
+def check_raw_format(raw: Any) -> list[str]:
+    """Shape problems in untrusted custom-format JSON (before ``normalize_format``); [] = well formed."""
+    if not isinstance(raw, dict):
+        return ["custom format must be an object"]
+    problems: list[str] = []
+    name = raw.get("name")
+    if name is not None and not isinstance(name, str):
+        problems.append("name must be a string")
+    elif isinstance(name, str) and len(name) > MAX_FORMAT_NAME:
+        problems.append(f"name is longer than {MAX_FORMAT_NAME} characters")
+    specs = raw.get("specifications")
+    if specs is None:
+        return problems
+    if not isinstance(specs, list):
+        return problems + ["specifications must be a list of objects"]
+    if len(specs) > MAX_SPECS_PER_FORMAT:
+        problems.append(f"too many specifications (max {MAX_SPECS_PER_FORMAT})")
+    for idx, spec in enumerate(specs):
+        if not isinstance(spec, dict):
+            problems.append(f"specification {idx + 1} must be an object")
+            continue
+        sname = spec.get("name")
+        if sname is not None and not isinstance(sname, str):
+            problems.append(f"specification {idx + 1}: name must be a string")
+        elif isinstance(sname, str) and len(sname) > MAX_SPEC_NAME:
+            problems.append(f"specification {idx + 1}: name is longer than {MAX_SPEC_NAME} characters")
+    return problems
+
+
 def normalize_format(raw: dict[str, Any]) -> dict[str, Any]:
     """Normalizes Lidarr-schema (or stored) JSON into ``{name, include_in_rename, specifications, unsupported}``."""
     specs = [normalize_spec(s) for s in (raw.get("specifications") or []) if isinstance(s, dict)]
@@ -201,12 +236,14 @@ def validate_format(fmt: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     if not fmt.get("name"):
         problems.append("name is required")
-    elif len(fmt["name"]) > 120:
-        problems.append("name is longer than 120 characters")
+    elif len(fmt["name"]) > MAX_FORMAT_NAME:
+        problems.append(f"name is longer than {MAX_FORMAT_NAME} characters")
     specs = fmt.get("specifications") or []
-    if len(specs) > 100:
-        problems.append("too many specifications (max 100)")
+    if len(specs) > MAX_SPECS_PER_FORMAT:
+        problems.append(f"too many specifications (max {MAX_SPECS_PER_FORMAT})")
     for idx, spec in enumerate(specs):
+        if len(str(spec.get("name") or "")) > MAX_SPEC_NAME:
+            problems.append(f"specification {idx + 1}: name is longer than {MAX_SPEC_NAME} characters")
         label = f"specification {idx + 1} ('{spec.get('name')}')"
         impl = spec["implementation"]
         fields = spec["fields"]
@@ -298,10 +335,15 @@ class DecisionContext:
     duration: Optional[DurationInfo]
     budget: Budget
     skipped: int = 0
+    budget_exceeded: bool = False  # a regex timed out or the budget ran out: the verdict must reject
 
 
 def _regex_match(ctx: DecisionContext, pattern: str, text: str) -> Optional[bool]:
-    result = safe_search(pattern, text, ctx.budget)
+    try:
+        result = safe_search(pattern, text, ctx.budget)
+    except BudgetExceeded:
+        ctx.budget_exceeded = True
+        return None
     if result is None:
         ctx.skipped += 1
     return result
@@ -332,7 +374,7 @@ def _raw_match(spec: dict[str, Any], ctx: DecisionContext) -> Optional[bool]:
         return ctx.parsed.quality == str(fields.get("value"))
     if impl == "PhraseSpecification":
         if ctx.budget.spent():
-            ctx.skipped += 1
+            ctx.budget_exceeded = True
             return None
         try:
             threshold = float(fields.get("threshold", 85))
@@ -385,10 +427,8 @@ def format_matches(fmt: dict[str, Any], ctx: DecisionContext) -> bool:
 def parse_term(term: str) -> tuple[str, str]:
     """``/regex/`` (optional trailing flags are ignored; matching is always case-insensitive) or a plain substring."""
     t = term.strip()
-    if len(t) >= 2 and t.startswith("/"):
-        end = t.rfind("/")
-        if end > 0:
-            return "regex", t[1:end]
+    if len(t) > 2 and t.startswith("/") and t.endswith("/"):
+        return "regex", t[1:-1]
     return "substring", t
 
 
@@ -404,10 +444,19 @@ def validate_term(term: str) -> None:
 
 
 def term_matches(term: str, title: str, budget: Optional[Budget] = None) -> bool:
+    """Raises ``BudgetExceeded`` when a regex term times out or the budget is spent."""
     kind, value = parse_term(term)
     if kind == "substring":
         return value.lower() in title.lower()
     return bool(safe_search(value, title, budget))
+
+
+def _term_hit(term: str, ctx: DecisionContext) -> bool:
+    try:
+        return term_matches(term, ctx.title, ctx.budget)
+    except BudgetExceeded:
+        ctx.budget_exceeded = True
+        return False
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -527,10 +576,13 @@ def _check_kbps(
         duration_seconds=round(duration.seconds, 1),
         duration_source=duration.source,
     )
+    if duration.estimated:
+        # A track-count based duration can be far off (long tracks), so neither bound is enforced; note only.
+        info["skipped_reason"] = "duration estimated: min/max not enforced"
+        return True, None
     ok = True
     lo, hi = definition.get("min_kbps"), definition.get("max_kbps")
-    # Estimated durations only ever enforce the maximum, to avoid false rejections (spec section 1).
-    if lo is not None and lo > 0 and not duration.estimated and measured < float(lo):
+    if lo is not None and lo > 0 and measured < float(lo):
         breakdown.rejections.append(
             {
                 "code": "kbps_below_min",
@@ -539,11 +591,10 @@ def _check_kbps(
         )
         ok = False
     if hi is not None and hi > 0 and measured > float(hi):
-        suffix = " (estimated duration)" if duration.estimated else ""
         breakdown.rejections.append(
             {
                 "code": "kbps_above_max",
-                "message": f"Bitrate {measured:.0f} kbps{suffix} exceeds the {quality} maximum ({float(hi):.0f} kbps)",
+                "message": f"Bitrate {measured:.0f} kbps exceeds the {quality} maximum ({float(hi):.0f} kbps)",
             }
         )
         ok = False
@@ -610,14 +661,14 @@ def evaluate_prepared(
         outcome = {"id": rp.get("id"), "name": rp_name, "result": "pass", "detail": ""}
         required = [t for t in rp.get("required") or [] if str(t).strip()]
         ignored = [t for t in rp.get("ignored") or [] if str(t).strip()]
-        if required and not any(term_matches(t, title, ctx.budget) for t in required):
+        if required and not any(_term_hit(t, ctx) for t in required) and not ctx.budget_exceeded:
             outcome.update(result="rejected", detail="missing required term")
             reject(
                 "release_profile_required",
                 f"Release profile '{rp_name}' requires one of: {', '.join(str(t) for t in required)}",
             )
         for term in ignored:
-            if term_matches(term, title, ctx.budget):
+            if _term_hit(term, ctx):
                 outcome.update(result="rejected", detail=f"ignored term {term}")
                 reject("release_profile_ignored", f"Release profile '{rp_name}' ignores term '{term}'")
                 break
@@ -668,7 +719,11 @@ def evaluate_prepared(
         pattern_str = cf.get("pattern", "")
         if not pattern_str:
             continue
-        matched = safe_search(str(pattern_str), title, ctx.budget)
+        try:
+            matched = safe_search(str(pattern_str), title, ctx.budget)
+        except BudgetExceeded:
+            ctx.budget_exceeded = True
+            continue
         if matched is None:
             logger.warning("Skipped legacy custom format '%s': invalid, unsafe or over the time budget", name)
             continue
@@ -704,6 +759,11 @@ def evaluate_prepared(
         if legacy_total < profile.min_score:
             reject("legacy_min_score", f"Score {legacy_total} is below profile minimum {profile.min_score}")
 
+    if ctx.budget_exceeded:
+        reject(
+            "evaluation_budget_exceeded",
+            "Regex evaluation exceeded its time budget; rejected rather than risk a wrong verdict",
+        )
     if ctx.skipped:
         bd.notes.append(f"{ctx.skipped} regex/phrase check(s) skipped (invalid pattern or time budget spent)")
 
@@ -803,12 +863,19 @@ def evaluate_upgrade(current: EvaluationResult, candidate: EvaluationResult, pro
     return UpgradeDecision(False, f"Format score improves by {gain}, below the required {needed}")
 
 
-def upgrade_floor(current: EvaluationResult, profile: QualityProfile) -> int:
+def upgrade_floor(current: EvaluationResult, profile: QualityProfile, title_known: bool = True) -> int:
     """Score a candidate must *exceed* to count as an upgrade (callers compare ``candidate.score > floor``).
 
     Quality tiers are ``TIER_STEP`` apart, so a better quality always clears the floor; inside a tier the candidate
     needs ``min_upgrade_format_score`` more format score than the current file.
+
+    ``title_known`` is False when ``current`` was scored from a bare quality string (no release title), so its format
+    score of 0 is not real and any same-tier candidate with a positive format score would look like an upgrade (and be
+    re-grabbed every cycle). Then only a better tier clears the floor: it sits mid-tier above any same-tier score.
     """
+    if not title_known and current.tier is not None:
+        base = current.score - max(-FORMAT_SCORE_CLAMP, min(FORMAT_SCORE_CLAMP, current.format_score))
+        return base + TIER_STEP // 2
     return current.score + max(1, int(profile.min_upgrade_format_score)) - 1
 
 

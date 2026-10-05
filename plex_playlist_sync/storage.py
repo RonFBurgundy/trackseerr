@@ -73,7 +73,7 @@ def clean_library_name(text: str) -> str:
 
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
-SCHEMA_VERSION = 51  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 53  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _titles_near_equal(a: str, b: str) -> bool:
@@ -333,6 +333,8 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 (49, self._migration_v49),
                 (50, self._migration_v50),
                 (51, self._migration_v51),
+                (52, self._migration_v52),
+                (53, self._migration_v53),
             ]
 
             applied = 0
@@ -5254,6 +5256,24 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             )
             self.conn.commit()
             return cur.rowcount > 0
+
+    def get_imported_release_title(
+        self, request_id: Optional[str] = None, track_id: Optional[str] = None, album_id: Optional[str] = None
+    ) -> Optional[str]:
+        """Release title of the most recent ``imported`` history event for a request, track or album (first key that
+        has one wins), or None when unknown. Used to score the current file's format score exactly like a candidate."""
+        with self._lock:
+            for column, value in (("request_id", request_id), ("track_id", track_id), ("album_id", album_id)):
+                if not value:
+                    continue
+                row = self.conn.execute(
+                    f"SELECT release_title FROM download_history WHERE event = 'imported' AND {column} = ? "
+                    "AND release_title IS NOT NULL AND release_title <> '' ORDER BY rowid DESC LIMIT 1",
+                    (str(value),),
+                ).fetchone()
+                if row:
+                    return str(row[0])
+        return None
 
     def record_download_grab(
         self,

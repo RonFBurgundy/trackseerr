@@ -12,6 +12,7 @@ from plex_playlist_sync.acquisition_coordinator import _to_quality_profile, reso
 from plex_playlist_sync.api.dependencies import get_db, require_admin, require_core_tier
 from plex_playlist_sync.decision_engine import evaluate_prepared, evaluate_upgrade, prepare_profile
 from plex_playlist_sync.redaction import redact_text
+from plex_playlist_sync.safe_regex import UnsafeRegexError, validate_pattern
 from plex_playlist_sync.quality import parse_release_title
 from plex_playlist_sync.quality_defaults import QUALITY_ORDER, entry_label, entry_qualities, normalize_entries
 from plex_playlist_sync.storage import Database
@@ -111,6 +112,13 @@ def _bad_request(detail: str) -> HTTPException:
 
 def _validate_profile(payload: QualityProfilePayload, db: Database) -> list[dict[str, Any]]:
     """Normalizes ``items`` to v2 entries and raises clear 400s for an inconsistent profile."""
+    for idx, cf in enumerate(payload.custom_formats):
+        pattern = cf.get("pattern") if isinstance(cf, dict) else None
+        if pattern:
+            try:
+                validate_pattern(str(pattern))
+            except UnsafeRegexError as exc:
+                raise _bad_request(f"custom_formats[{idx}] pattern: {exc}")
     raw = [i.model_dump(exclude_none=True) for i in payload.items]
     legacy = bool(raw) and all("type" not in i and i.get("weight") is not None for i in raw)
     if not legacy:  # legacy weight payloads stay type-less so normalize_entries orders them by weight
@@ -164,13 +172,17 @@ def _profile_dict(payload: QualityProfilePayload, entries: list[dict[str, Any]],
         "cutoff_format_score": payload.cutoff_format_score,
         "min_upgrade_format_score": payload.min_upgrade_format_score,
         "is_default": payload.is_default,
-        "preferred_tags": [t.strip() for t in payload.preferred_tags if t.strip()],
-        "ignored_tags": [t.strip() for t in payload.ignored_tags if t.strip()],
-        "min_size_mb": payload.min_size_mb,
-        "max_size_mb": payload.max_size_mb,
-        "custom_formats": payload.custom_formats,
-        "min_score": payload.min_score,
     }
+    # Legacy fields: the v2 UI payload omits them. Only fields the client actually sent are written; omitted ones keep
+    # their stored values (db.upsert_quality_profile preserves any key missing from the dict).
+    sent = payload.model_fields_set
+    if "preferred_tags" in sent:
+        data["preferred_tags"] = [t.strip() for t in payload.preferred_tags if t.strip()]
+    if "ignored_tags" in sent:
+        data["ignored_tags"] = [t.strip() for t in payload.ignored_tags if t.strip()]
+    for key in ("min_size_mb", "max_size_mb", "custom_formats", "min_score"):
+        if key in sent:
+            data[key] = getattr(payload, key)
     if payload.format_items is not None:
         data["format_items"] = [fi.model_dump() for fi in payload.format_items]
     return data
@@ -209,12 +221,19 @@ def create_or_update_quality_profile(
     """Creates or updates a quality profile (full v2 shape)."""
     p_id = payload.id.strip() if payload.id and payload.id.strip() else str(uuid.uuid4())
     entries = _validate_profile(payload, db)
+    previous = db.get_quality_profile(p_id, include_catalog=False)
     try:
         saved = db.upsert_quality_profile(_profile_dict(payload, entries, p_id))
     except sqlite3.IntegrityError as e:
         raise _bad_request(f"Profile name already exists or violates constraint: {redact_text(str(e))}")
-    if payload.preferred_tags or payload.ignored_tags:
-        saved = db.apply_legacy_tags(p_id, saved["preferred_tags"], saved["ignored_tags"]) or saved
+    # Fold only tags that are new relative to what was stored, so a re-save never resets tuned scores or resurrects
+    # release profiles the user deleted or edited.
+    old_pref = set((previous or {}).get("preferred_tags") or [])
+    old_ign = set((previous or {}).get("ignored_tags") or [])
+    added_pref = [t for t in saved.get("preferred_tags") or [] if t not in old_pref]
+    added_ign = [t for t in saved.get("ignored_tags") or [] if t not in old_ign]
+    if added_pref or added_ign:
+        saved = db.apply_legacy_tags(p_id, added_pref, added_ign) or saved
     return saved
 
 

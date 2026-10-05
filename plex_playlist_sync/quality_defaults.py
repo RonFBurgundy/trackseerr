@@ -33,6 +33,24 @@ QUALITY_ORDER: list[str] = [
 # Qualities added in migration v51 (appended disallowed to existing profiles).
 V51_NEW_QUALITIES: list[str] = ["ALAC", "WAV/AIFF", "MP3 V1", "AAC (other)", "Opus", "OGG Vorbis"]
 
+# What each v51 quality parsed as before v51 (quality.py at c4a8250): ALAC matched the FLAC 16bit pattern, the rest had no
+# pattern (or, for AAC below 256 kbps, was demoted) and parsed as Unknown. v51 gives each the old target's allowed flag.
+V51_OLD_PARSE_TARGETS: dict[str, str] = {
+    "ALAC": "FLAC 16bit",
+    "WAV/AIFF": "Unknown",
+    "MP3 V1": "Unknown",
+    "AAC (other)": "Unknown",
+    "Opus": "Unknown",
+    "OGG Vorbis": "Unknown",
+}
+
+# Seeded defaults that migration v52 widened (quality -> (min, preferred, max) before v52). Only rows still equal to
+# these are bumped, so user edits survive.
+V52_OLD_DEFAULTS: dict[str, tuple[float, float, float]] = {
+    "MP3 320": (290.0, 320.0, 350.0),
+    "MP3 V0": (160.0, 245.0, 350.0),
+}
+
 # (quality, title, min_kbps, preferred_kbps, max_kbps); None = unbounded.
 DEFAULT_QUALITY_DEFINITIONS: list[tuple[str, str, Optional[float], Optional[float], Optional[float]]] = [
     ("FLAC 24bit", "FLAC 24bit", 0.0, 2000.0, 9500.0),
@@ -44,8 +62,8 @@ DEFAULT_QUALITY_DEFINITIONS: list[tuple[str, str, Optional[float], Optional[floa
     # Uncompressed PCM is exact arithmetic: 44.1 kHz x 16 bit x 2 ch = 1411 kbps. The floor of 1300 rejects anything
     # that is not full-rate stereo PCM; 5000 allows up to roughly 24/96 stereo (4608 kbps).
     ("WAV/AIFF", "WAV/AIFF", 1300.0, 1411.0, 5000.0),
-    ("MP3 320", "MP3 320", 290.0, 320.0, 350.0),
-    ("MP3 V0", "MP3 V0", 160.0, 245.0, 350.0),
+    ("MP3 320", "MP3 320", 290.0, 320.0, 400.0),
+    ("MP3 V0", "MP3 V0", 160.0, 245.0, 400.0),
     # LAME V1 averages ~225 kbps (range ~190-250), between V0 (245) and V2 (190); the ceiling is shared with 320.
     ("MP3 V1", "MP3 V1", 150.0, 225.0, 320.0),
     ("AAC 256", "AAC 256", 200.0, 256.0, 280.0),
@@ -173,8 +191,9 @@ def is_v2_items(items: Any) -> bool:
     return isinstance(items, list) and any(isinstance(i, dict) and i.get("type") in ("quality", "group") for i in items)
 
 
-def legacy_items_to_entries(items: list[Any]) -> list[dict[str, Any]]:
-    """Weight-based flat items -> ordered v2 entries (weight descending, stable). Allowed flags are preserved."""
+def _legacy_flat(items: list[Any]) -> list[dict[str, Any]]:
+    """Legacy weight items in stored list order, each with the effective weight the pre-v49 engine ranked by:
+    the item's weight, or ``1000 - index * 100`` (floored at 0) when the weight is 0 or null."""
     flat: list[dict[str, Any]] = []
     for it in items or []:
         if hasattr(it, "to_dict"):
@@ -182,22 +201,57 @@ def legacy_items_to_entries(items: list[Any]) -> list[dict[str, Any]]:
         if not isinstance(it, dict) or not it.get("quality"):
             continue
         try:
-            weight = int(it.get("weight", 100))
+            weight = int(it.get("weight", 100) or 0)
         except (TypeError, ValueError):
             weight = 100
-        flat.append({"quality": str(it["quality"]), "allowed": bool(it.get("allowed", True)), "weight": weight})
+        idx = len(flat)
+        flat.append(
+            {
+                "quality": str(it["quality"]),
+                "allowed": bool(it.get("allowed", True)),
+                "weight": weight if weight else max(0, 1000 - idx * 100),
+            }
+        )
+    return flat
+
+
+def legacy_items_to_entries(items: list[Any]) -> list[dict[str, Any]]:
+    """Weight-based flat items -> ordered v2 entries (effective weight descending, stable). Allowed flags are preserved."""
+    flat = _legacy_flat(items)
     flat.sort(key=lambda i: -i["weight"])
     return [{"type": "quality", "quality": i["quality"], "allowed": i["allowed"]} for i in flat]
 
 
+def legacy_cutoff_for_entries(items: list[Any], cutoff: str) -> tuple[str, bool]:
+    """Maps a legacy cutoff onto the weight-ordered v2 entries. Returns ``(cutoff, exact)``.
+
+    The pre-v49 engine ranked by weight but decided "cutoff met" by *list index* (index <= cutoff index). v2 ranks and
+    cuts off by the same order, so when the list order differs from the weight order the cutoff is moved to the entry
+    that makes the same set of qualities count as met. If that set is not a prefix of the weight order it cannot be
+    represented exactly: the longest prefix inside the old set is used (``exact`` is False), which can only trigger
+    extra upgrades, never block ones that were allowed. An unknown cutoff is returned unchanged.
+    """
+    flat = _legacy_flat(items)
+    cutoff_idx = next((i for i, f in enumerate(flat) if f["quality"] == cutoff), None)
+    if cutoff_idx is None:
+        return cutoff, True
+    met = {f["quality"] for f in flat[: cutoff_idx + 1]}
+    ordered = [f["quality"] for f in sorted(flat, key=lambda i: -i["weight"])]
+    prefix = 0
+    while prefix < len(ordered) and ordered[prefix] in met:
+        prefix += 1
+    if prefix == len(met):
+        return ordered[prefix - 1], True
+    if prefix > 0:
+        return ordered[prefix - 1], False
+    return next(q for q in ordered if q in met), False
+
+
 def legacy_items_to_entries_with_weight(items: list[Any]) -> list[dict[str, Any]]:
-    """Like ``legacy_items_to_entries`` but keeps each weight (used when the profile has a legacy ``min_score``)."""
+    """Like ``legacy_items_to_entries`` but keeps each effective weight (used when the profile has a legacy
+    ``min_score``, which the old engine compared against weight + format score)."""
     entries = legacy_items_to_entries(items)
-    weights = {
-        str(i["quality"]): int(i.get("weight", 100))
-        for i in (x.to_dict() if hasattr(x, "to_dict") else x for x in items or [])
-        if isinstance(i, dict) and i.get("quality")
-    }
+    weights = {f["quality"]: f["weight"] for f in reversed(_legacy_flat(items))}
     for e in entries:
         e["weight"] = weights.get(e["quality"], 100)
     return entries

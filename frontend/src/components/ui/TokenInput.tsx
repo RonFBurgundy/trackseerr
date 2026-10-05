@@ -1,4 +1,4 @@
-import React, { useId, useState } from 'react';
+import React, { forwardRef, useId, useImperativeHandle, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { TapeDeckButton } from './TapeDeckButton';
 import { inputClass, labelClass } from './FormField';
@@ -6,6 +6,11 @@ import { inputClass, labelClass } from './FormField';
 /** True for a `/pattern/` or `/pattern/flags` term (matches the backend's regex-term syntax). */
 export function isRegexTerm(term: string): boolean {
   return /^\/.+\/[a-z]*$/.test(term);
+}
+
+/** Imperative handle: commits any typed-but-uncommitted text and returns the resulting token list. */
+export interface TokenInputHandle {
+  flush: () => string[];
 }
 
 export interface TokenInputProps {
@@ -20,15 +25,22 @@ export interface TokenInputProps {
 }
 
 /** Labelled token field: Enter (or the Add key) commits a term; `/regex/` terms render in mono with a badge. */
-export const TokenInput: React.FC<TokenInputProps> = ({ label, name, tokens, onChange, placeholder, hint, error }) => {
+export const TokenInput = forwardRef<TokenInputHandle, TokenInputProps>(function TokenInput(
+  { label, name, tokens, onChange, placeholder, hint, error },
+  ref
+) {
   const id = useId();
   const [draft, setDraft] = useState<string>('');
 
-  const commit = (): void => {
+  const commit = (): string[] => {
     const term = draft.trim();
-    if (term && !tokens.includes(term)) onChange([...tokens, term]);
+    const next = term && !tokens.includes(term) ? [...tokens, term] : [...tokens];
+    if (next.length !== tokens.length) onChange(next);
     setDraft('');
+    return next;
   };
+
+  useImperativeHandle(ref, () => ({ flush: commit }));
 
   return (
     <div>
@@ -44,6 +56,9 @@ export const TokenInput: React.FC<TokenInputProps> = ({ label, name, tokens, onC
           value={draft}
           placeholder={placeholder}
           onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => {
+            if (draft.trim() !== '') commit();
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault();
@@ -53,7 +68,7 @@ export const TokenInput: React.FC<TokenInputProps> = ({ label, name, tokens, onC
           className={`${inputClass} font-mono`}
           aria-describedby={hint ? `${id}-hint` : undefined}
         />
-        <TapeDeckButton size="sm" aria-label={`Add ${label} term`} disabled={draft.trim() === ''} onClick={commit} icon={<Plus className="h-3.5 w-3.5" />} />
+        <TapeDeckButton size="sm" aria-label={`Add ${label} term`} disabled={draft.trim() === ''} onClick={() => void commit()} icon={<Plus className="h-3.5 w-3.5" />} />
       </div>
       {tokens.length > 0 && (
         <ul className="mt-2 flex flex-wrap gap-1.5" aria-label={`${label} terms`}>
@@ -90,4 +105,4 @@ export const TokenInput: React.FC<TokenInputProps> = ({ label, name, tokens, onC
       )}
     </div>
   );
-};
+});

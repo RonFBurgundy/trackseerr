@@ -15,8 +15,11 @@ from plex_playlist_sync.quality_defaults import (
     DEFAULT_RELEASE_PROFILE,
     QUALITY_ORDER,
     V51_NEW_QUALITIES,
+    V51_OLD_PARSE_TARGETS,
+    V52_OLD_DEFAULTS,
     legacy_format_name,
     legacy_tag_format_spec,
+    legacy_cutoff_for_entries,
     legacy_items_to_entries,
     legacy_items_to_entries_with_weight,
     legacy_tag_term,
@@ -42,6 +45,30 @@ def _loads(raw: Any, default: Any) -> Any:
         return default
     return value if value is not None else default
 
+
+
+def _insert_v51_quality(entries: list[dict[str, Any]], quality: str, target: str, last_after: dict[str, str]) -> None:
+    """Inserts ``quality`` right after ``target`` (or after the previous quality inserted there), inheriting its
+    allowed flag. Falls back to a disallowed append when the profile has no ``target``."""
+    anchor = last_after.get(target, target)
+    for idx, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("type") == "group":
+            members = [str(m) for m in entry.get("items") or []]
+            if anchor in members:
+                entry.setdefault("items", members)
+                entry["items"] = members[: members.index(anchor) + 1] + [quality] + members[members.index(anchor) + 1 :]
+                last_after[target] = quality
+                return
+        elif entry.get("quality") == anchor:
+            new: dict[str, Any] = {"type": "quality", "quality": quality, "allowed": bool(entry.get("allowed", True))}
+            if isinstance(entry.get("weight"), int):
+                new["weight"] = entry["weight"]
+            entries.insert(idx + 1, new)
+            last_after[target] = quality
+            return
+    entries.append({"type": "quality", "quality": quality, "allowed": False})
 
 class QualityCatalogMixin:
     # ------------------------------------------------------------------------------------------------------------
@@ -127,10 +154,20 @@ class QualityCatalogMixin:
         )
 
         cur.execute(
-            "SELECT id, name, items_json, preferred_tags_json, ignored_tags_json, min_score FROM quality_profiles"
+            "SELECT id, name, items_json, preferred_tags_json, ignored_tags_json, min_score, cutoff "
+            "FROM quality_profiles"
         )
-        for pid, pname, items_json, pref_json, ign_json, min_score in cur.fetchall():
+        for pid, pname, items_json, pref_json, ign_json, min_score, cutoff in cur.fetchall():
             raw_items = _loads(items_json, [])
+            new_cutoff = cutoff
+            if not is_v2_items(raw_items):
+                # Old engine: rank by weight, cutoff by list index. Keep the same set of qualities cutoff-met.
+                new_cutoff, exact = legacy_cutoff_for_entries(raw_items, str(cutoff))
+                if not exact:
+                    logger.warning(
+                        "Quality profile '%s': list order differs from weight order and the old cutoff set is not "
+                        "representable; cutoff moved to '%s'", pname, new_cutoff,
+                    )
             if min_score is not None and not is_v2_items(raw_items):
                 # The legacy min_score is compared against weight + score, so keep the weights for that check.
                 entries = legacy_items_to_entries_with_weight(raw_items)
@@ -141,15 +178,18 @@ class QualityCatalogMixin:
                 cur, str(pid), str(pname), _loads(pref_json, []), _loads(ign_json, []), fmt_items
             )
             cur.execute(
-                "UPDATE quality_profiles SET items_json = ?, format_items_json = ?, min_format_score = ? WHERE id = ?",
-                (json.dumps(entries), json.dumps(fmt_items), MIGRATED_MIN_FORMAT_SCORE, pid),
+                "UPDATE quality_profiles SET items_json = ?, format_items_json = ?, min_format_score = ?, cutoff = ? "
+                "WHERE id = ?",
+                (json.dumps(entries), json.dumps(fmt_items), MIGRATED_MIN_FORMAT_SCORE, new_cutoff, pid),
             )
 
     def _migration_v51(self, cur: sqlite3.Cursor) -> None:
         """More codecs (ALAC, WAV/AIFF, MP3 V1, AAC other, Opus, OGG Vorbis) and the per-track import bitrate check.
 
         Seeds the new quality_definitions rows (existing rows are never overwritten), appends the new qualities to every
-        quality profile as ``allowed=false`` entries (order, cutoff and existing entries untouched), and adds
+        quality profile. Each new quality inherits ``allowed`` from the quality it used to parse as (ALAC from FLAC 16bit,
+        the rest from Unknown) and sits right after it (inside its group when grouped), so existing profiles grab
+        exactly what they grabbed before. Cutoff and existing entries are untouched. Also adds
         ``media_management_settings.import_bitrate_check`` (default ``warn``). Idempotent.
         """
         for quality, title, lo, pref, hi in DEFAULT_QUALITY_DEFINITIONS:
@@ -162,18 +202,30 @@ class QualityCatalogMixin:
         cur.execute("SELECT id, items_json FROM quality_profiles")
         for pid, items_json in cur.fetchall():
             raw = _loads(items_json, [])
-            # Append to the stored list untouched (order, cutoff, existing entries and weights stay exactly as saved);
-            # only a pre-v2 weight list is converted first.
+            # Stored v2 lists stay exactly as saved (order, cutoff, weights); only a pre-v2 weight list is converted first.
             entries = list(raw) if is_v2_items(raw) else legacy_items_to_entries(raw)
             present = {q for e in normalize_entries(entries) for q in entry_qualities(e)}
             missing = [q for q in V51_NEW_QUALITIES if q not in present]
             if not missing:
                 continue
-            entries.extend({"type": "quality", "quality": q, "allowed": False} for q in missing)
+            last_after: dict[str, str] = {}
+            for q in missing:
+                _insert_v51_quality(entries, q, V51_OLD_PARSE_TARGETS[q], last_after)
             cur.execute("UPDATE quality_profiles SET items_json = ? WHERE id = ?", (json.dumps(entries), pid))
         cur.execute("PRAGMA table_info(media_management_settings);")
         if "import_bitrate_check" not in {row[1] for row in cur.fetchall()}:
             cur.execute("ALTER TABLE media_management_settings ADD COLUMN import_bitrate_check TEXT NOT NULL DEFAULT 'warn';")
+
+    def _migration_v52(self, cur: sqlite3.Cursor) -> None:
+        """Widens the MP3 320 / MP3 V0 max kbps default (350 -> 400). Only rows still equal to the old seeded values
+        are bumped; edited rows are untouched. Idempotent."""
+        new = {q: (lo, pref, hi) for q, _t, lo, pref, hi in DEFAULT_QUALITY_DEFINITIONS}
+        for quality, old in V52_OLD_DEFAULTS.items():
+            cur.execute(
+                "UPDATE quality_definitions SET max_kbps = ? WHERE quality = ? AND min_kbps = ? AND preferred_kbps = ? "
+                "AND max_kbps = ?",
+                (new[quality][2], quality, old[0], old[1], old[2]),
+            )
 
     def _apply_legacy_tags(
         self,
@@ -200,11 +252,21 @@ class QualityCatalogMixin:
         terms = [legacy_tag_term(str(t)) for t in ignored or [] if str(t).strip()]
         if terms:
             rp_name = f"Ignored tags: {profile_name}"
+            # Merge into an existing release profile (never replace edited terms or its scope).
+            prev = cur.execute(
+                "SELECT ignored_json, quality_profile_ids_json FROM release_profiles WHERE name = ?", (rp_name,)
+            ).fetchone()
+            if prev:
+                kept = _loads(prev[0], [])
+                terms = list(kept) + [t for t in terms if t not in kept]
+                profile_ids = _loads(prev[1], [])
+            else:
+                profile_ids = [profile_id]
             cur.execute(
                 "INSERT INTO release_profiles (name, enabled, ignored_json, quality_profile_ids_json) "
                 "VALUES (?, 1, ?, ?) ON CONFLICT(name) DO UPDATE SET ignored_json = excluded.ignored_json, "
                 "quality_profile_ids_json = excluded.quality_profile_ids_json, updated_at = CURRENT_TIMESTAMP",
-                (rp_name, json.dumps(terms), json.dumps([profile_id])),
+                (rp_name, json.dumps(terms), json.dumps(profile_ids)),
             )
         return [{"format_id": k, "score": v} for k, v in scores.items()]
 
@@ -558,6 +620,10 @@ class QualityCatalogMixin:
         )
         custom_formats = src.get("custom_formats", [])
         min_score = src.get("min_score")
+        pref_tags = src.get("preferred_tags", [])
+        ign_tags = src.get("ignored_tags", [])
+        min_size = src.get("min_size_mb")
+        max_size = src.get("max_size_mb")
         format_items = [
             {"format_id": int(i["format_id"]), "score": int(i.get("score", 0))}
             for i in (src.get("format_items") or [])
@@ -566,10 +632,25 @@ class QualityCatalogMixin:
         is_default = bool(src.get("is_default", False))
         with self._lock:
             existing = self.conn.execute(
-                "SELECT format_items_json, min_format_score, cutoff_format_score, min_upgrade_format_score "
+                "SELECT format_items_json, min_format_score, cutoff_format_score, min_upgrade_format_score, "
+                "preferred_tags_json, ignored_tags_json, min_size_mb, max_size_mb, custom_formats_json, min_score "
                 "FROM quality_profiles WHERE id = ?",
                 (p_id,),
             ).fetchone()
+            if existing:
+                # A key missing from ``src`` (e.g. the v2 UI payload) keeps the stored value.
+                if "preferred_tags" not in src:
+                    pref_tags = _loads(existing[4], [])
+                if "ignored_tags" not in src:
+                    ign_tags = _loads(existing[5], [])
+                if "min_size_mb" not in src:
+                    min_size = existing[6]
+                if "max_size_mb" not in src:
+                    max_size = existing[7]
+                if "custom_formats" not in src:
+                    custom_formats = _loads(existing[8], [])
+                if "min_score" not in src:
+                    min_score = existing[9]
             if "format_items" not in src and existing:
                 format_items = _loads(existing[0], [])
             min_fs = src.get("min_format_score", existing[1] if existing else DEFAULT_MIN_FORMAT_SCORE)
@@ -607,10 +688,10 @@ class QualityCatalogMixin:
                     str(src.get("name")),
                     str(src.get("cutoff")),
                     json.dumps(entries),
-                    json.dumps(src.get("preferred_tags", [])),
-                    json.dumps(src.get("ignored_tags", [])),
-                    src.get("min_size_mb"),
-                    src.get("max_size_mb"),
+                    json.dumps(pref_tags),
+                    json.dumps(ign_tags),
+                    min_size,
+                    max_size,
                     1 if is_default else 0,
                     json.dumps(custom_formats if isinstance(custom_formats, list) else []),
                     int(min_score) if min_score is not None else None,

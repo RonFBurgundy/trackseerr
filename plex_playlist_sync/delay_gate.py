@@ -148,13 +148,35 @@ def bypass_reason(
 def item_key(
     request_id: Optional[str], album_id: Optional[str], track_id: Optional[str], artist: str, title: str, album: Optional[str]
 ) -> str:
-    if request_id:
-        return f"req:{request_id}"
+    """Canonical key: ``album:`` > ``track:`` > ``req:`` > name. (Rows also store every id; see ``find_pending_releases``.)"""
     if album_id:
         return f"album:{album_id}"
     if track_id:
         return f"track:{track_id}"
+    if request_id:
+        return f"req:{request_id}"
     return "name:" + "|".join(str(x or "").strip().lower() for x in (artist, title, album))
+
+
+def rank_beats(held: Any, new: Any) -> bool:
+    """True when rank list ``held`` is strictly better than ``new``; ``None`` entries and mixed types never raise.
+
+    ``None`` sorts below every value (a missing score is the worst), mirroring how a missing field ranks last.
+    """
+    held = list(held or [])
+    new = list(new or [])
+    for a, b in zip(held, new):
+        if a == b:
+            continue
+        if a is None:
+            return False
+        if b is None:
+            return True
+        try:
+            return bool(a > b)
+        except TypeError:
+            return str(a) > str(b)
+    return len(held) > len(new)
 
 
 def candidate_to_dict(candidate: AcquisitionSearchResult) -> dict[str, Any]:
@@ -175,6 +197,8 @@ class GateDecision:
     reason: str
     pending: Optional[dict[str, Any]] = None
     candidate: Optional[AcquisitionSearchResult] = None  # what to grab when ``grab`` (the held winner may differ)
+    # Row this call claimed (removed) from the queue; if the grab then fails, ``db.restore_pending_release(claimed)``.
+    claimed: Optional[dict[str, Any]] = None
 
 
 def apply_gate(
@@ -199,30 +223,44 @@ def apply_gate(
     """Decides grab-now vs. hold for the best-ranked candidate of one item, maintaining ``pending_releases``."""
     now = now or utcnow()
     key = item_key(request_id, album_id, track_id, artist, item_title, album)
-    existing = db.get_pending_release_by_key(key)
+    matches = db.find_pending_releases(request_id, album_id, track_id)
+    if not matches:
+        by_key = db.get_pending_release_by_key(key)
+        matches = [by_key] if by_key else []
+    existing = matches[0] if matches else None  # earliest added_at wins: the window anchor
+    for extra in matches[1:]:  # duplicates of one item (legacy keys) collapse into the earliest row
+        db.delete_pending_release(extra["id"])
 
     delay = delay_minutes(profile, candidate.protocol)
     bypass = bypass_reason(profile, result, top_tier)
     if delay <= 0 or bypass:
+        claimed = None
         if existing:
-            db.delete_pending_release(existing["id"])
+            claimed = db.claim_pending_release(existing["id"])
+            if claimed is None:
+                return GateDecision(False, "already being released", pending=existing)
         why = "no delay for this protocol" if delay <= 0 else f"delay bypassed: {bypass}"
-        return GateDecision(True, why, candidate=candidate)
+        return GateDecision(True, why, candidate=candidate, claimed=claimed)
 
     added_at = parse_ts(existing["added_at"]) if existing else now
     release_at = added_at + timedelta(minutes=delay)
     rank_list = [list(x) if isinstance(x, tuple) else x for x in rank]
 
-    if existing and existing["rank"] > rank_list:
+    if existing and rank_beats(existing["rank"], rank_list):
         # The parked release still beats everything the search found now (it may have dropped out of the feed).
         return GateDecision(False, existing["reason"], pending=existing)
 
     if now >= release_at:
+        claimed = None
         if existing:
-            db.delete_pending_release(existing["id"])
-        return GateDecision(True, f"delay window of {delay} min elapsed", candidate=candidate)
+            claimed = db.claim_pending_release(existing["id"])
+            if claimed is None:  # the tick, the endpoint or another search is grabbing this item right now
+                return GateDecision(False, "already being released", pending=existing)
+        return GateDecision(True, f"delay window of {delay} min elapsed", candidate=candidate, claimed=claimed)
 
     reason = f"Delayed {delay} min for {normalize_protocol(candidate.protocol)} (profile '{profile.get('name')}')"
+    if existing and existing["item_key"] != key:  # re-key under the canonical key, window anchor preserved
+        db.delete_pending_release(existing["id"])
     pending = db.upsert_pending_release(
         {
             "item_key": key,
@@ -230,14 +268,15 @@ def apply_gate(
             "artist_name": artist,
             "album": album,
             "item_type": item_type,
-            "album_id": album_id,
-            "track_id": track_id,
-            "request_id": request_id,
+            "album_id": album_id or (existing or {}).get("album_id"),
+            "track_id": track_id or (existing or {}).get("track_id"),
+            "request_id": request_id or (existing or {}).get("request_id"),
             "protocol": normalize_protocol(candidate.protocol),
             "quality": result.parsed_quality,
             "format_score": result.format_score,
             "payload": {
                 "candidate": candidate_to_dict(candidate),
+                "item_title": item_title,
                 "quality_profile_id": quality_profile_id,
                 "upgrade_floor": upgrade_floor,
                 "score": result.score,

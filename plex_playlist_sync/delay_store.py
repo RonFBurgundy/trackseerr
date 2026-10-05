@@ -5,6 +5,7 @@ Mixed into ``storage.Database`` (uses ``self._lock`` / ``self.conn``).
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import json
 import sqlite3
 from typing import Any, Optional
@@ -88,6 +89,43 @@ class DelayProfileMixin:
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_pending_releases_release_at ON pending_releases(release_at)")
+
+    def _migration_v53(self, cur: sqlite3.Cursor) -> None:
+        """Pending-release retry state (``attempts``, ``next_attempt_at``) and one canonical ``item_key`` per item.
+
+        Keys become ``album:<id>`` > ``track:<id>`` > ``req:<id>`` (previously ``req:`` won). Rows that collapse onto the
+        same key keep the earliest ``added_at`` (the delay window anchor); the others are deleted. Idempotent.
+        """
+        cols = {r[1] for r in cur.execute("PRAGMA table_info(pending_releases)").fetchall()}
+        if "attempts" not in cols:
+            cur.execute("ALTER TABLE pending_releases ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
+        if "next_attempt_at" not in cols:
+            cur.execute("ALTER TABLE pending_releases ADD COLUMN next_attempt_at TEXT")
+        rows = cur.execute(
+            "SELECT id, item_key, album_id, track_id, request_id FROM pending_releases ORDER BY added_at, id"
+        ).fetchall()
+        seen: set[str] = set()
+        renames: list[tuple[str, int]] = []
+        deletes: list[int] = []
+        for rid, key, album_id, track_id, request_id in rows:
+            if album_id:
+                target = f"album:{album_id}"
+            elif track_id:
+                target = f"track:{track_id}"
+            elif request_id:
+                target = f"req:{request_id}"
+            else:
+                target = key
+            if target in seen:
+                deletes.append(int(rid))
+                continue
+            seen.add(target)
+            if target != key:
+                renames.append((target, int(rid)))
+        for rid in deletes:
+            cur.execute("DELETE FROM pending_releases WHERE id = ?", (rid,))
+        for target, rid in renames:
+            cur.execute("UPDATE pending_releases SET item_key = ? WHERE id = ?", (target, rid))
 
     # ------------------------------------------------------------------------------------------------------------
     # Delay profiles
@@ -176,8 +214,29 @@ class DelayProfileMixin:
                     int(profile_id),
                 ),
             )
+            self._recompute_pending_release_at(int(profile_id), delays)
             self.conn.commit()
         return self.get_delay_profile(profile_id)
+
+    def _recompute_pending_release_at(self, profile_id: int, delays: dict[str, Any]) -> None:
+        """Re-anchors ``release_at`` of the rows parked under ``profile_id`` to ``added_at`` + the new delay.
+
+        Caller holds ``self._lock`` and commits.
+        """
+        rows = self.conn.execute(
+            "SELECT id, protocol, added_at FROM pending_releases WHERE delay_profile_id = ?", (profile_id,)
+        ).fetchall()
+        for rid, protocol, added_at in rows:
+            minutes = max(0, int(delays.get(protocol or "", 0) or 0))
+            try:
+                base = datetime.strptime(added_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                continue
+            release_at = (base + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            self.conn.execute(
+                "UPDATE pending_releases SET release_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (release_at, int(rid)),
+            )
 
     def delete_delay_profile(self, profile_id: int) -> str:
         """Returns ``deleted``, ``not_found`` or ``default`` (the default profile cannot be deleted)."""
@@ -233,13 +292,15 @@ class DelayProfileMixin:
         return self._pending_row(row) if row else None
 
     def list_pending_releases(self, due_before: Optional[str] = None) -> list[dict[str, Any]]:
-        """All pending releases by ``release_at``; with ``due_before`` only those whose window has elapsed."""
+        """All pending releases by ``release_at``; with ``due_before`` only those whose window has elapsed and whose retry backoff is over."""
         with self._lock:
             if due_before is None:
                 rows = self.conn.execute("SELECT * FROM pending_releases ORDER BY release_at, id").fetchall()
             else:
                 rows = self.conn.execute(
-                    "SELECT * FROM pending_releases WHERE release_at <= ? ORDER BY release_at, id", (due_before,)
+                    "SELECT * FROM pending_releases WHERE release_at <= ? "
+                    "AND (next_attempt_at IS NULL OR next_attempt_at <= ?) ORDER BY release_at, id",
+                    (due_before, due_before),
                 ).fetchall()
         return [self._pending_row(r) for r in rows]
 
@@ -258,7 +319,8 @@ class DelayProfileMixin:
                     request_id = excluded.request_id, protocol = excluded.protocol, quality = excluded.quality,
                     format_score = excluded.format_score, payload_json = excluded.payload_json,
                     rank_json = excluded.rank_json, delay_profile_id = excluded.delay_profile_id,
-                    reason = excluded.reason, release_at = excluded.release_at, updated_at = CURRENT_TIMESTAMP
+                    reason = excluded.reason, release_at = excluded.release_at, attempts = 0, next_attempt_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
                 """,
                 (
                     row["item_key"],
@@ -290,3 +352,107 @@ class DelayProfileMixin:
             cur = self.conn.execute("DELETE FROM pending_releases WHERE id = ?", (int(pending_id),))
             self.conn.commit()
             return cur.rowcount > 0
+
+    def find_pending_releases(
+        self, request_id: Optional[str] = None, album_id: Optional[str] = None, track_id: Optional[str] = None
+    ) -> list[dict[str, Any]]:
+        """Pending rows matching ANY of the given identifiers, earliest ``added_at`` first."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        for column, value in (("request_id", request_id), ("album_id", album_id), ("track_id", track_id)):
+            if value:
+                clauses.append(f"{column} = ?")
+                params.append(str(value))
+        if not clauses:
+            return []
+        with self._lock:
+            rows = self.conn.execute(
+                f"SELECT * FROM pending_releases WHERE {' OR '.join(clauses)} ORDER BY added_at, id", params
+            ).fetchall()
+        return [self._pending_row(r) for r in rows]
+
+    def clear_pending_for_item(
+        self, request_id: Optional[str] = None, album_id: Optional[str] = None, track_id: Optional[str] = None
+    ) -> int:
+        """Deletes every pending row that shares a request, album or track id with the item; returns the count."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        for column, value in (("request_id", request_id), ("album_id", album_id), ("track_id", track_id)):
+            if value:
+                clauses.append(f"{column} = ?")
+                params.append(str(value))
+        if not clauses:
+            return 0
+        with self._lock:
+            cur = self.conn.execute(f"DELETE FROM pending_releases WHERE {' OR '.join(clauses)}", params)
+            self.conn.commit()
+            return int(cur.rowcount)
+
+    def claim_pending_release(self, pending_id: int) -> Optional[dict[str, Any]]:
+        """Atomically removes and returns the row, or None when another grab path already claimed it.
+
+        Every grab path (tick, endpoint, gate) must claim before dispatching so a release is grabbed once. On a failed
+        grab call ``restore_pending_release``.
+        """
+        with self._lock:
+            row = self.conn.execute("DELETE FROM pending_releases WHERE id = ? RETURNING *", (int(pending_id),)).fetchone()
+            self.conn.commit()
+        return self._pending_row(row) if row else None
+
+    def restore_pending_release(
+        self, row: dict[str, Any], attempts: Optional[int] = None, next_attempt_at: Optional[str] = None
+    ) -> bool:
+        """Re-inserts a claimed row after a failed grab. A newer row parked for the same item meanwhile wins."""
+        with self._lock:
+            cur = self.conn.execute(
+                """
+                INSERT OR IGNORE INTO pending_releases (
+                    id, item_key, title, artist_name, album, item_type, album_id, track_id, request_id, protocol,
+                    quality, format_score, payload_json, rank_json, delay_profile_id, reason, added_at, release_at,
+                    attempts, next_attempt_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (
+                    row["id"],
+                    row["item_key"],
+                    row["title"],
+                    row.get("artist_name") or "",
+                    row.get("album"),
+                    row.get("item_type") or "track",
+                    row.get("album_id"),
+                    row.get("track_id"),
+                    row.get("request_id"),
+                    row.get("protocol") or "",
+                    row.get("quality"),
+                    int(row.get("format_score") or 0),
+                    json.dumps(row.get("payload") or {}),
+                    json.dumps(row.get("rank") or []),
+                    row.get("delay_profile_id"),
+                    row.get("reason") or "",
+                    row["added_at"],
+                    row["release_at"],
+                    int(row.get("attempts") if attempts is None else attempts),
+                    row.get("next_attempt_at") if attempts is None else next_attempt_at,
+                ),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def library_item_has_file(self, artist: str, title: str, album: Optional[str], item_type: str) -> bool:
+        """True when the library already holds a file for the item (track by title, album by any track file)."""
+        from plex_playlist_sync.storage import clean_library_name  # local: storage imports this mixin
+
+        with self._lock:
+            if item_type == "album":
+                row = self.conn.execute(
+                    """
+                    SELECT 1 FROM library_albums al
+                    JOIN library_artists a ON a.id = al.artist_id
+                    JOIN library_tracks t ON t.album_id = al.id
+                    JOIN library_files f ON f.track_id = t.id
+                    WHERE a.clean_name = ? AND al.clean_title = ? LIMIT 1
+                    """,
+                    (clean_library_name(artist or ""), clean_library_name(album or title or "")),
+                ).fetchone()
+                return row is not None
+        return self.library_track_has_file(artist, title)  # type: ignore[attr-defined]

@@ -107,7 +107,7 @@ const EditorBody: React.FC<BodyProps> = ({ target, definitions, formats, onClose
           />
         </Group>
 
-        <FormField label="Upgrade until quality (cutoff)" htmlFor={`${uid}-cutoff`} hint="Upgrades stop once a file reaches this entry. Only allowed entries are listed.">
+        <FormField label="Upgrade until quality (cutoff)" htmlFor={`${uid}-cutoff`} hint="Upgrades stop once a file reaches this entry. Allowed entries are listed.">
           <select
             id={`${uid}-cutoff`}
             name="cutoff"
@@ -118,9 +118,15 @@ const EditorBody: React.FC<BodyProps> = ({ target, definitions, formats, onClose
             {draft.cutoffOptions.map((label) => (
               <option key={label} value={label}>
                 {titleOf(label)}
+                {label === draft.cutoff && draft.cutoffNotAllowed ? ' (not allowed)' : ''}
               </option>
             ))}
           </select>
+          {draft.cutoffNotAllowed && (
+            <p role="alert" className="mt-1 text-[11px] font-mono text-[var(--accent-amber)]">
+              The cutoff is not an allowed quality, so it can never be reached. Pick an allowed entry or allow this one.
+            </p>
+          )}
         </FormField>
 
         <Group title="Custom format scores" hint="Scores add up per release. Positive scores are preferred, negative ones penalised. Blank = 0.">

@@ -522,6 +522,7 @@ def test_acquisition_worker_reconciles_multitrack_album_with_unacquired_remainin
             "root_folder_path": str(music_dir),
             "staging_folder_path": str(staging_dir),
             "library_mode": "native",
+            "enrich_mbids": False,  # no real MusicBrainz / Cover Art Archive lookups in tests
             "track_format": "{Artist}/{Album}/{TrackNumber:02d} - {Title}",
         }
     )

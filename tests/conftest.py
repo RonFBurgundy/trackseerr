@@ -1,6 +1,8 @@
 """Pytest configuration and global fixtures for TrackSeerr test suite."""
 
 import os
+from pathlib import Path
+import socket
 
 # Default to legacy UI for backwards compatibility with existing frontend tests.
 # New React SPA tests explicitly unset or set TRACKSEERR_LEGACY_UI to '0'.
@@ -13,6 +15,15 @@ collect_ignore_glob = [] if os.environ.get("RUN_INTEGRATION") == "1" else ["inte
 
 
 def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "real_metadata_network: allow real DNS/HTTP to musicbrainz.org, api.deezer.com, coverartarchive.org, "
+        "itunes.apple.com (refused by default in tests)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "real_mediacover_http: let MediaCoverService make real outbound HTTP (blocked by default in tests)",
+    )
     config.addinivalue_line(
         "markers",
         "real_art_pipeline: keep the real art pre-cache / thumbnail pre-generate / startup-backfill schedulers "
@@ -129,7 +140,126 @@ def _isolated_lidarr_cover_cache(tmp_path, monkeypatch):
     """Fetched Lidarr covers are cached on disk under the mediacover base dir: keep that per-test, never shared."""
     from plex_playlist_sync.mediacover import mediacover_service
 
-    monkeypatch.setattr(mediacover_service, "base_dir", tmp_path / "mediacover-base")
+    base = tmp_path / "mediacover-base"
+    monkeypatch.setattr(mediacover_service, "base_dir", base)
+    # artists_dir/albums_dir are resolved once at construction (/data or /config); a stale one makes every cached
+    # download fail on a read-only /data and writes outside the per-test sandbox.
+    monkeypatch.setattr(mediacover_service, "artists_dir", base / "mediacover" / "artists")
+    monkeypatch.setattr(mediacover_service, "albums_dir", base / "mediacover" / "albums")
+
+
+class _BlockedHttp:
+    """Stands in for ``mediacover.requests``: real outbound HTTP is refused unless a test mocks ``requests.get``."""
+
+    def __init__(self) -> None:
+        import requests
+
+        self._requests = requests
+        self._real_get = requests.get
+        self.get = self._get
+        self.blocked: list[str] = []
+
+    def _get(self, url, *args, **kwargs):
+        current = self._requests.get  # honours ``patch("requests.get")`` as well as ``patch.object(mc.requests, "get")``
+        if current is not self._real_get:
+            return current(url, *args, **kwargs)
+        self.blocked.append(url)
+        raise self._requests.ConnectionError(f"real HTTP blocked in tests: {url}")
+
+    def __getattr__(self, name):
+        return getattr(self._requests, name)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_mediacover_service(request, monkeypatch):
+    """The MediaCoverService singleton owns a background download pool, an in-flight map, a negative cache and per-host
+    circuit-breaker state. Without this, one test's queued downloads (real coverartarchive/Deezer fetches) run during a
+    later test and starve its waits. Real HTTP is blocked by default (opt in with ``@pytest.mark.real_mediacover_http``),
+    and the pool and failure memory are reset after every test."""
+    import plex_playlist_sync.mediacover as mc
+
+    svc = mc.mediacover_service
+
+    def _reset() -> None:
+        with svc._state_lock:
+            executor, svc._executor = svc._executor, None
+            svc._inflight.clear()
+            svc._negative.clear()
+            svc._host_failures.clear()
+            svc._host_open_until.clear()
+        if executor is not None:
+            executor.shutdown(wait=True, cancel_futures=True)
+
+    _reset()  # also at setup: a stray thread from an earlier test may have dirtied it after that test's teardown
+    if not request.node.get_closest_marker("real_mediacover_http"):
+        monkeypatch.setattr(mc, "requests", _BlockedHttp())
+    yield
+    _reset()
+
+
+_BANNED_HOSTS = ("musicbrainz.org", "api.deezer.com", "deezer.com", "coverartarchive.org", "itunes.apple.com")
+_real_getaddrinfo = socket.getaddrinfo
+_network_violations: list[str] = []
+
+
+def _guarded_getaddrinfo(host, *args, **kwargs):
+    name = host.decode() if isinstance(host, bytes) else str(host or "")
+    if any(name == h or name.endswith("." + h) for h in _BANNED_HOSTS):
+        import threading
+        import traceback
+
+        where = " <- ".join(
+            f"{f.name}@{Path(f.filename).name}:{f.lineno}" for f in reversed(traceback.extract_stack()[-14:-1])
+        )
+        _network_violations.append(f"{name} [thread {threading.current_thread().name}] {where}")
+        raise socket.gaierror(socket.EAI_NONAME, f"real network to {name} blocked in tests")
+    return _real_getaddrinfo(host, *args, **kwargs)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_metadata_network(request, monkeypatch):
+    """No test may resolve musicbrainz.org, api.deezer.com, coverartarchive.org or itunes.apple.com: those must be
+    mocked. Name resolution is refused for every client library (and every thread, including strays that outlive their
+    test), and any attempt fails the test it landed in. Opt out with ``@pytest.mark.real_metadata_network``."""
+    if request.node.get_closest_marker("real_metadata_network"):
+        yield
+        return
+    _network_violations.clear()
+    monkeypatch.setattr(socket, "getaddrinfo", _guarded_getaddrinfo)
+    yield
+    if _network_violations:
+        seen = list(dict.fromkeys(_network_violations))
+        _network_violations.clear()
+        pytest.fail(f"real outbound network attempted ({len(seen)} distinct):\n" + "\n".join(seen[:5]), pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def _offline_cover_art_archive(monkeypatch):
+    """The acquisition import path fetches an embedded-cover fallback with ``httpx.get`` straight from the Cover Art
+    Archive. Answer those (and only those) with a 404 so tests that mock the MBID lookup stay offline; a test that
+    patches ``httpx.get`` itself overrides this."""
+    import httpx
+
+    real_get = httpx.get
+
+    def _get(url, *args, **kwargs):
+        host = (httpx.URL(str(url)).host or "").lower()
+        if any(host == h or host.endswith("." + h) for h in _BANNED_HOSTS):
+            return httpx.Response(404, request=httpx.Request("GET", str(url)))
+        return real_get(url, *args, **kwargs)
+
+    monkeypatch.setattr(httpx, "get", _get)
+
+
+@pytest.fixture(autouse=True)
+def _reset_art_executors():
+    """The art pre-cache and thumbnail pre-generation pools are module singletons that outlive a test. Cancel what is
+    queued and drop the pools (a fresh one is built, with a fresh stop event, on next use) at setup and teardown."""
+    from plex_playlist_sync import art_pipeline
+
+    art_pipeline.shutdown()
+    yield
+    art_pipeline.shutdown()
 
 
 @pytest.fixture(autouse=True)

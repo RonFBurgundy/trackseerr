@@ -15,7 +15,8 @@ export interface UseReleaseProfileDraftReturn {
   qualityProfileIds: string[];
   toggleQualityProfile: (id: string) => void;
   problem: string | null;
-  toInput: () => ReleaseProfileInput | null;
+  /** Pass the flushed token lists to include text typed but not yet committed. */
+  toInput: (terms?: { required: string[]; ignored: string[] }) => ReleaseProfileInput | null;
 }
 
 const toggled = (list: string[], id: string): string[] => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
@@ -34,13 +35,13 @@ export function useReleaseProfileDraft(profile: ReleaseProfile | null): UseRelea
 
   const problem = name.trim() ? null : 'Give the profile a name.';
 
-  const toInput = useCallback((): ReleaseProfileInput | null => {
+  const toInput = useCallback((terms?: { required: string[]; ignored: string[] }): ReleaseProfileInput | null => {
     if (problem) return null;
     return {
       name: name.trim(),
       enabled,
-      required,
-      ignored,
+      required: terms?.required ?? required,
+      ignored: terms?.ignored ?? ignored,
       indexer_ids: indexerIds,
       tags: profile?.tags.map(String) ?? [],
       quality_profile_ids: qualityProfileIds,
