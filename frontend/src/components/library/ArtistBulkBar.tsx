@@ -1,15 +1,27 @@
-import React, { useId, useState } from 'react';
-import { Check, Eye, EyeOff, Loader2, X } from 'lucide-react';
+import React, { useEffect, useId, useState } from 'react';
+import { X } from 'lucide-react';
 import type { QualityProfile } from '@/types/models';
 import type { ReleaseProfile } from '@/types/releaseProfiles';
-import { MONITOR_OPTION_HINTS, MONITOR_OPTION_LABELS, type MonitorOption } from '@/types/monitoring';
+import { MONITOR_OPTIONS, MONITOR_OPTION_HINTS, MONITOR_OPTION_LABELS, type MonitorOption } from '@/types/monitoring';
 import type { UseBulkSelectionReturn } from '@/hooks/useBulkSelection';
-import type { UseArtistBulkEditReturn } from '@/hooks/useArtistBulkEdit';
-import { ActionBar, MachinedCard, MonitorOptionSelect, TapeDeckButton } from '@/components/ui';
-import { inputClass } from '@/components/settings/formClasses';
+import type { ArtistBulkPatch, UseArtistBulkEditReturn } from '@/hooks/useArtistBulkEdit';
+import { ConfirmDialog, TapeDeckButton } from '@/components/ui';
+import { BulkEditSheet, BulkField, bulkSelectClass } from './BulkEditSheet';
 
-const NO_PROFILE = '__none__';
+/** Sentinel for "No change" in every field. */
 const KEEP = '';
+/** Sentinel for an explicit clear (profile = none). */
+const NONE = '__none__';
+
+type MonitoredChoice = '' | 'true' | 'false';
+
+function isMonitoredChoice(v: string): v is MonitoredChoice {
+  return v === '' || v === 'true' || v === 'false';
+}
+
+function isMonitorOption(v: string): v is MonitorOption {
+  return MONITOR_OPTIONS.some((o) => o.value === v);
+}
 
 export interface ArtistBulkBarProps {
   selection: UseBulkSelectionReturn;
@@ -25,7 +37,7 @@ export interface ArtistBulkBarProps {
   releaseProfilesLoading: boolean;
 }
 
-/** Lidarr-style mass editor for the artists grid. */
+/** Lidarr-style mass editor for the artists grid: choose the changes, then press Apply once. */
 export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
   selection,
   total,
@@ -37,198 +49,232 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
   releaseProfilesLoading,
 }) => {
   const uid = useId();
-  const [option, setOption] = useState<MonitorOption>('existing');
-  const [applyToAlbums, setApplyToAlbums] = useState<boolean>(true);
-  const [profile, setProfile] = useState<string>('');
+  const [monitored, setMonitored] = useState<MonitoredChoice>('');
+  const [option, setOption] = useState<string>(KEEP);
+  const [quality, setQuality] = useState<string>(KEEP);
   const [releaseProfile, setReleaseProfile] = useState<string>(KEEP);
+  const [applyToAlbums, setApplyToAlbums] = useState<boolean>(false);
+  // Until the user touches the checkbox it mirrors the server default; only a touched value is sent.
+  const [applyTouched, setApplyTouched] = useState<boolean>(false);
 
   const count = selection.count(total);
   const empty = count === 0;
-  const disabled = empty || edit.busy;
-  const countLabel = selection.allMatching
-    ? `All ${total.toLocaleString()} artists`
-    : `${count.toLocaleString()} selected`;
+  const countLabel = selection.allMatching ? `All ${total.toLocaleString()} artists` : `${count.toLocaleString()} selected`;
+  const dirty = monitored !== '' || option !== KEEP || quality !== KEEP || releaseProfile !== KEEP;
+  const cascadeRelevant = monitored !== '' || option !== KEEP || releaseProfile !== KEEP;
 
-  if (edit.pending) {
-    const { pending } = edit;
-    return (
-      <MachinedCard role="alertdialog" aria-label="Confirm bulk edit" className="p-3 space-y-3 border-[#e5a00d]/40">
-        <p className="text-xs font-mono text-white">
-          {pending.summary} for{' '}
-          {selection.allMatching
-            ? `all ${pending.targetCount.toLocaleString()} artists`
-            : `${pending.targetCount.toLocaleString()} selected ${pending.targetCount === 1 ? 'artist' : 'artists'}`}
-          ?
-        </p>
-        {pending.patch.apply_monitor_to_albums === true && (
-          <p className="text-[11px] font-mono text-neutral-400">
-            This also changes monitoring on every existing album of each artist.
-          </p>
-        )}
-        {pending.patch.release_profile_id !== undefined && (
-          <p className="text-[11px] font-mono text-amber-300">
-            {pending.patch.apply_monitor_to_albums === true
-              ? `"Also apply to existing albums" is checked: this will recompute monitoring for ${pending.targetCount.toLocaleString()} ${pending.targetCount === 1 ? 'artist' : 'artists'} and replace manual monitoring choices.`
-              : `"Also apply to existing albums" is unchecked: the profile is saved for future releases only; existing albums are unchanged.`}
-          </p>
-        )}
-        <ActionBar align="end">
-          <TapeDeckButton
-            variant="amber"
-            disabled={edit.busy}
-            onClick={edit.confirm}
-            icon={edit.busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-          >
-            Confirm
-          </TapeDeckButton>
-          <TapeDeckButton disabled={edit.busy} onClick={edit.cancel}>
-            Cancel
-          </TapeDeckButton>
-        </ActionBar>
-      </MachinedCard>
-    );
-  }
+  // Server default: cascade on unmonitor, otherwise recompute only artists whose monitor option changes.
+  const serverDefaultApply = monitored === 'false';
+  useEffect(() => {
+    if (!applyTouched) setApplyToAlbums(serverDefaultApply);
+  }, [applyTouched, serverDefaultApply]);
 
-  const apply = (patch: Parameters<UseArtistBulkEditReturn['request']>[0], summary: string): void =>
-    edit.request(patch, summary);
+  const resetFields = (): void => {
+    setMonitored('');
+    setOption(KEEP);
+    setQuality(KEEP);
+    setReleaseProfile(KEEP);
+    setApplyToAlbums(false);
+    setApplyTouched(false);
+  };
+
+  const qualityName = (v: string): string =>
+    v === NONE ? 'no quality profile' : (profiles.find((p) => String(p.id) === v)?.name ?? v);
+  const releaseName = (v: string): string =>
+    v === NONE ? 'no release profile' : (releaseProfiles.find((p) => String(p.id) === v)?.name ?? v);
+
+  const stage = (): void => {
+    const patch: ArtistBulkPatch = {};
+    const changes: string[] = [];
+    const warnings: string[] = [];
+    if (monitored !== '') {
+      patch.monitored = monitored === 'true';
+      changes.push(monitored === 'true' ? 'Monitored' : 'Unmonitored');
+    }
+    if (isMonitorOption(option)) {
+      patch.monitor_option = option;
+      changes.push(`monitor option ${MONITOR_OPTION_LABELS[option]}`);
+    }
+    if (quality !== KEEP) {
+      patch.quality_profile_id = quality === NONE ? null : quality;
+      changes.push(`quality profile ${qualityName(quality)}`);
+    }
+    if (releaseProfile !== KEEP) {
+      patch.release_profile_id = releaseProfile === NONE ? null : Number(releaseProfile);
+      changes.push(`release profile ${releaseName(releaseProfile)}`);
+    }
+    if (cascadeRelevant) {
+      if (applyTouched) {
+        patch.apply_monitor_to_albums = applyToAlbums;
+        if (applyToAlbums) {
+          changes.push('apply to their existing albums (replaces manual choices)');
+          warnings.push('Monitoring on every existing album of each artist is recomputed; manual album choices are replaced.');
+        } else {
+          warnings.push('Existing albums are left unchanged; settings apply to future releases only.');
+        }
+      } else if (monitored === 'false') {
+        warnings.push('Unmonitoring also unmonitors every existing album of these artists.');
+      } else if (option !== KEEP) {
+        warnings.push('Existing albums are recomputed only for artists whose monitor option actually changes; manual choices on those are replaced.');
+      } else {
+        warnings.push('Existing albums are unchanged; settings apply to future releases only.');
+      }
+    }
+    const target = `${count.toLocaleString()} ${count === 1 ? 'artist' : 'artists'}`;
+    const lead = monitored !== '' ? `Set ${target} to ${changes[0]}` : `Set ${target}: ${changes[0]}`;
+    const rest = changes.slice(1);
+    const summary =
+      rest.length === 0
+        ? lead
+        : `${lead}, ${rest.length > 1 ? `${rest.slice(0, -1).join(', ')}, and ${rest[rest.length - 1]}` : `and ${rest[0]}`}`;
+    edit.request(patch, summary, changes.join(', '), warnings);
+  };
+
+  const handleConfirm = async (): Promise<void> => {
+    if (await edit.confirm()) resetFields();
+  };
+
+  const field = (suffix: string): string => `${uid}-${suffix}`;
 
   return (
-    <MachinedCard className="p-3 space-y-3" aria-label="Bulk edit artists">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div className="min-w-0">
-          <span className="text-xs font-mono font-bold uppercase text-[#e5a00d]">{countLabel}</span>
-          {!canSelectAll && (
-            <p className="text-[11px] font-mono text-neutral-500">Clear search and filters to select every artist.</p>
-          )}
-        </div>
-        <ActionBar align="end">
-          {canSelectAll && !selection.allMatching && (
-            <TapeDeckButton size="sm" onClick={selection.selectAllMatching}>
-              {`All ${total.toLocaleString()} artists`}
+    <>
+      <BulkEditSheet
+        ariaLabel="Bulk edit artists"
+        countLabel={countLabel}
+        applyDisabled={empty || !dirty}
+        busy={edit.busy}
+        onApply={stage}
+        headerActions={
+          <>
+            {canSelectAll && !selection.allMatching && (
+              <TapeDeckButton type="button" size="sm" onClick={selection.selectAllMatching}>
+                {`All ${total.toLocaleString()}`}
+              </TapeDeckButton>
+            )}
+            <TapeDeckButton type="button" size="sm" onClick={selection.clear} disabled={empty}>
+              Clear selection
             </TapeDeckButton>
-          )}
-          <TapeDeckButton size="sm" onClick={selection.clear} disabled={empty}>
-            Clear
-          </TapeDeckButton>
-          <TapeDeckButton size="sm" onClick={selection.exit} icon={<X className="h-3.5 w-3.5" />}>
-            Done
-          </TapeDeckButton>
-        </ActionBar>
-      </div>
-
-      <ActionBar>
-        <TapeDeckButton
-          size="sm"
-          disabled={disabled}
-          onClick={() => apply({ monitored: true, apply_monitor_to_albums: applyToAlbums }, 'Monitor')}
-          icon={<Eye className="h-3.5 w-3.5" />}
-        >
-          Monitor
-        </TapeDeckButton>
-        <TapeDeckButton
-          size="sm"
-          disabled={disabled}
-          onClick={() => apply({ monitored: false, apply_monitor_to_albums: applyToAlbums }, 'Unmonitor')}
-          icon={<EyeOff className="h-3.5 w-3.5" />}
-        >
-          Unmonitor
-        </TapeDeckButton>
-      </ActionBar>
-
-      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
-        <MonitorOptionSelect
-          value={option}
-          onChange={setOption}
-          id={`${uid}-option`}
-          name="monitor-option"
-          disabled={edit.busy}
-          aria-label="Monitor option"
-          className="sm:w-56"
-        />
-        <select
-          id={`${uid}-release-profile`}
-          name="release-profile"
-          value={releaseProfile}
-          onChange={(e) => setReleaseProfile(e.target.value)}
-          disabled={edit.busy || releaseProfilesLoading}
-          aria-label="Release profile"
-          className={`${inputClass} sm:w-56`}
-        >
-          <option value={KEEP}>{releaseProfilesLoading ? 'Loading profiles...' : 'Release profile: unchanged'}</option>
-          <option value={NO_PROFILE}>No release profile (clear)</option>
-          {releaseProfiles.map((p) => (
-            <option key={p.id} value={String(p.id)}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-        <label className="flex items-center gap-2 min-h-[44px] sm:min-h-0 text-xs font-mono text-neutral-300 cursor-pointer">
-          <input
-            id={`${uid}-albums`}
-            name="apply-to-albums"
-            type="checkbox"
-            checked={applyToAlbums}
-            onChange={(e) => setApplyToAlbums(e.target.checked)}
-            className="h-5 w-5 accent-[#e5a00d]"
-          />
-          Also apply to existing albums
-        </label>
-        <TapeDeckButton
-          size="sm"
-          variant="amber"
-          disabled={disabled}
-          className="sm:ml-auto"
-          onClick={() => {
-            const patch: Parameters<UseArtistBulkEditReturn['request']>[0] = {
-              monitor_option: option,
-              apply_monitor_to_albums: applyToAlbums,
-            };
-            let summary = `Set monitoring to "${MONITOR_OPTION_LABELS[option]}"`;
-            if (releaseProfile !== KEEP) {
-              const chosen = releaseProfile === NO_PROFILE ? null : Number(releaseProfile);
-              patch.release_profile_id = chosen;
-              const name = chosen === null ? 'no release profile' : (releaseProfiles.find((p) => p.id === chosen)?.name ?? String(chosen));
-              summary += ` with ${name}`;
-            }
-            apply(patch, summary);
-          }}
-        >
-          Apply monitoring
-        </TapeDeckButton>
-      </div>
-      <p className="text-[11px] font-mono text-neutral-500">{MONITOR_OPTION_HINTS[option]}</p>
-
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-        <select
-          id={`${uid}-profile`}
-          name="quality-profile"
-          value={profile}
-          onChange={(e) => setProfile(e.target.value)}
-          disabled={edit.busy || profilesLoading}
-          aria-label="Quality profile"
-          className={`${inputClass} sm:w-56`}
-        >
-          <option value="">{profilesLoading ? 'Loading profiles...' : 'Quality profile...'}</option>
-          <option value={NO_PROFILE}>No profile (clear)</option>
-          {profiles.map((p) => (
-            <option key={p.id} value={String(p.id)}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-        <TapeDeckButton
-          size="sm"
-          disabled={disabled || profile === ''}
-          className="sm:ml-auto"
-          onClick={() => {
-            const chosen = profile === NO_PROFILE ? null : profile;
-            const name = chosen === null ? 'no profile' : (profiles.find((p) => String(p.id) === chosen)?.name ?? chosen);
-            apply({ quality_profile_id: chosen }, `Set quality profile to ${name}`);
-          }}
-        >
-          Apply profile
-        </TapeDeckButton>
-      </div>
-    </MachinedCard>
+            <TapeDeckButton type="button" size="sm" onClick={selection.exit} icon={<X className="h-3.5 w-3.5" />}>
+              Done
+            </TapeDeckButton>
+          </>
+        }
+        notice={
+          <>
+            {isMonitorOption(option) && (
+              <p className="text-[11px] font-mono text-neutral-500">{MONITOR_OPTION_HINTS[option]}</p>
+            )}
+            {!canSelectAll && (
+              <p className="text-[11px] font-mono text-neutral-500">Clear search and filters to select every artist.</p>
+            )}
+          </>
+        }
+      >
+        <BulkField id={field('monitored')} label="Monitored">
+          <select
+            id={field('monitored')}
+            name="bulk-monitored"
+            value={monitored}
+            disabled={edit.busy}
+            onChange={(e) => {
+              if (isMonitoredChoice(e.target.value)) setMonitored(e.target.value);
+            }}
+            className={bulkSelectClass}
+          >
+            <option value="">No change</option>
+            <option value="true">Monitored</option>
+            <option value="false">Unmonitored</option>
+          </select>
+        </BulkField>
+        <BulkField id={field('option')} label="Monitor option">
+          <select
+            id={field('option')}
+            name="bulk-monitor-option"
+            value={option}
+            disabled={edit.busy}
+            onChange={(e) => setOption(e.target.value)}
+            className={bulkSelectClass}
+          >
+            <option value={KEEP}>No change</option>
+            {MONITOR_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </BulkField>
+        <BulkField id={field('quality')} label="Quality profile">
+          <select
+            id={field('quality')}
+            name="bulk-quality-profile"
+            value={quality}
+            disabled={edit.busy || profilesLoading}
+            onChange={(e) => setQuality(e.target.value)}
+            className={bulkSelectClass}
+          >
+            <option value={KEEP}>{profilesLoading ? 'Loading...' : 'No change'}</option>
+            <option value={NONE}>None</option>
+            {profiles.map((p) => (
+              <option key={p.id} value={String(p.id)}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </BulkField>
+        <BulkField id={field('release')} label="Release profile">
+          <select
+            id={field('release')}
+            name="bulk-release-profile"
+            value={releaseProfile}
+            disabled={edit.busy || releaseProfilesLoading}
+            onChange={(e) => setReleaseProfile(e.target.value)}
+            className={bulkSelectClass}
+          >
+            <option value={KEEP}>{releaseProfilesLoading ? 'Loading...' : 'No change'}</option>
+            <option value={NONE}>None</option>
+            {releaseProfiles.map((p) => (
+              <option key={p.id} value={String(p.id)}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </BulkField>
+        {cascadeRelevant && (
+          <label
+            htmlFor={field('albums')}
+            className="col-span-2 flex min-h-[36px] cursor-pointer items-center gap-2 text-xs font-mono text-neutral-300 sm:col-span-1 sm:min-h-0"
+          >
+            <input
+              id={field('albums')}
+              name="bulk-apply-to-albums"
+              type="checkbox"
+              checked={applyToAlbums}
+              disabled={edit.busy}
+              onChange={(e) => {
+                setApplyTouched(true);
+                setApplyToAlbums(e.target.checked);
+              }}
+              className="h-5 w-5 accent-[#e5a00d]"
+            />
+            Also apply to existing albums
+          </label>
+        )}
+      </BulkEditSheet>
+      <ConfirmDialog
+        isOpen={edit.pending !== null}
+        title="Apply bulk edit"
+        confirmLabel="Apply"
+        busy={edit.busy}
+        onConfirm={() => void handleConfirm()}
+        onCancel={edit.cancel}
+      >
+        <p className="font-mono text-xs text-white">{edit.pending?.summary}</p>
+        {edit.pending?.warnings.map((w) => (
+          <p key={w} className="mt-2 font-mono text-[11px] text-amber-300">
+            {w}
+          </p>
+        ))}
+      </ConfirmDialog>
+    </>
   );
 };

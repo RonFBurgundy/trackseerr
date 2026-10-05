@@ -105,13 +105,13 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <h3 className="text-base sm:text-lg font-bold text-white truncate font-mono" title={album.title}>
+              <h3 className="text-sm sm:text-lg font-bold text-white truncate font-mono" title={album.title}>
                 {album.title}
               </h3>
               <button
                 type="button"
                 onClick={goToArtist}
-                className="text-sm text-[#e5a00d] hover:underline truncate block max-w-full min-h-[44px] sm:min-h-0 font-mono text-left"
+                className="text-sm text-[#e5a00d] hover:underline truncate block max-w-full min-h-[36px] sm:min-h-0 font-mono text-left"
                 title="View Artist Discography"
               >
                 {album.artist_name || 'Unknown Artist'}

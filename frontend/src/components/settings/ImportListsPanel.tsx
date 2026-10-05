@@ -64,10 +64,10 @@ export const ImportListsPanel: React.FC<ImportListsPanelProps> = ({ libraryMode,
 
       <ScrollFill ariaLabel="Import lists" className="grid grid-cols-1 gap-3 content-start">
         {lists.lists.map((l) => (
-          <MachinedCard key={l.id} className="p-4 space-y-3">
+          <MachinedCard key={l.id} className="p-3 sm:p-4 space-y-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h4 className="font-bold text-base text-white truncate" title={l.name}>
+                <h4 className="font-bold text-sm sm:text-base text-white truncate" title={l.name}>
                   {l.name}
                 </h4>
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-mono text-neutral-400">

@@ -68,7 +68,7 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, reload, 
       ) : (
         <ScrollFill ariaLabel="Indexers" className="grid grid-cols-1 md:grid-cols-2 gap-4 content-start">
           {indexers.map((idx) => (
-            <MachinedCard key={idx.id} className="p-4 flex items-center justify-between gap-3">
+            <MachinedCard key={idx.id} className="p-3 sm:p-4 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-sm text-white">{idx.name}</span>
@@ -94,7 +94,7 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, reload, 
         </ScrollFill>
       )}
 
-      <MachinedCard className="p-5 max-w-xl">
+      <MachinedCard className="p-3 sm:p-5 max-w-xl">
         <h4 className="text-xs font-bold uppercase font-mono text-white mb-4">Add New Indexer (Torznab / Newznab)</h4>
         <form onSubmit={handleAdd} className="space-y-4">
           <div>

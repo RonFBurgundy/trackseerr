@@ -14,7 +14,7 @@ export const LibraryScanBanner: React.FC<LibraryScanBannerProps> = ({ scanStatus
   const found = scanStatus?.total_files_found || 0;
   const pct = Math.round((processed / Math.max(1, found || 1)) * 100);
   return (
-    <MachinedCard className="p-4 border-[#e5a00d]/50 bg-[#161616]/90 shadow-lg space-y-2.5">
+    <MachinedCard className="p-3 sm:p-4 border-[#e5a00d]/50 bg-[#161616]/90 shadow-lg space-y-2.5">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <RefreshCw className="h-5 w-5 text-[#e5a00d] animate-spin flex-shrink-0" />

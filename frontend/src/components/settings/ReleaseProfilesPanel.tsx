@@ -58,7 +58,7 @@ export const ReleaseProfilesPanel: React.FC<ReleaseProfilesPanelProps> = ({ enab
 
   return (
     <div className="flex min-h-0 flex-col gap-4">
-      <MachinedCard className="p-4 space-y-3">
+      <MachinedCard className="p-3 sm:p-4 space-y-3">
         <p className="text-xs font-mono text-neutral-400">
           Release profiles are optional and off by default. They only decide which releases are monitored
           automatically; every release stays in the catalog and can always be monitored or requested by hand. Files
@@ -97,7 +97,7 @@ export const ReleaseProfilesPanel: React.FC<ReleaseProfilesPanelProps> = ({ enab
       ) : (
         <ScrollFill ariaLabel="Release profiles" className="grid grid-cols-1 md:grid-cols-2 gap-3 content-start">
           {profiles.map((p) => (
-            <MachinedCard key={p.id} className="p-4 flex items-start justify-between gap-3">
+            <MachinedCard key={p.id} className="p-3 sm:p-4 flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <span className="font-bold text-sm text-white break-words">{p.name}</span>
                 <p className="text-xs text-neutral-400 font-mono mt-1 break-words">{summarize(p)}</p>

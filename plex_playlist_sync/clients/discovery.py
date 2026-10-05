@@ -11,6 +11,7 @@ from typing import Any, Optional
 import requests
 
 from plex_playlist_sync.models import DiscoveryItem
+from plex_playlist_sync.track_counts import positive_int
 
 logger = logging.getLogger(__name__)
 
@@ -803,6 +804,8 @@ class DiscoveryClient:
                     "cover_url": a_cover,
                     "release_date": a_rel,
                     "record_type": rec_type or "album",
+                    # Deezer's artist-albums listing may omit nb_tracks; None means unknown (never 0).
+                    "track_count": positive_int(a.get("nb_tracks")),
                 }
 
                 if rec_type == "album":
@@ -879,7 +882,7 @@ class DiscoveryClient:
                     image_url = cover
 
                 rel_date = c.get("releaseDate") or None
-                track_count = int(c.get("trackCount", 0) or 0)
+                track_count = positive_int(c.get("trackCount")) or 0
                 col_type = str(c.get("collectionType", "")).lower()
                 title_lower = c_title.lower()
 
@@ -900,6 +903,7 @@ class DiscoveryClient:
                             "cover_url": cover,
                             "release_date": rel_date,
                             "record_type": rec_type,
+                            "track_count": track_count or None,
                         }
                     )
                 elif (
@@ -920,6 +924,7 @@ class DiscoveryClient:
                             "cover_url": cover,
                             "release_date": rel_date,
                             "record_type": rec_type,
+                            "track_count": track_count or None,
                         }
                     )
                 else:
@@ -934,6 +939,7 @@ class DiscoveryClient:
                             "cover_url": cover,
                             "release_date": rel_date,
                             "record_type": rec_type,
+                            "track_count": track_count or None,
                         }
                     )
 

@@ -177,7 +177,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
       {!isLoading && playlists.length > 0 && (
         <ScrollFill ariaLabel="Playlists" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 content-start">
           {playlists.map((pl) => (
-            <MachinedCard key={pl.id} className="p-4 flex flex-col justify-between gap-4">
+            <MachinedCard key={pl.id} className="p-3 sm:p-4 flex flex-col justify-between gap-4">
               <div>
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <span className="px-2 py-0.5 rounded-[2px] bg-[#1a1a1a] border border-[#2a2a2a] text-[10px] font-mono uppercase text-neutral-300">
@@ -192,7 +192,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                   )}
                 </div>
 
-                <h4 className="font-bold text-base text-white truncate" title={pl.name}>
+                <h4 className="font-bold text-sm sm:text-base text-white truncate" title={pl.name}>
                   {pl.name}
                 </h4>
 

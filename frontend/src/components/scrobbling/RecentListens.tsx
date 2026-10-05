@@ -25,7 +25,7 @@ export interface RecentListensProps {
 }
 
 export const RecentListens: React.FC<RecentListensProps> = ({ listens }) => (
-  <MachinedCard className="p-4 sm:p-6">
+  <MachinedCard className="p-3 sm:p-6">
     <h3 className="text-sm font-bold uppercase tracking-wider text-white mb-4">Recent Listens</h3>
     {listens.length === 0 ? (
       <p className="text-sm text-neutral-500 font-mono">No listens captured yet.</p>

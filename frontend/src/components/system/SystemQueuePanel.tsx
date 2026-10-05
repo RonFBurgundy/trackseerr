@@ -39,18 +39,18 @@ export const SystemQueuePanel: React.FC = () => {
           <table className="w-full text-left border-collapse text-xs font-mono">
             <thead>
               <tr className="border-b border-[#222222] bg-[#121212] text-[11px] uppercase tracking-wider text-neutral-400">
-                <th className="py-3 px-4">Name</th>
-                <th className="py-3 px-4">State</th>
-                <th className="py-3 px-4">Started</th>
-                <th className="py-3 px-4">Duration</th>
-                <th className="py-3 px-4">Message</th>
+                <th className="py-2 px-3 md:py-3 md:px-4">Name</th>
+                <th className="py-2 px-3 md:py-3 md:px-4">State</th>
+                <th className="py-2 px-3 md:py-3 md:px-4">Started</th>
+                <th className="py-2 px-3 md:py-3 md:px-4">Duration</th>
+                <th className="py-2 px-3 md:py-3 md:px-4">Message</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1c1c1c]">
               {rows.map((job) => (
                 <tr key={job.id} className="hover:bg-[#141414] transition-colors">
-                  <td className="py-3 px-4 text-white font-bold min-w-[160px]">{job.name}</td>
-                  <td className="py-3 px-4 whitespace-nowrap">
+                  <td className="py-2 px-3 md:py-3 md:px-4 text-white font-bold min-w-[160px]">{job.name}</td>
+                  <td className="py-2 px-3 md:py-3 md:px-4 whitespace-nowrap">
                     <span
                       className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[2px] border text-[10px] font-bold uppercase ${STATE_STYLE[job.state]}`}
                     >
@@ -58,9 +58,9 @@ export const SystemQueuePanel: React.FC = () => {
                       {job.state}
                     </span>
                   </td>
-                  <td className="py-3 px-4 whitespace-nowrap text-neutral-400">{formatTimestamp(job.started_at)}</td>
-                  <td className="py-3 px-4 whitespace-nowrap text-neutral-400">{formatDuration(job.duration_ms)}</td>
-                  <td className="py-3 px-4 text-neutral-300 break-words max-w-md">{job.message || '-'}</td>
+                  <td className="py-2 px-3 md:py-3 md:px-4 whitespace-nowrap text-neutral-400">{formatTimestamp(job.started_at)}</td>
+                  <td className="py-2 px-3 md:py-3 md:px-4 whitespace-nowrap text-neutral-400">{formatDuration(job.duration_ms)}</td>
+                  <td className="py-2 px-3 md:py-3 md:px-4 text-neutral-300 break-words max-w-md">{job.message || '-'}</td>
                 </tr>
               ))}
             </tbody>

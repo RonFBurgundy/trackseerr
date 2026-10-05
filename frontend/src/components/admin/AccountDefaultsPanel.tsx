@@ -53,7 +53,7 @@ export const AccountDefaultsPanel: React.FC<AccountDefaultsPanelProps> = ({ defa
   };
 
   return (
-    <MachinedCard className="p-4 sm:p-6 max-w-2xl">
+    <MachinedCard className="p-3 sm:p-6 max-w-2xl">
       <form onSubmit={handleSave} className="space-y-5">
         <h3 className="text-sm font-bold uppercase tracking-wider">Account defaults</h3>
         <TactileSwitch

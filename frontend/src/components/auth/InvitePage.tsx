@@ -155,7 +155,7 @@ export const InvitePage: React.FC<InvitePageProps> = ({ token }) => {
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center p-4 bg-[var(--bg-canvas)] text-[var(--text-primary)]">
-      <MachinedCard className="max-w-md w-full p-6 sm:p-8 space-y-6 bg-[var(--bg-surface)]">
+      <MachinedCard className="max-w-md w-full p-3 sm:p-8 space-y-6 bg-[var(--bg-surface)]">
         <div className="text-center space-y-1">
           <h1 className="text-2xl font-black tracking-tight uppercase font-mono">
             Track<span className="text-[var(--accent-amber)]">Seerr</span>

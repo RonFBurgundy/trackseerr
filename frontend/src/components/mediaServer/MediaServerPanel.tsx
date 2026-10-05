@@ -73,7 +73,7 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
         </p>
       )}
 
-      <MachinedCard className="p-6 space-y-5">
+      <MachinedCard className="p-3 sm:p-6 space-y-5">
         <div className="border-b border-[#222222] pb-3">
           <h4 className="text-sm font-bold uppercase font-mono text-white">Media Server</h4>
           <p className="text-xs text-neutral-400 font-mono mt-0.5">

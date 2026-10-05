@@ -44,6 +44,11 @@ export interface ArtistDetailProps {
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
 }
 
+/** 32px icon key: the page actions live inside the hero, so they stay small on every viewport. */
+const ICON_KEY = '!min-h-8 !h-8 !w-8 !p-0 shrink-0';
+const COMPACT_SELECT =
+  "h-8 min-h-8 min-w-0 appearance-none rounded-[3px] border border-[#2a2a2a] bg-[#141414] bg-[url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23a3a3a3' stroke-width='3'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")] bg-[length:10px] bg-[right_4px_center] bg-no-repeat py-0 pl-1.5 pr-4 text-xs font-mono text-neutral-300 focus:border-[#e5a00d] focus:outline-none disabled:opacity-50";
+
 const SINGLE_TYPES = ['single', 'ep', 'singles', 'eps'];
 const STUDIO_TYPES = ['album', 'studio'];
 
@@ -138,16 +143,17 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   const { exit: exitSelection } = selection;
   const bulk = useAlbumBulkEdit(onToast);
 
-  const handleBulkApply = async (monitored: boolean): Promise<void> => {
+  const handleBulkApply = async (monitored: boolean): Promise<boolean> => {
     const ids = Array.from(selection.selected);
-    if (await bulk.apply(ids, monitored)) {
+    const ok = await bulk.apply(ids, monitored);
+    if (ok) {
       const picked = new Set(ids);
       for (const a of artist?.albums ?? []) {
         if (picked.has(a.id)) patchAlbumMonitored(a.id, monitored);
       }
-      exitSelection();
       onChanged();
     }
+    return ok;
   };
 
   const genreList = Array.isArray(artist?.genres)
@@ -196,43 +202,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   ];
 
   return (
-    <div className="space-y-3 sm:space-y-4">
-      <div className="flex items-center justify-between">
-        <TapeDeckButton size="sm" onClick={onBack} icon={<ArrowLeft className="h-4 w-4" />}>
-          Back to Artists
-        </TapeDeckButton>
-        {isAdmin && (
-          <div className="flex items-center gap-2">
-            {lidarrMode && (
-              <TapeDeckButton
-                size="sm"
-                disabled={lidarrSearch.busyKey === `artist:${artistId}`}
-                onClick={() => void lidarrSearch.searchArtist(artistId)}
-                icon={
-                  lidarrSearch.busyKey === `artist:${artistId}` ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Search className="h-3.5 w-3.5" />
-                  )
-                }
-                title="Ask Lidarr to search for this artist's monitored missing albums"
-              >
-                Search
-              </TapeDeckButton>
-            )}
-            <TapeDeckButton
-              size="sm"
-              variant="amber"
-              disabled={refreshing}
-              onClick={() => void detail.refreshDiscography()}
-              icon={refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            >
-              Refresh Discography
-            </TapeDeckButton>
-          </div>
-        )}
-      </div>
-
+    <div className="space-y-2 sm:space-y-4">
       <MachinedCard className="relative overflow-hidden">
         {artist?.banner_url && (
           <div className="absolute inset-0 z-0 pointer-events-none">
@@ -240,8 +210,8 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
             <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-[#141414]/85 to-transparent" />
           </div>
         )}
-        <div className="relative z-10 grid grid-cols-[6.5rem_minmax(0,1fr)] sm:grid-cols-[auto_minmax(0,1fr)_auto] gap-x-3 gap-y-2 p-3 sm:gap-x-4 sm:p-4">
-          <div className="col-start-1 row-start-1 sm:col-start-1 sm:row-span-3 relative h-[6.5rem] w-[6.5rem] sm:h-auto sm:w-36 rounded-[4px] bg-[#1a1a1a] border-2 border-[#e5a00d]/70 overflow-hidden flex items-center justify-center shadow-xl">
+        <div className="relative z-10 grid grid-cols-[7rem_minmax(0,1fr)] sm:grid-cols-[9rem_minmax(0,1fr)] gap-x-2 sm:gap-x-4 p-2 sm:p-4">
+          <div className="relative h-28 w-28 sm:h-36 sm:w-36 rounded-[4px] bg-[#1a1a1a] border-2 border-[#e5a00d]/70 overflow-hidden flex items-center justify-center shadow-xl">
             {artist?.image_url ? (
               <img
                 src={artist.image_url}
@@ -251,116 +221,161 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
                 decoding="async"
               />
             ) : (
-              <User className="h-12 w-12 text-neutral-600" />
+              <User className="h-10 w-10 text-neutral-600" />
             )}
+            <div className="absolute left-1 top-1 z-10">
+              <TapeDeckButton
+                size="sm"
+                className={`${ICON_KEY} bg-black/60`}
+                onClick={onBack}
+                icon={<ArrowLeft className="h-4 w-4" />}
+                aria-label="Back to artists"
+                title="Back to artists"
+              />
+            </div>
           </div>
 
-          <div className="col-start-2 row-start-1 sm:col-start-2 min-w-0 flex flex-col justify-center text-center sm:text-left">
-            <span className="hidden sm:block text-[10px] font-mono uppercase tracking-widest text-[#e5a00d]">
-              Artist Catalog
-            </span>
-            <h2 className="text-lg sm:text-3xl font-black text-white font-mono tracking-tight leading-tight line-clamp-2 sm:line-clamp-1 break-words">
-              {artist?.name}
-            </h2>
-          </div>
-
-          <div className="col-span-2 row-start-3 sm:contents flex items-center gap-2">
-            {artist?.mbid && (
-              <a
-                href={`https://musicbrainz.org/artist/${artist.mbid}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="sm:col-start-3 sm:row-start-2 sm:self-center inline-flex min-h-[44px] sm:min-h-0 shrink-0 px-2 sm:py-0.5 items-center rounded-[2px] text-[10px] font-mono font-bold bg-[#ba478f]/20 text-[#e599cf] border border-[#ba478f]/40 gap-1 hover:bg-[#ba478f]/30 transition-colors"
-                title={`MusicBrainz Artist: ${artist.mbid}`}
-              >
-                <span>MusicBrainz</span>
-                <ExternalLink className="h-3 w-3" />
-              </a>
-            )}
-            {isAdmin && artist && (
-              <div className="flex flex-1 min-w-0 items-center justify-end gap-2 sm:col-start-3 sm:row-start-1 sm:flex-none">
-                <label htmlFor={presetId} className="sr-only">
-                  Apply monitor preset
-                </label>
-                <select
-                  id={presetId}
-                  name="monitor_preset"
-                  className="bg-[#141414] border border-[#2a2a2a] text-xs font-mono text-neutral-300 rounded-[3px] px-2 min-h-[44px] sm:min-h-[36px] focus:border-[#e5a00d] focus:outline-none flex-1 min-w-0 sm:flex-none sm:w-48"
-                  value=""
-                  onChange={(e) => {
-                    const picked = presetOptions.find((o) => o.value === e.target.value);
-                    if (picked) preset(picked.value);
-                  }}
-                >
-                  <option value="" disabled>
-                    Monitor preset...
-                  </option>
-                  {presetOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-                {!lidarrMode && (
-                  <>
-                    <label htmlFor={releaseProfileSelectId} className="sr-only">
-                      Release profile
-                    </label>
-                    <select
-                      id={releaseProfileSelectId}
-                      name="release_profile"
-                      className="bg-[#141414] border border-[#2a2a2a] text-xs font-mono text-neutral-300 rounded-[3px] px-2 min-h-[44px] sm:min-h-[36px] focus:border-[#e5a00d] focus:outline-none flex-1 min-w-0 sm:flex-none sm:w-44"
-                      value={releaseProfileId === null ? '' : String(releaseProfileId)}
-                      disabled={profileBusy}
-                      onChange={(e) => void requestProfileChange(e.target.value === '' ? null : Number(e.target.value))}
-                    >
-                      <option value="">No release profile</option>
-                      {releaseProfiles.profiles.map((p) => (
-                        <option key={p.id} value={String(p.id)}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                  </>
-                )}
-                <TactileSwitch
-                  checked={artist.monitored}
-                  onChange={(val) => void toggleArtist(val)}
-                  label={artist.monitored ? 'Monitored' : 'Unmonitored'}
-                  className="shrink-0 max-sm:[&>span]:sr-only"
-                />
+          <div className="min-w-0 flex flex-col justify-between gap-1.5 sm:gap-2">
+            <div className="flex items-start gap-1.5 min-w-0">
+              <div className="min-w-0 flex-1">
+                <span className="hidden sm:block text-[10px] font-mono uppercase tracking-widest text-[#e5a00d]">
+                  Artist Catalog
+                </span>
+                <h2 className="text-[17px] sm:text-3xl font-black text-white font-mono tracking-tight leading-tight line-clamp-2 sm:line-clamp-1 break-words text-left">
+                  {artist?.name}
+                </h2>
               </div>
+              {isAdmin && (
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {lidarrMode && (
+                    <TapeDeckButton
+                      size="sm"
+                      className={ICON_KEY}
+                      disabled={lidarrSearch.busyKey === `artist:${artistId}`}
+                      onClick={() => void lidarrSearch.searchArtist(artistId)}
+                      icon={
+                        lidarrSearch.busyKey === `artist:${artistId}` ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Search className="h-4 w-4" />
+                        )
+                      }
+                      aria-label="Search for this artist"
+                      title="Ask Lidarr to search for this artist's monitored missing albums"
+                    />
+                  )}
+                  <TapeDeckButton
+                    size="sm"
+                    variant="amber"
+                    className={ICON_KEY}
+                    disabled={refreshing}
+                    onClick={() => void detail.refreshDiscography()}
+                    icon={refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    aria-label="Refresh discography"
+                    title="Refresh discography"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div
+              className="flex flex-nowrap items-center gap-1.5 overflow-x-auto snap-x snap-proximity [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              aria-label="Genres"
+            >
+              {artist?.country && (
+                <span className="snap-start shrink-0 inline-flex h-[22px] items-center gap-1 px-1.5 rounded-[2px] text-[11px] font-mono font-bold bg-neutral-800 text-neutral-200 border border-neutral-700">
+                  <Globe className="h-3 w-3 text-[#e5a00d]" />
+                  {artist.country}
+                </span>
+              )}
+              {genreList.map((g) => (
+                <span
+                  key={g}
+                  className="snap-start shrink-0 whitespace-nowrap inline-flex h-[22px] items-center px-1.5 rounded-[2px] text-[11px] font-mono bg-[#e5a00d]/10 text-[#e5a00d] border border-[#e5a00d]/30"
+                >
+                  {g}
+                </span>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-1 sm:gap-2 min-w-0">
+              {artist?.mbid && (
+                <a
+                  href={`https://musicbrainz.org/artist/${artist.mbid}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[3px] bg-[#ba478f]/20 text-[#e599cf] border border-[#ba478f]/40 hover:bg-[#ba478f]/30 transition-colors after:absolute after:-inset-1 after:content-['']"
+                  title={`MusicBrainz Artist: ${artist.mbid}`}
+                  aria-label="Open on MusicBrainz"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+              )}
+              {isAdmin && artist && (
+                <>
+                  <label htmlFor={presetId} className="sr-only">
+                    Apply monitor preset
+                  </label>
+                  <select
+                    id={presetId}
+                    name="monitor_preset"
+                    className={`${COMPACT_SELECT} flex-[4_1_0] sm:flex-none sm:w-48`}
+                    value=""
+                    onChange={(e) => {
+                      const picked = presetOptions.find((o) => o.value === e.target.value);
+                      if (picked) preset(picked.value);
+                    }}
+                  >
+                    <option value="" disabled>
+                      Monitor
+                    </option>
+                    {presetOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  {!lidarrMode && (
+                    <>
+                      <label htmlFor={releaseProfileSelectId} className="sr-only">
+                        Release profile
+                      </label>
+                      <select
+                        id={releaseProfileSelectId}
+                        name="release_profile"
+                        className={`${COMPACT_SELECT} flex-[5_1_0] sm:flex-none sm:w-44`}
+                        value={releaseProfileId === null ? '' : String(releaseProfileId)}
+                        disabled={profileBusy}
+                        onChange={(e) => void requestProfileChange(e.target.value === '' ? null : Number(e.target.value))}
+                      >
+                        <option value="">No profile</option>
+                        {releaseProfiles.profiles.map((p) => (
+                          <option key={p.id} value={String(p.id)}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  )}
+                  <TactileSwitch
+                    checked={artist.monitored}
+                    onChange={(val) => void toggleArtist(val)}
+                    label={artist.monitored ? 'Monitored' : 'Unmonitored'}
+                    className="shrink-0 max-sm:-mx-1 max-sm:[&>span]:sr-only"
+                  />
+                </>
+              )}
+            </div>
+
+            {artist?.bio && (
+              <p className="hidden sm:block text-xs text-neutral-300 font-mono line-clamp-1 bg-black/40 px-2.5 py-1.5 rounded-[3px] border border-white/5">
+                {artist.bio}
+              </p>
             )}
           </div>
-
-          <div
-            className="col-span-2 row-start-2 sm:col-span-1 sm:col-start-2 flex flex-nowrap items-center gap-2 overflow-x-auto snap-x snap-proximity [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            aria-label="Genres"
-          >
-            {artist?.country && (
-              <span className="snap-start shrink-0 px-2 py-0.5 rounded-[2px] text-[10px] font-mono font-bold bg-neutral-800 text-neutral-200 border border-neutral-700 flex items-center gap-1">
-                <Globe className="h-3 w-3 text-[#e5a00d]" />
-                {artist.country}
-              </span>
-            )}
-            {genreList.map((g) => (
-              <span
-                key={g}
-                className="snap-start shrink-0 whitespace-nowrap px-2 py-0.5 rounded-[2px] text-[10px] font-mono bg-[#e5a00d]/10 text-[#e5a00d] border border-[#e5a00d]/30"
-              >
-                {g}
-              </span>
-            ))}
-          </div>
-
-          {artist?.bio && (
-            <p className="hidden sm:block sm:col-start-2 sm:col-span-2 text-xs text-neutral-300 font-mono line-clamp-1 bg-black/40 px-2.5 py-1.5 rounded-[3px] border border-white/5">
-              {artist.bio}
-            </p>
-          )}
         </div>
 
-        <div className="relative z-10 flex items-center justify-center sm:justify-start gap-3 border-t border-[#1f1f1f] bg-black/30 px-3 sm:px-4 py-1 text-[11px] font-mono text-neutral-400">
+        <div className="relative z-10 flex items-center justify-start gap-2 sm:gap-3 border-t border-[#1f1f1f] bg-black/30 px-2 sm:px-4 py-0.5 sm:py-1 text-[11px] leading-4 whitespace-nowrap overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden font-mono text-neutral-400">
           <span>{artist?.albums?.length || artist?.album_count || 0} Releases</span>
           <span aria-hidden="true">&bull;</span>
           <span>{artist?.track_count || 0} Tracks in Library</span>
@@ -374,7 +389,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
           )}
         </div>
 
-        <div className="relative z-10 flex items-center gap-2 border-t border-[#1f1f1f] p-1.5">
+        <div className="relative z-10 flex items-center gap-1.5 border-t border-[#1f1f1f] p-1 sm:p-1.5">
           <TabStrip className="min-w-0 flex-1">
             {tabs.map((t) => (
               <TapeDeckButton key={t.id} size="sm" active={tab === t.id} onClick={() => setTab(t.id)} icon={t.icon}>
@@ -397,11 +412,12 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
               size="sm"
               className="shrink-0"
               icon={<CheckSquare className="h-3.5 w-3.5" />}
+              collapseLabel
               onClick={selection.enter}
               aria-label="Select albums"
+              title="Select albums"
             >
-              <span className="hidden sm:inline">Select albums</span>
-              <span className="sm:hidden">Select</span>
+              Select albums
             </TapeDeckButton>
           )}
         </div>
@@ -414,7 +430,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
               onSelectAll={() => selection.selectKeys(albums.map((a) => a.id))}
               onClear={selection.clear}
               onDone={exitSelection}
-              onApply={(m) => void handleBulkApply(m)}
+              onApply={handleBulkApply}
             />
           </div>
         )}

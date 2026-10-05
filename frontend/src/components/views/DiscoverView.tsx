@@ -200,7 +200,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                           preview_url: item.preview_url!,
                         });
                       }}
-                      className="absolute bottom-2 left-2 inline-flex h-11 w-11 sm:h-9 sm:w-9 items-center justify-center rounded-[3px] bg-black/80 hover:bg-[#e5a00d] text-white hover:text-black border border-[#2a2a2a] shadow-lg transition-colors z-10"
+                      className="absolute bottom-2 left-2 inline-flex h-9 w-9 items-center justify-center rounded-[3px] bg-black/80 hover:bg-[#e5a00d] text-white hover:text-black border border-[#2a2a2a] shadow-lg transition-colors z-10"
                       aria-label="Toggle 30s preview"
                     >
                       {isPlayingThis ? (
@@ -344,7 +344,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                 className="h-20 w-20 rounded-[3px] object-cover border border-[#222222]"
               />
               <div className="space-y-1">
-                <h4 className="font-bold text-white text-base">{selectedAlbum.title}</h4>
+                <h4 className="font-bold text-white text-sm sm:text-base">{selectedAlbum.title}</h4>
                 <p className="text-sm text-neutral-400">{selectedAlbum.artist}</p>
                 {selectedAlbum.release_date && (
                   <p className="text-xs text-neutral-500 font-mono">

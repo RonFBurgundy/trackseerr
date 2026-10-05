@@ -89,7 +89,7 @@ export const SystemLogsPanel: React.FC = () => {
             />
           </div>
 
-          <label htmlFor={autoScrollId} className="flex items-center gap-1.5 min-h-[44px] sm:min-h-0 text-xs font-mono text-neutral-400 cursor-pointer select-none">
+          <label htmlFor={autoScrollId} className="flex items-center gap-1.5 min-h-[36px] sm:min-h-0 text-xs font-mono text-neutral-400 cursor-pointer select-none">
             <input
               id={autoScrollId}
               name="log-auto-scroll"

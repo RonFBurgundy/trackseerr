@@ -172,6 +172,13 @@ body {
 }
 
 /* 7. Virtualized lists and the scrubber rail */
+/* While a phone bulk sheet is open, keep the last row and the footer reachable above it. */
+@media (max-width: 639px) {
+  .virtual-scroll.virtual-scroll {
+    padding-bottom: calc(var(--bulk-sheet-offset, 0px) + var(--player-offset, 0px));
+  }
+}
+
 .virtual-scroll[data-scrubber='on'],
 [data-scrubber='on'] {
   scrollbar-width: none;
@@ -276,8 +283,8 @@ body {
  */
 .action-bar {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr));
-  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.5rem), 1fr));
+  gap: 0.375rem;
   align-items: stretch;
   width: 100%;
   min-width: 0;
@@ -317,20 +324,22 @@ body {
   }
 }
 
-/* Touch targets: text inputs and selects are at least 44px tall on phones. */
+/* Compact phones: text inputs and selects are 36px (13px text); the hit area stays generous via row spacing. */
 @media (max-width: 639px) {
   input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='hidden']),
   select,
   textarea {
-    min-height: 44px;
+    min-height: 36px;
   }
 }
 
-@media (pointer: coarse) {
-  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='hidden']),
-  select,
-  textarea {
-    /* iOS Safari zooms on focus below 16px; max() beats Tailwind text-xs/text-sm (specificity: element + :not()s). */
-    font-size: max(16px, 1em);
+/* iOS Safari zooms on focus below 16px, so only iOS keeps the larger input font; Android/desktop use the compact scale. */
+@supports (-webkit-touch-callout: none) {
+  @media (pointer: coarse) {
+    input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='hidden']),
+    select,
+    textarea {
+      font-size: max(16px, 1em);
+    }
   }
 }

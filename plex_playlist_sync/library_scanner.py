@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from plex_playlist_sync import art_pipeline
 from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
 from plex_playlist_sync.library import (
     AUDIO_EXTENSIONS,
@@ -165,6 +166,15 @@ class LibraryScanner:
             if not self._status.get("is_scanning", False) and self._status.get("status") == "idle":
                 self._status["status"] = "cancelled"
             return dict(self._status)
+
+    @staticmethod
+    def _register_art(db: Database, kind: str, row: dict[str, Any], settings: dict[str, Any]) -> None:
+        """Versions the art the routes will serve for ``row`` and queues its thumbnails; art bookkeeping must never
+        fail a scan."""
+        try:
+            art_pipeline.register_served_art(db, kind, row, settings)
+        except Exception as exc:
+            logger.warning("Could not register %s art for %s: %s", kind, row.get("id"), exc)
 
     def start_scan(
         self,
@@ -347,6 +357,8 @@ class LibraryScanner:
             newly_created_artist_ids: list[str] = []
             artist_cache: dict[str, dict[str, Any]] = {}
             album_cache: dict[tuple[str, str], dict[str, Any]] = {}
+            art_registered_albums: set[str] = set()
+            art_registered_artists: set[str] = set()
             track_cache: dict[tuple[str, str, int], dict[str, Any]] = {}
             track_id_cache: dict[str, dict[str, Any]] = {}
             quality_profile_cache: dict[Optional[str], Any] = {}
@@ -611,6 +623,14 @@ class LibraryScanner:
                                 }, preserve_monitoring=True)
                         album_cache[album_key] = album_row
                         album_id = str(album_row["id"])
+
+                        # Folder art found: version it and pre-generate its 250/500 derivatives (once per album per scan).
+                        if has_local_cover and album_id not in art_registered_albums:
+                            art_registered_albums.add(album_id)
+                            self._register_art(db, "album", album_row, media_settings)
+                        if artist_id not in art_registered_artists:
+                            art_registered_artists.add(artist_id)
+                            self._register_art(db, "artist", artist_row, media_settings)
 
                         # Resolve/Upsert Track
                         mb_rec_id = metadata.get("musicbrainz_trackid")

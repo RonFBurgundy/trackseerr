@@ -90,13 +90,12 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
   }, [collectAllIds, selectKeys]);
 
   const handleBulkApply = useCallback(
-    async (monitored: boolean): Promise<void> => {
-      if (await bulk.apply(Array.from(selection.selected), monitored)) {
-        exitSelection();
-        reload();
-      }
+    async (monitored: boolean): Promise<boolean> => {
+      const ok = await bulk.apply(Array.from(selection.selected), monitored);
+      if (ok) reload();
+      return ok;
     },
-    [bulk, selection.selected, exitSelection, reload]
+    [bulk, selection.selected, reload]
   );
 
   useEffect(() => {
@@ -207,7 +206,7 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
           onSelectAll={() => void handleSelectAll()}
           onClear={selection.clear}
           onDone={exitSelection}
-          onApply={(m) => void handleBulkApply(m)}
+          onApply={handleBulkApply}
         />
       )}
       <FlatList<TrackItem>

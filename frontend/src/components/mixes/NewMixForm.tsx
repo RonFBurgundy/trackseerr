@@ -48,7 +48,7 @@ export const NewMixForm: React.FC<NewMixFormProps> = ({ onCreate, onCancel }) =>
   };
 
   return (
-    <MachinedCard className="p-4 sm:p-6 max-w-2xl">
+    <MachinedCard className="p-3 sm:p-6 max-w-2xl">
       <form onSubmit={handleSubmit} className="space-y-4">
         <h3 className="text-sm font-bold uppercase tracking-wider text-white">New Mix</h3>
         <TabStrip fill>

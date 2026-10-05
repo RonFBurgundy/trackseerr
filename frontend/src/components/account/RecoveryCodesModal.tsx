@@ -40,7 +40,7 @@ export const RecoveryCodesModal: React.FC<RecoveryCodesModalProps> = ({ codes, o
           safe. They will not be shown again.
         </p>
         <CopyBox value={(codes ?? []).join('\n')} multiline />
-        <label className="flex items-center gap-3 min-h-[44px] cursor-pointer text-xs font-mono">
+        <label className="flex items-center gap-3 min-h-[36px] cursor-pointer text-xs font-mono">
           <input
             id="recovery-codes-saved"
             name="recovery-codes-saved"

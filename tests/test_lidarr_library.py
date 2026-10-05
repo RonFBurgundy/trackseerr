@@ -267,7 +267,7 @@ class TestPagedAndIndex:
         assert names.index("Anna") < names.index("The Beatles") < names.index("Beatles Tribute") < names.index("A Tribe Called Quest")
         rec = next(r for r in records if r["name"] == "The Beatles")
         assert rec["id"] == "1" and rec["monitored"] is False and rec["album_count"] == 1
-        assert rec["track_count"] == 3 and rec["image_url"] == "/api/library/artists/1/image"
+        assert rec["track_count"] == 3 and rec["image_url"].startswith("/api/library/artists/1/image?v=")
         assert rec["banner_url"] == "/api/library/artists/1/banner" and rec["mbid"] == "mbid-1"
         assert API_KEY not in str(body)
 
@@ -275,7 +275,7 @@ class TestPagedAndIndex:
         res = api.get("/api/library/albums/paged?sort_key=title&page_size=200", headers=admin_h).json()
         rec = next(r for r in res["records"] if r["id"] == "101")
         assert rec["artist_id"] == "2" and rec["artist_name"] == "Beatles Tribute" and rec["title"] == "A Night"
-        assert rec["cover_url"] == "/api/library/albums/101/cover" and rec["track_count"] == 10
+        assert rec["cover_url"].startswith("/api/library/albums/101/cover?v=") and rec["track_count"] == 10
         assert rec["release_date"] == "2003-06-01T00:00:00Z" and rec["year"] == 2003 and rec["monitored"] is True
         assert res["total"] == 24
 
@@ -425,6 +425,31 @@ class TestImages:
         res = api.get("/api/library/albums/105/cover", headers=admin_h)
         assert lidarr.http.stream.call_args.args[1].endswith("/mediacover/album/105/cover.jpg")
         assert res.headers["content-type"] == "image/png"
+
+    def test_immutable_only_when_v_matches_the_token_the_cover_was_fetched_for(self, api, admin_h, lidarr):
+        immutable = "private, max-age=31536000, immutable"
+        revalidated = "private, max-age=86400"
+        lidarr.stream_image()
+        first = api.get("/api/library/artists/1/image?v=tokenA", headers=admin_h)
+        assert first.status_code == 200 and first.headers["cache-control"] == immutable
+        etag = first.headers["etag"]
+        # Same token, now answered from disk / the validator cache: still immutable.
+        assert api.get("/api/library/artists/1/image?v=tokenA", headers=admin_h).headers["cache-control"] == immutable
+        not_modified = api.get("/api/library/artists/1/image?v=tokenA", headers={**admin_h, "If-None-Match": etag})
+        assert not_modified.status_code == 304 and not_modified.headers["cache-control"] == immutable
+        # A well-formed token the stored body was not fetched for never earns immutable, on any branch.
+        for hdrs in (admin_h, {**admin_h, "If-None-Match": etag}):
+            other = api.get("/api/library/artists/1/image?v=tokenB", headers=hdrs)
+            assert other.status_code in (200, 304) and other.headers["cache-control"] == revalidated
+        assert api.get("/api/library/artists/1/image", headers=admin_h).headers["cache-control"] == revalidated
+
+    def test_cached_cover_remembers_its_version_across_a_cold_validator_cache(self, api, admin_h, lidarr):
+        lidarr.stream_image()
+        api.get("/api/library/albums/105/cover?v=tokenA", headers=admin_h)
+        lidarr_library._cover_validators.clear()  # e.g. a restart: only the sidecar on disk remains
+        lidarr_library._cover_versions.clear()
+        assert api.get("/api/library/albums/105/cover?v=tokenA", headers=admin_h).headers["cache-control"].endswith("immutable")
+        assert api.get("/api/library/albums/105/cover?v=tokenZ", headers=admin_h).headers["cache-control"] == "private, max-age=86400"
 
     def test_non_image_content_type_rejected(self, api, admin_h, lidarr):
         lidarr.stream_image(content_type="text/html")

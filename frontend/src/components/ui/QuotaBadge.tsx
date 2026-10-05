@@ -13,7 +13,7 @@ export const QuotaBadge: React.FC<QuotaBadgeProps> = ({ quota, className = '' })
 
   return (
     <div
-      className={`inline-flex items-center gap-2 px-2.5 py-1 bg-[#121212] border border-[#222222] rounded-[3px] text-xs font-mono select-none ${className}`}
+      className={`inline-flex items-center gap-2 px-2.5 py-0.5 sm:py-1 bg-[#121212] border border-[#222222] rounded-[3px] text-xs font-mono select-none ${className}`}
       title={`Request Quota: ${quota.remaining} remaining out of ${quota.limit} every ${quota.period_days} days`}
     >
       <span

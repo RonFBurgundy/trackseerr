@@ -475,6 +475,13 @@ def _start_local_workers(db: Database, config: Config) -> None:
     logger.info("Starting ArtistRefreshWorker (interval: 24h, pace: 1.5s, first cycle in 10 min)")
     artist_refresh_worker.start(db=db, interval_seconds=86400, pace_delay=1.5)
 
+    from . import art_pipeline
+
+    try:
+        art_pipeline.start_startup_backfill(db)  # one-off after upgrade; background thread, marker-gated
+    except Exception as exc:
+        logger.error("Art backfill could not be started: %s", safe_exc(exc))
+
     if config.enable_import_lists:
         from .import_list_worker import import_list_worker
 
@@ -849,6 +856,10 @@ def main() -> int:
                     getattr(module, attr).stop()
                 except (ImportError, AttributeError, RuntimeError, OSError) as e:
                     logger.warning("Failed to stop %s cleanly: %s", label, safe_exc(e))
+            from . import art_pipeline
+
+            art_pipeline.stop_startup_backfill()
+            art_pipeline.shutdown()  # cancel queued pre-cache/thumbnail work so exit never drains it
             try:
                 from .backlog_worker import backlog_worker, rss_worker
 

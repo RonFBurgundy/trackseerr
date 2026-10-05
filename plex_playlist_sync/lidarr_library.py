@@ -24,7 +24,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from plex_playlist_sync.clients.lidarr import _COVER_FILE_RE, LidarrApiError, LidarrClient
 from plex_playlist_sync.mediacover import mediacover_service
@@ -133,6 +133,23 @@ def _monitor_option(raw: dict[str, Any]) -> Optional[str]:
     return None
 
 
+def art_version(raw: dict[str, Any], cover_types: tuple[str, ...]) -> str:
+    """Version token for the cover Lidarr serves for ``raw``: changes when Lidarr rewrites the file.
+
+    Lidarr stamps each image URL with ``?lastWrite=<ticks>``; that and the item's ``lastInfoSync`` are hashed together
+    (with the file name, so the token is never empty). Computed from the already-fetched JSON: no I/O.
+    """
+    parts: list[str] = [str(raw.get("lastInfoSync") or "")]
+    for wanted in cover_types:
+        for image in raw.get("images") or []:
+            if isinstance(image, dict) and str(image.get("coverType") or "").lower() == wanted:
+                url = urlsplit(str(image.get("url") or ""))
+                parts.append(url.path.rsplit("/", 1)[-1])
+                parts.append(parse_qs(url.query).get("lastWrite", [""])[0])
+                return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:12]
+
+
 def artist_row(raw: dict[str, Any]) -> Row:
     aid = str(_int(raw.get("id")))
     name = str(raw.get("artistName") or "")
@@ -161,7 +178,11 @@ def artist_row(raw: dict[str, Any]) -> Row:
         "track_file_count": _int(stats.get("trackFileCount")),
         "size_bytes": _int(stats.get("sizeOnDisk")),
         "status": _text(raw.get("status")),
-        "image_url": f"/api/library/artists/{aid}/image" if pick_image(images, ("poster", "cover")) else None,
+        "image_url": (
+            f"/api/library/artists/{aid}/image?v={art_version(raw, ('poster', 'cover'))}"
+            if pick_image(images, ("poster", "cover"))
+            else None
+        ),
         "banner_url": f"/api/library/artists/{aid}/banner" if pick_image(images, ("banner",)) else None,
         "source": "lidarr",
     }
@@ -205,7 +226,11 @@ def album_row(raw: dict[str, Any], artist_names: Optional[dict[str, str]] = None
         "track_count": _int(stats.get("trackCount", stats.get("totalTrackCount"))),
         "track_file_count": _int(stats.get("trackFileCount")),
         "size_bytes": _int(stats.get("sizeOnDisk")),
-        "cover_url": f"/api/library/albums/{alid}/cover" if pick_image(images, ("cover",)) else None,
+        "cover_url": (
+            f"/api/library/albums/{alid}/cover?v={art_version(raw, ('cover',))}"
+            if pick_image(images, ("cover",))
+            else None
+        ),
         "source": "lidarr",
     }
     return Row(
@@ -334,6 +359,7 @@ _entries: dict[str, Snapshot] = {}
 _generation = 0
 _clock: Callable[[], float] = time.monotonic
 _cover_validators: "OrderedDict[tuple[str, str, str, str], str]" = OrderedDict()
+_cover_versions: dict[tuple[str, str, str, str], str] = {}  # same keys as above: the ``v`` each body was fetched for
 _cover_slots = threading.BoundedSemaphore(COVER_MAX_CONCURRENT)
 
 
@@ -350,6 +376,7 @@ def invalidate() -> None:
         _generation += 1
         _entries.clear()
         _cover_validators.clear()
+        _cover_versions.clear()
 
 
 def _peek(kind: str, identity: tuple[str, str], max_age: float = LIST_TTL_SECONDS) -> Optional[Snapshot]:
@@ -458,11 +485,25 @@ def known_cover_etag(identity: tuple[str, str], kind: str, entity_id: int, filen
         return _cover_validators.get((identity[0] + identity[1], kind, str(entity_id), filename))
 
 
-def remember_cover_etag(identity: tuple[str, str], kind: str, entity_id: int, filename: str, etag: str) -> None:
+def known_cover_version(identity: tuple[str, str], kind: str, entity_id: int, filename: str) -> Optional[str]:
+    """The ``v`` token the cover behind ``known_cover_etag`` was fetched for (None when unknown)."""
     with _lock:
-        _cover_validators[(identity[0] + identity[1], kind, str(entity_id), filename)] = etag
+        return _cover_versions.get((identity[0] + identity[1], kind, str(entity_id), filename))
+
+
+def remember_cover_etag(
+    identity: tuple[str, str], kind: str, entity_id: int, filename: str, etag: str, version: Optional[str] = None
+) -> None:
+    key = (identity[0] + identity[1], kind, str(entity_id), filename)
+    with _lock:
+        _cover_validators[key] = etag
+        if version:
+            _cover_versions[key] = version
+        else:
+            _cover_versions.pop(key, None)
         while len(_cover_validators) > VALIDATOR_CACHE_SIZE:
-            _cover_validators.popitem(last=False)
+            evicted, _ = _cover_validators.popitem(last=False)
+            _cover_versions.pop(evicted, None)
 
 
 # Lidarr renders sized variants next to every cover (``poster-250.jpg``, ``cover-500.jpg``); the thumbnail grids ask
@@ -487,6 +528,7 @@ class CachedCover:
     content_type: str
     etag: str
     fresh: bool  # younger than COVER_DISK_TTL_SECONDS: served without asking Lidarr at all
+    version: Optional[str] = None  # the ``?v=`` token this body was fetched for (immutable caching needs a match)
 
 
 def _cover_path(identity: tuple[str, str], kind: str, entity_id: int, filename: str) -> Path:
@@ -505,6 +547,7 @@ def read_cached_cover(identity: tuple[str, str], kind: str, entity_id: int, file
             str(info["content_type"]),
             str(info["etag"]),
             time.time() - float(info["fetched_at"]) < COVER_DISK_TTL_SECONDS,
+            str(info["version"]) if info.get("version") else None,
         )
     except FileNotFoundError:
         return None
@@ -547,7 +590,14 @@ def _prune_old_covers(identity_dir: Path) -> None:
 
 
 def write_cached_cover(
-    identity: tuple[str, str], kind: str, entity_id: int, filename: str, body: bytes, content_type: str, etag: str
+    identity: tuple[str, str],
+    kind: str,
+    entity_id: int,
+    filename: str,
+    body: bytes,
+    content_type: str,
+    etag: str,
+    version: Optional[str] = None,
 ) -> None:
     """Stores a fetched cover; a disk error only costs a refetch.
 
@@ -570,7 +620,13 @@ def write_cached_cover(
             (
                 meta,
                 json.dumps(
-                    {"content_type": content_type, "etag": etag, "fetched_at": time.time(), "body": body_path.name}
+                    {
+                        "content_type": content_type,
+                        "etag": etag,
+                        "fetched_at": time.time(),
+                        "body": body_path.name,
+                        "version": version or None,
+                    }
                 ).encode("utf-8"),
             ),
         ):

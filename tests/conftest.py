@@ -15,6 +15,11 @@ collect_ignore_glob = [] if os.environ.get("RUN_INTEGRATION") == "1" else ["inte
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
+        "real_art_pipeline: keep the real art pre-cache / thumbnail pre-generate / startup-backfill schedulers "
+        "instead of the autouse recording stubs",
+    )
+    config.addinivalue_line(
+        "markers",
         "real_core_client: opt out of the autouse CoreClient.session_status mock so the real signed "
         "gateway->core call path runs (see tests/test_gateway_core_e2e.py)",
     )
@@ -170,3 +175,45 @@ def _reset_artist_refresh_worker_stop_event():
     artist_refresh_worker._stop_event.clear()
     yield
     artist_refresh_worker._stop_event.clear()
+
+
+class _ArtSchedulerCalls:
+    """Records calls to the art background schedulers that the autouse stub swapped in."""
+
+    def __init__(self):
+        self.precache: list[tuple] = []
+        self.pregenerate: list[tuple] = []
+        self.startup_backfill: list[tuple] = []
+
+
+@pytest.fixture(autouse=True)
+def art_scheduler_calls(request, monkeypatch):
+    """Art pre-cache, thumbnail pre-generation and the startup backfill start threads/pools that outlive a test, so
+    every test gets recording no-ops. Opt back in to the real ones with ``@pytest.mark.real_art_pipeline`` (or the
+    ``real_art_pipeline`` fixture); the recorder is still returned but stays empty."""
+    from plex_playlist_sync import art_pipeline, art_thumbs
+
+    calls = _ArtSchedulerCalls()
+    if request.node.get_closest_marker("real_art_pipeline") or "real_art_pipeline" in request.fixturenames:
+        yield calls
+        art_pipeline.stop_startup_backfill()
+        return
+    monkeypatch.setattr(
+        art_pipeline, "schedule_precache", lambda *a, **kw: calls.precache.append((a, kw)) or None
+    )
+    monkeypatch.setattr(
+        art_thumbs, "schedule_pregenerate", lambda *a, **kw: calls.pregenerate.append((a, kw)) or False
+    )
+    monkeypatch.setattr(
+        art_pipeline, "start_startup_backfill", lambda *a, **kw: calls.startup_backfill.append((a, kw)) or None
+    )
+    yield calls
+
+
+@pytest.fixture
+def real_art_pipeline(art_scheduler_calls):
+    """Opt-in marker fixture: keeps the real art schedulers for this test and drains their pools afterwards."""
+    from plex_playlist_sync import art_pipeline
+
+    yield
+    art_pipeline.wait_idle(5)

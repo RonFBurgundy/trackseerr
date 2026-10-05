@@ -26,10 +26,10 @@ const MixCard: React.FC<{
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
 
   return (
-    <MachinedCard className="p-4 space-y-3">
+    <MachinedCard className="p-3 sm:p-4 space-y-3">
       <div>
         <p className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono truncate">{mix.hub_title}</p>
-        <h4 className="font-bold text-base text-white truncate" title={mix.title}>
+        <h4 className="font-bold text-sm sm:text-base text-white truncate" title={mix.title}>
           {mix.title}
         </h4>
         {mix.track_count !== null && (

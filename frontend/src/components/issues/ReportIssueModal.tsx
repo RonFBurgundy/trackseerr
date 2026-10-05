@@ -160,7 +160,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({
               value={issueType}
               onChange={(e) => setIssueType(e.target.value as IssueType)}
               disabled={isSending}
-              className="w-full min-h-[44px] px-3 rounded-[3px] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-amber)]"
+              className="w-full min-h-[36px] px-2.5 rounded-[3px] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] text-[13px] sm:text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-amber)]"
             >
               {ISSUE_TYPES.map((t) => (
                 <option key={t} value={t}>

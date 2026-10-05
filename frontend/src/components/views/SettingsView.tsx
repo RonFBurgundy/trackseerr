@@ -129,7 +129,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <RoleChangeBanner enabled={isAdmin && !mfaEnrollmentRequired} />
 
       {showGatewayNote && (
-        <div className="bg-[#121212] border border-[#2a2a2a] rounded-[4px] px-4 py-3 text-xs font-mono text-neutral-400">
+        <div className="bg-[#121212] border border-[#2a2a2a] rounded-[4px] px-3 py-2 sm:px-4 sm:py-3 text-xs font-mono text-neutral-400">
           Admin settings are available on the TrackSeerr Core admin interface.
         </div>
       )}

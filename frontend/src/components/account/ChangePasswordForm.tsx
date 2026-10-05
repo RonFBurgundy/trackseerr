@@ -40,7 +40,7 @@ export const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({ username
   };
 
   return (
-    <MachinedCard className="p-4 sm:p-6">
+    <MachinedCard className="p-3 sm:p-6">
       <form onSubmit={handleSubmit} className="space-y-4 max-w-md">
         <h3 className="text-sm font-bold uppercase tracking-wider">Change password</h3>
         <FormField label="Current password" htmlFor="acct-current-pw">

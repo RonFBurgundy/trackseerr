@@ -13,7 +13,7 @@ export const StartupScreen: React.FC<StartupScreenProps> = ({ step }) => (
     role="status"
     aria-live="polite"
   >
-    <MachinedCard className="w-full max-w-sm p-6 flex flex-col items-center gap-4 text-center">
+    <MachinedCard className="w-full max-w-sm p-3 sm:p-6 flex flex-col items-center gap-4 text-center">
       <Loader2 className="w-8 h-8 text-[#e5a00d] animate-spin" aria-hidden="true" />
       <h1 className="text-sm font-semibold uppercase tracking-[0.05em] text-white">
         TrackSeerr is starting&hellip;

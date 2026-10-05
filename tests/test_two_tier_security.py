@@ -156,12 +156,44 @@ def test_tampered_query_is_401(core):
 
 def test_clock_skew_over_60s_is_401(core):
     client, _ = core
-    old = _signed("GET", "/api/users/me", timestamp=int(time.time()) - 61)
+    # Margins well past the 60s window: int() truncation plus request latency under load eats up to ~1s+,
+    # so a +61 timestamp can land at exactly 60s by verification time and be (correctly) accepted.
+    old = _signed("GET", "/api/users/me", timestamp=int(time.time()) - 90)
     assert client.get("/api/users/me", headers=old).status_code == 401
-    future = _signed("GET", "/api/users/me", timestamp=int(time.time()) + 61)
+    future = _signed("GET", "/api/users/me", timestamp=int(time.time()) + 90)
     assert client.get("/api/users/me", headers=future).status_code == 401
     ok = _signed("GET", "/api/users/me", timestamp=int(time.time()) - 30)
     assert client.get("/api/users/me", headers=ok).status_code == 200
+
+
+def test_clock_skew_boundary_is_deterministic():
+    secret_headers = _signed("GET", "/api/users/me", timestamp=1_000_000)
+    kwargs = dict(nonce_cache=internal_auth.NonceCache())
+    body_hash = __import__("hashlib").sha256(b"").hexdigest()
+    with pytest.raises(internal_auth.InvalidAssertion):
+        internal_auth.verify_assertion(SECRET, "GET", "/api/users/me", secret_headers, body_hash, now=1_000_061.0, **kwargs)
+    with pytest.raises(internal_auth.InvalidAssertion):
+        internal_auth.verify_assertion(SECRET, "GET", "/api/users/me", secret_headers, body_hash, now=999_939.0, **kwargs)
+
+
+def test_rejected_assertion_never_falls_back_to_session_credentials(core, db):
+    """A present-but-invalid gateway assertion is 401 even alongside a valid admin/user Bearer session."""
+    client, cfg = core
+    for uid in ("admin-1", "1001"):
+        sess = _session_headers(db.get_user(uid), db, cfg)
+        # sanity: the session alone authenticates
+        assert client.get("/api/users/me", headers=sess).status_code == 200
+        for bad in (
+            _signed("GET", "/api/users/me", timestamp=int(time.time()) - 90),
+            _signed("GET", "/api/users/me", secret="x" * 40),
+            _signed("GET", "/api/auth/me"),  # signed for a different path
+        ):
+            res = client.get("/api/users/me", headers={**sess, **bad})
+            assert res.status_code == 401, uid
+            client.cookies.set("session_token", sess["Authorization"][7:])
+            res = client.get("/api/users/me", headers=bad)
+            client.cookies.clear()
+            assert res.status_code == 401, uid
 
 
 def test_replayed_nonce_is_401(core):

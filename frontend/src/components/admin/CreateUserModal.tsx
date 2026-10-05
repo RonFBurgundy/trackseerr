@@ -131,7 +131,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ isOpen, onClos
             {PERMISSION_PRESETS.map((p) => (
               <label
                 key={p.id}
-                className="flex items-center gap-3 min-h-[44px] sm:min-h-0 cursor-pointer text-xs font-mono"
+                className="flex items-center gap-3 min-h-[36px] sm:min-h-0 cursor-pointer text-xs font-mono"
               >
                 <input
                   id={`create-user-preset-${p.id}`}

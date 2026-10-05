@@ -19,9 +19,9 @@ export const ItunesImportCard: React.FC = () => {
   const fileRef = useRef<HTMLInputElement>(null);
 
   return (
-    <MachinedCard className="p-4 space-y-4">
+    <MachinedCard className="p-3 sm:p-4 space-y-4">
       <div>
-        <h3 className="font-bold text-base text-white">Import iTunes / Apple Music library</h3>
+        <h3 className="font-bold text-sm sm:text-base text-white">Import iTunes / Apple Music library</h3>
         <p className="mt-1 text-xs font-mono text-neutral-400">
           Export with File &gt; Library &gt; Export Library and upload the XML file. Playlists are imported as snapshots;
           importing the same export again updates them.
@@ -79,7 +79,7 @@ export const ItunesImportCard: React.FC = () => {
             </div>
             <div className="max-h-80 overflow-y-auto border border-[#2a2a2a] rounded-[3px] divide-y divide-[#222222]">
               {imp.preview.playlists.map((p, i) => (
-                <label key={p.key} className="flex items-center gap-3 px-3 min-h-[44px] cursor-pointer hover:bg-[#1c1c1c]">
+                <label key={p.key} className="flex items-center gap-3 px-3 min-h-[36px] cursor-pointer hover:bg-[#1c1c1c]">
                   <input
                     id={`itunes-playlist-${i}`}
                     name="playlist"
@@ -173,12 +173,12 @@ export const ItunesImportCard: React.FC = () => {
             </div>
           </div>
 
-          <label className="flex items-center gap-3 min-h-[44px] cursor-pointer text-sm text-neutral-200">
+          <label className="flex items-center gap-3 min-h-[36px] cursor-pointer text-sm text-neutral-200">
             <input id="itunes-include-folders" name="include-folders" type="checkbox" className={checkClass} checked={imp.includeFolders} onChange={(e) => imp.setIncludeFolders(e.target.checked)} />
             Prefix playlist names with their folder ("Folder / Playlist")
           </label>
           <div>
-            <label className="flex items-center gap-3 min-h-[44px] text-sm text-neutral-500">
+            <label className="flex items-center gap-3 min-h-[36px] text-sm text-neutral-500">
               <input id="itunes-import-play-stats" name="import-play-stats" type="checkbox" className={checkClass} checked={imp.importPlayStats} disabled onChange={() => undefined} />
               Import play counts and ratings
             </label>
@@ -215,7 +215,7 @@ export const ItunesImportCard: React.FC = () => {
           {imp.status?.error && <div className="text-xs font-mono text-[#ef4444]" role="alert">{imp.status.error}</div>}
           <div className="max-h-80 overflow-y-auto border border-[#2a2a2a] rounded-[3px] divide-y divide-[#222222]">
             {(imp.status?.playlists ?? []).map((p) => (
-              <div key={p.key} className="flex items-center gap-3 px-3 min-h-[44px] text-sm">
+              <div key={p.key} className="flex items-center gap-3 px-3 min-h-[36px] text-sm">
                 <span className="min-w-0 flex-1 truncate text-white" title={p.name}>{p.name}</span>
                 {p.state === 'pending' && <span className="text-xs font-mono text-neutral-500">waiting</span>}
                 {p.state === 'failed' && <span className="text-xs font-mono text-[#ef4444]">failed</span>}

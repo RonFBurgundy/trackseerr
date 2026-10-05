@@ -150,7 +150,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
       </div>
 
       {account && (
-        <MachinedCard className="p-4">
+        <MachinedCard className="p-3 sm:p-4">
           <QuotaBars account={account} isAdmin={isAdmin} compact />
           <p className="mt-2 text-[11px] font-mono text-[var(--text-muted)]">
             Remaining requests per type over a rolling {account.quotas.window_days} days.
@@ -191,7 +191,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
             const isBusy = processingId === req.id;
 
             return (
-              <MachinedCard key={req.id} className="p-4 flex flex-col justify-between gap-4">
+              <MachinedCard key={req.id} className="p-3 sm:p-4 flex flex-col justify-between gap-4">
                 <div className="flex items-start gap-3.5">
                   <img
                     src={req.cover_url || '/placeholder.svg'}

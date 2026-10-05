@@ -13,7 +13,7 @@ export const TapeTransportBay = React.forwardRef<HTMLDivElement, TapeTransportBa
   return (
     <div
       ref={ref}
-      className={`tape-transport-bay bg-[#0d0d0d] border border-[#1f1f1f] shadow-transport-bay rounded-[4px] p-[3px] ${className}`}
+      className={`tape-transport-bay bg-[#0d0d0d] border border-[#1f1f1f] shadow-transport-bay rounded-[4px] p-[2px] sm:p-[3px] ${className}`}
       {...props}
     >
       {children}

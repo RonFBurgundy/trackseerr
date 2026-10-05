@@ -27,7 +27,7 @@ export const SelectionCheckbox: React.FC<SelectionCheckboxProps> = ({
   return (
   <label
     onClick={(e) => e.stopPropagation()}
-    className={`${inline ? 'relative shrink-0' : 'absolute top-1 left-1 z-10'} flex h-11 w-11 items-center justify-center rounded-[3px] border border-[#2a2a2a] bg-black/70 ${
+    className={`${inline ? 'relative shrink-0' : 'absolute top-1 left-1 z-10'} flex h-9 w-9 items-center justify-center rounded-[3px] border border-[#2a2a2a] bg-black/70 ${
       disabled ? 'cursor-not-allowed' : 'cursor-pointer'
     } ${className}`}
   >

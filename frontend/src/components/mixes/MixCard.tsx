@@ -59,13 +59,13 @@ export const MixCard: React.FC<MixCardProps> = ({
   const [confirmDelete, setConfirmDelete] = useState<boolean>(false);
 
   return (
-    <MachinedCard className="p-4 space-y-4 w-full">
+    <MachinedCard className="p-3 sm:p-4 space-y-4 w-full">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[10px] font-mono uppercase tracking-wider text-[#e5a00d]">
             {TYPE_LABEL[mix.mix_type]}
           </div>
-          <div className="text-base font-bold text-white truncate">{mix.name}</div>
+          <div className="text-sm sm:text-base font-bold text-white truncate">{mix.name}</div>
           {mix.seed_artist && <div className="text-xs text-neutral-400 truncate">Seed: {mix.seed_artist}</div>}
         </div>
         <TactileSwitch
@@ -99,7 +99,7 @@ export const MixCard: React.FC<MixCardProps> = ({
           onChange={(e) => setRatio(Number(e.target.value))}
           onPointerUp={() => void onUpdate(mix.id, { discovery_ratio: ratio / 100 })}
           onKeyUp={() => void onUpdate(mix.id, { discovery_ratio: ratio / 100 })}
-          className="w-full h-11 sm:h-6 accent-[#e5a00d]"
+          className="w-full h-8 sm:h-6 accent-[#e5a00d]"
         />
       </div>
 
@@ -231,7 +231,7 @@ export const MixCard: React.FC<MixCardProps> = ({
 
       {!preview && result && result.tracks.length > 0 && (
         <details className="border-t border-[#222222] pt-3">
-          <summary className="text-xs uppercase font-mono text-neutral-400 cursor-pointer min-h-[44px] sm:min-h-0 flex items-center">
+          <summary className="text-xs uppercase font-mono text-neutral-400 cursor-pointer min-h-[36px] sm:min-h-0 flex items-center">
             Last result tracks
           </summary>
           <ul className="max-h-64 overflow-y-auto divide-y divide-[#222222] mt-2">

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Play, Pause, Square, Music } from 'lucide-react';
 import type { AudioPreviewTrack } from '@/types/models';
 import { TapeDeckButton } from '@/components/ui';
@@ -24,6 +24,27 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({
   onStop,
   onSeek,
 }) => {
+  const barRef = useRef<HTMLDivElement>(null);
+  const visible = currentTrack !== null;
+
+  // Publish the bar height so floating sheets (bulk editors) can sit above it.
+  useEffect(() => {
+    const root = document.documentElement;
+    const el = barRef.current;
+    if (!visible || !el) {
+      root.style.removeProperty('--player-offset');
+      return undefined;
+    }
+    const publish = (): void => root.style.setProperty('--player-offset', `${el.offsetHeight}px`);
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty('--player-offset');
+    };
+  }, [visible]);
+
   if (!currentTrack) return null;
 
   const handleScrubberClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -40,7 +61,7 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({
   };
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 bg-[#0d0d0d] border-t border-[#1f1f1f] shadow-[0_-4px_16px_rgba(0,0,0,0.8)] pb-safe">
+    <div ref={barRef} className="fixed bottom-0 left-0 right-0 z-40 bg-[#0d0d0d] border-t border-[#1f1f1f] shadow-[0_-4px_16px_rgba(0,0,0,0.8)] pb-safe">
       {/* 30s Scrubber Progress Bar */}
       <div
         className="w-full h-1.5 bg-[#181818] cursor-pointer relative group"

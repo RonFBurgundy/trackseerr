@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
+from plex_playlist_sync import art_pipeline
 from plex_playlist_sync.acquisition_worker import acquisition_worker
 from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
 from plex_playlist_sync.api.dependencies import (
@@ -870,6 +871,7 @@ VALID_TASK_IDS = {
     "lidarr_auto_trickle",
     "download_queue_monitor",
     "artist_metadata_refresh",
+    "art_thumbnail_backfill",
 }
 
 _running_tasks: set[str] = set()
@@ -1020,6 +1022,21 @@ def get_all_scheduled_tasks(
             interval="Every 24h",
             status=ar_status_val,
             last_run_at=ar_last_run,
+            can_trigger=True,
+            can_cancel=False,
+        )
+    )
+
+    # 8. art_thumbnail_backfill: one-off pre-generation of 250/500 thumbnails and art versions for existing art
+    backfill_running = "art_thumbnail_backfill" in _running_tasks
+    tasks.append(
+        ScheduledTaskItem(
+            id="art_thumbnail_backfill",
+            name="Artwork Thumbnail Backfill",
+            description="One-off: generates missing 250/500px thumbnails and version tokens for artwork already on disk. Safe to re-run; skips finished items.",
+            interval="Manual / On Demand",
+            status="running" if backfill_running else "idle",
+            last_run_at=_task_last_run_at.get("art_thumbnail_backfill"),
             can_trigger=True,
             can_cancel=False,
         )
@@ -1182,6 +1199,24 @@ def run_scheduled_task(
                     _running_tasks.discard("artist_metadata_refresh")
 
         threading.Thread(target=_refresh_thread, daemon=True, name="ManualArtistRefreshTask").start()
+
+    elif task_id == "art_thumbnail_backfill":
+        with _tasks_lock:
+            if "art_thumbnail_backfill" in _running_tasks:
+                return {"success": True, "message": "Task 'art_thumbnail_backfill' is already running"}
+            _running_tasks.add("art_thumbnail_backfill")
+
+        def _art_backfill_thread():
+            try:
+                with track_job("art_thumbnail_backfill", "Artwork Thumbnail Backfill") as job:
+                    job.message = summarize_result(art_pipeline.backfill(db))
+            except Exception as exc:  # the job is already recorded as failed; keep the thread from dying silently
+                logger.error("Artwork thumbnail backfill failed: %s", safe_exc(exc))
+            finally:
+                with _tasks_lock:
+                    _running_tasks.discard("art_thumbnail_backfill")
+
+        threading.Thread(target=_art_backfill_thread, daemon=True, name="ArtBackfillTask").start()
 
     return {"success": True, "message": f"Task '{task_id}' dispatched successfully"}
 

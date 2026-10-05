@@ -41,7 +41,7 @@ export const PlexPlaylistsSection: React.FC<PlexPlaylistsSectionProps> = ({ isAd
               value={plex.selectedUser ?? ''}
               onChange={(e) => plex.setSelectedUser(e.target.value)}
               aria-label="Plex user"
-              className="bg-[#0d0d0d] border border-[#2a2a2a] rounded-[3px] px-3 py-2 min-h-[44px] sm:min-h-0 text-sm text-white font-mono focus:outline-none focus:border-[#e5a00d]"
+              className="bg-[#0d0d0d] border border-[#2a2a2a] rounded-[3px] px-2.5 py-1.5 min-h-[36px] sm:min-h-0 text-[13px] sm:text-sm text-white font-mono focus:outline-none focus:border-[#e5a00d]"
             >
               {plex.users.map((u) => (
                 <option key={u.username} value={u.username}>
@@ -72,7 +72,7 @@ export const PlexPlaylistsSection: React.FC<PlexPlaylistsSectionProps> = ({ isAd
           className="flex items-start justify-between gap-3 p-3 bg-[#1a0f0f] border border-[#ef4444]/40 rounded-[3px] text-xs text-[#ef4444] font-mono"
         >
           <span>{plex.error}</span>
-          <button type="button" onClick={plex.clearError} aria-label="Dismiss error" className="shrink-0 inline-flex h-11 w-11 -my-3 -mr-3 items-center justify-center">
+          <button type="button" onClick={plex.clearError} aria-label="Dismiss error" className="shrink-0 inline-flex h-9 w-9 -my-2 -mr-2 items-center justify-center">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -125,7 +125,7 @@ export const PlexPlaylistsSection: React.FC<PlexPlaylistsSectionProps> = ({ isAd
                       />
                     </div>
                   </div>
-                  <h4 className="font-bold text-base text-white truncate" title={pl.title}>
+                  <h4 className="font-bold text-sm sm:text-base text-white truncate" title={pl.title}>
                     {pl.title}
                   </h4>
                   <div className="flex items-center gap-3 text-xs text-neutral-400 font-mono">

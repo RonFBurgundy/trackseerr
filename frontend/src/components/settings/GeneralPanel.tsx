@@ -29,7 +29,7 @@ export const GeneralPanel: React.FC<GeneralPanelProps> = ({ settings, onChange, 
   };
 
   return (
-    <MachinedCard className="p-6 max-w-2xl">
+    <MachinedCard className="p-3 sm:p-6 max-w-2xl">
       <form onSubmit={handleSave} className="space-y-5">
         <div>
           <label htmlFor="general-server-name" className={labelClass}>Server Name</label>

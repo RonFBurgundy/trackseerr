@@ -103,7 +103,7 @@ export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
 
   return (
     <div className="space-y-6">
-      <MachinedCard className="p-4 sm:p-6">
+      <MachinedCard className="p-3 sm:p-6">
         <h3 className="text-sm font-bold uppercase tracking-wider text-white mb-4">Server Scrobbling</h3>
         <form onSubmit={handleSaveServer} className="space-y-4 max-w-2xl">
           <div>
@@ -160,7 +160,7 @@ export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
       </MachinedCard>
 
       {showPlexOptions && (
-        <MachinedCard className="p-4 sm:p-6">
+        <MachinedCard className="p-3 sm:p-6">
           <h3 className="text-sm font-bold uppercase tracking-wider text-white mb-2">Plex Webhook</h3>
           <p className="text-xs text-neutral-400 mb-3">
             Add this URL in Plex under Settings, Webhooks (requires Plex Pass on the server owner).
@@ -199,7 +199,7 @@ export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
         </MachinedCard>
       )}
 
-      <MachinedCard className="p-4 sm:p-6">
+      <MachinedCard className="p-3 sm:p-6">
         <h3 className="text-sm font-bold uppercase tracking-wider text-white mb-4">Users</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">

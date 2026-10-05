@@ -338,7 +338,7 @@ const MainApp: React.FC = () => {
                             href={auth.plexAuthUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="tape-deck-btn flex min-h-[44px] w-full items-center justify-center rounded-[3px] px-4 text-xs sm:min-h-[38px]"
+                            className="tape-deck-btn flex min-h-[36px] w-full items-center justify-center rounded-[3px] px-4 text-xs sm:min-h-[38px]"
                           >
                             Open Plex Sign-In
                           </a>
@@ -517,7 +517,7 @@ const MainApp: React.FC = () => {
           </div>
 
           <div className="space-y-1">
-            <h4 className="font-bold text-base text-white">Authorize with Plex</h4>
+            <h4 className="font-bold text-sm sm:text-base text-white">Authorize with Plex</h4>
             <p className="text-xs text-neutral-400 max-w-sm mx-auto font-mono">
               Sign in with your plex.tv credentials to manage playlists, browse recommendations,
               and submit music requests.
