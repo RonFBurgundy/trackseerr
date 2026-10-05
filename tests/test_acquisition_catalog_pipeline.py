@@ -12,6 +12,7 @@ Covers:
 - Test 9: Library mode == "lidarr" skips native catalog table population.
 """
 
+from tests.audio_fixtures import write_flac
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -311,7 +312,7 @@ def test_acquisition_worker_imports_and_populates_native_catalog(test_db: Databa
     download_folder = downloads_dir / "Pink_Floyd_Time"
     download_folder.mkdir(parents=True, exist_ok=True)
     audio_file = download_folder / "04_Time.flac"
-    audio_file.write_text("dummy binary audio content")
+    write_flac(audio_file)
 
     # Insert active download
     test_db.create_active_download(

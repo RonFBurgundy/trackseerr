@@ -94,6 +94,7 @@ class ProbedFile:
     sample_rate: Optional[float] = None
     channels: Optional[int] = None
     bits_per_sample: Optional[int] = None
+    unparseable: bool = False  # mutagen returned None or raised a parse error: a security failure at any check mode
     corrupt: bool = False  # parse failure / zero duration (error-class when other files are readable)
 
 
@@ -224,10 +225,10 @@ def probe_audio_file(path: Path) -> ProbedFile:
         return ProbedFile(spath, None, None, None, f"unreadable: {type(exc).__name__}: {exc}")
     except Exception as exc:  # noqa: BLE001 - mutagen raises MutagenError, struct.error, ValueError, EOFError, ...
         logger.warning("Import bitrate check: cannot parse %s: %s: %s", spath, type(exc).__name__, exc)
-        return ProbedFile(spath, None, None, None, f"unreadable: {type(exc).__name__}: {exc}", corrupt=True)
+        return ProbedFile(spath, None, None, None, f"unreadable: {type(exc).__name__}: {exc}", corrupt=True, unparseable=True)
     try:
         if audio is None or getattr(audio, "info", None) is None:
-            return ProbedFile(spath, None, None, None, "unrecognised audio format")
+            return ProbedFile(spath, None, None, None, "unrecognised audio format", unparseable=True)
         info = audio.info
         try:
             duration = float(getattr(info, "length", 0.0) or 0.0)
@@ -302,7 +303,12 @@ def _check_lossy(probed: ProbedFile, definition: dict[str, Any]) -> Optional[Tra
     )
 
 
-def check_files(files: Iterable[Path], mode: str, definitions: dict[str, dict[str, Any]]) -> CheckResult:
+def check_files(
+    files: Iterable[Path],
+    mode: str,
+    definitions: dict[str, dict[str, Any]],
+    probes: Optional[dict[str, ProbedFile]] = None,
+) -> CheckResult:
     """Checks every file (see module docstring). ``definitions`` is {quality: {min_kbps, max_kbps, ...}}. Never raises."""
     result = CheckResult(mode=normalize_check_mode(mode))
     if result.mode == CHECK_OFF:
@@ -310,7 +316,7 @@ def check_files(files: Iterable[Path], mode: str, definitions: dict[str, dict[st
     corrupt: list[tuple[str, str]] = []
     for f in files:
         try:
-            probed = probe_audio_file(f)
+            probed = (probes or {}).get(str(f)) or probe_audio_file(f)  # reuse the security stage's probe
             if probed.skipped_reason or probed.kbps is None:
                 reason = probed.skipped_reason or "unknown"
                 result.skipped.append((probed.path, reason))

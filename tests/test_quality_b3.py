@@ -1,5 +1,6 @@
 """Phase B3: new codecs (parser, defaults, migration v51) and the per-track bitrate check on import."""
 
+from tests.audio_fixtures import write_mp3
 import json
 import sqlite3
 from pathlib import Path
@@ -346,7 +347,7 @@ def _run_import(tmp_path, mode, mutagen_result):
         )
     )
     audio = downloads / "01 - Song.mp3"
-    audio.write_bytes(b"x" * 2000)
+    write_mp3(audio)
     settings = db.get_media_management_settings()
     settings["root_folder_path"] = str(music)
     settings["import_bitrate_check"] = mode

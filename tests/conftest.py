@@ -90,6 +90,34 @@ def _restore_root_logging():
     root.setLevel(before_level)
 
 
+def _stop_worker_singletons_started_since(before: set) -> None:
+    """Stop the module-level worker singletons (pending/backlog/RSS/acquisition/artist-refresh/import-list/mix)
+    whose thread a test started and left running, so they cannot outlive their test's DB."""
+    import threading
+
+    from plex_playlist_sync import (
+        acquisition_worker,
+        artist_refresh_worker,
+        backlog_worker,
+        import_list_worker,
+        mix_worker,
+        pending_worker,
+    )
+
+    workers = {
+        "PendingReleaseWorkerThread": pending_worker.pending_worker,
+        "WantedBacklogWorkerThread": backlog_worker.backlog_worker,
+        "RSSSyncWorkerThread": backlog_worker.rss_worker,
+        "AcquisitionWorkerThread": acquisition_worker.acquisition_worker,
+        "ArtistRefreshWorkerThread": artist_refresh_worker.artist_refresh_worker,
+        "ImportListWorkerThread": import_list_worker.import_list_worker,
+        "MixWorkerThread": mix_worker.mix_worker,
+    }
+    for thread in [t for t in threading.enumerate() if t not in before and t.name in workers]:
+        workers[thread.name].stop()
+        thread.join(timeout=10)
+
+
 @pytest.fixture(autouse=True)
 def _stop_scheduler_threads_started_by_the_test():
     """``cli.main`` starts the sync scheduler and the Lidarr auto-trickle runner as daemon threads that live until
@@ -103,6 +131,7 @@ def _stop_scheduler_threads_started_by_the_test():
     names = {"ScheduledSyncWorker", "ScheduledLidarrTrickleWorker"}
     before = set(threading.enumerate())
     yield
+    _stop_worker_singletons_started_since(before)
     started = [t for t in threading.enumerate() if t.name in names and t not in before]
     if not started:
         return

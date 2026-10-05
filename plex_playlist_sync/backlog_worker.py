@@ -209,8 +209,9 @@ class WantedBacklogWorker:
                     # Responsive sleep
                     slept = 0.0
                     while slept < float(self.interval_seconds) and not self._stop_event.is_set():
-                        time.sleep(min(1.0, float(self.interval_seconds) - slept))
-                        slept += 1.0
+                        step = min(1.0, float(self.interval_seconds) - slept)
+                        self._stop_event.wait(step)
+                        slept += step
 
                 with self._lock:
                     self._is_running = False
@@ -616,8 +617,9 @@ class WantedBacklogWorker:
             if self.pace_delay > 0 and not self._stop_event.is_set():
                 slept = 0.0
                 while slept < self.pace_delay and not self._stop_event.is_set():
-                    time.sleep(min(0.2, self.pace_delay - slept))
-                    slept += 0.2
+                    step = min(0.2, self.pace_delay - slept)
+                    self._stop_event.wait(step)
+                    slept += step
 
         with self._lock:
             self.items_checked += items_checked
@@ -694,8 +696,9 @@ class RSSSyncWorker:
                     # Responsive sleep
                     slept = 0.0
                     while slept < float(self.interval_seconds) and not self._stop_event.is_set():
-                        time.sleep(min(1.0, float(self.interval_seconds) - slept))
-                        slept += 1.0
+                        step = min(1.0, float(self.interval_seconds) - slept)
+                        self._stop_event.wait(step)
+                        slept += step
 
                 with self._lock:
                     self._is_running = False

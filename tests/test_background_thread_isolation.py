@@ -30,7 +30,10 @@ def test_scheduler_threads_do_not_spin_when_time_sleep_is_a_noop():
             assert _scheduler_threads() == [], "scheduler threads must exit promptly once shutdown is signalled"
         finally:
             cli._shutdown_event.clear()
-    assert spun == 0, f"scheduler threads called the patched time.sleep {spun} times in 0.3s"
+    assert spun == 0, (
+        f"scheduler threads called the patched time.sleep {spun} times in 0.3s; "
+        f"live threads: {sorted(t.name for t in threading.enumerate())}"
+    )
 
 
 def test_conftest_stops_scheduler_threads_a_test_leaves_behind():
@@ -52,3 +55,20 @@ def test_fast_clock_finishes_a_cooldown_loop_without_waiting():
         clock.sleep(1.0)
         calls += 1
     assert calls <= 61
+
+
+def test_interval_workers_wait_on_their_stop_event_not_time_sleep():
+    """Worker loops that sleep between ticks must use ``Event.wait``; a no-op ``time.sleep`` would make them hot."""
+    from plex_playlist_sync.backlog_worker import RSSSyncWorker
+    from plex_playlist_sync.pending_worker import PendingReleaseWorker
+
+    workers = [PendingReleaseWorker(), RSSSyncWorker()]
+    with patch("time.sleep") as fake_sleep, patch("plex_playlist_sync.pending_worker.release_due") as rd:
+        rd.return_value = {"released": 0}
+        for w in workers:
+            w.start(MagicMock(), 3600)
+        threading.Event().wait(0.3)
+        spun = fake_sleep.call_count
+        for w in workers:
+            w.stop()
+    assert spun == 0, f"worker loops called the patched time.sleep {spun} times in 0.3s"

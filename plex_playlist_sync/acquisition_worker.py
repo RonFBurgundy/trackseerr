@@ -27,12 +27,14 @@ from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result
+from plex_playlist_sync.import_security import clear_exec_bits, quarantine_files, verify_files, QUARANTINE_DIRNAME
 from plex_playlist_sync.import_quality_check import CHECK_OFF, check_files, normalize_check_mode
 from plex_playlist_sync.library_monitoring import NATIVE_MONITOR_OPTIONS
 from plex_playlist_sync.library_manager import ModeChanged, run_guarded
 from plex_playlist_sync.library import (
     AUDIO_EXTENSIONS,
     embed_album_artwork,
+    ArchiveLimitError,
     extract_archive,
     inspect_audio_file,
     is_archive_file,
@@ -159,6 +161,7 @@ def place_audio_file(
         try:
             os.link(str(src), str(dst))
             logger.info("Successfully hardlinked '%s' -> '%s'", src, dst)
+            clear_exec_bits(dst)
             return dst
         except OSError as e:
             logger.warning(
@@ -168,9 +171,12 @@ def place_audio_file(
                 dst,
             )
             shutil.copy2(str(src), str(dst))
+            clear_exec_bits(dst)
             return dst
     else:
-        return safe_atomic_move(source_file, target_file)
+        placed = safe_atomic_move(source_file, target_file)
+        clear_exec_bits(placed)
+        return placed
 
 
 def reconcile_audio_file_to_track(
@@ -355,6 +361,7 @@ class AcquisitionWorker:
         self._is_running: bool = False
         self.poll_interval: float = 5.0
         self.staging_dir: str = "/downloads"
+        self._archive_errors: list[str] = []
 
     def is_running(self) -> bool:
         with self._lock:
@@ -411,8 +418,9 @@ class AcquisitionWorker:
                     # Sleep with responsive stop checking
                     slept = 0.0
                     while slept < self.poll_interval and not self._stop_event.is_set():
-                        time.sleep(min(0.5, self.poll_interval - slept))
-                        slept += 0.5
+                        step = min(0.5, self.poll_interval - slept)
+                        self._stop_event.wait(step)
+                        slept += step
 
                 with self._lock:
                     self._is_running = False
@@ -434,6 +442,12 @@ class AcquisitionWorker:
 
         with self._lock:
             self._is_running = False
+
+    def _note_archive_failure(self, archive: Path, exc: Exception) -> None:
+        """Logs an extraction failure; limit violations are also remembered so the poll can record a system event."""
+        logger.warning("Failed to extract archive %s: %s: %s", archive, type(exc).__name__, exc)
+        if isinstance(exc, ArchiveLimitError):
+            self._archive_errors.append(f"{archive.name}: {exc}")
 
     def _find_audio_files(self, candidate_path: Optional[str | Path], search_term: str) -> list[Path]:
         """Locates downloaded audio files from source path or staging directory.
@@ -460,13 +474,13 @@ class AcquisitionWorker:
                             if extracted:
                                 return sorted(extracted)
                         except Exception as e:
-                            logger.warning("Failed to extract candidate archive %s: %s", src_path, e)
+                            self._note_archive_failure(src_path, e)
                 elif src_path.is_dir():
                     archives_in_src: list[Path] = []
                     for root, _, files in os.walk(str(src_path)):
                         for f in files:
                             f_path = (Path(root) / f).resolve()
-                            if f_path.is_relative_to(staging_path):
+                            if f_path.is_relative_to(staging_path) and QUARANTINE_DIRNAME not in f_path.relative_to(staging_path).parts:
                                 if f_path.suffix.lower() in AUDIO_EXTENSIONS:
                                     found.append(f_path)
                                 elif is_archive_file(f_path):
@@ -480,7 +494,7 @@ class AcquisitionWorker:
                             extracted = extract_archive(arc_path, extract_dir)
                             found.extend(extracted)
                         except Exception as e:
-                            logger.warning("Failed to extract archive %s in candidate dir: %s", arc_path, e)
+                            self._note_archive_failure(arc_path, e)
                     if found:
                         return sorted(found)
 
@@ -491,7 +505,7 @@ class AcquisitionWorker:
             for root, _, files in os.walk(str(staging_path)):
                 for f in files:
                     f_path = (Path(root) / f).resolve()
-                    if f_path.is_relative_to(staging_path):
+                    if f_path.is_relative_to(staging_path) and QUARANTINE_DIRNAME not in f_path.relative_to(staging_path).parts:
                         if clean_term in f.lower() or clean_term in root.lower():
                             if f_path.suffix.lower() in AUDIO_EXTENSIONS:
                                 found.append(f_path)
@@ -506,7 +520,7 @@ class AcquisitionWorker:
                         extracted = extract_archive(arc_path, extract_dir)
                         found.extend(extracted)
                     except Exception as e:
-                        logger.warning("Failed to extract fallback archive %s: %s", arc_path, e)
+                        self._note_archive_failure(arc_path, e)
 
         return sorted(found)
 
@@ -766,7 +780,35 @@ class AcquisitionWorker:
                         candidate_src = None
 
                 search_term = item.get("title") or item.get("artist") or ""
+                self._archive_errors = []
                 audio_files = self._find_audio_files(candidate_src, search_term)
+
+                if self._archive_errors and not audio_files:
+                    err_msg = "Archive rejected: " + "; ".join(self._archive_errors)
+                    try:
+                        db.record_event(
+                            "import_security",
+                            f"Archive limits exceeded for '{item.get('title', '')}': {err_msg}",
+                            source="AcquisitionWorker",
+                            severity="error",
+                            details={"download_id": download_id, "archives": list(self._archive_errors)},
+                        )
+                    except sqlite3.Error as ev_err:
+                        logger.warning("Failed to record import_security event: %s", ev_err)
+                    db.update_download_status(download_id, status=DownloadStatus.FAILED.value, error_message=err_msg)
+                    _notify_failed(err_msg)
+                    try:
+                        db.add_to_blocklist(
+                            source_title=item.get("title", ""),
+                            artist=item.get("artist"),
+                            release_guid=item.get("id"),
+                            info_hash=item.get("download_hash"),
+                            reason=err_msg,
+                        )
+                    except Exception as bl_err:
+                        logger.warning("Failed to add archive-rejected download to blocklist: %s", bl_err)
+                    stats["failed"] += 1
+                    continue
 
                 if not audio_files:
                     logger.warning(
@@ -795,12 +837,49 @@ class AcquisitionWorker:
                     stats["failed"] += 1
                     continue
 
+                # Security gate (always on, any import_bitrate_check mode): magic bytes + header parse. One bad file
+                # rejects the whole release; offenders are quarantined, never imported.
+                probes: dict[str, Any] = {}
+                security = verify_files(audio_files, probes)
+                if security.failed:
+                    err_msg = f"Security check failed: {security.reason()}"
+                    moved = quarantine_files([p for p, _ in security.failures], self.staging_dir, str(download_id))
+                    try:
+                        db.record_event(
+                            "import_security",
+                            f"Security check failed for '{item.get('title', '')}': {security.reason()}",
+                            source="AcquisitionWorker",
+                            severity="error",
+                            details={
+                                "download_id": download_id,
+                                "files": [{"file": p, "reason": r} for p, r in security.failures],
+                                "quarantined_to": [str(m) for m in moved],
+                            },
+                        )
+                    except sqlite3.Error as ev_err:
+                        logger.warning("Failed to record import_security event: %s", ev_err)
+                    logger.error("Import security failure for download %s: %s", download_id, err_msg)
+                    db.update_download_status(download_id, status=DownloadStatus.FAILED.value, error_message=err_msg)
+                    _notify_failed(err_msg)
+                    try:
+                        db.add_to_blocklist(
+                            source_title=item.get("title", ""),
+                            artist=item.get("artist"),
+                            release_guid=item.get("id"),
+                            info_hash=item.get("download_hash"),
+                            reason=err_msg,
+                        )
+                    except Exception as bl_err:
+                        logger.warning("Failed to add security-rejected download to blocklist: %s", bl_err)
+                    stats["failed"] += 1
+                    continue
+
                 # Per-track bitrate check (media management: import_bitrate_check = off | warn | reject).
                 check_mode = normalize_check_mode(media_settings.get("import_bitrate_check"))
                 if check_mode != CHECK_OFF:
                     try:
                         definitions = {str(d["quality"]): d for d in db.list_quality_definitions()}
-                        check = check_files(audio_files, check_mode, definitions)
+                        check = check_files(audio_files, check_mode, definitions, probes=probes)
                     except Exception as chk_err:  # noqa: BLE001 - the check is advisory; it must never crash the worker loop
                         logger.warning(
                             "Import bitrate check failed for download %s: %s: %s",
@@ -1044,6 +1123,7 @@ class AcquisitionWorker:
                         if not cover_file.exists():
                             try:
                                 cover_file.write_bytes(cover_bytes)
+                                clear_exec_bits(cover_file)
                                 logger.info("Saved album cover to %s", cover_file)
                             except OSError as e:
                                 logger.warning("Failed to save cover.jpg at %s: %s", cover_file, e)

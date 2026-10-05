@@ -1,5 +1,6 @@
 """apply_list_item levels (native + Lidarr), playlist monitor modes, import list sync and the acquisition fix."""
 
+from tests.audio_fixtures import write_flac
 from pathlib import Path
 from typing import Any, Optional
 from unittest.mock import MagicMock, patch
@@ -675,11 +676,11 @@ def _import_one(db: Database, tmp_path: Path, artist: str = "Pink Floyd") -> Non
     folder = downloads / "dl"
     folder.mkdir()
     audio = folder / "04_Time.flac"
-    audio.write_text("dummy binary audio content")
+    write_flac(audio)
     db.create_active_download(
         ActiveDownload(
             id="dl-1", client_id="c1", title="Pink Floyd - Time [FLAC]", artist=artist, item_type="track",
-            status=DownloadStatus.COMPLETED.value, download_hash="h1", size_bytes=len("dummy binary audio content"),
+            status=DownloadStatus.COMPLETED.value, download_hash="h1", size_bytes=audio.stat().st_size,
         )
     )
     driver = MagicMock()
