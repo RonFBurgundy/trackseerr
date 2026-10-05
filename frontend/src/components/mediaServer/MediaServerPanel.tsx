@@ -14,7 +14,7 @@ const EMPTY: MediaServerSettingsInput = { type: 'none', url: '', username: '', p
 function toInput(settings: MediaServerSettings | null): MediaServerSettingsInput {
   if (!settings) return EMPTY;
   return {
-    type: settings.type === 'subsonic' ? 'subsonic' : 'none',
+    type: toSettableType(settings.type),
     url: settings.url,
     username: settings.username,
     password: settings.password,
@@ -22,9 +22,14 @@ function toInput(settings: MediaServerSettings | null): MediaServerSettingsInput
   };
 }
 
-const TYPE_LABELS: Record<string, string> = { plex: 'Plex', subsonic: 'Subsonic', none: 'None' };
+const TYPE_LABELS: Record<string, string> = { plex: 'Plex', subsonic: 'Subsonic', jellyfin: 'Jellyfin', none: 'None' };
 
-/** Settings > Media Server: pick Subsonic (Navidrome, Gonic, Airsonic) or none; Plex is set through the environment. */
+function toSettableType(value: string): SettableMediaServerType {
+  if (value === 'subsonic' || value === 'jellyfin') return value;
+  return 'none';
+}
+
+/** Settings > Media Server: pick Subsonic (Navidrome, Gonic, Airsonic), Jellyfin or none; Plex is set through the environment. */
 export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) => {
   const hook = useMediaServerSettings(true);
   const { settings } = hook;
@@ -46,6 +51,8 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
   const locked = settings?.locked_by_env ?? false;
   const patch = (p: Partial<MediaServerSettingsInput>) => setForm((prev) => ({ ...prev, ...p }));
   const isSubsonic = form.type === 'subsonic';
+  const isJellyfin = form.type === 'jellyfin';
+  const hasServer = isSubsonic || isJellyfin;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,7 +86,7 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
           <p className="flex items-start gap-2 text-xs font-mono text-amber-300" role="note">
             <Lock className="h-4 w-4 shrink-0" aria-hidden="true" />
             <span>
-              The media server is set by environment variables (MEDIA_SERVER, PLEX_*, SUBSONIC_*). Remove them to manage
+              The media server is set by environment variables (MEDIA_SERVER, PLEX_*, SUBSONIC_*, JELLYFIN_*). Remove them to manage
               it here.
             </span>
           </p>
@@ -94,18 +101,19 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
               <select
                 id="media-server-type"
                 value={form.type}
-                onChange={(e) => patch({ type: e.target.value === 'subsonic' ? ('subsonic' as SettableMediaServerType) : 'none' })}
+                onChange={(e) => patch({ type: toSettableType(e.target.value) })}
                 className={inputClass}
               >
                 <option value="none">None (Trackseerr manages the library only)</option>
                 <option value="subsonic">Subsonic API (Navidrome, Gonic, Airsonic)</option>
+                <option value="jellyfin">Jellyfin</option>
               </select>
               <p className="mt-1 text-[11px] font-mono text-neutral-500">
                 Plex is configured with PLEX_URL and PLEX_TOKEN in the environment.
               </p>
             </div>
 
-            {isSubsonic && (
+            {hasServer && (
               <>
                 <div>
                   <label htmlFor="media-server-url" className={labelClass}>
@@ -116,11 +124,49 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
                     type="text"
                     value={form.url}
                     onChange={(e) => patch({ url: e.target.value })}
-                    placeholder="http://navidrome:4533"
+                    placeholder={isJellyfin ? 'http://jellyfin:8096' : 'http://navidrome:4533'}
                     className={inputClass}
                     autoComplete="off"
                   />
                 </div>
+                {isJellyfin && (
+                  <>
+                    <div>
+                      <label htmlFor="media-server-api-key" className={labelClass}>
+                        API key
+                      </label>
+                      <input
+                        id="media-server-api-key"
+                        type="password"
+                        value={form.api_key}
+                        onChange={(e) => patch({ api_key: e.target.value })}
+                        placeholder="Jellyfin Dashboard > API Keys. Leave masked to keep the saved key"
+                        className={inputClass}
+                        autoComplete="new-password"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="media-server-user" className={labelClass}>
+                        Default user (optional)
+                      </label>
+                      <input
+                        id="media-server-user"
+                        type="text"
+                        value={form.username}
+                        onChange={(e) => patch({ username: e.target.value })}
+                        placeholder="Used when a playlist has no sync target; defaults to the first administrator"
+                        className={inputClass}
+                        autoComplete="off"
+                      />
+                    </div>
+                    <p className="text-[11px] font-mono text-neutral-500">
+                      Playlists are created per Jellyfin user: pick sync targets on each playlist. Changing the URL
+                      requires entering the API key again.
+                    </p>
+                  </>
+                )}
+                {isSubsonic && (
+                  <>
                 <div>
                   <label htmlFor="media-server-user" className={labelClass}>
                     Username
@@ -165,6 +211,8 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
                 <p className="text-[11px] font-mono text-neutral-500">
                   Playlists are written to this account only; Subsonic servers keep playlists per user.
                 </p>
+                  </>
+                )}
               </>
             )}
           </fieldset>
@@ -173,7 +221,7 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
             <TapeDeckButton
               type="button"
               size="sm"
-              disabled={locked || !isSubsonic || hook.isTesting}
+              disabled={locked || !hasServer || hook.isTesting}
               onClick={() => void handleTest()}
               icon={hook.isTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : undefined}
             >

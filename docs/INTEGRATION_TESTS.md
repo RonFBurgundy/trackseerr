@@ -101,3 +101,44 @@ updated in place), idempotent re-sync, description as comment, other-account tar
 
 Findings on Navidrome 0.64.2: `getUsers` works for an admin; it does not advertise `apiKeyAuthentication`; a fresh
 instance scans on first start and reports `Full scan required after migration`.
+
+
+# Jellyfin (adapter) integration tests
+
+`tests/integration/test_jellyfin_contract.py` runs `JellyfinMediaServer` against a real Jellyfin
+(`jellyfin/jellyfin:12.1.20260915-010956`, i.e. server 12.1.0, pinned) with the same opt-in as the other suites
+(`RUN_INTEGRATION=1`, marker `integration`). `tests/jellyfin_fake.py` is the in-process stand-in; these tests check that
+the real server still behaves as the fake assumes.
+
+```bash
+docker compose -f docker-compose.integration.yml up -d jellyfin         # 127.0.0.1:18096, ~40s, 1g / 1 cpu
+RUN_INTEGRATION=1 pytest tests/integration/test_jellyfin_contract.py -m integration -p no:xdist
+docker compose -f docker-compose.integration.yml down -v                # then `docker ps` must show only your own containers
+```
+
+Inside the test image use `--network host` and `JELLYFIN_IT_URL=http://127.0.0.1:18096` (the container has no docker
+CLI to start the stack itself). Config, cache and temp are tmpfs (a 3 GB cap: Jellyfin refuses to start with under 2 GiB
+free; real usage is a few MB), so every start is a first run. The fixture completes the Startup wizard
+(`/Startup/Configuration`, `/Startup/User`, `/Startup/RemoteAccess`, `/Startup/Complete`), logs in with
+`/Users/AuthenticateByName`, adds a music library over the SAME generated folder Navidrome uses
+(`tests/integration/navidrome/music`, mounted read-only at `/media/music`), creates a second user and an API key
+(`/Auth/Keys`). TEST-ONLY credentials live in `tests/integration/conftest.py`.
+
+Covered: ping, bad key -> `MediaServerAuthError`, unreachable server, scan + search, match (remaster suffix, wrong
+artist), playlist create -> reorder / drop / add -> removal -> append mode (same playlist id throughout), idempotent
+re-sync, a second user getting its own private playlist (and an unknown target reported), full reversal, repeated tracks,
+`/Users`, `/Library/Refresh`.
+
+Findings on Jellyfin 12.1.0:
+
+1. `POST /Playlists` without `IsPublic` creates a **public** playlist (`OpenAccess: true`), visible to every user. The
+   adapter always sends `IsPublic: false`.
+2. `POST /Playlists/{id}/Items/{entry}/Move/{index}` answers **400** for an API key (it needs a user session). The adapter
+   therefore orders with remove-by-`EntryIds` plus append and never calls Move.
+3. Adding an item that is repeated in one update is silently collapsed; only creation accepts repeats. The adapter syncs
+   a repeated source track once.
+4. Right after the first scan tracks are named after their file (`01 - Kettle Song`); the tag read follows in the
+   metadata pass, so the fixture waits for the real titles.
+5. `SearchTerm` matches the item name only, so the adapter searches by title and scores the artist itself.
+6. An API key has no user context, so every playlist call names the account with `UserId`.
+

@@ -45,9 +45,9 @@ from plex_playlist_sync.clients.acquisition import (
 from plex_playlist_sync.clients.deezer import DeezerClient
 from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient
 from plex_playlist_sync.clients.plex import PlexClient
-from plex_playlist_sync.media_servers import as_media_server, build_subsonic
+from plex_playlist_sync.media_servers import as_media_server, build_jellyfin, build_subsonic
 from plex_playlist_sync.clients.spotify import SpotifyClient
-from plex_playlist_sync.config import MEDIA_SERVER_SUBSONIC, Config
+from plex_playlist_sync.config import MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_SUBSONIC, Config
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result, track_job
 from plex_playlist_sync.library_manager import MODE_LIDARR, MODE_NATIVE, build_lidarr_client, get_library_mode
 from plex_playlist_sync.library_scanner import library_scanner
@@ -668,8 +668,8 @@ def _get_worker_statuses() -> WorkerStatus:
 
 def _connected_media_client(config: Config) -> Optional[Any]:
     """A reachable client of the configured media server, or None (probe helper for the status endpoint)."""
-    if config.media_server_type == MEDIA_SERVER_SUBSONIC:
-        server = build_subsonic(config)
+    if config.media_server_type in (MEDIA_SERVER_SUBSONIC, MEDIA_SERVER_JELLYFIN):
+        server = build_subsonic(config) if config.media_server_type == MEDIA_SERVER_SUBSONIC else build_jellyfin(config)
         if server is None:
             return None
         return True if server.test_connection().ok else None  # the probe only needs "reachable or not"

@@ -36,7 +36,7 @@ export interface PlaylistsViewProps {
   hasMediaServer?: boolean;
   /** Which server receives playlists; Plex-only sections (Plex playlists) show for `plex` alone. */
   serverType?: MediaServerType;
-  /** Name used in generic copy ("Plex", "Subsonic server"). */
+  /** Name used in generic copy ("Plex", "Subsonic server", "Jellyfin server"). */
   serverLabel?: string;
   /** False when playlists can only go to one account (Subsonic): per-user sync targets are hidden. */
   canTargetUsers?: boolean;

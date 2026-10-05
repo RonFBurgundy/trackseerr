@@ -2,7 +2,7 @@
 
 import logging
 import sqlite3
-from typing import Any, Literal
+from typing import Any, Literal, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 from plex_playlist_sync import library_manager, lidarr_library
 from plex_playlist_sync.api.dependencies import get_config, get_db, require_admin, require_core_tier
 from plex_playlist_sync.config import Config
-from plex_playlist_sync.media_servers import MediaServerError, SubsonicMediaServer
+from plex_playlist_sync.media_servers import JellyfinMediaServer, MediaServerError, SubsonicMediaServer
 from plex_playlist_sync.media_servers import settings as media_server_settings
 from plex_playlist_sync.library_monitoring import validate_monitor_option
 from plex_playlist_sync.redaction import redact_text
@@ -582,7 +582,7 @@ def test_lidarr_connection(
 class MediaServerSettingsPayload(BaseModel):
     """What the Settings page submits. A secret sent back as ``********`` keeps the stored value."""
 
-    type: Literal["subsonic", "none"]
+    type: Literal["subsonic", "jellyfin", "none"]
     url: str = Field("", max_length=2048)
     username: str = Field("", max_length=256)
     password: str = Field("", max_length=1024)
@@ -640,7 +640,7 @@ def update_media_server_settings(
             detail="The media server is configured through environment variables; remove them to manage it here.",
         )
     values = _media_server_values(payload)
-    if values["type"] == "subsonic":
+    if values["type"] in ("subsonic", "jellyfin"):
         clean_url = values["url"].strip().rstrip("/")
         if clean_url and not is_safe_service_url(clean_url):
             raise HTTPException(
@@ -650,6 +650,8 @@ def update_media_server_settings(
         values["url"] = clean_url
     try:
         media_server_settings.save(db, values)
+    except media_server_settings.SecretReuseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except media_server_settings.MediaServerSettingsError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except sqlite3.Error as exc:
@@ -672,25 +674,33 @@ def test_media_server_settings(
     admin_user: dict[str, Any] = Depends(require_admin),
 ) -> MediaServerTestResponse:
     """Builds the adapter from the submitted values (masked secrets resolved from the saved ones) and pings it."""
-    if payload.type != "subsonic":
+    if payload.type == "none":
         return MediaServerTestResponse(ok=False, message="Nothing to test: no media server selected")
     try:
         values = media_server_settings.validate(
             media_server_settings.merge_secrets(_media_server_values(payload), db.get_media_server_settings())
         )
+    except media_server_settings.SecretReuseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except media_server_settings.MediaServerSettingsError as exc:
         return MediaServerTestResponse(ok=False, message=str(exc))
     clean_url = values["url"].rstrip("/")
     if not is_safe_service_url(clean_url):
         return MediaServerTestResponse(ok=False, message="Prohibited or invalid host URL (SSRF defense)")
     try:
-        server = SubsonicMediaServer(
-            clean_url,
-            values["username"],
-            values["password"],
-            api_key=values["api_key"],
-            verify_ssl=config.plex_verify_ssl,
-        )
+        server: Union[SubsonicMediaServer, JellyfinMediaServer]
+        if values["type"] == "jellyfin":
+            server = JellyfinMediaServer(
+                clean_url, values["api_key"], values["username"], verify_ssl=config.plex_verify_ssl
+            )
+        else:
+            server = SubsonicMediaServer(
+                clean_url,
+                values["username"],
+                values["password"],
+                api_key=values["api_key"],
+                verify_ssl=config.plex_verify_ssl,
+            )
     except MediaServerError as exc:
         return MediaServerTestResponse(ok=False, message=exc.safe_detail)
     try:

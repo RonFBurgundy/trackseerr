@@ -22,9 +22,9 @@ from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.clients.spotify_scraper import SpotifyWebScraper
 from plex_playlist_sync.clients.core_client import SESSION_ISSUED_AT_KEY, CoreClient
-from plex_playlist_sync.config import MEDIA_SERVER_NONE, MEDIA_SERVER_SUBSONIC, Config
+from plex_playlist_sync.config import MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_NONE, MEDIA_SERVER_SUBSONIC, Config
 from plex_playlist_sync.media_server import MediaServerUnavailable
-from plex_playlist_sync.media_servers import MediaServer, as_media_server, build_subsonic
+from plex_playlist_sync.media_servers import MediaServer, as_media_server, build_jellyfin, build_subsonic
 from plex_playlist_sync.internal_auth import (
     HEADER_SIGNATURE,
     InvalidAssertion,
@@ -143,6 +143,8 @@ def get_media_client(
         return plex_client
     if config.media_server_type == MEDIA_SERVER_SUBSONIC:
         return build_subsonic(config)
+    if config.media_server_type == MEDIA_SERVER_JELLYFIN:
+        return build_jellyfin(config)
     return None
 
 

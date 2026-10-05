@@ -1,7 +1,7 @@
 """Plex Home users management routes."""
 
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -11,6 +11,7 @@ from plex_playlist_sync.api.dependencies import (
     tier_of,
     get_config,
     get_db,
+    get_media_client,
     get_plex_client,
     require_media_server,
     require_admin,
@@ -18,7 +19,7 @@ from plex_playlist_sync.api.dependencies import (
 )
 from plex_playlist_sync.api.routes.admin_users import MAX_QUOTA, MAX_WINDOW_DAYS, apply_user_changes
 from plex_playlist_sync.clients.plex import PlexClient
-from plex_playlist_sync.media_servers import as_media_server, describe_error
+from plex_playlist_sync.media_servers import MediaServer, as_media_server, describe_error
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.models import UserPermission
 from plex_playlist_sync.redaction import safe_exc
@@ -152,9 +153,9 @@ def update_user_governance_route(
 def refresh_users(
     _admin: dict[str, Any] = Depends(require_admin),
     db: Database = Depends(get_db),
-    plex_client: Optional[PlexClient] = Depends(get_plex_client),
+    plex_client: Optional[Union[PlexClient, MediaServer]] = Depends(get_media_client),
 ) -> list[dict[str, Any]]:
-    """Discovers users from Plex server and upserts them to DB (admin only)."""
+    """Discovers users from the media server and upserts them to DB (admin only)."""
     server = as_media_server(plex_client)
     if not server:
         raise HTTPException(

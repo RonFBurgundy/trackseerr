@@ -1,5 +1,5 @@
 /** Media servers Trackseerr can push playlists to; `none` means it only manages the library. */
-export type MediaServerType = 'plex' | 'subsonic' | 'none';
+export type MediaServerType = 'plex' | 'subsonic' | 'jellyfin' | 'none';
 
 export interface MediaServerCapabilities {
   playlists: boolean;
@@ -16,7 +16,7 @@ export interface MediaServerStatus {
 }
 
 /** Servers that can be chosen on the Settings page (Plex is configured through environment variables only). */
-export type SettableMediaServerType = 'subsonic' | 'none';
+export type SettableMediaServerType = 'subsonic' | 'jellyfin' | 'none';
 
 /** GET /api/settings/media-server. Secrets come back as `********` when set; send that back to keep them. */
 export interface MediaServerSettings {

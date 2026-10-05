@@ -2,7 +2,7 @@
 
 Each implementation is driven through a small harness over one shared in-memory backend, so the same scenarios run
 against ``FakeMediaServer`` (a direct implementation of the interface) and ``PlexMediaServer`` (the real adapter over a
-duck-typed PlexClient that raises genuine plexapi/requests exceptions). Stage 3/4 adapters (Subsonic, Jellyfin) join by
+duck-typed PlexClient that raises genuine plexapi/requests exceptions). Adapters (Subsonic, Jellyfin) join by
 adding a harness to ``HARNESSES``; the scenarios themselves do not change.
 
 The Plex harness verifies the adapter's plumbing (delegation, ref mapping, option mapping, exception translation).
@@ -34,8 +34,12 @@ from plex_playlist_sync.media_servers import (
     plex_extras,
 )
 from plex_playlist_sync.media_servers.plex import refresh_mix_snapshots
+from plex_playlist_sync.media_servers.jellyfin import JellyfinMediaServer
 from plex_playlist_sync.media_servers.subsonic import SubsonicMediaServer
 from plex_playlist_sync.models import Playlist, SyncResult, Track
+from tests.jellyfin_fake import API_KEY as JELLYFIN_KEY
+from tests.jellyfin_fake import FakeJellyfin
+from tests.jellyfin_fake import default_state as jellyfin_state
 from tests.subsonic_fake import Fault as SubsonicFault
 from tests.subsonic_fake import FakeSubsonic, default_state
 
@@ -315,7 +319,80 @@ def _subsonic() -> Harness:
     )
 
 
-HARNESSES = {"fake": _fake, "plex": _plex, "subsonic": _subsonic}  # Stage 4: add a "jellyfin" harness here
+class JellyfinBackend:
+    """The Backend surface the scenarios use, over a fake Jellyfin server's state.
+
+    A ``failure`` factory may return an ``httpx.Response`` (served for every request) or an exception (raised by the
+    transport).
+    """
+
+    def __init__(self, fake: FakeJellyfin) -> None:
+        self.fake = fake
+        self._reachable = True
+        self._failure: Optional[Callable[[], Any]] = None
+
+    def _sync_hooks(self) -> None:
+        st = self.fake.state
+        st.transport_failure = None
+        st.respond_with = None
+        failure = self._failure
+        if not self._reachable:
+            st.transport_failure = lambda: httpx.ConnectError("http://srv/Items?api_key=SECRET")
+        elif failure is not None:
+            probe = failure()
+            if isinstance(probe, httpx.Response):
+                st.respond_with = lambda _m, _p, _n: failure()
+            else:
+                st.transport_failure = failure
+
+    @property
+    def reachable(self) -> bool:
+        return self._reachable
+
+    @reachable.setter
+    def reachable(self, value: bool) -> None:
+        self._reachable = value
+        self._sync_hooks()
+
+    @property
+    def failure(self) -> Optional[Callable[[], Any]]:
+        return self._failure
+
+    @failure.setter
+    def failure(self, value: Optional[Callable[[], Any]]) -> None:
+        self._failure = value
+        self._sync_hooks()
+
+    @property
+    def playlists(self) -> dict[tuple[str, str], list[str]]:
+        st = self.fake.state
+        out: dict[tuple[str, str], list[str]] = {}
+        for p in st.playlists.values():
+            owner = st.user(p.owner_id)
+            out[(owner.name if owner else p.owner_id, p.name)] = [st.song(e.item_id).title for e in p.entries]  # type: ignore[union-attr]
+        return out
+
+    @property
+    def refreshes(self) -> int:
+        return self.fake.state.scans
+
+
+def _jellyfin() -> Harness:
+    fake = FakeJellyfin(jellyfin_state([(t.title, t.artist, t.album) for t in LIBRARY]))
+    server = JellyfinMediaServer("http://srv", JELLYFIN_KEY, ADMIN, transport=fake.transport(), sleep=lambda _s: None)
+    return Harness(
+        "jellyfin",
+        JellyfinBackend(fake),  # type: ignore[arg-type]
+        server,
+        {
+            "auth": lambda: httpx.Response(401),
+            "notfound": lambda: httpx.Response(404),
+            "connection": lambda: httpx.ConnectError("http://srv/Items?api_key=SECRET"),
+        },
+    )
+
+
+HARNESSES = {"fake": _fake, "plex": _plex, "subsonic": _subsonic, "jellyfin": _jellyfin}
 
 
 @pytest.fixture(params=sorted(HARNESSES))

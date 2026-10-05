@@ -7,7 +7,7 @@ import type {
   MediaServerType,
 } from '@/types/mediaServer';
 
-const MEDIA_SERVER_TYPES: readonly MediaServerType[] = ['plex', 'subsonic', 'none'];
+const MEDIA_SERVER_TYPES: readonly MediaServerType[] = ['plex', 'subsonic', 'jellyfin', 'none'];
 
 function isMediaServerStatus(value: unknown): value is MediaServerStatus {
   if (typeof value !== 'object' || value === null) return false;

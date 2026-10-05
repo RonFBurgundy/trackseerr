@@ -4,7 +4,7 @@ import logging
 import threading
 from typing import Any, Optional
 
-from plex_playlist_sync.config import MEDIA_SERVER_PLEX, MEDIA_SERVER_SUBSONIC, Config
+from plex_playlist_sync.config import MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_PLEX, MEDIA_SERVER_SUBSONIC, Config
 from plex_playlist_sync.media_servers.base import (
     NO_CAPABILITIES,
     ConnectionTest,
@@ -21,6 +21,7 @@ from plex_playlist_sync.media_servers.base import (
     ServerUser,
     as_media_server,
 )
+from plex_playlist_sync.media_servers.jellyfin import JELLYFIN_CAPABILITIES, JellyfinMediaServer
 from plex_playlist_sync.media_servers.plex import PLEX_CAPABILITIES, PlexMediaServer, plex_extras
 from plex_playlist_sync.media_servers.subsonic import SUBSONIC_CAPABILITIES, SubsonicMediaServer
 from plex_playlist_sync.redaction import safe_exc
@@ -49,6 +50,8 @@ def get_media_server(config: Config, *, plex_client: Optional[Any] = None) -> Op
             return None
     if config.media_server_type == MEDIA_SERVER_SUBSONIC:
         return build_subsonic(config)
+    if config.media_server_type == MEDIA_SERVER_JELLYFIN:
+        return build_jellyfin(config)
     return None
 
 
@@ -93,12 +96,52 @@ def build_subsonic(config: Config) -> Optional[SubsonicMediaServer]:
         return server
 
 
+_jellyfin_lock = threading.Lock()
+_jellyfin_cached: Optional[tuple[tuple[Any, ...], JellyfinMediaServer]] = None
+
+
+def build_jellyfin(config: Config) -> Optional[JellyfinMediaServer]:
+    """The Jellyfin adapter for ``config`` (env, else the Settings page), or None when it is incomplete.
+
+    Shared per distinct configuration like :func:`build_subsonic`; no network call is made here.
+    """
+    global _jellyfin_cached
+    if not config.jellyfin_configured:
+        return None
+    key = (config.jellyfin_url, config.jellyfin_api_key, config.jellyfin_user, config.plex_verify_ssl)
+    with _jellyfin_lock:
+        if _jellyfin_cached is not None and _jellyfin_cached[0] == key:
+            return _jellyfin_cached[1]
+        try:
+            server = JellyfinMediaServer(
+                config.jellyfin_url, config.jellyfin_api_key, config.jellyfin_user, verify_ssl=config.plex_verify_ssl
+            )
+        except MediaServerError as exc:
+            logger.error("Failed to initialize Jellyfin media server: %s", exc.safe_detail)
+            return None
+        if _jellyfin_cached is not None:
+            _jellyfin_cached[1].close()
+        _jellyfin_cached = (key, server)
+        return server
+
+
+def build_media_server(config: Config) -> Optional[MediaServer]:
+    """The non-Plex adapter (Subsonic or Jellyfin) for ``config``, or None."""
+    if config.media_server_type == MEDIA_SERVER_SUBSONIC:
+        return build_subsonic(config)
+    if config.media_server_type == MEDIA_SERVER_JELLYFIN:
+        return build_jellyfin(config)
+    return None
+
+
 def capabilities_for(kind: str) -> ServerCapabilities:
     """Static capabilities of a server kind, known without connecting (the public status endpoint needs them)."""
     if kind == MEDIA_SERVER_PLEX:
         return PLEX_CAPABILITIES
     if kind == MEDIA_SERVER_SUBSONIC:
         return SUBSONIC_CAPABILITIES
+    if kind == MEDIA_SERVER_JELLYFIN:
+        return JELLYFIN_CAPABILITIES
     return NO_CAPABILITIES
 
 
@@ -108,8 +151,10 @@ def describe_error(exc: BaseException) -> str:
 
 
 __all__ = [
+    "JELLYFIN_CAPABILITIES",
     "NO_CAPABILITIES",
     "ConnectionTest",
+    "JellyfinMediaServer",
     "MediaServer",
     "MediaServerAuthError",
     "MediaServerConnectionError",
@@ -125,6 +170,8 @@ __all__ = [
     "ServerUser",
     "SubsonicMediaServer",
     "as_media_server",
+    "build_jellyfin",
+    "build_media_server",
     "build_subsonic",
     "capabilities_for",
     "describe_error",

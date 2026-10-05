@@ -38,8 +38,9 @@ def _split_ids(val: Optional[str]) -> List[str]:
 
 MEDIA_SERVER_PLEX = "plex"
 MEDIA_SERVER_SUBSONIC = "subsonic"
+MEDIA_SERVER_JELLYFIN = "jellyfin"
 MEDIA_SERVER_NONE = "none"
-SUPPORTED_MEDIA_SERVERS = (MEDIA_SERVER_PLEX, MEDIA_SERVER_SUBSONIC, MEDIA_SERVER_NONE)
+SUPPORTED_MEDIA_SERVERS = (MEDIA_SERVER_PLEX, MEDIA_SERVER_SUBSONIC, MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_NONE)
 
 # Where the effective media-server choice came from: the environment always wins; the Settings page (database) only
 # applies when the environment says nothing about a media server.
@@ -79,6 +80,9 @@ class Config:
     subsonic_user: str = ""
     subsonic_password: str = ""
     subsonic_api_key: str = ""
+    jellyfin_url: str = ""
+    jellyfin_user: str = ""  # default account for single-target sync (name or id); empty = the first administrator
+    jellyfin_api_key: str = ""
     media_server_source: str = MEDIA_SERVER_SOURCE_ENV
 
     write_missing_as_csv: bool = False
@@ -185,6 +189,9 @@ class Config:
             subsonic_user=os.getenv("SUBSONIC_USER", "").strip(),
             subsonic_password=os.getenv("SUBSONIC_PASSWORD", ""),
             subsonic_api_key=os.getenv("SUBSONIC_API_KEY", "").strip(),
+            jellyfin_url=os.getenv("JELLYFIN_URL", "").strip(),
+            jellyfin_user=os.getenv("JELLYFIN_USER", "").strip(),
+            jellyfin_api_key=os.getenv("JELLYFIN_API_KEY", "").strip(),
             write_missing_as_csv=_parse_bool(os.getenv("WRITE_MISSING_AS_CSV"), False),
             append_service_suffix=_parse_bool(os.getenv("APPEND_SERVICE_SUFFIX"), True),
             add_playlist_poster=_parse_bool(os.getenv("ADD_PLAYLIST_POSTER"), True),
@@ -234,12 +241,13 @@ class Config:
 
     @property
     def media_server_env_controlled(self) -> bool:
-        """True when the environment configures a media server (MEDIA_SERVER, Plex or Subsonic variables), which
+        """True when the environment configures a media server (MEDIA_SERVER, Plex, Subsonic or Jellyfin variables), which
         then takes precedence over anything saved on the Settings page."""
         return bool(
             self.media_server_source == MEDIA_SERVER_SOURCE_ENV
             and (self.media_server or self.plex_url or self.plex_token or self.subsonic_url or self.subsonic_user
-                 or self.subsonic_password or self.subsonic_api_key)
+                 or self.subsonic_password or self.subsonic_api_key
+                 or self.jellyfin_url or self.jellyfin_user or self.jellyfin_api_key)
         )
 
     def apply_media_server_overlay(self, stored: Optional[dict[str, str]] = None) -> None:
@@ -250,10 +258,11 @@ class Config:
             return
         values = get_media_server_overlay() if stored is None else stored
         kind = (values.get("type") or "").strip().lower()
-        if kind not in (MEDIA_SERVER_SUBSONIC, MEDIA_SERVER_NONE):
+        if kind not in (MEDIA_SERVER_SUBSONIC, MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_NONE):
             self.media_server_source = MEDIA_SERVER_SOURCE_ENV
             self.media_server, self.subsonic_url, self.subsonic_user = "", "", ""
             self.subsonic_password, self.subsonic_api_key = "", ""
+            self.jellyfin_url, self.jellyfin_user, self.jellyfin_api_key = "", "", ""
             return
         self.media_server_source = MEDIA_SERVER_SOURCE_SETTINGS
         self.media_server = kind
@@ -261,6 +270,10 @@ class Config:
         self.subsonic_user = (values.get("username") or "").strip() if kind == MEDIA_SERVER_SUBSONIC else ""
         self.subsonic_password = (values.get("password") or "") if kind == MEDIA_SERVER_SUBSONIC else ""
         self.subsonic_api_key = (values.get("api_key") or "").strip() if kind == MEDIA_SERVER_SUBSONIC else ""
+        # Jellyfin reuses the saved row: ``username`` is the default account, ``api_key`` the API key.
+        self.jellyfin_url = (values.get("url") or "").strip() if kind == MEDIA_SERVER_JELLYFIN else ""
+        self.jellyfin_user = (values.get("username") or "").strip() if kind == MEDIA_SERVER_JELLYFIN else ""
+        self.jellyfin_api_key = (values.get("api_key") or "").strip() if kind == MEDIA_SERVER_JELLYFIN else ""
 
     @property
     def media_server_type(self) -> str:
@@ -287,6 +300,11 @@ class Config:
                     "SUBSONIC_* variables are set but MEDIA_SERVER is not. Set MEDIA_SERVER=subsonic to use the "
                     "Subsonic server, or remove the SUBSONIC_* variables."
                 )
+            if any((self.jellyfin_url, self.jellyfin_user, self.jellyfin_api_key)):
+                raise ConfigError(
+                    "JELLYFIN_* variables are set but MEDIA_SERVER is not. Set MEDIA_SERVER=jellyfin to use the "
+                    "Jellyfin server, or remove the JELLYFIN_* variables."
+                )
             if bool(self.plex_url) != bool(self.plex_token):
                 missing = "PLEX_TOKEN" if self.plex_url else "PLEX_URL"
                 raise ConfigError(
@@ -300,6 +318,8 @@ class Config:
             )
         if choice == MEDIA_SERVER_SUBSONIC:
             self._validate_subsonic()
+        if choice == MEDIA_SERVER_JELLYFIN:
+            self._validate_jellyfin()
         if choice == MEDIA_SERVER_PLEX and not (self.plex_url and self.plex_token):
             raise ConfigError(
                 "MEDIA_SERVER=plex requires PLEX_URL and PLEX_TOKEN. Set both, or set MEDIA_SERVER=none "
@@ -330,6 +350,26 @@ class Config:
             raise ConfigError(
                 f"MEDIA_SERVER=subsonic is not fully configured: {problem}. Set SUBSONIC_URL with SUBSONIC_USER and "
                 "SUBSONIC_PASSWORD (or SUBSONIC_API_KEY), or set MEDIA_SERVER=none to run without a media server."
+            )
+
+    @property
+    def jellyfin_configured(self) -> bool:
+        """True when Jellyfin is the active media server and has everything it needs to connect."""
+        return self.media_server_type == MEDIA_SERVER_JELLYFIN and self._jellyfin_problem() is None
+
+    def _jellyfin_problem(self) -> Optional[str]:
+        if not self.jellyfin_url:
+            return "JELLYFIN_URL is missing"
+        if not self.jellyfin_api_key:
+            return "JELLYFIN_API_KEY is missing"
+        return None
+
+    def _validate_jellyfin(self) -> None:
+        problem = self._jellyfin_problem()
+        if problem:
+            raise ConfigError(
+                f"MEDIA_SERVER=jellyfin is not fully configured: {problem}. Set JELLYFIN_URL and JELLYFIN_API_KEY "
+                "(optionally JELLYFIN_USER), or set MEDIA_SERVER=none to run without a media server."
             )
 
     @property

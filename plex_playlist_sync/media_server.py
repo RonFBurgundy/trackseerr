@@ -14,7 +14,7 @@ from typing import Any, Callable, Optional
 from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
-from plex_playlist_sync.config import MEDIA_SERVER_NONE, MEDIA_SERVER_SUBSONIC, Config
+from plex_playlist_sync.config import MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_NONE, MEDIA_SERVER_SUBSONIC, Config
 from plex_playlist_sync.media_servers import MediaServerUnavailable, capabilities_for
 from plex_playlist_sync.redaction import safe_exc
 
@@ -67,6 +67,8 @@ def _plex_reachable(config: Config, connect: Callable[[], Optional[Any]]) -> boo
     it; every other caller gets the cached (possibly stale) value immediately. With no cache yet, they get False."""
     if config.media_server_type == MEDIA_SERVER_SUBSONIC:
         key = (f"subsonic:{config.subsonic_url}", f"{config.subsonic_user}:{config.subsonic_password}:{config.subsonic_api_key}")
+    elif config.media_server_type == MEDIA_SERVER_JELLYFIN:
+        key = (f"jellyfin:{config.jellyfin_url}", f"{config.jellyfin_user}:{config.jellyfin_api_key}")
     else:
         key = (config.plex_url, config.plex_token)
     with _probe_lock:

@@ -1,6 +1,6 @@
 """Media-server choice saved on the Settings page.
 
-Plex stays environment-only (its token also feeds the gateway guard and Plex OAuth flows); Subsonic can be set by
+Plex stays environment-only (its token also feeds the gateway guard and Plex OAuth flows); Subsonic and Jellyfin can be set by
 environment or saved here. The environment always wins: when it configures a media server the saved values are kept
 but ignored, and the UI shows the field as locked. Saved values reach the running process through
 ``config.set_media_server_overlay`` (applied by ``Config.from_env``); registered listeners (the background workers'
@@ -12,6 +12,7 @@ import threading
 from typing import Any, Callable
 
 from plex_playlist_sync.config import (
+    MEDIA_SERVER_JELLYFIN,
     MEDIA_SERVER_NONE,
     MEDIA_SERVER_SUBSONIC,
     Config,
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 SECRET_PLACEHOLDER = "********"
 SECRET_FIELDS = ("password", "api_key")
-SETTABLE_TYPES = (MEDIA_SERVER_SUBSONIC, MEDIA_SERVER_NONE)  # Plex is environment-only
+SETTABLE_TYPES = (MEDIA_SERVER_SUBSONIC, MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_NONE)  # Plex is environment-only
 
 _listeners: list[Callable[[], None]] = []
 _listeners_lock = threading.Lock()
@@ -30,6 +31,10 @@ _listeners_lock = threading.Lock()
 
 class MediaServerSettingsError(ValueError):
     """The submitted media-server settings are not acceptable (rendered as a 422 with this message)."""
+
+
+class SecretReuseError(MediaServerSettingsError):
+    """A masked (saved) secret was submitted for a different server than the one it was saved for (rendered as 400)."""
 
 
 def on_change(callback: Callable[[], None]) -> None:
@@ -77,9 +82,23 @@ def present(config: Config, db: Any) -> dict[str, Any]:
     }
 
 
+def _norm_url(url: str) -> str:
+    return (url or "").strip().rstrip("/").lower()
+
+
 def merge_secrets(incoming: dict[str, str], stored: dict[str, str]) -> dict[str, str]:
-    """``incoming`` with each ``********`` secret replaced by the stored value (empty when there is none)."""
+    """``incoming`` with each ``********`` secret replaced by the stored value (empty when there is none).
+
+    A saved Jellyfin API key is only ever resolved for the server it was saved for: a masked key submitted with a
+    different URL raises :class:`SecretReuseError`, so the saved key cannot be sent to a new host.
+    """
     merged = dict(incoming)
+    if (merged.get("type") or "").strip().lower() == MEDIA_SERVER_JELLYFIN and merged.get("api_key") == SECRET_PLACEHOLDER:
+        same_server = (stored.get("type") or "").strip().lower() == MEDIA_SERVER_JELLYFIN and _norm_url(
+            merged.get("url", "")
+        ) == _norm_url(stored.get("url", ""))
+        if stored.get("api_key") and not same_server:
+            raise SecretReuseError("The server URL changed: enter the API key again instead of keeping the saved one")
     for key in SECRET_FIELDS:
         if merged.get(key) == SECRET_PLACEHOLDER:
             merged[key] = stored.get(key, "")
@@ -93,11 +112,16 @@ def validate(values: dict[str, str]) -> dict[str, str]:
         raise MediaServerSettingsError("Plex is configured with PLEX_URL / PLEX_TOKEN in the environment")
     if kind not in SETTABLE_TYPES:
         raise MediaServerSettingsError(f"Media server type must be one of: {', '.join(SETTABLE_TYPES)}")
-    if kind != MEDIA_SERVER_SUBSONIC:
+    if kind == MEDIA_SERVER_NONE:
         return {"type": kind, "url": "", "username": "", "password": "", "api_key": ""}
     url = (values.get("url") or "").strip()
     if not url.lower().startswith(("http://", "https://")):
         raise MediaServerSettingsError("Server URL must start with http:// or https://")
+    if kind == MEDIA_SERVER_JELLYFIN:  # ``username`` is the optional default account; there is no password
+        api_key = (values.get("api_key") or "").strip()
+        if not api_key:
+            raise MediaServerSettingsError("Enter the Jellyfin API key")
+        return {"type": kind, "url": url, "username": (values.get("username") or "").strip(), "password": "", "api_key": api_key}
     username = (values.get("username") or "").strip()
     password = values.get("password") or ""
     api_key = (values.get("api_key") or "").strip()

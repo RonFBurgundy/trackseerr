@@ -20,6 +20,9 @@ _SENSITIVE_QUERY_RE = re.compile(
 _SUBSONIC_URL_RE = re.compile(r"(?i)(/rest/\w+(?:\.view)?\?)([^\s\"'#]*)")
 _SUBSONIC_AUTH_PARAM_RE = re.compile(r"(?i)(^|&)(u|t|s|p|apikey)=[^&]*")
 
+# Jellyfin / Emby authorisation header values: ``MediaBrowser Client="..", Token="secret"``.
+_MEDIABROWSER_TOKEN_RE = re.compile(r'(?i)(\bToken=")[^"]*(")')
+
 _INVITE_TOKEN_RE = re.compile(r"(/(?:api/auth/)?invite/)[^/?#\s\"']+")
 
 _URL_USERINFO_RE = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@\"']+@")
@@ -40,6 +43,7 @@ def redact_sensitive_query(text: str) -> str:
     """Replace token/apikey/api_key/state query values, Subsonic auth parameters, and invite/reset link tokens
     (``[REDACTED]``), with ``REDACTED``."""
     text = _SUBSONIC_URL_RE.sub(_sub_subsonic_query, text)
+    text = _MEDIABROWSER_TOKEN_RE.sub(r"\1REDACTED\2", text)
     return _INVITE_TOKEN_RE.sub(r"\1[REDACTED]", _SENSITIVE_QUERY_RE.sub(_sub_query, text))
 
 

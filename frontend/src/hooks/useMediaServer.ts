@@ -13,6 +13,7 @@ const LEGACY_CAPABILITIES: MediaServerCapabilities = {
 const MEDIA_SERVER_LABELS: Record<MediaServerType, string> = {
   plex: 'Plex',
   subsonic: 'Subsonic server',
+  jellyfin: 'Jellyfin server',
   none: 'media server',
 };
 
@@ -25,7 +26,7 @@ export interface UseMediaServerReturn {
   hasMediaServer: boolean;
   /** True only for Plex: Plex sign-in and Plex-only features (Plex playlists, home users) depend on it. */
   isPlex: boolean;
-  /** Human name for generic copy ("Plex", "Subsonic server", "media server"). */
+  /** Human name for generic copy ("Plex", "Subsonic server", "Jellyfin server", "media server"). */
   label: string;
   capabilities: MediaServerCapabilities;
 }
