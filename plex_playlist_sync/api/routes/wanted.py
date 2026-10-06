@@ -157,3 +157,13 @@ def search_wanted(
         return {"queued": int(total) if isinstance(total, int) else 0}
 
     return run_mutation(db, native, lidarr)
+
+
+def search_tracks_for_replacement(
+    db: Database, track_ids: list[str], issue_id: str, require_better: bool
+) -> dict[str, Any]:
+    """Issue fix actions only: searches the tracks although they have files (see ``backlog_worker.ReplacementSpec``)."""
+    targets = db.list_wanted_search_targets(track_ids=track_ids)
+    return backlog_worker.queue_wanted_search(
+        db, targets, replacement=backlog_worker.ReplacementSpec(issue_id=issue_id, require_better=require_better)
+    )

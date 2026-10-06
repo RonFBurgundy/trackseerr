@@ -35,6 +35,7 @@ from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.job_tracker import track_job
 from plex_playlist_sync.library_manager import ModeChanged, run_guarded
 from plex_playlist_sync.media_servers import as_media_server
+from plex_playlist_sync.import_security import QUARANTINE_DIRNAME
 from plex_playlist_sync.redaction import redact_text, safe_exc
 from plex_playlist_sync.storage import Database
 
@@ -332,6 +333,8 @@ class LibraryScanner:
                     if self._stop_event.is_set():
                         break
                     try:
+                        if QUARANTINE_DIRNAME in entry.relative_to(root).parts:
+                            continue  # retired/quarantined files are not library content
                         if entry.is_file() and entry.suffix.lower() in AUDIO_EXTENSIONS:
                             audio_files.append(entry.resolve())
                     except OSError as oe:

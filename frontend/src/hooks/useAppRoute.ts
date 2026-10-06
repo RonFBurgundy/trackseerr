@@ -6,7 +6,7 @@ import type { RequestFilter } from './useRequests';
 export type MainTab = 'discover' | 'requests' | 'library' | 'playlists' | 'activity' | 'wanted' | 'settings';
 
 export type RequestsSub = RequestFilter | 'issues';
-export type ActivitySub = 'queue' | 'history' | 'blocklist' | 'review';
+export type ActivitySub = 'queue' | 'history' | 'blocklist' | 'review' | 'issues';
 export type WantedSub = WantedListName;
 
 export type SettingsSection = 'general' | 'media-management' | 'lidarr' | 'requests' | 'system' | 'account';
@@ -34,6 +34,13 @@ export interface DiscoverRoute {
   artistId?: string;
 }
 
+/** Activity sub-page; `issueId` opens one issue on `#/activity/issues/<id>`. */
+export interface ActivityRoute {
+  tab: 'activity';
+  sub: ActivitySub;
+  issueId?: string;
+}
+
 export interface LibraryRoute {
   tab: 'library';
   sub: LibraryTab;
@@ -46,7 +53,7 @@ export type AppRoute =
   | { tab: 'playlists' }
   | { tab: 'requests'; sub: RequestsSub }
   | LibraryRoute
-  | { tab: 'activity'; sub: ActivitySub }
+  | ActivityRoute
   | { tab: 'wanted'; sub: WantedSub }
   | SettingsRoute;
 
@@ -71,7 +78,7 @@ function prevHashOf(state: unknown): string | undefined {
 export const MAIN_TABS: readonly MainTab[] = ['discover', 'requests', 'library', 'playlists', 'activity', 'wanted', 'settings'];
 export const REQUESTS_SUBS: readonly RequestsSub[] = ['all', 'pending', 'approved', 'fulfilled', 'rejected', 'issues'];
 export const LIBRARY_SUBS: readonly LibraryTab[] = ['artists', 'albums', 'tracks', 'collections'];
-export const ACTIVITY_SUBS: readonly ActivitySub[] = ['queue', 'history', 'blocklist', 'review'];
+export const ACTIVITY_SUBS: readonly ActivitySub[] = ['queue', 'history', 'blocklist', 'review', 'issues'];
 export const WANTED_SUBS: readonly WantedSub[] = ['missing', 'cutoff'];
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   'general',
@@ -147,6 +154,7 @@ export function routeToHash(route: AppRoute): string {
   if ('sub' in route) parts.push(route.sub);
   if ('leaf' in route) parts.push(route.leaf);
   if (route.tab === 'library') parts.push(...libraryDetailSegments(route.detail));
+  if (route.tab === 'activity' && route.sub === 'issues' && route.issueId) parts.push(encodeURIComponent(route.issueId));
   if (route.tab === 'discover' && route.artistId) parts.push('artist', encodeURIComponent(route.artistId));
   return `#/${parts.join('/')}`;
 }
@@ -206,8 +214,11 @@ export function parseRouteHash(hash: string): AppRoute | null {
       const detail = parseLibraryDetail(segments.slice(2));
       return detail ? { tab, sub: librarySub, detail } : { tab, sub: librarySub };
     }
-    case 'activity':
-      return { tab, sub: pick(ACTIVITY_SUBS, sub) ?? 'queue' };
+    case 'activity': {
+      const activitySub = pick(ACTIVITY_SUBS, sub) ?? 'queue';
+      const issueId = activitySub === 'issues' ? decodeSegment(segments[2]) : undefined;
+      return issueId === undefined ? { tab, sub: activitySub } : { tab, sub: activitySub, issueId };
+    }
     case 'wanted':
       return { tab, sub: pick(WANTED_SUBS, sub) ?? 'missing' };
     case 'settings':

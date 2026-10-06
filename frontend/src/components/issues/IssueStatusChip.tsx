@@ -6,6 +6,7 @@ const STATUS_CLASS: Record<IssueStatus, string> = {
   open: 'border-[var(--accent-amber)] text-[var(--accent-amber)]',
   in_progress: 'border-[var(--text-secondary)] text-[var(--text-primary)]',
   resolved: 'border-[var(--status-success)] text-[var(--status-success)]',
+  wont_fix: 'border-[var(--border-default)] text-[var(--text-muted)]',
 };
 
 export interface IssueStatusChipProps {

@@ -8,6 +8,7 @@ import {
   useDiscovery,
   useRequests,
   useIssues,
+  useIssueCounts,
   useLibrary,
   useLibraryHealthCount,
   useAccount,
@@ -87,6 +88,7 @@ const MainApp: React.FC = () => {
   const discovery = useDiscovery();
   const requestsHook = useRequests();
   const issuesHook = useIssues(auth.user?.id);
+  const issueCounts = useIssueCounts(auth.isAuthenticated && !mfaEnrollmentRequired, auth.canUseAdminUi);
   const libraryHook = useLibrary(auth.canUseAdminUi);
   const reviewHealth = useLibraryHealthCount(auth.canUseAdminUi);
 
@@ -250,6 +252,8 @@ const MainApp: React.FC = () => {
         onTabChange={handleTabChange}
         isAdmin={auth.canUseAdminUi}
         reviewCount={reviewHealth.count}
+        issuesOpenCount={issueCounts.open}
+        issuesUnreadCount={issueCounts.unread}
         tier={identity.tier}
         onLogin={() => {
           if (mediaServer.isPlex) setIsAuthModalOpen(true);
@@ -271,6 +275,8 @@ const MainApp: React.FC = () => {
         isAdmin={auth.canUseAdminUi}
         mfaEnrollmentRequired={mfaEnrollmentRequired}
         reviewCount={reviewHealth.count}
+        issuesOpenCount={issueCounts.open}
+        issuesUnreadCount={issueCounts.unread}
         tier={identity.tier}
         onLogout={auth.logout}
       />
@@ -430,6 +436,7 @@ const MainApp: React.FC = () => {
                 requestsHook={requestsHook}
                 isAdmin={auth.canUseAdminUi}
                 issuesHook={issuesHook}
+                issuesUnreadCount={issueCounts.unread}
                 currentUserId={auth.user?.id}
                 account={accountHook.account}
               />
@@ -443,6 +450,7 @@ const MainApp: React.FC = () => {
                 onRequestItem={handleRequestItem}
                 onRequestDiscography={handleRequestDiscography}
                 libraryHook={libraryHook}
+                issuesHook={issuesHook}
                 isAdmin={auth.canUseAdminUi}
               />
             )}
@@ -474,6 +482,10 @@ const MainApp: React.FC = () => {
                 onSubChange={(sub, o) => handleNavigate({ tab: 'activity', sub }, o)}
                 reviewCount={reviewHealth.count}
                 onReviewChanged={() => void reviewHealth.refresh()}
+                issuesOpenCount={issueCounts.open}
+                issueId={activeRoute.issueId}
+                onOpenIssue={(id) => handleNavigate({ tab: 'activity', sub: 'issues', issueId: id })}
+                onCloseIssue={() => navigateUp({ tab: 'activity', sub: 'issues' })}
               />
             )}
 

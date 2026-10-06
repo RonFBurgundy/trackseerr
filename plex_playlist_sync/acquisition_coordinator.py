@@ -331,6 +331,7 @@ class AcquisitionCoordinator:
         track_id: Optional[str] = None,
         album_id: Optional[str] = None,
         bypass_delay: bool = False,
+        replacement_issue_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Searches indexers, ranks releases against the Quality Profile, and dispatches grab.
 
@@ -340,6 +341,9 @@ class AcquisitionCoordinator:
 
         Records active download transfer in the database upon successful dispatch. Runs under the native
         library-manager guard: if Lidarr manages the library it does nothing and reports ``mode_changed``.
+
+        ``replacement_issue_id`` marks the grab as an admin replacement for a media issue: the grab history row names
+        the issue so the import can comment on it. The blocklist still applies.
         """
         if db is None:
             raise ValueError("Database instance must be provided to search_and_grab")
@@ -347,7 +351,7 @@ class AcquisitionCoordinator:
             with work_guard(db, MODE_NATIVE):
                 return self._search_and_grab(
                     artist, title, album, item_type, request_id, db, quality_profile_id, min_score, track_id, album_id,
-                    bypass_delay,
+                    bypass_delay, replacement_issue_id,
                 )
         except ModeChanged:
             logger.info("Native grab skipped for '%s - %s': library manager is Lidarr", artist, title)
@@ -370,6 +374,7 @@ class AcquisitionCoordinator:
         track_id: Optional[str],
         album_id: Optional[str],
         bypass_delay: bool = False,
+        replacement_issue_id: Optional[str] = None,
     ) -> dict[str, Any]:
 
         # 1. Retrieve quality profile
@@ -467,6 +472,7 @@ class AcquisitionCoordinator:
                 track_id=track_id,
                 album_id=album_id,
                 upgrade=min_score is not None,
+                replacement_issue_id=replacement_issue_id,
             )
             grabbed = bool(result.get("success"))
             return result
@@ -488,6 +494,7 @@ class AcquisitionCoordinator:
         track_id: Optional[str],
         album_id: Optional[str],
         upgrade: bool = False,
+        replacement_issue_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Dispatches a chosen candidate to its protocol's client and records the download (no delay gate)."""
         # 4. Find appropriate client for candidate's protocol
@@ -568,6 +575,7 @@ class AcquisitionCoordinator:
                 quality=parsed_quality,
                 protocol=top_candidate.protocol or None,
                 upgrade=upgrade,
+                replacement_issue_id=replacement_issue_id,
             )
         except sqlite3.Error as hist_err:
             logger.warning("Failed to record grab history for %s: %s", download_id, type(hist_err).__name__)

@@ -135,6 +135,26 @@ def quarantine_files(paths: Iterable[str | Path], staging_dir: Path | str, downl
     return moved
 
 
+def retire_replaced_file(src: Path | str, library_root: Path | str, issue_id: str) -> Path:
+    """Renames a superseded library file to ``<library>/_quarantine/replaced/<issue_id>/`` (never deletes it).
+
+    Rename only, so a hardlink shared with a seeding torrent keeps its other link untouched. Raises ``OSError`` (e.g.
+    EXDEV when the move would cross filesystems) and leaves the file where it was; the caller decides what to do.
+    """
+    safe_id = "".join(c if c.isalnum() or c in "-_." else "_" for c in str(issue_id)) or "unknown"
+    qdir = Path(library_root) / QUARANTINE_DIRNAME / "replaced" / safe_id
+    qdir.mkdir(parents=True, exist_ok=True)
+    src_p = Path(src)
+    i = 0
+    while True:
+        dest = qdir / f"{i:03d}_{src_p.name}"
+        if not os.path.lexists(dest):
+            break
+        i += 1
+    os.rename(src_p, dest)
+    return dest
+
+
 def clear_exec_bits(path: Path | str) -> None:
     """chmod 0644 a placed library file. Failure is logged, never raised."""
     try:

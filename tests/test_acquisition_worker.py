@@ -16,6 +16,7 @@ from plex_playlist_sync.models import (
     DownloadClientConfig,
     DownloadDriverType,
     DownloadStatus,
+    MediaIssue,
     MusicRequest,
     RequestStatus,
 )
@@ -251,6 +252,100 @@ def test_worker_poll_once_completed_and_organizes(test_db, workspace_dirs):
 
     # Verify Plex library refresh pinged
     mock_plex.refresh_music_library.assert_called_once()
+
+
+def test_import_of_replacement_grab_comments_on_issue(test_db, workspace_dirs):
+    downloads_dir, music_dir = workspace_dirs
+
+    # Seed client
+    client = test_db.create_download_client(
+        DownloadClientConfig(
+            id="client-sab-1",
+            name="Test SABnzbd",
+            driver_type=DownloadDriverType.SABNZBD,
+            host_url="http://sabnzbd:8080",
+            api_key="secret",
+        )
+    )
+
+    # Seed user and request
+    user = test_db.upsert_user("user-1", "dj_bob", "bob@example.com")
+    req = test_db.create_request(
+        MusicRequest(
+            id="req-101",
+            user_id="user-1",
+            item_type="track",
+            title="Get Lucky",
+            artist="Daft Punk",
+            album="Random Access Memories",
+            status=RequestStatus.PROCESSING,
+        )
+    )
+
+    # Seed active download linked to request
+    download = test_db.create_active_download(
+        ActiveDownload(
+            id="dl-sab-101",
+            title="Get Lucky",
+            artist="Daft Punk",
+            client_id="client-sab-1",
+            download_hash="nzo-999",
+            status=DownloadStatus.DOWNLOADING.value,
+            request_id="req-101",
+        )
+    )
+
+    test_db.create_issue(
+        MediaIssue(
+            id="iss-1", user_id="user-1", media_title="Get Lucky", artist="Daft Punk",
+            issue_type="corrupted_file", problem_details="skips",
+        )
+    )
+    test_db.record_download_grab("dl-sab-101", replacement_issue_id="iss-1")
+    # Create dummy downloaded audio file in downloads directory
+    dl_file = downloads_dir / "03 - Get Lucky.mp3"
+    write_mp3(dl_file)
+
+    mock_driver = MagicMock()
+    mock_driver.get_status.return_value = {
+        "status": DownloadStatus.COMPLETED.value,
+        "progress": 100.0,
+        "size_bytes": dl_file.stat().st_size,
+        "speed_bps": 0,
+        "eta_seconds": 0,
+        "source_path": str(dl_file),
+        "error_message": None,
+    }
+
+    mock_plex = MagicMock()
+    worker = AcquisitionWorker()
+
+    mock_meta = {
+        "artist": "Daft Punk",
+        "title": "Get Lucky",
+        "album": "Random Access Memories",
+        "file_path": str(dl_file),
+        "extension": ".mp3",
+        "track_number": 3,
+        "year": 2013,
+        "disc_number": 1,
+        "total_discs": 1,
+    }
+
+    # Set media management root path to music_dir
+    settings = test_db.get_media_management_settings()
+    settings["root_folder_path"] = str(music_dir)
+    test_db.update_media_management_settings(settings)
+
+    with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+        with patch("plex_playlist_sync.acquisition_worker.inspect_audio_file", return_value=mock_meta):
+            stats = worker.poll_once(db=test_db, plex_client=mock_plex, staging_dir=str(downloads_dir))
+            assert stats["completed"] == 1
+            assert stats["imported"] == 1
+
+    assert test_db.get_issue("iss-1")["status"] == "open"  # the admin decides; nothing auto-resolves
+    comments = test_db.list_issue_comments("iss-1")
+    assert [c["body"] for c in comments] == ["Replacement imported"] and comments[0]["is_system"]
 
 
 def test_worker_poll_once_failed(test_db, workspace_dirs):

@@ -32,12 +32,15 @@ export class ApiError extends Error {
   readonly status: number;
   /** The server's raw `detail` (string, list of strings/validation items, or an object), for callers that need structure. */
   readonly detail: unknown;
+  /** The full parsed JSON body, for responses that carry fields beside `detail` (e.g. `existing_issue_id`). */
+  readonly body: unknown;
 
-  constructor(message: string, status: number, detail?: unknown) {
+  constructor(message: string, status: number, detail?: unknown, body?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.detail = detail;
+    this.body = body;
   }
 }
 
@@ -127,7 +130,7 @@ export async function apiRequest<T>(
   if (!response.ok) {
     const detail: unknown = isRecord(data) ? data.detail : undefined;
     const detailMsg = detailMessage(detail) ?? `HTTP Error ${response.status}: ${response.statusText}`;
-    throw new ApiError(detailMsg, response.status, detail);
+    throw new ApiError(detailMsg, response.status, detail, data);
   }
 
   return data as T;

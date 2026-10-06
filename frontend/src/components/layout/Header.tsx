@@ -30,6 +30,10 @@ export interface HeaderProps {
   isAdmin?: boolean;
   /** Library-health findings awaiting review, shown on the Activity key (admin only). */
   reviewCount?: number;
+  /** Open issues awaiting an admin, added to the Activity key's badge (admin only). */
+  issuesOpenCount?: number;
+  /** The user's own issues with unseen admin activity, shown on the Requests key. */
+  issuesUnreadCount?: number;
   tier?: DeploymentTier;
 }
 
@@ -44,6 +48,8 @@ export const Header: React.FC<HeaderProps> = ({
   onTabChange,
   isAdmin = false,
   reviewCount = 0,
+  issuesOpenCount = 0,
+  issuesUnreadCount = 0,
   tier = 'all-in-one',
 }) => {
   const isGateway = tier === 'gateway';
@@ -54,6 +60,12 @@ export const Header: React.FC<HeaderProps> = ({
         Core
       </span>
     ) : null;
+  /** Count chip per main key: Activity = review findings + open issues (admin), Requests = unseen issue replies. */
+  const badgeFor = (id: MainTab): number => {
+    if (id === 'activity') return reviewCount + issuesOpenCount;
+    if (id === 'requests') return issuesUnreadCount;
+    return 0;
+  };
   const navItems: Array<{ id: MainTab; label: string; icon: React.ReactNode; adminOnly?: boolean }> = [
     { id: 'discover', label: 'Discover', icon: <Compass className="h-4 w-4" /> },
     { id: 'requests', label: 'Requests', icon: <Inbox className="h-4 w-4" /> },
@@ -127,9 +139,9 @@ export const Header: React.FC<HeaderProps> = ({
                         title={item.label}
                       >
                         {item.label}
-                        {item.id === 'activity' && reviewCount > 0 && (
+                        {badgeFor(item.id) > 0 && (
                           <span className="ml-1 px-1 rounded-[3px] bg-[var(--accent-amber)] text-[10px] font-mono font-bold text-black">
-                            {reviewCount}
+                            {badgeFor(item.id)}
                           </span>
                         )}
                       </TapeDeckButton>
@@ -161,12 +173,12 @@ export const Header: React.FC<HeaderProps> = ({
                         aria-current={isActive ? 'page' : undefined}
                         title={item.label}
                       >
-                        {item.id === 'activity' && reviewCount > 0 && (
+                        {badgeFor(item.id) > 0 && (
                           <span
                             className="absolute -top-1 -right-1 min-w-[14px] px-0.5 rounded-[3px] bg-[var(--accent-amber)] text-[9px] leading-[14px] font-mono font-bold text-black text-center"
                             aria-hidden="true"
                           >
-                            {reviewCount}
+                            {badgeFor(item.id)}
                           </span>
                         )}
                       </TapeDeckButton>

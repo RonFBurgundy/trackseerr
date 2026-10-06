@@ -424,16 +424,24 @@ class TestActions:
 
     def test_research_calls_wanted_search_with_album_track_ids(self, client, hdr, library, test_db):
         issue = _create(client, hdr["admin"], issue_type="missing_tracks", album_id="alb-1")
-        with patch.object(issues_mod.wanted_routes, "search_wanted", return_value={"queued": 2}) as search:
+        with patch.object(issues_mod.wanted_routes, "search_tracks_for_replacement", return_value={"queued": 2}) as search:
             res = self._action(client, hdr["admin"], issue["id"], "research")
         assert res.status_code == 200, res.text
-        assert sorted(search.call_args.args[0].ids) == ["trk-1", "trk-2"]
+        assert sorted(search.call_args.args[1]) == ["trk-1", "trk-2"]
+        assert search.call_args.args[2] == issue["id"] and search.call_args.kwargs["require_better"] is False
         assert res.json()["issue"]["status"] == "in_progress"
         assert test_db.list_issue_comments(issue["id"])[-1]["body"] == "Admin ran: Search again"
 
+    def test_audio_quality_research_requires_a_better_release(self, client, hdr, library, test_db):
+        issue = _create(client, hdr["admin"], issue_type="audio_quality", album_id="alb-1")
+        with patch.object(issues_mod.wanted_routes, "search_tracks_for_replacement", return_value={"queued": 2}) as search:
+            res = self._action(client, hdr["admin"], issue["id"], "research")
+        assert res.status_code == 200, res.text
+        assert search.call_args.kwargs["require_better"] is True
+
     def test_research_nothing_queued_is_409_without_side_effects(self, client, hdr, library, test_db):
         issue = _create(client, hdr["admin"], issue_type="audio_quality", album_id="alb-1")
-        with patch.object(issues_mod.wanted_routes, "search_wanted", return_value={"queued": 0, "message": "A search batch is already running"}):
+        with patch.object(issues_mod.wanted_routes, "search_tracks_for_replacement", return_value={"queued": 0, "message": "A search batch is already running"}):
             res = self._action(client, hdr["admin"], issue["id"], "research")
         assert res.status_code == 409 and "already running" in res.json()["detail"]
         assert test_db.get_issue(issue["id"])["status"] == "open"
@@ -445,18 +453,18 @@ class TestActions:
             protocol="torrent", artist="The Beatles", album="Abbey Road",
         )
         issue = _create(client, hdr["admin"], issue_type="wrong_release", album_id="alb-1")
-        with patch.object(issues_mod.wanted_routes, "search_wanted", return_value={"queued": 2}) as search:
+        with patch.object(issues_mod.wanted_routes, "search_tracks_for_replacement", return_value={"queued": 2}) as search:
             res = self._action(client, hdr["admin"], issue["id"], "blocklist_and_research")
         assert res.status_code == 200, res.text
         assert res.json()["result"]["release"] == "Bad.Release.FLAC"
-        assert search.called
+        assert search.called and search.call_args.kwargs["require_better"] is False
         assert test_db.is_blocklisted(release_title="Bad.Release.FLAC")
         assert test_db.list_issue_comments(issue["id"])[-1]["body"] == "Admin ran: Blocklist release and search again"
         assert res.json()["issue"]["status"] == "in_progress"
 
     def test_blocklist_and_research_409_when_source_unknown(self, client, hdr, library, test_db):
         issue = _create(client, hdr["admin"], issue_type="wrong_release", album_id="alb-1")
-        with patch.object(issues_mod.wanted_routes, "search_wanted") as search:
+        with patch.object(issues_mod.wanted_routes, "search_tracks_for_replacement") as search:
             res = self._action(client, hdr["admin"], issue["id"], "blocklist_and_research")
         assert res.status_code == 409 and "not on record" in res.json()["detail"]
         search.assert_not_called()
@@ -491,7 +499,7 @@ class TestActions:
     def test_action_on_resolved_issue_reopens_to_in_progress(self, client, hdr, library, test_db):
         issue = _create(client, hdr["admin"], issue_type="corrupted_file", album_id="alb-1")
         client.put(f"/api/issues/{issue['id']}", json={"status": "resolved"}, headers=hdr["admin"])
-        with patch.object(issues_mod.wanted_routes, "search_wanted", return_value={"queued": 1}):
+        with patch.object(issues_mod.wanted_routes, "search_tracks_for_replacement", return_value={"queued": 1}):
             res = self._action(client, hdr["admin"], issue["id"], "research")
         assert res.json()["issue"]["status"] == "in_progress" and res.json()["issue"]["resolved_at"] is None
 

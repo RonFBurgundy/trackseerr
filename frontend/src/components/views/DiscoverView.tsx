@@ -136,6 +136,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
       requestingId={requestingId}
       currentPreviewTrackId={currentPreviewTrackId}
       isPreviewPlaying={isPreviewPlaying}
+      issuesHook={issuesHook}
       onClose={closeTrack}
       onPlayTrack={onPlayTrack}
       onRequestTrack={(item) => void requestWithBusy(item)}

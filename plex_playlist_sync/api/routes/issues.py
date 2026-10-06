@@ -638,13 +638,15 @@ def delete_issue(
     return {"status": "deleted", "id": issue_id}
 
 
-def _queue_album_search(db: Database, admin: dict[str, Any], album_id: str) -> dict[str, Any]:
-    """Searches every track of the album exactly like the Wanted page's search (``wanted.search_wanted``)."""
+def _queue_album_search(db: Database, issue: dict[str, Any], album_id: str) -> dict[str, Any]:
+    """Searches every track of the album as a replacement search (``wanted.search_tracks_for_replacement``): the
+    files exist and meet the cutoff, so the Wanted page's search would skip or reject them. Same quality is fine
+    unless the issue is about audio quality."""
     track_ids = [str(t["id"]) for t in db.list_library_tracks(album_id=album_id, limit=1000)]
     if not track_ids:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The album has no tracks to search for")
-    return wanted_routes.search_wanted(
-        wanted_routes.WantedSearchRequest(ids=track_ids), db=db, client=None, _admin=admin
+    return wanted_routes.search_tracks_for_replacement(
+        db, track_ids, str(issue["id"]), require_better=issue["issue_type"] == IssueType.AUDIO_QUALITY.value
     )
 
 
@@ -710,7 +712,7 @@ def run_issue_action(
         )
     elif action == ACTION_RESEARCH:
         assert album_id is not None  # guaranteed by _available_actions
-        result = _queue_album_search(db, admin, album_id)
+        result = _queue_album_search(db, issue, album_id)
         if not result.get("queued"):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail=result.get("message") or "No search was queued"
@@ -718,7 +720,7 @@ def run_issue_action(
     elif action == ACTION_BLOCKLIST_AND_RESEARCH:
         assert album_id is not None
         blocklisted = _blocklist_current_release(db, issue, album_id)
-        result = {**blocklisted, "search": _queue_album_search(db, admin, album_id)}
+        result = {**blocklisted, "search": _queue_album_search(db, issue, album_id)}
     else:  # ACTION_REMATCH: a read; hands the UI what the manual import modal needs
         assert album_id is not None
         album = db.get_library_album(album_id) or {}

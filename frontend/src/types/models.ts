@@ -850,22 +850,54 @@ export type IssueType =
   | 'wrong_release'
   | 'missing_tracks'
   | 'incorrect_tags'
+  | 'request_stuck'
   | 'other';
 
-export type IssueStatus = 'open' | 'in_progress' | 'resolved';
+export type IssueStatus = 'open' | 'in_progress' | 'resolved' | 'wont_fix';
 
+/** Admin fix actions an issue can offer (`available_actions`). */
+export type IssueAction = 'retry_request' | 'research' | 'blocklist_and_research' | 'rematch';
+
+export type IssueItemType = 'album' | 'track';
+
+/** Issue as returned to the viewer. The server omits unset fields, so everything beyond the core is optional. */
 export interface Issue {
-  id: number;
+  id: string;
   media_title: string;
   artist: string;
   issue_type: IssueType;
   problem_details: string;
   status: IssueStatus;
-  user_id: number;
-  request_id: string | null;
-  username: string | null;
-  created_at: string | null;
-  updated_at: string | null;
+  user_id: string;
+  request_id?: string | null;
+  username?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  resolved_at?: string | null;
+  resolved_by?: string | null;
+  last_activity_at?: string | null;
+  comment_count?: number;
+  item_type?: IssueItemType | null;
+  discovery_id?: string | null;
+  /** Reporter's own view only: admin activity not yet seen. */
+  unread?: boolean;
+  /** Admin only. */
+  album_id?: string | null;
+  track_id?: string | null;
+  available_actions?: string[];
+}
+
+export interface IssueComment {
+  id: string;
+  issue_id: string;
+  body: string;
+  created_at: string;
+  is_admin: boolean;
+  username?: string | null;
+  mine: boolean;
+  /** Admin only. */
+  user_id?: string | null;
+  is_system?: boolean;
 }
 
 export interface CreateIssuePayload {
@@ -874,6 +906,34 @@ export interface CreateIssuePayload {
   issue_type: IssueType;
   problem_details: string;
   request_id?: string;
+  discovery_id?: string;
+  item_type?: IssueItemType;
+  /** Admin only. */
+  album_id?: string;
+  track_id?: string;
+}
+
+export interface IssueListFilters {
+  status?: IssueStatus;
+  media_title?: string;
+  artist?: string;
+}
+
+export interface IssueOpenCount {
+  count: number;
+  in_progress: number;
+}
+
+/** Body of `rematch`: what the Manual Import modal needs. */
+export interface IssueRematchResult {
+  scope: { album_id: string };
+  album: { id: string; title?: string | null; artist_name?: string | null };
+}
+
+export interface IssueActionResponse {
+  action: string;
+  result: Record<string, unknown>;
+  issue: Issue;
 }
 
 export const ISSUE_TYPE_LABELS: Record<IssueType, string> = {
@@ -882,6 +942,7 @@ export const ISSUE_TYPE_LABELS: Record<IssueType, string> = {
   wrong_release: 'Wrong release',
   missing_tracks: 'Missing tracks',
   incorrect_tags: 'Incorrect tags',
+  request_stuck: 'Request is stuck',
   other: 'Other',
 };
 
@@ -889,10 +950,35 @@ export const ISSUE_STATUS_LABELS: Record<IssueStatus, string> = {
   open: 'Open',
   in_progress: 'In progress',
   resolved: 'Resolved',
+  wont_fix: "Won't fix",
 };
+
+export const ISSUE_ACTION_LABELS: Record<IssueAction, string> = {
+  retry_request: 'Retry request',
+  research: 'Search again',
+  blocklist_and_research: 'Blocklist & search again',
+  rematch: 'Rematch files',
+};
+
+/** Types offered for a report about media we have (Discover, Library, available requests). */
+export const MEDIA_ISSUE_TYPES: readonly IssueType[] = [
+  'audio_quality',
+  'corrupted_file',
+  'wrong_release',
+  'missing_tracks',
+  'incorrect_tags',
+  'other',
+];
+
+/** Types offered for a report about a request that is not yet fulfilled. */
+export const REQUEST_ISSUE_TYPES: readonly IssueType[] = ['request_stuck', 'other'];
 
 export const ISSUE_MAX_TITLE = 300;
 export const ISSUE_MAX_DETAILS = 2000;
+export const ISSUE_MAX_COMMENT = 2000;
+
+/** Statuses an issue is actively tracked in (a duplicate report is refused while one is active). */
+export const ACTIVE_ISSUE_STATUSES: readonly IssueStatus[] = ['open', 'in_progress'];
 
 /** One release in an artist's discography (GET /api/discovery/artist/{id}). */
 export interface ArtistDiscographyAlbum {

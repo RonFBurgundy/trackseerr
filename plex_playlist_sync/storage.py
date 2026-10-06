@@ -173,6 +173,10 @@ def lidarr_item_due(row: dict[str, Any], now: Optional[datetime] = None) -> bool
     return str(due_at) <= current
 
 
+# ``download_history.message`` of a ``grabbed`` row made by an issue replacement search (followed by the issue id).
+REPLACEMENT_MESSAGE_PREFIX = "Replacement search for issue "
+
+
 class Database(QualityCatalogMixin, DelayProfileMixin):
     """Thread-safe SQLite database wrapper with WAL mode, foreign keys, and migrations."""
 
@@ -5871,14 +5875,33 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         quality: Optional[str] = None,
         protocol: Optional[str] = None,
         upgrade: bool = False,
+        replacement_issue_id: Optional[str] = None,
     ) -> None:
-        """Stores release metadata on a fresh download and writes its ``grabbed`` (and, for upgrades, ``upgraded``) event."""
+        """Stores release metadata on a fresh download and writes its ``grabbed`` (and, for upgrades, ``upgraded``) event.
+
+        ``replacement_issue_id`` tags the ``grabbed`` row's message (``REPLACEMENT_MESSAGE_PREFIX`` + id) so the import
+        can find the issue via ``get_download_replacement_issue``.
+        """
         self.set_download_release_meta(download_id, indexer=indexer, quality=quality, protocol=protocol)
-        self.record_download_event("grabbed", download_id=download_id)
+        self.record_download_event(
+            "grabbed",
+            download_id=download_id,
+            message=f"{REPLACEMENT_MESSAGE_PREFIX}{replacement_issue_id}" if replacement_issue_id else None,
+        )
         if upgrade:
             self.record_download_event(
                 "upgraded", download_id=download_id, message="Grabbed to replace a file below its quality cutoff"
             )
+
+    def get_download_replacement_issue(self, download_id: str) -> Optional[str]:
+        """Issue id a download was grabbed to replace files for (see ``record_download_grab``), or None."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT message FROM download_history WHERE event = 'grabbed' AND download_id = ? "
+                "AND message LIKE ? ORDER BY rowid DESC LIMIT 1",
+                (str(download_id), f"{REPLACEMENT_MESSAGE_PREFIX}%"),
+            ).fetchone()
+        return str(row[0])[len(REPLACEMENT_MESSAGE_PREFIX):] if row else None
 
     def list_native_queue(
         self, page: int, page_size: int, sort_key: str, sort_dir: str
@@ -8014,6 +8037,14 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             )
             row = cur.fetchone()
             return self._map_library_file(row) if row else None
+
+    def list_library_files_for_track(self, track_id: str) -> list[dict[str, Any]]:
+        """Every file row attached to a track (a track normally has one; replacements briefly have two)."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM library_files WHERE track_id = ?", (str(track_id),)
+            ).fetchall()
+            return [self._map_library_file(r) for r in rows]
 
     def list_library_artist_track_index(self, artist_id: str) -> list[dict[str, Any]]:
         """One artist's tracks for import matching: id, clean_title, album clean title, duration, file presence."""

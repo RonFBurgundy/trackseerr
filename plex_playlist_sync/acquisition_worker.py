@@ -30,7 +30,13 @@ from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result
 from plex_playlist_sync.download_roots import AllowedRoots, allowed_roots_for_client
-from plex_playlist_sync.import_security import clear_exec_bits, quarantine_files, verify_files, QUARANTINE_DIRNAME
+from plex_playlist_sync.import_security import (
+    clear_exec_bits,
+    quarantine_files,
+    retire_replaced_file,
+    verify_files,
+    QUARANTINE_DIRNAME,
+)
 from plex_playlist_sync.import_quality_check import CHECK_OFF, check_files, normalize_check_mode
 from plex_playlist_sync.library_health import record_weak_match
 from plex_playlist_sync.library_monitoring import NATIVE_MONITOR_OPTIONS
@@ -761,6 +767,10 @@ def translate_remote_path(
     return norm
 
 
+def _path_under(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
 class AcquisitionWorker:
     """Thread-safe background runner monitoring active downloads and organizing media."""
 
@@ -865,6 +875,52 @@ class AcquisitionWorker:
         if self.allowed_roots is not None:
             return self.allowed_roots
         return AllowedRoots(roots=[Path(self.staging_dir).resolve()] if self.staging_dir else [])
+
+    def _retire_replaced_files(
+        self,
+        db: Database,
+        issue_id: str,
+        old_rows: list[dict[str, Any]],
+        new_path: Path,
+        library_root: Path,
+        retired: list[str],
+        kept: list[str],
+    ) -> None:
+        """Retires a track's previous library files after an issue-driven replacement was imported.
+
+        Only files inside the library root and outside every download root are moved (rename into the library's
+        quarantine, never a delete, so a hardlink shared with a seeding torrent is untouched). A file that cannot be
+        moved stays on disk and is reported in ``kept``. Stale rows are removed either way so the track points at the
+        new file only.
+        """
+        client_roots = [r for r in self._effective_roots().roots]
+        if self.staging_dir:
+            client_roots.append(Path(self.staging_dir).resolve())
+        for row in old_rows:
+            old_str = str(row.get("file_path") or "")
+            if not old_str or old_str == str(new_path):
+                continue
+            old_p = Path(os.path.abspath(old_str))
+            if old_p == new_path:
+                continue
+            try:
+                resolved = old_p.resolve()
+                in_client_root = any(_path_under(old_p, r) or _path_under(resolved, r) for r in client_roots)
+                if in_client_root or not _path_under(old_p, library_root) or not os.path.lexists(old_p):
+                    if os.path.lexists(old_p):
+                        kept.append(f"{old_p} (outside the library or inside a download folder: left in place)")
+                        logger.warning("Replacement of %s: old file not moved (outside library / in download root)", old_p)
+                else:
+                    dest = retire_replaced_file(old_p, library_root, issue_id)
+                    retired.append(f"{old_p} -> {dest}")
+                    logger.info("Replacement for issue %s: retired %s to %s", issue_id, old_p, dest)
+            except OSError as exc:
+                kept.append(f"{old_p}: could not move")
+                logger.warning("Replacement for issue %s: could not move old file %s: %s", issue_id, old_p, exc)
+            try:
+                db.delete_library_file(str(row["id"]))
+            except sqlite3.Error as del_err:
+                logger.warning("Could not remove stale library file row %s: %s", row.get("id"), safe_exc(del_err))
 
     def _extract_into(self, archive: Path, root: Path) -> list[Path]:
         """Extracts ``archive`` into a fresh ``_extracted_*`` folder under ``root``; failures are noted, not raised."""
@@ -1614,6 +1670,15 @@ class AcquisitionWorker:
                     target_path=target_summary,
                 )
 
+                # An issue-driven replacement retires the track's previous file(s) once the new row is in.
+                replacement_issue_id: Optional[str] = None
+                replaced_retired: list[str] = []
+                replaced_kept: list[str] = []
+                try:
+                    replacement_issue_id = db.get_download_replacement_issue(str(download_id))
+                except sqlite3.Error as ri_err:
+                    logger.warning("Could not look up replacement issue for %s: %s", download_id, safe_exc(ri_err))
+
                 # Native catalog upsert (when library_mode != "lidarr")
                 if media_settings.get("library_mode") != "lidarr":
                     for placed_str in imported_paths:
@@ -1778,6 +1843,9 @@ class AcquisitionWorker:
                                 else str(placed_p)
                             )
                             file_id = f"fil-{uuid.uuid4().hex[:12]}"
+                            old_file_rows = (
+                                db.list_library_files_for_track(track_id) if replacement_issue_id else []
+                            )
                             db.upsert_library_file(
                                 LibraryFile(
                                     id=file_id,
@@ -1799,6 +1867,11 @@ class AcquisitionWorker:
                                 track_id,
                                 cutoff_met,
                             )
+                            if replacement_issue_id and old_file_rows:
+                                self._retire_replaced_files(
+                                    db, replacement_issue_id, old_file_rows, placed_p, root_path,
+                                    replaced_retired, replaced_kept,
+                                )
                         except Exception as upsert_err:
                             logger.exception(
                                 "Error upserting native library records for %s: %s",
@@ -1882,6 +1955,18 @@ class AcquisitionWorker:
                     )
 
                 stats["imported"] += 1
+
+                try:  # a grab made by an issue's "Search again" tells that issue; the admin decides the status
+                    issue_id = replacement_issue_id
+                    if issue_id and db.get_issue(issue_id):
+                        body = "Replacement imported"
+                        for line in replaced_retired:
+                            body += f"\nRetired old file: {line}"
+                        for line in replaced_kept:
+                            body += f"\nOld file kept at {line}"
+                        db.add_issue_comment(issue_id, None, body, is_admin=True, is_system=True, staff=True)
+                except sqlite3.Error as issue_err:
+                    logger.warning("Could not comment on the issue for download %s: %s", download_id, safe_exc(issue_err))
 
                 try:
                     notification_dispatcher.dispatch(

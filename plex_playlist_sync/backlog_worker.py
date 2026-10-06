@@ -7,6 +7,7 @@
 """
 
 from difflib import SequenceMatcher
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import logging
 import sqlite3
@@ -128,6 +129,19 @@ def _matches_request(candidate: AcquisitionSearchResult, req: dict[str, Any]) ->
 
 # A track searched this recently is not searched again by a manual Wanted search.
 RECENT_SEARCH_WINDOW = timedelta(minutes=10)
+
+
+@dataclass(frozen=True)
+class ReplacementSpec:
+    """An admin-driven replacement search for tracks that already have files (issue fix actions only).
+
+    ``require_better`` keeps the "strictly better than the current file" rule (``audio_quality`` issues); otherwise a
+    same-quality release is accepted (``corrupted_file`` / ``wrong_release``). ``issue_id`` is recorded on the grab so
+    the import can comment on the issue.
+    """
+
+    issue_id: str
+    require_better: bool = False
 
 
 def _searched_since(value: Any, cutoff: datetime) -> bool:
@@ -255,11 +269,14 @@ class WantedBacklogWorker:
         thread = self.last_search_thread
         return thread is not None and thread.is_alive()
 
-    def queue_wanted_search(self, db: Database, targets: list[dict[str, Any]]) -> dict[str, Any]:
+    def queue_wanted_search(
+        self, db: Database, targets: list[dict[str, Any]], replacement: Optional[ReplacementSpec] = None
+    ) -> dict[str, Any]:
         """Queues indexer searches for Wanted rows; returns ``{"queued": n}`` plus a ``message`` when nothing/less ran.
 
         Only one manual batch runs at a time: while one is alive a new request queues nothing and says so. Tracks
-        searched within ``RECENT_SEARCH_WINDOW`` (``last_searched_at``) are skipped, which also absorbs double clicks.
+        searched within ``RECENT_SEARCH_WINDOW`` (``last_searched_at``) are skipped, which also absorbs double clicks;
+        a ``replacement`` (deliberate admin action) bypasses that guard for this call only.
         """
         with self._search_lock:
             if self.search_batch_running():
@@ -268,11 +285,11 @@ class WantedBacklogWorker:
             fresh: list[dict[str, Any]] = []
             skipped = 0
             for t in targets:
-                if _searched_since(t.get("last_searched_at"), cutoff):
+                if replacement is None and _searched_since(t.get("last_searched_at"), cutoff):
                     skipped += 1
                 else:
                     fresh.append(t)
-            queued = self.search_wanted_tracks(db, fresh)
+            queued = self.search_wanted_tracks(db, fresh, replacement=replacement)
         out: dict[str, Any] = {"queued": queued}
         if skipped and queued:
             out["message"] = f"Skipped {skipped} searched in the last 10 minutes"
@@ -280,13 +297,19 @@ class WantedBacklogWorker:
             out["message"] = "All selected items were searched in the last 10 minutes"
         return out
 
-    def search_wanted_tracks(self, db: Database, targets: list[dict[str, Any]]) -> int:
+    def search_wanted_tracks(
+        self, db: Database, targets: list[dict[str, Any]], replacement: Optional[ReplacementSpec] = None
+    ) -> int:
         """Queues indexer searches for the given Wanted rows and returns how many were queued.
 
         The searches run on a daemon thread, paced like the periodic sweep; each one goes through
         ``acquisition_coordinator.search_and_grab`` (which takes the native work guard itself). Rows that already
         have a below-cutoff file are searched as upgrades, scored against the current quality. The caller is
         expected to hold the native ``work_guard`` while it decides to queue.
+
+        With a ``replacement`` the tracks are searched even though their files meet the cutoff: same-quality
+        releases are accepted unless ``require_better``, the delay profile is bypassed, and the grab is tagged with
+        the issue id. The blocklist and quality profile still apply.
         """
         runnable = [t for t in targets if (t.get("artist") or "").strip() and (t.get("title") or "").strip()]
         if not runnable:
@@ -298,7 +321,9 @@ class WantedBacklogWorker:
                 try:
                     min_score: Optional[int] = None
                     qp_id = t.get("quality_profile_id")
-                    if t.get("current_quality") and t.get("cutoff_met") == 0:
+                    if t.get("current_quality") and (
+                        (replacement.require_better if replacement is not None else t.get("cutoff_met") == 0)
+                    ):
                         profile_dict = db.get_quality_profile(qp_id) if qp_id else db.get_default_quality_profile()
                         min_score = 0
                         if profile_dict:
@@ -319,6 +344,8 @@ class WantedBacklogWorker:
                         min_score=min_score,
                         track_id=t.get("track_id"),
                         album_id=t.get("album_id"),
+                        bypass_delay=replacement is not None,
+                        replacement_issue_id=replacement.issue_id if replacement is not None else None,
                     )
                     if res.get("mode_changed"):
                         logger.info("Manual wanted search stopped: library manager switched to Lidarr")
