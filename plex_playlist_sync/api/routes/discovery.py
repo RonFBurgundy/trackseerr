@@ -22,7 +22,7 @@ from plex_playlist_sync.artist_links import normalize_artist_name
 from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient, LidarrNotFound
 from plex_playlist_sync.library_manager import MODE_LIDARR, build_lidarr_client
 from plex_playlist_sync.clients.core_client import CoreClient
-from plex_playlist_sync.clients.discovery import DiscoveryClient
+from plex_playlist_sync.clients.discovery import DiscoveryClient, DiscoveryUpstreamError
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.config import Config
@@ -331,6 +331,32 @@ def get_album(
     annotated_album = annotate_item_statuses([album_dict], db=db, plex_client=plex_client, config=config, user=_user)[0]
     annotated_album["tracks"] = annotated_tracks
     return annotated_album
+
+
+@router.get("/track/{track_id}")
+def get_track(
+    track_id: str,
+    discovery: DiscoveryClient = Depends(get_discovery_client),
+    db: Database = Depends(get_db),
+    plex_client: Optional[Any] = Depends(get_media_client),
+    config: Config = Depends(get_config),
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """Retrieves a single track's metadata (Deezer/iTunes) annotated with request/library status."""
+    try:
+        track = discovery.get_track_details(track_id)
+    except DiscoveryUpstreamError as exc:
+        logger.warning("Track lookup for '%s' failed upstream: %s", track_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Track metadata provider is unavailable",
+        ) from exc
+    if not track:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Track '{track_id}' not found",
+        )
+    return annotate_item_statuses([dict(track)], db=db, plex_client=plex_client, config=config, user=_user)[0]
 
 
 @router.get("/artist/{artist_id}")

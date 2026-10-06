@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { RequestItem, UserQuota, DiscoveryItem } from '@/types/models';
+import type { RequestItem, UserQuota } from '@/types/models';
 import {
   getRequests,
   getUserQuota,
@@ -11,6 +11,18 @@ import {
 
 export type RequestFilter = 'all' | 'pending' | 'approved' | 'fulfilled' | 'rejected';
 
+/** What a single-item request needs; a DiscoveryItem satisfies it. */
+export interface RequestableItem {
+  id?: string;
+  title: string;
+  artist: string;
+  album?: string;
+  cover_url?: string;
+  type?: string;
+  preview_url?: string;
+  release_date?: string;
+}
+
 export interface UseRequestsReturn {
   requests: RequestItem[];
   quota: UserQuota | null;
@@ -18,7 +30,7 @@ export interface UseRequestsReturn {
   isLoading: boolean;
   error: string | null;
   setFilter: (filter: RequestFilter) => void;
-  submitRequest: (item: DiscoveryItem | { title: string; artist: string; album?: string; cover_url?: string; type?: string }) => Promise<void>;
+  submitRequest: (item: RequestableItem) => Promise<void>;
   approve: (id: number) => Promise<void>;
   reject: (id: number, reason?: string) => Promise<void>;
   remove: (id: number) => Promise<void>;
@@ -55,7 +67,7 @@ export function useRequests(): UseRequestsReturn {
   }, [refresh]);
 
   const submitRequest = useCallback(
-    async (item: DiscoveryItem | { title: string; artist: string; album?: string; cover_url?: string; type?: string }) => {
+    async (item: RequestableItem) => {
       setError(null);
       try {
         await apiCreateRequest({
@@ -63,7 +75,10 @@ export function useRequests(): UseRequestsReturn {
           artist: item.artist,
           album: item.album,
           cover_url: item.cover_url,
-          type: item.type || 'album',
+          item_type: item.type === 'track' ? 'track' : 'album',
+          foreign_id: item.id,
+          preview_url: item.preview_url,
+          release_date: item.release_date,
         });
         await refresh();
       } catch (err: unknown) {

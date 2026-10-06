@@ -6,6 +6,8 @@ import type { UseIssuesReturn } from '@/hooks/useIssues';
 import type { DiscoveryAlbumTrack } from '@/hooks/useDiscoveryAlbum';
 import type { AudioPreviewTrack, DiscoveryItem } from '@/types/models';
 import { ArtistNameLink } from './ArtistNameLink';
+import { ProfileRequestButton } from './ProfileRequestButton';
+import { effectiveStatus } from './profileItems';
 
 export interface DiscoveryAlbumModalProps {
   album: DiscoveryItem;
@@ -20,6 +22,8 @@ export interface DiscoveryAlbumModalProps {
   onPlayTrack: (track: AudioPreviewTrack) => void;
   onRequestAlbum: () => void;
   onRequestTrack: (item: DiscoveryItem) => void;
+  /** Open the track detail modal for a tracklist row. */
+  onOpenTrack: (item: DiscoveryItem) => void;
   /** Open the album artist's profile (only offered when the album carries `artist_discovery_id`). */
   onOpenArtist: (discoveryId: string) => void;
 }
@@ -38,6 +42,7 @@ export const DiscoveryAlbumModal: React.FC<DiscoveryAlbumModalProps> = ({
   onPlayTrack,
   onRequestAlbum,
   onRequestTrack,
+  onOpenTrack,
   onOpenArtist,
 }) => {
   const isInLibrary = Boolean(album.in_library || album.status === 'in_library' || album.status === 'available');
@@ -114,12 +119,29 @@ export const DiscoveryAlbumModal: React.FC<DiscoveryAlbumModalProps> = ({
           <div className="divide-y divide-[#1f1f1f] overflow-hidden rounded-[4px] border border-[#1f1f1f]">
             {tracks.map((t, idx) => {
               const isPlaying = currentPreviewTrackId === t.id && isPreviewPlaying;
+              const trackItem: DiscoveryItem = {
+                id: t.id,
+                title: t.title,
+                artist: album.artist,
+                album: album.title,
+                cover_url: album.cover_url,
+                preview_url: t.preview_url,
+                release_date: album.release_date,
+                type: 'track',
+                artist_discovery_id: album.artist_discovery_id,
+                album_discovery_id: t.album_discovery_id ?? album.id,
+              };
               return (
-                <div key={t.id || idx} className="flex items-center justify-between p-2.5 transition-colors hover:bg-[#181818]">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <span className="w-5 font-mono text-xs text-neutral-500">{idx + 1}</span>
-                    <span className="truncate text-sm text-neutral-200">{t.title}</span>
-                  </div>
+                <div key={t.id || idx} className="flex items-center justify-between gap-2 p-2.5 transition-colors hover:bg-[#181818]">
+                  <button
+                    type="button"
+                    onClick={() => onOpenTrack(trackItem)}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left focus:outline-none focus-visible:text-[#e5a00d]"
+                    aria-label={`Track details for ${t.title}`}
+                  >
+                    <span className="w-5 shrink-0 font-mono text-xs text-neutral-500">{t.track_number ?? idx + 1}</span>
+                    <span className="truncate text-sm text-neutral-200 hover:text-white">{t.title}</span>
+                  </button>
                   <div className="flex flex-shrink-0 items-center gap-2">
                     {t.preview_url && (
                       <TapeDeckButton
@@ -131,31 +153,12 @@ export const DiscoveryAlbumModal: React.FC<DiscoveryAlbumModalProps> = ({
                         icon={isPlaying ? <Pause className="h-3 w-3 text-[#e5a00d]" /> : <Play className="h-3 w-3 fill-current" />}
                       />
                     )}
-                    {requestedIds.has(t.id) ? (
-                      <span className="rounded-[2px] border border-[#e5a00d]/30 bg-[#e5a00d]/10 px-2 py-1 font-mono text-[10px] text-[#e5a00d]">Requested</span>
-                    ) : requestingId === t.id ? (
-                      <TapeDeckButton size="sm" variant="default" disabled aria-label="Requesting track" icon={<Loader2 className="h-3 w-3 animate-spin" />}>
-                        ...
-                      </TapeDeckButton>
-                    ) : (
-                      <TapeDeckButton
-                        size="sm"
-                        variant="amber"
-                        onClick={() =>
-                          onRequestTrack({
-                            id: t.id,
-                            title: t.title,
-                            artist: album.artist,
-                            album: album.title,
-                            cover_url: album.cover_url,
-                            type: 'track',
-                          })
-                        }
-                        icon={<Plus className="h-3 w-3" />}
-                      >
-                        Request
-                      </TapeDeckButton>
-                    )}
+                    <ProfileRequestButton
+                      status={effectiveStatus(t.status, t.id, requestedIds)}
+                      busy={requestingId === t.id}
+                      label="Request"
+                      onRequest={() => onRequestTrack(trackItem)}
+                    />
                   </div>
                 </div>
               );

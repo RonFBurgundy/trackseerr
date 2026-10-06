@@ -1,9 +1,10 @@
 import React, { useCallback, useState } from 'react';
 import { Play, Pause, Plus, Check, Disc, Music, Loader2 } from 'lucide-react';
 import type { ArtistDiscographyAlbum, DiscoveryItem, AudioPreviewTrack } from '@/types/models';
-import { ArtistNameLink, ArtistProfileView, DiscoveryAlbumModal } from '@/components/discovery';
+import { ArtistNameLink, ArtistProfileView, DiscoveryAlbumModal, DiscoveryTrackModal } from '@/components/discovery';
 import type { UseDiscoveryReturn } from '@/hooks/useDiscovery';
 import { useDiscoveryAlbum } from '@/hooks/useDiscoveryAlbum';
+import { useDiscoveryTrack } from '@/hooks/useDiscoveryTrack';
 import type { AppRoute, DiscoverRoute } from '@/hooks/useAppRoute';
 import {
   TabStrip,
@@ -51,19 +52,40 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
 }) => {
   const album = useDiscoveryAlbum();
   const { open: openAlbum, close: closeAlbum } = album;
+  const trackDetail = useDiscoveryTrack();
+  const { open: openTrack, close: closeTrack } = trackDetail;
   const [requestingId, setRequestingId] = useState<string | null>(null);
 
   const openArtist = useCallback(
     (discoveryId: string): void => {
+      closeTrack();
       closeAlbum();
       onNavigate({ tab: 'discover', artistId: discoveryId });
     },
-    [closeAlbum, onNavigate]
+    [closeAlbum, closeTrack, onNavigate]
+  );
+
+  const currentAlbumId = album.album?.id;
+  const openedTrack = trackDetail.track;
+  /** From the track modal: show the track's album, reusing the album modal when it is already open on it. */
+  const openAlbumOfTrack = useCallback(
+    (albumDiscoveryId: string): void => {
+      const source = openedTrack;
+      closeTrack();
+      if (source && currentAlbumId !== albumDiscoveryId) {
+        void openAlbum({ ...source, album_discovery_id: albumDiscoveryId });
+      }
+    },
+    [openedTrack, currentAlbumId, closeTrack, openAlbum]
   );
 
   const handleOpenItem = (item: DiscoveryItem): void => {
     if (item.type === 'artist') {
       openArtist(item.id);
+      return;
+    }
+    if (item.type === 'track') {
+      void openTrack(item);
       return;
     }
     void openAlbum(item);
@@ -98,7 +120,28 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
       onPlayTrack={onPlayTrack}
       onRequestAlbum={() => void requestWithBusy(current)}
       onRequestTrack={(item) => void requestWithBusy(item)}
+      onOpenTrack={(item) => void openTrack(item)}
       onOpenArtist={openArtist}
+    />
+  );
+
+  const trackItem = trackDetail.track;
+  const trackModal = trackItem && (
+    <DiscoveryTrackModal
+      track={trackItem}
+      detail={trackDetail.detail}
+      isLoading={trackDetail.isLoading}
+      error={trackDetail.error}
+      requestedIds={requestedIds}
+      requestingId={requestingId}
+      currentPreviewTrackId={currentPreviewTrackId}
+      isPreviewPlaying={isPreviewPlaying}
+      onClose={closeTrack}
+      onPlayTrack={onPlayTrack}
+      onRequestTrack={(item) => void requestWithBusy(item)}
+      onRequestAlbum={(item) => void requestWithBusy(item)}
+      onOpenArtist={openArtist}
+      onOpenAlbum={openAlbumOfTrack}
     />
   );
 
@@ -120,6 +163,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
           requestedIds={requestedIds}
         />
         {albumModal}
+        {trackModal}
       </>
     );
   }
@@ -325,6 +369,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
       )}
 
       {albumModal}
+      {trackModal}
     </PageFrame>
   );
 };

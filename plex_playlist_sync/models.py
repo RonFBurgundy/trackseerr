@@ -138,6 +138,7 @@ class DiscoveryItem:
     release_date: Optional[str] = None
     status: str = "none"  # "none", "requested", "processing", "available", "in_library"
     artist_discovery_id: Optional[str] = None  # e.g. "deezer:artist:27"; only emitted when the source provides it
+    album_discovery_id: Optional[str] = None  # tracks only, e.g. "deezer:album:302127"; only emitted when known
 
     def to_dict(self) -> dict[str, Any]:
         data = {
@@ -153,6 +154,8 @@ class DiscoveryItem:
         }
         if self.artist_discovery_id:
             data["artist_discovery_id"] = self.artist_discovery_id
+        if self.album_discovery_id:
+            data["album_discovery_id"] = self.album_discovery_id
         return data
 
 

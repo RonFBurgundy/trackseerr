@@ -15,8 +15,11 @@ export interface CreateRequestPayload {
   source?: string;
   source_id?: string;
   cover_url?: string;
-  type?: string;
-  quality_profile?: string;
+  /** Sent as `item_type`; the server defaults to album when omitted. */
+  item_type?: 'album' | 'track';
+  foreign_id?: string;
+  preview_url?: string;
+  release_date?: string;
 }
 
 export async function createRequest(payload: CreateRequestPayload): Promise<RequestItem> {

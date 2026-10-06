@@ -55,6 +55,7 @@ GATEWAY_LOCAL_ALLOWLIST: tuple[tuple[frozenset[str], str], ...] = (
     (READ, "/api/discovery/new-releases"),  # discovery: new releases
     (READ, "/api/discovery/search"),  # discovery: search
     (READ, "/api/discovery/album/{}"),  # discovery: album detail
+    (READ, "/api/discovery/track/{}"),  # discovery: track detail
     (READ, "/api/discovery/artist/{}"),  # discovery: artist detail
     (READ, "/api/discovery/artist-profile"),  # discovery: artist profile (user-scoped; availability resolved on core)
     (frozenset({"POST"}), "/api/requests"),  # create a request (route forwards to core)
