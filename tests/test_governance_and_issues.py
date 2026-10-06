@@ -849,7 +849,7 @@ class TestMediaIssuesAPI:
         assert up_admin.json()["problem_details"] == "fixed"
 
         # 5. Non-existent returns 404
-        assert client.put("/api/issues/issue-unknown", json={"status": "closed"}, headers=admin_headers).status_code == 404
+        assert client.put("/api/issues/issue-unknown", json={"status": "wont_fix"}, headers=admin_headers).status_code == 404
 
     def test_delete_issue_boundaries(self, app_and_client, test_db, test_config, seeded_users):
         """Only admins can delete issues; the owner and third parties receive 403."""

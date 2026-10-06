@@ -74,7 +74,7 @@ def clean_library_name(text: str) -> str:
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
 SEED_COMPLETE_ACTIONS = ("keep", "remove", "remove_and_delete")
-SCHEMA_VERSION = 60  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 61  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:
@@ -353,6 +353,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 (58, self._migration_v58),
                 (59, self._migration_v59),
                 (60, self._migration_v60),
+                (61, self._migration_v61),
             ]
 
             applied = 0
@@ -1090,6 +1091,44 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN torrent_hardlink_tags TEXT NOT NULL DEFAULT 'copy_and_tag'"
             )
+
+    def _migration_v61(self, cur: sqlite3.Cursor) -> None:
+        """Issue lifecycle: validated statuses (``wont_fix`` replaces ``closed``), resolution stamps, media refs,
+        reporter-seen tracking and the ``issue_comments`` thread."""
+        cur.execute("PRAGMA table_info(media_issues);")
+        have = {row[1] for row in cur.fetchall()}
+        for column in (
+            "resolved_at", "resolved_by", "album_id", "track_id", "discovery_id", "item_type",
+            "reporter_seen_at", "last_activity_at", "last_staff_activity_at",
+        ):
+            if column not in have:
+                cur.execute(f"ALTER TABLE media_issues ADD COLUMN {column} TEXT;")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS issue_comments (
+                id TEXT PRIMARY KEY,
+                issue_id TEXT NOT NULL REFERENCES media_issues(id) ON DELETE CASCADE,
+                user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+                body TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                is_admin INTEGER NOT NULL DEFAULT 0,
+                is_system INTEGER NOT NULL DEFAULT 0
+            );
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_issue_comments_issue ON issue_comments(issue_id, created_at);")
+        cur.execute("UPDATE media_issues SET status = 'resolved' WHERE status = 'closed';")
+        cur.execute(
+            "UPDATE media_issues SET status = 'open' WHERE status NOT IN ('open', 'in_progress', 'resolved', 'wont_fix');"
+        )
+        cur.execute(
+            "UPDATE media_issues SET resolved_at = replace(updated_at, ' ', 'T') "
+            "WHERE status IN ('resolved', 'wont_fix') AND resolved_at IS NULL;"
+        )
+        cur.execute(
+            "UPDATE media_issues SET last_activity_at = replace(updated_at, ' ', 'T') WHERE last_activity_at IS NULL;"
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_media_issues_album ON media_issues(album_id);")
 
     def _migration_v60(self, cur: sqlite3.Cursor) -> None:
         """Discovery <-> library artist identity cache (``artist_links``); one row per resolved side, each key unique."""
@@ -6234,41 +6273,66 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
     # Media Issues CRUD
     # -------------------------------------------------------------------------
 
+    ISSUE_STATUSES: tuple[str, ...] = ("open", "in_progress", "resolved", "wont_fix")
+    ISSUE_FINAL_STATUSES: tuple[str, ...] = ("resolved", "wont_fix")
+
+    _ISSUE_SELECT = """
+        SELECT i.id, i.request_id, i.media_title, i.artist, i.issue_type,
+               i.problem_details, i.status, i.user_id, i.created_at, i.updated_at,
+               i.resolved_at, i.resolved_by AS resolved_by_id, i.album_id, i.track_id,
+               i.discovery_id, i.item_type, i.reporter_seen_at, i.last_staff_activity_at,
+               COALESCE(i.last_activity_at, i.updated_at) AS last_activity_at,
+               u.username, ru.username AS resolved_by,
+               (SELECT COUNT(*) FROM issue_comments c WHERE c.issue_id = i.id) AS comment_count_all,
+               (SELECT COUNT(*) FROM issue_comments c WHERE c.issue_id = i.id AND c.is_system = 0)
+                   AS comment_count_public,
+               CASE WHEN i.last_staff_activity_at IS NOT NULL
+                         AND (i.reporter_seen_at IS NULL OR i.last_staff_activity_at > i.reporter_seen_at)
+                    THEN 1 ELSE 0 END AS unread
+        FROM media_issues i
+        LEFT JOIN users u ON i.user_id = u.id
+        LEFT JOIN users ru ON i.resolved_by = ru.id
+    """
+
     def create_issue(self, issue: Union[MediaIssue, dict[str, Any]]) -> dict[str, Any]:
         """Creates a new media issue report."""
         d = issue.to_dict() if isinstance(issue, MediaIssue) else dict(issue)
         issue_id = str(d.get("id"))
-        req_id = d.get("request_id")
-        media_title = str(d.get("media_title") or "")
-        artist = str(d.get("artist") or "")
         issue_type = d.get("issue_type")
         if hasattr(issue_type, "value"):
             issue_type = issue_type.value
         issue_type = str(issue_type or "other")
-        problem_details = str(d.get("problem_details") or "")
         status_val = d.get("status")
         if hasattr(status_val, "value"):
             status_val = status_val.value
         status_val = str(status_val or "open")
-        user_id = str(d.get("user_id"))
+        if status_val not in self.ISSUE_STATUSES:
+            raise ValueError(f"Invalid issue status: {status_val!r}")
+        now = _utcnow().isoformat()
 
         with self._lock:
             self.conn.execute(
                 """
                 INSERT INTO media_issues (
                     id, request_id, media_title, artist, issue_type,
-                    problem_details, status, user_id, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    problem_details, status, user_id, album_id, track_id, discovery_id, item_type,
+                    last_activity_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (
                     issue_id,
-                    req_id,
-                    media_title,
-                    artist,
+                    d.get("request_id"),
+                    str(d.get("media_title") or ""),
+                    str(d.get("artist") or ""),
                     issue_type,
-                    problem_details,
+                    str(d.get("problem_details") or ""),
                     status_val,
-                    user_id,
+                    str(d.get("user_id")),
+                    d.get("album_id"),
+                    d.get("track_id"),
+                    d.get("discovery_id"),
+                    d.get("item_type"),
+                    now,
                 ),
             )
             self.conn.commit()
@@ -6279,20 +6343,9 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         return created
 
     def get_issue(self, issue_id: str) -> Optional[dict[str, Any]]:
-        """Retrieves a single media issue by ID with reporter username joined."""
+        """Retrieves a single media issue by ID with reporter username, comment counts and unread flag joined."""
         with self._lock:
-            cur = self.conn.execute(
-                """
-                SELECT i.id, i.request_id, i.media_title, i.artist, i.issue_type,
-                       i.problem_details, i.status, i.user_id, i.created_at, i.updated_at,
-                       u.username
-                FROM media_issues i
-                LEFT JOIN users u ON i.user_id = u.id
-                WHERE i.id = ?
-                """,
-                (str(issue_id),),
-            )
-            row = cur.fetchone()
+            row = self.conn.execute(self._ISSUE_SELECT + " WHERE i.id = ?", (str(issue_id),)).fetchone()
             return dict(row) if row else None
 
     def count_recent_issues(self, user_id: str, hours: int = 24) -> int:
@@ -6305,19 +6358,38 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             return int(cur.fetchone()[0])
 
     def find_active_duplicate_issue(
-        self, user_id: str, media_title: str, artist: str, issue_type: str
+        self,
+        user_id: str,
+        media_title: str,
+        artist: str,
+        issue_type: str,
+        request_id: Optional[str] = None,
+        album_id: Optional[str] = None,
+        track_id: Optional[str] = None,
+        discovery_id: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
-        """Returns the user's open/in_progress issue matching title+artist (case-insensitive) and type, if any."""
+        """The user's open/in_progress issue of the same type that matches title+artist (case-insensitive) or
+        shares the request / library album / library track / discovery reference, if any."""
+        clauses = ["(lower(media_title) = lower(?) AND lower(artist) = lower(?))"]
+        params: list[Any] = [str(media_title), str(artist)]
+        for column, value in (
+            ("request_id", request_id),
+            ("album_id", album_id),
+            ("track_id", track_id),
+            ("discovery_id", discovery_id),
+        ):
+            if value:
+                clauses.append(f"{column} = ?")
+                params.append(str(value))
         with self._lock:
             cur = self.conn.execute(
-                """
+                f"""
                 SELECT id, status FROM media_issues
-                WHERE user_id = ? AND status IN ('open', 'in_progress')
-                  AND lower(media_title) = lower(?) AND lower(artist) = lower(?)
-                  AND issue_type = ?
+                WHERE user_id = ? AND status IN ('open', 'in_progress') AND issue_type = ?
+                  AND ({' OR '.join(clauses)})
                 ORDER BY created_at DESC LIMIT 1
                 """,
-                (str(user_id), str(media_title), str(artist), str(issue_type).lower()),
+                (str(user_id), str(issue_type).lower(), *params),
             )
             row = cur.fetchone()
             return dict(row) if row else None
@@ -6330,14 +6402,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         artist: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Lists media issues filtered by status and/or user_id with username joined."""
-        query = """
-            SELECT i.id, i.request_id, i.media_title, i.artist, i.issue_type,
-                   i.problem_details, i.status, i.user_id, i.created_at, i.updated_at,
-                   u.username
-            FROM media_issues i
-            LEFT JOIN users u ON i.user_id = u.id
-            WHERE 1=1
-        """
+        query = self._ISSUE_SELECT + " WHERE 1=1"
         params: list[Any] = []
         if status:
             query += " AND i.status = ?"
@@ -6351,7 +6416,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         if artist:
             query += " AND lower(i.artist) = lower(?)"
             params.append(str(artist))
-        query += " ORDER BY i.created_at DESC"
+        query += " ORDER BY i.created_at DESC, i.rowid DESC"
 
         with self._lock:
             cur = self.conn.execute(query, params)
@@ -6360,40 +6425,187 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
     def update_issue(
         self, issue_id: str, updates: dict[str, Any]
     ) -> dict[str, Any]:
-        """Updates media issue status and problem details."""
+        """Updates an issue's status and/or problem details; any other key is ignored.
+
+        A status change goes through ``set_issue_status`` so ``resolved_at`` / ``resolved_by`` stay consistent.
+        """
         existing = self.get_issue(issue_id)
         if not existing:
             raise KeyError(f"Media issue {issue_id} not found")
 
-        allowed = {"status", "problem_details", "media_title", "artist", "issue_type", "request_id"}
-        filtered: dict[str, Any] = {}
-        for k, v in updates.items():
-            if k in allowed and v is not None:
-                if hasattr(v, "value"):
-                    filtered[k] = v.value
-                else:
-                    filtered[k] = str(v)
-
-        if filtered:
-            set_clauses = [f"{k} = ?" for k in filtered.keys()]
-            set_clauses.append("updated_at = CURRENT_TIMESTAMP")
-            params = list(filtered.values())
-            params.append(str(issue_id))
-
+        new_status = updates.get("status")
+        if hasattr(new_status, "value"):
+            new_status = new_status.value
+        if new_status is not None:
+            new_status = str(new_status)
+            if new_status not in self.ISSUE_STATUSES:
+                raise ValueError(f"Invalid issue status: {new_status!r}")
+        details = updates.get("problem_details")
+        if details is not None:
             with self._lock:
                 self.conn.execute(
-                    f"UPDATE media_issues SET {', '.join(set_clauses)} WHERE id = ?",
-                    params,
+                    "UPDATE media_issues SET problem_details = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (str(details), str(issue_id)),
                 )
                 self.conn.commit()
+        if new_status is not None and new_status != existing["status"]:
+            self.set_issue_status(issue_id, new_status, actor_id=None, staff=False)
 
         updated = self.get_issue(issue_id)
         if updated is None:
             raise RuntimeError(f"Media issue {issue_id} disappeared after update")
         return updated
 
+    def set_issue_status(
+        self,
+        issue_id: str,
+        new_status: str,
+        actor_id: Optional[str],
+        staff: bool,
+        expected_status: Optional[str] = None,
+    ) -> bool:
+        """Moves an issue to ``new_status``; True when a row changed.
+
+        Terminal statuses stamp ``resolved_at`` / ``resolved_by``; leaving them clears both. ``staff`` marks the
+        change as admin activity the reporter has not seen yet. ``expected_status`` makes it a compare-and-set so
+        two concurrent transitions cannot both win.
+        """
+        if new_status not in self.ISSUE_STATUSES:
+            raise ValueError(f"Invalid issue status: {new_status!r}")
+        now = _utcnow().isoformat()
+        final = new_status in self.ISSUE_FINAL_STATUSES
+        sql = (
+            "UPDATE media_issues SET status = ?, resolved_at = ?, resolved_by = ?, last_activity_at = ?, "
+            "last_staff_activity_at = CASE WHEN ? THEN ? ELSE last_staff_activity_at END, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status <> ?"
+        )
+        params: list[Any] = [
+            new_status, now if final else None, actor_id if final else None, now,
+            1 if staff else 0, now, str(issue_id), new_status,
+        ]
+        if expected_status is not None:
+            sql += " AND status = ?"
+            params.append(expected_status)
+        with self._lock:
+            cur = self.conn.execute(sql, params)
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def add_issue_comment(
+        self,
+        issue_id: str,
+        user_id: Optional[str],
+        body: str,
+        is_admin: bool,
+        is_system: bool = False,
+        staff: Optional[bool] = None,
+        max_comments: Optional[int] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Appends a comment and bumps the issue's activity stamps.
+
+        ``staff`` (default: ``is_admin``) marks it as activity the reporter has not seen; a reporter's own comment
+        instead marks the issue seen for them. Returns None when ``max_comments`` is already reached.
+        """
+        staff_activity = is_admin if staff is None else staff
+        now = _utcnow().isoformat()
+        comment_id = f"ic-{uuid.uuid4().hex[:12]}"
+        with self._lock:
+            if max_comments is not None:
+                count = self.conn.execute(
+                    "SELECT COUNT(*) FROM issue_comments WHERE issue_id = ?", (str(issue_id),)
+                ).fetchone()[0]
+                if int(count) >= max_comments:
+                    return None
+            self.conn.execute(
+                "INSERT INTO issue_comments (id, issue_id, user_id, body, created_at, is_admin, is_system) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (comment_id, str(issue_id), user_id, str(body), now, 1 if is_admin else 0, 1 if is_system else 0),
+            )
+            if staff_activity:
+                self.conn.execute(
+                    "UPDATE media_issues SET last_activity_at = ?, last_staff_activity_at = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (now, now, str(issue_id)),
+                )
+            else:
+                self.conn.execute(
+                    "UPDATE media_issues SET last_activity_at = ?, reporter_seen_at = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (now, now, str(issue_id)),
+                )
+            self.conn.commit()
+            row = self.conn.execute(
+                "SELECT c.id, c.issue_id, c.user_id, c.body, c.created_at, c.is_admin, c.is_system, u.username "
+                "FROM issue_comments c LEFT JOIN users u ON c.user_id = u.id WHERE c.id = ?",
+                (comment_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def list_issue_comments(self, issue_id: str, include_system: bool = True) -> list[dict[str, Any]]:
+        """An issue's comments oldest first; ``include_system`` False hides admin action notes."""
+        sql = (
+            "SELECT c.id, c.issue_id, c.user_id, c.body, c.created_at, c.is_admin, c.is_system, u.username "
+            "FROM issue_comments c LEFT JOIN users u ON c.user_id = u.id WHERE c.issue_id = ?"
+        )
+        if not include_system:
+            sql += " AND c.is_system = 0"
+        sql += " ORDER BY c.created_at ASC, c.rowid ASC"
+        with self._lock:
+            return [dict(r) for r in self.conn.execute(sql, (str(issue_id),)).fetchall()]
+
+    def mark_issue_seen(self, issue_id: str) -> bool:
+        """Stamps the reporter's last-seen time on an issue."""
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE media_issues SET reporter_seen_at = ? WHERE id = ?",
+                (_utcnow().isoformat(), str(issue_id)),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def count_unread_issues(self, user_id: str) -> int:
+        """Issues the user reported that have admin activity newer than their last visit."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) FROM media_issues WHERE user_id = ? AND last_staff_activity_at IS NOT NULL "
+                "AND (reporter_seen_at IS NULL OR last_staff_activity_at > reporter_seen_at)",
+                (str(user_id),),
+            ).fetchone()
+            return int(row[0])
+
+    def count_issues_by_status(self, status: str) -> int:
+        """Number of issues currently in ``status``."""
+        with self._lock:
+            row = self.conn.execute("SELECT COUNT(*) FROM media_issues WHERE status = ?", (str(status),)).fetchone()
+            return int(row[0])
+
+    def get_imported_release_source(
+        self,
+        album_id: str,
+        track_ids: Optional[list[str]] = None,
+        request_id: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """The newest ``imported`` history row that produced an album's files (matched by album, then its tracks,
+        then the request), or None when no import is on record. Carries the release identity for blocklisting."""
+        candidates: list[tuple[str, list[str]]] = [("album_id", [str(album_id)])]
+        if track_ids:
+            candidates.append(("track_id", [str(t) for t in track_ids]))
+        if request_id:
+            candidates.append(("request_id", [str(request_id)]))
+        with self._lock:
+            for column, values in candidates:
+                marks = ", ".join("?" for _ in values)
+                row = self.conn.execute(
+                    f"SELECT * FROM download_history WHERE event = 'imported' AND {column} IN ({marks}) "
+                    "AND release_title IS NOT NULL AND release_title <> '' ORDER BY rowid DESC LIMIT 1",
+                    values,
+                ).fetchone()
+                if row:
+                    return dict(row)
+        return None
+
     def delete_issue(self, issue_id: str) -> bool:
-        """Deletes a media issue by ID."""
+        """Deletes a media issue by ID (its comments cascade)."""
         with self._lock:
             cur = self.conn.execute(
                 "DELETE FROM media_issues WHERE id = ?",

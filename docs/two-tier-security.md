@@ -104,7 +104,7 @@ Everything else is **admin-only** and returns 403 for non-admins (404 on the gat
 - Library and its management: artists, albums, tracks, stats, scan, collections, manual import, Lidarr migration. One exception stays open to users: `GET /api/library/availability`, which discover and requests use to show "in library".
 - Activity: system events, logs and the log stream, plus the queue, acquisition, backlog and missing tracks (including the Lidarr push and queue controls).
 - Global sync trigger and status, the user list, settings, download clients, indexers, quality profiles and notifications.
-- Media issues: user-facing issue reporting (create, and list their own) stays open to users; view-all, edit and delete are admin.
+- Media issues: user-facing issue reporting (create, list/get their own, comments, unread-count, seen, reopen/close via `POST /{id}/status`) stays open to users and is forwarded by the gateway; view-all, `PUT`, `DELETE`, `open-count` and `actions/*` are core-only admin (`open-count` is on `GATEWAY_FORWARD_DENYLIST` because `/api/issues/{}` would otherwise match it).
 
 Rules for user-scoped routes:
 - **Ownership is checked on the server.** A non-admin acting on another user's object gets **404**, not 403, so the response does not reveal that the object exists.

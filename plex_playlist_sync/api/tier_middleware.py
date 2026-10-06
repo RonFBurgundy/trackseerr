@@ -76,7 +76,11 @@ GATEWAY_FORWARD_ALLOWLIST: tuple[tuple[frozenset[str], str], ...] = (
     (frozenset({"DELETE"}), "/api/requests/{}"),  # cancel own pending request (core checks ownership)
     (ALL_METHODS, "/api/playlists/**"),  # user's own sync playlists (core enforces ownership)
     (frozenset({"GET", "POST"}), "/api/issues"),  # list own issues / report an issue
-    (READ, "/api/issues/{}"),  # view own issue (core returns 404 for others')
+    (READ, "/api/issues/{}"),  # view own issue (core returns 404 for others'); also /unread-count
+    (READ, "/api/issues/{}/comments"),  # read the discussion on an own issue
+    (frozenset({"POST"}), "/api/issues/{}/comments"),  # comment on an own issue
+    (frozenset({"POST"}), "/api/issues/{}/seen"),  # mark an own issue as seen
+    (frozenset({"POST"}), "/api/issues/{}/status"),  # reopen / close an own issue (core enforces the transitions)
     (ALL_METHODS, "/api/plex-playlists/**"),  # user's own Plex playlists (core enforces ownership)
     (ALL_METHODS, "/api/mixes/**"),  # tailored mixes
     (ALL_METHODS, "/api/account/**"),  # own profile, quotas, password and MFA (core enforces)
@@ -84,6 +88,11 @@ GATEWAY_FORWARD_ALLOWLIST: tuple[tuple[frozenset[str], str], ...] = (
     (READ, "/api/scrobbles/listens"),  # own listen history
     (READ, "/api/scrobbles/lastfm/auth-url"),  # begin Last.fm connect
     (READ, "/api/scrobbles/lastfm/callback"),  # Last.fm return; core's 303 Location is passed through
+)
+
+# Paths a wildcard above would otherwise forward although core serves them to admins only (answered 404 here).
+GATEWAY_FORWARD_DENYLIST: tuple[tuple[frozenset[str], str], ...] = (
+    (ALL_METHODS, "/api/issues/open-count"),  # admin nav badge; "/api/issues/{}" would match it
 )
 
 
@@ -330,7 +339,9 @@ class GatewayGuardMiddleware:
             response = await self._forward(scope, receive, config, fastapi_app, method, raw_path, service=True)
             await response(scope, receive, send)
             return
-        if _allowed(GATEWAY_FORWARD_ALLOWLIST, method, match_path):
+        if _allowed(GATEWAY_FORWARD_ALLOWLIST, method, match_path) and not _allowed(
+            GATEWAY_FORWARD_DENYLIST, method, match_path
+        ):
             response = await self._forward(scope, receive, config, fastapi_app, method, raw_path)
             await response(scope, receive, send)
             return
@@ -481,6 +492,7 @@ class GatewayGuardMiddleware:
 
 __all__ = [
     "GATEWAY_FORWARD_ALLOWLIST",
+    "GATEWAY_FORWARD_DENYLIST",
     "GATEWAY_FORWARD_SERVICE_ALLOWLIST",
     "GATEWAY_LOCAL_ALLOWLIST",
     "GatewayGuardMiddleware",
