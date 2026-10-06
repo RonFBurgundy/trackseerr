@@ -212,6 +212,7 @@ def settle_transfer_after_import(
     media_settings: dict[str, Any],
     import_mode: str | None,
     status_dict: Optional[dict[str, Any]],
+    download: Optional[dict[str, Any]] = None,
 ) -> str:
     """Shared post-import download-client governance (worker and manual import).
 
@@ -220,11 +221,36 @@ def settle_transfer_after_import(
     - delete_completed_transfers off: no client call, IMPORTED.
     - on, source-preserving mode, seed limits set: keep while limits unmet (or status unknown).
     - on otherwise: cleanup_completed(delete_files=False), IMPORTED.
+    Seed targets come from the download row's grab-time snapshot (``download``); rows without one (legacy) use the
+    global limits. A snapshot from an indexer rule is stricter: while its ratio or time target is unmet the transfer
+    is NEVER removed, whatever the import mode, because deleting early would break the tracker's seeding rule.
     """
     if not media_settings.get("delete_completed_transfers"):
         return DownloadStatus.IMPORTED.value
     seed_ratio_limit = media_settings.get("seed_ratio_limit")
     seed_time_limit_minutes = media_settings.get("seed_time_limit_minutes")
+    rule_source = (download or {}).get("seed_rule_source")
+    if rule_source in ("indexer", "global"):
+        seed_ratio_limit = download.get("seed_ratio_target")  # type: ignore[union-attr]
+        seed_time_limit_minutes = download.get("seed_time_target_minutes")  # type: ignore[union-attr]
+    if rule_source == "indexer":
+        ratio_t = float(seed_ratio_limit or 0.0)
+        time_t = int(seed_time_limit_minutes or 0)
+        if ratio_t > 0 or time_t > 0:  # 0/None never counts as met on its own, nor as a requirement
+            if status_dict is None:
+                logger.info("Keeping transfer %s: seeding status unavailable (indexer seed rule)", target_lookup)
+                return DownloadStatus.COMPLETED.value
+            cur_ratio = float(status_dict.get("ratio") or 0.0)
+            cur_seeding_sec = int(status_dict.get("seeding_time_seconds") or 0)
+            ratio_met = ratio_t > 0 and cur_ratio >= ratio_t
+            time_met = time_t > 0 and cur_seeding_sec >= time_t * 60
+            if not (ratio_met or time_met):
+                return DownloadStatus.COMPLETED.value
+        try:
+            driver.cleanup_completed(target_lookup, delete_files=False)
+        except Exception as ex:
+            logger.warning("Error during cleanup_completed for %s: %s", target_lookup, ex)
+        return DownloadStatus.IMPORTED.value
     if preserves_source(import_mode) and (seed_ratio_limit is not None or seed_time_limit_minutes is not None):
         if status_dict is None:
             logger.info("Keeping transfer %s: seeding status unavailable", target_lookup)
@@ -804,6 +830,15 @@ class AcquisitionWorker:
             progress = float(status_dict.get("progress") or 0.0)
             size_bytes = status_dict.get("size_bytes")
             db.update_download_progress(download_id, progress, size_bytes)
+            if "ratio" in status_dict:  # torrent clients report seeding progress; the queue shows it for held downloads
+                try:
+                    db.record_seed_progress(
+                        download_id,
+                        float(status_dict.get("ratio") or 0.0),
+                        int(status_dict.get("seeding_time_seconds") or 0),
+                    )
+                except (sqlite3.Error, TypeError, ValueError) as seed_err:
+                    logger.warning("Could not record seed progress for %s: %s", download_id, seed_err)
 
             if item.get("status") == DownloadStatus.QUEUED.value and cur_status == DownloadStatus.DOWNLOADING.value:
                 client_name = client_config.get("name", "Client") if client_config else "Client"
@@ -851,7 +886,7 @@ class AcquisitionWorker:
                 if media_settings.get("delete_completed_transfers"):
                     db.update_download_status(
                         download_id,
-                        status=settle_transfer_after_import(driver, target_lookup, media_settings, import_mode, status_dict),
+                        status=settle_transfer_after_import(driver, target_lookup, media_settings, import_mode, status_dict, item),
                     )
                 continue
 
@@ -1533,7 +1568,7 @@ class AcquisitionWorker:
                     )
                 else:
                     should_keep_seeding = (
-                        settle_transfer_after_import(driver, target_lookup, media_settings, import_mode, status_dict)
+                        settle_transfer_after_import(driver, target_lookup, media_settings, import_mode, status_dict, item)
                         == DownloadStatus.COMPLETED.value
                     )
 

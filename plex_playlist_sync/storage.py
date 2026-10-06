@@ -73,7 +73,17 @@ def clean_library_name(text: str) -> str:
 
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
-SCHEMA_VERSION = 55  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 56  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+
+
+def _opt_float(value: Any) -> Optional[float]:
+    """NULL-preserving float coercion for nullable numeric columns."""
+    return None if value is None or value == "" else float(value)
+
+
+def _opt_int(value: Any) -> Optional[int]:
+    """NULL-preserving int coercion for nullable numeric columns."""
+    return None if value is None or value == "" else int(value)
 
 
 def _titles_near_equal(a: str, b: str) -> bool:
@@ -337,6 +347,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 (53, self._migration_v53),
                 (54, self._migration_v54),
                 (55, self._migration_v55),
+                (56, self._migration_v56),
             ]
 
             applied = 0
@@ -1066,6 +1077,33 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         cur.execute("PRAGMA table_info(active_downloads);")
         if "unmatched_files" not in {row[1] for row in cur.fetchall()}:
             cur.execute("ALTER TABLE active_downloads ADD COLUMN unmatched_files TEXT;")
+
+    def _migration_v56(self, cur: sqlite3.Cursor) -> None:
+        """Per-indexer seed rules (NULL = inherit global) and the seed-rule snapshot taken on each download at grab time."""
+        cur.execute("PRAGMA table_info(indexers);")
+        idx_cols = {row[1] for row in cur.fetchall()}
+        for col, decl in (
+            ("seed_ratio", "REAL"),
+            ("seed_time_minutes", "INTEGER"),
+            ("discography_seed_time_minutes", "INTEGER"),
+            ("minimum_seeders", "INTEGER"),
+        ):
+            if col not in idx_cols:
+                cur.execute(f"ALTER TABLE indexers ADD COLUMN {col} {decl};")
+        cur.execute("PRAGMA table_info(active_downloads);")
+        ad_cols = {row[1] for row in cur.fetchall()}
+        for col, decl in (
+            ("indexer_id", "TEXT"),
+            ("seed_ratio_target", "REAL"),
+            ("seed_time_target_minutes", "INTEGER"),
+            ("seed_rule_source", "TEXT"),
+            # Last ratio / seeding time the worker saw from the client, so the queue can show seeding progress
+            # without calling the client on every page load.
+            ("seed_ratio_current", "REAL"),
+            ("seeding_seconds", "INTEGER"),
+        ):
+            if col not in ad_cols:
+                cur.execute(f"ALTER TABLE active_downloads ADD COLUMN {col} {decl};")
 
     def _migration_v20(self, cur: sqlite3.Cursor) -> None:
         cur.execute("PRAGMA table_info(media_management_settings);")
@@ -4852,14 +4890,19 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         categories = str(idx.get("categories") or "3000,3010,3020,3030,3040")
         enabled = 1 if idx.get("enabled", True) else 0
         priority = int(idx.get("priority", 1))
+        seed_ratio = _opt_float(idx.get("seed_ratio"))
+        seed_time = _opt_int(idx.get("seed_time_minutes"))
+        disco_time = _opt_int(idx.get("discography_seed_time_minutes"))
+        min_seeders = _opt_int(idx.get("minimum_seeders"))
 
         with self._lock:
             self.conn.execute(
                 """
                 INSERT INTO indexers (
                     id, name, indexer_type, host_url, api_key, categories,
-                    enabled, priority, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    enabled, priority, seed_ratio, seed_time_minutes,
+                    discography_seed_time_minutes, minimum_seeders, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     indexer_type = excluded.indexer_type,
@@ -4868,9 +4911,16 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                     categories = excluded.categories,
                     enabled = excluded.enabled,
                     priority = excluded.priority,
+                    seed_ratio = excluded.seed_ratio,
+                    seed_time_minutes = excluded.seed_time_minutes,
+                    discography_seed_time_minutes = excluded.discography_seed_time_minutes,
+                    minimum_seeders = excluded.minimum_seeders,
                     updated_at = CURRENT_TIMESTAMP
                 """,
-                (iid, name, indexer_type, host_url, api_key, categories, enabled, priority),
+                (
+                    iid, name, indexer_type, host_url, api_key, categories, enabled, priority,
+                    seed_ratio, seed_time, disco_time, min_seeders,
+                ),
             )
             self.conn.commit()
         return self.get_indexer(iid) or {}
@@ -4910,7 +4960,10 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         self, indexer_id: str, updates: dict[str, Any]
     ) -> Optional[dict[str, Any]]:
         """Updates indexer fields."""
-        allowed = {"name", "indexer_type", "host_url", "api_key", "categories", "enabled", "priority"}
+        allowed = {
+            "name", "indexer_type", "host_url", "api_key", "categories", "enabled", "priority",
+            "seed_ratio", "seed_time_minutes", "discography_seed_time_minutes", "minimum_seeders",
+        }
         filtered: dict[str, Any] = {}
         for k, v in updates.items():
             if k in allowed:
@@ -4918,6 +4971,10 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                     filtered[k] = 1 if v else 0
                 elif k == "priority":
                     filtered[k] = int(v)
+                elif k == "seed_ratio":
+                    filtered[k] = _opt_float(v)
+                elif k in ("seed_time_minutes", "discography_seed_time_minutes", "minimum_seeders"):
+                    filtered[k] = _opt_int(v)
                 else:
                     filtered[k] = v
 
@@ -5302,6 +5359,39 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             )
             self.conn.commit()
             return cur.rowcount > 0
+
+    def set_download_seed_rule(
+        self,
+        download_id: str,
+        indexer_id: Optional[str],
+        ratio_target: Optional[float],
+        time_target_minutes: Optional[int],
+        source: Optional[str],
+    ) -> bool:
+        """Snapshots the grab-time indexer id and effective seed targets onto a download (never re-resolved later)."""
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE active_downloads SET indexer_id = ?, seed_ratio_target = ?, seed_time_target_minutes = ?, "
+                "seed_rule_source = ? WHERE id = ?",
+                (
+                    str(indexer_id) if indexer_id else None,
+                    ratio_target,
+                    time_target_minutes,
+                    source,
+                    str(download_id),
+                ),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def record_seed_progress(self, download_id: str, ratio: float, seeding_seconds: int) -> None:
+        """Stores the client's last-reported share ratio and seeding time for a torrent download."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE active_downloads SET seed_ratio_current = ?, seeding_seconds = ? WHERE id = ?",
+                (float(ratio), int(seeding_seconds), str(download_id)),
+            )
+            self.conn.commit()
 
     def get_imported_release_title(
         self, request_id: Optional[str] = None, track_id: Optional[str] = None, album_id: Optional[str] = None

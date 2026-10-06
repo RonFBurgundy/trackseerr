@@ -260,13 +260,51 @@ export interface DownloadClientItem {
 }
 
 export interface IndexerItem {
-  id: number;
+  id: string;
   name: string;
   indexer_type: 'torznab' | 'newznab' | 'soulseek';
-  url: string;
-  api_key?: string;
-  is_enabled: boolean;
+  host_url: string;
+  /** Masked by the server on read. */
+  api_key?: string | null;
+  categories: string;
+  enabled: boolean;
   priority: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+  /** Seed ratio to reach; null = inherit the global limit, 0 = no requirement. */
+  seed_ratio?: number | null;
+  /** Seed time in minutes; null = inherit the global limit, 0 = no requirement. */
+  seed_time_minutes?: number | null;
+  /** Seed time for discography/multi-album grabs, in minutes; null = inherit. */
+  discography_seed_time_minutes?: number | null;
+  /** Reject releases with fewer seeders; null = inherit, 0 = no requirement. */
+  minimum_seeders?: number | null;
+}
+
+/** POST /api/settings/indexers body (create when `id` is omitted, otherwise update). */
+export interface IndexerPayload {
+  id?: string;
+  name: string;
+  indexer_type: IndexerItem['indexer_type'];
+  host_url: string;
+  api_key?: string | null;
+  categories?: string;
+  enabled?: boolean;
+  priority?: number;
+  seed_ratio?: number | null;
+  seed_time_minutes?: number | null;
+  discography_seed_time_minutes?: number | null;
+  minimum_seeders?: number | null;
+}
+
+/** POST /api/settings/indexers/test body. */
+export interface TestIndexerPayload {
+  /** Stored indexer id; lets the server substitute the saved API key when the key is empty or masked. */
+  id?: string | null;
+  indexer_type: IndexerItem['indexer_type'];
+  host_url: string;
+  api_key?: string | null;
+  categories?: string;
 }
 
 export interface SystemStatusInfo {
@@ -361,6 +399,12 @@ export interface MediaManagementSettings {
   add_metadata_profile_id?: number | null;
   /** Per-track bitrate check on import: warn (default) records out-of-range files, reject fails the import. */
   import_bitrate_check?: ImportBitrateCheck;
+  /** Global seed ratio limit; null/absent = none. */
+  seed_ratio_limit?: number | null;
+  /** Global seed time limit in minutes; null/absent = none. */
+  seed_time_limit_minutes?: number | null;
+  /** True when import_mode is move and an enabled torrent indexer has a seed rule (server-computed). */
+  seed_rule_conflict?: boolean;
 }
 
 export interface LidarrSettings {

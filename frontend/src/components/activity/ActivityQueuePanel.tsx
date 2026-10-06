@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { AlertTriangle, FolderInput, RotateCcw, Trash2, X } from 'lucide-react';
-import type { ActivityQueueRecord, ListSortDir } from '@/types/activity';
+import type { ActivityQueueRecord, ActivitySeeding, ListSortDir } from '@/types/activity';
 import { getActivityQueue, removeActivityQueueItem, retryActivityQueueItem } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
 import { pagedFetcher, useVirtualPagedList } from '@/hooks/useVirtualPagedList';
@@ -15,6 +15,7 @@ import {
   formatBytes,
   formatDateTime,
   formatEta,
+  formatMinutes,
   orDash,
   type FlatListColumn,
   type RowTone,
@@ -27,6 +28,20 @@ export interface ActivityPanelProps {
 const fetchQueue = pagedFetcher(getActivityQueue);
 const getKey = (r: ActivityQueueRecord): string | number => r.id;
 const rowTone = (r: ActivityQueueRecord): RowTone => (r.stalled ? 'warning' : null);
+
+const SeedingLine: React.FC<{ seeding: ActivitySeeding }> = ({ seeding }) => {
+  const ratio =
+    seeding.ratio_target === null ? seeding.ratio.toFixed(2) : `${seeding.ratio.toFixed(2)} / ${parseFloat(seeding.ratio_target.toFixed(2))}`;
+  const time =
+    seeding.time_target_minutes === null
+      ? formatMinutes(seeding.seeding_minutes)
+      : `${formatMinutes(seeding.seeding_minutes)} / ${formatMinutes(seeding.time_target_minutes)}`;
+  return (
+    <span className="basis-full text-[10px] font-mono text-[#e5a00d] break-words" title="Seeding ratio and time versus targets">
+      Seeding &middot; {ratio} &middot; {time}
+    </span>
+  );
+};
 
 const StatusCell: React.FC<{ record: ActivityQueueRecord }> = ({ record }) => {
   const reason = record.stalled_reason || record.messages.join(' | ') || 'Stalled';
@@ -42,6 +57,7 @@ const StatusCell: React.FC<{ record: ActivityQueueRecord }> = ({ record }) => {
           <AlertTriangle className="h-3 w-3" /> Stalled
         </span>
       )}
+      {record.seeding && <SeedingLine seeding={record.seeding} />}
     </span>
   );
 };

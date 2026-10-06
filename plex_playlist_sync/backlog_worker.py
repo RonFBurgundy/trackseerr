@@ -39,6 +39,7 @@ from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.job_tracker import tracked
 from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_guard
+from plex_playlist_sync.seed_rules import apply_seed_rules_at_grab
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -961,6 +962,10 @@ class RSSSyncWorker:
                 )
                 try:
                     db.create_active_download(active_dl)
+                    apply_seed_rules_at_grab(
+                        db, client_driver, download_id, download_hash, candidate.title, candidate.protocol,
+                        candidate.extra,
+                    )
                     try:
                         db.record_download_grab(
                             download_id,

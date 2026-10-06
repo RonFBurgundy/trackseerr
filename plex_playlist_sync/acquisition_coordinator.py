@@ -36,6 +36,7 @@ from plex_playlist_sync.decision_engine import (
 from plex_playlist_sync import delay_gate
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.quality_defaults import entry_qualities, is_v2_items, normalize_entries
+from plex_playlist_sync.seed_rules import apply_seed_rules_at_grab
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -184,6 +185,7 @@ class AcquisitionCoordinator:
                             extra = dict(r.extra or {})
                             extra.setdefault("indexer_id", idx_cfg.get("id"))
                             extra.setdefault("indexer_name", idx_name)
+                            extra.setdefault("indexer_minimum_seeders", idx_cfg.get("minimum_seeders"))
                             r.extra = extra
                     all_results.extend(res)
             except Exception as e:
@@ -551,6 +553,10 @@ class AcquisitionCoordinator:
             album_id=album_id,
         )
         db.create_active_download(active_dl)
+        apply_seed_rules_at_grab(
+            db, client_driver, download_id, download_hash, top_candidate.title, top_candidate.protocol,
+            top_candidate.extra,
+        )
         try:  # any grab of the item supersedes whatever is parked for it, under any of its identifiers
             db.clear_pending_for_item(request_id, album_id, track_id)
         except sqlite3.Error as clear_err:

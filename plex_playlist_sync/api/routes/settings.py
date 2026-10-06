@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from plex_playlist_sync import library_manager, lidarr_library
+from plex_playlist_sync.seed_rules import seed_rule_conflict
 from plex_playlist_sync.api.dependencies import get_config, get_db, require_admin, require_core_tier
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.media_servers import JellyfinMediaServer, MediaServerError, SubsonicMediaServer
@@ -331,6 +332,7 @@ class MediaManagementGetResponse(BaseModel):
     preset_descriptions: dict[str, str] = Field(default_factory=dict)
     token_help: list[dict[str, Any]] = Field(default_factory=list)
     syntax_help: list[dict[str, str]] = Field(default_factory=list)
+    seed_rule_conflict: bool = False  # move import mode + an enabled torrent indexer with a seed rule
 
 
 def _render_previews_for_settings(settings: dict[str, Any]) -> list[PreviewItemModel]:
@@ -394,6 +396,7 @@ def get_media_management_settings(
     """Retrieves current media management settings and preset templates."""
     settings_dict = _mask_media_management_secrets(db.get_media_management_settings())
     return MediaManagementGetResponse(
+        seed_rule_conflict=seed_rule_conflict(settings_dict.get("import_mode"), db.list_indexers()),
         settings=MediaManagementSettingsModel(**settings_dict),
         presets=PRESETS,
         preset_descriptions=PRESET_DESCRIPTIONS,

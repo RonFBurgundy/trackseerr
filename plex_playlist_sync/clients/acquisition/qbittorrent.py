@@ -253,3 +253,44 @@ class QbittorrentDriver(AcquisitionDriver):
         except Exception as e:
             logger.error("Failed to cleanup completed qBittorrent torrent %s: %s", download_id, e)
             return False
+
+    def set_share_limits(
+        self, lookup: str, ratio: Optional[float], seed_time_minutes: Optional[int]
+    ) -> bool:
+        """Sets per-torrent share limits via torrents/setShareLimits.
+
+        qBittorrent semantics: -2 = use the global setting, -1 = unlimited. So ``None`` maps to -2 and ``0``
+        (no requirement) to -1. The inactive-seeding limit is always left on the global setting.
+        """
+        if not is_safe_service_url(self.host_url):
+            return False
+        ratio_limit: float = -2 if ratio is None else (-1 if float(ratio) <= 0 else float(ratio))
+        time_limit: int = -2 if seed_time_minutes is None else (-1 if int(seed_time_minutes) <= 0 else int(seed_time_minutes))
+        url = f"{self.host_url}/api/v2/torrents/setShareLimits"
+        payload = {
+            "hashes": lookup.lower(),
+            "ratioLimit": ratio_limit,
+            "seedingTimeLimit": time_limit,
+            "inactiveSeedingTimeLimit": -2,
+        }
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                if self._cookie:
+                    client.headers["Cookie"] = self._cookie
+                else:
+                    self._login(client)
+                    if self._cookie:
+                        client.headers["Cookie"] = self._cookie
+                resp = client.post(url, data=payload)
+                if resp.status_code == 403:
+                    self._login(client)
+                    if self._cookie:
+                        client.headers["Cookie"] = self._cookie
+                    resp = client.post(url, data=payload)
+                if resp.status_code != 200:
+                    logger.warning("qBittorrent setShareLimits failed for %s (HTTP %s)", lookup, resp.status_code)
+                    return False
+                return True
+        except httpx.HTTPError as e:
+            logger.warning("qBittorrent setShareLimits failed for %s: %s", lookup, e)
+            return False

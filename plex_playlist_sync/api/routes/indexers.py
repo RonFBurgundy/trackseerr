@@ -30,6 +30,10 @@ class IndexerItem(BaseModel):
     priority: int = 1
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    seed_ratio: Optional[float] = None
+    seed_time_minutes: Optional[int] = None
+    discography_seed_time_minutes: Optional[int] = None
+    minimum_seeders: Optional[int] = None
 
 
 class IndexerPayload(BaseModel):
@@ -41,9 +45,15 @@ class IndexerPayload(BaseModel):
     categories: str = "3000,3010,3020,3030,3040"
     enabled: bool = True
     priority: int = 1
+    # None = inherit the global limit, 0 = no requirement.
+    seed_ratio: Optional[float] = Field(default=None, ge=0)
+    seed_time_minutes: Optional[int] = Field(default=None, ge=0)
+    discography_seed_time_minutes: Optional[int] = Field(default=None, ge=0)
+    minimum_seeders: Optional[int] = Field(default=None, ge=0)
 
 
 class TestIndexerPayload(BaseModel):
+    id: Optional[str] = None
     indexer_type: str = "torznab"
     host_url: str
     api_key: Optional[str] = None
@@ -107,6 +117,10 @@ def create_or_update_indexer(
         categories=payload.categories.strip(),
         enabled=payload.enabled,
         priority=payload.priority,
+        seed_ratio=payload.seed_ratio,
+        seed_time_minutes=payload.seed_time_minutes,
+        discography_seed_time_minutes=payload.discography_seed_time_minutes,
+        minimum_seeders=payload.minimum_seeders,
     )
 
     saved = db.create_indexer(config)
@@ -127,12 +141,23 @@ def test_indexer_connection(
             message="Prohibited or invalid host URL (SSRF defense)",
         )
 
+    api_key = payload.api_key
+    if not api_key or "•" in api_key:
+        existing = db.get_indexer(payload.id.strip()) if payload.id and payload.id.strip() else None
+        if existing:
+            api_key = existing.get("api_key")
+        elif api_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The API key is masked and no saved indexer matches the given id; re-enter the key to test.",
+            )
+
     try:
         driver = get_indexer_driver(
             {
                 "indexer_type": payload.indexer_type,
                 "host_url": clean_host,
-                "api_key": payload.api_key,
+                "api_key": api_key,
                 "categories": payload.categories,
             }
         )

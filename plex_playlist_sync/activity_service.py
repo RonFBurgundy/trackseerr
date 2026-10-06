@@ -133,7 +133,30 @@ def native_stalled(row: dict[str, Any], now: datetime) -> tuple[bool, Optional[s
     return False, None
 
 
-def native_queue_record(row: dict[str, Any], now: datetime) -> dict[str, Any]:
+def native_seeding(row: dict[str, Any], media_settings: Optional[dict[str, Any]] = None) -> Optional[dict[str, Any]]:
+    """Seeding progress of a completed torrent still held for its seed rule; None for everything else.
+
+    Targets come from the grab-time snapshot, falling back to the global limits for legacy rows. Ratio and time
+    are the last values the worker read from the client (0 until it has polled).
+    """
+    if str(row.get("status") or "").lower() != "completed" or str(row.get("protocol") or "").lower() != "torrent":
+        return None
+    ratio_t = row.get("seed_ratio_target")
+    time_t = row.get("seed_time_target_minutes")
+    if not row.get("seed_rule_source") and media_settings:
+        ratio_t = media_settings.get("seed_ratio_limit")
+        time_t = media_settings.get("seed_time_limit_minutes")
+    return {
+        "ratio": float(row.get("seed_ratio_current") or 0.0),
+        "ratio_target": float(ratio_t) if ratio_t else None,
+        "seeding_minutes": int(row.get("seeding_seconds") or 0) // 60,
+        "time_target_minutes": int(time_t) if time_t else None,
+    }
+
+
+def native_queue_record(
+    row: dict[str, Any], now: datetime, media_settings: Optional[dict[str, Any]] = None
+) -> dict[str, Any]:
     stalled, reason = native_stalled(row, now)
     size = int(row.get("size_bytes") or 0)
     progress = max(0.0, min(1.0, float(row.get("progress") or 0.0)))
@@ -164,13 +187,15 @@ def native_queue_record(row: dict[str, Any], now: datetime) -> dict[str, Any]:
         "download_id": str(row["id"]),
         "needs_manual_import": bool(unmatched),
         "unmatched_count": len(unmatched),
+        "seeding": native_seeding(row, media_settings),
     }
 
 
 def native_queue(db: Database, page: int, page_size: int, sort_key: str, sort_dir: str) -> dict[str, Any]:
     rows, total = db.list_native_queue(page, page_size, sort_key, sort_dir)
     now = _now()
-    return _page(SOURCE_NATIVE, page, page_size, total, sort_key, sort_dir, [native_queue_record(r, now) for r in rows])
+    media_settings = db.get_media_management_settings()
+    return _page(SOURCE_NATIVE, page, page_size, total, sort_key, sort_dir, [native_queue_record(r, now, media_settings) for r in rows])
 
 
 def empty_index(sort_key: str, sort_dir: str) -> dict[str, Any]:
@@ -521,6 +546,7 @@ def lidarr_queue_record(rec: dict[str, Any]) -> dict[str, Any]:
         "download_id": None,
         "needs_manual_import": False,
         "unmatched_count": 0,
+        "seeding": None,
     }
 
 

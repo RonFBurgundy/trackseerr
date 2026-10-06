@@ -603,6 +603,9 @@ def _check_kbps(
     return ok, distance
 
 
+DEFAULT_MINIMUM_SEEDERS = 1  # a torrent with no seeders can never complete
+
+
 def evaluate_prepared(
     release: ParsedRelease,
     prepared: PreparedProfile,
@@ -614,6 +617,8 @@ def evaluate_prepared(
     indexer_flags: int = 0,
     duration: Optional[DurationInfo] = None,
     budget: Optional[Budget] = None,
+    seeders: Optional[int] = None,
+    minimum_seeders: Optional[int] = None,
 ) -> EvaluationResult:
     profile = prepared.profile
     title = release.raw_title
@@ -648,6 +653,16 @@ def evaluate_prepared(
             reject("size_below_min", f"Release size ({size_mb:.1f} MB) is below minimum ({profile.min_size_mb:.1f} MB)")
         if profile.max_size_mb is not None and size_mb > profile.max_size_mb:
             reject("size_above_max", f"Release size ({size_mb:.1f} MB) exceeds maximum ({profile.max_size_mb:.1f} MB)")
+
+    # 1b. Minimum seeders (torrents only): the indexer's value overrides the default of 1. Unknown seeder counts
+    # (indexer omitted the attribute) are never rejected.
+    if bd.protocol == "torrent" and seeders is not None:
+        required_seeders = DEFAULT_MINIMUM_SEEDERS if minimum_seeders is None else int(minimum_seeders)
+        if int(seeders) < required_seeders:
+            reject(
+                "seeders_below_min",
+                f"Release has {int(seeders)} seeder(s); the indexer requires at least {required_seeders}",
+            )
 
     raw_lower = title.lower()
     tags_lower = {t.lower() for t in release.tags}
@@ -802,7 +817,14 @@ def candidate_context(candidate: AcquisitionSearchResult) -> dict[str, Any]:
         flags = int(flags or 0)
     except (TypeError, ValueError):
         flags = 0
+    min_seeders = extra.get("indexer_minimum_seeders")
+    try:
+        min_seeders = int(min_seeders) if min_seeders is not None else None
+    except (TypeError, ValueError):
+        min_seeders = None
     return {
+        "seeders": candidate.seeders,
+        "minimum_seeders": min_seeders,
         "protocol": candidate.protocol,
         "indexer_id": extra.get("indexer_id"),
         "indexer_name": extra.get("indexer_name"),

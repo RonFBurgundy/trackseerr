@@ -1,40 +1,52 @@
 import React, { useState } from 'react';
-import { Trash2, Plus } from 'lucide-react';
+import { Trash2, Plus, Save, X } from 'lucide-react';
 import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar, ScrollFill } from '@/components/ui';
-import type { IndexerItem } from '@/types/models';
+import type { IndexerItem, MediaManagementSettings } from '@/types/models';
+import { useIndexerDraft, seedingDraftToPayload } from '@/hooks/useIndexerDraft';
+import { IndexerSeedingFields } from './IndexerSeedingFields';
 import { saveIndexer, deleteIndexer, testIndexer } from '@/services/settingsService';
 import { compactInputClass, compactLabelClass } from './formClasses';
 
 export interface IndexersPanelProps {
   indexers: IndexerItem[];
+  /** Media management settings, used for the global seed limits shown as placeholders. */
+  media?: MediaManagementSettings | null;
   reload: () => Promise<void>;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
 }
 
-export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, reload, onToast }) => {
-  const [name, setName] = useState<string>('');
-  const [url, setUrl] = useState<string>('');
-  const [apiKey, setApiKey] = useState<string>('');
+export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, media, reload, onToast }) => {
+  const draft = useIndexerDraft();
+  const { editingId, name, url, apiKey, indexerType, seeding } = draft;
+  const editing = indexers.find((i) => i.id === editingId) ?? null;
+  const showSeeding = indexerType === 'torznab';
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !url.trim()) return;
+    const seedPayload = showSeeding ? seedingDraftToPayload(seeding) : {};
+    if (seedPayload === null) {
+      onToast('Seeding values must be non-negative numbers (whole numbers for minutes and seeders)', 'error');
+      return;
+    }
     setIsSaving(true);
     try {
       await saveIndexer({
+        ...(editing ? { id: editing.id } : {}),
         name: name.trim(),
-        url: url.trim(),
+        host_url: url.trim(),
         api_key: apiKey.trim(),
-        indexer_type: 'torznab',
-        is_enabled: true,
-        priority: 1,
+        indexer_type: indexerType,
+        categories: editing ? editing.categories : undefined,
+        enabled: editing ? editing.enabled : true,
+        priority: editing ? editing.priority : 1,
+        ...seedPayload,
       });
-      setName('');
-      setUrl('');
-      setApiKey('');
+      const wasEditing = editing !== null;
+      draft.reset();
       await reload();
-      onToast('Indexer registered');
+      onToast(wasEditing ? 'Indexer updated' : 'Indexer registered');
     } catch {
       onToast('Failed to save indexer', 'error');
     } finally {
@@ -42,7 +54,7 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, reload, 
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     try {
       await deleteIndexer(id);
       await reload();
@@ -54,7 +66,13 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, reload, 
 
   const handleTest = async (indexer: IndexerItem) => {
     try {
-      const res = await testIndexer(indexer);
+      const res = await testIndexer({
+        id: indexer.id,
+        indexer_type: indexer.indexer_type,
+        host_url: indexer.host_url,
+        api_key: indexer.api_key,
+        categories: indexer.categories,
+      });
       onToast(res.success ? 'Indexer responded OK' : `Indexer error: ${res.message}`, res.success ? 'ok' : 'error');
     } catch {
       onToast('Test indexer failed', 'error');
@@ -76,9 +94,12 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, reload, 
                     {idx.indexer_type}
                   </span>
                 </div>
-                <p className="text-xs text-neutral-400 font-mono mt-1 truncate max-w-xs">{idx.url}</p>
+                <p className="text-xs text-neutral-400 font-mono mt-1 truncate max-w-xs">{idx.host_url}</p>
               </div>
               <div className="flex items-center gap-2">
+                <TapeDeckButton size="sm" onClick={() => draft.startEdit(idx)}>
+                  Edit
+                </TapeDeckButton>
                 <TapeDeckButton size="sm" onClick={() => void handleTest(idx)}>
                   Test
                 </TapeDeckButton>
@@ -95,7 +116,7 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, reload, 
       )}
 
       <MachinedCard className="p-3 sm:p-5 max-w-xl">
-        <h4 className="text-xs font-bold uppercase font-mono text-white mb-4">Add New Indexer (Torznab / Newznab)</h4>
+        <h4 className="text-xs font-bold uppercase font-mono text-white mb-4">{editing ? `Edit Indexer (${editing.name})` : 'Add New Indexer (Torznab / Newznab)'}</h4>
         <form onSubmit={handleAdd} className="space-y-4">
           <div>
             <label htmlFor="indexer-name" className={compactLabelClass}>Name</label>
@@ -103,7 +124,7 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, reload, 
               type="text"
               required
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => draft.setName(e.target.value)}
               placeholder="e.g. Redacted Torznab"
               className={compactInputClass}
             />
@@ -114,22 +135,35 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, reload, 
               type="url"
               required
               value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              onChange={(e) => draft.setUrl(e.target.value)}
               placeholder="http://prowlarr:9696/1/api"
               className={compactInputClass}
             />
           </div>
           <div>
             <label htmlFor="indexer-api-key" className={compactLabelClass}>API Key</label>
-            <input id="indexer-api-key" name="api-key" type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} className={compactInputClass} />
+            <input id="indexer-api-key" name="api-key" type="password" autoComplete="off" value={apiKey} onChange={(e) => draft.setApiKey(e.target.value)} className={compactInputClass} />
           </div>
+          {showSeeding && (
+            <IndexerSeedingFields
+              value={seeding}
+              onChange={draft.setSeedingField}
+              globalSeedRatio={media?.seed_ratio_limit}
+              globalSeedTimeMinutes={media?.seed_time_limit_minutes}
+            />
+          )}
           <ActionBar align="end" className="pt-2">
+            {editing && (
+              <TapeDeckButton type="button" size="sm" onClick={draft.reset} icon={<X className="h-3.5 w-3.5" />}>
+                Cancel
+              </TapeDeckButton>
+            )}
             <TapeDeckButton
               type="submit"
               size="sm"
               variant="amber"
               disabled={isSaving}
-              icon={<Plus className="h-3.5 w-3.5" />}
+              icon={editing ? <Save className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
             >
               Save Indexer
             </TapeDeckButton>

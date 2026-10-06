@@ -247,9 +247,17 @@ class IndexerConfig:
     priority: int = 1
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    seed_ratio: Optional[float] = None  # None = inherit the global limit; 0 = no requirement
+    seed_time_minutes: Optional[int] = None
+    discography_seed_time_minutes: Optional[int] = None
+    minimum_seeders: Optional[int] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "seed_ratio": self.seed_ratio,
+            "seed_time_minutes": self.seed_time_minutes,
+            "discography_seed_time_minutes": self.discography_seed_time_minutes,
+            "minimum_seeders": self.minimum_seeders,
             "id": self.id,
             "name": self.name,
             "indexer_type": self.indexer_type,
