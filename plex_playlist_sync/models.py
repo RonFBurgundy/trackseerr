@@ -200,6 +200,7 @@ class DownloadStatus(str, Enum):
     FAILED = "failed"
     IMPORTING = "importing"
     IMPORTED = "imported"
+    WARNING = "warning"
 
 
 @dataclass

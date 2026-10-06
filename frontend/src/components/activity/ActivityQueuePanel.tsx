@@ -1,11 +1,13 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { AlertTriangle, RotateCcw, Trash2, X } from 'lucide-react';
+import { AlertTriangle, FolderInput, RotateCcw, Trash2, X } from 'lucide-react';
 import type { ActivityQueueRecord, ListSortDir } from '@/types/activity';
 import { getActivityQueue, removeActivityQueueItem, retryActivityQueueItem } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
 import { pagedFetcher, useVirtualPagedList } from '@/hooks/useVirtualPagedList';
 import { usePolling } from '@/hooks/usePolling';
 import { TapeDeckButton } from '@/components/ui';
+import { ManualImportModal } from '@/components/manualImport';
+import type { ManualImportScope } from '@/types/manualImport';
 import {
   FlatList,
   ListPanel,
@@ -52,6 +54,7 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
   const [removeFromClient, setRemoveFromClient] = useState<boolean>(true);
   const [blocklist, setBlocklist] = useState<boolean>(false);
   const [busyId, setBusyId] = useState<string | number | null>(null);
+  const [importScope, setImportScope] = useState<ManualImportScope | null>(null);
 
   const list = useVirtualPagedList<ActivityQueueRecord>(fetchQueue, { sortKey, sortDir, getKey });
   const { refresh, removeItems } = list;
@@ -179,6 +182,24 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
       }
       return (
         <>
+          {r.source === 'native' && r.needs_manual_import && r.download_id && (
+            <TapeDeckButton
+              size="sm"
+              variant="amber"
+              disabled={busy}
+              onClick={() =>
+                setImportScope({
+                  kind: 'download',
+                  downloadId: r.download_id ?? '',
+                  title: [r.artist, r.album ?? r.title].filter(Boolean).join(' \u2013 ') || 'Download',
+                })
+              }
+              icon={<FolderInput className="h-3.5 w-3.5" />}
+              title={`${r.unmatched_count} file(s) need manual import`}
+            >
+              Manual import
+            </TapeDeckButton>
+          )}
           <TapeDeckButton
             size="sm"
             disabled={busy}
@@ -213,11 +234,19 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
         sortDir={sortDir}
         onSortChange={onSortChange}
         rowActions={rowActions}
-        actionsWidth="112px"
+        actionsWidth="230px"
         mobileLayout="compact"
         rowTone={rowTone}
         emptyMessage="The queue is empty."
         emptyHint="Approved requests appear here while they download."
+      />
+      <ManualImportModal
+        scope={importScope}
+        onClose={() => setImportScope(null)}
+        onImported={() => {
+          onToast('Files imported');
+          void refresh();
+        }}
       />
     </ListPanel>
   );

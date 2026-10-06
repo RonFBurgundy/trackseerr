@@ -7,6 +7,7 @@ collision resolution into /music, and triggers Plex library update pings.
 """
 
 import difflib
+import errno
 import json
 import logging
 import os
@@ -118,12 +119,36 @@ def _is_safe_cover_url(url: Optional[str]) -> bool:
         return False
 
 
+IMPORT_MODES = ("move", "hardlink", "copy")
+
+
+def preserves_source(mode: str | None) -> bool:
+    """True when an import mode leaves the source file in place, so a torrent can keep seeding."""
+    return mode in ("hardlink", "copy")
+
+
+def _copy_atomic(src: Path, dst: Path) -> Path:
+    """Copies src to a hidden temp file beside dst, then os.replace: readers never see a partial file."""
+    tmp_dst = dst.parent / f".tmp_{dst.name}_{os.getpid()}_{time.time_ns()}"
+    try:
+        shutil.copy2(str(src), str(tmp_dst))
+        os.replace(str(tmp_dst), str(dst))
+    except BaseException:
+        try:
+            tmp_dst.unlink(missing_ok=True)
+        except OSError as cleanup_err:
+            logger.warning("Could not remove temp file '%s': %s", tmp_dst, cleanup_err)
+        raise
+    return dst
+
+
 def safe_atomic_move(source_file: Path | str, target_file: Path | str) -> Path:
     """Atomically places source_file at target_file, safely handling cross-device mounts.
 
     If source and destination reside on the same filesystem, os.replace is used directly.
-    Across different filesystems, writes to a temporary hidden file in the destination
+    On EXDEV (different filesystems), writes to a temporary hidden file in the destination
     folder first, then atomically replaces to ensure Plex never indexes incomplete files.
+    Any other OSError is logged and re-raised.
     """
     src = Path(source_file).resolve()
     dst = Path(target_file).resolve()
@@ -132,28 +157,31 @@ def safe_atomic_move(source_file: Path | str, target_file: Path | str) -> Path:
     try:
         os.replace(str(src), str(dst))
         return dst
-    except OSError:
-        # Cross-device link: write temporary file in destination folder, then os.replace
-        tmp_dst = dst.parent / f".tmp_{dst.name}_{os.getpid()}_{time.time_ns()}"
-        shutil.copy2(str(src), str(tmp_dst))
-        os.replace(str(tmp_dst), str(dst))
-        try:
-            src.unlink(missing_ok=True)
-        except OSError:
-            pass
-        return dst
+    except OSError as e:
+        if e.errno != errno.EXDEV:
+            logger.error("Move '%s' -> '%s' failed: %s", src, dst, e)
+            raise
+    _copy_atomic(src, dst)
+    try:
+        src.unlink(missing_ok=True)
+    except OSError as e:
+        logger.warning("Copied '%s' -> '%s' across devices but could not remove the source: %s", src, dst, e)
+    return dst
 
 
 def place_audio_file(
     source_file: Path | str, target_file: Path | str, mode: str = "move"
 ) -> Path:
-    """Places source_file at target_file using either atomic move or hardlink.
+    """Places source_file at target_file according to mode.
 
-    - mode="hardlink": Target parent directories created, calls os.link(src, dst).
-      If successful, returns dst (original src preserved untouched for seeding).
-      If os.link fails (e.g. cross-device EXDEV), falls back to shutil.copy2 without unlinking src.
-    - mode="move": Calls safe_atomic_move(source_file, target_file) (atomic replace, unlink source).
+    - "hardlink": os.link(src, dst); on OSError (e.g. EXDEV) falls back to an atomic copy.
+      The source is always left untouched.
+    - "copy": atomic copy (hidden temp + os.replace); the source is left untouched.
+    - "move": safe_atomic_move (atomic replace, source removed).
+    Any other mode raises ValueError.
     """
+    if mode not in IMPORT_MODES:
+        raise ValueError(f"Unknown import mode {mode!r}; expected one of {', '.join(IMPORT_MODES)}")
     src = Path(source_file).resolve()
     dst = Path(target_file).resolve()
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -165,19 +193,53 @@ def place_audio_file(
             clear_exec_bits(dst)
             return dst
         except OSError as e:
-            logger.warning(
-                "os.link failed (%s); falling back to shutil.copy2 for '%s' -> '%s'",
-                e,
-                src,
-                dst,
-            )
-            shutil.copy2(str(src), str(dst))
+            logger.warning("os.link failed (%s); falling back to atomic copy for '%s' -> '%s'", e, src, dst)
+            _copy_atomic(src, dst)
             clear_exec_bits(dst)
             return dst
-    else:
-        placed = safe_atomic_move(source_file, target_file)
-        clear_exec_bits(placed)
-        return placed
+    if mode == "copy":
+        _copy_atomic(src, dst)
+        clear_exec_bits(dst)
+        return dst
+    placed = safe_atomic_move(source_file, target_file)
+    clear_exec_bits(placed)
+    return placed
+
+
+def settle_transfer_after_import(
+    driver: Any,
+    target_lookup: str,
+    media_settings: dict[str, Any],
+    import_mode: str | None,
+    status_dict: Optional[dict[str, Any]],
+) -> str:
+    """Shared post-import download-client governance (worker and manual import).
+
+    Returns the DownloadStatus value to record: COMPLETED when the transfer is kept (seeding
+    continues; the worker's already-imported branch removes it once limits are met), else IMPORTED.
+    - delete_completed_transfers off: no client call, IMPORTED.
+    - on, source-preserving mode, seed limits set: keep while limits unmet (or status unknown).
+    - on otherwise: cleanup_completed(delete_files=False), IMPORTED.
+    """
+    if not media_settings.get("delete_completed_transfers"):
+        return DownloadStatus.IMPORTED.value
+    seed_ratio_limit = media_settings.get("seed_ratio_limit")
+    seed_time_limit_minutes = media_settings.get("seed_time_limit_minutes")
+    if preserves_source(import_mode) and (seed_ratio_limit is not None or seed_time_limit_minutes is not None):
+        if status_dict is None:
+            logger.info("Keeping transfer %s: seeding status unavailable", target_lookup)
+            return DownloadStatus.COMPLETED.value
+        cur_ratio = float(status_dict.get("ratio") or 0.0)
+        cur_seeding_sec = int(status_dict.get("seeding_time_seconds") or 0)
+        ratio_met = seed_ratio_limit is not None and cur_ratio >= float(seed_ratio_limit)
+        time_met = seed_time_limit_minutes is not None and cur_seeding_sec >= int(seed_time_limit_minutes) * 60
+        if not (ratio_met or time_met):
+            return DownloadStatus.COMPLETED.value
+    try:
+        driver.cleanup_completed(target_lookup, delete_files=False)
+    except Exception as ex:
+        logger.warning("Error during cleanup_completed for %s: %s", target_lookup, ex)
+    return DownloadStatus.IMPORTED.value
 
 
 def reconcile_audio_file_to_track(
@@ -363,6 +425,42 @@ def _fingerprint_fallback_match(
                 return title_hits[0]
     logger.info("Import match for %s decided by tag-weak-kept (strength=%s)", file_path.name, strength)
     return tag_track
+
+
+def resolve_download_expected_tracks(
+    db: Database,
+    item: dict[str, Any],
+    req: Optional[dict[str, Any]],
+) -> tuple[Optional[dict[str, Any]], list[dict[str, Any]]]:
+    """The catalog album a native download targets and that album's tracks (the tracks the import expects).
+
+    Resolution order: the download's album_id, its track's album, then artist name + album title.
+    Returns (None, []) when the download cannot be tied to a catalog album.
+    """
+    target_album = None
+    if item.get("album_id"):
+        target_album = db.get_library_album(item["album_id"])
+    elif item.get("track_id"):
+        req_track = db.get_library_track(item["track_id"])
+        if req_track:
+            target_album = db.get_library_album(req_track["album_id"])
+
+    if not target_album:
+        art_name_cand = item.get("artist") or (req.get("artist") if req else None)
+        alb_title_cand = (
+            (item.get("title") if item.get("item_type") == "album" else None)
+            or (req.get("album") or req.get("title") if req else None)
+            or item.get("title")
+        )
+        if art_name_cand and alb_title_cand:
+            art_cand = db.get_library_artist_by_name(art_name_cand)
+            if art_cand:
+                target_album = db.get_library_album_by_title(art_cand["id"], alb_title_cand)
+
+    expected_tracks: list[dict[str, Any]] = []
+    if target_album:
+        expected_tracks = db.list_library_tracks(album_id=target_album["id"], limit=1000)
+    return target_album, expected_tracks
 
 
 def translate_remote_path(
@@ -751,28 +849,10 @@ class AcquisitionWorker:
             if already_imported and is_ready:
                 # Torrent already imported, currently seeding under governance
                 if media_settings.get("delete_completed_transfers"):
-                    seed_ratio_limit = media_settings.get("seed_ratio_limit")
-                    seed_time_limit_minutes = media_settings.get("seed_time_limit_minutes")
-                    if import_mode == "hardlink" and (seed_ratio_limit is not None or seed_time_limit_minutes is not None):
-                        cur_ratio = float(status_dict.get("ratio") or 0.0)
-                        cur_seeding_sec = int(status_dict.get("seeding_time_seconds") or 0)
-                        ratio_met = seed_ratio_limit is not None and cur_ratio >= float(seed_ratio_limit)
-                        time_met = seed_time_limit_minutes is not None and cur_seeding_sec >= int(seed_time_limit_minutes) * 60
-                        limit_reached = ratio_met or time_met
-                        if limit_reached:
-                            try:
-                                driver.cleanup_completed(target_lookup, delete_files=False)
-                            except Exception as ex:
-                                logger.warning("Error during cleanup_completed for %s: %s", target_lookup, ex)
-                            db.update_download_status(download_id, status=DownloadStatus.IMPORTED.value)
-                        else:
-                            db.update_download_status(download_id, status=DownloadStatus.COMPLETED.value)
-                    else:
-                        try:
-                            driver.cleanup_completed(target_lookup, delete_files=False)
-                        except Exception as ex:
-                            logger.warning("Error during cleanup_completed for %s: %s", target_lookup, ex)
-                        db.update_download_status(download_id, status=DownloadStatus.IMPORTED.value)
+                    db.update_download_status(
+                        download_id,
+                        status=settle_transfer_after_import(driver, target_lookup, media_settings, import_mode, status_dict),
+                    )
                 continue
 
             if is_ready:
@@ -1026,32 +1106,12 @@ class AcquisitionWorker:
                 last_metadata: dict[str, Any] = {}
 
                 # Check if item has album_id or matches an existing album in catalog
-                target_album = None
-                if item.get("album_id"):
-                    target_album = db.get_library_album(item["album_id"])
-                elif item.get("track_id"):
-                    req_track = db.get_library_track(item["track_id"])
-                    if req_track:
-                        target_album = db.get_library_album(req_track["album_id"])
-
-                if not target_album:
-                    art_name_cand = item.get("artist") or (req.get("artist") if req else None)
-                    alb_title_cand = (
-                        (item.get("title") if item.get("item_type") == "album" else None)
-                        or (req.get("album") or req.get("title") if req else None)
-                        or item.get("title")
-                    )
-                    if art_name_cand and alb_title_cand:
-                        art_cand = db.get_library_artist_by_name(art_name_cand)
-                        if art_cand:
-                            target_album = db.get_library_album_by_title(art_cand["id"], alb_title_cand)
-
-                expected_tracks: list[dict[str, Any]] = []
-                if target_album:
-                    expected_tracks = db.list_library_tracks(album_id=target_album["id"], limit=1000)
+                target_album, expected_tracks = resolve_download_expected_tracks(db, item, req)
 
                 remaining_expected_tracks = list(expected_tracks)
                 placed_to_track: dict[str, dict[str, Any]] = {}
+                # Files with no catalog match when the release has expected tracks: left on disk for manual import.
+                held_files: list[str] = []
 
                 for af in audio_files:
                     try:
@@ -1094,6 +1154,13 @@ class AcquisitionWorker:
                                 art_cand = db.get_library_artist(target_album["artist_id"])
                                 if art_cand:
                                     metadata["artist"] = art_cand["name"]
+
+                    if expected_tracks and matched_expected_track is None:
+                        logger.warning(
+                            "Holding unmatched file %s for download %s (manual import required)", af, download_id
+                        )
+                        held_files.append(str(af))
+                        continue
 
                     # Disc 1 of a multi-disc release must use the multi-disc format too.
                     known_discs = [int(metadata.get("total_discs") or 1)]
@@ -1194,6 +1261,16 @@ class AcquisitionWorker:
                                 logger.info("Saved album cover to %s", cover_file)
                             except OSError as e:
                                 logger.warning("Failed to save cover.jpg at %s: %s", cover_file, e)
+
+                if held_files:
+                    db.set_download_unmatched_files(download_id, held_files)
+                    held_msg = f"{len(held_files)} file(s) couldn't be matched — manual import required"
+                    if not imported_paths:
+                        # Nothing placed: park the download for manual import (not a failure, no blocklisting).
+                        db.update_download_status(
+                            download_id, status=DownloadStatus.WARNING.value, error_message=held_msg
+                        )
+                        continue
 
                 if not imported_paths:
                     logger.error("No audio files were successfully imported for download %s", download_id)
@@ -1447,29 +1524,27 @@ class AcquisitionWorker:
                         logger.warning("Error evaluating release quality for request %s: %s", item.get("request_id"), ex)
 
                 should_keep_seeding = False
-                if media_settings.get("delete_completed_transfers"):
-                    seed_ratio_limit = media_settings.get("seed_ratio_limit")
-                    seed_time_limit_minutes = media_settings.get("seed_time_limit_minutes")
-                    if import_mode == "hardlink" and (seed_ratio_limit is not None or seed_time_limit_minutes is not None):
-                        cur_ratio = float(status_dict.get("ratio") or 0.0)
-                        cur_seeding_sec = int(status_dict.get("seeding_time_seconds") or 0)
-                        ratio_met = seed_ratio_limit is not None and cur_ratio >= float(seed_ratio_limit)
-                        time_met = seed_time_limit_minutes is not None and cur_seeding_sec >= int(seed_time_limit_minutes) * 60
-                        limit_reached = ratio_met or time_met
-                        if limit_reached:
-                            try:
-                                driver.cleanup_completed(target_lookup, delete_files=False)
-                            except Exception as ex:
-                                logger.warning("Error during cleanup_completed for %s: %s", target_lookup, ex)
-                        else:
-                            should_keep_seeding = True
-                    else:
-                        try:
-                            driver.cleanup_completed(target_lookup, delete_files=False)
-                        except Exception as ex:
-                            logger.warning("Error during cleanup_completed for %s: %s", target_lookup, ex)
+                # Held files still live in the client's download folder: never remove the transfer while they wait.
+                if held_files:
+                    logger.info(
+                        "Download %s keeps %d unmatched file(s); skipping download-client cleanup",
+                        download_id,
+                        len(held_files),
+                    )
+                else:
+                    should_keep_seeding = (
+                        settle_transfer_after_import(driver, target_lookup, media_settings, import_mode, status_dict)
+                        == DownloadStatus.COMPLETED.value
+                    )
 
-                if should_keep_seeding:
+                if held_files:
+                    db.update_download_status(
+                        download_id,
+                        status=DownloadStatus.WARNING.value,
+                        error_message=held_msg,
+                        target_path=target_summary,
+                    )
+                elif should_keep_seeding:
                     db.update_download_status(
                         download_id,
                         status=DownloadStatus.COMPLETED.value,

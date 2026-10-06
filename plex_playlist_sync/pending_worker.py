@@ -21,7 +21,7 @@ MAX_ATTEMPTS = 5
 MAX_BACKOFF_MIN = 30
 MIN_TTL = timedelta(hours=24)
 _DEAD_REQUEST_STATUSES = frozenset({"rejected", "denied", "cancelled", "canceled", "available", "fulfilled"})
-_LIVE_DOWNLOAD_STATUSES = ["queued", "downloading", "completed", "importing"]
+_LIVE_DOWNLOAD_STATUSES = ["queued", "downloading", "completed", "importing", "warning"]
 
 
 def backoff_minutes(attempts: int) -> int:

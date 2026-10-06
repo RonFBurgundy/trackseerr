@@ -2720,7 +2720,7 @@ export interface components {
              * Mode
              * @default move
              */
-            mode: string;
+            mode?: 'move' | 'hardlink' | 'copy' | null;
             /**
              * Write Tags
              * @default true

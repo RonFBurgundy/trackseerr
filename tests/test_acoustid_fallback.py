@@ -317,12 +317,14 @@ def test_worker_low_score_keeps_tag_result(tmp_path, test_db):
     assert test_db.get_library_file_for_track(t1["id"]) is None
 
 
-def test_worker_fingerprint_failure_does_not_abort_import(tmp_path, test_db):
+def test_worker_fingerprint_failure_holds_unmatched_file_for_manual_import(tmp_path, test_db):
     music, staging = tmp_path / "music", tmp_path / "staging"
     music.mkdir(); staging.mkdir()
     dl, _, _ = _seed_album(test_db, music, staging, fp_setting=True, api_key="key")
     _run_import(test_db, dl, staging, WEAK_META, None)
-    assert any(music.rglob("*.flac")), "file must still be imported when fingerprinting returns nothing"
+    assert not any(music.rglob("*.flac")), "an unmatched file is held, never placed under its tag names"
+    assert (dl / "mystery.flac").exists()
+    assert test_db.get_active_download("dl-1")["status"] == "warning"
 
 
 def _fallback(settings, tracks, tag_track, strength, fp_result, caplog=None):

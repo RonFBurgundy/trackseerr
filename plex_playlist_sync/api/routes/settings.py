@@ -150,7 +150,9 @@ class MediaManagementSettingsModel(BaseModel):
     colon_replacement_format: str = Field(" - ", description="String to replace colons with")
     clean_artist_names: bool = Field(True, description="Whether to strip leading articles from artist names")
     staging_folder_path: str = Field("/data/downloads", description="Path for staging/downloads folder")
-    import_mode: str = Field("move", description="Import mode: move or hardlink")
+    import_mode: Literal["move", "hardlink", "copy"] = Field(
+        "move", description="Import mode: move, hardlink or copy (hardlink and copy keep the source so torrents keep seeding)"
+    )
     write_audio_tags: bool = Field(True, description="Whether to normalize audio tags on import")
     embed_artwork: bool = Field(True, description="Whether to embed cover artwork in audio files")
     save_cover_art_file: bool = Field(True, description="Whether to save cover.jpg in album directory")
@@ -184,7 +186,7 @@ class MediaManagementUpdateModel(BaseModel):
     colon_replacement_format: str | None = None
     clean_artist_names: bool | None = None
     staging_folder_path: str | None = None
-    import_mode: str | None = None
+    import_mode: Literal["move", "hardlink", "copy"] | None = None
     write_audio_tags: bool | None = None
     embed_artwork: bool | None = None
     save_cover_art_file: bool | None = None
@@ -225,7 +227,7 @@ class PreviewRequestModel(BaseModel):
     colon_replacement_format: str | None = None
     clean_artist_names: bool | None = None
     staging_folder_path: str | None = None
-    import_mode: str | None = None
+    import_mode: Literal["move", "hardlink", "copy"] | None = None
     delete_completed_transfers: bool | None = None
     enable_quality_upgrades: bool | None = None
     library_mode: str | None = None

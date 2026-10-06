@@ -47,6 +47,11 @@ export interface ActivityQueueRecord {
   stalled_reason: string | null;
   messages: string[];
   request_id: string | null;
+  /** Download-client id the files live under; null when unknown. */
+  download_id: string | null;
+  /** The download finished but some files could not be matched; offer Manual import. */
+  needs_manual_import: boolean;
+  unmatched_count: number;
 }
 
 export type ActivityHistoryEvent =
@@ -94,6 +99,8 @@ export interface WantedRecord {
   album: string | null;
   title: string | null;
   item_type: 'track' | 'album';
+  /** Album the item belongs to; populated in native mode, null for Lidarr. */
+  album_id: string | null;
   release_date: string | null;
   monitored: boolean;
   last_searched_at: string | null;

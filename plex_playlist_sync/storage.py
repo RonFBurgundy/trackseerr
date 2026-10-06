@@ -73,7 +73,7 @@ def clean_library_name(text: str) -> str:
 
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
-SCHEMA_VERSION = 54  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 55  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _titles_near_equal(a: str, b: str) -> bool:
@@ -336,6 +336,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 (52, self._migration_v52),
                 (53, self._migration_v53),
                 (54, self._migration_v54),
+                (55, self._migration_v55),
             ]
 
             applied = 0
@@ -1059,6 +1060,12 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN fingerprint_on_weak_match INTEGER NOT NULL DEFAULT 0;"
             )
+
+    def _migration_v55(self, cur: sqlite3.Cursor) -> None:
+        """Native downloads hold files that could not be matched to a catalog track (JSON list of paths)."""
+        cur.execute("PRAGMA table_info(active_downloads);")
+        if "unmatched_files" not in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE active_downloads ADD COLUMN unmatched_files TEXT;")
 
     def _migration_v20(self, cur: sqlite3.Cursor) -> None:
         cur.execute("PRAGMA table_info(media_management_settings);")
@@ -4951,7 +4958,33 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         res["size_bytes"] = int(res.get("size_bytes") or 0)
         res["track_id"] = res.get("track_id")
         res["album_id"] = res.get("album_id")
+        res["unmatched_files"] = self._parse_unmatched_files(res.get("unmatched_files"))
         return res
+
+    @staticmethod
+    def _parse_unmatched_files(raw: Any) -> list[str]:
+        """The persisted JSON list of held file paths; a missing or corrupt value reads as an empty list."""
+        if not raw:
+            return []
+        if isinstance(raw, list):
+            return [str(p) for p in raw]
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError) as exc:
+            logger.warning("Ignoring corrupt unmatched_files value: %s", type(exc).__name__)
+            return []
+        return [str(p) for p in data] if isinstance(data, list) else []
+
+    def set_download_unmatched_files(self, download_id: str, paths: list[str]) -> bool:
+        """Persists the files a native download is holding for manual import (an empty list clears them)."""
+        value = json.dumps([str(p) for p in paths]) if paths else None
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE active_downloads SET unmatched_files = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (value, str(download_id)),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
 
     def create_active_download(
         self, download: Union[dict[str, Any], ActiveDownload]
