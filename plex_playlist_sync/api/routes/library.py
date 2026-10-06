@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 import threading
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, Optional
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -28,9 +28,16 @@ from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
 from plex_playlist_sync import art_pipeline, art_thumbs
 from plex_playlist_sync import lidarr_library
 from plex_playlist_sync.redaction import redact_text
+from plex_playlist_sync.clients.acquisition import get_acquisition_driver
 from plex_playlist_sync.acquisition_worker import (
+    MATCH_NONE,
+    MATCH_STRONG,
     place_audio_file,
+    preserves_source,
+    settle_transfer_after_import,
     reconcile_audio_file_to_track,
+    reconcile_audio_file_to_track_scored,
+    resolve_download_expected_tracks,
     safe_atomic_move,
 )
 from plex_playlist_sync.api.dependencies import (
@@ -83,6 +90,7 @@ from plex_playlist_sync.library_manager import MODE_LIDARR, ModeChanged, get_lib
 from plex_playlist_sync.library_availability import get_item_availability
 from plex_playlist_sync.mediacover import mediacover_service
 from plex_playlist_sync.models import (
+    DownloadStatus,
     LibraryAlbum,
     LibraryArtist,
     LibraryCollection,
@@ -207,6 +215,9 @@ class MigrateLidarrRequest(BaseModel):
 
 class ManualImportScanRequest(BaseModel):
     folder_path: Optional[str] = None
+    download_id: Optional[str] = None
+    album_id: Optional[str] = None
+    file_paths: Optional[list[str]] = None
 
 
 class ManualImportItem(BaseModel):
@@ -221,12 +232,13 @@ class ManualImportItem(BaseModel):
     track_number: Optional[int] = None
     disc_number: Optional[int] = 1
     year: Optional[int] = None
-    mode: str = "move"
+    mode: Optional[Literal["move", "hardlink", "copy"]] = None
     write_tags: Optional[bool] = None
 
 
 class ManualImportCommitRequest(BaseModel):
     items: list[ManualImportItem] = Field(default_factory=list)
+    download_id: Optional[str] = None
 
 
 class RenamePreviewRequest(BaseModel):
@@ -2832,90 +2844,244 @@ def cancel_lidarr_migration(
 # 4. Manual Import Pipeline
 # -------------------------------------------------------------------------
 
+def _scan_fallback_tags(p: Path) -> dict[str, Any]:
+    return {
+        "title": p.stem,
+        "artist": None,
+        "album": None,
+        "year": None,
+        "track_number": None,
+        "disc_number": 1,
+        "codec": p.suffix.lstrip(".").upper(),
+        "file_path": str(p),
+    }
+
+
+def _candidate_tracks(db: Database, tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Tracks in the manual-import picker shape, with artist/album names and whether a library file exists."""
+    artist_names: dict[str, str] = {}
+    album_titles: dict[str, str] = {}
+    out: list[dict[str, Any]] = []
+    for t in tracks:
+        art_id = t.get("artist_id")
+        if art_id and art_id not in artist_names:
+            art = db.get_library_artist(art_id)
+            artist_names[art_id] = art["name"] if art else "Unknown Artist"
+        alb_id = t.get("album_id")
+        if alb_id and alb_id not in album_titles:
+            alb = db.get_library_album(alb_id)
+            album_titles[alb_id] = alb["title"] if alb else "Unknown Album"
+        out.append({
+            "id": t["id"],
+            "title": t.get("title"),
+            "track_number": t.get("track_number"),
+            "disc_number": t.get("disc_number"),
+            "album_id": alb_id,
+            "album_title": album_titles.get(alb_id) if alb_id else None,
+            "artist_id": art_id,
+            "artist_name": artist_names.get(art_id) if art_id else None,
+            "has_file": db.get_library_file_for_track(t["id"]) is not None,
+        })
+    return out
+
+
+def _tracks_without_file(db: Database, tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [t for t in tracks if db.get_library_file_for_track(t["id"]) is None]
+
+
+def _scan_one_file(db: Database, p: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Inspects one file; returns (tags, base scan item with the unscoped tag-based library match)."""
+    try:
+        inspected = inspect_audio_file(p)
+    except Exception as exc:
+        logger.warning("Failed to inspect %s: %s", p, exc)
+        inspected = _scan_fallback_tags(p)
+
+    title = inspected.get("title")
+    artist = resolve_album_artist(inspected, known_artist=lambda n: db.get_library_artist_by_name(n) is not None) or None
+    album = inspected.get("album")
+    trkn = inspected.get("track_number")
+
+    # Fuzzy/clean search against existing library catalog
+    matched_artist = db.get_library_artist_by_name(artist) if artist else None
+    matched_album = None
+    matched_track = None
+    confidence = 0.0
+
+    if matched_artist:
+        confidence = 0.4
+        if album:
+            matched_album = db.get_library_album_by_title(matched_artist["id"], album)
+            if matched_album:
+                confidence = 0.7
+                if title:
+                    matched_track = db.get_library_track_by_title(matched_album["id"], title, track_number=trkn)
+                    if matched_track:
+                        confidence = 1.0
+
+    try:
+        size = p.stat().st_size
+    except OSError:
+        size = 0
+
+    item = {
+        "file_path": str(p),
+        "filename": p.name,
+        "size_bytes": size,
+        "tags": inspected,
+        "matched_artist_id": matched_artist["id"] if matched_artist else None,
+        "matched_artist_name": matched_artist["name"] if matched_artist else (artist or None),
+        "matched_album_id": matched_album["id"] if matched_album else None,
+        "matched_album_title": matched_album["title"] if matched_album else (album or None),
+        "matched_track_id": matched_track["id"] if matched_track else None,
+        "matched_track_title": matched_track["title"] if matched_track else (title or None),
+        "confidence": round(confidence, 2),
+    }
+    return inspected, item
+
+
+def _unscoped_match_fields(db: Database, item: dict[str, Any]) -> dict[str, Any]:
+    """match_strength / suggested_track_id / candidate_tracks for a folder-scan item (no candidate scope)."""
+    if item["confidence"] == 1.0:
+        strength = "strong"
+    elif item["matched_album_id"]:
+        strength = "weak"
+    else:
+        strength = "none"
+    candidates: list[dict[str, Any]] = []
+    if item["matched_album_id"]:
+        candidates = _candidate_tracks(db, db.list_library_tracks(album_id=item["matched_album_id"], limit=1000))
+    return {
+        "match_strength": strength,
+        "suggested_track_id": item["matched_track_id"],
+        "candidate_tracks": candidates,
+    }
+
+
+def _scoped_match_fields(
+    db: Database,
+    item: dict[str, Any],
+    inspected: dict[str, Any],
+    remaining: list[dict[str, Any]],
+    all_candidates: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Suggests a track from the scoped candidates (consuming it from ``remaining``) and rewrites matched_* to it."""
+    meta = dict(inspected)
+    meta.setdefault("file_path", item["file_path"])
+    track, strength = reconcile_audio_file_to_track_scored(meta, remaining)
+    if track is not None:
+        remaining.remove(track)
+        artist = db.get_library_artist(track["artist_id"]) if track.get("artist_id") else None
+        album = db.get_library_album(track["album_id"]) if track.get("album_id") else None
+        item.update({
+            "matched_artist_id": artist["id"] if artist else None,
+            "matched_artist_name": artist["name"] if artist else item["matched_artist_name"],
+            "matched_album_id": album["id"] if album else None,
+            "matched_album_title": album["title"] if album else item["matched_album_title"],
+            "matched_track_id": track["id"],
+            "matched_track_title": track["title"],
+            "confidence": 1.0 if strength == MATCH_STRONG else 0.7,
+        })
+    else:
+        item.update({"matched_album_id": None, "matched_track_id": None, "confidence": 0.0})
+        strength = MATCH_NONE
+    return {
+        "match_strength": strength,
+        "suggested_track_id": track["id"] if track is not None else None,
+        "candidate_tracks": all_candidates,
+    }
+
+
+def _walk_audio_files(folder: Path) -> list[Path]:
+    found: list[Path] = []
+    for root, _, files in os.walk(str(folder)):
+        for f in sorted(files):
+            p = Path(root) / f
+            if p.suffix.lower() in AUDIO_EXTENSIONS:
+                found.append(p)
+    return found
+
+
 @router.post("/manual-import/scan", dependencies=[Depends(require_core_tier), Depends(native_only)])
 def manual_import_scan(
     body: Optional[ManualImportScanRequest] = None,
     db: Database = Depends(get_db),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> list[dict[str, Any]]:
-    """Scans a staging or download folder for audio files, inspects metadata, and calculates library match confidence."""
+    """Scans files for manual import, inspects metadata and suggests library matches.
+
+    Scope (first that applies): ``download_id`` (that native download's held files, matched against its tracks that
+    have no file), ``file_paths`` (exactly those files), ``album_id`` (the folder scan, matched against that album's
+    tracks that have no file), otherwise a plain folder scan with the tag-based match.
+    """
     req = body or ManualImportScanRequest()
-    folder_path = req.folder_path
-    if not folder_path:
-        mm = db.get_media_management_settings()
-        folder_path = mm.get("staging_folder_path") or "/downloads"
+    files: list[Path] = []
+    scoped_tracks: Optional[list[dict[str, Any]]] = None
 
-    validated_dir = validate_media_path(folder_path, db=db)
-    if not validated_dir.exists() or not validated_dir.is_dir():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Directory does not exist or is not a directory: {folder_path}",
-        )
+    if req.download_id:
+        download = db.get_active_download(req.download_id)
+        if download is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Download '{req.download_id}' not found")
+        for raw in download.get("unmatched_files") or []:
+            try:
+                held = validate_media_path(raw, db=db)
+            except HTTPException as exc:
+                logger.warning("Skipping held file %s for download %s: %s", raw, req.download_id, exc.detail)
+                continue
+            if held.is_file():
+                files.append(held)
+        req_row = db.get_request(download["request_id"]) if download.get("request_id") else None
+        _, expected = resolve_download_expected_tracks(db, download, req_row)
+        scoped_tracks = _tracks_without_file(db, expected)
+        if req.album_id:
+            scoped_tracks = _tracks_without_file(db, db.list_library_tracks(album_id=req.album_id, limit=1000))
+    elif req.file_paths is not None:
+        for raw in req.file_paths:
+            p = validate_media_path(raw, db=db)
+            if not p.is_file():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"File does not exist: {raw}")
+            files.append(p)
+        if req.album_id:
+            scoped_tracks = _tracks_without_file(db, db.list_library_tracks(album_id=req.album_id, limit=1000))
+    else:
+        folder_path = req.folder_path
+        if not folder_path:
+            mm = db.get_media_management_settings()
+            folder_path = mm.get("staging_folder_path") or "/downloads"
+        validated_dir = validate_media_path(folder_path, db=db)
+        if not validated_dir.exists() or not validated_dir.is_dir():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Directory does not exist or is not a directory: {folder_path}",
+            )
+        files = _walk_audio_files(validated_dir)
+        if req.album_id:
+            scoped_tracks = _tracks_without_file(db, db.list_library_tracks(album_id=req.album_id, limit=1000))
 
-    candidates: list[dict[str, Any]] = []
-    for root, _, files in os.walk(str(validated_dir)):
-        for f in sorted(files):
-            p = Path(root) / f
-            if p.suffix.lower() in AUDIO_EXTENSIONS:
-                try:
-                    inspected = inspect_audio_file(p)
-                except Exception as exc:
-                    logger.warning("Failed to inspect %s: %s", p, exc)
-                    inspected = {
-                        "title": p.stem,
-                        "artist": None,
-                        "album": None,
-                        "year": None,
-                        "track_number": None,
-                        "disc_number": 1,
-                        "codec": p.suffix.lstrip(".").upper(),
-                        "file_path": str(p),
-                    }
+    all_candidates = _candidate_tracks(db, scoped_tracks) if scoped_tracks is not None else []
+    remaining = list(scoped_tracks) if scoped_tracks is not None else []
 
-                title = inspected.get("title")
-                artist = resolve_album_artist(inspected, known_artist=lambda n: db.get_library_artist_by_name(n) is not None) or None
-                album = inspected.get("album")
-                trkn = inspected.get("track_number")
+    results: list[dict[str, Any]] = []
+    for p in files:
+        inspected, item = _scan_one_file(db, p)
+        if scoped_tracks is not None:
+            item.update(_scoped_match_fields(db, item, inspected, remaining, all_candidates))
+        else:
+            item.update(_unscoped_match_fields(db, item))
+        results.append(item)
+    return results
 
-                # Fuzzy/clean search against existing library catalog
-                matched_artist = db.get_library_artist_by_name(artist) if artist else None
-                matched_album = None
-                matched_track = None
-                confidence = 0.0
 
-                if matched_artist:
-                    confidence = 0.4
-                    if album:
-                        matched_album = db.get_library_album_by_title(matched_artist["id"], album)
-                        if matched_album:
-                            confidence = 0.7
-                            if title:
-                                matched_track = db.get_library_track_by_title(
-                                    matched_album["id"], title, track_number=trkn
-                                )
-                                if matched_track:
-                                    confidence = 1.0
-
-                try:
-                    size = p.stat().st_size
-                except OSError:
-                    size = 0
-
-                candidates.append({
-                    "file_path": str(p),
-                    "filename": p.name,
-                    "size_bytes": size,
-                    "tags": inspected,
-                    "matched_artist_id": matched_artist["id"] if matched_artist else None,
-                    "matched_artist_name": matched_artist["name"] if matched_artist else (artist or None),
-                    "matched_album_id": matched_album["id"] if matched_album else None,
-                    "matched_album_title": matched_album["title"] if matched_album else (album or None),
-                    "matched_track_id": matched_track["id"] if matched_track else None,
-                    "matched_track_title": matched_track["title"] if matched_track else (title or None),
-                    "confidence": round(confidence, 2),
-                })
-
-    return candidates
+@router.get("/manual-import/album-tracks", dependencies=[Depends(require_core_tier), Depends(native_only)])
+def manual_import_album_tracks(
+    album_id: str = Query(..., min_length=1),
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> list[dict[str, Any]]:
+    """An album's tracks in the manual-import picker shape (``has_file`` marks tracks that already have a file)."""
+    if db.get_library_album(album_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+    return _candidate_tracks(db, db.list_library_tracks(album_id=album_id, limit=1000))
 
 
 @router.post("/manual-import/commit", dependencies=[Depends(require_core_tier), Depends(native_only)])
@@ -2929,6 +3095,14 @@ def manual_import_commit(
     imported_count = 0
     failed_count = 0
     results: list[dict[str, Any]] = []
+
+    download_row: Optional[dict[str, Any]] = None
+    if body.download_id:
+        download_row = db.get_active_download(body.download_id)
+        if download_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Download '{body.download_id}' not found"
+            )
 
     media_settings = db.get_media_management_settings()
     root_folder_str = media_settings.get("root_folder_path") or "/music"
@@ -3083,7 +3257,8 @@ def manual_import_commit(
             target_dest = resolve_collision(target_proposed)
 
             # 5. Place file
-            placed_file = place_audio_file(source_path, target_dest, mode=item.mode)
+            effective_mode = item.mode or str(media_settings.get("import_mode") or "move")
+            placed_file = place_audio_file(source_path, target_dest, mode=effective_mode)
 
             # 6. Write audio tags if requested
             write_tags = item.write_tags
@@ -3134,6 +3309,7 @@ def manual_import_commit(
                 "track_id": track_id,
                 "file_id": file_id,
                 "status": "imported",
+                "mode": effective_mode,
             })
 
         except Exception as exc:
@@ -3145,6 +3321,10 @@ def manual_import_commit(
                 "error": redact_text(str(exc)),
             })
 
+    download_cleared = False
+    if download_row is not None and str(download_row.get("status")) == DownloadStatus.WARNING.value:
+        download_cleared = _settle_download_after_manual_import(db, download_row, results, media_settings)
+
     if plex_client:
         try:
             as_media_server(plex_client).refresh_library()
@@ -3155,7 +3335,70 @@ def manual_import_commit(
         "imported_count": imported_count,
         "failed_count": failed_count,
         "results": results,
+        "download_cleared": download_cleared,
     }
+
+
+def _settle_download_after_manual_import(
+    db: Database,
+    download: dict[str, Any],
+    results: list[dict[str, Any]],
+    media_settings: dict[str, Any],
+) -> bool:
+    """Drops imported files from a download's held list; settles the transfer once nothing is left to import."""
+    done = {str(Path(r["source_path"]).resolve()) for r in results if r.get("status") == "imported" and r.get("source_path")}
+    held = [p for p in download.get("unmatched_files") or []]
+    still_held = [p for p in held if str(Path(p).resolve()) not in done and os.path.isfile(p)]
+    db.set_download_unmatched_files(download["id"], still_held)
+    if still_held:
+        db.update_download_status(
+            download["id"],
+            status=DownloadStatus.WARNING.value,
+            error_message=f"{len(still_held)} file(s) couldn't be matched — manual import required",
+        )
+        return False
+    modes = [str(r.get("mode") or "move") for r in results if r.get("status") == "imported"]
+    # Any move-mode file has left the torrent's folder, so seeding retention no longer applies.
+    effective_mode = "move" if not modes or not all(preserves_source(m) for m in modes) else modes[0]
+    new_status = _govern_download_at_client(db, download, media_settings, effective_mode)
+    fields: dict[str, Any] = {"status": new_status, "error_message": ""}
+    if new_status == DownloadStatus.COMPLETED.value:
+        # target_path marks it already imported, so the worker's governance branch removes it once limits are met.
+        fields["target_path"] = ", ".join(sorted({str(Path(r["destination_path"]).parent) for r in results if r.get("destination_path")}))
+    db.update_download_status(download["id"], **fields)
+    return True
+
+
+def _govern_download_at_client(
+    db: Database, download: dict[str, Any], media_settings: dict[str, Any], import_mode: str
+) -> str:
+    """Runs the worker's shared post-import governance for a manual import; returns the status to record."""
+    if not media_settings.get("delete_completed_transfers"):
+        return DownloadStatus.IMPORTED.value
+    client_id = download.get("client_id")
+    if not client_id:
+        return DownloadStatus.IMPORTED.value
+    target_lookup = download.get("download_hash") or download["id"]
+    try:
+        client_cfg = db.get_download_client(client_id)
+        if not client_cfg:
+            logger.warning("Cannot clean up %s: download client %s no longer exists", download["id"], client_id)
+            return DownloadStatus.IMPORTED.value
+        driver = get_acquisition_driver(client_cfg)
+        try:
+            status_dict: Optional[dict[str, Any]] = driver.get_status(target_lookup)
+        except Exception as exc:  # driver errors span HTTP, auth and parsing
+            logger.warning(
+                "Keeping transfer %s: could not fetch seeding status (%s)", target_lookup, redact_text(str(exc))
+            )
+            return DownloadStatus.COMPLETED.value
+        if not status_dict:
+            logger.warning("Keeping transfer %s: driver returned no status", target_lookup)
+            return DownloadStatus.COMPLETED.value
+        return settle_transfer_after_import(driver, target_lookup, media_settings, import_mode, status_dict)
+    except Exception as exc:  # the commit has already succeeded; never fail it over client governance
+        logger.warning("Error settling transfer %s: %s", target_lookup, redact_text(str(exc)))
+        return DownloadStatus.COMPLETED.value
 
 
 # -------------------------------------------------------------------------
@@ -3394,7 +3637,18 @@ def fingerprint_file(
         api_key=settings.get("acoustid_api_key"),
     )
     if fp:
-        return {"success": True, "fingerprint": fp}
+        library_track: Optional[dict[str, Any]] = None
+        if fp.get("recording_id"):
+            row = db.get_library_track_by_mb_recording_id(fp["recording_id"])
+            if row:
+                artist_row = db.get_library_artist(row["artist_id"]) if row.get("artist_id") else None
+                library_track = {
+                    "id": row["id"],
+                    "title": row.get("title"),
+                    "album_id": row.get("album_id"),
+                    "artist": artist_row["name"] if artist_row else None,
+                }
+        return {"success": True, "fingerprint": fp, "library_track": library_track}
     return {
         "success": False,
         "message": "Fingerprinting unavailable or no match found",

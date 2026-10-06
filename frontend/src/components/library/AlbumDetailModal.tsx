@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { BookmarkPlus, Disc, Loader2, Search, User } from 'lucide-react';
+import { BookmarkPlus, Disc, FolderInput, Loader2, Search, User } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
 import { useAlbumTracks } from '@/hooks/useAlbumTracks';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
@@ -15,6 +15,8 @@ export interface AlbumDetailModalProps {
   onClose: () => void;
   onCollect: (album: AlbumItem) => void;
   onGoToArtist: (artistId: number | string) => void;
+  /** Opens Manual Import scoped to this album (native mode, admin). */
+  onImportFiles: (album: AlbumItem) => void;
   onToggleTrackMonitored: (trackId: number | string, monitored: boolean) => Promise<void>;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
 }
@@ -27,6 +29,7 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
   onClose,
   onCollect,
   onGoToArtist,
+  onImportFiles,
   onToggleTrackMonitored,
   onToast,
 }) => {
@@ -73,6 +76,16 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
                 title="Ask Lidarr to search for this album"
               >
                 Search
+              </TapeDeckButton>
+            )}
+            {isAdmin && !lidarrMode && (
+              <TapeDeckButton
+                size="sm"
+                disabled={album === null}
+                onClick={() => album && onImportFiles(album)}
+                icon={<FolderInput className="h-3.5 w-3.5" />}
+              >
+                Import files&hellip;
               </TapeDeckButton>
             )}
             {canCollect && (

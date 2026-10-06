@@ -9,6 +9,7 @@ than failing the whole page. Free text that originates in a client (Lidarr/downl
 """
 
 import logging
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -137,6 +138,7 @@ def native_queue_record(row: dict[str, Any], now: datetime) -> dict[str, Any]:
     size = int(row.get("size_bytes") or 0)
     progress = max(0.0, min(1.0, float(row.get("progress") or 0.0)))
     messages = [m for m in (_clean(row.get("error_message")),) if m]
+    unmatched = Database._parse_unmatched_files(row.get("unmatched_files"))
     return {
         "id": str(row["id"]),
         "source": SOURCE_NATIVE,
@@ -159,6 +161,9 @@ def native_queue_record(row: dict[str, Any], now: datetime) -> dict[str, Any]:
         "stalled_reason": reason,
         "messages": messages,
         "request_id": row.get("request_id"),
+        "download_id": str(row["id"]),
+        "needs_manual_import": bool(unmatched),
+        "unmatched_count": len(unmatched),
     }
 
 
@@ -236,6 +241,7 @@ def native_wanted_record(row: dict[str, Any], kind: str) -> dict[str, Any]:
         "source": SOURCE_NATIVE,
         "artist": row.get("artist"),
         "album": row.get("album"),
+        "album_id": str(row["album_id"]) if row.get("album_id") else None,
         "title": row.get("title"),
         "item_type": "track",
         "release_date": row.get("release_date"),
@@ -512,6 +518,9 @@ def lidarr_queue_record(rec: dict[str, Any]) -> dict[str, Any]:
         "stalled_reason": reason,
         "messages": messages,
         "request_id": None,
+        "download_id": None,
+        "needs_manual_import": False,
+        "unmatched_count": 0,
     }
 
 
@@ -558,6 +567,7 @@ def lidarr_wanted_record(rec: dict[str, Any], kind: str) -> dict[str, Any]:
         "source": SOURCE_LIDARR,
         "artist": _dig(rec, "artist", "artistName"),
         "album": rec.get("title"),
+        "album_id": str(rec["id"]) if rec.get("id") is not None else None,
         "title": rec.get("title"),
         "item_type": "album",
         "release_date": rec.get("releaseDate"),

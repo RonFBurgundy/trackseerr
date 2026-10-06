@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Search } from 'lucide-react';
+import { FolderInput, Search } from 'lucide-react';
 import type { IndexFetcher, ListSortDir, WantedCutoffRecord, WantedListName, WantedRecord } from '@/types/activity';
 import { getWantedCutoff, getWantedIndex, getWantedMissing, searchWanted } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
@@ -7,6 +7,8 @@ import { pagedFetcher, useVirtualPagedList } from '@/hooks/useVirtualPagedList';
 import { useGroupIndex } from '@/hooks/useGroupIndex';
 import { useListSelection } from '@/hooks/useListSelection';
 import { ConfirmDangerButton, TapeDeckButton } from '@/components/ui';
+import { ManualImportModal } from '@/components/manualImport';
+import type { ManualImportScope } from '@/types/manualImport';
 import {
   FlatList,
   ListPanel,
@@ -37,6 +39,7 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
   const [sortKey, setSortKey] = useState<string>('artist');
   const [sortDir, setSortDir] = useState<ListSortDir>('asc');
   const [busy, setBusy] = useState<boolean>(false);
+  const [importScope, setImportScope] = useState<ManualImportScope | null>(null);
   const { selected, setSelected, clear } = useListSelection();
 
   const list = useVirtualPagedList<WantedRow>(isCutoff ? fetchCutoff : fetchMissing, {
@@ -109,6 +112,20 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
   const searchAllCapped = list.mode === 'native' && list.total > MAX_NATIVE_SEARCH_ALL;
   const searchAllLabel = searchAllCapped ? `Search all (up to ${MAX_NATIVE_SEARCH_ALL})` : `Search all ${list.total}`;
 
+  const rowActions = useCallback(
+    (r: WantedRow): React.ReactNode =>
+      r.source === 'native' && r.album_id ? (
+        <TapeDeckButton
+          size="sm"
+          onClick={() => setImportScope({ kind: 'album', albumId: r.album_id ?? '', title: r.album || 'Album' })}
+          icon={<FolderInput className="h-3.5 w-3.5" />}
+        >
+          Import files&hellip;
+        </TapeDeckButton>
+      ) : null,
+    []
+  );
+
   const toolbar = (
     <>
       <TapeDeckButton
@@ -154,9 +171,19 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
         onSortChange={onSortChange}
         selectedKeys={selected}
         onSelectedKeysChange={setSelected}
+        rowActions={rowActions}
+        actionsWidth="150px"
         mobileLayout="compact"
         emptyMessage={isCutoff ? 'Nothing is below its cutoff.' : 'Nothing is missing.'}
         rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
+      />
+      <ManualImportModal
+        scope={importScope}
+        onClose={() => setImportScope(null)}
+        onImported={() => {
+          onToast('Files imported');
+          void list.refresh();
+        }}
       />
     </ListPanel>
   );

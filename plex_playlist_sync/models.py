@@ -200,6 +200,7 @@ class DownloadStatus(str, Enum):
     FAILED = "failed"
     IMPORTING = "importing"
     IMPORTED = "imported"
+    WARNING = "warning"
 
 
 @dataclass
@@ -848,6 +849,7 @@ class MediaManagementSettings:
     seed_time_limit_minutes: Optional[int] = None
     enrich_mbids: bool = True
     acoustid_api_key: Optional[str] = None
+    fingerprint_on_weak_match: bool = False
     mb_mirror_url: str = "https://api.brainzmash.cc"
     prefer_local_artwork: bool = True
     scan_monitor_option: str = "existing"
@@ -876,6 +878,7 @@ class MediaManagementSettings:
             "seed_time_limit_minutes": int(self.seed_time_limit_minutes) if self.seed_time_limit_minutes is not None else None,
             "enrich_mbids": bool(self.enrich_mbids),
             "acoustid_api_key": self.acoustid_api_key,
+            "fingerprint_on_weak_match": bool(self.fingerprint_on_weak_match),
             "mb_mirror_url": self.mb_mirror_url,
             "prefer_local_artwork": bool(self.prefer_local_artwork),
             "scan_monitor_option": self.scan_monitor_option,

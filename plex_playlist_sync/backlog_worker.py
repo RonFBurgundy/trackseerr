@@ -341,7 +341,7 @@ class WantedBacklogWorker:
 
         # 1. Query active downloads to avoid duplicate searches
         try:
-            active_dls = db.list_active_downloads(statuses=["queued", "downloading", "importing"])
+            active_dls = db.list_active_downloads(statuses=["queued", "downloading", "importing", "warning"])
         except Exception as e:
             logger.error("WantedBacklogWorker error querying active downloads: %s", e)
             active_dls = []
@@ -751,7 +751,7 @@ class RSSSyncWorker:
 
         # 2. Gather wanted requests without active transfers
         try:
-            active_dls = db.list_active_downloads(statuses=["queued", "downloading", "importing"])
+            active_dls = db.list_active_downloads(statuses=["queued", "downloading", "importing", "warning"])
         except Exception as e:
             logger.error("RSSSyncWorker error querying active downloads: %s", e)
             active_dls = []

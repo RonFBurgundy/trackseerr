@@ -39,6 +39,8 @@ export interface UseLibraryReturn {
   toggleAlbumMonitored: (albumId: number | string, monitored: boolean) => Promise<void>;
   toggleTrackMonitored: (trackId: number | string, monitored: boolean) => Promise<void>;
   refresh: () => Promise<void>;
+  /** Reloads stats/collections and remounts the paged catalog lists (after files were imported). */
+  reloadCatalog: () => Promise<void>;
 }
 
 /** `enabled` must be false for non-admins: every /api/library route except availability is admin-only. */
@@ -176,6 +178,11 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
     [startScanPolling]
   );
 
+  const reloadCatalog = useCallback(async () => {
+    setCatalogVersion((v) => v + 1);
+    await loadData();
+  }, [loadData]);
+
   const cancelScan = useCallback(async () => {
     try {
       await apiCancelScan();
@@ -227,5 +234,6 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
     toggleAlbumMonitored,
     toggleTrackMonitored,
     refresh: loadData,
+    reloadCatalog,
   };
 }

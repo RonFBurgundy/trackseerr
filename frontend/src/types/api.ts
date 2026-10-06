@@ -2720,7 +2720,7 @@ export interface components {
              * Mode
              * @default move
              */
-            mode: string;
+            mode?: 'move' | 'hardlink' | 'copy' | null;
             /**
              * Write Tags
              * @default true
@@ -2839,6 +2839,10 @@ export interface components {
              * @default true
              */
             embed_artwork: boolean;
+            /** Acoustid Api Key */
+            acoustid_api_key?: string | null;
+            /** Fingerprint On Weak Match */
+            fingerprint_on_weak_match?: boolean;
             /**
              * Save Cover Art File
              * @description Whether to save cover.jpg in album directory
@@ -2902,6 +2906,10 @@ export interface components {
             write_audio_tags?: boolean | null;
             /** Embed Artwork */
             embed_artwork?: boolean | null;
+            /** Acoustid Api Key */
+            acoustid_api_key?: string | null;
+            /** Fingerprint On Weak Match */
+            fingerprint_on_weak_match?: boolean | null;
             /** Save Cover Art File */
             save_cover_art_file?: boolean | null;
             /** Delete Completed Transfers */

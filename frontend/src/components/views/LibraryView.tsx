@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Disc, Eye, Layers, Loader2, Music, RefreshCw, User } from 'lucide-react';
+import { Disc, Eye, FolderInput, Layers, Loader2, Music, RefreshCw, User } from 'lucide-react';
 import type { UseLibraryReturn, LibraryTab } from '@/hooks/useLibrary';
 import type { NavigateOptions } from '@/hooks/useAppRoute';
 import type { AlbumItem } from '@/types/models';
@@ -7,6 +7,7 @@ import { useAddToCollection } from '@/hooks/useAddToCollection';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useLibraryManager } from '@/hooks/useLibraryManager';
 import { useToast } from '@/hooks/useToast';
+import type { ManualImportScope } from '@/types/manualImport';
 import { deleteCollection } from '@/services/libraryService';
 import { errorMessage } from '@/services/apiClient';
 import { SearchBar, TapeDeckButton, TabStrip, ToastBanner } from '@/components/ui';
@@ -23,6 +24,7 @@ import {
   LidarrMigrationBanner,
   TracksPanel,
 } from '@/components/library';
+import { ManualImportModal } from '@/components/manualImport';
 
 export interface LibraryViewProps {
   libraryHook: UseLibraryReturn;
@@ -59,6 +61,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
     toggleAlbumMonitored,
     toggleTrackMonitored,
     refresh,
+    reloadCatalog,
   } = libraryHook;
 
   const { toast, showToast } = useToast();
@@ -71,6 +74,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
   const [selectedArtistId, setSelectedArtistId] = useState<number | string | null>(null);
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
   const [albumForModal, setAlbumForModal] = useState<AlbumItem | null>(null);
+  const [importScope, setImportScope] = useState<ManualImportScope | null>(null);
   /** Data source reported by the paged artists/albums responses; used until the manager settings load. */
   const [listMode, setListMode] = useState<string | null>(null);
 
@@ -156,6 +160,14 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
           onToast={showToast}
         />
         <AddToCollectionModal picker={picker} />
+      <ManualImportModal
+        scope={importScope}
+        onClose={() => setImportScope(null)}
+        onImported={() => {
+          showToast('Files imported');
+          void reloadCatalog();
+        }}
+      />
       </>
     );
   }
@@ -224,6 +236,18 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
           )}
           {/* Select and sort controls from the active panel are portaled here. */}
           <div ref={setToolbarSlot} className="contents" />
+          {isAdmin && !lidarrMode && (
+            <TapeDeckButton
+              size="sm"
+              className="shrink-0"
+              onClick={() => setImportScope({ kind: 'folder' })}
+              icon={<FolderInput className="h-3.5 w-3.5" />}
+              collapseLabel="xl"
+              title="Manual import"
+            >
+              Manual import&hellip;
+            </TapeDeckButton>
+          )}
           {/* Scanning is a native-library action; Lidarr manages its own files. */}
           {isAdmin && !lidarrMode && (
             isScanning ? (
@@ -341,6 +365,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
         onClose={() => setAlbumForModal(null)}
         onCollect={openCollectPicker}
         onGoToArtist={setSelectedArtistId}
+        onImportFiles={(album) => setImportScope({ kind: 'album', albumId: String(album.id), title: album.title })}
         onToggleTrackMonitored={toggleTrackMonitored}
         onToast={showToast}
       />

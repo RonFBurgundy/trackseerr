@@ -247,7 +247,7 @@ class TestNativeQueue:
         assert set(rec) == {
             "id", "source", "artist", "album", "title", "release_title", "item_type", "quality", "protocol", "indexer",
             "client", "status", "progress", "size_bytes", "sizeleft_bytes", "eta_seconds", "added_at", "stalled",
-            "stalled_reason", "messages", "request_id",
+            "stalled_reason", "messages", "request_id", "download_id", "needs_manual_import", "unmatched_count",
         }
         assert rec["source"] == "native" and rec["sizeleft_bytes"] == 150 and rec["progress"] == 0.5
         assert rec["added_at"] == "2026-10-01T10:00:00Z"
@@ -600,7 +600,8 @@ class TestNativeWanted:
         assert [r["id"] for r in body["records"]] == ["t-missing", "t-missing-b"]
         rec = body["records"][0]
         assert rec == {
-            "id": "t-missing", "source": "native", "artist": "Alpha", "album": "First", "title": "Missing One",
+            "id": "t-missing", "source": "native", "artist": "Alpha", "album": "First", "album_id": "al-1",
+            "title": "Missing One",
             "item_type": "track", "release_date": "2001", "monitored": True, "last_searched_at": None,
         }
 
@@ -911,7 +912,8 @@ class TestLidarrMode:
         url = lidarr_http.get.call_args.args[0]
         assert "/api/v1/wanted/missing?" in url and "sortKey=albums.releaseDate" in url and "includeArtist=true" in url
         assert body["total"] == 12 and body["records"][0] == {
-            "id": "42", "source": "lidarr", "artist": "Radiohead", "album": "OK Computer", "title": "OK Computer",
+            "id": "42", "source": "lidarr", "artist": "Radiohead", "album": "OK Computer", "album_id": "42",
+            "title": "OK Computer",
             "item_type": "album", "release_date": "1997-05-21T00:00:00Z", "monitored": True,
             "last_searched_at": "2026-10-03T00:00:00Z",
         }

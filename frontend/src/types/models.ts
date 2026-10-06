@@ -343,6 +343,10 @@ export interface MediaManagementSettings {
   import_mode: 'move' | 'hardlink' | 'copy';
   write_audio_tags: boolean;
   embed_artwork: boolean;
+  /** AcoustID application key; the server may return a masked value (only '*'/bullets) when configured. */
+  acoustid_api_key?: string | null;
+  /** Look a file up by audio fingerprint when its tags match weakly (server default false). */
+  fingerprint_on_weak_match?: boolean;
   save_cover_art_file?: boolean;
   delete_completed_transfers?: boolean;
   enable_quality_upgrades?: boolean;

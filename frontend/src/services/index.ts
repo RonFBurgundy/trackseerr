@@ -27,3 +27,4 @@ export * from './qualityProfileService';
 export * from './customFormatService';
 export * from './releaseProfileService';
 export * from './delayProfileService';
+export * from './manualImportService';
