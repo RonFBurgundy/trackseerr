@@ -90,6 +90,7 @@ export const ActivityBlocklistPanel: React.FC<ActivityPanelProps> = ({ onToast }
         <ConfirmDangerButton
           icon={<Trash2 className="h-3.5 w-3.5" />}
           idleLabel="Remove selected"
+          collapseLabel
           ariaLabel={`Remove ${selected.size} selected from blocklist`}
           confirmLabel={`Remove ${selected.size}`}
           disabled={busy}

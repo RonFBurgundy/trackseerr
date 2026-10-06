@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { TapeDeckButton } from './TapeDeckButton';
 import { ActionBar } from './ActionBar';
@@ -31,11 +32,9 @@ export const ObsidianModal: React.FC<ObsidianModalProps> = ({
     if (!isOpen) return;
     const id = idRef.current;
     openModalStack.push(id);
-    document.body.style.overflow = 'hidden';
     return () => {
       const idx = openModalStack.indexOf(id);
       if (idx !== -1) openModalStack.splice(idx, 1);
-      if (openModalStack.length === 0) document.body.style.overflow = '';
     };
   }, [isOpen]);
 
@@ -59,9 +58,9 @@ export const ObsidianModal: React.FC<ObsidianModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-[2px] p-0 sm:p-4 overflow-hidden"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-[2px] p-0 sm:p-4 overflow-hidden overscroll-contain"
       role="dialog"
       aria-modal="true"
     >
@@ -88,7 +87,7 @@ export const ObsidianModal: React.FC<ObsidianModalProps> = ({
         </div>
 
         {/* Scrollable Body */}
-        <div className="modal-body-scroll flex-1 p-4 sm:p-5 text-neutral-200">
+        <div className="modal-body-scroll flex-1 min-h-0 p-4 sm:p-5 text-neutral-200">
           {children}
         </div>
 
@@ -102,6 +101,7 @@ export const ObsidianModal: React.FC<ObsidianModalProps> = ({
           </ActionBar>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

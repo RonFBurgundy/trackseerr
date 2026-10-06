@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { RefreshCw, Trash2, Loader2, Search, AlertTriangle } from 'lucide-react';
 import type { SystemEventItem } from '@/types/models';
 import { TapeDeckButton, ActionBar } from '@/components/ui';
+import { PageFrame } from '@/components/layout';
 import { FlatList, type FlatListColumn } from '@/components/lists';
 import { useSystemEvents } from '@/hooks/useSystemEvents';
 
@@ -88,7 +89,10 @@ export const SystemEventsPanel: React.FC = () => {
   const [confirmingClear, setConfirmingClear] = useState<boolean>(false);
 
   return (
-    <div className="space-y-4">
+    <PageFrame
+      ariaLabel="System events"
+      nav={
+      <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h4 className="text-sm font-bold uppercase font-mono text-white">System Events</h4>
@@ -204,7 +208,9 @@ export const SystemEventsPanel: React.FC = () => {
           <span>{ev.clearError}</span>
         </div>
       )}
-
+      </div>
+      }
+    >
       <FlatList
         ariaLabel="System events"
         columns={columns}
@@ -215,6 +221,6 @@ export const SystemEventsPanel: React.FC = () => {
         onSortChange={noopSort}
         emptyMessage="No system lifecycle events recorded matching current filters."
       />
-    </div>
+    </PageFrame>
   );
 };

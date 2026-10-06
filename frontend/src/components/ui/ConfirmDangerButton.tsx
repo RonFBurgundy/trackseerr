@@ -9,6 +9,8 @@ export interface ConfirmDangerButtonProps {
   ariaLabel: string;
   /** Visible text for the idle button (icon-only when omitted). */
   idleLabel?: string;
+  /** Hide the idle label below `sm` (icon-only on phones); the aria-label still names it. */
+  collapseLabel?: boolean;
   confirmLabel?: string;
   cancelLabel?: string;
   size?: 'sm' | 'md' | 'lg';
@@ -23,6 +25,7 @@ export const ConfirmDangerButton: React.FC<ConfirmDangerButtonProps> = ({
   icon,
   ariaLabel,
   idleLabel,
+  collapseLabel = false,
   confirmLabel = 'Confirm',
   cancelLabel = 'Keep',
   size = 'sm',
@@ -46,6 +49,8 @@ export const ConfirmDangerButton: React.FC<ConfirmDangerButtonProps> = ({
         onClick={() => setArmed(true)}
         icon={icon}
         aria-label={ariaLabel}
+        title={ariaLabel}
+        collapseLabel={collapseLabel}
       >
         {idleLabel}
       </TapeDeckButton>

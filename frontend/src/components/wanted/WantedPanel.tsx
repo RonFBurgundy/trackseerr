@@ -133,6 +133,9 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
         variant="amber"
         disabled={busy || selected.size === 0}
         onClick={() => void runSearch({ ids: Array.from(selected) }, true)}
+        aria-label={`Search selected${selected.size > 0 ? ` (${selected.size})` : ''}`}
+        title="Search selected"
+        collapseLabel
         icon={<Search className="h-3.5 w-3.5" />}
       >
         Search selected{selected.size > 0 ? ` (${selected.size})` : ''}
@@ -140,6 +143,7 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
       <ConfirmDangerButton
         icon={<Search className="h-3.5 w-3.5" />}
         idleLabel="Search all"
+        collapseLabel
         ariaLabel={`${searchAllLabel}: ${isCutoff ? 'cutoff unmet' : 'missing'} items`}
         confirmLabel={searchAllLabel}
         disabled={busy || list.total === 0}
@@ -150,7 +154,6 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
 
   return (
     <ListPanel
-      stackToolbar
       title={isCutoff ? 'Cutoff Unmet' : 'Missing'}
       description={
         isCutoff

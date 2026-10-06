@@ -19,12 +19,18 @@ export interface SystemPageProps {
 }
 
 /** Settings > System. Only the active panel is mounted, so polling and the log stream stop when it is left. */
-export const SystemPage: React.FC<SystemPageProps> = ({ tab, isCore, libraryMode, onToast }) => (
-  <div className="space-y-6">
-    {tab === 'status' && <SystemStatusPanel isCore={isCore} libraryMode={libraryMode} />}
-    {tab === 'queue' && <SystemQueuePanel />}
-    {tab === 'tasks' && <SystemTasksPanel onToast={onToast} />}
-    {tab === 'events' && <SystemEventsPanel />}
-    {tab === 'logs' && <SystemLogsPanel />}
-  </div>
-);
+export const SystemPage: React.FC<SystemPageProps> = ({ tab, isCore, libraryMode, onToast }) => {
+  // Events and logs own their scroller (a nested PageFrame filling the settings body); the rest flow in the body.
+  if (tab === 'events') return <SystemEventsPanel />;
+  if (tab === 'logs') return <SystemLogsPanel />;
+  return (
+    <div className="space-y-6">
+      {tab === 'status' && <SystemStatusPanel isCore={isCore} libraryMode={libraryMode} />}
+      {tab === 'queue' && <SystemQueuePanel />}
+      {tab === 'tasks' && <SystemTasksPanel onToast={onToast} />}
+    </div>
+  );
+};
+
+/** True for the System leaves whose panel owns its own scroll region (the settings body must not scroll for them). */
+export const systemTabOwnsScroll = (tab: SystemTab): boolean => tab === 'events' || tab === 'logs';

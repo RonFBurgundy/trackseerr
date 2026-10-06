@@ -22,6 +22,7 @@ import type { AppRoute, MainTab, NavigateOptions } from '@/hooks';
 import {
   Header,
   NavHub,
+  PageFrame,
   gateRoute,
   routesEqual,
   AudioPlayerBar,
@@ -136,8 +137,9 @@ const MainApp: React.FC = () => {
   const handleNavigate = useCallback(
     (next: AppRoute, options?: NavigateOptions) => {
       navigate(next, options);
-      if (!options?.replace && mainRef.current) {
-        mainRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      // main never scrolls; the page body inside it does.
+      if (!options?.replace) {
+        mainRef.current?.querySelector<HTMLElement>('[data-page-body]')?.scrollTo({ top: 0, behavior: 'smooth' });
       }
     },
     [navigate]
@@ -269,20 +271,23 @@ const MainApp: React.FC = () => {
       {/* Main Content Area - Locked scrolling inside container */}
       <main
         ref={mainRef}
-        className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-4 sm:px-6 pt-4"
+        className="flex flex-col flex-1 min-h-0 overflow-hidden px-4 sm:px-6 pt-4"
         // Bottom room: the safe-area inset, plus the audio bar while a preview is loaded. Lists size to this edge.
         style={{ paddingBottom: `calc(${audioPlayer.currentTrack ? '6.5rem' : '1rem'} + env(safe-area-inset-bottom, 0px))` }}
       >
         {auth.isLoading ? (
-          <div className="flex flex-col items-center justify-center py-28 gap-3">
-            <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
-            <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">
-              Calibrating Analog Deck...
-            </span>
-          </div>
+          <PageFrame bodyClassName="flex">
+            <div className="m-auto flex flex-col items-center justify-center gap-3 py-8">
+              <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
+              <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">
+                Calibrating Analog Deck...
+              </span>
+            </div>
+          </PageFrame>
         ) : !auth.isAuthenticated ? (
           /* Landing Hero for Unauthenticated Visitors */
-          <div className="flex-1 min-h-full flex items-center justify-center p-4 relative">
+          <PageFrame bodyClassName="flex">
+          <div className="m-auto p-4 relative flex items-center justify-center w-full">
             <div className="absolute w-72 h-72 bg-[#e5a00d]/10 rounded-full blur-3xl pointer-events-none" />
             <MachinedCard className="max-w-md w-full p-8 text-center space-y-6 border-[#262626] bg-[#121212] relative z-10 shadow-2xl">
               <div className="w-20 h-20 rounded-[4px] bg-[#141414] border border-[#262626] flex items-center justify-center mx-auto shadow-xl">
@@ -390,9 +395,10 @@ const MainApp: React.FC = () => {
               </div>
             </MachinedCard>
           </div>
+          </PageFrame>
         ) : (
-          /* Authenticated Dashboard Views */
-          <div className="max-w-7xl mx-auto w-full">
+          /* Authenticated Dashboard Views: each view is a PageFrame filling this column. */
+          <div className="max-w-7xl mx-auto w-full flex flex-col flex-1 min-h-0">
             {activeTab === 'discover' && (
               <DiscoverView
                 discovery={discovery}
@@ -478,7 +484,7 @@ const MainApp: React.FC = () => {
               />
             )}
             {identity.isGateway && (
-              <p className="mt-10 text-center text-[10px] font-mono text-[var(--text-muted)]">
+              <p className="shrink-0 pt-2 text-center text-[10px] font-mono text-[var(--text-muted)]">
                 Settings are managed in TrackSeerr Core
               </p>
             )}
@@ -572,7 +578,7 @@ export const App: React.FC = () => {
   const startup = useStartupStatus();
   const inviteToken = parseInviteToken(window.location.pathname);
   // Hold the whole app (hooks included) back until the server is up, so nothing fires 503-ing requests.
-  if (startup.phase === 'checking') return <div className="min-h-screen bg-[#0a0a0a]" />;
+  if (startup.phase === 'checking') return <div className="h-full bg-[#0a0a0a]" />;
   if (startup.phase === 'starting') return <StartupScreen step={startup.step} />;
   // The invite page must work without a session, so it bypasses auth (and its hooks) entirely.
   return inviteToken ? <InvitePage token={inviteToken} /> : <MainApp />;

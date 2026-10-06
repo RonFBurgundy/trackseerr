@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Loader2, ScanSearch } from 'lucide-react';
-import { ScrollFill, TactileSwitch, TapeDeckButton } from '@/components/ui';
+import { TactileSwitch, TapeDeckButton } from '@/components/ui';
+import { PageActionsPortal } from '@/components/layout';
 import { ManualImportModal } from '@/components/manualImport';
 import { formatDateTime } from '@/components/lists';
 import { useLibraryHealth } from '@/hooks/useLibraryHealth';
@@ -85,6 +86,31 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
 
   return (
     <section className="flex flex-col gap-3 min-h-0">
+      {supported && (
+        <PageActionsPortal>
+          <div className="flex items-center justify-end gap-3">
+            <TactileSwitch
+              label="Check weekly"
+              name="library-health-weekly"
+              checked={data.weekly}
+              disabled={busy}
+              onChange={(v) => void hl.setWeekly(v)}
+            />
+            <TapeDeckButton
+              variant="amber"
+              size="sm"
+              disabled={running}
+              onClick={() => void hl.checkNow()}
+              aria-label={running ? 'Checking library' : 'Check now'}
+              title="Check now"
+              collapseLabel
+              icon={running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ScanSearch className="h-3.5 w-3.5" />}
+            >
+              {running ? 'Checking' : 'Check now'}
+            </TapeDeckButton>
+          </div>
+        </PageActionsPortal>
+      )}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="min-w-0">
           <h4 className="text-sm font-bold uppercase font-mono text-white">
@@ -104,26 +130,6 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
             </p>
           )}
         </div>
-        {supported && (
-          <div className="flex flex-wrap items-center gap-3">
-            <TactileSwitch
-              label="Check weekly"
-              name="library-health-weekly"
-              checked={data.weekly}
-              disabled={busy}
-              onChange={(v) => void hl.setWeekly(v)}
-            />
-            <TapeDeckButton
-              variant="amber"
-              size="sm"
-              disabled={running}
-              onClick={() => void hl.checkNow()}
-              icon={running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ScanSearch className="h-3.5 w-3.5" />}
-            >
-              {running ? 'Checking' : 'Check now'}
-            </TapeDeckButton>
-          </div>
-        )}
       </div>
 
       <SeedCleanupStrip status={sc.status} running={sc.running} onRun={() => void sc.run()} />
@@ -138,7 +144,7 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
         <ReviewMappingCard mapping={mapping} busy={busy} onSave={hl.saveMapping} onRemove={hl.removeMapping} />
       )}
 
-      <ScrollFill ariaLabel="Needs review findings" className="min-h-0 pr-1">
+      <div className="min-h-0">
         {empty ? (
           <div className="py-10 text-center">
             <p className="text-sm font-mono font-bold text-white">Nothing needs review</p>
@@ -160,7 +166,7 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
             {failed.length > 0 && <ReviewCleanupFailed findings={failed} busy={busy} onRetry={hl.retryFailed} />}
           </div>
         )}
-      </ScrollFill>
+      </div>
 
       <ManualImportModal scope={importScope} onClose={() => setImportScope(null)} onImported={afterImport} />
     </section>

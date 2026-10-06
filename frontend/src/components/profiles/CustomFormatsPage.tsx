@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Download, Pencil, Plus, Trash2, Upload } from 'lucide-react';
-import { ConfirmDialog, MachinedCard, ScrollFill, TapeDeckButton } from '@/components/ui';
+import { ConfirmDialog, MachinedCard, TapeDeckButton } from '@/components/ui';
 import type { CustomFormat } from '@/types/customFormats';
 import { useCustomFormats } from '@/hooks/useCustomFormats';
 import { useQualityDefinitions } from '@/hooks/useQualityDefinitions';
@@ -50,7 +50,7 @@ export const CustomFormatsPage: React.FC<CustomFormatsPageProps> = ({ enabled, o
       ) : manager.formats.length === 0 ? (
         <EmptyNote>No custom formats yet. Add one or import a JSON file.</EmptyNote>
       ) : (
-        <ScrollFill ariaLabel="Custom formats" className="grid grid-cols-1 content-start gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 content-start gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
           {manager.formats.map((f) => (
             <MachinedCard key={f.id} className="space-y-2 p-2.5 sm:p-3">
               <div className="min-w-0">
@@ -70,7 +70,7 @@ export const CustomFormatsPage: React.FC<CustomFormatsPageProps> = ({ enabled, o
               </div>
             </MachinedCard>
           ))}
-        </ScrollFill>
+        </div>
       )}
 
       <CustomFormatEditorModal target={editing} qualities={definitions} onClose={() => setEditing(null)} onSave={manager.save} />

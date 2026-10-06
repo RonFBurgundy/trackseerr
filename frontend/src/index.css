@@ -64,6 +64,15 @@ body {
   overflow-x: hidden;
 }
 
+/* The browser window never scrolls: the app shell is exactly the viewport and panels scroll inside it. */
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 /* 1. Recessed Transport Bays */
 .tape-transport-bay {
   background: #0d0d0d;
@@ -151,6 +160,7 @@ body {
 /* 5. Mobile & Modal Scrolling */
 .modal-body-scroll {
   overflow-y: auto;
+  overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
 

@@ -10,7 +10,8 @@ import {
   ObsidianModal,
   TactileSwitch,
   ConfirmDangerButton,
-  MonitorModeSelect, ScrollFill } from '@/components/ui';
+  MonitorModeSelect } from '@/components/ui';
+import { PageFrame } from '@/components/layout';
 import { LIST_MONITOR_MODES, type ListMonitorMode } from '@/types/importLists';
 
 /** Album and artist modes add to the library without a quota, so the server only accepts them from admins. */
@@ -121,41 +122,48 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      {/* Action Header */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        <ActionBar bay className="p-1.5">
-          {isAdmin && (
-          <TapeDeckButton
-            size="sm"
-            variant="amber"
-            onClick={handleSyncClick}
-            disabled={isSyncing}
-            icon={
-              isSyncing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" />
-              )
-            }
-          >
-            {isSyncing ? 'Syncing...' : 'Sync Playlists'}
-          </TapeDeckButton>
-          )}
+    <PageFrame
+      bodyClassName="space-y-6"
+      actions={
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <div className="tape-transport-bay p-1.5 flex items-center gap-1.5 shrink-0">
+            {isAdmin && (
+              <TapeDeckButton
+                size="sm"
+                variant="amber"
+                onClick={handleSyncClick}
+                disabled={isSyncing}
+                aria-label={isSyncing ? 'Syncing playlists' : 'Sync playlists'}
+                title="Sync playlists"
+                collapseLabel
+                icon={
+                  isSyncing ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )
+                }
+              >
+                {isSyncing ? 'Syncing...' : 'Sync Playlists'}
+              </TapeDeckButton>
+            )}
 
-          <TapeDeckButton
-            size="sm"
-            onClick={() => setIsImportModalOpen(true)}
-            icon={<Plus className="h-3.5 w-3.5" />}
-          >
-            Add Playlist
-          </TapeDeckButton>
-        </ActionBar>
+            <TapeDeckButton
+              size="sm"
+              onClick={() => setIsImportModalOpen(true)}
+              aria-label="Add playlist"
+              title="Add playlist"
+              collapseLabel
+              icon={<Plus className="h-3.5 w-3.5" />}
+            >
+              Add Playlist
+            </TapeDeckButton>
+          </div>
 
-        <div className="text-xs text-neutral-400 font-mono">
-          {playlists.length} Configured Playlists
+          <div className="text-xs text-neutral-400 font-mono truncate">{playlists.length} Configured Playlists</div>
         </div>
-      </div>
+      }
+    >
 
       {/* Loading state */}
       {isLoading && (
@@ -175,7 +183,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
       )}
 
       {!isLoading && playlists.length > 0 && (
-        <ScrollFill ariaLabel="Playlists" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 content-start">
+        <div aria-label="Playlists" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 content-start">
           {playlists.map((pl) => (
             <MachinedCard key={pl.id} className="p-3 sm:p-4 flex flex-col justify-between gap-4">
               <div>
@@ -291,7 +299,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
               </div>
             </MachinedCard>
           ))}
-        </ScrollFill>
+        </div>
       )}
 
       {/* Add / Import Playlist Modal */}
@@ -429,7 +437,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
           </form>
         </div>
       </ObsidianModal>
-    </div>
+    </PageFrame>
   );
 };
 
@@ -446,8 +454,11 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = (props) => {
   const section: PlaylistsSection = hasMediaServer && visible(requestedSection) ? requestedSection : 'sync';
 
   return (
-    <div className="space-y-6">
-      {hasMediaServer ? (
+    <PageFrame
+      scroll={section !== 'sync'}
+      bodyClassName="space-y-6"
+      nav={
+      hasMediaServer ? (
         <TabStrip fill>
           <TapeDeckButton size="sm" active={section === 'sync'} onClick={() => setSection('sync')}>
             Sync
@@ -465,11 +476,12 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = (props) => {
         </TabStrip>
       ) : (
         <NoMediaServerNote />
-      )}
-
+      )
+      }
+    >
       {section === 'sync' && <SyncPlaylistsPanel {...props} hasMediaServer={hasMediaServer} />}
       {section === 'plex' && <PlexPlaylistsSection isAdmin={props.isAdmin ?? false} />}
       {section === 'mixes' && <TailoredMixesSection isAdmin={props.isAdmin ?? false} />}
-    </div>
+    </PageFrame>
   );
 };

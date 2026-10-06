@@ -151,7 +151,6 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
             isAdmin={isAdmin}
             canMonitorTracks={!lidarrMode}
             onToggleMonitored={(id, cur) => void handleToggle(id, cur)}
-            scrollClass="max-h-80"
           />
         </div>
       )}

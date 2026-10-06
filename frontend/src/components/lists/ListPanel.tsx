@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActionBar } from '@/components/ui';
+import { PageActionsPortal } from '@/components/layout';
 import { SourceBadge } from './SourceBadge';
 
 export interface ListPanelProps {
@@ -7,17 +7,20 @@ export interface ListPanelProps {
   description?: string;
   mode: string | null;
   total: number;
-  /** Right-aligned toolbar (filters, bulk actions). */
+  /** Pinned in the page frame's actions row (filters, bulk actions), kept to a single row. */
   toolbar?: React.ReactNode;
-  /** One toolbar button per row on mobile (for long labels). */
-  stackToolbar?: boolean;
   children: React.ReactNode;
 }
 
 /** Header strip shared by the Activity and Wanted lists: title, count, source indicator, toolbar. */
-export const ListPanel: React.FC<ListPanelProps> = ({ title, description, mode, total, toolbar, stackToolbar = false, children }) => (
+export const ListPanel: React.FC<ListPanelProps> = ({ title, description, mode, total, toolbar, children }) => (
   <section className="space-y-3">
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    {toolbar && (
+      <PageActionsPortal>
+        <div className="flex items-center justify-end gap-2 min-w-0">{toolbar}</div>
+      </PageActionsPortal>
+    )}
+    <div className="min-w-0">
       <div className="min-w-0">
         <h4 className="text-sm font-bold uppercase font-mono text-white">
           {title}
@@ -28,7 +31,6 @@ export const ListPanel: React.FC<ListPanelProps> = ({ title, description, mode, 
           <SourceBadge mode={mode} />
         </div>
       </div>
-      {toolbar && <ActionBar align="end" stackOnMobile={stackToolbar}>{toolbar}</ActionBar>}
     </div>
     {children}
   </section>

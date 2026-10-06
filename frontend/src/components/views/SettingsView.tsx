@@ -23,7 +23,8 @@ import {
 } from '@/components/settings';
 import type { ManagedExternally } from '@/components/settings';
 import { CustomFormatsPage, ProfilesPage, QualityDefinitionsPanel } from '@/components/profiles';
-import { SystemPage } from '@/components/system';
+import { SystemPage, systemTabOwnsScroll } from '@/components/system';
+import { PageFrame } from '@/components/layout';
 import type { UseAccountReturn } from '@/hooks/useAccount';
 import { settingsRouteFor } from '@/hooks/useAppRoute';
 import type { SettingsRoute } from '@/hooks/useAppRoute';
@@ -111,8 +112,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const isSelfServiceTab = SELF_SERVICE_TABS.has(activeTab);
   const mediaActive = mode === 'native';
 
+  const systemLeaf = route.sub === 'system' ? route.leaf : 'status';
+  // System events/logs own their scroller, so the settings body must not scroll for them (one scroll region per column).
+  const bodyScrolls = !(activeTab === 'system' && isAdmin && !mfaEnrollmentRequired && systemTabOwnsScroll(systemLeaf));
+
   return (
-    <div className="space-y-6">
+    <PageFrame
+      scroll={bodyScrolls}
+      bodyClassName="space-y-6"
+      nav={
+      <>
       {toast && (
         <div
           role="status"
@@ -125,15 +134,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       )}
 
-      <RoleChangeBanner enabled={isAdmin && !mfaEnrollmentRequired} />
+      <SettingsNav sections={sections} route={route} onNavigate={onNavigate} inactiveIds={inactiveIds} />
+      </>
+      }
+    >
+      {/* Informational banners scroll away with the content; pages whose child owns the scroller skip them. */}
+      {bodyScrolls && <RoleChangeBanner enabled={isAdmin && !mfaEnrollmentRequired} />}
 
-      {showGatewayNote && (
-        <div className="bg-[#121212] border border-[#2a2a2a] rounded-[4px] px-3 py-2 sm:px-4 sm:py-3 text-xs font-mono text-neutral-400">
+      {bodyScrolls && showGatewayNote && (
+        <div
+          title="Admin settings are available on the TrackSeerr Core admin interface."
+          className="bg-[#121212] border border-[#2a2a2a] rounded-[4px] px-3 py-2 text-xs font-mono text-neutral-400 truncate"
+        >
           Admin settings are available on the TrackSeerr Core admin interface.
         </div>
       )}
-
-      <SettingsNav sections={sections} route={route} onNavigate={onNavigate} inactiveIds={inactiveIds} />
 
       {activeTab === 'scrobbling' && !mfaEnrollmentRequired && <ScrobblingSettings isAdmin={isAdmin} hasMediaServer={hasMediaServer} />}
 
@@ -150,7 +165,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {activeTab === 'media-server' && isAdmin && !mfaEnrollmentRequired && <MediaServerPanel onToast={showToast} />}
 
       {activeTab === 'system' && isAdmin && !mfaEnrollmentRequired && (
-        <SystemPage tab={route.sub === 'system' ? route.leaf : 'status'} isCore={isCore} libraryMode={mode} onToast={showToast} />
+        <SystemPage tab={systemLeaf} isCore={isCore} libraryMode={mode} onToast={showToast} />
       )}
 
       {data.isLoading && !isSelfServiceTab && (
@@ -252,6 +267,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           onToast={showToast}
         />
       )}
-    </div>
+    </PageFrame>
   );
 };

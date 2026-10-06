@@ -1,5 +1,4 @@
 import React from 'react';
-import { ScrollFill } from '@/components/ui';
 import type { IndexerItem, MediaManagementSettings } from '@/types/models';
 import { useCustomFormats } from '@/hooks/useCustomFormats';
 import { useQualityDefinitions } from '@/hooks/useQualityDefinitions';
@@ -25,11 +24,11 @@ export const ProfilesPage: React.FC<ProfilesPageProps> = ({ enabled, media, onMe
   const formats = useCustomFormats(enabled, onToast);
 
   return (
-    <ScrollFill ariaLabel="Profiles" className="space-y-8 pr-1">
+    <div className="space-y-8">
       <QualityProfilesSection manager={qualityProfiles} definitions={definitions.definitions} formats={formats.formats} />
       <MetadataProfilesSection enabled={enabled} settings={media} onChange={onMediaChange} onToast={onToast} />
       <DelayProfilesSection enabled={enabled} onToast={onToast} />
       <ReleaseProfilesSection enabled={enabled} indexers={indexers} qualityProfiles={qualityProfiles.profiles} onToast={onToast} />
-    </ScrollFill>
+    </div>
   );
 };

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Loader2, Play, Square, RotateCw, AlertTriangle } from 'lucide-react';
-import { TapeDeckButton, ActionBar, MachinedCard, ScrollFill } from '@/components/ui';
+import { TapeDeckButton, ActionBar, MachinedCard } from '@/components/ui';
+import { PageActionsPortal } from '@/components/layout';
 import { useScheduledTasks } from '@/hooks/useScheduledTasks';
 import { formatTimestamp } from './formatters';
 
@@ -13,23 +14,28 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start sm:items-center justify-between gap-3">
+      <PageActionsPortal>
+        <div className="flex items-center justify-end gap-2">
+          <TapeDeckButton
+            size="sm"
+            onClick={() => void refresh()}
+            disabled={isLoading}
+            collapseLabel
+            aria-label="Refresh tasks"
+            title="Refresh tasks"
+            icon={isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
+          >
+            Refresh
+          </TapeDeckButton>
+        </div>
+      </PageActionsPortal>
+      <div>
         <div className="min-w-0">
           <h4 className="text-sm font-bold uppercase font-mono text-white">Scheduled Tasks &amp; Background Workers</h4>
           <p className="text-xs text-neutral-400 font-mono mt-0.5">
             Monitor recurring automation timers, intervals, and trigger on-demand sweeps
           </p>
         </div>
-        <TapeDeckButton
-          size="sm"
-          onClick={() => void refresh()}
-          disabled={isLoading}
-          collapseLabel
-          className="shrink-0"
-          icon={isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
-        >
-          Refresh
-        </TapeDeckButton>
       </div>
 
       {error && (
@@ -40,7 +46,7 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
       )}
 
       <MachinedCard className="overflow-hidden p-0 border-[#222222]">
-        <ScrollFill ariaLabel="Scheduled tasks" className="overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse max-md:block">
             <thead className="max-md:hidden">
               <tr className="border-b border-[#222222] bg-[#121212] text-[11px] font-mono uppercase tracking-wider text-neutral-400">
@@ -130,7 +136,7 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
               })}
             </tbody>
           </table>
-        </ScrollFill>
+        </div>
 
         {isLoading && tasks.length === 0 && (
           <div className="flex items-center justify-center gap-2 py-12 text-neutral-400 text-xs font-mono">
