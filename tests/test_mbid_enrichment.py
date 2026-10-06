@@ -879,6 +879,7 @@ class TestAcoustIDEndpoint:
         _, client = app_and_client
         admin = seeded_users["admin"]
         headers = _auth_headers(admin, test_db, test_config)
+        test_db.update_media_management_settings({"root_folder_path": str(tmp_path)})
 
         res = client.post(
             "/api/library/manual-import/fingerprint",
@@ -904,6 +905,7 @@ class TestAcoustIDEndpoint:
         _, client = app_and_client
         admin = seeded_users["admin"]
         headers = _auth_headers(admin, test_db, test_config)
+        test_db.update_media_management_settings({"root_folder_path": str(tmp_path)})
 
         flac_file = tmp_path / "song.flac"
         _create_minimal_flac(flac_file)
@@ -925,6 +927,7 @@ class TestAcoustIDEndpoint:
         _, client = app_and_client
         admin = seeded_users["admin"]
         headers = _auth_headers(admin, test_db, test_config)
+        test_db.update_media_management_settings({"root_folder_path": str(tmp_path)})
 
         flac_file = tmp_path / "song.flac"
         _create_minimal_flac(flac_file)

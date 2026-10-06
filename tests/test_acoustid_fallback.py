@@ -360,7 +360,7 @@ def test_fallback_title_path_ambiguous_keeps_tag(caplog):
 
 def test_manual_fingerprint_route_returns_library_track(client, test_db, test_config, tmp_path):
     headers = _admin_headers(test_db, test_config)
-    test_db.update_media_management_settings({"acoustid_api_key": "key"})
+    test_db.update_media_management_settings({"acoustid_api_key": "key", "root_folder_path": str(tmp_path)})
     test_db.upsert_library_artist({"id": "art-9", "name": "Radiohead", "monitored": True})
     test_db.upsert_library_album({"id": "alb-9", "artist_id": "art-9", "title": "OK Computer", "monitored": True})
     test_db.upsert_library_track({"id": "trk-9", "album_id": "alb-9", "artist_id": "art-9", "title": "Karma Police",

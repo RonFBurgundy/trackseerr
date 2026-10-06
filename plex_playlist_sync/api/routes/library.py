@@ -276,11 +276,42 @@ class AddAlbumToCollectionRequest(BaseModel):
 # Security & Path Traversal Defense
 # -------------------------------------------------------------------------
 
-def validate_media_path(path_str: str, db: Optional[Database] = None) -> Path:
-    """Validates that a path is safe against directory traversal and resides in an approved directory.
+def _approved_media_bases(db: Optional[Database], purpose: str) -> list[Path]:
+    """Configured roots (resolved) a path may live under for ``purpose``; empty when nothing is configured.
 
-    Approved bases include /music, /downloads, /data, /config, system temp directories (/tmp),
-    current working directory, and paths configured in media management settings.
+    ``library``: the library root. ``import``: library + download-client roots + legacy staging folder.
+    ``internal``: ``import`` plus the app's own config dirs, only for callers that touch app-internal files.
+    """
+    if purpose not in _MEDIA_PATH_PURPOSES:
+        raise ValueError(f"Unknown media path purpose: {purpose!r}")
+    bases: list[Path] = []
+    if db is None:
+        return bases
+    try:
+        mm = db.get_media_management_settings()
+        if mm.get("root_folder_path"):
+            bases.append(Path(mm["root_folder_path"]).resolve())
+        if purpose in ("import", "internal"):
+            if mm.get("staging_folder_path"):
+                bases.append(Path(mm["staging_folder_path"]).resolve())
+            roots = allowed_roots_for_all_clients(db, mm)
+            bases.extend(roots.roots)
+            if purpose == "internal":
+                bases.extend(roots.config_dirs)
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        logger.warning("Could not query media management settings for path validation: %s", exc)
+    return bases
+
+
+_MEDIA_PATH_PURPOSES = ("library", "import", "internal")
+
+
+def validate_media_path(path_str: str, db: Optional[Database] = None, purpose: str = "library") -> Path:
+    """Validates a path against traversal and symlink escapes, and that it sits under a configured root.
+
+    There are no hardcoded bases (``/data``, ``/tmp``, cwd and the config dir are not implicitly approved): only the
+    configured library root (and, for ``purpose="import"``, download-client roots and the legacy staging folder) count.
+    The path is ``resolve()``d (following symlinks) before the containment check.
     """
     if not path_str or not isinstance(path_str, str):
         raise HTTPException(
@@ -296,25 +327,7 @@ def validate_media_path(path_str: str, db: Optional[Database] = None) -> Path:
         )
 
     resolved = Path(path_str).resolve()
-    approved_bases = [
-        Path("/music").resolve(),
-        Path("/downloads").resolve(),
-        Path("/data").resolve(),
-        Path("/config").resolve(),
-        Path("/tmp").resolve(),
-        Path.cwd().resolve(),
-    ]
-
-    if db is not None:
-        try:
-            mm = db.get_media_management_settings()
-            if mm.get("root_folder_path"):
-                approved_bases.append(Path(mm["root_folder_path"]).resolve())
-            if mm.get("staging_folder_path"):
-                approved_bases.append(Path(mm["staging_folder_path"]).resolve())
-            approved_bases.extend(allowed_roots_for_all_clients(db, mm).roots)
-        except (sqlite3.Error, OSError, ValueError) as exc:
-            logger.warning("Could not query media management settings for path validation: %s", exc)
+    approved_bases = _approved_media_bases(db, purpose)
 
     is_approved = any(resolved == base or resolved.is_relative_to(base) for base in approved_bases)
     if not is_approved:
@@ -3045,7 +3058,7 @@ def manual_import_scan(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Download '{req.download_id}' not found")
         for raw in download.get("unmatched_files") or []:
             try:
-                held = validate_media_path(raw, db=db)
+                held = validate_media_path(raw, db=db, purpose="import")
             except HTTPException as exc:
                 logger.warning("Skipping held file %s for download %s: %s", raw, req.download_id, exc.detail)
                 continue
@@ -3058,7 +3071,7 @@ def manual_import_scan(
             scoped_tracks = _tracks_without_file(db, db.list_library_tracks(album_id=req.album_id, limit=1000))
     elif req.file_paths is not None:
         for raw in req.file_paths:
-            p = validate_media_path(raw, db=db)
+            p = validate_media_path(raw, db=db, purpose="import")
             if not p.is_file():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"File does not exist: {raw}")
             files.append(p)
@@ -3076,7 +3089,7 @@ def manual_import_scan(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"{detail}. Pass a folder_path, or check your download client connection.",
                 )
-        validated_dir = validate_media_path(folder_path, db=db)
+        validated_dir = validate_media_path(folder_path, db=db, purpose="import")
         if not validated_dir.exists() or not validated_dir.is_dir():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -3150,7 +3163,7 @@ def manual_import_commit(
             continue
 
         try:
-            source_path = validate_media_path(source_str, db=db)
+            source_path = validate_media_path(source_str, db=db, purpose="import")
             if not source_path.exists() or not source_path.is_file():
                 failed_count += 1
                 results.append({
@@ -3699,7 +3712,7 @@ def fingerprint_file(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Fingerprints an audio file on-demand via AcoustID without routine scanner overhead."""
-    validated_file = validate_media_path(body.file_path, db=db)
+    validated_file = validate_media_path(body.file_path, db=db, purpose="import")
     if not validated_file.exists() or not validated_file.is_file():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

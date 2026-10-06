@@ -22,7 +22,8 @@ IMMUTABLE = "private, max-age=86400"  # name kept for the call sites below; the 
 
 
 @pytest.fixture(autouse=True)
-def _thumb_dir(tmp_path, monkeypatch):
+def _thumb_dir(tmp_path, monkeypatch, test_db):
+    test_db.update_media_management_settings({"root_folder_path": str(tmp_path / "music")})
     monkeypatch.setattr(mediacover_service, "base_dir", tmp_path / "cfg")
 
 

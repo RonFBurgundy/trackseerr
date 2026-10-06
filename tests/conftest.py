@@ -403,3 +403,45 @@ def _clear_download_roots_cache():
     clear_roots_cache()
     yield
     clear_roots_cache()
+
+
+
+@pytest.fixture(autouse=True)
+def _drop_fastapi_callable_classification_caches():
+    """FastAPI memoises "is this dependency a (async) generator / coroutine?" in module-level ``lru_cache``s keyed by
+    the dependency callable (4096 entries each). Tests install per-test ``dependency_overrides`` such as
+    ``lambda: test_db``; the cache keeps each lambda, and through its closure the whole per-test Database/Config,
+    alive for the rest of the worker (~12 MB per app-building test, ~3 GB per xdist worker by the end of a run)."""
+    yield
+    from fastapi.dependencies import models
+
+    for value in vars(models).values():
+        clear = getattr(value, "cache_clear", None)
+        if callable(clear):
+            clear()
+
+# --- optional memory profiling (TRACKSEERR_TEST_MEM=<file prefix>): per-module RSS deltas for each xdist worker ---
+_mem_log = os.environ.get("TRACKSEERR_TEST_MEM")
+if _mem_log:
+    import resource as _resource
+
+    _mem_state = {"mod": None, "start": 0, "rows": []}
+
+    def _rss_mb() -> float:
+        with open("/proc/self/statm") as fh:
+            return int(fh.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 1048576
+
+    def _mem_flush(worker: str) -> None:
+        with open(f"{_mem_log}.{worker}", "w") as fh:
+            fh.write(f"peak_maxrss_mb {_resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss / 1024:.0f}\n")
+            for mod, start, end in sorted(_mem_state["rows"], key=lambda r: r[1] - r[2]):
+                fh.write(f"{end - start:+8.0f} MB  end={end:6.0f}  {mod}\n")
+
+    @pytest.hookimpl(trylast=True)
+    def pytest_runtest_teardown(item, nextitem):
+        mod = item.module.__name__
+        if _mem_state["mod"] != mod:
+            _mem_state["mod"], _mem_state["start"] = mod, _rss_mb()
+            _mem_state["rows"].append([mod, _mem_state["start"], _mem_state["start"]])
+        _mem_state["rows"][-1][2] = _rss_mb()
+        _mem_flush(os.environ.get("PYTEST_XDIST_WORKER", "main"))

@@ -276,7 +276,7 @@ def test_validate_media_path_approves_client_roots(db, tree, tmp_path):
     _client(db)
     db.update_media_management_settings({"root_folder_path": str(tree["library"]), "staging_folder_path": ""})
     with patch("plex_playlist_sync.download_roots.get_acquisition_driver", return_value=_driver([str(tree["qbit"])])):
-        assert validate_media_path(str(tree["qbit"] / "x"), db=db) == (tree["qbit"] / "x").resolve()
+        assert validate_media_path(str(tree["qbit"] / "x"), db=db, purpose="import") == (tree["qbit"] / "x").resolve()
         assert validate_media_path(str(tree["library"] / "a"), db=db) == (tree["library"] / "a").resolve()
         with pytest.raises(HTTPException) as exc:
             validate_media_path("/etc/passwd", db=db)

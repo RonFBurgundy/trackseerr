@@ -61,6 +61,7 @@ def _thumb_files(tmp_path) -> list[Path]:
 def album(test_db, tmp_path):
     d = tmp_path / "music" / "Band" / "Alb"
     _jpeg(d / "cover.jpg")
+    test_db.update_media_management_settings({"root_folder_path": str(tmp_path / "music")})
     art = test_db.upsert_library_artist({"id": "art-p", "name": "Band", "path": str(d.parent)})
     alb = test_db.upsert_library_album(
         {"id": "alb-p", "artist_id": art["id"], "title": "Alb", "path": str(d), "cover_url": "/api/library/albums/alb-p/cover"}

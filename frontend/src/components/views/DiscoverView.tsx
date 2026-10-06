@@ -155,6 +155,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
           onBack={() => onNavigateUp(DISCOVER_HOME)}
           onNavigate={onNavigate}
           onOpenAlbum={handleOpenItem}
+          onOpenTrack={(item) => void openTrack(item)}
           onPlayTrack={onPlayTrack}
           currentPreviewTrackId={currentPreviewTrackId}
           isPreviewPlaying={isPreviewPlaying}
