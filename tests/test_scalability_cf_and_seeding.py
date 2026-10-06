@@ -355,7 +355,7 @@ def test_seeding_governance_preserves_hardlink_until_ratio_and_time_limits(
     test_db.update_media_management_settings(
         {
             "import_mode": "hardlink",
-            "delete_completed_transfers": True,
+            "seed_complete_action": "remove",
             "seed_ratio_limit": 2.0,
             "seed_time_limit_minutes": 60,
             "root_folder_path": str(music),
@@ -478,7 +478,7 @@ def test_seeding_governance_time_limit_only(test_db: Database, tmp_path: Path):
     test_db.update_media_management_settings(
         {
             "import_mode": "hardlink",
-            "delete_completed_transfers": True,
+            "seed_complete_action": "remove",
             "seed_ratio_limit": None,
             "seed_time_limit_minutes": 30,
             "root_folder_path": str(music),

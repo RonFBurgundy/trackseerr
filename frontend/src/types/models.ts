@@ -368,6 +368,8 @@ export interface GeneralSettings {
 
 export type ImportBitrateCheck = 'off' | 'warn' | 'reject';
 
+export type SeedCompleteAction = 'keep' | 'remove' | 'remove_and_delete';
+
 export interface MediaManagementSettings {
   artist_folder_format: string;
   album_folder_format: string;
@@ -388,7 +390,8 @@ export interface MediaManagementSettings {
   /** Look a file up by audio fingerprint when its tags match weakly (server default false). */
   fingerprint_on_weak_match?: boolean;
   save_cover_art_file?: boolean;
-  delete_completed_transfers?: boolean;
+  /** What happens to a torrent once its seed goal is met. */
+  seed_complete_action?: SeedCompleteAction;
   enable_quality_upgrades?: boolean;
   library_mode?: string;
   colon_replacement_format?: string;

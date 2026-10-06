@@ -146,11 +146,19 @@ def native_seeding(row: dict[str, Any], media_settings: Optional[dict[str, Any]]
     if not row.get("seed_rule_source") and media_settings:
         ratio_t = media_settings.get("seed_ratio_limit")
         time_t = media_settings.get("seed_time_limit_minutes")
+    action = str((media_settings or {}).get("seed_complete_action") or "keep")
+    if action not in ("keep", "remove", "remove_and_delete"):
+        action = "keep"
+    seeding_minutes = int(row.get("seeding_seconds") or 0) // 60
+    time_target = int(time_t) if time_t else None
+    removes_in = max(0, time_target - seeding_minutes) if (action != "keep" and time_target) else None
     return {
         "ratio": float(row.get("seed_ratio_current") or 0.0),
         "ratio_target": float(ratio_t) if ratio_t else None,
-        "seeding_minutes": int(row.get("seeding_seconds") or 0) // 60,
-        "time_target_minutes": int(time_t) if time_t else None,
+        "seeding_minutes": seeding_minutes,
+        "time_target_minutes": time_target,
+        "removes_in_minutes": removes_in,
+        "action": action,
     }
 
 

@@ -1,4 +1,4 @@
-export type LibraryHealthKind = 'server_unindexed' | 'server_stale' | 'weak_match';
+export type LibraryHealthKind = 'server_unindexed' | 'server_stale' | 'weak_match' | 'orphan_torrent' | 'cleanup_failed';
 
 export interface LibraryHealthFinding {
   id: string;

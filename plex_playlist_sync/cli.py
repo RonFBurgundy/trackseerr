@@ -508,6 +508,11 @@ def _start_local_workers(db: Database, config: Config) -> None:
     logger.info("Starting LibraryHealthWorker (weekly media-server reconciliation, when enabled)")
     library_health_worker.start(db=db, config=config)
 
+    from .seed_cleanup import seed_cleanup_worker
+
+    logger.info("Starting SeedCleanupWorker (daily finished-torrent sweep)")
+    seed_cleanup_worker.start(db=db, config=config)
+
 
 def _log_when_listening(server: uvicorn.Server, host: str, port: int, started_at: float) -> None:
     """Logs a ``[boot]`` line, with time since process start, once uvicorn has bound its socket."""
@@ -861,6 +866,7 @@ def main() -> int:
                 ("MixWorker", "mix_worker", "mix_worker"),
                 ("ImportListWorker", "import_list_worker", "import_list_worker"),
                 ("LibraryHealthWorker", "library_health", "library_health_worker"),
+                ("SeedCleanupWorker", "seed_cleanup", "seed_cleanup_worker"),
             ):
                 try:
                     module = __import__(f"plex_playlist_sync.{module_name}", fromlist=[attr])

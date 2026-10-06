@@ -184,7 +184,7 @@ def test_worker_with_only_unmatched_files_parks_download_without_failing(tmp_pat
 
 def test_held_files_survive_post_import_cleanup(tmp_path, db):
     music, staging, *_ = _seed(db, tmp_path)
-    db.update_media_management_settings({"delete_completed_transfers": True, "import_mode": "move"})
+    db.update_media_management_settings({"seed_complete_action": "remove", "import_mode": "move"})
     dl = staging / "Daft.Punk.Discovery.FLAC"
     _flac(dl / "good.flac")
     _flac(dl / "mystery.flac")
@@ -199,7 +199,7 @@ def test_held_files_survive_post_import_cleanup(tmp_path, db):
 
 def test_cleanup_still_runs_when_nothing_is_held(tmp_path, db):
     music, staging, *_ = _seed(db, tmp_path)
-    db.update_media_management_settings({"delete_completed_transfers": True, "import_mode": "move"})
+    db.update_media_management_settings({"seed_complete_action": "remove", "import_mode": "move"})
     dl = staging / "Daft.Punk.Discovery.FLAC"
     _flac(dl / "good.flac")
 
@@ -508,7 +508,7 @@ def _with_client(db: Database):
 
 def test_commit_cleans_up_client_when_download_cleared(tmp_path, db, client, headers):
     music, files = _held_download(db, tmp_path, ["a.flac"])
-    db.update_media_management_settings({"delete_completed_transfers": True})
+    db.update_media_management_settings({"seed_complete_action": "remove"})
     driver, cfg = _with_client(db)
     with cfg, patch("plex_playlist_sync.api.routes.library.get_acquisition_driver", return_value=driver):
         out = _commit(client, headers, [_item(files[0], "trk-1", 1, "One More Time")])
@@ -527,7 +527,7 @@ def test_commit_does_not_clean_up_client_while_files_remain(tmp_path, db, client
 
 def test_commit_survives_client_cleanup_failure(tmp_path, db, client, headers):
     music, files = _held_download(db, tmp_path, ["a.flac"])
-    db.update_media_management_settings({"delete_completed_transfers": True})
+    db.update_media_management_settings({"seed_complete_action": "remove"})
     driver, cfg = _with_client(db)
     driver.cleanup_completed.side_effect = RuntimeError("client down")
     with cfg, patch("plex_playlist_sync.api.routes.library.get_acquisition_driver", return_value=driver):
@@ -583,7 +583,7 @@ def test_commit_keeps_transfer_when_delete_completed_off(tmp_path, db, client, h
 def test_commit_hardlink_keeps_seeding_until_limits_met(tmp_path, db, client, headers):
     music, files = _held_download(db, tmp_path, ["a.flac"])
     db.update_media_management_settings(
-        {"delete_completed_transfers": True, "import_mode": "hardlink", "seed_ratio_limit": 2.0}
+        {"seed_complete_action": "remove", "import_mode": "hardlink", "seed_ratio_limit": 2.0}
     )
     driver, _ = _with_client(db)
     driver.get_status.return_value = {"status": "completed", "ratio": 0.5, "seeding_time_seconds": 0}
@@ -597,7 +597,7 @@ def test_commit_hardlink_keeps_seeding_until_limits_met(tmp_path, db, client, he
 def test_commit_hardlink_cleans_up_when_limits_met(tmp_path, db, client, headers):
     music, files = _held_download(db, tmp_path, ["a.flac"])
     db.update_media_management_settings(
-        {"delete_completed_transfers": True, "import_mode": "hardlink", "seed_ratio_limit": 2.0}
+        {"seed_complete_action": "remove", "import_mode": "hardlink", "seed_ratio_limit": 2.0}
     )
     driver, _ = _with_client(db)
     driver.get_status.return_value = {"status": "completed", "ratio": 2.5, "seeding_time_seconds": 0}
@@ -608,7 +608,7 @@ def test_commit_hardlink_cleans_up_when_limits_met(tmp_path, db, client, headers
 
 def test_commit_keeps_transfer_when_status_fetch_fails(tmp_path, db, client, headers):
     music, files = _held_download(db, tmp_path, ["a.flac"])
-    db.update_media_management_settings({"delete_completed_transfers": True})
+    db.update_media_management_settings({"seed_complete_action": "remove"})
     driver, _ = _with_client(db)
     driver.get_status.side_effect = RuntimeError("client down")
     out = _commit_with_driver(client, headers, db, files, driver)
@@ -619,7 +619,7 @@ def test_commit_keeps_transfer_when_status_fetch_fails(tmp_path, db, client, hea
 
 def test_worker_keeps_transfer_when_delete_completed_off(tmp_path, db):
     music, staging, *_ = _seed(db, tmp_path)
-    db.update_media_management_settings({"delete_completed_transfers": False, "import_mode": "move"})
+    db.update_media_management_settings({"seed_complete_action": "keep", "import_mode": "move"})
     dl = staging / "Daft.Punk.Discovery.FLAC"
     _flac(dl / "good.flac")
     _, driver = _run_worker(db, dl, staging, {"good.flac": MATCHED})
@@ -633,7 +633,7 @@ def test_worker_source_preserving_mode_respects_seed_limits(tmp_path, db, mode, 
     music, staging, *_ = _seed(db, tmp_path)
     _as_torrent(db)
     db.update_media_management_settings(
-        {"delete_completed_transfers": True, "import_mode": mode, "seed_ratio_limit": 2.0}
+        {"seed_complete_action": "remove", "import_mode": mode, "seed_ratio_limit": 2.0}
     )
     dl = staging / "Daft.Punk.Discovery.FLAC"
     _flac(dl / "good.flac")

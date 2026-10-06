@@ -1,7 +1,7 @@
 import React, { useId, useState } from 'react';
 import { Eye, EyeOff, Loader2, Save } from 'lucide-react';
 import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, FormField, MonitorOptionSelect, ScrollFill } from '@/components/ui';
-import type { MediaManagementSettings } from '@/types/models';
+import type { MediaManagementSettings, SeedCompleteAction } from '@/types/models';
 import { updateMediaManagementSettings } from '@/services/settingsService';
 import { NamingFormatsEditor } from '@/components/naming/NamingFormatsEditor';
 import { inputClass, labelClass } from './formClasses';
@@ -22,6 +22,7 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
   const stagingId = useId();
   const importModeId = useId();
   const hardlinkTagsId = useId();
+  const seedActionId = useId();
   const scanMonitorId = useId();
   const addMonitorId = useId();
   const acoustidKeyId = useId();
@@ -162,6 +163,37 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
               </p>
             </div>
           )}
+
+          <div>
+            <label htmlFor={seedActionId} className={labelClass}>When seeding is done</label>
+            <select
+              id={seedActionId}
+              name="seed_complete_action"
+              value={settings?.seed_complete_action ?? 'keep'}
+              onChange={(e) => {
+                const v = e.target.value;
+                const action: SeedCompleteAction = v === 'remove' || v === 'remove_and_delete' ? v : 'keep';
+                onChange((prev) => (prev ? { ...prev, seed_complete_action: action } : null));
+              }}
+              className={inputClass}
+            >
+              <option value="keep">Keep seeding</option>
+              <option value="remove">Remove torrent (keep files)</option>
+              <option value="remove_and_delete">Remove torrent and its files</option>
+            </select>
+            <p className="mt-1.5 text-[11px] font-mono text-neutral-500">
+              Files are only deleted once the seed goal is met and your library has its own copy. Never in Move mode, and never
+              while files wait for manual import.
+            </p>
+            {settings?.seed_complete_action === 'remove_and_delete' && (settings.import_mode ?? 'move') === 'move' && (
+              <p
+                role="alert"
+                className="mt-1.5 px-2 py-1.5 rounded-[3px] border border-[#e5a00d]/50 bg-[#e5a00d]/10 text-[11px] font-mono text-[#e5a00d]"
+              >
+                In Move mode the library holds the only copy, so files are never deleted &mdash; the torrent is removed only.
+              </p>
+            )}
+          </div>
 
           <div className="flex flex-col justify-end">
             <div className="flex items-center justify-between pb-2">

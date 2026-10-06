@@ -29,3 +29,4 @@ export * from './releaseProfileService';
 export * from './delayProfileService';
 export * from './manualImportService';
 export * from './libraryHealthService';
+export * from './seedCleanupService';

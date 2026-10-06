@@ -4,13 +4,18 @@ import { ScrollFill, TactileSwitch, TapeDeckButton } from '@/components/ui';
 import { ManualImportModal } from '@/components/manualImport';
 import { formatDateTime } from '@/components/lists';
 import { useLibraryHealth } from '@/hooks/useLibraryHealth';
+import { useSeedCleanup } from '@/hooks/useSeedCleanup';
 import type { ManualImportScope } from '@/types/manualImport';
 import type { LibraryHealthFinding, LibraryHealthRun } from '@/types/libraryHealth';
 import type { ActivityPanelProps } from './ActivityQueuePanel';
 import { ReviewMappingCard } from './ReviewMappingCard';
 import { ReviewGroupList } from './ReviewGroupList';
 import { ReviewWeakMatches } from './ReviewWeakMatches';
+import { ReviewOrphans } from './ReviewOrphans';
+import { ReviewCleanupFailed } from './ReviewCleanupFailed';
+import { SeedCleanupStrip } from './SeedCleanupStrip';
 import { fileName, weakMatchInfo } from './reviewCauses';
+import { isSeedCleanupKind } from './seedCleanupInfo';
 
 export interface NeedsReviewPanelProps extends ActivityPanelProps {
   /** Called whenever findings may have changed so the nav badge can refresh. */
@@ -31,6 +36,12 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
   const hl = useLibraryHealth({ onChanged, onToast });
   const [importScope, setImportScope] = useState<ManualImportScope | null>(null);
   const { data, loading, error, running, busy } = hl;
+  const { refresh: refreshHealth } = hl;
+  const handleCleanupFinished = useCallback((): void => {
+    void refreshHealth();
+    onChanged();
+  }, [refreshHealth, onChanged]);
+  const sc = useSeedCleanup({ onFinished: handleCleanupFinished, onToast });
 
   const rematch = useCallback((f: LibraryHealthFinding): void => {
     const info = weakMatchInfo(f);
@@ -42,10 +53,12 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
     onChanged();
   }, [hl, onChanged]);
 
-  const { regularGroups, weak } = useMemo(
+  const { regularGroups, weak, orphans, failed } = useMemo(
     () => ({
-      regularGroups: (data?.groups ?? []).filter((g) => g.kind !== 'weak_match'),
+      regularGroups: (data?.groups ?? []).filter((g) => g.kind !== 'weak_match' && !isSeedCleanupKind(g.kind)),
       weak: (data?.findings ?? []).filter((f) => f.kind === 'weak_match'),
+      orphans: (data?.findings ?? []).filter((f) => f.kind === 'orphan_torrent'),
+      failed: (data?.findings ?? []).filter((f) => f.kind === 'cleanup_failed'),
     }),
     [data]
   );
@@ -68,7 +81,7 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
   const { server, last_run: run, mapping } = data;
   const supported = server !== null && server.file_paths;
   const serverName = server ? serverLabel(server.kind) : 'server';
-  const empty = regularGroups.length === 0 && weak.length === 0;
+  const empty = regularGroups.length === 0 && weak.length === 0 && orphans.length === 0 && failed.length === 0;
 
   return (
     <section className="flex flex-col gap-3 min-h-0">
@@ -113,34 +126,41 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
         )}
       </div>
 
+      <SeedCleanupStrip status={sc.status} running={sc.running} onRun={() => void sc.run()} />
+
       {!supported ? (
-        <p className="py-6 text-xs font-mono text-[var(--text-muted)]">
+        <p className="text-xs font-mono text-[var(--text-muted)]">
           {server === null
             ? 'No media server is connected, so there is nothing to compare your library against.'
             : `${serverName} does not expose file paths, so library checks are not available.`}
         </p>
       ) : (
-        <>
-          <ReviewMappingCard mapping={mapping} busy={busy} onSave={hl.saveMapping} onRemove={hl.removeMapping} />
-          <ScrollFill ariaLabel="Needs review findings" className="min-h-0 pr-1">
-            {empty ? (
-              <div className="py-10 text-center">
-                <p className="text-sm font-mono font-bold text-white">Nothing needs review</p>
-                <p className="mt-1 text-xs font-mono text-[var(--text-muted)]">
-                  {run ? `Last checked ${formatDateTime(run.finished_at ?? run.started_at)}` : 'Run a check to compare your library.'}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {regularGroups.length > 0 && (
-                  <ReviewGroupList groups={regularGroups} findings={data.findings} busy={busy} onDismiss={hl.dismiss} />
-                )}
-                {weak.length > 0 && <ReviewWeakMatches findings={weak} busy={busy} onRematch={rematch} onDismiss={hl.dismiss} />}
-              </div>
-            )}
-          </ScrollFill>
-        </>
+        <ReviewMappingCard mapping={mapping} busy={busy} onSave={hl.saveMapping} onRemove={hl.removeMapping} />
       )}
+
+      <ScrollFill ariaLabel="Needs review findings" className="min-h-0 pr-1">
+        {empty ? (
+          <div className="py-10 text-center">
+            <p className="text-sm font-mono font-bold text-white">Nothing needs review</p>
+            <p className="mt-1 text-xs font-mono text-[var(--text-muted)]">
+              {supported && run
+                ? `Last checked ${formatDateTime(run.finished_at ?? run.started_at)}`
+                : supported
+                  ? 'Run a check to compare your library.'
+                  : 'No orphaned torrents or failed cleanups.'}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {supported && regularGroups.length > 0 && (
+              <ReviewGroupList groups={regularGroups} findings={data.findings} busy={busy} onDismiss={hl.dismiss} />
+            )}
+            {weak.length > 0 && <ReviewWeakMatches findings={weak} busy={busy} onRematch={rematch} onDismiss={hl.dismiss} />}
+            {orphans.length > 0 && <ReviewOrphans findings={orphans} busy={busy} onRemove={hl.removeOrphan} />}
+            {failed.length > 0 && <ReviewCleanupFailed findings={failed} busy={busy} onRetry={hl.retryFailed} />}
+          </div>
+        )}
+      </ScrollFill>
 
       <ManualImportModal scope={importScope} onClose={() => setImportScope(null)} onImported={afterImport} />
     </section>

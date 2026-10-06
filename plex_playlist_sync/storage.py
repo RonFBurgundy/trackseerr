@@ -73,7 +73,8 @@ def clean_library_name(text: str) -> str:
 
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
-SCHEMA_VERSION = 58  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SEED_COMPLETE_ACTIONS = ("keep", "remove", "remove_and_delete")
+SCHEMA_VERSION = 59  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:
@@ -350,6 +351,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 (56, self._migration_v56),
                 (57, self._migration_v57),
                 (58, self._migration_v58),
+                (59, self._migration_v59),
             ]
 
             applied = 0
@@ -1087,6 +1089,55 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN torrent_hardlink_tags TEXT NOT NULL DEFAULT 'copy_and_tag'"
             )
+
+    def _migration_v59(self, cur: sqlite3.Cursor) -> None:
+        """Seed cleanup: ``seed_complete_action`` replaces ``delete_completed_transfers`` (kept readable, no longer
+        used), per-download cleanup bookkeeping and placed-file record, and the two new Needs-review finding kinds."""
+        cur.execute("PRAGMA table_info(media_management_settings);")
+        if "seed_complete_action" not in {row[1] for row in cur.fetchall()}:
+            cur.execute(
+                "ALTER TABLE media_management_settings ADD COLUMN seed_complete_action TEXT NOT NULL DEFAULT 'remove'"
+            )
+            cur.execute(
+                "UPDATE media_management_settings SET seed_complete_action = "
+                "CASE WHEN COALESCE(delete_completed_transfers, 0) = 0 THEN 'keep' ELSE 'remove' END"
+            )
+        cur.execute("PRAGMA table_info(active_downloads);")
+        dl_cols = {row[1] for row in cur.fetchall()}
+        for name, ddl in (
+            ("cleanup_attempts", "INTEGER NOT NULL DEFAULT 0"),
+            ("cleanup_error", "TEXT"),
+            ("placed_files", "TEXT"),
+        ):
+            if name not in dl_cols:
+                cur.execute(f"ALTER TABLE active_downloads ADD COLUMN {name} {ddl};")
+        # SQLite cannot alter a CHECK constraint: rebuild the findings table with the widened kind list.
+        cur.execute(
+            """
+            CREATE TABLE library_health_findings_new (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL CHECK (kind IN ('server_unindexed', 'server_stale', 'weak_match', 'orphan_torrent', 'cleanup_failed')),
+                server_kind TEXT,
+                cause TEXT NOT NULL,
+                group_key TEXT NOT NULL,
+                path TEXT NOT NULL,
+                detail_json TEXT,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                dismissed INTEGER NOT NULL DEFAULT 0,
+                UNIQUE (kind, path)
+            );
+            """
+        )
+        cur.execute(
+            "INSERT INTO library_health_findings_new "
+            "(id, kind, server_kind, cause, group_key, path, detail_json, first_seen, last_seen, dismissed) "
+            "SELECT id, kind, server_kind, cause, group_key, path, detail_json, first_seen, last_seen, dismissed "
+            "FROM library_health_findings"
+        )
+        cur.execute("DROP TABLE library_health_findings")
+        cur.execute("ALTER TABLE library_health_findings_new RENAME TO library_health_findings")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_health_findings_group ON library_health_findings(group_key);")
 
     def _migration_v57(self, cur: sqlite3.Cursor) -> None:
         """Library health: findings (server vs disk diff, weak import matches), run history, dismissals, and the
@@ -4403,7 +4454,9 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             res["staging_folder_path"] = str(res.get("staging_folder_path") or "/data/downloads")
             res["import_mode"] = str(res.get("import_mode") or "move")
             res["torrent_hardlink_tags"] = str(res.get("torrent_hardlink_tags") or "copy_and_tag")
-            res["delete_completed_transfers"] = bool(res.get("delete_completed_transfers", 0))
+            action = str(res.get("seed_complete_action") or "remove")
+            res["seed_complete_action"] = action if action in SEED_COMPLETE_ACTIONS else "remove"
+            res["delete_completed_transfers"] = res["seed_complete_action"] != "keep"  # legacy read-only mirror
             res["enable_quality_upgrades"] = bool(res.get("enable_quality_upgrades", 1))
             res["library_mode"] = str(res.get("library_mode") or "native")
             res["seed_ratio_limit"] = (
@@ -4446,6 +4499,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             "embed_artwork",
             "save_cover_art_file",
             "delete_completed_transfers",
+            "seed_complete_action",
             "enable_quality_upgrades",
             "library_mode",
             "seed_ratio_limit",
@@ -4470,6 +4524,13 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         for opt_key in ("scan_monitor_option", "add_monitor_option"):
             if settings.get(opt_key) is not None:
                 validate_monitor_option(settings[opt_key])
+        if settings.get("seed_complete_action") is not None and settings["seed_complete_action"] not in SEED_COMPLETE_ACTIONS:
+            raise ValueError("seed_complete_action must be one of: " + ", ".join(SEED_COMPLETE_ACTIONS))
+        settings = dict(settings)
+        legacy_delete = settings.pop("delete_completed_transfers", None)
+        if legacy_delete is not None and settings.get("seed_complete_action") is None:
+            # Deprecated boolean from older clients: true -> remove, false -> keep.
+            settings["seed_complete_action"] = "remove" if legacy_delete else "keep"
         updates: dict[str, Any] = {}
         for k, v in settings.items():
             if k in allowed_keys:
@@ -4478,7 +4539,6 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                     "write_audio_tags",
                     "embed_artwork",
                     "save_cover_art_file",
-                    "delete_completed_transfers",
                     "enable_quality_upgrades",
                     "enrich_mbids",
                     "fingerprint_on_weak_match",
@@ -4907,6 +4967,18 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             out.append(d)
         return out
 
+    def get_library_health_finding(self, finding_id: str) -> Optional[dict[str, Any]]:
+        with self._lock:
+            row = self.conn.execute("SELECT * FROM library_health_findings WHERE id = ?", (str(finding_id),)).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        try:
+            d["detail"] = json.loads(d.pop("detail_json") or "null")
+        except (TypeError, ValueError):
+            d["detail"] = None
+        return d
+
     def count_library_health_findings(self) -> int:
         with self._lock:
             row = self.conn.execute("SELECT COUNT(*) FROM library_health_findings WHERE dismissed = 0").fetchone()
@@ -5254,6 +5326,8 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         res["track_id"] = res.get("track_id")
         res["album_id"] = res.get("album_id")
         res["unmatched_files"] = self._parse_unmatched_files(res.get("unmatched_files"))
+        res["placed_files"], res["placed_mode"] = self._parse_placed_files(res.get("placed_files"))
+        res["cleanup_attempts"] = int(res.get("cleanup_attempts") or 0)
         return res
 
     @staticmethod
@@ -5270,6 +5344,21 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             return []
         return [str(p) for p in data] if isinstance(data, list) else []
 
+    @staticmethod
+    def _parse_placed_files(raw: Any) -> tuple[list[str], Optional[str]]:
+        """The persisted placed-files record ``{"mode": ..., "files": [...]}``; missing or corrupt reads as ([], None)."""
+        if not raw:
+            return [], None
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else raw
+        except (TypeError, ValueError) as exc:
+            logger.warning("Ignoring corrupt placed_files value: %s", type(exc).__name__)
+            return [], None
+        if not isinstance(data, dict) or not isinstance(data.get("files"), list):
+            return [], None
+        mode = data.get("mode")
+        return [str(p) for p in data["files"]], str(mode) if mode else None
+
     def set_download_unmatched_files(self, download_id: str, paths: list[str]) -> bool:
         """Persists the files a native download is holding for manual import (an empty list clears them)."""
         value = json.dumps([str(p) for p in paths]) if paths else None
@@ -5280,6 +5369,67 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             )
             self.conn.commit()
             return cur.rowcount > 0
+
+    def set_download_placed_files(self, download_id: str, paths: list[str], mode: Optional[str] = None) -> bool:
+        """Records the library files an import placed for a download and the import mode used (seed-cleanup safety gate)."""
+        value = json.dumps({"mode": mode, "files": [str(p) for p in paths]}) if paths else None
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE active_downloads SET placed_files = ? WHERE id = ?", (value, str(download_id))
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def add_download_placed_files(self, download_id: str, paths: list[str], mode: Optional[str] = None) -> bool:
+        """Appends to a download's placed-file record (manual import commits in batches); no duplicates.
+
+        A ``move`` anywhere makes the whole record ``move``; an unknown mode on either side leaves it unknown; a
+        hardlink/copy mix is recorded as ``hardlink`` (the stricter check).
+        """
+        row = self.get_active_download(download_id)
+        if row is None:
+            return False
+        merged = list(dict.fromkeys([*row.get("placed_files", []), *[str(p) for p in paths]]))
+        old_mode = row.get("placed_mode") if row.get("placed_files") else mode
+        if "move" in (old_mode, mode):
+            new_mode: Optional[str] = "move"
+        elif old_mode and mode:
+            new_mode = old_mode if old_mode == mode else "hardlink"  # strictest of the two safe modes
+        else:
+            new_mode = None
+        return self.set_download_placed_files(download_id, merged, new_mode)
+
+    def record_cleanup_result(self, download_id: str, attempts: int, error: Optional[str]) -> None:
+        """Stores the seed-cleanup retry counter and last error for a download (``attempts=0, error=None`` resets)."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE active_downloads SET cleanup_attempts = ?, cleanup_error = ? WHERE id = ?",
+                (int(attempts), error, str(download_id)),
+            )
+            self.conn.commit()
+
+    def get_active_download_by_hash(self, download_hash: str) -> Optional[dict[str, Any]]:
+        """Newest download row (any status) whose client hash matches, case-insensitively."""
+        with self._lock:
+            row = self.conn.execute(
+                """
+                SELECT d.*, c.name AS client_name, c.driver_type AS client_driver_type
+                FROM active_downloads d
+                LEFT JOIN download_clients c ON d.client_id = c.id
+                WHERE lower(d.download_hash) = ?
+                ORDER BY d.created_at DESC LIMIT 1
+                """,
+                (str(download_hash).lower(),),
+            ).fetchone()
+            return self._map_active_download(row) if row else None
+
+    def history_has_hash(self, download_hash: str) -> bool:
+        """True when ``download_history`` knows a release with this torrent hash (import history match)."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT 1 FROM download_history WHERE lower(info_hash) = ? LIMIT 1", (str(download_hash).lower(),)
+            ).fetchone()
+        return row is not None
 
     def create_active_download(
         self, download: Union[dict[str, Any], ActiveDownload]

@@ -147,34 +147,34 @@ def _gov(settings, mode, status):
 
 
 def test_governance_off_never_calls_client():
-    driver, res = _gov({"delete_completed_transfers": False}, "move", {})
+    driver, res = _gov({"seed_complete_action": "keep"}, "move", {})
     driver.cleanup_completed.assert_not_called()
     assert res == "imported"
 
 
 def test_governance_limits_not_met_keeps_seeding():
-    s = {"delete_completed_transfers": True, "seed_ratio_limit": 2.0}
+    s = {"seed_complete_action": "remove", "seed_ratio_limit": 2.0}
     driver, res = _gov(s, "copy", {"ratio": 1.0})
     driver.cleanup_completed.assert_not_called()
     assert res == "completed"
 
 
 def test_governance_limits_met_cleans():
-    s = {"delete_completed_transfers": True, "seed_time_limit_minutes": 10}
+    s = {"seed_complete_action": "remove", "seed_time_limit_minutes": 10}
     driver, res = _gov(s, "hardlink", {"seeding_time_seconds": 700})
     driver.cleanup_completed.assert_called_once_with("H", delete_files=False)
     assert res == "imported"
 
 
 def test_governance_move_mode_ignores_limits():
-    s = {"delete_completed_transfers": True, "seed_ratio_limit": 2.0}
+    s = {"seed_complete_action": "remove", "seed_ratio_limit": 2.0}
     driver, res = _gov(s, "move", {"ratio": 0.0})
     driver.cleanup_completed.assert_called_once()
     assert res == "imported"
 
 
 def test_governance_unknown_status_keeps_transfer():
-    s = {"delete_completed_transfers": True, "seed_ratio_limit": 2.0}
+    s = {"seed_complete_action": "remove", "seed_ratio_limit": 2.0}
     driver, res = _gov(s, "hardlink", None)
     driver.cleanup_completed.assert_not_called()
     assert res == "completed"

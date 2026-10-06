@@ -851,7 +851,7 @@ class MediaManagementSettings:
     write_audio_tags: bool = True
     embed_artwork: bool = True
     save_cover_art_file: bool = True
-    delete_completed_transfers: bool = False
+    seed_complete_action: str = "remove"
     enable_quality_upgrades: bool = True
     library_mode: str = "native"
     seed_ratio_limit: Optional[float] = None
@@ -881,7 +881,7 @@ class MediaManagementSettings:
             "write_audio_tags": bool(self.write_audio_tags),
             "embed_artwork": bool(self.embed_artwork),
             "save_cover_art_file": bool(self.save_cover_art_file),
-            "delete_completed_transfers": bool(self.delete_completed_transfers),
+            "seed_complete_action": self.seed_complete_action,
             "enable_quality_upgrades": bool(self.enable_quality_upgrades),
             "library_mode": self.library_mode,
             "seed_ratio_limit": float(self.seed_ratio_limit) if self.seed_ratio_limit is not None else None,

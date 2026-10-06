@@ -36,6 +36,7 @@ from plex_playlist_sync.acquisition_worker import (
     prepare_file_for_tagging,
     place_audio_file,
     preserves_source,
+    seed_action,
     settle_transfer_after_import,
     reconcile_audio_file_to_track,
     reconcile_audio_file_to_track_scored,
@@ -3387,6 +3388,13 @@ def _settle_download_after_manual_import(
 ) -> bool:
     """Drops imported files from a download's held list; settles the transfer once nothing is left to import."""
     done = {str(Path(r["source_path"]).resolve()) for r in results if r.get("status") == "imported" and r.get("source_path")}
+    placed_modes = {str(r.get("mode") or "move") for r in results if r.get("status") == "imported" and r.get("destination_path")}
+    placed_paths = [str(r["destination_path"]) for r in results if r.get("status") == "imported" and r.get("destination_path")]
+    if placed_paths:
+        # Record what this commit placed so the seed-cleanup safety gate can verify the library copies later.
+        record_mode = "move" if "move" in placed_modes else ("hardlink" if "hardlink" in placed_modes else "copy")
+        db.add_download_placed_files(download["id"], placed_paths, record_mode)
+        download = db.get_active_download(download["id"]) or download
     held = [p for p in download.get("unmatched_files") or []]
     still_held = [p for p in held if str(Path(p).resolve()) not in done and os.path.isfile(p)]
     db.set_download_unmatched_files(download["id"], still_held)
@@ -3400,6 +3408,7 @@ def _settle_download_after_manual_import(
     modes = [str(r.get("mode") or "move") for r in results if r.get("status") == "imported"]
     # Any move-mode file has left the torrent's folder, so seeding retention no longer applies.
     effective_mode = "move" if not modes or not all(preserves_source(m) for m in modes) else modes[0]
+    download = db.get_active_download(download["id"]) or download  # fresh placed/unmatched records for the safety gate
     new_status = _govern_download_at_client(db, download, media_settings, effective_mode)
     fields: dict[str, Any] = {"status": new_status, "error_message": ""}
     if new_status == DownloadStatus.COMPLETED.value:
@@ -3413,7 +3422,7 @@ def _govern_download_at_client(
     db: Database, download: dict[str, Any], media_settings: dict[str, Any], import_mode: str
 ) -> str:
     """Runs the worker's shared post-import governance for a manual import; returns the status to record."""
-    if not media_settings.get("delete_completed_transfers"):
+    if seed_action(media_settings) == "keep":
         return DownloadStatus.IMPORTED.value
     client_id = download.get("client_id")
     if not client_id:
@@ -3435,7 +3444,7 @@ def _govern_download_at_client(
         if not status_dict:
             logger.warning("Keeping transfer %s: driver returned no status", target_lookup)
             return DownloadStatus.COMPLETED.value
-        return settle_transfer_after_import(driver, target_lookup, media_settings, import_mode, status_dict, download)
+        return settle_transfer_after_import(driver, target_lookup, media_settings, import_mode, status_dict, download, db)
     except Exception as exc:  # the commit has already succeeded; never fail it over client governance
         logger.warning("Error settling transfer %s: %s", target_lookup, redact_text(str(exc)))
         return DownloadStatus.COMPLETED.value

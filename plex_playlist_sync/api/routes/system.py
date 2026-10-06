@@ -20,10 +20,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from plex_playlist_sync import art_pipeline
+from plex_playlist_sync import art_pipeline, library_health, seed_cleanup
 from plex_playlist_sync.acquisition_worker import acquisition_worker
 from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
 from plex_playlist_sync.api.dependencies import (
+    get_active_media_server,
     get_config,
     authenticate_request,
     get_current_user,
@@ -47,6 +48,7 @@ from plex_playlist_sync.clients.deezer import DeezerClient
 from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import as_media_server, build_jellyfin, build_subsonic
+from plex_playlist_sync.media_servers.base import MediaServer
 from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.config import MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_SUBSONIC, Config
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result, track_job
@@ -872,6 +874,8 @@ VALID_TASK_IDS = {
     "download_queue_monitor",
     "artist_metadata_refresh",
     "art_thumbnail_backfill",
+    "seed_cleanup",
+    "library_health",
 }
 
 _running_tasks: set[str] = set()
@@ -1042,6 +1046,41 @@ def get_all_scheduled_tasks(
         )
     )
 
+    # 9. seed_cleanup: finished-torrent sweep (seed_cleanup)
+    sc_stat = seed_cleanup.get_status(db)
+    sc_last = (sc_stat.get("last_run") or {}).get("finished_at") or _task_last_run_at.get("seed_cleanup")
+    tasks.append(
+        ScheduledTaskItem(
+            id="seed_cleanup",
+            name="Seed Cleanup",
+            description="Removes finished torrents per the 'When seeding is done' setting and flags torrents TrackSeerr no longer tracks for review.",
+            interval="Every 24h",
+            status="running" if (sc_stat.get("running") or "seed_cleanup" in _running_tasks) else "idle",
+            last_run_at=sc_last,
+            can_trigger=True,
+            can_cancel=False,
+        )
+    )
+
+    # 10. library_health: media-server vs disk reconciliation (library_health)
+    try:
+        lh_run = db.get_last_library_health_run() or {}
+    except sqlite3.Error as exc:
+        logger.warning("Could not read the last library health run: %s", safe_exc(exc))
+        lh_run = {}
+    tasks.append(
+        ScheduledTaskItem(
+            id="library_health",
+            name="Library Health Check",
+            description="Compares the music folder with what the media server indexes and records what is missing, stale or weakly matched.",
+            interval="Weekly",
+            status="running" if (library_health.is_running() or "library_health" in _running_tasks) else "idle",
+            last_run_at=lh_run.get("finished_at") or lh_run.get("started_at") or _task_last_run_at.get("library_health"),
+            can_trigger=True,
+            can_cancel=False,
+        )
+    )
+
     return tasks
 
 
@@ -1064,6 +1103,7 @@ def run_scheduled_task(
     spotify_client: Optional[SpotifyClient] = Depends(get_spotify_client),
     deezer_client: Optional[DeezerClient] = Depends(get_deezer_client),
     lidarr_client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    media_server: Optional[MediaServer] = Depends(get_active_media_server),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Dispatches the specified background task asynchronously (admin required)."""
@@ -1075,6 +1115,16 @@ def run_scheduled_task(
             status_code=status.HTTP_409_CONFLICT,
             detail="Library manager is set to TrackSeerr; the Lidarr trickle is disabled.",
         )
+
+    if task_id == "seed_cleanup":
+        if get_library_mode(db) == MODE_LIDARR:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Library manager is Lidarr; seed cleanup is disabled.")
+        if not seed_cleanup.start_sweep_async(db):
+            return {"success": True, "message": "Task 'seed_cleanup' is already running"}
+    elif task_id == "library_health":
+        music_root = Path(db.get_media_management_settings().get("root_folder_path") or "/music")
+        if not library_health.start_check_async(db, media_server, music_root=music_root):
+            return {"success": True, "message": "Task 'library_health' is already running"}
 
     now_iso = datetime.now(timezone.utc).isoformat()
     with _tasks_lock:
