@@ -34,7 +34,7 @@ def test_copy_keeps_source_and_target_identical(tmp_path):
     assert src.exists()
     assert dst.read_bytes() == src.read_bytes()
     assert dst.stat().st_ino != src.stat().st_ino
-    assert [p.name for p in dst.parent.iterdir()] == ["a.flac"]  # no temp left behind
+    assert sorted(p.name for p in dst.parent.iterdir()) == ["a.flac"]  # no temp left behind
 
 
 def test_hardlink_shares_inode(tmp_path):
@@ -84,7 +84,7 @@ def test_safe_atomic_move_exdev_copies_then_unlinks(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "replace", replace)
     dst = safe_atomic_move(src, tmp_path / "lib" / "a.flac")
     assert dst.exists() and not src.exists()
-    assert [p.name for p in dst.parent.iterdir()] == ["a.flac"]
+    assert sorted(p.name for p in dst.parent.iterdir()) == ["a.flac"]
 
 
 def test_safe_atomic_move_reraises_non_exdev(tmp_path, monkeypatch, caplog):

@@ -39,6 +39,7 @@ from plex_playlist_sync.models import (
 )
 from plex_playlist_sync.storage import Database
 
+pytestmark = pytest.mark.real_mbid_enricher
 
 def _create_minimal_flac(path: Path) -> None:
     """Writes a valid minimal FLAC stream header recognizable by Mutagen."""

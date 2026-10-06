@@ -9,6 +9,7 @@ import socket
 os.environ["TRACKSEERR_LEGACY_UI"] = "1"
 
 import pytest
+from unittest.mock import patch
 
 # The Lidarr contract tests need a real Lidarr: not even collected unless RUN_INTEGRATION=1 (docs/INTEGRATION_TESTS.md).
 collect_ignore_glob = [] if os.environ.get("RUN_INTEGRATION") == "1" else ["integration/*"]
@@ -88,6 +89,21 @@ def _restore_root_logging():
             root.removeHandler(handler)
             handler.close()
     root.setLevel(before_level)
+
+
+@pytest.fixture(autouse=True)
+def _stub_mbid_enricher(request, monkeypatch):
+    """Autouse fixture that stubs MbidEnricherClient.lookup_track_mbids to return None without network calls.
+
+    Opt out with ``@pytest.mark.real_mbid_enricher`` (module-level ``pytestmark`` works too) to allow
+    real MusicBrainz network calls for tests that directly exercise the enricher's HTTP logic.
+    """
+    if request.node.get_closest_marker("real_mbid_enricher") is None:
+        from unittest.mock import MagicMock
+        from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
+        mock_method = MagicMock(return_value=None)
+        monkeypatch.setattr(MbidEnricherClient, "lookup_track_mbids", mock_method)
+    yield
 
 
 def _stop_worker_singletons_started_since(before: set) -> None:
