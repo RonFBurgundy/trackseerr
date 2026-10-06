@@ -483,8 +483,8 @@ def test_record_weak_match_and_failure_never_raises(db):
 
 
 def test_migration_v57(db):
-    assert SCHEMA_VERSION == 57
-    assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 57
+    assert SCHEMA_VERSION >= 57
+    assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] >= 57
     for table in ("library_health_findings", "library_health_runs", "library_health_dismissals"):
         assert db.conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (table,)).fetchone()
     cols = {r[1] for r in db.conn.execute("PRAGMA table_info(media_server_settings)")}

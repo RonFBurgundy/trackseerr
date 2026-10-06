@@ -9,7 +9,7 @@ from plex_playlist_sync import acquisition_worker as aw
 from plex_playlist_sync.acquisition_worker import ensure_private_copy
 
 from tests.test_manual_import_hold import (  # noqa: F401  (fixtures + helpers)
-    MATCHED, _commit, _flac, _held_download, _run_worker, _seed, client, config, db, headers,
+    MATCHED, _as_torrent, _commit, _flac, _held_download, _run_worker, _seed, client, config, db, headers,
 )
 
 
@@ -53,6 +53,7 @@ def test_ensure_private_copy_failure_returns_false_and_cleans_up(tmp_path):
 
 def _worker_import(tmp_path, db, *, write_tags: bool):
     music, staging, *_ = _seed(db, tmp_path)
+    _as_torrent(db)
     db.update_media_management_settings({"import_mode": "hardlink", "write_audio_tags": write_tags,
                                          "embed_artwork": False})
     dl = staging / "Daft.Punk.Discovery.FLAC"
@@ -94,6 +95,7 @@ def test_worker_without_write_tags_keeps_link(tmp_path, db):
 
 def _commit_hardlink(tmp_path, db, client, headers, *, write_tags: bool):
     music, files = _held_download(db, tmp_path, ["a.flac"])
+    _as_torrent(db)
     item = {"source_path": str(files[0]), "artist_id": "art-1", "album_id": "alb-1", "track_id": "trk-1",
             "track_title": "One More Time", "track_number": 1, "mode": "hardlink", "write_tags": write_tags}
     return music, files[0], item
@@ -115,7 +117,7 @@ def test_manual_commit_copy_failure_skips_tags(tmp_path, db, client, headers):
     before = src.read_bytes()
     calls = []
     with patch("plex_playlist_sync.api.routes.library.write_audio_tags", side_effect=lambda *a, **k: calls.append(a)), \
-         patch("plex_playlist_sync.api.routes.library.ensure_private_copy", return_value=False):
+         patch("plex_playlist_sync.acquisition_worker.ensure_private_copy", return_value=False):
         _commit(client, headers, [item])
     assert calls == [] and src.read_bytes() == before
 

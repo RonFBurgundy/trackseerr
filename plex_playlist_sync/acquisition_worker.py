@@ -23,7 +23,7 @@ from typing import Any, Callable, Optional
 import httpx
 
 from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
-from plex_playlist_sync.clients.acquisition import get_acquisition_driver
+from plex_playlist_sync.clients.acquisition import get_acquisition_driver, is_torrent_driver_type
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import as_media_server
@@ -230,6 +230,40 @@ def ensure_private_copy(path: Path | str) -> bool:
         return False
     logger.info("Broke hardlink for tagging: %s", p)
     return True
+
+
+TORRENT_HARDLINK_TAG_MODES = ("copy_and_tag", "keep_hardlink")
+
+
+def effective_import_mode(client_type: str | None, media_settings: dict[str, Any]) -> str:
+    """Import mode for a download: the configured mode for torrent clients, always "move" for everything else.
+
+    Usenet and Soulseek files do not seed from their source, so there is nothing to preserve.
+    """
+    if not is_torrent_driver_type(client_type):
+        return "move"
+    mode = str(media_settings.get("import_mode") or "move")
+    return mode if mode in IMPORT_MODES else "move"
+
+
+def prepare_file_for_tagging(path: Path | str, media_settings: dict[str, Any]) -> bool:
+    """True when ``path`` may be rewritten with tags/artwork; False when tag and art writes must be skipped.
+
+    A hardlinked file (shared inode with a seeding torrent) is either kept untouched (``keep_hardlink``) or split into
+    a private copy first (``copy_and_tag``, the default, via ``ensure_private_copy``).
+    """
+    p = Path(path)
+    if str(media_settings.get("torrent_hardlink_tags") or "copy_and_tag") == "keep_hardlink":
+        try:
+            shared = p.stat().st_nlink > 1
+        except OSError as e:
+            logger.warning("Cannot stat '%s' before tagging; skipping tag writes: %s", p, e)
+            return False
+        if shared:
+            logger.info("Kept hardlink; skipped tag writing for %s", p)
+            return False
+        return True
+    return ensure_private_copy(p)
 
 
 def settle_transfer_after_import(
@@ -756,7 +790,6 @@ class AcquisitionWorker:
         staging_dir: Optional[str] = None,
     ) -> dict[str, int]:
         media_settings = db.get_media_management_settings()
-        import_mode = media_settings.get("import_mode", "move")
         write_tags = bool(media_settings.get("write_audio_tags", True))
         embed_art = bool(media_settings.get("embed_artwork", True))
         save_cover = bool(media_settings.get("save_cover_art_file", True))
@@ -912,7 +945,14 @@ class AcquisitionWorker:
                 if media_settings.get("delete_completed_transfers"):
                     db.update_download_status(
                         download_id,
-                        status=settle_transfer_after_import(driver, target_lookup, media_settings, import_mode, status_dict, item),
+                        status=settle_transfer_after_import(
+                            driver,
+                            target_lookup,
+                            media_settings,
+                            effective_import_mode(client_config.get("driver_type"), media_settings),
+                            status_dict,
+                            item,
+                        ),
                     )
                 continue
 
@@ -922,6 +962,7 @@ class AcquisitionWorker:
 
                 # Special case: Lidarr performs native file organization
                 driver_type = str(client_config.get("driver_type", "")).lower()
+                import_mode = effective_import_mode(driver_type, media_settings)
                 if driver_type == "lidarr":
                     db.update_download_status(download_id, status=DownloadStatus.IMPORTED.value)
                     req_row = None
@@ -1315,7 +1356,7 @@ class AcquisitionWorker:
                             logger.warning("AcquisitionWorker: MBID enrichment error: %s", e)
 
                     file_write_tags, file_embed_art = write_tags, embed_art
-                    if (file_write_tags or (file_embed_art and cover_bytes)) and not ensure_private_copy(placed_path):
+                    if (file_write_tags or (file_embed_art and cover_bytes)) and not prepare_file_for_tagging(placed_path, media_settings):
                         file_write_tags = file_embed_art = False
                     if file_write_tags:
                         art_to_embed = cover_bytes if file_embed_art else None

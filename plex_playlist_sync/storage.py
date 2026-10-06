@@ -73,7 +73,7 @@ def clean_library_name(text: str) -> str:
 
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
-SCHEMA_VERSION = 57  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 58  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:
@@ -349,6 +349,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 (55, self._migration_v55),
                 (56, self._migration_v56),
                 (57, self._migration_v57),
+                (58, self._migration_v58),
             ]
 
             applied = 0
@@ -1078,6 +1079,14 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         cur.execute("PRAGMA table_info(active_downloads);")
         if "unmatched_files" not in {row[1] for row in cur.fetchall()}:
             cur.execute("ALTER TABLE active_downloads ADD COLUMN unmatched_files TEXT;")
+
+    def _migration_v58(self, cur: sqlite3.Cursor) -> None:
+        """How hardlinked torrent files are tagged: 'copy_and_tag' (private copy) or 'keep_hardlink' (skip tags)."""
+        cur.execute("PRAGMA table_info(media_management_settings);")
+        if "torrent_hardlink_tags" not in {row[1] for row in cur.fetchall()}:
+            cur.execute(
+                "ALTER TABLE media_management_settings ADD COLUMN torrent_hardlink_tags TEXT NOT NULL DEFAULT 'copy_and_tag'"
+            )
 
     def _migration_v57(self, cur: sqlite3.Cursor) -> None:
         """Library health: findings (server vs disk diff, weak import matches), run history, dismissals, and the
@@ -4393,6 +4402,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             res["save_cover_art_file"] = bool(res.get("save_cover_art_file", 1))
             res["staging_folder_path"] = str(res.get("staging_folder_path") or "/data/downloads")
             res["import_mode"] = str(res.get("import_mode") or "move")
+            res["torrent_hardlink_tags"] = str(res.get("torrent_hardlink_tags") or "copy_and_tag")
             res["delete_completed_transfers"] = bool(res.get("delete_completed_transfers", 0))
             res["enable_quality_upgrades"] = bool(res.get("enable_quality_upgrades", 1))
             res["library_mode"] = str(res.get("library_mode") or "native")
@@ -4431,6 +4441,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             "clean_artist_names",
             "staging_folder_path",
             "import_mode",
+            "torrent_hardlink_tags",
             "write_audio_tags",
             "embed_artwork",
             "save_cover_art_file",
@@ -4451,6 +4462,11 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         }
         if settings.get("import_bitrate_check") is not None and str(settings["import_bitrate_check"]).strip().lower() not in CHECK_MODES:
             raise ValueError("import_bitrate_check must be one of: off, warn, reject")
+        if settings.get("torrent_hardlink_tags") is not None and settings["torrent_hardlink_tags"] not in (
+            "copy_and_tag",
+            "keep_hardlink",
+        ):
+            raise ValueError("torrent_hardlink_tags must be one of: copy_and_tag, keep_hardlink")
         for opt_key in ("scan_monitor_option", "add_monitor_option"):
             if settings.get(opt_key) is not None:
                 validate_monitor_option(settings[opt_key])

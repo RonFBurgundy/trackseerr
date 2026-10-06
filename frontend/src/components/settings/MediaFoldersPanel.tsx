@@ -21,6 +21,7 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
   const rootId = useId();
   const stagingId = useId();
   const importModeId = useId();
+  const hardlinkTagsId = useId();
   const scanMonitorId = useId();
   const addMonitorId = useId();
   const acoustidKeyId = useId();
@@ -107,7 +108,7 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-[#1f1f1f]">
           <div>
-            <label htmlFor={importModeId} className={labelClass}>Import Mode</label>
+            <label htmlFor={importModeId} className={labelClass}>Import mode (torrents)</label>
             <select
               id={importModeId}
               name="import_mode"
@@ -123,6 +124,9 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
               <option value="hardlink">Hardlink</option>
               <option value="copy">Copy</option>
             </select>
+            <p className="mt-1.5 text-[11px] font-mono text-neutral-500">
+              Usenet and Soulseek downloads are always moved &mdash; nothing seeds from them.
+            </p>
             {settings?.seed_rule_conflict && (settings?.import_mode ?? 'move') === 'move' && (
               <p
                 role="alert"
@@ -132,6 +136,32 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
               </p>
             )}
           </div>
+
+          {settings?.import_mode === 'hardlink' && (
+            <div>
+              <label htmlFor={hardlinkTagsId} className={labelClass}>Tagging hardlinked torrent files</label>
+              <select
+                id={hardlinkTagsId}
+                name="torrent_hardlink_tags"
+                value={settings.torrent_hardlink_tags ?? 'copy_and_tag'}
+                onChange={(e) =>
+                  onChange((prev) =>
+                    prev
+                      ? { ...prev, torrent_hardlink_tags: e.target.value === 'keep_hardlink' ? 'keep_hardlink' : 'copy_and_tag' }
+                      : null
+                  )
+                }
+                className={inputClass}
+              >
+                <option value="copy_and_tag">Write tags (temporary copy while seeding)</option>
+                <option value="keep_hardlink">Keep hardlink (don&apos;t write tags)</option>
+              </select>
+              <p className="mt-1.5 text-[11px] font-mono text-neutral-500">
+                Writing tags into a hardlink would change the torrent&apos;s data and break seeding, so TrackSeerr writes tags
+                to a separate copy. The copy&apos;s extra space is freed once seeding cleanup removes the torrent.
+              </p>
+            </div>
+          )}
 
           <div className="flex flex-col justify-end">
             <div className="flex items-center justify-between pb-2">

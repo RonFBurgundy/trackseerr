@@ -34,6 +34,9 @@ class AcquisitionUnavailableError(RuntimeError):
 class AcquisitionDriver(ABC):
     """Abstract base class for all acquisition drivers."""
 
+    #: True for torrent clients, whose completed files seed from their original location (import mode applies).
+    is_torrent: bool = False
+
     @abstractmethod
     def test_connection(self) -> tuple[bool, str]:
         """Test connectivity and authentication with download client or indexer.
