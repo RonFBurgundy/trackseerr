@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Pencil, Pin, Trash2 } from 'lucide-react';
 import { ConfirmDangerButton, MachinedCard, SortableList, SortControls, TapeDeckButton } from '@/components/ui';
+import type { LibraryManagerMode } from '@/types/models';
 import type { DelayProfile } from '@/types/delayProfiles';
 import { useDelayProfiles, usePendingReleases } from '@/hooks/useDelayProfiles';
 import { DelayProfileEditorModal, type DelayProfileTarget } from './DelayProfileEditorModal';
@@ -33,11 +34,12 @@ const Summary: React.FC<{ p: DelayProfile }> = ({ p }) => (
 
 export interface DelayProfilesSectionProps {
   enabled: boolean;
+  libraryMode: LibraryManagerMode;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
 }
 
 /** Ordered delay profiles (first match wins; the default is pinned last) plus the queue of held-back releases. */
-export const DelayProfilesSection: React.FC<DelayProfilesSectionProps> = ({ enabled, onToast }) => {
+export const DelayProfilesSection: React.FC<DelayProfilesSectionProps> = ({ enabled, libraryMode, onToast }) => {
   const { profiles, loading, save, remove, reorder } = useDelayProfiles(enabled, onToast);
   const pending = usePendingReleases(enabled, onToast);
   const [editing, setEditing] = useState<DelayProfileTarget | null>(null);
@@ -85,7 +87,7 @@ export const DelayProfilesSection: React.FC<DelayProfilesSectionProps> = ({ enab
         </div>
       )}
       <PendingReleasesList manager={pending} />
-      <DelayProfileEditorModal target={editing} onClose={() => setEditing(null)} onSave={save} />
+      <DelayProfileEditorModal target={editing} libraryMode={libraryMode} onClose={() => setEditing(null)} onSave={save} />
     </ProfileSection>
   );
 };

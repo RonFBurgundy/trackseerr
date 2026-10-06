@@ -174,13 +174,11 @@ def test_artist_without_tags_field_uses_default(db):
     assert delay_gate.resolve_delay_profile(db, "Nirvana")["is_default"]
 
 
-def test_artist_tags_read_from_metadata_when_present(db):
+def test_artist_tags_read_from_artist_tags_table(db):
     _profiles(db)
-    db.conn.execute(
-        "INSERT INTO library_artists (id, name, clean_name, metadata_json) VALUES ('a1', 'Sepultura', 'sepultura', ?)",
-        (json.dumps({"tags": ["metal"]}),),
-    )
+    db.conn.execute("INSERT INTO library_artists (id, name, clean_name) VALUES ('a1', 'Sepultura', 'sepultura')")
     db.conn.commit()
+    db.set_artist_tags("a1", [db.get_tag_by_label("metal")["id"]])
     assert delay_gate.resolve_delay_profile(db, "Sepultura")["name"] == "Metal"
 
 

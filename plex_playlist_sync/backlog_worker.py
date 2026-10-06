@@ -53,6 +53,16 @@ from plex_playlist_sync.storage import Database
 logger = logging.getLogger(__name__)
 
 
+def _cached_artist_tags(db: Database, cache: dict[str, list[str]], artist_name: Optional[str]) -> list[str]:
+    """Artist tag labels by name, looked up once per artist per ``cache`` (one cache per sweep)."""
+    key = (artist_name or "").strip().lower()
+    if not key:
+        return []
+    if key not in cache:
+        cache[key] = delay_gate.artist_tags(db, artist_name)
+    return cache[key]
+
+
 def _current_floor(
     db: Database,
     prof: QualityProfile,
@@ -61,10 +71,12 @@ def _current_floor(
     request_id: Optional[str] = None,
     track_id: Optional[str] = None,
     album_id: Optional[str] = None,
+    artist_tags: Optional[list[str]] = None,
 ) -> int:
     """Upgrade floor for the file currently held. The current file is scored from the release title it was imported
     from (download history) so its format score is real; when that title is unknown (or no longer matches the stored
-    quality) only a better quality tier counts as an upgrade, so a same-tier candidate is never re-grabbed in a loop."""
+    quality) only a better quality tier counts as an upgrade, so a same-tier candidate is never re-grabbed in a loop.
+    ``artist_tags`` scope tag-restricted release profiles exactly as they do for the candidate being compared."""
     bare = parse_release_title(current_quality)
     if bare.quality == "Unknown":
         bare.quality = current_quality
@@ -72,8 +84,8 @@ def _current_floor(
     if title:
         titled = parse_release_title(title)
         if titled.quality in {current_quality, bare.quality}:
-            return upgrade_floor(evaluate_release(titled, prof), prof)
-    return upgrade_floor(evaluate_release(bare, prof), prof, title_known=False)
+            return upgrade_floor(evaluate_release(titled, prof, artist_tags=artist_tags), prof)
+    return upgrade_floor(evaluate_release(bare, prof, artist_tags=artist_tags), prof, title_known=False)
 
 
 def _matches_request(candidate: AcquisitionSearchResult, req: dict[str, Any]) -> bool:
@@ -343,6 +355,7 @@ class WantedBacklogWorker:
         db.mark_tracks_searched([str(t["track_id"]) for t in runnable if t.get("track_id")])
 
         def _run() -> None:
+            tag_cache: dict[str, list[str]] = {}
             for t in runnable:
                 try:
                     min_score: Optional[int] = None
@@ -359,6 +372,7 @@ class WantedBacklogWorker:
                                 t["current_quality"],
                                 track_id=t.get("track_id"),
                                 album_id=t.get("album_id"),
+                                artist_tags=_cached_artist_tags(db, tag_cache, t.get("artist")),
                             )
                     res = acquisition_coordinator.search_and_grab(
                         artist=str(t["artist"]).strip(),
@@ -393,6 +407,7 @@ class WantedBacklogWorker:
         items_checked = 0
         items_grabbed = 0
         errors_count = 0
+        tag_cache: dict[str, list[str]] = {}
 
         # 1. Query active downloads to avoid duplicate searches
         try:
@@ -510,7 +525,13 @@ class WantedBacklogWorker:
                     prof = _to_quality_profile(profile_dict)
                     cur_q = r.get("current_quality")
                     if cur_q:
-                        min_score = _current_floor(db, prof, cur_q, request_id=r.get("id"))
+                        min_score = _current_floor(
+                            db,
+                            prof,
+                            cur_q,
+                            request_id=r.get("id"),
+                            artist_tags=_cached_artist_tags(db, tag_cache, r.get("artist")),
+                        )
                     else:
                         min_score = 0
             items_to_search.append(
@@ -594,7 +615,12 @@ class WantedBacklogWorker:
                             cur_q = t.get("quality_name")
                             if cur_q:
                                 min_score = _current_floor(
-                                    db, prof, cur_q, track_id=t.get("track_id"), album_id=t.get("album_id")
+                                    db,
+                                    prof,
+                                    cur_q,
+                                    track_id=t.get("track_id"),
+                                    album_id=t.get("album_id"),
+                                    artist_tags=_cached_artist_tags(db, tag_cache, t.get("artist_name")),
                                 )
 
                         items_to_search.append(
@@ -908,10 +934,12 @@ class RSSSyncWorker:
 
                 if req_profile:
                     parsed = parse_release_title(candidate.title)
+                    req_artist_tags = delay_gate.artist_tags(db, matched_req.get("artist") or candidate.artist)
                     eval_res = evaluate_release(
                         release=parsed,
                         profile=req_profile,
                         size_bytes=candidate.size_bytes if candidate.size_bytes > 0 else None,
+                        artist_tags=req_artist_tags,
                     )
                     if not eval_res.is_acceptable:
                         logger.debug(
@@ -928,7 +956,11 @@ class RSSSyncWorker:
                         current_score = 0
                         if current_quality:
                             current_score = _current_floor(
-                                db, req_profile, current_quality, request_id=matched_req.get("id")
+                                db,
+                                req_profile,
+                                current_quality,
+                                request_id=matched_req.get("id"),
+                                artist_tags=req_artist_tags,
                             )
 
                         if eval_res.score <= current_score:
@@ -947,7 +979,9 @@ class RSSSyncWorker:
                 # Delay gate: park the best release of the item until its protocol delay has elapsed
                 claimed_pending = None
                 if eval_res is not None and req_profile is not None:
-                    delay_profile = delay_gate.resolve_delay_profile(db, matched_req.get("artist") or candidate.artist)
+                    delay_profile = delay_gate.resolve_delay_profile(
+                        db, matched_req.get("artist") or candidate.artist, tags=req_artist_tags
+                    )
                     decision = delay_gate.apply_gate(
                         db,
                         profile=delay_profile,

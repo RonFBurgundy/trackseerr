@@ -60,6 +60,7 @@ def test_create_get_list_shapes_and_secret_masking(app_and_client, admin, test_d
     assert set(created) == {
         "id", "name", "provider", "config", "enabled", "monitor_mode", "artist_monitor_option", "quality_profile_id",
         "sync_interval_minutes", "last_synced_at", "last_status", "last_error", "item_counts", "created_at", "updated_at",
+        "tags",
     }
     assert created["config"]["api_key"] == "********" and created["config"]["username"] == "ron"
     assert created["item_counts"] == {"applied": 0, "pending": 0, "unresolved": 0, "failed": 0, "skipped": 0}

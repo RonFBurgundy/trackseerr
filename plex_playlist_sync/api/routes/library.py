@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, model_validator
 
 import httpx
 
+from plex_playlist_sync import delay_gate
 from plex_playlist_sync import library_paging as paging
 from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
 from plex_playlist_sync import art_pipeline, art_thumbs
@@ -131,6 +132,7 @@ from plex_playlist_sync.recycle_bin import (
     restore_recycled,
 )
 from plex_playlist_sync.storage import Database, clean_library_name
+from plex_playlist_sync.tag_store import UnknownTag
 from plex_playlist_sync.track_counts import positive_int as _positive_int
 
 logger = logging.getLogger(__name__)
@@ -202,11 +204,23 @@ class ArtistBulkEditRequest(BaseModel):
     # Omitted: an unmonitor (monitored=false) cascades to albums (and native tracks) by default, so artists never end
     # up unmonitored with monitored children; an explicit value always wins.
     apply_monitor_to_albums: Optional[bool] = None
+    # Native only: tag ids to add to / remove from every selected artist (no overlap allowed).
+    add_tags: list[int] = Field(default_factory=list)
+    remove_tags: list[int] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
     def _deprecated_profile_keys(cls, data: Any) -> Any:
         return accept_deprecated_profile_keys(data)
+
+
+class ArtistTagsRequest(BaseModel):
+    tags: list[int] = Field(default_factory=list, description="Tag ids; replaces the artist's tags")
+
+
+class ArtistTagsResponse(BaseModel):
+    artist_id: str
+    tags: list[int]
 
 
 class AlbumBulkEditRequest(BaseModel):
@@ -878,10 +892,12 @@ def _enrich_artists(db: Database, artists: list[dict[str, Any]]) -> list[dict[st
             artist_ids,
         )
         cover_urls = dict(cover_cur.fetchall())
+    tag_ids = db.get_artist_tags_map(artist_ids)
 
     results: list[dict[str, Any]] = []
     for artist in artists:
         a_dict = dict(artist)
+        a_dict["tags"] = tag_ids.get(str(artist["id"]), [])
         a_dict["album_count"] = album_counts.get(artist["id"], 0)
         a_dict["track_count"] = track_counts.get(artist["id"], 0)
 
@@ -1319,6 +1335,7 @@ def get_artist(
         alb["track_count"] = alb.get("total_tracks") or stored.get(alb["id"], 0)
         alb["track_file_count"] = with_files.get(alb["id"], 0)
     result["metadata_profile_id"] = profile["id"] if profile else None
+    result["tags"] = db.get_artist_tag_ids(artist_id)
     result["albums"] = albums
 
     img: Optional[str] = artist.get("image_url")
@@ -1511,6 +1528,27 @@ def set_artist_monitored(
     return updated or {}
 
 
+@router.put(
+    "/artists/{artist_id}/tags",
+    response_model=ArtistTagsResponse,
+    dependencies=[Depends(require_core_tier), Depends(track_admin_actor)],
+)
+def set_artist_tags(
+    artist_id: str,
+    body: ArtistTagsRequest,
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> ArtistTagsResponse:
+    """Replaces an artist's tags with ``tags`` (ids from ``/api/tags``). Native library only."""
+    try:
+        result = db.set_artist_tags(artist_id, body.tags)
+    except UnknownTag as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
+    return ArtistTagsResponse(artist_id=str(artist_id), tags=result)
+
+
 @router.post("/artists/bulk-edit", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
 def bulk_edit_artists(
     body: ArtistBulkEditRequest,
@@ -1533,12 +1571,17 @@ def bulk_edit_artists(
         )
     profile_given = "quality_profile_id" in body.model_fields_set
     release_given = "metadata_profile_id" in body.model_fields_set
-    if body.monitored is None and body.monitor_option is None and not profile_given and not release_given:
+    tags_given = bool(body.add_tags or body.remove_tags)
+    if (
+        body.monitored is None and body.monitor_option is None and not profile_given and not release_given
+        and not tags_given
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Provide at least one of monitored, monitor_option, quality_profile_id or metadata_profile_id",
+            detail="Provide at least one of monitored, monitor_option, quality_profile_id, metadata_profile_id, "
+            "add_tags or remove_tags",
         )
-    if release_given and _is_lidarr(db):
+    if (release_given or tags_given) and _is_lidarr(db):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NATIVE_ONLY_DETAIL)
     # Omitted: unmonitoring cascades, and switching to "existing" recomputes (track-level: only tracks with files) --
     # but only the artists whose option actually changes; artists already on "existing" are left alone unless the
@@ -1578,8 +1621,10 @@ def bulk_edit_artists(
             apply_monitor_to_albums=apply_to_albums,
             metadata_profile_id=body.metadata_profile_id if release_given else Database._UNSET,
             recompute_when_option_changes=recompute_on_change,
+            add_tag_ids=body.add_tags,
+            remove_tag_ids=body.remove_tags,
         )
-    except ValueError as exc:
+    except ValueError as exc:  # includes tag_store.UnknownTag
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
@@ -3235,6 +3280,7 @@ def manual_import_commit(
     replaced_retired: list[str] = []
     replaced_kept: list[str] = []
 
+    manual_import_tag_cache: dict[str, list[str]] = {}  # artist id -> tag labels, one lookup per artist
     for item in body.items:
         source_str = item.source_path or item.file_path
         if not source_str:
@@ -3348,7 +3394,10 @@ def manual_import_commit(
                     if parsed.quality == "Unknown" and quality_input:
                         parsed.quality = str(quality_input)
                     fsize = source_path.stat().st_size
-                    eval_result = evaluate_release(parsed, qp, size_bytes=fsize)
+                    if artist_id not in manual_import_tag_cache:
+                        manual_import_tag_cache[artist_id] = delay_gate.artist_tags(db, artist.get("name"), artist_id)
+                    import_artist_tags = manual_import_tag_cache[artist_id]
+                    eval_result = evaluate_release(parsed, qp, size_bytes=fsize, artist_tags=import_artist_tags)
                     # A bare quality string scores 0 format points and could never reach ``cutoff_format_score``, so
                     # judge the quality tier only; when the imported release title is known (and its quality matches)
                     # score from it instead, exactly as ``backlog_worker._current_floor`` does.
@@ -3358,7 +3407,11 @@ def manual_import_commit(
                     if title:
                         titled = parse_release_title(title)
                         if titled.quality in {parsed.quality, str(quality_input)}:
-                            cutoff_met = bool(evaluate_release(titled, qp, size_bytes=fsize).meets_cutoff)
+                            cutoff_met = bool(
+                                evaluate_release(
+                                    titled, qp, size_bytes=fsize, artist_tags=import_artist_tags
+                                ).meets_cutoff
+                            )
                     quality_name = eval_result.parsed_quality or str(quality_input)
             except Exception as exc:
                 logger.warning("Cutoff evaluation error during manual import for %s: %s", source_path, exc)

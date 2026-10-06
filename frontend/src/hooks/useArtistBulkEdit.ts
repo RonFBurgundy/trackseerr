@@ -34,6 +34,8 @@ export function formatBulkArtistResult(r: BulkArtistEditResult): string {
   const parts = [`${r.artists_updated.toLocaleString()} ${r.artists_updated === 1 ? 'artist' : 'artists'} updated`];
   if (r.albums_monitored > 0) parts.push(`${r.albums_monitored.toLocaleString()} albums monitored`);
   if (r.albums_unmonitored > 0) parts.push(`${r.albums_unmonitored.toLocaleString()} albums unmonitored`);
+  if ((r.tags_added ?? 0) > 0) parts.push(`${(r.tags_added ?? 0).toLocaleString()} tags added`);
+  if ((r.tags_removed ?? 0) > 0) parts.push(`${(r.tags_removed ?? 0).toLocaleString()} tags removed`);
   return parts.join(' · ');
 }
 

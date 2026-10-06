@@ -33,6 +33,7 @@ from plex_playlist_sync.delay_store import DelayProfileMixin
 from plex_playlist_sync.item_history import GrabTrigger, ItemHistoryMixin, trigger_kwargs
 from plex_playlist_sync.import_quality_check import CHECK_MODES, normalize_check_mode
 from plex_playlist_sync.quality_store import QualityCatalogMixin
+from plex_playlist_sync.tag_store import TagMixin, normalize_labels
 from plex_playlist_sync.models import (
     ActiveDownload,
     BlocklistItem,
@@ -75,7 +76,7 @@ def clean_library_name(text: str) -> str:
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
 SEED_COMPLETE_ACTIONS = ("keep", "remove", "remove_and_delete")
-SCHEMA_VERSION = 63  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 64  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:
@@ -178,7 +179,7 @@ def lidarr_item_due(row: dict[str, Any], now: Optional[datetime] = None) -> bool
 REPLACEMENT_MESSAGE_PREFIX = "Replacement search for issue "
 
 
-class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin):
+class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixin):
     """Thread-safe SQLite database wrapper with WAL mode, foreign keys, and migrations."""
 
     def __init__(self, db_path: Optional[Union[str, Path]] = None) -> None:
@@ -361,6 +362,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin):
                 (61, self._migration_v61),
                 (62, self._migration_v62),
                 (63, self._migration_v63),
+                (64, self._migration_v64),
             ]
 
             applied = 0
@@ -3319,7 +3321,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin):
 
     _IMPORT_LIST_COLUMNS = (
         "id, name, provider, config_json, enabled, monitor_mode, artist_monitor_option, quality_profile_id, "
-        "sync_interval_minutes, last_synced_at, last_status, last_error, created_at, updated_at"
+        "sync_interval_minutes, last_synced_at, last_status, last_error, created_at, updated_at, tags_json"
     )
     IMPORT_LIST_ITEM_STATUSES = ("pending", "applied", "unresolved", "skipped", "failed")
 
@@ -3333,6 +3335,11 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin):
             logger.warning("Import list %s has unreadable config_json; treating it as empty", d.get("id"))
             cfg = {}
         d["config"] = cfg if isinstance(cfg, dict) else {}
+        try:
+            tags = json.loads(d.pop("tags_json", None) or "[]")
+        except ValueError:
+            tags = []
+        d["tags"] = [str(t) for t in tags] if isinstance(tags, list) else []
         return d
 
     def create_import_list(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -3342,27 +3349,35 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin):
         option = data.get("artist_monitor_option")
         if option is not None:
             option = validate_monitor_option(option)
+        tags = normalize_labels(data.get("tags") or [])
         with self._lock:
-            self.conn.execute(
-                """
-                INSERT INTO import_lists (
-                    id, name, provider, config_json, enabled, monitor_mode, artist_monitor_option,
-                    quality_profile_id, sync_interval_minutes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    list_id,
-                    str(data["name"]),
-                    str(data["provider"]),
-                    json.dumps(data.get("config") or {}),
-                    1 if data.get("enabled", True) else 0,
-                    mode,
-                    option,
-                    str(data["quality_profile_id"]) if data.get("quality_profile_id") else None,
-                    int(data.get("sync_interval_minutes") or 1440),
-                ),
-            )
-            self.conn.commit()
+            try:
+                self._register_tag_labels(tags)
+                self.conn.execute(
+                    """
+                    INSERT INTO import_lists (
+                        id, name, provider, config_json, enabled, monitor_mode, artist_monitor_option,
+                        quality_profile_id, sync_interval_minutes, tags_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        list_id,
+                        str(data["name"]),
+                        str(data["provider"]),
+                        json.dumps(data.get("config") or {}),
+                        1 if data.get("enabled", True) else 0,
+                        mode,
+                        option,
+                        str(data["quality_profile_id"]) if data.get("quality_profile_id") else None,
+                        int(data.get("sync_interval_minutes") or 1440),
+                        json.dumps(tags),
+                    ),
+                )
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                logger.exception("create_import_list(%s) failed; rolled back (no tags registered)", list_id)
+                raise
         created = self.get_import_list(list_id)
         if created is None:
             raise RuntimeError(f"Failed to create import list {list_id}")
@@ -3390,37 +3405,46 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin):
         option = data.get("artist_monitor_option")
         if option is not None:
             option = validate_monitor_option(option)
+        tags = normalize_labels(data["tags"]) if "tags" in data else None
         with self._lock:
             prev = self.conn.execute("SELECT monitor_mode FROM import_lists WHERE id = ?", (str(list_id),)).fetchone()
-            cur = self.conn.execute(
-                """
-                UPDATE import_lists SET name = ?, provider = ?, config_json = ?, enabled = ?, monitor_mode = ?,
-                    artist_monitor_option = ?, quality_profile_id = ?, sync_interval_minutes = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """,
-                (
-                    str(data["name"]),
-                    str(data["provider"]),
-                    json.dumps(data.get("config") or {}),
-                    1 if data.get("enabled", True) else 0,
-                    mode,
-                    option,
-                    str(data["quality_profile_id"]) if data.get("quality_profile_id") else None,
-                    int(data.get("sync_interval_minutes") or 1440),
-                    str(list_id),
-                ),
-            )
-            if cur.rowcount > 0 and prev is not None and str(prev[0]) != mode:
-                # A new mode may apply what "none" only recorded, so skipped items get another go.
-                self.conn.execute(
-                    "UPDATE import_list_items SET status = 'pending', error = NULL, next_attempt_at = NULL "
-                    "WHERE list_id = ? AND status = 'skipped'",
-                    (str(list_id),),
-                )
-            self.conn.commit()
-            if cur.rowcount == 0:
+            if prev is None:
                 return None
+            try:
+                if tags is not None:
+                    self._register_tag_labels(tags)
+                self.conn.execute(
+                    """
+                    UPDATE import_lists SET name = ?, provider = ?, config_json = ?, enabled = ?, monitor_mode = ?,
+                        artist_monitor_option = ?, quality_profile_id = ?, sync_interval_minutes = ?,
+                        tags_json = COALESCE(?, tags_json), updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (
+                        str(data["name"]),
+                        str(data["provider"]),
+                        json.dumps(data.get("config") or {}),
+                        1 if data.get("enabled", True) else 0,
+                        mode,
+                        option,
+                        str(data["quality_profile_id"]) if data.get("quality_profile_id") else None,
+                        int(data.get("sync_interval_minutes") or 1440),
+                        json.dumps(tags) if tags is not None else None,
+                        str(list_id),
+                    ),
+                )
+                if str(prev[0]) != mode:
+                    # A new mode may apply what "none" only recorded, so skipped items get another go.
+                    self.conn.execute(
+                        "UPDATE import_list_items SET status = 'pending', error = NULL, next_attempt_at = NULL "
+                        "WHERE list_id = ? AND status = 'skipped'",
+                        (str(list_id),),
+                    )
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                logger.exception("update_import_list(%s) failed; rolled back (no tags registered)", list_id)
+                raise
         return self.get_import_list(list_id)
 
     def delete_import_list(self, list_id: str) -> bool:
@@ -7294,6 +7318,8 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin):
         apply_monitor_to_albums: bool = False,
         metadata_profile_id: Any = _UNSET,
         recompute_when_option_changes: bool = False,
+        add_tag_ids: Optional[list[int]] = None,
+        remove_tag_ids: Optional[list[int]] = None,
     ) -> dict[str, int]:
         """Set-based bulk edit of native artists (``artist_ids=None`` means every artist), in one transaction.
 
@@ -7305,9 +7331,16 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin):
         auto-monitored by the recompute (files still win under ``existing``).
         ``recompute_when_option_changes`` (ignored when ``apply_monitor_to_albums``) recomputes only the artists whose
         ``monitor_option`` differs from the new ``monitor_option`` before this edit; the rest are just written.
+        ``add_tag_ids`` / ``remove_tag_ids`` add/remove tags in the same transaction (the result then also carries
+        ``tags_added`` / ``tags_removed``; ``UnknownTag`` for a bad id, ``ValueError`` when a tag is in both).
         Returns ``artists_updated`` plus the post-update count of ``albums_monitored`` / ``albums_unmonitored``
         among the affected artists' albums (0/0 when albums were not recomputed).
         """
+        tag_add = list(dict.fromkeys(int(i) for i in add_tag_ids or []))
+        tag_remove = list(dict.fromkeys(int(i) for i in remove_tag_ids or []))
+        if set(tag_add) & set(tag_remove):
+            raise ValueError("A tag cannot be both added and removed")
+        tag_events: dict[str, tuple[list[str], list[str]]] = {}
         if monitor_option is not None:
             validate_monitor_option(monitor_option)
         sets: list[str] = []
@@ -7326,8 +7359,9 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin):
                 raise ValueError(f"Metadata profile {metadata_profile_id} does not exist")
             sets.append("metadata_profile_id = ?")
             set_params.append(int(metadata_profile_id) if metadata_profile_id is not None else None)
-        if not sets and not apply_monitor_to_albums:
+        if not sets and not apply_monitor_to_albums and not tag_add and not tag_remove:
             raise ValueError("No changes requested")
+        result_tags = {"tags_added": 0, "tags_removed": 0}
 
         if artist_ids is None:
             chunks: list[Optional[list[str]]] = [None]
@@ -7378,12 +7412,20 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin):
 
         with self._lock:
             try:
+                tag_labels = self._require_tag_ids([*tag_add, *tag_remove]) if (tag_add or tag_remove) else {}
                 for chunk in chunks:
                     art_where, params = "", []
                     if chunk is not None:
                         marks = ", ".join("?" for _ in chunk)
                         art_where = f" WHERE id IN ({marks})"
                         params = chunk
+                    if tag_add or tag_remove:
+                        t_added, t_removed, per_artist = self._apply_artist_tag_changes(
+                            chunk, tag_add, tag_remove, tag_labels
+                        )
+                        result_tags["tags_added"] += t_added
+                        result_tags["tags_removed"] += t_removed
+                        tag_events.update(per_artist)
                     changing: list[str] = []
                     if recompute_when_option_changes and monitor_option is not None and not apply_monitor_to_albums:
                         # Only artists whose option actually changes are recomputed; ones already on it are left alone.
@@ -7414,6 +7456,9 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin):
                 self.conn.rollback()
                 logger.exception("bulk_edit_library_artists failed; transaction rolled back")
                 raise
+        if tag_add or tag_remove:
+            result.update(result_tags)
+            self._emit_tag_events(tag_events)
         return result
 
     def bulk_set_albums_monitored(

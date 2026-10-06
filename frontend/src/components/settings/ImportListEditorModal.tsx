@@ -1,7 +1,8 @@
 import React from 'react';
 import { Loader2, FlaskConical } from 'lucide-react';
-import { ObsidianModal, TapeDeckButton, TactileSwitch, FormField, MonitorOptionSelect, MonitorModeSelect } from '@/components/ui';
+import { ObsidianModal, TapeDeckButton, TactileSwitch, FormField, MonitorOptionSelect, MonitorModeSelect, TagPicker } from '@/components/ui';
 import { StatusMessage } from '@/components/ui/FormField';
+import { useTags } from '@/hooks/useTags';
 import type { UseImportListEditorReturn } from '@/hooks/useImportListEditor';
 import type { ProviderMeta, ProviderField, ImportListItemOut } from '@/types/importLists';
 import { SECRET_MASK, SYNC_INTERVAL_OPTIONS } from '@/types/importLists';
@@ -76,6 +77,7 @@ const ProviderFieldInput: React.FC<{
 
 export const ImportListEditorModal: React.FC<ImportListEditorModalProps> = ({ editor, providers, profiles, libraryMode }) => {
   const { draft, provider, testResult } = editor;
+  const tagCatalogue = useTags(editor.isOpen && libraryMode !== 'lidarr');
   const intervalOptions = SYNC_INTERVAL_OPTIONS.some((o) => o.value === draft.sync_interval_minutes)
     ? SYNC_INTERVAL_OPTIONS
     : [...SYNC_INTERVAL_OPTIONS, { value: draft.sync_interval_minutes, label: `Every ${draft.sync_interval_minutes} min` }];
@@ -170,6 +172,21 @@ export const ImportListEditorModal: React.FC<ImportListEditorModalProps> = ({ ed
             ))}
           </select>
         </FormField>
+
+        {libraryMode !== 'lidarr' && (
+          <TagPicker
+            mode="label"
+            label="Tags"
+            name="import_list_tags"
+            tags={tagCatalogue.tags}
+            loading={tagCatalogue.loading}
+            loadError={tagCatalogue.loadError}
+            onCreate={tagCatalogue.create}
+            value={draft.tags}
+            onChange={(tags) => editor.patch({ tags })}
+            hint="Added artists get these tags"
+          />
+        )}
 
         <FormField label="Sync interval" htmlFor="il-interval">
           <select

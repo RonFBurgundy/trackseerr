@@ -31,3 +31,4 @@ export * from './manualImportService';
 export * from './libraryHealthService';
 export * from './seedCleanupService';
 export * from './itemHistoryService';
+export * from './tagService';

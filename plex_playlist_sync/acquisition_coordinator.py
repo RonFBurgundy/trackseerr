@@ -238,11 +238,13 @@ class AcquisitionCoordinator:
         track_id: Optional[str] = None,
         item_type: Optional[str] = None,
         preferred_protocol: Optional[str] = None,
+        artist_tags: Optional[list[str]] = None,
     ) -> list[tuple[AcquisitionSearchResult, EvaluationResult]]:
         """Evaluates candidates against the QualityProfile and ranks the acceptable ones.
 
         Order: quality > custom-format score > distance to the preferred kbps > protocol preference > seeders.
         ``preferred_protocol`` (from the applicable delay profile) puts that protocol first in the preference.
+        ``artist_tags`` (labels of the artist searched for) scope tag-restricted release profiles.
         ``album_id`` / ``track_id`` give the duration the quality-definition kbps limits are measured against.
         """
         if not candidates:
@@ -270,6 +272,7 @@ class AcquisitionCoordinator:
                 prepared,
                 candidate.size_bytes if candidate.size_bytes > 0 else None,
                 duration=duration,
+                artist_tags=artist_tags,
                 **candidate_context(candidate),
             )
             if eval_res.is_acceptable:
@@ -407,7 +410,8 @@ class AcquisitionCoordinator:
         candidates = self.search_all_indexers(artist=artist, title=title, album=album, db=db)
 
         # 3. Evaluate and rank (protocol preference comes from the delay profile that applies to this artist)
-        delay_profile = delay_gate.resolve_delay_profile(db, artist)
+        tags = delay_gate.artist_tags(db, artist)
+        delay_profile = delay_gate.resolve_delay_profile(db, artist, tags=tags)
         preferred_protocol = delay_profile.get("preferred_protocol")
         ranked = self.evaluate_and_rank(
             candidates=candidates,
@@ -417,6 +421,7 @@ class AcquisitionCoordinator:
             track_id=track_id,
             item_type=item_type,
             preferred_protocol=preferred_protocol,
+            artist_tags=tags,
         )
         if min_score is not None:
             ranked = [item for item in ranked if item[1].score > min_score]

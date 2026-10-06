@@ -619,8 +619,12 @@ def evaluate_prepared(
     budget: Optional[Budget] = None,
     seeders: Optional[int] = None,
     minimum_seeders: Optional[int] = None,
+    artist_tags: Optional[Iterable[str]] = None,
 ) -> EvaluationResult:
+    """``artist_tags`` are the labels of the artist the release is for. A release profile with tags applies only when
+    the artist carries at least one of them; an untagged profile applies to everyone (unknown artist: no tags)."""
     profile = prepared.profile
+    artist_tag_set = {str(t).strip().lower() for t in artist_tags or [] if str(t).strip()}
     title = release.raw_title
     bd = DecisionBreakdown(
         title=title,
@@ -669,6 +673,9 @@ def evaluate_prepared(
 
     # 2. Release profiles (required terms OR within a profile, AND across profiles; any ignored term rejects).
     for rp in prepared.release_profiles:
+        rp_tags = {str(t).strip().lower() for t in rp.get("tags") or [] if str(t).strip()}
+        if rp_tags and not (rp_tags & artist_tag_set):
+            continue
         allowed_indexers = [str(i) for i in rp.get("indexer_ids") or []]
         if allowed_indexers and (ctx.indexer_id is None or ctx.indexer_id not in allowed_indexers):
             continue

@@ -13,6 +13,8 @@ export interface UseReleaseProfileDraftReturn {
   indexerIds: string[];
   toggleIndexer: (id: string) => void;
   qualityProfileIds: string[];
+  tags: string[];
+  setTags: (v: string[]) => void;
   toggleQualityProfile: (id: string) => void;
   problem: string | null;
   /** Pass the flushed token lists to include text typed but not yet committed. */
@@ -28,6 +30,7 @@ export function useReleaseProfileDraft(profile: ReleaseProfile | null): UseRelea
   const [required, setRequired] = useState<string[]>(profile?.required ?? []);
   const [ignored, setIgnored] = useState<string[]>(profile?.ignored ?? []);
   const [indexerIds, setIndexerIds] = useState<string[]>(profile?.indexer_ids.map(String) ?? []);
+  const [tags, setTags] = useState<string[]>(profile?.tags.map(String) ?? []);
   const [qualityProfileIds, setQualityProfileIds] = useState<string[]>(profile?.quality_profile_ids ?? []);
 
   const toggleIndexer = useCallback((id: string): void => setIndexerIds((prev) => toggled(prev, id)), []);
@@ -43,10 +46,10 @@ export function useReleaseProfileDraft(profile: ReleaseProfile | null): UseRelea
       required: terms?.required ?? required,
       ignored: terms?.ignored ?? ignored,
       indexer_ids: indexerIds,
-      tags: profile?.tags.map(String) ?? [],
+      tags,
       quality_profile_ids: qualityProfileIds,
     };
-  }, [problem, name, enabled, required, ignored, indexerIds, qualityProfileIds, profile]);
+  }, [problem, name, enabled, required, ignored, indexerIds, tags, qualityProfileIds]);
 
   return {
     name,
@@ -60,6 +63,8 @@ export function useReleaseProfileDraft(profile: ReleaseProfile | null): UseRelea
     indexerIds,
     toggleIndexer,
     qualityProfileIds,
+    tags,
+    setTags,
     toggleQualityProfile,
     problem,
     toInput,

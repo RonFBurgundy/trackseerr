@@ -172,9 +172,11 @@ def _ensure_native_artist(
     resolved: _Resolved,
     monitor_option: str,
     quality_profile_id: Optional[str],
+    tags: Optional[list[str]] = None,
 ) -> tuple[dict[str, Any], bool]:
     """The library artist for ``resolved`` and whether this call created it. An existing artist is left as it is
-    (only a missing MusicBrainz id is filled in); a new one gets ``monitor_option`` and is monitored."""
+    (only a missing MusicBrainz id is filled in); a new one gets ``monitor_option``, is monitored and receives
+    ``tags`` (the importing list's tag labels, as in Lidarr)."""
     existing = None
     if resolved.artist_mbid:
         existing = db.get_library_artist_by_mbid(resolved.artist_mbid)
@@ -199,6 +201,8 @@ def _ensure_native_artist(
         ),
         preserve_monitoring=True,
     )
+    if tags:
+        db.add_artist_tags_by_label(str(created["id"]), tags)
     return created, True
 
 
@@ -238,12 +242,16 @@ def _hydrate_album_tracks(
 
 
 def _apply_album_native(
-    db: Database, enricher: MbidEnricherClient, resolved: _Resolved, quality_profile_id: Optional[str]
+    db: Database,
+    enricher: MbidEnricherClient,
+    resolved: _Resolved,
+    quality_profile_id: Optional[str],
+    tags: Optional[list[str]] = None,
 ) -> Optional[str]:
     """Native album level. Returns a note for the caller when the result needs explaining."""
     assert resolved.album_mbid
     # A brand-new artist is monitored with option "none" so a later refresh adds no further albums as monitored.
-    artist, created = _ensure_native_artist(db, resolved, "none", quality_profile_id)
+    artist, created = _ensure_native_artist(db, resolved, "none", quality_profile_id, tags)
     artist_id = str(artist["id"])
     meta = _release_group_meta(enricher, resolved.artist_mbid, resolved.album_mbid)
     title = str(meta.get("title") or resolved.album_title or "Unknown Album")
@@ -284,10 +292,11 @@ def _apply_artist_native(
     *,
     resume: bool = False,
     on_artist_added: Optional[Callable[[], None]] = None,
+    tags: Optional[list[str]] = None,
 ) -> None:
     """Native artist level. ``resume`` says an earlier attempt of this same item created the artist, so the
     refresh that fills in its albums is still owed even though the artist now exists."""
-    artist, created = _ensure_native_artist(db, resolved, monitor_option, quality_profile_id)
+    artist, created = _ensure_native_artist(db, resolved, monitor_option, quality_profile_id, tags)
     if created and on_artist_added is not None:
         on_artist_added()  # persisted before the refresh so a crash or failure below is retried, not lost
     if not (created or resume):
@@ -477,6 +486,7 @@ def _apply_list_item(
     artist_added: bool = False,
     on_artist_added: Optional[Callable[[], None]] = None,
     trigger: Optional[GrabTrigger] = None,
+    tags: Optional[list[str]] = None,
 ) -> ApplyResult:
     """Applies ``item`` (a :class:`ListItem` or a dict with the same fields) at the level ``mode`` widens to.
 
@@ -484,6 +494,7 @@ def _apply_list_item(
     post-add step (album load + monitor preset, or the native refresh) is then finished on this attempt.
     ``on_artist_added`` is called the moment this attempt adds the artist, so the caller can persist that fact.
     ``trigger`` names the list/playlist the item came from; it is kept on the track request and on native adds.
+    ``tags`` are tag labels given to an artist this call adds in native mode (an existing artist is left alone).
 
     Never raises for a per-item problem; the outcome is the returned :class:`ApplyResult`. Raises ValueError for an
     invalid ``mode`` or ``artist_monitor_option``.
@@ -509,7 +520,7 @@ def _apply_list_item(
 
         def _native() -> None:
             if level == "album":
-                note = _apply_album_native(db, enricher, resolved, quality_profile_id)
+                note = _apply_album_native(db, enricher, resolved, quality_profile_id, tags)
                 if note:
                     notes.append(note)
             else:
@@ -521,6 +532,7 @@ def _apply_list_item(
                     quality_profile_id,
                     resume=artist_added,
                     on_artist_added=on_artist_added,
+                    tags=tags,
                 )
 
         def _lidarr() -> None:

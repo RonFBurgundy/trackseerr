@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 import { ConfirmDangerButton, MachinedCard, TactileSwitch, TapeDeckButton, isRegexTerm } from '@/components/ui';
-import type { IndexerItem } from '@/types/models';
+import type { IndexerItem, LibraryManagerMode } from '@/types/models';
 import type { QualityProfile } from '@/types/qualityProfiles';
 import { SEEDED_RELEASE_PROFILE_NAME } from '@/types/releaseProfiles';
 import { useReleaseProfiles } from '@/hooks/useReleaseProfiles';
@@ -10,6 +10,7 @@ import { ReleaseProfileEditorModal, type ReleaseProfileTarget } from './ReleaseP
 
 export interface ReleaseProfilesSectionProps {
   enabled: boolean;
+  libraryMode: LibraryManagerMode;
   indexers: readonly IndexerItem[];
   qualityProfiles: readonly QualityProfile[];
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
@@ -29,7 +30,7 @@ const Terms: React.FC<{ label: string; terms: readonly string[] }> = ({ label, t
   );
 
 /** Term-based release profiles: required / ignored terms with optional indexer and quality-profile scope. */
-export const ReleaseProfilesSection: React.FC<ReleaseProfilesSectionProps> = ({ enabled, indexers, qualityProfiles, onToast }) => {
+export const ReleaseProfilesSection: React.FC<ReleaseProfilesSectionProps> = ({ enabled, libraryMode, indexers, qualityProfiles, onToast }) => {
   const { profiles, loading, save, remove, toggleEnabled } = useReleaseProfiles(enabled, onToast);
   const [editing, setEditing] = useState<ReleaseProfileTarget | null>(null);
 
@@ -73,6 +74,7 @@ export const ReleaseProfilesSection: React.FC<ReleaseProfilesSectionProps> = ({ 
       )}
       <ReleaseProfileEditorModal
         target={editing}
+        libraryMode={libraryMode}
         indexers={indexers}
         qualityProfiles={qualityProfiles}
         onClose={() => setEditing(null)}

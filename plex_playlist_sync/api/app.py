@@ -26,6 +26,7 @@ from plex_playlist_sync.api.routes import (
     discovery,
     download_clients,
     import_lists,
+    tags,
     indexers,
     internal,
     issues,
@@ -235,6 +236,7 @@ def create_app(
     api_router.include_router(seed_cleanup.router, prefix="/seed-cleanup", tags=["seed-cleanup"])
     api_router.include_router(recycle_bin.router, prefix="/recycle-bin", tags=["recycle-bin"])
     api_router.include_router(itunes_import.router, prefix="/import/itunes", tags=["itunes-import"])
+    api_router.include_router(tags.router, prefix="/tags", tags=["tags"])
     api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
     api_router.include_router(
         download_clients.router, prefix="/settings/download-clients", tags=["download_clients"]
@@ -264,13 +266,15 @@ def create_app(
     api_router.include_router(activity.router, prefix="/activity", tags=["activity"])
     api_router.include_router(wanted.router, prefix="/wanted", tags=["wanted"])
 
-    @api_router.api_route("/health", methods=["GET", "HEAD"], tags=["health"])
+    @api_router.api_route("/health", methods=["HEAD"], include_in_schema=False)
+    @api_router.get("/health", tags=["health"])
     def health_check() -> dict[str, object]:
         # Deliberately minimal and unauthenticated: tier and boot state only, never a version.
         # Always 200 so a container HEALTHCHECK does not flap while booting; the SPA reads ``status``.
         return {**boot_state.snapshot(detailed=_role_of(app) != "gateway"), "tier": _role_of(app)}
 
-    @api_router.api_route("/health/ready", methods=["GET", "HEAD"], tags=["health"])
+    @api_router.api_route("/health/ready", methods=["HEAD"], include_in_schema=False)
+    @api_router.get("/health/ready", tags=["health"])
     def health_ready() -> JSONResponse:
         # Readiness probe: 503 + Retry-After until startup has finished.
         body = {**boot_state.snapshot(detailed=_role_of(app) != "gateway"), "tier": _role_of(app)}

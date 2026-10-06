@@ -34,10 +34,16 @@ export interface BulkArtistEditRequest {
   /** Native only: metadata profile id; an explicit null clears it, omitted leaves it alone. */
   metadata_profile_id?: number | null;
   apply_monitor_to_albums?: boolean;
+  /** Native only: tag ids to add to / remove from every targeted artist (409 in Lidarr mode). */
+  add_tags?: number[];
+  remove_tags?: number[];
 }
 
 export interface BulkArtistEditResult {
   artists_updated: number;
+  /** Artist-tag links created / removed; absent from older servers. */
+  tags_added?: number;
+  tags_removed?: number;
   albums_monitored: number;
   albums_unmonitored: number;
 }

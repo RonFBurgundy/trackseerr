@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from plex_playlist_sync.api.dependencies import get_db, require_admin, require_core_tier
 from plex_playlist_sync.storage import Database
+from plex_playlist_sync.tag_store import normalize_labels
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +34,7 @@ class DelayProfilePayload(BaseModel):
     @field_validator("tags")
     @classmethod
     def _clean_tags(cls, tags: list[str]) -> list[str]:
-        out: list[str] = []
-        for t in tags:
-            t = t.strip()
-            if len(t) > 60:
-                raise ValueError("tag too long")
-            if t and t.lower() not in {x.lower() for x in out}:
-                out.append(t)
-        return out
+        return normalize_labels(tags)
 
 
 class DelayProfileResponse(BaseModel):
