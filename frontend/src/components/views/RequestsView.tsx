@@ -8,7 +8,8 @@ import {
   TapeDeckButton,
   MachinedCard,
   QuotaBadge,
-  ConfirmDangerButton, ScrollFill } from '@/components/ui';
+  ConfirmDangerButton } from '@/components/ui';
+import { PageFrame } from '@/components/layout';
 import { IssueReportButton, MyIssuesList } from '@/components/issues';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
 import type { AccountInfo } from '@/types/account';
@@ -123,31 +124,31 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      {/* Top Banner / Filters */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <TabStrip fill>
-          {filters.map((f) => (
-            <TapeDeckButton
-              key={f.id}
-              size="sm"
-              active={sub === f.id}
-              onClick={() => onSubChange(f.id)}
-            >
-              {f.label}
-            </TapeDeckButton>
-          ))}
+    <PageFrame
+      bodyClassName="space-y-6"
+      nav={
+      <TabStrip fill>
+        {filters.map((f) => (
           <TapeDeckButton
+            key={f.id}
             size="sm"
-            active={section === 'issues'}
-            onClick={() => onSubChange('issues')}
+            active={sub === f.id}
+            onClick={() => onSubChange(f.id)}
           >
-            My issues
+            {f.label}
           </TapeDeckButton>
-        </TabStrip>
-
-        {!account && quota && <QuotaBadge quota={quota} />}
-      </div>
+        ))}
+        <TapeDeckButton
+          size="sm"
+          active={section === 'issues'}
+          onClick={() => onSubChange('issues')}
+        >
+          My issues
+        </TapeDeckButton>
+      </TabStrip>
+      }
+    >
+      {!account && quota && <QuotaBadge quota={quota} />}
 
       {account && (
         <MachinedCard className="p-3 sm:p-4">
@@ -186,7 +187,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
       )}
 
       {section === 'requests' && !isLoading && requests.length > 0 && (
-        <ScrollFill ariaLabel="Requests" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 content-start">
+        <div aria-label="Requests" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 content-start">
           {requests.map((req) => {
             const isBusy = processingId === req.id;
 
@@ -281,8 +282,8 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
               </MachinedCard>
             );
           })}
-        </ScrollFill>
+        </div>
       )}
-    </div>
+    </PageFrame>
   );
 };

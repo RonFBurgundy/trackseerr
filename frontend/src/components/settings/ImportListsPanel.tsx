@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { Plus, RefreshCw, Pencil, History, Trash2, Loader2 } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, ConfirmDangerButton, ScrollFill } from '@/components/ui';
+import { PageActionsPortal } from '@/components/layout';
+import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, ConfirmDangerButton } from '@/components/ui';
 import { useImportLists } from '@/hooks/useImportLists';
 import { useImportListEditor } from '@/hooks/useImportListEditor';
 import { useMonitoringDefaults } from '@/hooks/useMonitoringDefaults';
@@ -36,20 +37,24 @@ export const ImportListsPanel: React.FC<ImportListsPanelProps> = ({ libraryMode,
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="text-xs font-mono text-neutral-400">
-          Pull artists, albums and tracks from external services on a schedule.
-        </div>
-        <ActionBar align="end">
+      <PageActionsPortal>
+        <div className="flex items-center justify-end gap-2">
           <TapeDeckButton
+            size="sm"
             variant="amber"
-            icon={<Plus className="h-4 w-4" />}
+            aria-label="Add list"
+            title="Add list"
+            icon={<Plus className="h-3.5 w-3.5" />}
+            collapseLabel
             disabled={lists.providers.length === 0}
             onClick={editor.openNew}
           >
             Add List
           </TapeDeckButton>
-        </ActionBar>
+        </div>
+      </PageActionsPortal>
+      <div className="text-xs font-mono text-neutral-400">
+        Pull artists, albums and tracks from external services on a schedule.
       </div>
 
       {lists.loading && (
@@ -62,7 +67,7 @@ export const ImportListsPanel: React.FC<ImportListsPanelProps> = ({ libraryMode,
         <div className="text-center py-12 text-neutral-500 font-mono text-sm">No import lists configured.</div>
       )}
 
-      <ScrollFill ariaLabel="Import lists" className="grid grid-cols-1 gap-3 content-start">
+      <div className="grid grid-cols-1 gap-3 content-start">
         {lists.lists.map((l) => (
           <MachinedCard key={l.id} className="p-3 sm:p-4 space-y-3">
             <div className="flex items-start justify-between gap-3">
@@ -132,7 +137,7 @@ export const ImportListsPanel: React.FC<ImportListsPanelProps> = ({ libraryMode,
             </ActionBar>
           </MachinedCard>
         ))}
-      </ScrollFill>
+      </div>
 
       <ItunesImportCard />
 

@@ -1,6 +1,6 @@
 import React, { useId, useState } from 'react';
 import { Eye, EyeOff, Loader2, Save } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, FormField, MonitorOptionSelect, ScrollFill } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, FormField, MonitorOptionSelect } from '@/components/ui';
 import type { MediaManagementSettings, SeedCompleteAction } from '@/types/models';
 import { updateMediaManagementSettings } from '@/services/settingsService';
 import { NamingFormatsEditor } from '@/components/naming/NamingFormatsEditor';
@@ -64,7 +64,7 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
         </p>
       </div>
 
-      <ScrollFill ariaLabel="Root folders and naming settings" className="-mr-2 pr-2">
+      <div>
       <form onSubmit={handleSave} className="space-y-4">
         <div>
           <label htmlFor={rootId} className={labelClass}>Root Music Folder</label>
@@ -317,7 +317,7 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
           </TapeDeckButton>
         </ActionBar>
       </form>
-      </ScrollFill>
+      </div>
     </MachinedCard>
   );
 };

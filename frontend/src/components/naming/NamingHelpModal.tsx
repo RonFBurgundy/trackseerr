@@ -20,7 +20,7 @@ export const NamingHelpModal: React.FC<NamingHelpModalProps> = ({ isOpen, onClos
     subtitle="What you can type in a format, and what it becomes"
     maxWidth="sm:max-w-3xl"
   >
-    <div className="space-y-6 max-h-[65vh] overflow-y-auto pr-1">
+    <div className="space-y-6">
       {syntaxHelp.length > 0 && (
         <section>
           <h5 className="text-xs uppercase font-mono tracking-wider text-neutral-300 mb-2">Syntax</h5>

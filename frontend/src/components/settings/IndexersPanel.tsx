@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Trash2, Plus, Save, X } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar, ScrollFill } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar } from '@/components/ui';
 import type { IndexerItem, MediaManagementSettings } from '@/types/models';
 import { useIndexerDraft, seedingDraftToPayload } from '@/hooks/useIndexerDraft';
 import { IndexerSeedingFields } from './IndexerSeedingFields';
@@ -84,7 +84,7 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, media, r
       {indexers.length === 0 ? (
         <p className="text-xs font-mono text-neutral-500 py-4">No indexers registered yet.</p>
       ) : (
-        <ScrollFill ariaLabel="Indexers" className="grid grid-cols-1 md:grid-cols-2 gap-4 content-start">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 content-start">
           {indexers.map((idx) => (
             <MachinedCard key={idx.id} className="p-3 sm:p-4 flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -112,7 +112,7 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, media, r
               </div>
             </MachinedCard>
           ))}
-        </ScrollFill>
+        </div>
       )}
 
       <MachinedCard className="p-3 sm:p-5 max-w-xl">

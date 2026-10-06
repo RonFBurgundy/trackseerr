@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/useToast';
 import type { ManualImportScope } from '@/types/manualImport';
 import { deleteCollection } from '@/services/libraryService';
 import { errorMessage } from '@/services/apiClient';
+import { PageFrame } from '@/components/layout';
 import { SearchBar, TapeDeckButton, TabStrip, ToastBanner } from '@/components/ui';
 import {
   AddToCollectionModal,
@@ -143,8 +144,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
 
   if (selectedArtistId !== null) {
     return (
-      <>
-        {toastNode}
+      <PageFrame nav={toastNode}>
         <ArtistDetail
           key={String(selectedArtistId)}
           artistId={selectedArtistId}
@@ -168,14 +168,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
           void reloadCatalog();
         }}
       />
-      </>
+      </PageFrame>
     );
   }
 
   if (selectedCollectionId !== null) {
     return (
-      <>
-        {toastNode}
+      <PageFrame nav={toastNode}>
         <CollectionDetail
           collectionId={selectedCollectionId}
           fallback={collections.find((c) => c.id === selectedCollectionId)}
@@ -185,7 +184,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
           onChanged={refresh}
           onToast={showToast}
         />
-      </>
+      </PageFrame>
     );
   }
 
@@ -195,22 +194,19 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
   const statsFooter = <LibraryStatsBar stats={stats} showLegend={activeTab === 'artists'} />;
 
   return (
-    <div className="space-y-2">
-      {toastNode}
-
-      {showScanBanner && <LibraryScanBanner scanStatus={scanStatus} onCancel={() => void cancelScan()} />}
-
-      {/* One toolbar row on desktop (keys, search, filter/sort/scan); two on phones (keys, then search + icon keys). */}
-      <div className="flex flex-col gap-2 md:flex-row md:items-stretch">
-        <TabStrip className="min-w-0 md:shrink-0" aria-label="Library sections">
-          {visibleTabs.map((tab) => (
-            <TapeDeckButton key={tab.id} size="sm" active={activeTab === tab.id} onClick={() => onSubChange(tab.id)} icon={tab.icon}>
-              {tab.label}
-            </TapeDeckButton>
-          ))}
-        </TabStrip>
-
-        <div className="flex min-w-0 flex-1 items-stretch gap-1.5">
+    <PageFrame
+      inlineActions
+      nav={
+      <TabStrip aria-label="Library sections">
+        {visibleTabs.map((tab) => (
+          <TapeDeckButton key={tab.id} size="sm" active={activeTab === tab.id} onClick={() => onSubChange(tab.id)} icon={tab.icon}>
+            {tab.label}
+          </TapeDeckButton>
+        ))}
+      </TabStrip>
+      }
+      actions={
+        <div className="flex min-w-0 items-stretch gap-1.5">
           <SearchBar
             name="library-filter"
             ariaLabel={`Filter ${activeTab}`}
@@ -277,16 +273,19 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
             )
           )}
         </div>
+      }
+    >
+      {/* Status banners are one line each and scroll away with the content. */}
+      <div className="space-y-2 pb-2 empty:hidden">
+        {toastNode}
+        {showScanBanner && <LibraryScanBanner scanStatus={scanStatus} onCancel={() => void cancelScan()} />}
+        {lidarrStatus && lidarrStatus.is_migrating && <LidarrMigrationBanner status={lidarrStatus} />}
+        {error && !isLoading && (
+          <div role="alert" title={error} className="px-3 py-2 bg-red-950/40 border border-red-800/50 rounded-[4px] text-xs text-red-300 font-mono truncate">
+            {error}
+          </div>
+        )}
       </div>
-
-      {lidarrStatus && lidarrStatus.is_migrating && <LidarrMigrationBanner status={lidarrStatus} />}
-
-      {error && !isLoading && (
-        <div role="alert" className="p-4 bg-red-950/40 border border-red-800/50 rounded-[4px] text-xs text-red-300 font-mono">
-          {error}
-        </div>
-      )}
-
       {activeTab === 'artists' && (
         <ArtistsPanel
           query={query}
@@ -370,6 +369,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
         onToast={showToast}
       />
       <AddToCollectionModal picker={picker} />
-    </div>
+    </PageFrame>
   );
 };

@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Loader2 } from 'lucide-react';
 import { TapeDeckButton } from './TapeDeckButton';
 import { ActionBar } from './ActionBar';
@@ -74,22 +75,22 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/85 backdrop-blur-[2px] p-0 sm:p-4">
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/85 backdrop-blur-[2px] p-0 sm:p-4 overscroll-contain">
       <div
         ref={panelRef}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex flex-col w-full max-w-none sm:max-w-md bg-[#121212] border-0 border-t sm:border border-[#2a2a2a] rounded-none sm:rounded-[4px] shadow-2xl pb-safe"
+        className="flex flex-col w-full max-w-none sm:max-w-md max-h-full bg-[#121212] border-0 border-t sm:border border-[#2a2a2a] rounded-none sm:rounded-[4px] shadow-2xl pb-safe"
       >
-        <div className="border-b border-[#222222] px-3 py-2.5 sm:px-5 sm:py-3 bg-[#181818]/80">
+        <div className="border-b border-[#222222] px-3 py-2.5 sm:px-5 sm:py-3 bg-[#181818]/80 shrink-0">
           <h3 id={titleId} className="text-sm sm:text-base font-bold tracking-wider uppercase text-white">
             {title}
           </h3>
         </div>
-        <div className="p-4 sm:p-5 text-sm text-neutral-200">{children}</div>
-        <ActionBar align="end" className="border-t border-[#222222] px-3 py-2.5 sm:px-5 sm:py-3 bg-[#0e0e0e] flex-wrap">
+        <div className="modal-body-scroll min-h-0 p-4 sm:p-5 text-sm text-neutral-200">{children}</div>
+        <ActionBar align="end" className="border-t border-[#222222] px-3 py-2.5 sm:px-5 sm:py-3 bg-[#0e0e0e] flex-wrap shrink-0">
           <TapeDeckButton type="button" disabled={busy} onClick={onCancel}>
             {cancelLabel}
           </TapeDeckButton>
@@ -109,6 +110,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           </TapeDeckButton>
         </ActionBar>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

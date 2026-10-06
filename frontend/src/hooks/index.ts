@@ -71,3 +71,4 @@ export * from './useIndexerDraft';
 export * from './useLibraryHealth';
 export * from './useLibraryHealthCount';
 export * from './useSeedCleanup';
+export * from './useCollapsibleChrome';

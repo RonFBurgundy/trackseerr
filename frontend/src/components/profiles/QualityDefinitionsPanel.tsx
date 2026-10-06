@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { RotateCcw } from 'lucide-react';
-import { ConfirmDialog, MachinedCard, ScrollFill, TapeDeckButton } from '@/components/ui';
+import { ConfirmDialog, MachinedCard, TapeDeckButton } from '@/components/ui';
 import { useQualityDefinitions } from '@/hooks/useQualityDefinitions';
 import { EmptyNote } from './ProfileSection';
 import { QualityDefinitionRow } from './QualityDefinitionRow';
@@ -57,7 +57,7 @@ export const QualityDefinitionsPanel: React.FC<QualityDefinitionsPanelProps> = (
       ) : definitions.length === 0 ? (
         <EmptyNote>No quality definitions found.</EmptyNote>
       ) : (
-        <ScrollFill ariaLabel="Quality definitions" className="grid grid-cols-1 gap-2.5 content-start lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2.5 content-start lg:grid-cols-2">
           {definitions.map((d) => (
             <QualityDefinitionRow
               key={`${d.quality}:${d.min_kbps}:${d.preferred_kbps}:${d.max_kbps}`}
@@ -66,7 +66,7 @@ export const QualityDefinitionsPanel: React.FC<QualityDefinitionsPanelProps> = (
               onReset={resetRow}
             />
           ))}
-        </ScrollFill>
+        </div>
       )}
 
       <ImportBitrateCheckSelect enabled={enabled} onToast={onToast} />

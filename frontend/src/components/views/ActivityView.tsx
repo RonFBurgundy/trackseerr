@@ -1,5 +1,6 @@
 import React from 'react';
 import { Ban, ClipboardCheck, DownloadCloud, History } from 'lucide-react';
+import { PageFrame } from '@/components/layout';
 import { TabStrip, TapeDeckButton, ToastBanner } from '@/components/ui';
 import { ActivityQueuePanel, ActivityHistoryPanel, ActivityBlocklistPanel, NeedsReviewPanel } from '@/components/activity';
 import { useToast } from '@/hooks/useToast';
@@ -28,7 +29,10 @@ export const ActivityView: React.FC<ActivityViewProps> = ({ sub: tab, onSubChang
   const { toast, showToast } = useToast();
 
   return (
-    <div className="space-y-6">
+    <PageFrame
+      bodyClassName="space-y-6"
+      nav={
+      <>
       {toast && <ToastBanner message={toast.message} tone={toast.tone} />}
       <TabStrip aria-label="Activity sections">
         {TABS.map((t) => (
@@ -40,11 +44,13 @@ export const ActivityView: React.FC<ActivityViewProps> = ({ sub: tab, onSubChang
           </TapeDeckButton>
         ))}
       </TabStrip>
-
+      </>
+      }
+    >
       {tab === 'queue' && <ActivityQueuePanel onToast={showToast} />}
       {tab === 'history' && <ActivityHistoryPanel onToast={showToast} />}
       {tab === 'blocklist' && <ActivityBlocklistPanel onToast={showToast} />}
       {tab === 'review' && <NeedsReviewPanel onToast={showToast} onChanged={onReviewChanged ?? noop} />}
-    </div>
+    </PageFrame>
   );
 };

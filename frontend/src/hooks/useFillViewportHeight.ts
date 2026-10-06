@@ -2,22 +2,17 @@ import { useCallback, useLayoutEffect, useState, type RefObject } from 'react';
 
 /** Floor (px) for a filled list on a tiny viewport. */
 const MIN_FILL_PX = 220;
-/**
- * Smallest share of the viewport a filled list keeps. When the content above the list is taller than the screen (a long
- * settings menu on a phone) the list stays usable and the page scrolls to reach it, instead of collapsing to a sliver.
- */
-const MIN_FILL_VIEWPORT_SHARE = 0.5;
 
 function isScrollable(el: HTMLElement): boolean {
   const overflowY = getComputedStyle(el).overflowY;
   return overflowY === 'auto' || overflowY === 'scroll';
 }
 
-/** The nearest scrolling ancestor, or null when the document itself scrolls. */
+/** The nearest scrolling ancestor (a PageFrame body counts even when it clips), or null when none is found. */
 function findScrollParent(el: HTMLElement): HTMLElement | null {
   let node: HTMLElement | null = el.parentElement;
   while (node && node !== document.body && node !== document.documentElement) {
-    if (isScrollable(node)) return node;
+    if (isScrollable(node) || node.hasAttribute('data-page-body')) return node;
     node = node.parentElement;
   }
   return null;
@@ -48,9 +43,7 @@ export function useFillViewportHeight(ref: RefObject<HTMLElement | null>, minPx:
       const viewportH = window.visualViewport?.height ?? window.innerHeight;
       available = viewportH - rect.top;
     }
-    const viewportH = window.visualViewport?.height ?? window.innerHeight;
-    const floor = Math.max(minPx, Math.round(viewportH * MIN_FILL_VIEWPORT_SHARE));
-    const next = Math.max(floor, Math.floor(available));
+    const next = Math.max(minPx, Math.floor(available));
     setHeight((prev) => (prev === next ? prev : next));
   }, [ref, minPx]);
 

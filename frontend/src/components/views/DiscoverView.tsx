@@ -9,8 +9,8 @@ import {
   MachinedCard,
   SearchBar,
   ObsidianModal,
-  ScrollFill,
 } from '@/components/ui';
+import { PageFrame } from '@/components/layout';
 import { IssueReportButton } from '@/components/issues';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
 import { getDiscoveryAlbumDetail } from '@/services/discoveryService';
@@ -73,20 +73,10 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      {/* Search and Category Transport Controls */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        <div className="flex-1 max-w-lg">
-          <SearchBar
-            value={discovery.query}
-            onChange={(val) => {
-              if (!val) discovery.clearSearch();
-              else discovery.search(val);
-            }}
-            placeholder="Search albums, artists, or tracks..."
-          />
-        </div>
-
+    <PageFrame
+      bodyClassName="space-y-6"
+      ariaLabel="Discover results"
+      nav={
         <TabStrip fill>
           <TapeDeckButton
             size="sm"
@@ -111,9 +101,20 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
             New Releases
           </TapeDeckButton>
         </TabStrip>
-      </div>
-
-      <ScrollFill ariaLabel="Discover results" className="space-y-6">
+      }
+      actions={
+        <div className="max-w-lg">
+          <SearchBar
+            value={discovery.query}
+            onChange={(val) => {
+              if (!val) discovery.clearSearch();
+              else discovery.search(val);
+            }}
+            placeholder="Search albums, artists, or tracks..."
+          />
+        </div>
+      }
+    >
       {/* Loading state */}
       {discovery.isLoading && (
         <div className="flex flex-col items-center justify-center py-20 gap-3">
@@ -270,7 +271,6 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
           })}
         </div>
       )}
-      </ScrollFill>
 
       <ArtistDiscographyModal
         artist={selectedArtist}
@@ -465,6 +465,6 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
           </div>
         </ObsidianModal>
       )}
-    </div>
+    </PageFrame>
   );
 };

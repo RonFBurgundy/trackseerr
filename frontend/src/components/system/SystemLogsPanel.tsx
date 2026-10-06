@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { Download, Trash2, Loader2, Search, AlertTriangle } from 'lucide-react';
-import { TapeDeckButton, ActionBar, TabStrip, MachinedCard, ScrollFill } from '@/components/ui';
+import { TapeDeckButton, ActionBar, TabStrip } from '@/components/ui';
+import { PageFrame } from '@/components/layout';
 import { useSystemLogs } from '@/hooks/useSystemLogs';
 
 const LEVELS = ['all', 'info', 'warning', 'error', 'debug'] as const;
@@ -20,7 +21,12 @@ export const SystemLogsPanel: React.FC = () => {
   }, [filteredLogs, autoScroll]);
 
   return (
-    <div className="space-y-4">
+    <PageFrame
+      bodyRef={containerRef}
+      ariaLabel="Application log entries"
+      bodyClassName="space-y-1 p-1.5 font-mono text-[11px] leading-relaxed select-text bg-[#0a0a0a] border border-[#222222] rounded-[4px]"
+      nav={
+      <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h4 className="text-sm font-bold uppercase font-mono text-white">Application Logs</h4>
@@ -110,12 +116,9 @@ export const SystemLogsPanel: React.FC = () => {
         </div>
       </div>
 
-      <MachinedCard className="p-1.5 bg-[#0a0a0a] border border-[#222222]">
-        <ScrollFill
-          scrollRef={containerRef}
-          ariaLabel="Application log entries"
-          className="space-y-1 p-1.5 font-mono text-[11px] leading-relaxed select-text"
-        >
+      </div>
+      }
+    >
           {filteredLogs.length === 0 && (
             <div className="py-20 text-center text-neutral-500">
               {logs.length === 0
@@ -142,8 +145,6 @@ export const SystemLogsPanel: React.FC = () => {
               </div>
             );
           })}
-        </ScrollFill>
-      </MachinedCard>
-    </div>
+    </PageFrame>
   );
 };

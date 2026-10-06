@@ -9,11 +9,11 @@ export interface StartupScreenProps {
 /** Full-viewport "TrackSeerr is starting" screen shown while the server finishes booting. */
 export const StartupScreen: React.FC<StartupScreenProps> = ({ step }) => (
   <div
-    className="min-h-screen w-full flex items-center justify-center bg-[#0a0a0a] px-4"
+    className="h-full w-full overflow-y-auto flex bg-[#0a0a0a] px-4"
     role="status"
     aria-live="polite"
   >
-    <MachinedCard className="w-full max-w-sm p-3 sm:p-6 flex flex-col items-center gap-4 text-center">
+    <MachinedCard className="m-auto w-full max-w-sm p-3 sm:p-6 flex flex-col items-center gap-4 text-center">
       <Loader2 className="w-8 h-8 text-[#e5a00d] animate-spin" aria-hidden="true" />
       <h1 className="text-sm font-semibold uppercase tracking-[0.05em] text-white">
         TrackSeerr is starting&hellip;

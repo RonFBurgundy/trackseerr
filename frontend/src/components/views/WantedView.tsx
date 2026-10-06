@@ -1,5 +1,6 @@
 import React from 'react';
 import { ArrowUpCircle, SearchX } from 'lucide-react';
+import { PageFrame } from '@/components/layout';
 import { TabStrip, TapeDeckButton, ToastBanner } from '@/components/ui';
 import { WantedPanel } from '@/components/wanted';
 import { useToast } from '@/hooks/useToast';
@@ -20,7 +21,10 @@ export const WantedView: React.FC<WantedViewProps> = ({ sub: tab, onSubChange })
   const { toast, showToast } = useToast();
 
   return (
-    <div className="space-y-6">
+    <PageFrame
+      bodyClassName="space-y-6"
+      nav={
+      <>
       {toast && <ToastBanner message={toast.message} tone={toast.tone} />}
       <TabStrip aria-label="Wanted sections">
         {TABS.map((t) => (
@@ -29,8 +33,10 @@ export const WantedView: React.FC<WantedViewProps> = ({ sub: tab, onSubChange })
           </TapeDeckButton>
         ))}
       </TabStrip>
-
+      </>
+      }
+    >
       <WantedPanel key={tab} list={tab} onToast={showToast} />
-    </div>
+    </PageFrame>
   );
 };

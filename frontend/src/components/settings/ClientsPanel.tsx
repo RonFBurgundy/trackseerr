@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Trash2, Plus } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar, ScrollFill } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar } from '@/components/ui';
 import type { DownloadClientItem } from '@/types/models';
 import { saveClientSettings, deleteClientSettings, testClientConnection } from '@/services/settingsService';
 import { compactInputClass, compactLabelClass } from './formClasses';
@@ -66,7 +66,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
       {clients.length === 0 ? (
         <p className="text-xs font-mono text-neutral-500 py-4">No download clients configured yet.</p>
       ) : (
-        <ScrollFill ariaLabel="Download clients" className="grid grid-cols-1 md:grid-cols-2 gap-4 content-start">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 content-start">
           {clients.map((c) => (
             <MachinedCard key={c.id} className="p-3 sm:p-4 flex items-center justify-between gap-3">
               <div>
@@ -93,7 +93,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
               </div>
             </MachinedCard>
           ))}
-        </ScrollFill>
+        </div>
       )}
 
       <MachinedCard className="p-3 sm:p-5 max-w-xl">
