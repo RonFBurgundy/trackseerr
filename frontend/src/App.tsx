@@ -401,9 +401,13 @@ const MainApp: React.FC = () => {
         ) : (
           /* Authenticated Dashboard Views: each view is a PageFrame filling this column. */
           <div className="max-w-7xl mx-auto w-full flex flex-col flex-1 min-h-0">
-            {activeTab === 'discover' && (
+            {activeRoute.tab === 'discover' && (
               <DiscoverView
                 discovery={discovery}
+                route={activeRoute}
+                onNavigate={handleNavigate}
+                onNavigateUp={navigateUp}
+                isAdmin={auth.canUseAdminUi}
                 onPlayTrack={audioPlayer.play}
                 currentPreviewTrackId={audioPlayer.currentTrack?.id}
                 isPreviewPlaying={audioPlayer.isPlaying}
@@ -431,6 +435,8 @@ const MainApp: React.FC = () => {
                 route={activeRoute}
                 onNavigate={handleNavigate}
                 onNavigateUp={navigateUp}
+                onRequestItem={handleRequestItem}
+                onRequestDiscography={handleRequestDiscography}
                 libraryHook={libraryHook}
                 isAdmin={auth.canUseAdminUi}
               />

@@ -74,7 +74,7 @@ def clean_library_name(text: str) -> str:
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
 SEED_COMPLETE_ACTIONS = ("keep", "remove", "remove_and_delete")
-SCHEMA_VERSION = 59  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 60  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:
@@ -352,6 +352,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 (57, self._migration_v57),
                 (58, self._migration_v58),
                 (59, self._migration_v59),
+                (60, self._migration_v60),
             ]
 
             applied = 0
@@ -1089,6 +1090,30 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN torrent_hardlink_tags TEXT NOT NULL DEFAULT 'copy_and_tag'"
             )
+
+    def _migration_v60(self, cur: sqlite3.Cursor) -> None:
+        """Discovery <-> library artist identity cache (``artist_links``); one row per resolved side, each key unique."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS artist_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                library_artist_id TEXT,
+                discovery_id TEXT,
+                mbid TEXT,
+                name TEXT,
+                confidence TEXT NOT NULL DEFAULT 'none' CHECK (confidence IN ('mbid', 'name', 'none')),
+                updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+            );
+            """
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_artist_links_library ON artist_links(library_artist_id) "
+            "WHERE library_artist_id IS NOT NULL;"
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_artist_links_discovery ON artist_links(discovery_id) "
+            "WHERE discovery_id IS NOT NULL;"
+        )
 
     def _migration_v59(self, cur: sqlite3.Cursor) -> None:
         """Seed cleanup: ``seed_complete_action`` replaces ``delete_completed_transfers`` (kept readable, no longer
@@ -6527,6 +6552,73 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         if artist is None:
             raise RuntimeError(f"Failed to upsert library artist {artist_id}")
         return artist
+
+    # -------------------------------------------------------------------------
+    # Artist links (discovery <-> library identity cache)
+    # -------------------------------------------------------------------------
+
+    def get_artist_link(
+        self, library_artist_id: Optional[str] = None, discovery_id: Optional[str] = None
+    ) -> Optional[dict[str, Any]]:
+        """The cached link row keyed by library artist id or discovery id (library id wins); None when absent."""
+        with self._lock:
+            row = None
+            if library_artist_id:
+                row = self.conn.execute(
+                    "SELECT * FROM artist_links WHERE library_artist_id = ?", (str(library_artist_id),)
+                ).fetchone()
+            if row is None and discovery_id:
+                row = self.conn.execute(
+                    "SELECT * FROM artist_links WHERE discovery_id = ?", (str(discovery_id),)
+                ).fetchone()
+            return dict(row) if row else None
+
+    def save_artist_link(
+        self,
+        library_artist_id: Optional[str],
+        discovery_id: Optional[str],
+        mbid: Optional[str],
+        confidence: str,
+        name: Optional[str] = None,
+    ) -> None:
+        """Replaces any rows holding either key, then stores the link stamped with the current time (UTC)."""
+        if not library_artist_id and not discovery_id:
+            return
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        with self._lock:
+            if library_artist_id:
+                self.conn.execute("DELETE FROM artist_links WHERE library_artist_id = ?", (str(library_artist_id),))
+            if discovery_id:
+                self.conn.execute("DELETE FROM artist_links WHERE discovery_id = ?", (str(discovery_id),))
+            self.conn.execute(
+                "INSERT INTO artist_links (library_artist_id, discovery_id, mbid, name, confidence, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    str(library_artist_id) if library_artist_id else None,
+                    str(discovery_id) if discovery_id else None,
+                    mbid,
+                    name,
+                    confidence,
+                    stamp,
+                ),
+            )
+            self.conn.commit()
+
+    def get_discovery_ids_for_library_artists(self, library_artist_ids: list[str]) -> dict[str, str]:
+        """``{library_artist_id: discovery_id}`` for cached positive links only (no freshness check, no network)."""
+        ids = [str(i) for i in library_artist_ids if i]
+        out: dict[str, str] = {}
+        with self._lock:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start : start + 500]
+                marks = ",".join("?" for _ in chunk)
+                rows = self.conn.execute(
+                    f"SELECT library_artist_id, discovery_id FROM artist_links "
+                    f"WHERE library_artist_id IN ({marks}) AND discovery_id IS NOT NULL AND confidence != 'none'",
+                    chunk,
+                ).fetchall()
+                out.update({r[0]: r[1] for r in rows})
+        return out
 
     def get_library_artist(self, artist_id: str) -> Optional[dict[str, Any]]:
         """Retrieves a single library artist by ID."""

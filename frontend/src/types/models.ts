@@ -55,8 +55,23 @@ export interface DiscoveryItem {
   source?: string;
   requested?: boolean;
   in_library?: boolean;
-  status?: 'in_library' | 'available' | 'requested' | 'pending' | 'processing' | 'rejected' | 'none';
+  status?: DiscoveryStatus;
+  /** Deezer/iTunes artist id of this item's artist; present when the artist has a profile page. */
+  artist_discovery_id?: string;
+  /** Admin only: the matching library artist. */
+  library_artist_id?: string;
 }
+
+export type DiscoveryStatus =
+  | 'in_library'
+  | 'available'
+  | 'partial'
+  | 'missing'
+  | 'requested'
+  | 'pending'
+  | 'processing'
+  | 'rejected'
+  | 'none';
 
 export interface RequestItem {
   id: number;
@@ -142,6 +157,8 @@ export interface ArtistItem {
   metadata_profile_id?: number | null;
   /** `lidarr` for records served live from Lidarr; absent or `native` otherwise. */
   source?: 'native' | 'lidarr';
+  /** Discovery id of the matching Deezer/iTunes artist, when known (opens the Discover profile). */
+  discovery_id?: string | null;
 }
 
 export interface AlbumItem {
@@ -851,11 +868,84 @@ export interface ArtistDiscographyAlbum {
   record_type?: string;
 }
 
-export interface ArtistDetail {
-  id?: string;
+export type ArtistLinkConfidence = 'high' | 'medium' | 'low' | 'none';
+
+/** `artist` block of GET /api/discovery/artist-profile. Library fields are admin-only and absent for requesters. */
+export interface ArtistProfileArtist {
   name: string;
-  image_url?: string;
-  albums?: ArtistDiscographyAlbum[];
-  singles_eps?: ArtistDiscographyAlbum[];
-  compilations?: ArtistDiscographyAlbum[];
+  image_url?: string | null;
+  discovery_id?: string | null;
+  library_artist_id?: string | null;
+  mbid?: string | null;
+  link_confidence?: ArtistLinkConfidence;
 }
+
+/** Admin-only library summary; always null for requesters. */
+export interface ArtistProfileLibrary {
+  artist_id: number | string;
+  monitored: boolean;
+  album_count: number;
+  track_count: number;
+  track_file_count: number;
+}
+
+export interface ArtistProfileTrack {
+  id: string;
+  title: string;
+  album?: string | null;
+  duration?: number | null;
+  preview_url?: string | null;
+  status: DiscoveryStatus;
+  request_id?: number | null;
+}
+
+export interface ArtistProfileAlbum {
+  id: string;
+  item_type: 'album';
+  title: string;
+  artist: string;
+  album?: string | null;
+  cover_url?: string | null;
+  release_date?: string | null;
+  record_type?: string | null;
+  track_count?: number | null;
+  artist_discovery_id?: string | null;
+  status: DiscoveryStatus;
+  request_id?: number | null;
+  have_tracks?: number | null;
+  total_tracks?: number | null;
+  /** Admin only. */
+  library_album_id?: number | string | null;
+}
+
+/** Album owned in the library with no discography match. Requesters get only title, year and status. */
+export interface ArtistProfileLibraryOnly {
+  title: string;
+  year?: number | null;
+  status: DiscoveryStatus;
+  id?: string;
+  item_type?: string;
+  album?: string | null;
+  cover_url?: string | null;
+  release_date?: string | null;
+  library_album_id?: number | string | null;
+  have_tracks?: number | null;
+  total_tracks?: number | null;
+}
+
+export interface ArtistProfileDiscography {
+  albums: ArtistProfileAlbum[];
+  singles_eps: ArtistProfileAlbum[];
+  compilations: ArtistProfileAlbum[];
+  library_only: ArtistProfileLibraryOnly[];
+}
+
+export interface ArtistProfile {
+  artist: ArtistProfileArtist;
+  library: ArtistProfileLibrary | null;
+  top_tracks: ArtistProfileTrack[];
+  discography: ArtistProfileDiscography;
+}
+
+/** Exactly one id identifies the artist; `libraryArtistId` is admin-only. */
+export type ArtistProfileTarget = { discoveryId: string } | { libraryArtistId: string };

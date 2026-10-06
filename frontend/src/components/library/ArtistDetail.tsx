@@ -12,7 +12,7 @@ import {
   Search,
   User,
 } from 'lucide-react';
-import type { AlbumItem } from '@/types/models';
+import type { AlbumItem, ArtistDiscographyAlbum, DiscoveryItem } from '@/types/models';
 import { MONITOR_OPTIONS } from '@/types/monitoring';
 import type { MetadataProfilePreview } from '@/types/metadataProfiles';
 import { useArtistDetail, type MonitorPreset } from '@/hooks/useArtistDetail';
@@ -22,10 +22,11 @@ import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { useAlbumBulkEdit } from '@/hooks/useAlbumBulkEdit';
 import { errorMessage } from '@/services/apiClient';
 import { ConfirmDialog, MachinedCard, TactileSwitch, TapeDeckButton, TabStrip } from '@/components/ui';
-import { PageFrame } from '@/components/layout';
-import { DetailHeaderBar } from './DetailHeaderBar';
+import { DetailHeaderBar, PageFrame } from '@/components/layout';
+
 import { ArtistAlbumCard } from './ArtistAlbumCard';
 import { AlbumBulkBar } from './AlbumBulkBar';
+import { ArtistRestOfDiscography } from './ArtistRestOfDiscography';
 
 type DiscographyTab = 'studio' | 'singles_eps' | 'live' | 'compilations';
 
@@ -47,6 +48,10 @@ export interface ArtistDetailProps {
   onToggleAlbumMonitored: (albumId: number | string, monitored: boolean) => Promise<void>;
   onToggleTrackMonitored: (trackId: number | string, monitored: boolean) => Promise<void>;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
+  /** Request flow shared with Discover, for the admin-only rest-of-discography section. */
+  onRequestItem: (item: DiscoveryItem) => Promise<void>;
+  onRequestDiscography: (artist: string, albums: ArtistDiscographyAlbum[]) => Promise<void>;
+  onViewInDiscover: (discoveryId: string) => void;
 }
 
 /** 32px icon key: the page actions live inside the hero, so they stay small on every viewport. */
@@ -83,6 +88,9 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   onToggleAlbumMonitored,
   onToggleTrackMonitored,
   onToast,
+  onRequestItem,
+  onRequestDiscography,
+  onViewInDiscover,
 }) => {
   const detail = useArtistDetail(artistId, onToast, onChanged);
   const { artist, loading, refreshing, patchAlbumMonitored, patchArtistMonitored } = detail;
@@ -467,6 +475,14 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
             </div>
           )}
         </div>
+      )}
+      {isAdmin && !loading && artist && (
+        <ArtistRestOfDiscography
+          libraryArtistId={String(artistId)}
+          onRequestItem={onRequestItem}
+          onRequestDiscography={onRequestDiscography}
+          onViewInDiscover={onViewInDiscover}
+        />
       )}
       <ConfirmDialog
         isOpen={pendingProfile !== null}

@@ -5,3 +5,4 @@ export * from './navTree';
 export * from './AudioPlayerBar';
 export * from './PageFrame';
 export * from './PageActionsPortal';
+export * from './DetailHeaderBar';
