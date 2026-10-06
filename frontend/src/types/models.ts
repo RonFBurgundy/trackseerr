@@ -259,6 +259,14 @@ export interface DownloadClientItem {
   priority: number;
 }
 
+/** Completed-download folders one download client reports (after path mappings), or why they could not be read. */
+export interface DownloadClientRoots {
+  client_id: string;
+  name: string;
+  roots: string[];
+  error: string | null;
+}
+
 export interface IndexerItem {
   id: string;
   name: string;

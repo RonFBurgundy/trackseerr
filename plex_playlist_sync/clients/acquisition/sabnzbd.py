@@ -1,6 +1,7 @@
 """SABnzbd Usenet Downloader Acquisition Driver."""
 
 import logging
+import posixpath
 from typing import Any, Optional
 from urllib.parse import quote
 
@@ -59,6 +60,52 @@ class SabnzbdDriver(AcquisitionDriver):
             return False, "Connection timed out (5s)"
         except Exception as e:
             return False, f"Connection error: {str(e)}"
+
+    def get_download_roots(self) -> list[str]:
+        """Completed-download folders: ``misc.complete_dir`` plus the configured category's absolute dir.
+
+        SABnzbd normally reports ``complete_dir`` absolute; a relative value is resolved against the parent of
+        ``download_dir`` (SAB's own folder base, complete beside incomplete). ``download_dir`` itself (incomplete) is never returned.
+        """
+        self.last_roots_error = None
+        if not is_safe_service_url(self.host_url):
+            self.last_roots_error = "Prohibited host URL"
+            return []
+        roots: list[str] = []
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.get(self._api_url("get_config", section="misc"))
+                if resp.status_code != 200:
+                    raise RuntimeError(f"SABnzbd get_config misc failed (HTTP {resp.status_code})")
+                misc = (resp.json().get("config") or {}).get("misc") or {}
+                complete = str(misc.get("complete_dir") or "").strip()
+                download = str(misc.get("download_dir") or "").strip()
+                if complete and not posixpath.isabs(complete) and download and posixpath.isabs(download):
+                    # Relative to SAB's folder base: assume the usual layout where complete sits beside incomplete.
+                    complete = posixpath.join(posixpath.dirname(download.rstrip("/")), posixpath.basename(complete.rstrip("/")))
+                if complete and posixpath.isabs(complete):
+                    roots.append(complete)
+                if self.category and roots:
+                    cresp = client.get(self._api_url("get_config", section="categories"))
+                    if cresp.status_code == 200:
+                        cats = (cresp.json().get("config") or {}).get("categories") or []
+                        for cat in cats if isinstance(cats, list) else []:
+                            if not isinstance(cat, dict) or str(cat.get("name") or "").lower() != self.category.lower():
+                                continue
+                            cdir = str(cat.get("dir") or "").strip()
+                            if cdir and posixpath.isabs(cdir):
+                                roots.append(cdir)
+                            elif cdir:
+                                roots.append(posixpath.normpath(posixpath.join(roots[0], cdir)))
+                    else:
+                        logger.info("SABnzbd categories lookup returned HTTP %s; using complete_dir only", cresp.status_code)
+        except (httpx.HTTPError, RuntimeError, ValueError, AttributeError) as e:
+            logger.warning("Could not read SABnzbd download folders from %s: %s", self.host_url, e)
+            self.last_roots_error = str(e) or type(e).__name__
+            return []
+        if not roots:
+            self.last_roots_error = "SABnzbd reported no usable complete_dir"
+        return list(dict.fromkeys(roots))
 
     def search(
         self,

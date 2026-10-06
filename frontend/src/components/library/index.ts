@@ -13,6 +13,7 @@ export * from './AlbumTrackList';
 export * from './AlbumDetailModal';
 export * from './AddToCollectionModal';
 export * from './ArtistAlbumCard';
+export * from './DetailHeaderBar';
 export * from './ArtistDetail';
 export * from './CollectionArt';
 export * from './CreateCollectionModal';

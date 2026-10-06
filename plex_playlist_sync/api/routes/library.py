@@ -7,6 +7,7 @@ and Arr-grade token-template preview and batch-renaming engine.
 """
 
 from datetime import datetime, timezone
+import sqlite3
 import json
 import logging
 import os
@@ -27,6 +28,7 @@ from plex_playlist_sync import library_paging as paging
 from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
 from plex_playlist_sync import art_pipeline, art_thumbs
 from plex_playlist_sync import lidarr_library
+from plex_playlist_sync.download_roots import allowed_roots_for_all_clients
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver, is_torrent_driver_type
 from plex_playlist_sync.acquisition_worker import (
@@ -310,7 +312,8 @@ def validate_media_path(path_str: str, db: Optional[Database] = None) -> Path:
                 approved_bases.append(Path(mm["root_folder_path"]).resolve())
             if mm.get("staging_folder_path"):
                 approved_bases.append(Path(mm["staging_folder_path"]).resolve())
-        except Exception as exc:
+            approved_bases.extend(allowed_roots_for_all_clients(db, mm).roots)
+        except (sqlite3.Error, OSError, ValueError) as exc:
             logger.warning("Could not query media management settings for path validation: %s", exc)
 
     is_approved = any(resolved == base or resolved.is_relative_to(base) for base in approved_bases)
@@ -3050,7 +3053,14 @@ def manual_import_scan(
         folder_path = req.folder_path
         if not folder_path:
             mm = db.get_media_management_settings()
-            folder_path = mm.get("staging_folder_path") or "/downloads"
+            roots = allowed_roots_for_all_clients(db, mm)
+            folder_path = next((str(r) for r in roots.usable_roots()), None)
+            if not folder_path:
+                detail = "; ".join(roots.errors) or "No download folder is known"
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{detail}. Pass a folder_path, or check your download client connection.",
+                )
         validated_dir = validate_media_path(folder_path, db=db)
         if not validated_dir.exists() or not validated_dir.is_dir():
             raise HTTPException(

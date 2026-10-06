@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Disc, Eye, FolderInput, Layers, Loader2, Music, RefreshCw, User } from 'lucide-react';
 import type { UseLibraryReturn, LibraryTab } from '@/hooks/useLibrary';
-import type { NavigateOptions } from '@/hooks/useAppRoute';
+import type { AppRoute, LibraryRoute, NavigateOptions } from '@/hooks/useAppRoute';
+import { useLibraryDrilldown } from '@/hooks/useLibraryDrilldown';
 import type { AlbumItem } from '@/types/models';
 import { useAddToCollection } from '@/hooks/useAddToCollection';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
@@ -30,9 +31,11 @@ import { ManualImportModal } from '@/components/manualImport';
 export interface LibraryViewProps {
   libraryHook: UseLibraryReturn;
   isAdmin?: boolean;
-  /** Route sub-page (artists/albums/tracks/collections). */
-  sub: LibraryTab;
-  onSubChange: (sub: LibraryTab, options?: NavigateOptions) => void;
+  /** Current library route: sub-page (artists/albums/tracks/collections) plus any artist/collection/album drill-down. */
+  route: LibraryRoute;
+  onNavigate: (route: LibraryRoute, options?: NavigateOptions) => void;
+  /** Step up to `parent`: history back when the previous entry is that parent, otherwise replace with it. */
+  onNavigateUp: (parent: AppRoute) => void;
 }
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -44,7 +47,8 @@ const TABS: Array<{ id: LibraryTab; label: string; icon: React.ReactNode }> = [
   { id: 'collections', label: 'Collections', icon: <Layers className="h-3.5 w-3.5" /> },
 ];
 
-export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin = false, sub: activeTab, onSubChange }) => {
+export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin = false, route, onNavigate, onNavigateUp }) => {
+  const activeTab = route.sub;
   const {
     collections,
     stats,
@@ -67,14 +71,17 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
 
   const { toast, showToast } = useToast();
   const manager = useLibraryManager(isAdmin);
+  const drill = useLibraryDrilldown(route, onNavigate, onNavigateUp, showToast);
+  const { artistId: selectedArtistId, collectionId: selectedCollectionId, closeDetail } = drill;
+  const onSubChange = useCallback(
+    (sub: LibraryTab, options?: NavigateOptions): void => onNavigate({ tab: 'library', sub }, options),
+    [onNavigate]
+  );
 
   const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null);
   const [searchInput, setSearchInput] = useState<string>('');
   const query = useDebouncedValue(searchInput, SEARCH_DEBOUNCE_MS);
   const [monitoredOnly, setMonitoredOnly] = useState<boolean>(false);
-  const [selectedArtistId, setSelectedArtistId] = useState<number | string | null>(null);
-  const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
-  const [albumForModal, setAlbumForModal] = useState<AlbumItem | null>(null);
   const [importScope, setImportScope] = useState<ManualImportScope | null>(null);
   /** Data source reported by the paged artists/albums responses; used until the manager settings load. */
   const [listMode, setListMode] = useState<string | null>(null);
@@ -92,10 +99,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
   useEffect(() => {
     setSearch(query);
   }, [query, setSearch]);
-
-  useEffect(() => {
-    setSelectedCollectionId(null);
-  }, [activeTab, query]);
 
   // Collections reference native album ids, so the tab only exists when TrackSeerr manages the library.
   const visibleTabs = lidarrMode ? TABS.filter((t) => t.id !== 'collections') : TABS;
@@ -115,14 +118,14 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
           showToast('Failed to delete collection', 'error');
           return;
         }
-        setSelectedCollectionId((cur) => (cur === id ? null : cur));
+        if (selectedCollectionId === id) closeDetail();
         await refresh();
         showToast(`Collection "${name}" deleted`);
       } catch (err: unknown) {
         showToast(errorMessage(err, 'Error deleting collection'), 'error');
       }
     },
-    [refresh, showToast]
+    [refresh, showToast, selectedCollectionId, closeDetail]
   );
 
   const handleCollectionCreated = useCallback(
@@ -140,26 +143,29 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
     [picker]
   );
 
+  const openAlbumImport = useCallback(
+    (album: AlbumItem): void => setImportScope({ kind: 'album', albumId: String(album.id), title: album.title }),
+    []
+  );
+
   const toastNode = toast ? <ToastBanner message={toast.message} tone={toast.tone} /> : null;
 
-  if (selectedArtistId !== null) {
-    return (
-      <PageFrame nav={toastNode}>
-        <ArtistDetail
-          key={String(selectedArtistId)}
-          artistId={selectedArtistId}
-          isAdmin={isAdmin}
-          canCollect={canCollect}
-          lidarrMode={lidarrMode}
-          onBack={() => setSelectedArtistId(null)}
-          onCollect={openCollectPicker}
-          onChanged={() => void refresh()}
-          onToggleArtistMonitored={toggleArtistMonitored}
-          onToggleAlbumMonitored={toggleAlbumMonitored}
-          onToggleTrackMonitored={toggleTrackMonitored}
-          onToast={showToast}
-        />
-        <AddToCollectionModal picker={picker} />
+  // Modals are portaled and mounted once, whichever page is showing, so their triggers always find them.
+  const overlays = (
+    <>
+      <AlbumDetailModal
+        album={drill.album}
+        isAdmin={isAdmin}
+        canCollect={canCollect}
+        lidarrMode={lidarrMode}
+        onClose={drill.closeAlbum}
+        onCollect={openCollectPicker}
+        onGoToArtist={drill.openArtist}
+        onImportFiles={openAlbumImport}
+        onToggleTrackMonitored={toggleTrackMonitored}
+        onToast={showToast}
+      />
+      <AddToCollectionModal picker={picker} />
       <ManualImportModal
         scope={importScope}
         onClose={() => setImportScope(null)}
@@ -168,23 +174,51 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
           void reloadCatalog();
         }}
       />
-      </PageFrame>
+    </>
+  );
+
+  if (selectedArtistId !== null) {
+    return (
+      <>
+        <PageFrame nav={toastNode} scroll={false}>
+          <ArtistDetail
+            key={selectedArtistId}
+            artistId={selectedArtistId}
+            isAdmin={isAdmin}
+            canCollect={canCollect}
+            lidarrMode={lidarrMode}
+            onBack={closeDetail}
+            onCollect={openCollectPicker}
+            onOpenAlbum={drill.openAlbum}
+            onImportAlbum={openAlbumImport}
+            onChanged={() => void refresh()}
+            onToggleArtistMonitored={toggleArtistMonitored}
+            onToggleAlbumMonitored={toggleAlbumMonitored}
+            onToggleTrackMonitored={toggleTrackMonitored}
+            onToast={showToast}
+          />
+        </PageFrame>
+        {overlays}
+      </>
     );
   }
 
   if (selectedCollectionId !== null) {
     return (
-      <PageFrame nav={toastNode}>
-        <CollectionDetail
-          collectionId={selectedCollectionId}
-          fallback={collections.find((c) => c.id === selectedCollectionId)}
-          isAdmin={isAdmin}
-          onBack={() => setSelectedCollectionId(null)}
-          onDelete={(id, name) => void handleDeleteCollection(id, name)}
-          onChanged={refresh}
-          onToast={showToast}
-        />
-      </PageFrame>
+      <>
+        <PageFrame nav={toastNode} scroll={false}>
+          <CollectionDetail
+            collectionId={selectedCollectionId}
+            fallback={collections.find((c) => c.id === selectedCollectionId)}
+            isAdmin={isAdmin}
+            onBack={closeDetail}
+            onDelete={(id, name) => void handleDeleteCollection(id, name)}
+            onChanged={refresh}
+            onToast={showToast}
+          />
+        </PageFrame>
+        {overlays}
+      </>
     );
   }
 
@@ -194,6 +228,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
   const statsFooter = <LibraryStatsBar stats={stats} showLegend={activeTab === 'artists'} />;
 
   return (
+    <>
     <PageFrame
       inlineActions
       nav={
@@ -208,6 +243,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
       actions={
         <div className="flex min-w-0 items-stretch gap-1.5">
           <SearchBar
+            id="library-search"
             name="library-filter"
             ariaLabel={`Filter ${activeTab}`}
             value={searchInput}
@@ -292,7 +328,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
           monitoredOnly={monitoredOnly}
           isAdmin={isAdmin}
           reloadToken={catalogVersion}
-          onOpenArtist={setSelectedArtistId}
+          onOpenArtist={drill.openArtist}
           toolbarSlot={toolbarSlot}
           footer={statsFooter}
           onModeChange={setListMode}
@@ -306,7 +342,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
           monitoredOnly={monitoredOnly}
           isAdmin={isAdmin}
           reloadToken={catalogVersion}
-          onOpenAlbum={setAlbumForModal}
+          onOpenAlbum={drill.openAlbum}
           toolbarSlot={toolbarSlot}
           footer={statsFooter}
           onModeChange={setListMode}
@@ -349,26 +385,14 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
           <CollectionsPanel
             collections={collections}
             isAdmin={isAdmin}
-            onOpen={setSelectedCollectionId}
+            onOpen={drill.openCollection}
             onDelete={(id, name) => void handleDeleteCollection(id, name)}
             onCreated={handleCollectionCreated}
             onToast={showToast}
           />
         ))}
-
-      <AlbumDetailModal
-        album={albumForModal}
-        isAdmin={isAdmin}
-        canCollect={canCollect}
-        lidarrMode={lidarrMode}
-        onClose={() => setAlbumForModal(null)}
-        onCollect={openCollectPicker}
-        onGoToArtist={setSelectedArtistId}
-        onImportFiles={(album) => setImportScope({ kind: 'album', albumId: String(album.id), title: album.title })}
-        onToggleTrackMonitored={toggleTrackMonitored}
-        onToast={showToast}
-      />
-      <AddToCollectionModal picker={picker} />
     </PageFrame>
+    {overlays}
+    </>
   );
 };

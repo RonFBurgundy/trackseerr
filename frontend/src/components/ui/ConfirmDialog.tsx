@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2 } from 'lucide-react';
+import { useModalHistory } from '@/hooks/useModalHistory';
 import { TapeDeckButton } from './TapeDeckButton';
 import { ActionBar } from './ActionBar';
 
@@ -38,6 +39,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   const panelRef = useRef<HTMLDivElement>(null);
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
+  // Back cancels, like Escape.
+  useModalHistory(isOpen, onCancel);
 
   useEffect(() => {
     if (!isOpen) return;

@@ -1,8 +1,10 @@
 import React from 'react';
-import { ArrowLeft, Disc, Loader2, Trash2 } from 'lucide-react';
+import { Disc, Loader2, Trash2 } from 'lucide-react';
 import type { CollectionItem } from '@/types/models';
 import { useCollectionDetail } from '@/hooks/useCollectionDetail';
 import { MachinedCard, TapeDeckButton } from '@/components/ui';
+import { PageFrame } from '@/components/layout';
+import { DetailHeaderBar } from './DetailHeaderBar';
 import { CollectionArt } from './CollectionArt';
 
 export interface CollectionDetailProps {
@@ -28,24 +30,24 @@ export const CollectionDetail: React.FC<CollectionDetailProps> = ({
   const { collection, loading, removeAlbum } = useCollectionDetail(collectionId, onToast, onChanged);
   const col = collection ?? fallback;
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <TapeDeckButton size="sm" onClick={onBack} icon={<ArrowLeft className="h-4 w-4" />}>
-          Back to Collections
-        </TapeDeckButton>
-        {isAdmin && col && (
-          <TapeDeckButton
-            size="sm"
-            variant="danger"
-            onClick={() => onDelete(col.id, col.name)}
-            icon={<Trash2 className="h-3.5 w-3.5" />}
-          >
-            Delete Collection
-          </TapeDeckButton>
-        )}
-      </div>
+  const deleteAction =
+    isAdmin && col ? (
+      <TapeDeckButton
+        size="sm"
+        variant="danger"
+        onClick={() => onDelete(col.id, col.name)}
+        icon={<Trash2 className="h-3.5 w-3.5" />}
+        collapseLabel="sm"
+        aria-label="Delete collection"
+        title="Delete collection"
+      >
+        Delete
+      </TapeDeckButton>
+    ) : undefined;
 
+  return (
+    <PageFrame nav={<DetailHeaderBar parentLabel="Collections" title={col?.name} onBack={onBack} actions={deleteAction} />}>
+    <div className="space-y-6">
       <MachinedCard className="p-3 sm:p-6">
         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
           <div className="h-32 w-32 rounded-[4px] bg-[#1a1a1a] border border-[#2a2a2a] overflow-hidden flex-shrink-0 flex items-center justify-center shadow-xl">
@@ -117,5 +119,6 @@ export const CollectionDetail: React.FC<CollectionDetailProps> = ({
         </div>
       )}
     </div>
+    </PageFrame>
   );
 };

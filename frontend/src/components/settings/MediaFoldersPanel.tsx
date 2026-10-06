@@ -1,7 +1,8 @@
 import React, { useId, useState } from 'react';
-import { Eye, EyeOff, Loader2, Save } from 'lucide-react';
+import { Eye, EyeOff, Loader2, RefreshCw, Save } from 'lucide-react';
 import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, FormField, MonitorOptionSelect } from '@/components/ui';
 import type { MediaManagementSettings, SeedCompleteAction } from '@/types/models';
+import { useDownloadClientRoots } from '@/hooks/useDownloadClientRoots';
 import { updateMediaManagementSettings } from '@/services/settingsService';
 import { NamingFormatsEditor } from '@/components/naming/NamingFormatsEditor';
 import { inputClass, labelClass } from './formClasses';
@@ -26,6 +27,7 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
   const scanMonitorId = useId();
   const addMonitorId = useId();
   const acoustidKeyId = useId();
+  const roots = useDownloadClientRoots();
   const [showKey, setShowKey] = useState<boolean>(false);
   // null = untouched: the server value (possibly masked) is shown and never sent back.
   const [keyDraft, setKeyDraft] = useState<string | null>(null);
@@ -79,17 +81,60 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
           />
         </div>
 
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className={labelClass}>Download folders (read from your clients)</span>
+            <TapeDeckButton
+              type="button"
+              size="sm"
+              aria-label="Re-read download folders from clients"
+              title="Re-read from clients"
+              onClick={() => void roots.refresh()}
+              disabled={roots.loading}
+              icon={<RefreshCw className={`h-4 w-4 ${roots.loading ? 'animate-spin' : ''}`} />}
+            />
+          </div>
+          <p className="text-[11px] text-neutral-500 font-mono">
+            Finished downloads are imported from the folders each download client reports, so there is nothing to type here.
+          </p>
+          {roots.error && (
+            <p role="alert" className="text-[11px] font-mono text-[#ef4444]">{roots.error}</p>
+          )}
+          {!roots.error && !roots.loading && roots.clients.length === 0 && (
+            <p className="text-[11px] font-mono text-neutral-500">No download clients configured.</p>
+          )}
+          <ul className="space-y-1.5">
+            {roots.clients.map((c) => (
+              <li key={c.client_id} className="px-2 py-1.5 rounded-[3px] border border-[#222222] bg-[#0d0d0d]">
+                <div className="text-[11px] font-mono font-bold text-neutral-300">{c.name}</div>
+                {c.roots.map((r) => (
+                  <div key={r} className="text-[11px] font-mono text-white break-all">{r}</div>
+                ))}
+                {c.error && (
+                  <div className="text-[11px] font-mono text-[#e5a00d] break-words">
+                    Could not read download folder: {c.error}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+
         <div>
-          <label htmlFor={stagingId} className={labelClass}>Staging / Downloads Folder</label>
+          <label htmlFor={stagingId} className={labelClass}>Extra import folder (advanced)</label>
           <input
             id={stagingId}
             name="staging_folder_path"
             type="text"
             value={settings?.staging_folder_path || ''}
             onChange={(e) => onChange((prev) => (prev ? { ...prev, staging_folder_path: e.target.value } : null))}
-            placeholder="/data/downloads"
+            placeholder="Optional"
             className={`${inputClass} font-mono`}
           />
+          <p className="mt-1.5 text-[11px] font-mono text-neutral-500">
+            Optional. Download folders are read from each download client automatically; set this only to also allow
+            imports from another folder. It can never be inside your library.
+          </p>
         </div>
 
         <NamingFormatsEditor

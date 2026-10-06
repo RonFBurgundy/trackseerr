@@ -392,3 +392,13 @@ def real_art_pipeline(art_scheduler_calls):
 
     yield
     art_pipeline.wait_idle(5)
+
+
+@pytest.fixture(autouse=True)
+def _clear_download_roots_cache():
+    """The per-client download-roots cache is process-global; keep tests independent of each other."""
+    from plex_playlist_sync.download_roots import clear_roots_cache
+
+    clear_roots_cache()
+    yield
+    clear_roots_cache()

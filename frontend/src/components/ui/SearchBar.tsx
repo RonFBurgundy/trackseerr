@@ -31,6 +31,15 @@ export const SearchBar: React.FC<SearchBarProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && onSearch) {
       onSearch();
+    } else if (e.key === 'Escape') {
+      // Escape clears typed text first; on an empty box it leaves the field.
+      if (value) {
+        e.preventDefault();
+        e.stopPropagation();
+        onChange('');
+      } else {
+        e.currentTarget.blur();
+      }
     }
   };
 
@@ -42,6 +51,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
       <input
         id={id ?? generatedId}
         name={name}
+        data-page-search=""
         aria-label={ariaLabel ?? placeholder}
         autoComplete="off"
         type="text"

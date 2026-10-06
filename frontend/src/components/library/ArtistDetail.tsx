@@ -1,6 +1,5 @@
 import React, { useCallback, useId, useMemo, useState } from 'react';
 import {
-  ArrowLeft,
   CheckSquare,
   Disc,
   ExternalLink,
@@ -23,6 +22,8 @@ import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { useAlbumBulkEdit } from '@/hooks/useAlbumBulkEdit';
 import { errorMessage } from '@/services/apiClient';
 import { ConfirmDialog, MachinedCard, TactileSwitch, TapeDeckButton, TabStrip } from '@/components/ui';
+import { PageFrame } from '@/components/layout';
+import { DetailHeaderBar } from './DetailHeaderBar';
 import { ArtistAlbumCard } from './ArtistAlbumCard';
 import { AlbumBulkBar } from './AlbumBulkBar';
 
@@ -36,6 +37,10 @@ export interface ArtistDetailProps {
   lidarrMode: boolean;
   onBack: () => void;
   onCollect: (album: AlbumItem) => void;
+  /** Opens the album detail modal (route-driven). */
+  onOpenAlbum: (album: AlbumItem) => void;
+  /** Opens Manual Import scoped to an album (native mode, admin). */
+  onImportAlbum: (album: AlbumItem) => void;
   /** Called after a change that the paged lists should pick up. */
   onChanged: () => void;
   onToggleArtistMonitored: (artistId: number | string, monitored: boolean) => Promise<void>;
@@ -71,6 +76,8 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   lidarrMode,
   onBack,
   onCollect,
+  onOpenAlbum,
+  onImportAlbum,
   onChanged,
   onToggleArtistMonitored,
   onToggleAlbumMonitored,
@@ -202,6 +209,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   ];
 
   return (
+    <PageFrame nav={<DetailHeaderBar parentLabel="Artists" title={artist?.name} onBack={onBack} />}>
     <div className="space-y-2 sm:space-y-4">
       <MachinedCard className="relative overflow-hidden">
         {artist?.banner_url && (
@@ -223,16 +231,6 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
             ) : (
               <User className="h-10 w-10 text-neutral-600" />
             )}
-            <div className="absolute left-1 top-1 z-10">
-              <TapeDeckButton
-                size="sm"
-                className={`${ICON_KEY} bg-black/60`}
-                onClick={onBack}
-                icon={<ArrowLeft className="h-4 w-4" />}
-                aria-label="Back to artists"
-                title="Back to artists"
-              />
-            </div>
           </div>
 
           <div className="min-w-0 flex flex-col justify-between gap-1.5 sm:gap-2">
@@ -451,6 +449,8 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
               canCollect={canCollect}
               lidarrMode={lidarrMode}
               onCollect={onCollect}
+              onOpenAlbum={onOpenAlbum}
+              onImportAlbum={onImportAlbum}
               onToggleAlbumMonitored={(id, cur) => void toggleAlbum(id, cur)}
               onToggleTrackMonitored={onToggleTrackMonitored}
               onToast={onToast}
@@ -484,5 +484,6 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
         </p>
       </ConfirmDialog>
     </div>
+    </PageFrame>
   );
 };

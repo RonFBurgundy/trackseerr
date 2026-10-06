@@ -1,5 +1,5 @@
 import React, { useCallback, useId, useState } from 'react';
-import { BookmarkPlus, ChevronDown, ChevronUp, Disc, Loader2, Search, Sliders } from 'lucide-react';
+import { BookmarkPlus, ChevronDown, ChevronUp, Disc, FolderInput, Info, Loader2, Search, Sliders } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
 import { useAlbumTracks } from '@/hooks/useAlbumTracks';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
@@ -20,6 +20,10 @@ export interface ArtistAlbumCardProps {
   canCollect: boolean;
   lidarrMode: boolean;
   onCollect: (album: AlbumItem) => void;
+  /** Opens the album detail modal. */
+  onOpenAlbum: (album: AlbumItem) => void;
+  /** Opens Manual Import scoped to this album (native mode, admin). */
+  onImportAlbum: (album: AlbumItem) => void;
   onToggleAlbumMonitored: (albumId: number | string, currentMonitored: boolean) => void;
   onToggleTrackMonitored: (trackId: number | string, monitored: boolean) => Promise<void>;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
@@ -34,6 +38,8 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
   canCollect,
   lidarrMode,
   onCollect,
+  onOpenAlbum,
+  onImportAlbum,
   onToggleAlbumMonitored,
   onToggleTrackMonitored,
   onToast,
@@ -76,6 +82,20 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
       icon: <Search className="h-3.5 w-3.5" />,
       disabled: searching,
       onSelect: () => void lidarrSearch.searchAlbum(album.id),
+    });
+  }
+  menuItems.push({
+    key: 'details',
+    label: 'Album details',
+    icon: <Info className="h-3.5 w-3.5" />,
+    onSelect: () => onOpenAlbum(album),
+  });
+  if (isAdmin && !lidarrMode) {
+    menuItems.push({
+      key: 'import',
+      label: 'Import files',
+      icon: <FolderInput className="h-3.5 w-3.5" />,
+      onSelect: () => onImportAlbum(album),
     });
   }
   if (canCollect) {
@@ -181,6 +201,24 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
                 Search
               </TapeDeckButton>
             )}
+            {isAdmin && !lidarrMode && (
+              <TapeDeckButton
+                size="sm"
+                onClick={() => onImportAlbum(album)}
+                icon={<FolderInput className="h-3.5 w-3.5" />}
+                title="Import files for this album"
+              >
+                Import
+              </TapeDeckButton>
+            )}
+            <TapeDeckButton
+              size="sm"
+              onClick={() => onOpenAlbum(album)}
+              icon={<Info className="h-3.5 w-3.5" />}
+              title="Album details"
+            >
+              Details
+            </TapeDeckButton>
             {canCollect && (
               <TapeDeckButton
                 size="sm"

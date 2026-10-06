@@ -51,9 +51,8 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
 
   const goToArtist = (): void => {
     if (!album) return;
-    const artistId = album.artist_id;
-    onClose();
-    onGoToArtist(artistId);
+    // The drill-down hook swaps the album entry for the artist, so the modal is not closed separately.
+    onGoToArtist(album.artist_id);
   };
 
   const genres = album?.genres && album.genres.length > 0 ? album.genres.join(', ') : null;
@@ -62,6 +61,7 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
     <ObsidianModal
       isOpen={album !== null}
       onClose={onClose}
+      historyBacked={false}
       title="Album Details"
       subtitle={album ? `${album.title}${album.artist_name ? ` • ${album.artist_name}` : ''}` : undefined}
       footer={

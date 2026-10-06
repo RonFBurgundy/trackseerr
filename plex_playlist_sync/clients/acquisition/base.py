@@ -37,6 +37,9 @@ class AcquisitionDriver(ABC):
     #: True for torrent clients, whose completed files seed from their original location (import mode applies).
     is_torrent: bool = False
 
+    #: Human-readable reason the last ``get_download_roots`` call returned nothing (None when it succeeded).
+    last_roots_error: Optional[str] = None
+
     @abstractmethod
     def test_connection(self) -> tuple[bool, str]:
         """Test connectivity and authentication with download client or indexer.
@@ -118,6 +121,16 @@ class AcquisitionDriver(ABC):
             bool: True if successfully cleaned up, False otherwise.
         """
         return False
+
+    def get_download_roots(self) -> list[str]:
+        """The client's own configured completed-download directories, as the client sees them.
+
+        The client's API is the source of truth for where finished files land, so the import containment check
+        derives its allowed roots from here instead of a hand-typed path. Incomplete/temp directories must never be
+        returned. Default: ``[]`` (driver has no such notion). Implementations catch specific transport errors, log
+        the root cause, set ``last_roots_error`` and return ``[]`` when the client cannot be read.
+        """
+        return []
 
     def list_category(self) -> Optional[list[dict[str, Any]]]:
         """Torrents in TrackSeerr's category, as dicts (hash, name, size, ratio, seeding_time, content_path, state).

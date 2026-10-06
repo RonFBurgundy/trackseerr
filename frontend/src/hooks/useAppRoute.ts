@@ -21,12 +21,25 @@ export type SettingsRoute =
   | { tab: 'settings'; sub: 'requests'; leaf: RequestsLeaf }
   | { tab: 'settings'; sub: 'system'; leaf: SystemLeaf };
 
+/** Library drill-down carried in the URL: an artist or a collection, optionally with an album modal on top. */
+export interface LibraryDetail {
+  artistId?: string;
+  collectionId?: string;
+  albumId?: string;
+}
+
+export interface LibraryRoute {
+  tab: 'library';
+  sub: LibraryTab;
+  detail?: LibraryDetail;
+}
+
 /** Current location. `sub` is always present for tabs that have sub-pages; `leaf` only under settings sections with children. */
 export type AppRoute =
   | { tab: 'discover' }
   | { tab: 'playlists' }
   | { tab: 'requests'; sub: RequestsSub }
-  | { tab: 'library'; sub: LibraryTab }
+  | LibraryRoute
   | { tab: 'activity'; sub: ActivitySub }
   | { tab: 'wanted'; sub: WantedSub }
   | SettingsRoute;
@@ -37,6 +50,17 @@ export interface NavigateOptions {
 }
 
 export type Navigate = (route: AppRoute, options?: NavigateOptions) => void;
+
+/** History-state key holding the hash of the in-app entry we pushed from, so "back to parent" can use real history. */
+const PREV_KEY = '__tsPrevHash';
+
+function prevHashOf(state: unknown): string | undefined {
+  if (typeof state === 'object' && state !== null && PREV_KEY in state) {
+    const value = state[PREV_KEY];
+    return typeof value === 'string' ? value : undefined;
+  }
+  return undefined;
+}
 
 export const MAIN_TABS: readonly MainTab[] = ['discover', 'requests', 'library', 'playlists', 'activity', 'wanted', 'settings'];
 export const REQUESTS_SUBS: readonly RequestsSub[] = ['all', 'pending', 'approved', 'fulfilled', 'rejected', 'issues'];
@@ -101,12 +125,57 @@ export function defaultRoute(tab: MainTab): AppRoute {
   }
 }
 
-/** `#/<tab>[/<sub>[/<leaf>]]` */
+function libraryDetailSegments(detail: LibraryDetail | undefined): string[] {
+  if (!detail) return [];
+  const parts: string[] = [];
+  // An artist wins over a collection; the two never coexist in one URL.
+  if (detail.artistId) parts.push('artist', encodeURIComponent(detail.artistId));
+  else if (detail.collectionId) parts.push('collection', encodeURIComponent(detail.collectionId));
+  if (detail.albumId) parts.push('album', encodeURIComponent(detail.albumId));
+  return parts;
+}
+
+/** `#/<tab>[/<sub>[/<leaf>]]`; library adds `/artist/<id>`, `/collection/<id>` and `/album/<id>` drill-down segments. */
 export function routeToHash(route: AppRoute): string {
   const parts: string[] = [route.tab];
   if ('sub' in route) parts.push(route.sub);
   if ('leaf' in route) parts.push(route.leaf);
+  if (route.tab === 'library') parts.push(...libraryDetailSegments(route.detail));
   return `#/${parts.join('/')}`;
+}
+
+function decodeSegment(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  try {
+    const value = decodeURIComponent(raw);
+    return value.length > 0 ? value : undefined;
+  } catch (err: unknown) {
+    if (err instanceof URIError) return undefined;
+    throw err;
+  }
+}
+
+/** Parse `key/<id>` pairs after the library sub-page. Unknown keys, empty ids and duplicates are dropped. */
+export function parseLibraryDetail(segments: readonly string[]): LibraryDetail | undefined {
+  const detail: LibraryDetail = {};
+  for (let i = 0; i + 1 < segments.length; i += 2) {
+    const id = decodeSegment(segments[i + 1]);
+    if (id === undefined) continue;
+    switch (segments[i]) {
+      case 'artist':
+        if (detail.artistId === undefined && detail.collectionId === undefined) detail.artistId = id;
+        break;
+      case 'collection':
+        if (detail.artistId === undefined && detail.collectionId === undefined) detail.collectionId = id;
+        break;
+      case 'album':
+        if (detail.albumId === undefined) detail.albumId = id;
+        break;
+      default:
+        break;
+    }
+  }
+  return detail.artistId !== undefined || detail.collectionId !== undefined || detail.albumId !== undefined ? detail : undefined;
 }
 
 /** Retired leaves that now live as sections of the Profiles page; old bookmarks are rewritten to it by `readRoute`. */
@@ -121,8 +190,11 @@ export function parseRouteHash(hash: string): AppRoute | null {
   switch (tab) {
     case 'requests':
       return { tab, sub: pick(REQUESTS_SUBS, sub) ?? 'all' };
-    case 'library':
-      return { tab, sub: pick(LIBRARY_SUBS, sub) ?? 'artists' };
+    case 'library': {
+      const librarySub = pick(LIBRARY_SUBS, sub) ?? 'artists';
+      const detail = parseLibraryDetail(segments.slice(2));
+      return detail ? { tab, sub: librarySub, detail } : { tab, sub: librarySub };
+    }
     case 'activity':
       return { tab, sub: pick(ACTIVITY_SUBS, sub) ?? 'queue' };
     case 'wanted':
@@ -157,6 +229,11 @@ function readRoute(initial: boolean): AppRoute {
 export interface UseAppRouteReturn {
   route: AppRoute;
   navigate: Navigate;
+  /**
+   * Go to `parent` as an "up" step: `history.back()` when the previous entry is that parent (so Back and the on-screen
+   * button agree), otherwise replace the current entry with it (deep links never exit the app).
+   */
+  navigateUp: (parent: AppRoute) => void;
 }
 
 /** Single source of truth for the current page, mirrored to the URL hash so every page is deep-linkable. */
@@ -164,7 +241,12 @@ export function useAppRoute(): UseAppRouteReturn {
   const [route, setRoute] = useState<AppRoute>(() => readRoute(true));
 
   useEffect(() => {
-    const sync = (): void => setRoute(readRoute(false));
+    // Keep the existing route object when the hash did not change (modal sentinel pops fire popstate too).
+    const sync = (): void =>
+      setRoute((current) => {
+        const next = readRoute(false);
+        return routeToHash(next) === routeToHash(current) ? current : next;
+      });
     window.addEventListener('popstate', sync);
     window.addEventListener('hashchange', sync);
     return () => {
@@ -177,11 +259,27 @@ export function useAppRoute(): UseAppRouteReturn {
     const hash = routeToHash(next);
     if (window.location.hash !== hash) {
       const url = `${window.location.pathname}${window.location.search}${hash}`;
-      if (options?.replace) window.history.replaceState(null, '', url);
-      else window.history.pushState(null, '', url);
+      if (options?.replace) {
+        // Replacing keeps the same previous entry.
+        const prev = prevHashOf(window.history.state);
+        window.history.replaceState(prev === undefined ? null : { [PREV_KEY]: prev }, '', url);
+      } else {
+        window.history.pushState({ [PREV_KEY]: window.location.hash }, '', url);
+      }
     }
     setRoute(next);
   }, []);
 
-  return { route, navigate };
+  const navigateUp = useCallback(
+    (parent: AppRoute): void => {
+      if (prevHashOf(window.history.state) === routeToHash(parent)) {
+        window.history.back();
+        return;
+      }
+      navigate(parent, { replace: true });
+    },
+    [navigate]
+  );
+
+  return { route, navigate, navigateUp };
 }
