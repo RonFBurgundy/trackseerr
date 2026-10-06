@@ -10,7 +10,8 @@ code never imports ``plexapi`` / ``requests`` just to catch a failure.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Optional, Sequence
+from datetime import datetime
+from typing import Any, Iterator, Optional, Sequence
 
 from plex_playlist_sync.models import Playlist, SyncResult, Track
 
@@ -60,6 +61,7 @@ class ServerCapabilities:
     library_refresh: bool = False
     mixes: bool = False
     search: bool = False
+    file_paths: bool = False  # can list library file paths; an adapter may still raise MediaServerUnsupported at iteration
 
     def to_dict(self) -> dict[str, bool]:
         return {
@@ -67,10 +69,24 @@ class ServerCapabilities:
             "users": self.users,
             "mixes": self.mixes,
             "library_refresh": self.library_refresh,
+            "file_paths": self.file_paths,
         }
 
 
 NO_CAPABILITIES = ServerCapabilities()
+
+
+@dataclass(frozen=True)
+class ServerFileRef:
+    """One audio file as the server reports it. ``path`` is absolute as the SERVER sees it (relative to the music
+    folder when the adapter has ``paths_relative``). ``container`` is the lowercased extension/codec, '' if unknown."""
+
+    server_id: str
+    path: str
+    title: str = ""
+    artist: str = ""
+    album: str = ""
+    container: str = ""
 
 
 @dataclass(frozen=True)
@@ -135,6 +151,7 @@ class MediaServer(ABC):
     """A pluggable media-server sink."""
 
     kind: str = ""
+    paths_relative: bool = False  # True when ServerFileRef.path is relative to the music folder (Subsonic)
 
     @property
     @abstractmethod
@@ -178,6 +195,19 @@ class MediaServer(ABC):
     def list_users(self) -> list[ServerUser]:
         """Accounts playlists can target. Only valid when ``capabilities.users``."""
         raise MediaServerUnsupported(f"{self.kind or 'This media server'} does not support listing users")
+
+    def iter_library_files(self) -> Iterator[ServerFileRef]:
+        """Every audio file in the server's music libraries, paged and lazily. Raises MediaServerUnsupported when the
+        server cannot (or will not, e.g. a non-admin key) expose file paths."""
+        raise MediaServerUnsupported(f"{self.kind or 'This media server'} does not expose library file paths")
+
+    def last_scan_at(self) -> Optional[datetime]:
+        """When the server last finished scanning its music library (timezone-aware UTC), or None if unknown."""
+        return None
+
+    def library_roots(self) -> list[str]:
+        """Music library folder roots as the server sees them; empty when unknown or relative."""
+        return []
 
 
 def as_media_server(server_or_client: Any) -> Optional[MediaServer]:

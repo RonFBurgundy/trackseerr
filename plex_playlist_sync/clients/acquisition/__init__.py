@@ -12,6 +12,20 @@ from plex_playlist_sync.clients.acquisition.torznab import TorznabDriver
 from plex_playlist_sync.models import DownloadClientConfig, DownloadDriverType, IndexerConfig
 
 
+DRIVER_CLASSES: dict[str, type[AcquisitionDriver]] = {
+    DownloadDriverType.SLSKD.value: SlskdDriver,
+    DownloadDriverType.SABNZBD.value: SabnzbdDriver,
+    DownloadDriverType.QBITTORRENT.value: QbittorrentDriver,
+    DownloadDriverType.LIDARR.value: LidarrAdapter,
+}
+
+
+def is_torrent_driver_type(driver_type: str | None) -> bool:
+    """True when the download-client driver type is a torrent client (derived from the driver's ``is_torrent``)."""
+    cls = DRIVER_CLASSES.get(str(driver_type or "").strip().lower())
+    return bool(cls is not None and cls.is_torrent)
+
+
 def get_acquisition_driver(
     config: Union[dict[str, Any], DownloadClientConfig],
 ) -> AcquisitionDriver:
@@ -87,6 +101,8 @@ def get_indexer_driver(
 
 
 __all__ = [
+    "DRIVER_CLASSES",
+    "is_torrent_driver_type",
     "AcquisitionDriver",
     "SlskdDriver",
     "SabnzbdDriver",

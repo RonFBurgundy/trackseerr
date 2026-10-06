@@ -92,6 +92,12 @@ def _seed(db: Database, tmp_path: Path, *, with_download: bool = True, album_id:
     return music, staging, artist, album, t1, t2
 
 
+def _as_torrent(db: Database) -> None:
+    """Turns the seeded download client into a qBittorrent one (import mode only applies to torrents)."""
+    db.conn.execute("UPDATE download_clients SET driver_type = 'qbittorrent' WHERE id = 'c1'")
+    db.conn.commit()
+
+
 def _run_worker(db: Database, dl: Path, staging: Path, metas: dict[str, dict[str, Any]], driver: MagicMock | None = None):
     driver = driver or MagicMock()
     driver.get_status.return_value = {
@@ -496,7 +502,7 @@ def _with_client(db: Database):
     db.conn.commit()
     driver = MagicMock()
     driver.get_status.return_value = {"status": "completed", "ratio": 0.0, "seeding_time_seconds": 0}
-    cfg = {"id": "c1", "name": "qb"}
+    cfg = {"id": "c1", "name": "qb", "driver_type": "qbittorrent"}
     return driver, patch.object(db, "get_download_client", return_value=cfg)
 
 
@@ -534,13 +540,14 @@ def test_commit_survives_client_cleanup_failure(tmp_path, db, client, headers):
 
 
 def _commit_with_driver(client, headers, db, files, driver, mode_item=_item_no_mode):
-    cfg = patch.object(db, "get_download_client", return_value={"id": "c1", "name": "qb"})
+    cfg = patch.object(db, "get_download_client", return_value={"id": "c1", "name": "qb", "driver_type": "qbittorrent"})
     with cfg, patch("plex_playlist_sync.api.routes.library.get_acquisition_driver", return_value=driver):
         return _commit(client, headers, [mode_item(files[0], "trk-1", 1, "One More Time")])
 
 
 def test_commit_without_mode_uses_settings_import_mode(tmp_path, db, client, headers):
     music, files = _held_download(db, tmp_path, ["a.flac"])
+    _as_torrent(db)
     db.update_media_management_settings({"import_mode": "hardlink"})
     out = _commit(client, headers, [_item_no_mode(files[0], "trk-1", 1, "One More Time")])
     assert out["imported_count"] == 1
@@ -624,6 +631,7 @@ def test_worker_keeps_transfer_when_delete_completed_off(tmp_path, db):
 @pytest.mark.parametrize("ratio,cleaned", [(0.5, False), (3.0, True)])
 def test_worker_source_preserving_mode_respects_seed_limits(tmp_path, db, mode, ratio, cleaned):
     music, staging, *_ = _seed(db, tmp_path)
+    _as_torrent(db)
     db.update_media_management_settings(
         {"delete_completed_transfers": True, "import_mode": mode, "seed_ratio_limit": 2.0}
     )

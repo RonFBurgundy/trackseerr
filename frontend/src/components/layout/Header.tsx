@@ -28,6 +28,8 @@ export interface HeaderProps {
   activeTab?: MainTab;
   onTabChange?: (tab: MainTab) => void;
   isAdmin?: boolean;
+  /** Library-health findings awaiting review, shown on the Activity key (admin only). */
+  reviewCount?: number;
   tier?: DeploymentTier;
 }
 
@@ -41,6 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   onTabChange,
   isAdmin = false,
+  reviewCount = 0,
   tier = 'all-in-one',
 }) => {
   const isGateway = tier === 'gateway';
@@ -124,6 +127,11 @@ export const Header: React.FC<HeaderProps> = ({
                         title={item.label}
                       >
                         {item.label}
+                        {item.id === 'activity' && reviewCount > 0 && (
+                          <span className="ml-1 px-1 rounded-[3px] bg-[var(--accent-amber)] text-[10px] font-mono font-bold text-black">
+                            {reviewCount}
+                          </span>
+                        )}
                       </TapeDeckButton>
                     );
                   })}
@@ -152,7 +160,16 @@ export const Header: React.FC<HeaderProps> = ({
                         aria-label={item.label}
                         aria-current={isActive ? 'page' : undefined}
                         title={item.label}
-                      />
+                      >
+                        {item.id === 'activity' && reviewCount > 0 && (
+                          <span
+                            className="absolute -top-1 -right-1 min-w-[14px] px-0.5 rounded-[3px] bg-[var(--accent-amber)] text-[9px] leading-[14px] font-mono font-bold text-black text-center"
+                            aria-hidden="true"
+                          >
+                            {reviewCount}
+                          </span>
+                        )}
+                      </TapeDeckButton>
                     );
                   })}
               </div>

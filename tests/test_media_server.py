@@ -330,7 +330,7 @@ def test_media_server_endpoint_none(no_server):
     assert res.json() == {
         "type": "none",
         "connected": False,
-        "capabilities": {"playlists": False, "users": False, "mixes": False, "library_refresh": False},
+        "capabilities": {"playlists": False, "users": False, "mixes": False, "library_refresh": False, "file_paths": False},
     }
 
 
@@ -341,7 +341,7 @@ def test_media_server_endpoint_plex_connected(tmp_path):
     assert body == {
         "type": "plex",
         "connected": True,
-        "capabilities": {"playlists": True, "users": True, "mixes": True, "library_refresh": True},
+        "capabilities": {"playlists": True, "users": True, "mixes": True, "library_refresh": True, "file_paths": True},
     }
 
 

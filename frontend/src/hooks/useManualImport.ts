@@ -52,6 +52,20 @@ function isAbort(err: unknown): boolean {
   return err instanceof DOMException && err.name === 'AbortError';
 }
 
+function scopeKeyOf(scope: ManualImportScope | null): string {
+  if (scope === null) return '';
+  switch (scope.kind) {
+    case 'folder':
+      return 'folder';
+    case 'download':
+      return `download:${scope.downloadId}`;
+    case 'album':
+      return `album:${scope.albumId}`;
+    case 'files':
+      return `files:${scope.filePaths.join('|')}`;
+  }
+}
+
 export const rowKey = (row: ManualImportRow): string => row.item.file_path;
 
 function toRow(item: ManualImportScanItem): ManualImportRow {
@@ -103,7 +117,7 @@ export function useManualImport({ scope, isOpen, onImported }: UseManualImportOp
   const onImportedRef = useRef(onImported);
   onImportedRef.current = onImported;
 
-  const needsFolderInput = scope !== null && scope.kind !== 'download';
+  const needsFolderInput = scope !== null && (scope.kind === 'folder' || scope.kind === 'album');
 
   const patchRow = useCallback((key: string, patch: Partial<ManualImportRow>) => {
     setRows((prev) => prev.map((r) => (r.item.file_path === key ? { ...r, ...patch } : r)));
@@ -117,8 +131,9 @@ export function useManualImport({ scope, isOpen, onImported }: UseManualImportOp
     const body: ManualImportScanRequest = {};
     if (scope.kind === 'download') body.download_id = scope.downloadId;
     if (scope.kind === 'album') body.album_id = scope.albumId;
+    if (scope.kind === 'files') body.file_paths = scope.filePaths;
     const folder = folderPath.trim();
-    if (scope.kind !== 'download' && folder) body.folder_path = folder;
+    if ((scope.kind === 'folder' || scope.kind === 'album') && folder) body.folder_path = folder;
     setScanning(true);
     setScanError(null);
     setCommitError(null);
@@ -136,7 +151,7 @@ export function useManualImport({ scope, isOpen, onImported }: UseManualImportOp
   }, [scope, folderPath]);
 
   // Reset on open/scope change; download scope scans immediately. Closing aborts every in-flight request.
-  const scopeKey = scope === null ? '' : scope.kind === 'folder' ? 'folder' : `${scope.kind}:${scope.kind === 'download' ? scope.downloadId : scope.albumId}`;
+  const scopeKey = scopeKeyOf(scope);
   const scanRef = useRef(scan);
   scanRef.current = scan;
   useEffect(() => {
@@ -149,7 +164,7 @@ export function useManualImport({ scope, isOpen, onImported }: UseManualImportOp
     setDownloadCleared(false);
     setScanning(false);
     setIdentifyingAll(false);
-    if (scope.kind === 'download') void scanRef.current();
+    if (scope.kind === 'download' || scope.kind === 'files') void scanRef.current();
     return () => {
       controllerRef.current?.abort();
       controllerRef.current = null;

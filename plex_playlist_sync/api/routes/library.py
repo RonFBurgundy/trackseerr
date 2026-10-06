@@ -28,10 +28,12 @@ from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
 from plex_playlist_sync import art_pipeline, art_thumbs
 from plex_playlist_sync import lidarr_library
 from plex_playlist_sync.redaction import redact_text
-from plex_playlist_sync.clients.acquisition import get_acquisition_driver
+from plex_playlist_sync.clients.acquisition import get_acquisition_driver, is_torrent_driver_type
 from plex_playlist_sync.acquisition_worker import (
     MATCH_NONE,
     MATCH_STRONG,
+    effective_import_mode,
+    prepare_file_for_tagging,
     place_audio_file,
     preserves_source,
     settle_transfer_after_import,
@@ -3108,6 +3110,12 @@ def manual_import_commit(
     root_folder_str = media_settings.get("root_folder_path") or "/music"
     root_dir = Path(root_folder_str).resolve()
 
+    # Import mode only applies to torrent downloads; a download-scoped commit follows its client's type.
+    download_client_type: Optional[str] = None
+    if download_row is not None and download_row.get("client_id"):
+        client_cfg = db.get_download_client(download_row["client_id"])
+        download_client_type = str(client_cfg.get("driver_type") or "") if client_cfg else None
+
     for item in body.items:
         source_str = item.source_path or item.file_path
         if not source_str:
@@ -3254,16 +3262,43 @@ def manual_import_commit(
 
             target_proposed = build_track_path(meta, media_settings)
             validate_media_path(target_proposed, db=db)
-            target_dest = resolve_collision(target_proposed)
+
+            # A file already registered inside the library is a re-assign, not a new import: it is always moved
+            # within the library (never copied or linked from itself), and the old track loses its file record.
+            # A hardlinked library file keeps the torrent's inode: renaming a link never touches the other name.
+            source_row = db.get_library_file_by_path(str(source_path))
+            is_rematch = source_row is not None and source_path.is_relative_to(root_dir)
+            if is_rematch and Path(target_proposed).resolve() == source_path:
+                target_dest = source_path  # already at its naming path for the new track
+            else:
+                target_dest = resolve_collision(target_proposed)
 
             # 5. Place file
-            effective_mode = item.mode or str(media_settings.get("import_mode") or "move")
-            placed_file = place_audio_file(source_path, target_dest, mode=effective_mode)
+            if is_rematch:
+                effective_mode = "move"
+            elif download_row is not None:
+                # Non-torrent downloads never seed, so they are always moved whatever the item asks for.
+                effective_mode = (
+                    item.mode or effective_import_mode(download_client_type, media_settings)
+                    if is_torrent_driver_type(download_client_type)
+                    else "move"
+                )
+            else:
+                effective_mode = item.mode or str(media_settings.get("import_mode") or "move")
+            if is_rematch and target_dest == source_path:
+                placed_file = source_path
+            else:
+                placed_file = place_audio_file(source_path, target_dest, mode=effective_mode)
+            if is_rematch and source_row is not None and str(placed_file) != str(source_row["file_path"]):
+                db.delete_library_file(str(source_row["id"]))
 
             # 6. Write audio tags if requested
             write_tags = item.write_tags
             if write_tags is None:
                 write_tags = bool(media_settings.get("write_audio_tags", True))
+            if write_tags and not prepare_file_for_tagging(placed_file, media_settings):
+                # A shared inode (torrent seeding link) must never be rewritten; the copy failed, so skip tags.
+                write_tags = False
             if write_tags:
                 try:
                     write_audio_tags(placed_file, meta)
@@ -3291,6 +3326,10 @@ def manual_import_commit(
                 "cutoff_met": cutoff_met,
             })
 
+            if is_rematch:
+                for finding_path in {str(source_path), str(placed_file)}:
+                    db.delete_library_health_finding_by_path(finding_path, kind="weak_match")
+
             # Update album folder path if missing
             if not album.get("path"):
                 db.upsert_library_album({
@@ -3310,6 +3349,7 @@ def manual_import_commit(
                 "file_id": file_id,
                 "status": "imported",
                 "mode": effective_mode,
+                "rematch": is_rematch,
             })
 
         except Exception as exc:

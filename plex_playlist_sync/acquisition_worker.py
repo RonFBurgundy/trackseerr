@@ -23,13 +23,14 @@ from typing import Any, Callable, Optional
 import httpx
 
 from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
-from plex_playlist_sync.clients.acquisition import get_acquisition_driver
+from plex_playlist_sync.clients.acquisition import get_acquisition_driver, is_torrent_driver_type
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result
 from plex_playlist_sync.import_security import clear_exec_bits, quarantine_files, verify_files, QUARANTINE_DIRNAME
 from plex_playlist_sync.import_quality_check import CHECK_OFF, check_files, normalize_check_mode
+from plex_playlist_sync.library_health import record_weak_match
 from plex_playlist_sync.library_monitoring import NATIVE_MONITOR_OPTIONS
 from plex_playlist_sync.library_manager import ModeChanged, run_guarded
 from plex_playlist_sync.library import (
@@ -204,6 +205,65 @@ def place_audio_file(
     placed = safe_atomic_move(source_file, target_file)
     clear_exec_bits(placed)
     return placed
+
+
+def ensure_private_copy(path: Path | str) -> bool:
+    """Makes ``path`` safe to rewrite in place: True when no other link shares its inode afterwards.
+
+    A hardlink-imported library file shares its inode with the torrent's seeding file, so tagging it would corrupt the
+    torrent's data. When ``st_nlink > 1`` the file is copied to a hidden temp beside it and ``os.replace``d over it
+    (atomic; the other link keeps the original inode and bytes). Returns False when the copy failed: the caller must
+    then skip every tag/artwork write for that file.
+    """
+    p = Path(path)
+    try:
+        if p.stat().st_nlink <= 1:
+            return True
+    except OSError as e:
+        logger.warning("Cannot stat '%s' before tagging; skipping tag writes: %s", p, e)
+        return False
+    try:
+        _copy_atomic(p, p)
+        clear_exec_bits(p)
+    except OSError as e:
+        logger.warning("Could not break hardlink for tagging '%s'; skipping tag writes: %s", p, e)
+        return False
+    logger.info("Broke hardlink for tagging: %s", p)
+    return True
+
+
+TORRENT_HARDLINK_TAG_MODES = ("copy_and_tag", "keep_hardlink")
+
+
+def effective_import_mode(client_type: str | None, media_settings: dict[str, Any]) -> str:
+    """Import mode for a download: the configured mode for torrent clients, always "move" for everything else.
+
+    Usenet and Soulseek files do not seed from their source, so there is nothing to preserve.
+    """
+    if not is_torrent_driver_type(client_type):
+        return "move"
+    mode = str(media_settings.get("import_mode") or "move")
+    return mode if mode in IMPORT_MODES else "move"
+
+
+def prepare_file_for_tagging(path: Path | str, media_settings: dict[str, Any]) -> bool:
+    """True when ``path`` may be rewritten with tags/artwork; False when tag and art writes must be skipped.
+
+    A hardlinked file (shared inode with a seeding torrent) is either kept untouched (``keep_hardlink``) or split into
+    a private copy first (``copy_and_tag``, the default, via ``ensure_private_copy``).
+    """
+    p = Path(path)
+    if str(media_settings.get("torrent_hardlink_tags") or "copy_and_tag") == "keep_hardlink":
+        try:
+            shared = p.stat().st_nlink > 1
+        except OSError as e:
+            logger.warning("Cannot stat '%s' before tagging; skipping tag writes: %s", p, e)
+            return False
+        if shared:
+            logger.info("Kept hardlink; skipped tag writing for %s", p)
+            return False
+        return True
+    return ensure_private_copy(p)
 
 
 def settle_transfer_after_import(
@@ -730,7 +790,6 @@ class AcquisitionWorker:
         staging_dir: Optional[str] = None,
     ) -> dict[str, int]:
         media_settings = db.get_media_management_settings()
-        import_mode = media_settings.get("import_mode", "move")
         write_tags = bool(media_settings.get("write_audio_tags", True))
         embed_art = bool(media_settings.get("embed_artwork", True))
         save_cover = bool(media_settings.get("save_cover_art_file", True))
@@ -886,7 +945,14 @@ class AcquisitionWorker:
                 if media_settings.get("delete_completed_transfers"):
                     db.update_download_status(
                         download_id,
-                        status=settle_transfer_after_import(driver, target_lookup, media_settings, import_mode, status_dict, item),
+                        status=settle_transfer_after_import(
+                            driver,
+                            target_lookup,
+                            media_settings,
+                            effective_import_mode(client_config.get("driver_type"), media_settings),
+                            status_dict,
+                            item,
+                        ),
                     )
                 continue
 
@@ -896,6 +962,7 @@ class AcquisitionWorker:
 
                 # Special case: Lidarr performs native file organization
                 driver_type = str(client_config.get("driver_type", "")).lower()
+                import_mode = effective_import_mode(driver_type, media_settings)
                 if driver_type == "lidarr":
                     db.update_download_status(download_id, status=DownloadStatus.IMPORTED.value)
                     req_row = None
@@ -1172,13 +1239,17 @@ class AcquisitionWorker:
 
                     # Reconcile against expected catalog tracks if present
                     matched_expected_track = None
+                    file_weak_strength: Optional[str] = None
                     if remaining_expected_tracks:
                         matched_expected_track, match_strength = reconcile_audio_file_to_track_scored(
                             metadata, remaining_expected_tracks
                         )
+                        tag_track = matched_expected_track
                         matched_expected_track = _fingerprint_fallback_match(
                             af, media_settings, remaining_expected_tracks, matched_expected_track, match_strength
                         )
+                        if matched_expected_track is not None and matched_expected_track is tag_track and match_strength != MATCH_STRONG:
+                            file_weak_strength = match_strength
                         if matched_expected_track:
                             remaining_expected_tracks.remove(matched_expected_track)
                             metadata["title"] = matched_expected_track["title"]
@@ -1215,6 +1286,15 @@ class AcquisitionWorker:
                     imported_paths.append(str(placed_path))
                     if matched_expected_track:
                         placed_to_track[str(placed_path)] = matched_expected_track
+                        if file_weak_strength is not None:
+                            record_weak_match(
+                                db,
+                                str(placed_path),
+                                track_id=str(matched_expected_track.get("id") or ""),
+                                title=str(matched_expected_track.get("title") or ""),
+                                source_name=str(item.get("title") or ""),
+                                strength=file_weak_strength,
+                            )
                     logger.info("Successfully imported '%s' -> '%s'", af.name, placed_path)
                     try:
                         db.record_event(
@@ -1275,13 +1355,16 @@ class AcquisitionWorker:
                         except Exception as e:
                             logger.warning("AcquisitionWorker: MBID enrichment error: %s", e)
 
-                    if write_tags:
-                        art_to_embed = cover_bytes if embed_art else None
+                    file_write_tags, file_embed_art = write_tags, embed_art
+                    if (file_write_tags or (file_embed_art and cover_bytes)) and not prepare_file_for_tagging(placed_path, media_settings):
+                        file_write_tags = file_embed_art = False
+                    if file_write_tags:
+                        art_to_embed = cover_bytes if file_embed_art else None
                         try:
                             write_audio_tags(placed_path, tags=tags_to_write, cover_art_bytes=art_to_embed)
                         except Exception as e:
                             logger.warning("Error writing audio tags to %s: %s", placed_path, e)
-                    elif embed_art and cover_bytes:
+                    elif file_embed_art and cover_bytes:
                         try:
                             embed_album_artwork(placed_path, cover_bytes)
                         except Exception as e:

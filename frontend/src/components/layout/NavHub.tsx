@@ -16,6 +16,7 @@ export interface NavHubProps {
   quota: UserQuota | null;
   isAdmin?: boolean;
   mfaEnrollmentRequired?: boolean;
+  reviewCount?: number;
   onLogout?: () => void;
   tier?: DeploymentTier;
 }
@@ -73,6 +74,11 @@ const NodeRow: React.FC<NodeRowProps> = ({ node, depth, route, expanded, onToggl
           <p className="hidden md:block text-[11px] text-neutral-400 font-mono truncate">{node.description}</p>
         )}
       </div>
+      {node.badge !== undefined && node.badge > 0 && (
+        <span className="px-1.5 rounded-[3px] bg-[var(--accent-amber)] text-[10px] font-mono font-bold text-black" aria-label={`${node.badge} to review`}>
+          {node.badge}
+        </span>
+      )}
       {isCurrent && (
         <span className="h-1.5 w-1.5 rounded-full bg-[#e5a00d] shadow-[0_0_6px_rgba(229,160,13,0.8)]" aria-hidden="true" />
       )}
@@ -136,11 +142,12 @@ const HubPanel: React.FC<NavHubProps> = ({
   quota,
   isAdmin = false,
   mfaEnrollmentRequired = false,
+  reviewCount = 0,
   onLogout,
   tier = 'all-in-one',
 }) => {
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const tree = buildNavTree({ isAdmin, mfaEnrollmentRequired });
+  const tree = buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount });
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(activeAncestorKeys(tree, route)));
 
   // Focus moves in on open and returns to whatever opened the hub (the Menu key) on close.

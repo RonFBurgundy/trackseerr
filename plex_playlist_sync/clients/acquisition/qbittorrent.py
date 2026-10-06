@@ -18,6 +18,8 @@ _BTIH_RE = re.compile(r"urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})", re.IGNORECA
 class QbittorrentDriver(AcquisitionDriver):
     """Driver for qBittorrent Web API v2."""
 
+    is_torrent = True
+
     def __init__(
         self,
         host_url: str,

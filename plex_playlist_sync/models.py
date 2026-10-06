@@ -846,6 +846,7 @@ class MediaManagementSettings:
     album_folder_format: str = "{Artist Name} - {Album Title} ({Release Year})"
     track_file_format: str = "{Track:02d} - {Track Title}"
     import_mode: str = "move"
+    torrent_hardlink_tags: str = "copy_and_tag"
     delete_empty_folders: bool = True
     write_audio_tags: bool = True
     embed_artwork: bool = True
@@ -875,6 +876,7 @@ class MediaManagementSettings:
             "album_folder_format": self.album_folder_format,
             "track_file_format": self.track_file_format,
             "import_mode": self.import_mode,
+            "torrent_hardlink_tags": self.torrent_hardlink_tags,
             "delete_empty_folders": bool(self.delete_empty_folders),
             "write_audio_tags": bool(self.write_audio_tags),
             "embed_artwork": bool(self.embed_artwork),

@@ -154,6 +154,9 @@ class MediaManagementSettingsModel(BaseModel):
     import_mode: Literal["move", "hardlink", "copy"] = Field(
         "move", description="Import mode: move, hardlink or copy (hardlink and copy keep the source so torrents keep seeding)"
     )
+    torrent_hardlink_tags: Literal["copy_and_tag", "keep_hardlink"] = Field(
+        "copy_and_tag", description="Tagging a hardlinked torrent file: write tags to a private copy, or keep the hardlink"
+    )
     write_audio_tags: bool = Field(True, description="Whether to normalize audio tags on import")
     embed_artwork: bool = Field(True, description="Whether to embed cover artwork in audio files")
     save_cover_art_file: bool = Field(True, description="Whether to save cover.jpg in album directory")
@@ -188,6 +191,7 @@ class MediaManagementUpdateModel(BaseModel):
     clean_artist_names: bool | None = None
     staging_folder_path: str | None = None
     import_mode: Literal["move", "hardlink", "copy"] | None = None
+    torrent_hardlink_tags: Literal["copy_and_tag", "keep_hardlink"] | None = None
     write_audio_tags: bool | None = None
     embed_artwork: bool | None = None
     save_cover_art_file: bool | None = None
@@ -229,6 +233,7 @@ class PreviewRequestModel(BaseModel):
     clean_artist_names: bool | None = None
     staging_folder_path: str | None = None
     import_mode: Literal["move", "hardlink", "copy"] | None = None
+    torrent_hardlink_tags: Literal["copy_and_tag", "keep_hardlink"] | None = None
     delete_completed_transfers: bool | None = None
     enable_quality_upgrades: bool | None = None
     library_mode: str | None = None

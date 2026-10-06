@@ -412,7 +412,7 @@ class TestIdentityAndCapabilities:
         caps = h.server.capabilities
         assert isinstance(caps, ServerCapabilities)
         assert caps.playlists and caps.library_refresh
-        assert set(caps.to_dict()) == {"playlists", "users", "mixes", "library_refresh"}
+        assert set(caps.to_dict()) == {"playlists", "users", "mixes", "library_refresh", "file_paths"}
 
     def test_as_media_server_is_idempotent(self, h: Harness) -> None:
         assert as_media_server(h.server) is h.server

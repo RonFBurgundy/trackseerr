@@ -379,6 +379,8 @@ export interface MediaManagementSettings {
   root_folder_path: string;
   staging_folder_path: string;
   import_mode: 'move' | 'hardlink' | 'copy';
+  /** How a hardlinked torrent file is tagged: write tags into a private copy, or keep the hardlink untouched. */
+  torrent_hardlink_tags?: 'copy_and_tag' | 'keep_hardlink';
   write_audio_tags: boolean;
   embed_artwork: boolean;
   /** AcoustID application key; the server may return a masked value (only '*'/bullets) when configured. */

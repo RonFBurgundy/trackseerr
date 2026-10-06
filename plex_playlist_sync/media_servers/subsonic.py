@@ -24,6 +24,7 @@ import re
 import secrets
 import time
 import weakref
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Callable, Iterator, Optional, Sequence
@@ -41,6 +42,7 @@ from plex_playlist_sync.media_servers.base import (
     MediaServerUnsupported,
     PlaylistSyncOptions,
     ServerCapabilities,
+    ServerFileRef,
     ServerTrackRef,
     ServerUser,
 )
@@ -72,12 +74,13 @@ if not any(isinstance(f, _RedactHttpxUrls) for f in _httpx_logger.filters):
 
 SUBSONIC_API_VERSION = "1.16.1"
 CLIENT_NAME = "Trackseerr"
-SUBSONIC_CAPABILITIES = ServerCapabilities(playlists=True, users=False, library_refresh=True, mixes=False, search=True)
+SUBSONIC_CAPABILITIES = ServerCapabilities(playlists=True, users=False, library_refresh=True, mixes=False, search=True, file_paths=True)
 
 DURATION_TOLERANCE_SECONDS = 3.0
 _DURATION_PENALTY = 0.15
 _W_TITLE, _W_ARTIST, _W_ALBUM = 0.60, 0.35, 0.05
 _SEARCH_PAGE = 20
+_FILE_PAGE = 500
 _ID_CHUNK = 100  # song ids per request: keeps every GET URL far below common 8 KB proxy limits
 _MAX_ATTEMPTS = 3
 _BACKOFF_BASE = 0.5
@@ -121,6 +124,20 @@ class _Song:
 
     def ref(self) -> ServerTrackRef:
         return ServerTrackRef(id=self.id, title=self.title, artist=self.artist, album=self.album, native=self.raw)
+
+
+def _parse_iso_utc(raw: str) -> Optional[datetime]:
+    """ISO-8601 timestamp (Z suffix, 7-digit .NET fractions tolerated) as aware UTC; None when unparseable."""
+    text = raw.strip().replace("Z", "+00:00")
+    head, _, tail = text.partition(".")
+    if tail:
+        digits = "".join(ch for ch in tail if ch.isdigit())
+        text = f"{head}.{digits[:6]}{tail[len(digits):]}"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
 
 
 def _ratio(a: str, b: str) -> float:
@@ -186,6 +203,7 @@ def _chunks(items: Sequence[str], size: int = _ID_CHUNK) -> Iterator[list[str]]:
 
 class SubsonicMediaServer(MediaServer):
     kind = "subsonic"
+    paths_relative = True  # song ``path`` is relative to the music folder
 
     def __init__(
         self,
@@ -437,6 +455,59 @@ class SubsonicMediaServer(MediaServer):
             }
             for s in songs[:limit]
         ]
+
+    def iter_library_files(self) -> Iterator[ServerFileRef]:
+        """Every song via ``search3`` with an empty query, paged on ``songOffset``. Paths are relative to the music
+        folder. Raises :class:`MediaServerUnsupported` when the server's songs carry no ``path``."""
+        offset = 0
+        first = True
+        while True:
+            body = self._request(
+                "search3",
+                [
+                    ("query", ""),
+                    ("artistCount", 0),
+                    ("albumCount", 0),
+                    ("songCount", _FILE_PAGE),
+                    ("songOffset", offset),
+                ],
+            )
+            result = body.get("searchResult3")
+            songs = [x for x in (result.get("song") if isinstance(result, dict) else None) or [] if isinstance(x, dict)]
+            if first and songs and not any(x.get("path") for x in songs):
+                detail = "server does not expose file paths"
+                raise MediaServerUnsupported(detail, safe_detail=detail)
+            first = False
+            for song in songs:
+                path = str(song.get("path") or "")
+                if not path:
+                    continue
+                container = str(song.get("suffix") or "").lower().lstrip(".")
+                yield ServerFileRef(
+                    server_id=str(song.get("id") or ""),
+                    path=path,
+                    title=str(song.get("title") or ""),
+                    artist=str(song.get("artist") or ""),
+                    album=str(song.get("album") or ""),
+                    container=container,
+                )
+            if len(songs) < _FILE_PAGE:
+                return
+            offset += len(songs)
+
+    def last_scan_at(self) -> Optional[datetime]:
+        body = self._request("getScanStatus")
+        status = body.get("scanStatus")
+        raw = status.get("lastScan") if isinstance(status, dict) else None
+        if not raw:
+            return None
+        try:
+            if isinstance(raw, (int, float)):
+                return datetime.fromtimestamp(raw / 1000 if raw > 1e11 else raw, tz=timezone.utc)
+            return _parse_iso_utc(str(raw))
+        except (ValueError, OverflowError, OSError):
+            logger.debug("Subsonic getScanStatus returned an unparseable lastScan")
+            return None
 
     def refresh_library(self) -> bool:
         body = self._request("startScan", mutating=True)
