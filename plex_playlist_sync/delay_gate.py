@@ -18,6 +18,7 @@ import sqlite3
 from typing import Any, Optional
 
 from plex_playlist_sync.decision_engine import PreparedProfile, normalize_protocol
+from plex_playlist_sync.item_history import GrabTrigger
 from plex_playlist_sync.models import AcquisitionSearchResult, EvaluationResult
 
 logger = logging.getLogger(__name__)
@@ -219,6 +220,7 @@ def apply_gate(
     quality_profile_id: Optional[str] = None,
     upgrade_floor: Optional[int] = None,
     now: Optional[datetime] = None,
+    trigger: Optional[GrabTrigger] = None,
 ) -> GateDecision:
     """Decides grab-now vs. hold for the best-ranked candidate of one item, maintaining ``pending_releases``."""
     now = now or utcnow()
@@ -280,6 +282,7 @@ def apply_gate(
                 "quality_profile_id": quality_profile_id,
                 "upgrade_floor": upgrade_floor,
                 "score": result.score,
+                "trigger": trigger.to_dict() if trigger else None,  # survives the hold: the release-time grab uses it
             },
             "rank": rank_list,
             "delay_profile_id": profile.get("id"),

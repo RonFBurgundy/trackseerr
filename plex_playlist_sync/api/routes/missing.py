@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from plex_playlist_sync.item_history import TRIGGER_PLAYLIST, GrabTrigger
 from plex_playlist_sync.acquisition_coordinator import acquisition_coordinator
 from plex_playlist_sync.api.dependencies import (
     get_config,
@@ -524,6 +525,19 @@ def delete_match_override(
     return {"status": "deleted", "id": override_id}
 
 
+def _playlist_trigger(db: Database, track: dict[str, Any], admin: dict[str, Any]) -> GrabTrigger:
+    """A missing track's grab comes from its playlist (ref = playlist id, label = playlist name)."""
+    playlist_id = str(track.get("playlist_id") or "") or None
+    playlist = db.get_playlist(playlist_id) if playlist_id else None
+    uid = admin.get("id")
+    return GrabTrigger(
+        TRIGGER_PLAYLIST,
+        ref=playlist_id,
+        label=(playlist or {}).get("name"),
+        actor_user_id=str(uid) if uid and uid != "api_key_user" else None,
+    )
+
+
 @router.post("/{track_id}/grab")
 def grab_missing_track(
     track_id: int,
@@ -546,6 +560,7 @@ def grab_missing_track(
                 album=track.get("album"),
                 item_type="track",
                 db=db,
+                trigger=_playlist_trigger(db, track, _admin),
             )
     except ModeChanged as exc:
         raise HTTPException(

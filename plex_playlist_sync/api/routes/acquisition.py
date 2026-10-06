@@ -16,6 +16,7 @@ from plex_playlist_sync.acquisition_coordinator import (
 )
 from plex_playlist_sync import delay_gate
 from plex_playlist_sync.api.dependencies import get_db, require_admin, require_core_tier
+from plex_playlist_sync.item_history import TRIGGER_MANUAL, GrabTrigger
 from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver
@@ -229,7 +230,7 @@ def grab_release(
     """Native-mode only (409 while Lidarr manages the library); the grab runs under the library-manager guard."""
     try:
         with work_guard(db, MODE_NATIVE):
-            return _grab_release(payload, db)
+            return _grab_release(payload, db, _admin)
     except ModeChanged as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -237,7 +238,7 @@ def grab_release(
         ) from exc
 
 
-def _grab_release(payload: ManualGrabPayload, db: Database) -> dict[str, Any]:
+def _grab_release(payload: ManualGrabPayload, db: Database, admin: dict[str, Any]) -> dict[str, Any]:
     """Force-enqueues a manually selected candidate release to the target download client.
 
     Creates an active download tracking record in the activity queue and transitions
@@ -322,6 +323,8 @@ def _grab_release(payload: ManualGrabPayload, db: Database) -> dict[str, Any]:
         size_bytes=payload.release.size_bytes,
         source_path=None,
         target_path=None,
+        track_id=payload.track_id,
+        album_id=payload.album_id,
     )
     try:
         db.create_active_download(active_dl)
@@ -334,6 +337,12 @@ def _grab_release(payload: ManualGrabPayload, db: Database) -> dict[str, Any]:
             indexer=payload.release.indexer_name,
             quality=payload.release.parsed_quality,
             protocol=payload.release.protocol,
+            trigger=GrabTrigger(
+                TRIGGER_MANUAL,
+                ref=payload.request_id,
+                label="Interactive search",
+                actor_user_id=str(admin["id"]) if admin.get("id") and admin["id"] != "api_key_user" else None,
+            ),
         )
     except Exception as e:
         logger.error("Failed to record active download '%s': %s", download_id, e)

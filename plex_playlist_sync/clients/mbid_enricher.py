@@ -10,6 +10,8 @@ import urllib.parse
 
 import requests
 
+from plex_playlist_sync.system_paths import is_system_folder_name
+
 logger = logging.getLogger(__name__)
 
 
@@ -267,6 +269,9 @@ class MbidEnricherClient:
 
     def lookup_artist_mbid(self, artist_name: str) -> Optional[str]:
         """Queries the mirror for the canonical artist MBID."""
+        if is_system_folder_name(artist_name):
+            logger.info("MbidEnricherClient: skipping artist lookup for system/trash folder name %r", artist_name)
+            return None
         clean_name = _sanitize_lucene_query(artist_name)
         if not clean_name:
             return None
@@ -303,6 +308,11 @@ class MbidEnricherClient:
         self, artist_name: str, album_title: str
     ) -> Optional[dict[str, Optional[str]]]:
         """Queries the mirror for release group and artist MBIDs."""
+        if is_system_folder_name(artist_name) or is_system_folder_name(album_title):
+            logger.info(
+                "MbidEnricherClient: skipping album lookup for system/trash folder name %r / %r", artist_name, album_title
+            )
+            return None
         clean_artist = _sanitize_lucene_query(artist_name)
         clean_album = _sanitize_lucene_query(album_title)
         if not clean_album:

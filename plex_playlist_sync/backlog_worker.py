@@ -26,6 +26,13 @@ from plex_playlist_sync.clients.acquisition import (
     get_acquisition_driver,
     get_indexer_driver,
 )
+from plex_playlist_sync.item_history import (
+    TRIGGER_ISSUE,
+    TRIGGER_RSS,
+    TRIGGER_UPGRADE,
+    TRIGGER_WANTED,
+    GrabTrigger,
+)
 from plex_playlist_sync.models import (
     AcquisitionSearchResult,
     ActiveDownload,
@@ -142,6 +149,17 @@ class ReplacementSpec:
 
     issue_id: str
     require_better: bool = False
+
+
+def _search_trigger(
+    replacement: Optional[ReplacementSpec], min_score: Optional[int], actor_user_id: Optional[str] = None
+) -> GrabTrigger:
+    """Why a Wanted search grabs: an issue's replacement, a below-cutoff upgrade, or plain wanted."""
+    if replacement is not None:
+        return GrabTrigger(TRIGGER_ISSUE, ref=replacement.issue_id, label="Issue replacement", actor_user_id=actor_user_id)
+    if min_score is not None:
+        return GrabTrigger(TRIGGER_UPGRADE, label="Quality upgrade", actor_user_id=actor_user_id)
+    return GrabTrigger(TRIGGER_WANTED, label="Wanted search", actor_user_id=actor_user_id)
 
 
 def _searched_since(value: Any, cutoff: datetime) -> bool:
@@ -270,7 +288,11 @@ class WantedBacklogWorker:
         return thread is not None and thread.is_alive()
 
     def queue_wanted_search(
-        self, db: Database, targets: list[dict[str, Any]], replacement: Optional[ReplacementSpec] = None
+        self,
+        db: Database,
+        targets: list[dict[str, Any]],
+        replacement: Optional[ReplacementSpec] = None,
+        actor_user_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Queues indexer searches for Wanted rows; returns ``{"queued": n}`` plus a ``message`` when nothing/less ran.
 
@@ -289,7 +311,7 @@ class WantedBacklogWorker:
                     skipped += 1
                 else:
                     fresh.append(t)
-            queued = self.search_wanted_tracks(db, fresh, replacement=replacement)
+            queued = self.search_wanted_tracks(db, fresh, replacement=replacement, actor_user_id=actor_user_id)
         out: dict[str, Any] = {"queued": queued}
         if skipped and queued:
             out["message"] = f"Skipped {skipped} searched in the last 10 minutes"
@@ -298,7 +320,11 @@ class WantedBacklogWorker:
         return out
 
     def search_wanted_tracks(
-        self, db: Database, targets: list[dict[str, Any]], replacement: Optional[ReplacementSpec] = None
+        self,
+        db: Database,
+        targets: list[dict[str, Any]],
+        replacement: Optional[ReplacementSpec] = None,
+        actor_user_id: Optional[str] = None,
     ) -> int:
         """Queues indexer searches for the given Wanted rows and returns how many were queued.
 
@@ -346,6 +372,7 @@ class WantedBacklogWorker:
                         album_id=t.get("album_id"),
                         bypass_delay=replacement is not None,
                         replacement_issue_id=replacement.issue_id if replacement is not None else None,
+                        trigger=_search_trigger(replacement, min_score, actor_user_id),
                     )
                     if res.get("mode_changed"):
                         logger.info("Manual wanted search stopped: library manager switched to Lidarr")
@@ -620,6 +647,7 @@ class WantedBacklogWorker:
                     min_score=min_score,
                     track_id=track_id,
                     album_id=album_id,
+                    trigger=_search_trigger(None, min_score),
                 )
                 if track_id:
                     db.mark_tracks_searched([str(track_id)])
@@ -913,6 +941,9 @@ class RSSSyncWorker:
                             )
                             continue
 
+                indexer_name = str((candidate.extra or {}).get("indexer_name") or candidate.source or "") or None
+                rss_trigger = GrabTrigger(TRIGGER_RSS, ref=indexer_name, label=indexer_name or "RSS")
+
                 # Delay gate: park the best release of the item until its protocol delay has elapsed
                 claimed_pending = None
                 if eval_res is not None and req_profile is not None:
@@ -932,6 +963,7 @@ class RSSSyncWorker:
                         album_id=None,
                         track_id=None,
                         quality_profile_id=matched_req.get("quality_profile_id"),
+                        trigger=rss_trigger,
                     )
                     if not decision.grab:
                         logger.info(
@@ -1000,6 +1032,7 @@ class RSSSyncWorker:
                             quality=eval_res.parsed_quality if eval_res else None,
                             protocol=candidate.protocol or None,
                             upgrade=matched_req.get("cutoff_met") == 0 or matched_req.get("status") == "available",
+                            trigger=rss_trigger,
                         )
                     except sqlite3.Error as hist_err:
                         logger.warning("Failed to record grab history for %s: %s", download_id, type(hist_err).__name__)

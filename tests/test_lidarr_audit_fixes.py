@@ -1,6 +1,7 @@
 """Regression tests for the Lidarr follow-settings audit: schema v38, retry scheduling, title normalisation,
 partial-load settling, acquisition-layer outcomes, removed env vars."""
 
+from plex_playlist_sync.item_history import GrabTrigger
 from plex_playlist_sync.storage import SCHEMA_VERSION
 import inspect
 import sqlite3
@@ -416,7 +417,9 @@ class TestCoordinatorRecordsOutcome:
             ), patch.object(db, "get_default_quality_profile", return_value=profile), patch(
                 "plex_playlist_sync.acquisition_coordinator._to_quality_profile", return_value=MagicMock()
             ):
-                res = coordinator._search_and_grab("Queen", SONG, None, "track", "r1", db, None, None, None, None)
+                res = coordinator._search_and_grab(
+                    "Queen", SONG, None, "track", "r1", db, None, None, None, None, False, None, GrabTrigger("request")
+                )
             assert res["success"] is False and res["retryable"] is retryable and res["reason"] == reason
             row = db.get_request("r1")
             assert row["status_reason"] == reason and row["status_message"] == str(error)

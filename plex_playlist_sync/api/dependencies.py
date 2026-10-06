@@ -16,6 +16,7 @@ from plex_playlist_sync.auth import get_or_create_secret_key, verify_session_tok
 from plex_playlist_sync.clients.deezer import DeezerClient
 from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.lidarr import LidarrClient
+from plex_playlist_sync.item_history import TRIGGER_USER, GrabTrigger, set_provenance
 from plex_playlist_sync.library_manager import build_lidarr_client
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
@@ -578,6 +579,12 @@ def require_permission(permission: UserPermission):
     return _dependency
 
 
+def actor_id(user: dict[str, Any]) -> Optional[str]:
+    """The user id to persist as an actor: None for non-user principals such as the API key."""
+    uid = user.get("id")
+    return str(uid) if uid and uid != "api_key_user" else None
+
+
 def require_admin(current_user: dict[str, Any] = Depends(get_current_user_or_api_key)) -> dict[str, Any]:
     """Enforces is_admin=True or UserPermission.ADMIN, raises 403 otherwise."""
     if current_user.get("forwarded"):
@@ -592,6 +599,22 @@ def require_admin(current_user: dict[str, Any] = Depends(get_current_user_or_api
             detail="Administrator access required",
         )
     return current_user
+
+
+async def track_admin_actor(current_user: dict[str, Any] = Depends(require_admin)) -> None:
+    """Marks library changes made while serving this request as the admin's (item history provenance).
+
+    ``async`` on purpose: the ContextVar it sets lives in the request task and is copied into the thread the (sync)
+    endpoint then runs in. The task ends with the request, so nothing leaks to other requests.
+    """
+    actor_id = current_user.get("id")
+    set_provenance(
+        GrabTrigger(
+            TRIGGER_USER,
+            label=current_user.get("username"),
+            actor_user_id=str(actor_id) if actor_id and actor_id != "api_key_user" else None,
+        )
+    )
 
 
 def require_core_tier(config: Config = Depends(get_config)) -> None:

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { TrackItem } from '@/types/models';
 import { TactileSwitch } from '@/components/ui';
+import { ItemHistoryModal } from './ItemHistoryModal';
 import { formatTrackDuration, getQualityBadge, trackSeconds } from './trackFormat';
 
 export interface AlbumTrackListProps {
@@ -16,6 +17,8 @@ export interface AlbumTrackListProps {
   renderRowAction?: (track: TrackItem) => React.ReactNode;
   /** Tailwind max-height class that makes the list scroll internally. */
   scrollClass?: string;
+  /** Default true: a track's title is a text link that opens that track's history. */
+  trackHistory?: boolean;
 }
 
 /** One album's tracks (from the paged endpoint) with quality badge and monitoring switch. */
@@ -28,7 +31,9 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
   onToggleMonitored,
   renderRowAction,
   scrollClass = '',
+  trackHistory = true,
 }) => {
+  const [historyTrack, setHistoryTrack] = useState<TrackItem | null>(null);
   if (loading) {
     return (
       <div className="flex justify-center py-6">
@@ -47,6 +52,7 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
     return <p className="text-xs text-neutral-500 font-mono py-4 text-center">No tracks registered for this album.</p>;
   }
   return (
+    <>
     <div
       className={`divide-y divide-[#181818] border border-[#1f1f1f] rounded-[3px] bg-[#0d0d0d] ${
         scrollClass ? `${scrollClass} overflow-y-auto` : 'overflow-hidden'
@@ -60,9 +66,20 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
               <span className="font-mono text-xs text-neutral-500 w-6 text-right flex-shrink-0">
                 {t.track_number || 1}
               </span>
-              <span className="text-sm text-neutral-200 min-w-0 flex-1 truncate" title={t.title}>
-                {t.title}
-              </span>
+              {trackHistory ? (
+                <button
+                  type="button"
+                  onClick={() => setHistoryTrack(t)}
+                  className="text-sm text-neutral-200 min-w-0 flex-1 truncate text-left hover:text-white hover:underline"
+                  title={`${t.title} \u2014 view history`}
+                >
+                  {t.title}
+                </button>
+              ) : (
+                <span className="text-sm text-neutral-200 min-w-0 flex-1 truncate" title={t.title}>
+                  {t.title}
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-3 flex-shrink-0 font-mono text-xs">
               <span className="text-neutral-500 hidden sm:inline">{formatTrackDuration(trackSeconds(t))}</span>
@@ -89,5 +106,9 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
         );
       })}
     </div>
+    {historyTrack && (
+      <ItemHistoryModal isOpen onClose={() => setHistoryTrack(null)} entity="track" entityId={String(historyTrack.id)} title={historyTrack.title} />
+    )}
+    </>
   );
 };

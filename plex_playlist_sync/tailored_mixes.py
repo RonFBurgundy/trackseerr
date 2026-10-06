@@ -10,6 +10,7 @@ from plex_playlist_sync.library_availability import get_item_availability
 from plex_playlist_sync.models import Playlist, RequestStatus, Track
 from plex_playlist_sync.media_servers import MediaServerError, PlaylistSyncOptions, as_media_server
 from plex_playlist_sync.redaction import redact_text, safe_exc  # noqa: F401 - pinned by test_exception_redaction
+from plex_playlist_sync.item_history import TRIGGER_MIX, GrabTrigger
 from plex_playlist_sync.request_submission import (
     RequestRejected,
     RequestSubmission,
@@ -240,6 +241,9 @@ def _queue_acquisition(
             quality_profile_id=config_row.get("quality_profile_id"),
             source="mix",
             defer_followups=True,
+            trigger=GrabTrigger(
+                TRIGGER_MIX, ref=str(config_row["id"]), label=config_row.get("name"), actor_user_id=str(user["id"])
+            ),
         )
     except RequestRejected as exc:
         if exc.code == "duplicate":

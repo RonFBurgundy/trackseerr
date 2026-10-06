@@ -13,6 +13,7 @@ import uuid
 
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver, get_indexer_driver
 from plex_playlist_sync.clients.acquisition.base import AcquisitionRetryableError, AcquisitionUnavailableError
+from plex_playlist_sync.item_history import GrabTrigger, emit, emit_named, trigger_kwargs
 from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from plex_playlist_sync.models import (
     AcquisitionSearchResult,
@@ -332,6 +333,8 @@ class AcquisitionCoordinator:
         album_id: Optional[str] = None,
         bypass_delay: bool = False,
         replacement_issue_id: Optional[str] = None,
+        *,
+        trigger: GrabTrigger,
     ) -> dict[str, Any]:
         """Searches indexers, ranks releases against the Quality Profile, and dispatches grab.
 
@@ -344,6 +347,8 @@ class AcquisitionCoordinator:
 
         ``replacement_issue_id`` marks the grab as an admin replacement for a media issue: the grab history row names
         the issue so the import can comment on it. The blocklist still applies.
+
+        ``trigger`` (required) records why the grab happened; it is kept with a delayed (parked) grab until release.
         """
         if db is None:
             raise ValueError("Database instance must be provided to search_and_grab")
@@ -351,7 +356,7 @@ class AcquisitionCoordinator:
             with work_guard(db, MODE_NATIVE):
                 return self._search_and_grab(
                     artist, title, album, item_type, request_id, db, quality_profile_id, min_score, track_id, album_id,
-                    bypass_delay, replacement_issue_id,
+                    bypass_delay, replacement_issue_id, trigger,
                 )
         except ModeChanged:
             logger.info("Native grab skipped for '%s - %s': library manager is Lidarr", artist, title)
@@ -373,8 +378,9 @@ class AcquisitionCoordinator:
         min_score: Optional[int],
         track_id: Optional[str],
         album_id: Optional[str],
-        bypass_delay: bool = False,
-        replacement_issue_id: Optional[str] = None,
+        bypass_delay: bool,
+        replacement_issue_id: Optional[str],
+        trigger: GrabTrigger,
     ) -> dict[str, Any]:
 
         # 1. Retrieve quality profile
@@ -415,13 +421,26 @@ class AcquisitionCoordinator:
         if min_score is not None:
             ranked = [item for item in ranked if item[1].score > min_score]
         if not ranked:
+            reason = (
+                "No acceptable releases found meeting quality profile criteria"
+                if min_score is None
+                else f"No candidate release score exceeds current score {min_score}"
+            )
+            searched_kwargs: dict[str, Any] = dict(
+                request_id=request_id, message=reason, dedupe_last=True,
+                details={"reason": reason, "candidates_count": len(candidates), "searched": title},
+                **trigger_kwargs(trigger),
+            )
+            if track_id or album_id:
+                emit(db, "searched", track_id=track_id, album_id=album_id, **searched_kwargs)
+            else:
+                emit_named(
+                    db, "searched", artist=artist, album=album or (title if item_type == "album" else None),
+                    title=title if item_type != "album" else None, **searched_kwargs,
+                )
             return {
                 "success": False,
-                "message": (
-                    "No acceptable releases found meeting quality profile criteria"
-                    if min_score is None
-                    else f"No candidate release score exceeds current score {min_score}"
-                ),
+                "message": reason,
                 "candidates_count": len(candidates),
             }
 
@@ -445,6 +464,7 @@ class AcquisitionCoordinator:
                 track_id=track_id,
                 quality_profile_id=quality_profile_id,
                 upgrade_floor=min_score,
+                trigger=trigger,
             )
             if not decision.grab:
                 pending = decision.pending or {}
@@ -473,6 +493,7 @@ class AcquisitionCoordinator:
                 album_id=album_id,
                 upgrade=min_score is not None,
                 replacement_issue_id=replacement_issue_id,
+                trigger=trigger,
             )
             grabbed = bool(result.get("success"))
             return result
@@ -495,6 +516,7 @@ class AcquisitionCoordinator:
         album_id: Optional[str],
         upgrade: bool = False,
         replacement_issue_id: Optional[str] = None,
+        trigger: GrabTrigger,
     ) -> dict[str, Any]:
         """Dispatches a chosen candidate to its protocol's client and records the download (no delay gate)."""
         # 4. Find appropriate client for candidate's protocol
@@ -576,6 +598,7 @@ class AcquisitionCoordinator:
                 protocol=top_candidate.protocol or None,
                 upgrade=upgrade,
                 replacement_issue_id=replacement_issue_id,
+                trigger=trigger,
             )
         except sqlite3.Error as hist_err:
             logger.warning("Failed to record grab history for %s: %s", download_id, type(hist_err).__name__)

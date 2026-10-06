@@ -151,7 +151,7 @@ class MediaManagementSettingsModel(BaseModel):
     root_folder_path: str = Field("/data/media/music", description="Base music library folder")
     colon_replacement_format: str = Field(" - ", description="String to replace colons with")
     clean_artist_names: bool = Field(True, description="Whether to strip leading articles from artist names")
-    staging_folder_path: str = Field("/data/downloads", description="Path for staging/downloads folder")
+    staging_folder_path: str = Field("", description="Optional extra allowed import folder; empty means download clients' folders only")
     import_mode: Literal["move", "hardlink", "copy"] = Field(
         "move", description="Import mode: move, hardlink or copy (hardlink and copy keep the source so torrents keep seeding)"
     )

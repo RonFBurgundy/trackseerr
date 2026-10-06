@@ -107,7 +107,7 @@ class TestMediaManagementStorage:
         assert "import_mode" in cols
 
         mm = test_db.get_media_management_settings()
-        assert mm["staging_folder_path"] == "/data/downloads"
+        assert mm["staging_folder_path"] == ""  # fresh installs have no extra import folder
         assert mm["import_mode"] == "move"
 
         cursor.execute("SELECT * FROM lidarr_settings WHERE id = 1")
@@ -274,6 +274,21 @@ class TestMediaManagementAPI:
         db_settings = test_db.get_media_management_settings()
         assert db_settings["staging_folder_path"] == "/data/downloads/completed"
         assert db_settings["import_mode"] == "hardlink"
+
+    def test_fresh_get_reports_empty_staging_and_save_empty_is_accepted(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
+        _, client = app_and_client
+        headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+        resp = client.get("/api/settings/media-management", headers=headers)
+        assert resp.status_code == 200
+        assert resp.json()["settings"]["staging_folder_path"] == ""
+
+        client.post("/api/settings/media-management", json={"staging_folder_path": "/data/x"}, headers=headers)
+        resp = client.post("/api/settings/media-management", json={"staging_folder_path": ""}, headers=headers)
+        assert resp.status_code == 200
+        assert resp.json()["staging_folder_path"] == ""
+        assert test_db.get_media_management_settings()["staging_folder_path"] == ""
 
     def test_update_media_management_library_mode(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client

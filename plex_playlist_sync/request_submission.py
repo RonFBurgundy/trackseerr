@@ -17,6 +17,12 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from plex_playlist_sync.acquisition_coordinator import acquisition_coordinator
+from plex_playlist_sync.item_history import (
+    GrabTrigger,
+    emit_named,
+    request_trigger,
+    trigger_kwargs,
+)
 from plex_playlist_sync.library_manager import ModeChanged, dispatch_to_lidarr, native_is_configured, run_for_mode
 from plex_playlist_sync.models import MusicRequest, NotificationEvent, RequestStatus, UserPermission
 from plex_playlist_sync.notifications import notification_dispatcher
@@ -154,12 +160,16 @@ def submit_track_request(
     preview_url: Optional[str] = None,
     defer_followups: bool = False,
     lidarr_client: Any = None,
+    trigger: Optional[GrabTrigger] = None,
 ) -> RequestSubmission:
     """Apply request policy and create the request. Raises ``RequestRejected`` on quota or duplicate.
 
     Non-admins cannot choose a quality profile: it is dropped. The per-user lock covers only the
     count-check plus insert. Notifications and the native grab (network I/O) run after it is released; a caller
     that holds the lock itself passes ``defer_followups=True`` and calls ``run_submission_followups`` once released.
+
+    ``trigger`` names a system source (mix, import list, playlist) that raised the request on the user's behalf; it is
+    kept on the request so the eventual grab still carries it. Without one the request is the user's own.
     """
     clean_title = title.strip()
     clean_artist = artist.strip()
@@ -198,13 +208,55 @@ def submit_track_request(
                 foreign_id=foreign_id,
                 preview_url=preview_url,
                 quality_profile_id=quality_profile_id,
+                trigger=trigger.kind if trigger else None,
+                trigger_ref=trigger.ref if trigger else None,
+                trigger_label=trigger.label if trigger else None,
             )
         )
 
+    _record_requested(db, user, created, initial_status)
     submission = RequestSubmission(request=created, status=initial_status)
     if not defer_followups:
         run_submission_followups(db, user, submission, source=source, config=config, lidarr_client=lidarr_client)
     return submission
+
+
+def record_request_event(
+    db: Database,
+    event: str,
+    request: dict[str, Any],
+    *,
+    message: str = "",
+    actor_user_id: Optional[str] = None,
+    details: Optional[dict[str, Any]] = None,
+) -> None:
+    """``requested`` / ``request_approved`` / ``request_declined`` on the item behind ``request``.
+
+    The item is found by name (and adopts the request's ``request_id`` when it is not in the library yet, see
+    ``record_item_event``). The trigger is the request's own provenance; ``actor_*`` names an admin acting on it.
+    """
+    trig = request_trigger(db, request, actor_user_id=actor_user_id)
+    is_album = (request.get("item_type") or "track") == "album"
+    emit_named(
+        db, event,
+        artist=request.get("artist"),
+        album=request.get("title") if is_album else request.get("album"),
+        title=None if is_album else request.get("title"),
+        request_id=request.get("id"),
+        message=message,
+        details={"item_type": request.get("item_type"), **(details or {})},
+        **trigger_kwargs(trig),
+    )
+
+
+def _record_requested(db: Database, user: dict[str, Any], created: dict[str, Any], status: RequestStatus) -> None:
+    """``requested`` (and ``request_approved`` when auto-approved) item events for a freshly created request."""
+    req = {**created, "username": created.get("username") or user.get("username")}
+    record_request_event(db, "requested", req, message="Requested")
+    if status == RequestStatus.PROCESSING:
+        record_request_event(
+            db, "request_approved", req, message="Approved automatically", details={"automatic": True}
+        )
 
 
 def _norm(text: Optional[str]) -> str:
@@ -311,6 +363,7 @@ def submit_batch_requests(
                     batch_kind=kind,
                 )
             )
+            _record_requested(db, user, created, initial_status)
             submissions.append(RequestSubmission(request=created, status=initial_status))
     return submissions
 
@@ -373,6 +426,7 @@ def run_submission_followups(
                 item_type=item_type,
                 request_id=req_id,
                 db=db,
+                trigger=request_trigger(db, {**created, "username": created.get("username") or user.get("username")}),
             )
             if grab_res.get("success"):
                 logger.info(

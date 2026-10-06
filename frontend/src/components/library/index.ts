@@ -23,3 +23,6 @@ export * from './ArtistBulkBar';
 export * from './AlbumBulkBar';
 export * from './artSrc';
 export * from './ArtistRestOfDiscography';
+export * from './itemHistoryFormat';
+export * from './ItemHistoryModal';
+export * from './ItemOriginCaption';

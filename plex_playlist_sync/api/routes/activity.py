@@ -12,6 +12,7 @@ from typing import Any, Callable, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from plex_playlist_sync import activity_service as svc
+from plex_playlist_sync.api.dependencies import actor_id as _actor_id
 from plex_playlist_sync.api.dependencies import get_db, get_lidarr_client, require_admin, require_core_tier
 from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient, _exc_text
 from plex_playlist_sync.library_manager import MODE_LIDARR, ModeChanged, get_library_mode, run_for_mode
@@ -127,7 +128,7 @@ def retry_queue_item(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     def native() -> dict[str, Any]:
-        result = svc.native_retry_queue_item(db, queue_id)
+        result = svc.native_retry_queue_item(db, queue_id, _actor_id(_admin))
         if result is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Queue item not found")
         return result
@@ -197,7 +198,7 @@ def mark_history_failed(
 ) -> dict[str, Any]:
     def native() -> dict[str, Any]:
         try:
-            result = svc.native_mark_history_failed(db, history_id)
+            result = svc.native_mark_history_failed(db, history_id, _actor_id(_admin))
         except svc.HistoryConflict as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
         if result is None:

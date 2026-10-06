@@ -455,7 +455,7 @@ All interactive filesystem endpoints—including folder scanning, manual importi
    - `/data` (application database and state)
    - `/config` (configuration files)
    - `/tmp` (sandboxed system scratch space)
-   - Current working directory and configured `root_folder_path` or `staging_folder_path` in media management settings.
+   - The configured `root_folder_path`, each download client's own folders, and the optional `staging_folder_path` ("Extra import folder", empty by default; empty adds no root and never means the working directory).
 4. **Forbidden Boundary Enforcement**: If a resolved path falls outside all approved base mounts, TrackSeerr raises HTTP 403 Forbidden (`"Access denied: path is outside approved media mounts"`).
 
 #### Endpoint Safeguards on `/manual-import/scan`

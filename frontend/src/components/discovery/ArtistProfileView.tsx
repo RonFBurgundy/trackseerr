@@ -14,6 +14,7 @@ import type {
   AudioPreviewTrack,
   DiscoveryItem,
 } from '@/types/models';
+import { ItemOriginCaption } from '@/components/library/ItemOriginCaption';
 import { ProfileAlbumCard } from './ProfileAlbumCard';
 import { ProfileStatusBadge } from './ProfileStatusBadge';
 import { ProfileTrackRow } from './ProfileTrackRow';
@@ -132,6 +133,7 @@ const ProfileHero: React.FC<HeroProps> = React.memo(({ profile, isAdmin, missing
           <div className="min-w-0">
             <span className="hidden font-mono text-[10px] uppercase tracking-widest text-[#e5a00d] sm:block">Artist</span>
             <h2 className="line-clamp-2 break-words font-mono text-[17px] font-black leading-tight tracking-tight text-white sm:text-3xl">{artist.name}</h2>
+            {showLibrary && <ItemOriginCaption entity="artist" entityId={artist.library_artist_id} title={artist.name} />}
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             {showLibrary && library && (

@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
+from plex_playlist_sync.item_history import GrabTrigger
 from plex_playlist_sync import library_manager as lm
 from plex_playlist_sync.acquisition_coordinator import acquisition_coordinator
 from plex_playlist_sync.api.app import create_app
@@ -185,7 +186,7 @@ class TestWorkGuard:
 
         with patch.object(acquisition_coordinator, "_search_and_grab", side_effect=slow_grab):
             t = threading.Thread(
-                target=lambda: acquisition_coordinator.search_and_grab(artist="A", title="T", db=test_db)
+                target=lambda: acquisition_coordinator.search_and_grab(artist="A", title="T", db=test_db, trigger=GrabTrigger("request"))
             )
             t.start()
             try:
@@ -204,7 +205,7 @@ class TestWorkGuard:
     def test_search_and_grab_skips_in_lidarr_mode(self, test_db):
         _set_mode(test_db, "lidarr")
         with patch.object(acquisition_coordinator, "_search_and_grab") as inner:
-            res = acquisition_coordinator.search_and_grab(artist="A", title="T", db=test_db)
+            res = acquisition_coordinator.search_and_grab(artist="A", title="T", db=test_db, trigger=GrabTrigger("request"))
         inner.assert_not_called()
         assert res["success"] is False and res["mode_changed"] is True
 
@@ -306,7 +307,7 @@ class TestGrabRoute:
         _, client = app_and_client
         observed: list[int] = []
 
-        def fake(payload, db):
+        def fake(payload, db, admin):
             observed.append(lm.in_flight_count(lm.MODE_NATIVE))
             return {"success": True}
 

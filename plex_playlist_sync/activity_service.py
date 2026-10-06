@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver
 from plex_playlist_sync.clients.lidarr import LidarrClient
+from plex_playlist_sync.item_history import TRIGGER_RETRY, GrabTrigger, emit
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.storage import Database
 
@@ -309,7 +310,8 @@ def _stop_at_client(db: Database, row: dict[str, Any]) -> None:
 
 
 def _blocklist_release(db: Database, *, title: str, artist: Optional[str], album: Optional[str], guid: Optional[str],
-                       info_hash: Optional[str], protocol: Optional[str], indexer: Optional[str], reason: str) -> None:
+                       info_hash: Optional[str], protocol: Optional[str], indexer: Optional[str], reason: str,
+                       download_id: Optional[str] = None) -> None:
     db.add_to_blocklist(
         source_title=title,
         artist=artist,
@@ -319,6 +321,7 @@ def _blocklist_release(db: Database, *, title: str, artist: Optional[str], album
         protocol=protocol,
         indexer=indexer,
         reason=reason,
+        download_id=download_id,
     )
 
 
@@ -340,6 +343,7 @@ def native_delete_queue_item(db: Database, download_id: str, remove_from_client:
             protocol=row.get("protocol"),
             indexer=row.get("indexer"),
             reason="Removed from the queue and blocklisted by an administrator",
+            download_id=str(row["id"]),
         )
     db.record_download_event(
         "deleted",
@@ -364,6 +368,7 @@ def _search_again(
     request_id: Optional[str],
     track_id: Optional[str],
     album_id: Optional[str],
+    actor_user_id: Optional[str] = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Runs one indexer search + grab; returns ``(grabbed, message, raw_result)``."""
     from plex_playlist_sync.acquisition_coordinator import acquisition_coordinator  # local: avoids an import cycle
@@ -379,13 +384,16 @@ def _search_again(
         db=db,
         track_id=track_id,
         album_id=album_id,
+        trigger=GrabTrigger(TRIGGER_RETRY, actor_user_id=actor_user_id),
     )
     if res.get("success"):
         return True, f"Grabbed '{redact_text(str(res.get('release')))}'", res
     return False, redact_text(str(res.get("message") or "No release found")), res
 
 
-def native_retry_queue_item(db: Database, download_id: str) -> Optional[dict[str, Any]]:
+def native_retry_queue_item(
+    db: Database, download_id: str, actor_user_id: Optional[str] = None
+) -> Optional[dict[str, Any]]:
     """Searches again for the item behind a queue row; None when the row does not exist.
 
     The stuck row is only dropped once the new search actually grabbed a release. When nothing is found the row is
@@ -403,6 +411,7 @@ def native_retry_queue_item(db: Database, download_id: str) -> Optional[dict[str
         request_id=row.get("request_id"),
         track_id=row.get("track_id"),
         album_id=row.get("album_id"),
+        actor_user_id=actor_user_id,
     )
     if not grabbed:
         return {"success": False, "message": message}
@@ -417,7 +426,9 @@ def native_retry_queue_item(db: Database, download_id: str) -> Optional[dict[str
     return {"success": True, "message": message}
 
 
-def native_mark_history_failed(db: Database, history_id: str) -> Optional[dict[str, Any]]:
+def native_mark_history_failed(
+    db: Database, history_id: str, actor_user_id: Optional[str] = None
+) -> Optional[dict[str, Any]]:
     """Marks a grab as failed: blocklists the release, records ``failed``, then searches for a replacement.
 
     Returns None when the history row does not exist; raises ``HistoryConflict`` when it cannot be marked (not a
@@ -460,6 +471,15 @@ def native_mark_history_failed(db: Database, history_id: str) -> Optional[dict[s
             release_guid=hist.get("release_guid"),
             message=reason,
         )
+        emit(
+            db, "download_failed", track_id=hist.get("track_id"), album_id=hist.get("album_id"),
+            artist_name=hist.get("artist") or "", request_id=hist.get("request_id"), download_id=download_id,
+            actor_user_id=actor_user_id, message=reason,
+            details={
+                "release": hist.get("release_title"), "indexer": hist.get("indexer"),
+                "client": hist.get("client"), "protocol": hist.get("protocol"),
+            },
+        )
     release = hist.get("release_title") or hist.get("title")
     if release:
         _blocklist_release(
@@ -472,6 +492,7 @@ def native_mark_history_failed(db: Database, history_id: str) -> Optional[dict[s
             protocol=hist.get("protocol"),
             indexer=hist.get("indexer"),
             reason=reason,
+            download_id=str(download_id) if download_id else None,
         )
     grabbed, message, _res = _search_again(
         db,
@@ -482,6 +503,7 @@ def native_mark_history_failed(db: Database, history_id: str) -> Optional[dict[s
         request_id=hist.get("request_id"),
         track_id=hist.get("track_id"),
         album_id=hist.get("album_id"),
+        actor_user_id=actor_user_id,
     )
     if grabbed:
         return {"success": True, "message": f"Marked as failed and blocklisted. {message}"}

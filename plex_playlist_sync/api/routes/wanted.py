@@ -20,7 +20,7 @@ from plex_playlist_sync.api.routes.activity import (
     run_mutation,
     validate_sort_key,
 )
-from plex_playlist_sync.backlog_worker import backlog_worker
+from plex_playlist_sync.backlog_worker import ReplacementSpec, backlog_worker
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.library_manager import MODE_LIDARR, get_library_mode
 from plex_playlist_sync.storage import Database
@@ -139,7 +139,7 @@ def search_wanted(
             targets = db.list_wanted_search_targets(track_ids=ids)
         else:
             targets = db.list_wanted_search_targets(kind=body.list_name, limit=MAX_NATIVE_SEARCH_ALL)
-        return backlog_worker.queue_wanted_search(db, targets)
+        return backlog_worker.queue_wanted_search(db, targets, actor_user_id=_actor_id(_admin))
 
     def lidarr() -> dict[str, Any]:
         lidarr_client = require_lidarr(client)
@@ -159,11 +159,17 @@ def search_wanted(
     return run_mutation(db, native, lidarr)
 
 
+def _actor_id(user: dict[str, Any]) -> Optional[str]:
+    uid = user.get("id")
+    return str(uid) if uid and uid != "api_key_user" else None
+
+
 def search_tracks_for_replacement(
-    db: Database, track_ids: list[str], issue_id: str, require_better: bool
+    db: Database, track_ids: list[str], issue_id: str, require_better: bool, actor_user_id: Optional[str] = None
 ) -> dict[str, Any]:
-    """Issue fix actions only: searches the tracks although they have files (see ``backlog_worker.ReplacementSpec``)."""
+    """Issue fix actions only: searches the tracks although they have files (see ``ReplacementSpec``)."""
     targets = db.list_wanted_search_targets(track_ids=track_ids)
     return backlog_worker.queue_wanted_search(
-        db, targets, replacement=backlog_worker.ReplacementSpec(issue_id=issue_id, require_better=require_better)
+        db, targets, replacement=ReplacementSpec(issue_id=issue_id, require_better=require_better),
+        actor_user_id=actor_user_id,
     )
