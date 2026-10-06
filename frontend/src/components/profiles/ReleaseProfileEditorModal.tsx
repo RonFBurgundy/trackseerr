@@ -1,9 +1,10 @@
 import React, { useId, useRef, useState } from 'react';
-import { FormField, TactileSwitch, TokenInput, type TokenInputHandle } from '@/components/ui';
-import type { IndexerItem } from '@/types/models';
+import { FormField, TactileSwitch, TagPicker, TokenInput, type TokenInputHandle } from '@/components/ui';
+import type { IndexerItem, LibraryManagerMode } from '@/types/models';
 import type { QualityProfile } from '@/types/qualityProfiles';
 import { SEEDED_RELEASE_PROFILE_NAME, type ReleaseProfile, type ReleaseProfileInput } from '@/types/releaseProfiles';
 import { useReleaseProfileDraft } from '@/hooks/useReleaseProfileDraft';
+import { useTags } from '@/hooks/useTags';
 import { inputClass } from '@/components/settings/formClasses';
 import { EditorModalShell } from './EditorModalShell';
 
@@ -15,6 +16,8 @@ export interface ReleaseProfileEditorModalProps {
   qualityProfiles: readonly QualityProfile[];
   onClose: () => void;
   onSave: (id: number | null, input: ReleaseProfileInput) => Promise<string | null>;
+  /** In Lidarr mode native tags do not apply: the picker is hidden and existing tags are kept as they are. */
+  libraryMode: LibraryManagerMode;
 }
 
 interface CheckListProps {
@@ -66,10 +69,12 @@ const EditorBody: React.FC<Omit<ReleaseProfileEditorModalProps, 'target'> & { ta
   qualityProfiles,
   onClose,
   onSave,
+  libraryMode,
 }) => {
   const uid = useId();
   const existing = target === 'new' ? null : target;
   const draft = useReleaseProfileDraft(existing);
+  const tagCatalogue = useTags(libraryMode !== 'lidarr');
   const requiredRef = useRef<TokenInputHandle>(null);
   const ignoredRef = useRef<TokenInputHandle>(null);
   const [saving, setSaving] = useState<boolean>(false);
@@ -146,6 +151,20 @@ const EditorBody: React.FC<Omit<ReleaseProfileEditorModalProps, 'target'> & { ta
           hint="Any match rejects the release."
           error={ignoredError}
         />
+        {libraryMode !== 'lidarr' && (
+        <TagPicker
+          mode="label"
+          label="Tags"
+          name="release_profile_tags"
+          tags={tagCatalogue.tags}
+          loading={tagCatalogue.loading}
+          loadError={tagCatalogue.loadError}
+          onCreate={tagCatalogue.create}
+          value={draft.tags}
+          onChange={draft.setTags}
+          hint="Only applies to artists with one of these tags; leave empty for all artists"
+        />
+        )}
         <CheckList
           legend="Indexers"
           hint="Restrict this profile to these indexers. None ticked = every indexer."

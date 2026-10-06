@@ -191,6 +191,8 @@ export interface ArtistItem {
   added_at?: string | null;
   /** Native artist detail only: the artist's metadata profile id, null when none. */
   metadata_profile_id?: number | null;
+  /** Native only: ids of the tags on this artist (see `/api/tags`). */
+  tags?: number[];
   /** `lidarr` for records served live from Lidarr; absent or `native` otherwise. */
   source?: 'native' | 'lidarr';
   /** Discovery id of the matching Deezer/iTunes artist, when known (opens the Discover profile). */

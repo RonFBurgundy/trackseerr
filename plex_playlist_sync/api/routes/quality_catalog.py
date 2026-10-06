@@ -5,7 +5,7 @@ import sqlite3
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from plex_playlist_sync.api.dependencies import get_db, require_admin, require_core_tier
 from plex_playlist_sync.decision_engine import (
@@ -19,6 +19,7 @@ from plex_playlist_sync.quality_defaults import QUALITY_ORDER
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.safe_regex import UnsafeRegexError
 from plex_playlist_sync.storage import Database
+from plex_playlist_sync.tag_store import normalize_labels
 
 logger = logging.getLogger(__name__)
 
@@ -247,8 +248,13 @@ class ReleaseProfilePayload(BaseModel):
     required: list[str] = Field(default_factory=list, max_length=200)
     ignored: list[str] = Field(default_factory=list, max_length=200)
     indexer_ids: list[str] = Field(default_factory=list)
-    tags: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list, max_length=50)
     quality_profile_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("tags")
+    @classmethod
+    def _clean_tags(cls, tags: list[str]) -> list[str]:
+        return normalize_labels(tags)
 
 
 class ReleaseProfileResponse(BaseModel):

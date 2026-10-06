@@ -4,27 +4,24 @@
  */
 
 export interface paths {
-    "/api/auth/plex/pin": {
+    "/api/account": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Account */
+        get: operations["get_account_api_account_get"];
         put?: never;
-        /**
-         * Generate Pin
-         * @description Generates a Plex OAuth PIN and authorization URL.
-         */
-        post: operations["generate_pin_api_auth_plex_pin_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/auth/plex/verify": {
+    "/api/account/mfa/confirm": {
         parameters: {
             query?: never;
             header?: never;
@@ -34,12 +31,640 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Verify Pin
-         * @description Claims PIN, verifies server access with target_machine_id, upserts user in DB,
-         *
-         *     creates signed session token, sets HttpOnly, SameSite=Lax cookie. Outsiders get 403 Forbidden.
+         * Mfa Confirm
+         * @description Confirms enrollment with a code from the authenticator and returns the recovery codes once.
          */
-        post: operations["verify_pin_api_auth_plex_verify_post"];
+        post: operations["mfa_confirm_api_account_mfa_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/mfa/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mfa Disable */
+        post: operations["mfa_disable_api_account_mfa_disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/mfa/recovery-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mfa Regenerate Recovery Codes
+         * @description Replaces all recovery codes (old ones stop working) and returns the new ones once.
+         */
+        post: operations["mfa_regenerate_recovery_codes_api_account_mfa_recovery_codes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/mfa/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mfa Setup
+         * @description Starts TOTP enrollment after re-authenticating with the password. The secret stays pending (in memory, 10 min) until a code confirms it.
+         */
+        post: operations["mfa_setup_api_account_mfa_setup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change Password
+         * @description Changes a local account's password and signs out every other session.
+         */
+        post: operations["change_password_api_account_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/acquisition/blocklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List blocklisted releases
+         * @description Returns list of blocklisted downloads/releases (admin required).
+         */
+        get: operations["list_blocklist_api_acquisition_blocklist_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/acquisition/blocklist/{blocklist_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove entry from blocklist
+         * @description Removes an item from the download blocklist by ID (admin required).
+         */
+        delete: operations["remove_from_blocklist_api_acquisition_blocklist__blocklist_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/acquisition/grab": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Force-enqueue a chosen candidate release to a download client
+         * @description Native-mode only (409 while Lidarr manages the library); the grab runs under the library-manager guard.
+         */
+        post: operations["grab_release_api_acquisition_grab_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/acquisition/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List releases held by a delay profile */
+        get: operations["list_pending_api_acquisition_pending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/acquisition/pending/{pending_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Drop a pending release */
+        delete: operations["drop_pending_api_acquisition_pending__pending_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/acquisition/pending/{pending_id}/grab": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Grab a pending release now, skipping its delay */
+        post: operations["grab_pending_now_api_acquisition_pending__pending_id__grab_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/acquisition/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Interactive multi-indexer search with quality evaluation
+         * @description Queries all configured Torznab, Newznab, and slskd indexers.
+         *
+         *     Parses each candidate release and evaluates it against the active or requested
+         *     Quality Profile, returning ranked and scored results with acceptance flags.
+         */
+        post: operations["search_releases_api_acquisition_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/activity/blocklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Blocklisted releases (native or Lidarr) */
+        get: operations["list_blocklist_api_activity_blocklist_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/activity/blocklist/{blocklist_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove an entry from the blocklist */
+        delete: operations["delete_blocklist_item_api_activity_blocklist__blocklist_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/activity/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download history (native or Lidarr) */
+        get: operations["list_history_api_activity_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/activity/history/index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Scrubber groups for the download history (native only) */
+        get: operations["history_index_api_activity_history_index_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/activity/history/{history_id}/failed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark a grab as failed: blocklist it and search again */
+        post: operations["mark_history_failed_api_activity_history__history_id__failed_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/activity/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download queue (native or Lidarr) */
+        get: operations["list_queue_api_activity_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/activity/queue/{queue_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a queue item, optionally blocklisting it */
+        delete: operations["delete_queue_item_api_activity_queue__queue_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/activity/queue/{queue_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Search again for a queue item */
+        post: operations["retry_queue_item_api_activity_queue__queue_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/gateway-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Gateway Status */
+        get: operations["gateway_status_api_admin_gateway_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Permission Labels
+         * @description The assignable permission bits with human labels.
+         */
+        get: operations["list_permission_labels_api_admin_permissions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/role-change-notice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Role Change Notice */
+        get: operations["get_role_change_notice_api_admin_role_change_notice_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/role-change-notice/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Dismiss Role Change Notice */
+        post: operations["dismiss_role_change_notice_api_admin_role_change_notice_dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Account Settings */
+        get: operations["get_account_settings_api_admin_settings_accounts_get"];
+        /** Put Account Settings */
+        put: operations["put_account_settings_api_admin_settings_accounts_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Admin Users */
+        get: operations["list_admin_users_api_admin_users_get"];
+        put?: never;
+        /**
+         * Create Admin User
+         * @description Creates a local user with a 48 h invite. ``invite_url`` carries the only copy of the raw token.
+         */
+        post: operations["create_admin_user_api_admin_users_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Admin User
+         * @description Deletes the user and their data and writes a tombstone so they cannot come back by signing in.
+         */
+        delete: operations["delete_admin_user_api_admin_users__user_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Admin User */
+        patch: operations["update_admin_user_api_admin_users__user_id__patch"];
+        trace?: never;
+    };
+    "/api/admin/users/{user_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable Admin User */
+        post: operations["disable_admin_user_api_admin_users__user_id__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{user_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable Admin User */
+        post: operations["enable_admin_user_api_admin_users__user_id__enable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{user_id}/reset-mfa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset Admin User Mfa */
+        post: operations["reset_admin_user_mfa_api_admin_users__user_id__reset_mfa_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{user_id}/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Admin User Password
+         * @description Issues a single-use reset link (local accounts only) and signs the user out everywhere.
+         */
+        post: operations["reset_admin_user_password_api_admin_users__user_id__reset_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{user_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Admin User
+         * @description Lifts the tombstone of a deleted Plex user so they can sign in again (as a fresh, default user).
+         */
+        post: operations["restore_admin_user_api_admin_users__user_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{user_id}/revoke-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Admin User Sessions */
+        post: operations["revoke_admin_user_sessions_api_admin_users__user_id__revoke_sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/invite/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Invite
+         * @description Describes a valid invite or reset link; 404 for anything unknown, used or expired.
+         */
+        get: operations["get_invite_api_auth_invite__token__get"];
+        put?: never;
+        /**
+         * Accept Invite
+         * @description Sets the user's password from a valid invite/reset token (single use) and revokes sessions.
+         */
+        post: operations["accept_invite_api_auth_invite__token__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/local/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Local Login
+         * @description Signs in a local (non-Plex) account. On the gateway the credentials are verified by core.
+         */
+        post: operations["local_login_api_auth_local_login_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -75,7 +700,7 @@ export interface paths {
         };
         /**
          * Get Me
-         * @description Returns current user info and role.
+         * @description Returns current user info, role and the deployment tier.
          */
         get: operations["get_me_api_auth_me_get"];
         put?: never;
@@ -86,67 +711,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/users/me": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Current User Profile
-         * @description Returns current user profile, permissions bitmask, and rolling request quota telemetry.
-         */
-        get: operations["get_current_user_profile_api_users_me_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/users": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Users
-         * @description Returns discovered Plex Home users (admin sees all; regular user sees self).
-         */
-        get: operations["list_users_api_users_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/users/{user_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Update User Governance Route
-         * @description Updates user governance, permissions, and request quotas (admin only).
-         */
-        put: operations["update_user_governance_route_api_users__user_id__put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/users/refresh": {
+    "/api/auth/plex/pin": {
         parameters: {
             query?: never;
             header?: never;
@@ -156,10 +721,2241 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Refresh Users
-         * @description Discovers users from Plex server and upserts them to DB (admin only).
+         * Generate Pin
+         * @description Generates a Plex OAuth PIN and authorization URL.
+         *
+         *     Two-tier decision: in the DMZ model this endpoint is served by the gateway process itself
+         *     (GATEWAY_LOCAL_ALLOWLIST), never relayed to core, so the check runs where the public request
+         *     arrives. The allowed set is the UNION of APPLICATION_URL (env, else the stored general setting)
+         *     and the request's own origin (X-Forwarded-Proto/Host count only from a TRUSTED_PROXIES peer), so
+         *     a user on a secondary hostname such as a Tailscale name still gets redirected back. No
+         *     client-supplied header is trusted beyond that. A forward_url on any other origin is dropped (Plex
+         *     then simply does not redirect), which closes the post-login open redirect. Residual: a direct
+         *     caller spoofing Host can get a forwardUrl for that host (defense-in-depth only; the PIN flow
+         *     never exposes the token via the redirect).
          */
-        post: operations["refresh_users_api_users_refresh_post"];
+        post: operations["generate_pin_api_auth_plex_pin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/plex/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Pin
+         * @description Claims PIN, verifies server access with target_machine_id, upserts user in DB,
+         *
+         *     creates signed session token, sets HttpOnly, SameSite=Lax cookie. Outsiders get 403 Forbidden.
+         */
+        post: operations["verify_pin_api_auth_plex_verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/discovery/album/{album_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Album
+         * @description Retrieves deep album details including tracklist and previews annotated with status.
+         */
+        get: operations["get_album_api_discovery_album__album_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/discovery/artist-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Artist Profile
+         * @description Unified artist profile: top tracks plus the full discography merged with what the library owns.
+         *
+         *     Pass exactly one of ``discovery_id`` (``deezer:artist:<n>`` / ``itunes:artist:<n>``) or ``library_artist_id``.
+         *     Admins get the full profile; everyone else gets library-free fields only (see ``shape_for_requester``).
+         *     Library data survives a Deezer or MusicBrainz failure (empty discography, ``link_confidence: "none"``).
+         */
+        get: operations["get_artist_profile_api_discovery_artist_profile_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/discovery/artist/{artist_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Artist
+         * @description Retrieves artist details and discography grouped into albums, singles_eps, and compilations.
+         */
+        get: operations["get_artist_api_discovery_artist__artist_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/discovery/new-releases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get New Releases
+         * @description Retrieves latest album releases annotated with library & request status.
+         */
+        get: operations["get_new_releases_api_discovery_new_releases_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/discovery/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Discovery
+         * @description Performs unified multi-source search across iTunes and Deezer public APIs.
+         */
+        get: operations["search_discovery_api_discovery_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/discovery/track/{track_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Track
+         * @description Retrieves a single track's metadata (Deezer/iTunes) annotated with request/library status.
+         */
+        get: operations["get_track_api_discovery_track__track_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/discovery/trending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trending
+         * @description Retrieves trending music tracks and albums annotated with library & request status.
+         */
+        get: operations["get_trending_api_discovery_trending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Health Check */
+        get: operations["health_check_api_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/health/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Health Ready */
+        get: operations["health_ready_api_health_ready_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/import-lists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Import Lists */
+        get: operations["list_import_lists_api_import_lists_get"];
+        put?: never;
+        /** Create Import List */
+        post: operations["create_import_list_api_import_lists_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/import-lists/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Providers
+         * @description Provider metadata the UI renders its forms from.
+         */
+        get: operations["list_providers_api_import_lists_providers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/import-lists/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Import List
+         * @description Fetches the list and reports what it would import. Reads only: nothing is written.
+         */
+        post: operations["test_import_list_api_import_lists_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/import-lists/{list_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Import List */
+        get: operations["get_import_list_api_import_lists__list_id__get"];
+        /** Update Import List */
+        put: operations["update_import_list_api_import_lists__list_id__put"];
+        post?: never;
+        /** Delete Import List */
+        delete: operations["delete_import_list_api_import_lists__list_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/import-lists/{list_id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Items */
+        get: operations["list_items_api_import_lists__list_id__items_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/import-lists/{list_id}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync Now */
+        post: operations["sync_now_api_import_lists__list_id__sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/import/itunes/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Itunes Import
+         * @description Body = the raw ``iTunes Library.xml`` bytes. Stores the parsed export for 24 h and returns the preview.
+         */
+        post: operations["preview_itunes_import_api_import_itunes_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/import/itunes/{import_id}/commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Commit Itunes Import */
+        post: operations["commit_itunes_import_api_import_itunes__import_id__commit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/import/itunes/{import_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Itunes Import Status */
+        get: operations["itunes_import_status_api_import_itunes__import_id__status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/internal/auth/local/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Local
+         * @description Verifies local credentials for the gateway. The end user's IP arrives in the (signed) body.
+         */
+        post: operations["verify_local_api_internal_auth_local_verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/internal/auth/session-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Session Status
+         * @description Tells the gateway whether a session (user, issue time in epoch microseconds) may still be used.
+         */
+        post: operations["session_status_api_internal_auth_session_status_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/internal/gateway-heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Gateway Heartbeat
+         * @description Records the gateway's liveness (in memory and in the ``gateway_status`` kv row).
+         */
+        post: operations["gateway_heartbeat_api_internal_gateway_heartbeat_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/internal/hello": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Hello
+         * @description Version/protocol handshake for the gateway. Service principal only; 404 for everyone else.
+         */
+        get: operations["hello_api_internal_hello_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List media issues
+         * @description Lists issues. Filterable by status, media_title and artist (exact, case-insensitive).
+         *
+         *     Admins see all; regular users see only their own, regardless of filters.
+         */
+        get: operations["list_issues_api_issues_get"];
+        put?: never;
+        /**
+         * Report a media issue
+         * @description Creates an issue, emits ISSUE_REPORTED, and returns the created issue.
+         *
+         *     Rejections: 403 (library ids from a non-admin), 404 (unknown / not-owned request or unknown library ref),
+         *     409 (request already final, or a duplicate open issue: body carries ``existing_issue_id``), 422, 429 (24h cap).
+         */
+        post: operations["create_issue_api_issues_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/issues/open-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Open issues awaiting an admin (nav badge) */
+        get: operations["open_count_api_issues_open_count_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/issues/unread-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Issues with admin activity the reporter has not seen */
+        get: operations["unread_count_api_issues_unread_count_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/issues/{issue_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get media issue by ID
+         * @description Retrieves an issue by ID. Non-admins get 404 for issues they do not own.
+         */
+        get: operations["get_issue_api_issues__issue_id__get"];
+        /**
+         * Update media issue
+         * @description Admin-only: changes status (validated, no-ops refused) and/or problem_details; nothing else.
+         */
+        put: operations["update_issue_api_issues__issue_id__put"];
+        post?: never;
+        /**
+         * Delete media issue
+         * @description Admin-only: deletes an issue.
+         */
+        delete: operations["delete_issue_api_issues__issue_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/issues/{issue_id}/actions/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a fix action for an issue
+         * @description Admin-only fix actions, each delegating to the endpoint's existing service code.
+         *
+         *     Every action except ``rematch`` (a read) appends a system comment and moves the issue to ``in_progress``.
+         */
+        post: operations["run_issue_action_api_issues__issue_id__actions__action__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/issues/{issue_id}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Comments
+         * @description The discussion on an issue, oldest first. Reporter and admins only; admin action notes are admin-only.
+         */
+        get: operations["list_comments_api_issues__issue_id__comments_get"];
+        put?: never;
+        /**
+         * Add Comment
+         * @description Adds a comment. An admin's comment on an ``open`` issue moves it to ``in_progress``.
+         */
+        post: operations["add_comment_api_issues__issue_id__comments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/issues/{issue_id}/seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark an issue as seen by its reporter */
+        post: operations["mark_seen_api_issues__issue_id__seen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/issues/{issue_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reopen or close your own issue (admins: any transition)
+         * @description The reporter's lifecycle control: reopen (resolved / wont_fix -> open) or close (-> resolved).
+         */
+        post: operations["set_issue_status_api_issues__issue_id__status_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Library health findings, grouped, with the last run */
+        get: operations["get_library_health_api_library_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library-health/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a check in the background */
+        post: operations["start_library_health_check_api_library_health_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library-health/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Number of open findings (nav badge) */
+        get: operations["get_library_health_count_api_library_health_count_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library-health/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ignore a file or folder from now on */
+        post: operations["dismiss_library_health_api_library_health_dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library-health/mapping": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save the media-server path mapping */
+        put: operations["put_library_health_mapping_api_library_health_mapping_put"];
+        post?: never;
+        /** Clear the media-server path mapping */
+        delete: operations["delete_library_health_mapping_api_library_health_mapping_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library-health/weekly": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Turn the weekly check on or off */
+        put: operations["put_library_health_weekly_api_library_health_weekly_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/albums": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Albums
+         * @description Lists library albums with optional artist filtering, search query, and pagination, attaching artist name and track count.
+         */
+        get: operations["list_albums_api_library_albums_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/albums/bulk-edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Edit Albums
+         * @description Monitors or unmonitors many albums at once (native: albums and their tracks; Lidarr: one album/monitor call).
+         */
+        post: operations["bulk_edit_albums_api_library_albums_bulk_edit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/albums/index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Albums Index
+         * @description Scrubber groups for the albums list, in its order.
+         */
+        get: operations["albums_index_api_library_albums_index_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/albums/paged": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Paged Albums
+         * @description A page of library albums (with artist name and track count) plus the filtered total.
+         */
+        get: operations["paged_albums_api_library_albums_paged_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/albums/{album_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Album
+         * @description Retrieves an album by ID, including its tracks and their linked library files.
+         */
+        get: operations["get_album_api_library_albums__album_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Album
+         * @description Deletes an album and cascades to child tracks and files. Optionally unlinks files on disk.
+         */
+        delete: operations["delete_album_api_library_albums__album_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/albums/{album_id}/cover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Album Cover
+         * @description Serves local album cover artwork or redirects to remote artwork / placeholder.
+         */
+        get: operations["get_album_cover_api_library_albums__album_id__cover_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/albums/{album_id}/monitored": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Album Monitored
+         * @description Updates monitoring status for an album and optionally cascades to child tracks.
+         */
+        put: operations["set_album_monitored_api_library_albums__album_id__monitored_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/albums/{album_id}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Search Album
+         * @description Asks Lidarr to search for the album (Lidarr mode only).
+         */
+        post: operations["search_album_api_library_albums__album_id__search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/artists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Artists
+         * @description Lists library artists with optional filtering, search query, and pagination, attaching album and track counts.
+         */
+        get: operations["list_artists_api_library_artists_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/artists/bulk-edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Edit Artists
+         * @description Bulk-edits many artists (selected by ``artist_ids`` or ``all``) in one set-based transaction.
+         *
+         *     Native mode: ``monitored``, ``monitor_option`` and ``quality_profile_id`` are written when given;
+         *     ``apply_monitor_to_albums`` then recomputes every affected album (and its tracks) from the artist's resulting
+         *     option. Lidarr mode: ``monitored``/``quality_profile_id`` via ``artist/editor`` and the presets
+         *     all/albums/singles_eps/none per artist.
+         */
+        post: operations["bulk_edit_artists_api_library_artists_bulk_edit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/artists/index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Artists Index
+         * @description Scrubber groups ``[{label, offset, count}]`` for the artists list, in its order.
+         */
+        get: operations["artists_index_api_library_artists_index_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/artists/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Artist
+         * @description Ingests an artist discography from discovery metadata into the native catalog.
+         *
+         *     In Lidarr mode the artist is added to Lidarr instead, with every default of the Lidarr root folder (profiles,
+         *     monitoring, new-item monitoring, tags) and a search when auto-search is on; ``monitor_option``,
+         *     ``quality_profile_id`` and ``monitored`` are ignored there. An artist Lidarr already has is never modified.
+         */
+        post: operations["ingest_artist_api_library_artists_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/artists/paged": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Paged Artists
+         * @description A page of library artists (with counts) plus the filtered total.
+         */
+        get: operations["paged_artists_api_library_artists_paged_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/artists/{artist_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Artist
+         * @description Retrieves a single artist by ID, including its child albums and image_url.
+         */
+        get: operations["get_artist_api_library_artists__artist_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Artist
+         * @description Deletes an artist and cascades to child albums, tracks, and files. Optionally unlinks files on disk.
+         */
+        delete: operations["delete_artist_api_library_artists__artist_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/artists/{artist_id}/banner": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Artist Banner
+         * @description Serves cached or local artist banner artwork.
+         */
+        get: operations["get_artist_banner_api_library_artists__artist_id__banner_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/artists/{artist_id}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Artist Image
+         * @description Serves local artist artwork or redirects to remote image / first album cover / placeholder.
+         */
+        get: operations["get_artist_image_api_library_artists__artist_id__image_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/artists/{artist_id}/metadata-profile-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Metadata Profile
+         * @description What a metadata profile would do for an artist; ``profile_id`` omitted/null previews clearing the profile.
+         *
+         *     Returns ``{matching, total, would_change}`` where ``would_change`` is ``{albums_to_monitor, albums_to_unmonitor,
+         *     tracks_to_monitor, tracks_to_unmonitor}``: the effect of a recompute (``apply_monitor_to_albums``) against the
+         *     current flags, computed with the same predicate as the bulk edit, without writing anything.
+         */
+        get: operations["preview_metadata_profile_api_library_artists__artist_id__metadata_profile_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/artists/{artist_id}/monitored": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Artist Monitored
+         * @description Updates monitoring status for an artist, optionally cascading to albums and tracks or applying a preset.
+         */
+        put: operations["set_artist_monitored_api_library_artists__artist_id__monitored_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/artists/{artist_id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Artist
+         * @description Refreshes artist discography from Deezer/discovery metadata and enriches via MusicBrainz.
+         */
+        post: operations["refresh_artist_api_library_artists__artist_id__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/artists/{artist_id}/release-profile-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Metadata Profile
+         * @deprecated
+         * @description What a metadata profile would do for an artist; ``profile_id`` omitted/null previews clearing the profile.
+         *
+         *     Returns ``{matching, total, would_change}`` where ``would_change`` is ``{albums_to_monitor, albums_to_unmonitor,
+         *     tracks_to_monitor, tracks_to_unmonitor}``: the effect of a recompute (``apply_monitor_to_albums``) against the
+         *     current flags, computed with the same predicate as the bulk edit, without writing anything.
+         */
+        get: operations["preview_metadata_profile_api_library_artists__artist_id__release_profile_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/artists/{artist_id}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Search Artist
+         * @description Asks Lidarr to search for every monitored missing album of the artist (Lidarr mode only).
+         */
+        post: operations["search_artist_api_library_artists__artist_id__search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/artists/{artist_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Artist Tags
+         * @description Replaces an artist's tags with ``tags`` (ids from ``/api/tags``). Native library only.
+         */
+        put: operations["set_artist_tags_api_library_artists__artist_id__tags_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get library availability
+         * @description Resolves library presence and file availability. In gateway mode, forwards to Core.
+         */
+        get: operations["get_availability_api_library_availability_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/collections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Collections
+         * @description Returns list of library collections with album counts.
+         */
+        get: operations["list_collections_api_library_collections_get"];
+        put?: never;
+        /**
+         * Create Collection
+         * @description Creates a new library collection.
+         */
+        post: operations["create_collection_api_library_collections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/collections/{collection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Collection
+         * @description Returns collection detail along with its ordered albums list.
+         */
+        get: operations["get_collection_api_library_collections__collection_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Collection
+         * @description Deletes a library collection.
+         */
+        delete: operations["delete_collection_api_library_collections__collection_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/collections/{collection_id}/albums": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Album To Collection
+         * @description Adds an album to a collection with optional order_index.
+         */
+        post: operations["add_album_to_collection_api_library_collections__collection_id__albums_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/collections/{collection_id}/albums/{album_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Album From Collection
+         * @description Removes an album from a collection.
+         */
+        delete: operations["remove_album_from_collection_api_library_collections__collection_id__albums__album_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/files/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete File
+         * @description Deletes a library file record and optionally unlinks the physical file from disk.
+         */
+        delete: operations["delete_file_api_library_files__file_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/manual-import/album-tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Manual Import Album Tracks
+         * @description An album's tracks in the manual-import picker shape (``has_file`` marks tracks that already have a file).
+         */
+        get: operations["manual_import_album_tracks_api_library_manual_import_album_tracks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/manual-import/commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Manual Import Commit
+         * @description Commits selected manual import items: resolves/creates catalog entities, moves/copies files to destination, tags them, and registers them in the library.
+         */
+        post: operations["manual_import_commit_api_library_manual_import_commit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/manual-import/fingerprint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fingerprint File
+         * @description Fingerprints an audio file on-demand via AcoustID without routine scanner overhead.
+         */
+        post: operations["fingerprint_file_api_library_manual_import_fingerprint_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/manual-import/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Manual Import Scan
+         * @description Scans files for manual import, inspects metadata and suggests library matches.
+         *
+         *     Scope (first that applies): ``download_id`` (that native download's held files, matched against its tracks that
+         *     have no file), ``file_paths`` (exactly those files), ``album_id`` (the folder scan, matched against that album's
+         *     tracks that have no file), otherwise a plain folder scan with the tag-based match.
+         */
+        post: operations["manual_import_scan_api_library_manual_import_scan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/metadata-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Metadata Profiles
+         * @description Native metadata profiles with ``artist_count`` (artists using each) and the default for newly added artists.
+         */
+        get: operations["list_metadata_profiles_api_library_metadata_profiles_get"];
+        put?: never;
+        /** Create Metadata Profile */
+        post: operations["create_metadata_profile_api_library_metadata_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/metadata-profiles/{profile_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Metadata Profile
+         * @description Edits a profile. Existing monitoring is untouched until an artist's albums are recomputed.
+         */
+        put: operations["update_metadata_profile_api_library_metadata_profiles__profile_id__put"];
+        post?: never;
+        /**
+         * Delete Metadata Profile
+         * @description Deletes a profile; artists using it fall back to no profile (their albums keep their monitored flags).
+         */
+        delete: operations["delete_metadata_profile_api_library_metadata_profiles__profile_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/migrate-lidarr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Lidarr Migration
+         * @description Triggers an asynchronous background Lidarr migration job.
+         */
+        post: operations["trigger_lidarr_migration_api_library_migrate_lidarr_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/migrate-lidarr/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Lidarr Migration
+         * @description Signals active Lidarr migration job to stop and returns status.
+         */
+        post: operations["cancel_lidarr_migration_api_library_migrate_lidarr_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/migrate-lidarr/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Lidarr Migration Status
+         * @description Retrieves current Lidarr migration job status.
+         */
+        get: operations["get_lidarr_migration_status_api_library_migrate_lidarr_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/release-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Metadata Profiles
+         * @deprecated
+         * @description Native metadata profiles with ``artist_count`` (artists using each) and the default for newly added artists.
+         */
+        get: operations["list_metadata_profiles_api_library_release_profiles_get"];
+        put?: never;
+        /**
+         * Create Metadata Profile
+         * @deprecated
+         */
+        post: operations["create_metadata_profile_api_library_release_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/release-profiles/{profile_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Metadata Profile
+         * @deprecated
+         * @description Edits a profile. Existing monitoring is untouched until an artist's albums are recomputed.
+         */
+        put: operations["update_metadata_profile_api_library_release_profiles__profile_id__put"];
+        post?: never;
+        /**
+         * Delete Metadata Profile
+         * @deprecated
+         * @description Deletes a profile; artists using it fall back to no profile (their albums keep their monitored flags).
+         */
+        delete: operations["delete_metadata_profile_api_library_release_profiles__profile_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/rename/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rename Apply
+         * @description Applies batch renaming to specified library files, moving them to their template-rendered destinations and updating the catalog.
+         */
+        post: operations["rename_apply_api_library_rename_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/rename/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rename Preview
+         * @description Previews proposed file path changes based on token naming templates and identifies files needing renaming.
+         */
+        post: operations["rename_preview_api_library_rename_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Scan
+         * @description Triggers an asynchronous background filesystem scan.
+         */
+        post: operations["trigger_scan_api_library_scan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/scan/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Scan
+         * @description Signals active scan to stop and returns current scanner status.
+         */
+        post: operations["cancel_scan_api_library_scan_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/scan/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scan Status
+         * @description Retrieves current filesystem scanner status.
+         */
+        get: operations["get_scan_status_api_library_scan_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Library Stats
+         * @description Aggregate library statistics (Lidarr's own statistics in Lidarr mode, the native catalog otherwise).
+         */
+        get: operations["get_library_stats_api_library_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Tracks
+         * @description Lists library tracks with optional filtering and joins linked library file details.
+         */
+        get: operations["list_tracks_api_library_tracks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/tracks/bulk-edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Edit Tracks
+         * @description Sets ``monitored`` on many tracks at once (native mode only; 409 while Lidarr manages the library).
+         */
+        post: operations["bulk_edit_tracks_api_library_tracks_bulk_edit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/tracks/index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Tracks Index
+         * @description Scrubber groups for the tracks list, in its order.
+         */
+        get: operations["tracks_index_api_library_tracks_index_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/tracks/paged": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Paged Tracks
+         * @description A page of library tracks (with artist, album and file details) plus the filtered total.
+         *
+         *     Opening an album whose tracklist was never fetched (unmonitored albums are not hydrated on add/refresh) fetches it
+         *     from MusicBrainz once, stored unmonitored, before the first page is read. NOTE: this GET therefore has a write
+         *     side effect (it may create track rows). It is single-flight per album, and an album whose fetch failed or came
+         *     back empty is not retried for 10 minutes (see ``hydrate_album_tracks``).
+         */
+        get: operations["paged_tracks_api_library_tracks_paged_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/tracks/{track_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Track
+         * @description Deletes a library track and cascades to child files. Optionally unlinks files on disk.
+         */
+        delete: operations["delete_track_api_library_tracks__track_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/tracks/{track_id}/monitored": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Track Monitored
+         * @description Updates monitoring status for a single track.
+         */
+        put: operations["set_track_monitored_api_library_tracks__track_id__monitored_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/{entity}/{entity_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Audit trail of an artist, album or track
+         * @description Where an item came from and everything that happened to it since, newest first (keyset paging on ``before``).
+         *
+         *     Album history includes its tracks' events and artist history everything beneath the artist. Administrators see
+         *     every detail; everyone else gets the same events with indexer, client, protocol, hashes, file paths and other
+         *     users' identities removed. 404 when the id has neither a library row nor any history.
+         */
+        get: operations["get_item_history_api_library__entity___entity_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Missing Tracks
+         * @description Returns missing tracks list.
+         *
+         *     Admins can view all or filtered by playlist_id.
+         *     Regular users only see missing tracks for playlists targeted to them.
+         */
+        get: operations["get_missing_tracks_api_missing_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Missing Csv
+         * @description Generates and streams a safe CSV download of missing tracks.
+         */
+        get: operations["download_missing_csv_api_missing_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/lidarr/push": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push Missing To Lidarr
+         * @description Pushes missing tracks directly into Lidarr to queue download and monitoring.
+         *
+         *     Supports:
+         *     - Background trickle mode (`trickle=True`) with delay pacing and rate-limit backoff.
+         *     - Synchronous push (`trickle=False`) for targeted or immediate single-item updates.
+         */
+        post: operations["push_missing_to_lidarr_api_missing_lidarr_push_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/lidarr/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Lidarr Queue Status
+         * @description Returns the live status of the Lidarr background trickle worker.
+         */
+        get: operations["get_lidarr_queue_status_api_missing_lidarr_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/lidarr/queue/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Lidarr Queue
+         * @description Cancels and stops the Lidarr background trickle worker.
+         */
+        post: operations["cancel_lidarr_queue_api_missing_lidarr_queue_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/lidarr/queue/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause Lidarr Queue
+         * @description Pauses the Lidarr background trickle worker.
+         */
+        post: operations["pause_lidarr_queue_api_missing_lidarr_queue_pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/lidarr/queue/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Lidarr Queue
+         * @description Resumes the Lidarr background trickle worker.
+         */
+        post: operations["resume_lidarr_queue_api_missing_lidarr_queue_resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/lidarr/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Lidarr Status
+         * @description Returns Lidarr connection and configuration status from DB or config.
+         *
+         *     In native mode Lidarr is not contacted at all: the mode is reported with ``connected`` null.
+         */
+        get: operations["get_lidarr_status_api_missing_lidarr_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/match": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Match Override
+         * @description Records a manual match override (Match Memory) and removes corresponding missing tracks.
+         */
+        post: operations["create_match_override_api_missing_match_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/match/{override_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Match Override
+         * @description Deletes a Match Memory override.
+         */
+        delete: operations["delete_match_override_api_missing_match__override_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/matches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Match Overrides
+         * @description Lists all stored Match Memory overrides.
+         */
+        get: operations["list_match_overrides_api_missing_matches_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/rss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Feed Missing Rss
+         * @description Generates an RSS 2.0 XML feed of missing music for Lidarr and RSS clients.
+         */
+        get: operations["feed_missing_rss_api_missing_rss_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Plex Tracks
+         * @description Searches the Plex library for tracks to enable manual matching and correction.
+         */
+        get: operations["search_plex_tracks_api_missing_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/text": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Feed Missing Text
+         * @description Returns a plain text list of missing tracks (one per line).
+         */
+        get: operations["feed_missing_text_api_missing_text_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/{track_id}/grab": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grab Missing Track
+         * @description Admin-only endpoint to trigger native search and grab for a missing track.
+         */
+        post: operations["grab_missing_track_api_missing__track_id__grab_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mixes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Mixes */
+        get: operations["list_mixes_api_mixes_get"];
+        put?: never;
+        /** Create Mix */
+        post: operations["create_mix_api_mixes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mixes/{mix_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Mix */
+        put: operations["update_mix_api_mixes__mix_id__put"];
+        post?: never;
+        /** Delete Mix */
+        delete: operations["delete_mix_api_mixes__mix_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mixes/{mix_id}/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Mix */
+        post: operations["generate_mix_api_mixes__mix_id__generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mixes/{mix_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Mix */
+        post: operations["preview_mix_api_mixes__mix_id__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mixes/{mix_id}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Mix Result */
+        get: operations["get_mix_result_api_mixes__mix_id__result_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -175,7 +2971,7 @@ export interface paths {
         };
         /**
          * List Playlists
-         * @description Lists playlists. Admins see all; regular users only see playlists targeted to them.
+         * @description Lists playlists. Admins see all; regular users see only playlists they created or that target them.
          */
         get: operations["list_playlists_api_playlists_get"];
         put?: never;
@@ -207,106 +3003,6 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/playlists/smart-mix/presets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Smart Mix Presets
-         * @description Returns available local Smart Mix recipes.
-         */
-        get: operations["get_smart_mix_presets_api_playlists_smart_mix_presets_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/playlists/smart-mix": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create Smart Mix
-         * @description Generates a smart playlist in Plex from local listening history.
-         */
-        post: operations["create_smart_mix_api_playlists_smart_mix_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/playlists/{playlist_id}/targets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Update Playlist Targets
-         * @description Updates target user list for playlist. Regular users can only toggle themselves.
-         */
-        put: operations["update_playlist_targets_api_playlists__playlist_id__targets_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/playlists/{playlist_id}/enabled": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Set Playlist Enabled
-         * @description Toggles playlist auto-sync state between Active (enabled) and Paused (disabled).
-         */
-        put: operations["set_playlist_enabled_api_playlists__playlist_id__enabled_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/playlists/{playlist_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Playlist
-         * @description Deletes playlist (admin or creator only).
-         */
-        delete: operations["delete_playlist_api_playlists__playlist_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -347,6 +3043,1608 @@ export interface paths {
          */
         post: operations["import_m3u_playlist_api_playlists_import_m3u_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playlists/smart-mix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Smart Mix
+         * @description Generates a smart playlist in Plex from local listening history.
+         */
+        post: operations["create_smart_mix_api_playlists_smart_mix_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playlists/smart-mix/presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Smart Mix Presets
+         * @description Returns available local Smart Mix recipes.
+         */
+        get: operations["get_smart_mix_presets_api_playlists_smart_mix_presets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playlists/{playlist_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Playlist
+         * @description Deletes a playlist (admin, or the creator; others get 404).
+         */
+        delete: operations["delete_playlist_api_playlists__playlist_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playlists/{playlist_id}/enabled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Playlist Enabled
+         * @description Toggles playlist auto-sync state between Active (enabled) and Paused (disabled).
+         */
+        put: operations["set_playlist_enabled_api_playlists__playlist_id__enabled_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playlists/{playlist_id}/monitor-mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Playlist Monitor Mode
+         * @description Sets what a sync does with the playlist's missing tracks (track, album, artist or none).
+         */
+        put: operations["set_playlist_monitor_mode_api_playlists__playlist_id__monitor_mode_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playlists/{playlist_id}/targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Playlist Targets
+         * @description Updates the target user list for a playlist.
+         *
+         *     Admins may set any targets. A non-admin may act only on a playlist they created (404
+         *     otherwise, so existence is not revealed) and may only target themselves or nobody (403).
+         */
+        put: operations["update_playlist_targets_api_playlists__playlist_id__targets_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plex-playlists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Plex Playlists */
+        get: operations["list_plex_playlists_api_plex_playlists_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plex-playlists/mixes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Mixes */
+        get: operations["list_mixes_api_plex_playlists_mixes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plex-playlists/mixes/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Snapshot */
+        post: operations["create_snapshot_api_plex_playlists_mixes_snapshot_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plex-playlists/mixes/snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Snapshots */
+        get: operations["list_snapshots_api_plex_playlists_mixes_snapshots_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plex-playlists/mixes/snapshots/{snapshot_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Snapshot */
+        put: operations["update_snapshot_api_plex_playlists_mixes_snapshots__snapshot_id__put"];
+        post?: never;
+        /** Delete Snapshot */
+        delete: operations["delete_snapshot_api_plex_playlists_mixes_snapshots__snapshot_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plex-playlists/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Plex Users */
+        get: operations["list_plex_users_api_plex_playlists_users_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plex-playlists/{rating_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Playlist */
+        delete: operations["delete_playlist_api_plex_playlists__rating_key__delete"];
+        options?: never;
+        head?: never;
+        /** Rename Playlist */
+        patch: operations["rename_playlist_api_plex_playlists__rating_key__patch"];
+        trace?: never;
+    };
+    "/api/plex-playlists/{rating_key}/adopt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Adopt Playlist */
+        post: operations["adopt_playlist_api_plex_playlists__rating_key__adopt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plex-playlists/{rating_key}/copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Copy Playlist */
+        post: operations["copy_playlist_api_plex_playlists__rating_key__copy_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plex-playlists/{rating_key}/flags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Playlist Flags */
+        put: operations["set_playlist_flags_api_plex_playlists__rating_key__flags_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plex-playlists/{rating_key}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Playlist Items */
+        get: operations["get_playlist_items_api_plex_playlists__rating_key__items_get"];
+        put?: never;
+        /** Add Playlist Items */
+        post: operations["add_playlist_items_api_plex_playlists__rating_key__items_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plex-playlists/{rating_key}/items/{playlist_item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Playlist Item */
+        delete: operations["remove_playlist_item_api_plex_playlists__rating_key__items__playlist_item_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plex-playlists/{rating_key}/items/{playlist_item_id}/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Move Playlist Item */
+        post: operations["move_playlist_item_api_plex_playlists__rating_key__items__playlist_item_id__move_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List active download queue
+         * @description Admin-only: returns active downloads in the activity queue with progress and client badges.
+         */
+        get: operations["get_queue_api_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/queue/{download_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Cancel and remove download from queue
+         * @description Admin-only: cancels a download with the underlying download client and removes it from the queue.
+         */
+        delete: operations["cancel_download_api_queue__download_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recycle-bin/empty": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Permanently delete everything in the recycle bin (explicit confirmation required) */
+        post: operations["empty_recycle_bin_api_recycle_bin_empty_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recycle-bin/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether a cleanup is running, and the last run */
+        get: operations["get_recycle_bin_status_api_recycle_bin_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Requests
+         * @description Lists requests. Non-admins see only their own requests; admins see all.
+         */
+        get: operations["list_requests_api_requests_get"];
+        put?: never;
+        /**
+         * Create Request
+         * @description Creates a new music request.
+         *
+         *     If the user is admin or auto_approve_requests is enabled, transitions immediately
+         *     to processing and dispatches to lidarr_worker (if Lidarr is configured).
+         *     Otherwise, sets status to pending.
+         */
+        post: operations["create_request_api_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Batch Requests
+         * @description Creates multiple music requests (at most 50) within the user's per-type quotas.
+         *
+         *     A ``kind="discography"`` batch of one artist's albums consumes one discography unit; otherwise each item
+         *     consumes its own type's quota. Duplicates against active requests or within the batch are skipped.
+         *     Approved requests attempt native grab, falling back to Lidarr trickle worker.
+         */
+        post: operations["create_batch_requests_api_requests_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Request
+         * @description Deletes a request. Requesters can delete pending requests; admins can delete any.
+         */
+        delete: operations["delete_request_api_requests__request_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/{request_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve Request
+         * @description Admin-only endpoint to approve a request, updating status to processing and dispatching to Lidarr.
+         */
+        post: operations["approve_request_api_requests__request_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/{request_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject Request
+         * @description Admin-only endpoint to reject a request.
+         */
+        post: operations["reject_request_api_requests__request_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/{request_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Request
+         * @description Admin-only: forces re-search and grab for an existing request.
+         */
+        post: operations["retry_request_api_requests__request_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scrobbles/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Own scrobble configuration (masked) */
+        get: operations["get_my_config_api_scrobbles_config_get"];
+        /** Update own scrobble configuration */
+        put: operations["update_my_config_api_scrobbles_config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scrobbles/lastfm/auth-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Begin the Last.fm connect flow */
+        get: operations["lastfm_auth_url_api_scrobbles_lastfm_auth_url_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scrobbles/listens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recent listens */
+        get: operations["list_my_listens_api_scrobbles_listens_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scrobbles/plex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Plex webhook receiver (token auth only) */
+        post: operations["plex_webhook_api_scrobbles_plex_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scrobbles/server-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Server-level scrobbling settings (admin) */
+        get: operations["get_server_config_api_scrobbles_server_config_get"];
+        /** Update server-level scrobbling settings (admin) */
+        put: operations["update_server_config_api_scrobbles_server_config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scrobbles/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Scrobble configuration for every user (admin) */
+        get: operations["list_user_configs_api_scrobbles_users_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scrobbles/users/{user_id}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update any user's scrobble configuration (admin) */
+        put: operations["update_user_config_api_scrobbles_users__user_id__config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scrobbles/webhook-secret/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Regenerate the Plex webhook secret (admin) */
+        post: operations["rotate_webhook_secret_api_scrobbles_webhook_secret_rotate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scrobbles/webhook-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Plex webhook URL including its token (admin) */
+        get: operations["get_webhook_url_api_scrobbles_webhook_url_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/seed-cleanup/failed/{finding_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset a failed cleanup and try again now */
+        post: operations["retry_failed_cleanup_api_seed_cleanup_failed__finding_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/seed-cleanup/orphans/{finding_id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove an orphaned torrent (explicit user action) */
+        post: operations["remove_orphan_torrent_api_seed_cleanup_orphans__finding_id__remove_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/seed-cleanup/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run the seed cleanup sweep in the background */
+        post: operations["run_seed_cleanup_api_seed_cleanup_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/seed-cleanup/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether a sweep is running, and the last run */
+        get: operations["get_seed_cleanup_status_api_seed_cleanup_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/api-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get API Key (Admin or API Key)
+         * @description Retrieves the machine API key.
+         */
+        get: operations["get_api_key_api_settings_api_key_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/api-key/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Regenerate API Key (Admin Only)
+         * @description Regenerates the machine API key.
+         */
+        post: operations["regenerate_api_key_api_settings_api_key_regenerate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/custom-formats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List custom formats */
+        get: operations["list_formats_api_settings_custom_formats_get"];
+        put?: never;
+        /** Create a custom format */
+        post: operations["create_format_api_settings_custom_formats_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/custom-formats/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Lidarr-schema custom format JSON (one object or a list)
+         * @description Accepts one Lidarr/Servarr custom-format object or a list of them.
+         *
+         *     Unknown implementations are kept, flagged ``unsupported`` and ignored by the engine. A format whose name already
+         *     exists is replaced. Invalid entries are reported in ``errors`` and do not abort the rest; if nothing could be
+         *     imported the response is a 400.
+         */
+        post: operations["import_formats_api_settings_custom_formats_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/custom-formats/{format_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a custom format */
+        get: operations["get_format_api_settings_custom_formats__format_id__get"];
+        /** Update a custom format */
+        put: operations["update_format_api_settings_custom_formats__format_id__put"];
+        post?: never;
+        /** Delete a custom format */
+        delete: operations["delete_format_api_settings_custom_formats__format_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/custom-formats/{format_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export a custom format as Lidarr-schema JSON */
+        get: operations["export_custom_format_api_settings_custom_formats__format_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/delay-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List delay profiles */
+        get: operations["list_delay_profiles_api_settings_delay_profiles_get"];
+        put?: never;
+        /** Create a delay profile */
+        post: operations["create_delay_profile_api_settings_delay_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/delay-profiles/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reorder delay profiles
+         * @description ``ids`` lists the non-default profiles in their new order (the default is always last and may be omitted).
+         */
+        post: operations["reorder_delay_profiles_api_settings_delay_profiles_reorder_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/delay-profiles/{profile_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update a delay profile */
+        put: operations["update_delay_profile_api_settings_delay_profiles__profile_id__put"];
+        post?: never;
+        /** Delete a delay profile */
+        delete: operations["delete_delay_profile_api_settings_delay_profiles__profile_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/download-clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List configured download clients
+         * @description Lists all configured download clients with masked credentials.
+         */
+        get: operations["list_download_clients_api_settings_download_clients_get"];
+        put?: never;
+        /**
+         * Create or update download client
+         * @description Admin-only endpoint to save or update a download client.
+         */
+        post: operations["create_or_update_download_client_api_settings_download_clients_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/download-clients/roots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download folders reported by each client
+         * @description Completed-download folders each enabled client reports (as TrackSeerr sees them after path mappings).
+         */
+        get: operations["list_download_roots_api_settings_download_clients_roots_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/download-clients/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test download client connection
+         * @description Tests connectivity to a download client before saving.
+         */
+        post: operations["test_download_client_connection_api_settings_download_clients_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/download-clients/{client_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete download client
+         * @description Admin-only deletion of a download client.
+         */
+        delete: operations["delete_download_client_api_settings_download_clients__client_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/general": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get General Application Settings
+         * @description Retrieves general system settings including application URL.
+         */
+        get: operations["get_general_settings_api_settings_general_get"];
+        put?: never;
+        /**
+         * Update General Application Settings (Admin Only)
+         * @description Admin-only: updates general system settings in database.
+         */
+        post: operations["update_general_settings_api_settings_general_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/indexers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List configured indexers
+         * @description Lists all configured indexers with masked API keys.
+         */
+        get: operations["list_indexers_api_settings_indexers_get"];
+        put?: never;
+        /**
+         * Create or update indexer
+         * @description Admin-only endpoint to create or update an indexer.
+         */
+        post: operations["create_or_update_indexer_api_settings_indexers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/indexers/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test indexer capabilities
+         * @description Tests capabilities and connection against a Torznab/Newznab indexer.
+         */
+        post: operations["test_indexer_connection_api_settings_indexers_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/indexers/{indexer_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete indexer
+         * @description Admin-only deletion of an indexer.
+         */
+        delete: operations["delete_indexer_api_settings_indexers__indexer_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/library-manager": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Library Manager Mode (Admin Only)
+         * @description Which side manages the library, whether each side is usable, and whether a switch is allowed right now.
+         */
+        get: operations["get_library_manager_api_settings_library_manager_get"];
+        /**
+         * Switch Library Manager Mode (Admin Only)
+         * @description Switches the library manager. Refused (409) while downloads or a Lidarr trickle are in flight, and (422)
+         *     when switching to Lidarr before it is configured. The inactive side's settings are preserved untouched.
+         */
+        put: operations["set_library_manager_api_settings_library_manager_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/lidarr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Lidarr Automation Settings
+         * @description Retrieves Lidarr automation settings with masked API key.
+         */
+        get: operations["get_lidarr_settings_api_settings_lidarr_get"];
+        /**
+         * Update Lidarr Automation Settings (Admin Only)
+         * @description Admin-only: updates Lidarr automation settings in database.
+         *
+         *     Preserves existing API key if masked or empty.
+         */
+        put: operations["update_lidarr_settings_api_settings_lidarr_put"];
+        /**
+         * Update Lidarr Automation Settings (Admin Only)
+         * @description Admin-only: updates Lidarr automation settings in database.
+         *
+         *     Preserves existing API key if masked or empty.
+         */
+        post: operations["update_lidarr_settings_api_settings_lidarr_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/lidarr/defaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lidarr Root-Folder Defaults Trackseerr Adds Artists With (Admin Only)
+         * @description The read-only defaults (profiles, monitoring, tags) Trackseerr uses, straight from Lidarr's root folders.
+         */
+        get: operations["get_lidarr_defaults_api_settings_lidarr_defaults_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/lidarr/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live Lidarr Root Folders, Profiles and Tags (Admin Only)
+         * @description Fetches the pickers for the Lidarr settings form straight from Lidarr; 502 with a redacted message on failure.
+         */
+        get: operations["get_lidarr_options_api_settings_lidarr_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/lidarr/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Lidarr Connection (Admin Only)
+         * @description Admin-only: tests connectivity and credentials for Lidarr instance.
+         */
+        post: operations["test_lidarr_connection_api_settings_lidarr_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/media-management": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Media Management Settings & Presets
+         * @description Retrieves current media management settings and preset templates.
+         */
+        get: operations["get_media_management_settings_api_settings_media_management_get"];
+        put?: never;
+        /**
+         * Update Media Management Settings (Admin Only)
+         * @description Admin-only: updates media management naming templates and options.
+         */
+        post: operations["update_media_management_settings_api_settings_media_management_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/media-management/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Live Preview Token Templates (In-Memory)
+         * @description Renders real-time example paths purely in-memory using provided or stored settings.
+         */
+        post: operations["preview_media_management_templates_api_settings_media_management_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/media-server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the saved media-server settings (secrets masked) */
+        get: operations["get_media_server_settings_api_settings_media_server_get"];
+        /**
+         * Save the media-server settings (Admin Only)
+         * @description Saves the choice. The environment takes precedence: while it configures a media server this is refused (409).
+         */
+        put: operations["update_media_server_settings_api_settings_media_server_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/media-server/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test a media-server connection without saving it (Admin Only)
+         * @description Builds the adapter from the submitted values (masked secrets resolved from the saved ones) and pings it.
+         */
+        post: operations["test_media_server_settings_api_settings_media_server_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List notification channels
+         * @description Admin-only endpoint listing all notification channels with masked secrets.
+         */
+        get: operations["list_notification_channels_api_settings_notifications_get"];
+        put?: never;
+        /**
+         * Create notification channel
+         * @description Admin-only endpoint to create a new notification channel.
+         */
+        post: operations["create_notification_channel_api_settings_notifications_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/notifications/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test notification channel
+         * @description Admin-only endpoint to test a notification channel configuration.
+         */
+        post: operations["test_notification_channel_api_settings_notifications_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/notifications/{channel_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update notification channel
+         * @description Admin-only endpoint to update an existing channel, preserving masked secrets.
+         */
+        put: operations["update_notification_channel_api_settings_notifications__channel_id__put"];
+        post?: never;
+        /**
+         * Delete notification channel
+         * @description Admin-only endpoint to delete a notification channel.
+         */
+        delete: operations["delete_notification_channel_api_settings_notifications__channel_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/quality-definitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List quality definitions */
+        get: operations["list_definitions_api_settings_quality_definitions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/quality-definitions/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset all definitions */
+        post: operations["reset_all_definitions_api_settings_quality_definitions_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/quality-definitions/{quality}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update a definition */
+        put: operations["update_definition_api_settings_quality_definitions__quality__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/quality-definitions/{quality}/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset one definition */
+        post: operations["reset_definition_api_settings_quality_definitions__quality__reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/quality-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List quality profiles
+         * @description Lists all configured quality profiles.
+         */
+        get: operations["list_quality_profiles_api_settings_quality_profiles_get"];
+        put?: never;
+        /**
+         * Create or update quality profile
+         * @description Creates or updates a quality profile (full v2 shape).
+         */
+        post: operations["create_or_update_quality_profile_api_settings_quality_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/quality-profiles/evaluate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Evaluate release title against profile
+         * @description Previews a release title against a profile and returns the full decision breakdown.
+         *
+         *     ``protocol``, ``indexer_*`` and ``size_bytes`` feed the custom formats; ``album_id`` (or ``track_id``) supplies the
+         *     duration for the kbps limits; ``current_title`` additionally returns the upgrade decision against that file.
+         */
+        post: operations["evaluate_release_title_api_settings_quality_profiles_evaluate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/quality-profiles/{profile_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get quality profile by ID
+         * @description Retrieves a single quality profile.
+         */
+        get: operations["get_quality_profile_api_settings_quality_profiles__profile_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete quality profile
+         * @description Deletes a quality profile. Prevents deleting default profile.
+         */
+        delete: operations["delete_quality_profile_api_settings_quality_profiles__profile_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/quality-profiles/{profile_id}/copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Copy a quality profile */
+        post: operations["copy_quality_profile_api_settings_quality_profiles__profile_id__copy_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/quality-profiles/{profile_id}/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set the default profile */
+        post: operations["set_default_quality_profile_api_settings_quality_profiles__profile_id__default_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/release-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List release profiles */
+        get: operations["list_release_profiles_api_settings_release_profiles_get"];
+        put?: never;
+        /** Create a release profile */
+        post: operations["create_release_profile_api_settings_release_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/release-profiles/{profile_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a release profile */
+        get: operations["get_release_profile_api_settings_release_profiles__profile_id__get"];
+        /** Update a release profile */
+        put: operations["update_release_profile_api_settings_release_profiles__profile_id__put"];
+        post?: never;
+        /** Delete a release profile */
+        delete: operations["delete_release_profile_api_settings_release_profiles__profile_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -427,7 +4725,7 @@ export interface paths {
          *
          *     When Lidarr completes a track download/import or Plex completes a library scan,
          *     they can ping this endpoint to trigger immediate playlist sync and re-evaluation.
-         *     Requires FEED_TOKEN if configured, or a valid admin session.
+         *     Requires the FEED_TOKEN, an API key or an admin session; never a plain user.
          */
         post: operations["handle_sync_webhook_api_sync_webhook_post"];
         delete?: never;
@@ -436,7 +4734,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/missing": {
+    "/api/system/events": {
         parameters: {
             query?: never;
             header?: never;
@@ -444,13 +4742,35 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Missing Tracks
-         * @description Returns missing tracks list.
-         *
-         *     Admins can view all or filtered by playlist_id.
-         *     Regular users only see missing tracks for playlists targeted to them.
+         * List system lifecycle events
+         * @description Returns paginated and filtered system lifecycle events.
          */
-        get: operations["get_missing_tracks_api_missing_get"];
+        get: operations["get_system_events_api_system_events_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Clear system lifecycle events
+         * @description Clears all system lifecycle events from database (admin required).
+         */
+        delete: operations["clear_system_events_api_system_events_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/lidarr-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lidarr reachability, version and health checks
+         * @description Lidarr's own health checks. Native mode never contacts Lidarr. Never raises: an unreachable Lidarr is
+         *     reported as ``reachable: false`` with the checks empty.
+         */
+        get: operations["get_lidarr_health_api_system_lidarr_health_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -459,7 +4779,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/missing/csv": {
+    "/api/system/logs": {
         parameters: {
             query?: never;
             header?: never;
@@ -467,10 +4787,34 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Download Missing Csv
-         * @description Generates and streams a safe CSV download of missing tracks.
+         * Get recent in-memory system logs
+         * @description Returns filtered entries from the circular in-memory log buffer.
          */
-        get: operations["download_missing_csv_api_missing_csv_get"];
+        get: operations["get_system_logs_api_system_logs_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Clear in-memory log buffer
+         * @description Clears all buffered log entries from memory (admin required).
+         */
+        delete: operations["clear_system_logs_api_system_logs_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/logs/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download rotated disk log file
+         * @description Returns active trackseerr.log file for download (admin required).
+         */
+        get: operations["download_system_logs_api_system_logs_download_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -479,7 +4823,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/missing/rss": {
+    "/api/system/logs/stream": {
         parameters: {
             query?: never;
             header?: never;
@@ -487,10 +4831,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Feed Missing Rss
-         * @description Generates an RSS 2.0 XML feed of missing music for Lidarr and RSS clients.
+         * Live SSE stream of system logs
+         * @description Server-Sent Events endpoint streaming real-time log records.
          */
-        get: operations["feed_missing_rss_api_missing_rss_get"];
+        get: operations["stream_system_logs_api_system_logs_stream_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -499,7 +4843,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/missing/text": {
+    "/api/system/media-server": {
         parameters: {
             query?: never;
             header?: never;
@@ -507,10 +4851,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Feed Missing Text
-         * @description Returns a plain text list of missing tracks (one per line).
+         * Active media server and the features it enables
+         * @description Unauthenticated (the login screen needs it) and non-sensitive: type, connectivity, capability flags.
          */
-        get: operations["feed_missing_text_api_missing_text_get"];
+        get: operations["get_media_server_status_api_system_media_server_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -519,7 +4863,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/missing/lidarr/status": {
+    "/api/system/queue": {
         parameters: {
             query?: never;
             header?: never;
@@ -527,1535 +4871,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Lidarr Status
-         * @description Returns Lidarr connection and configuration status from DB or config.
+         * Running, queued and recently finished background jobs
+         * @description In-memory job list: what is running now, what is queued, and the last 50 finished runs (admin only).
          */
-        get: operations["get_lidarr_status_api_missing_lidarr_status_get"];
+        get: operations["get_job_queue_api_system_queue_get"];
         put?: never;
         post?: never;
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/missing/lidarr/push": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Push Missing To Lidarr
-         * @description Pushes missing tracks directly into Lidarr to queue download and monitoring.
-         *
-         *     Supports:
-         *     - Background trickle mode (`trickle=True`) with delay pacing and rate-limit backoff.
-         *     - Synchronous push (`trickle=False`) for targeted or immediate single-item updates.
-         */
-        post: operations["push_missing_to_lidarr_api_missing_lidarr_push_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/missing/lidarr/queue": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Lidarr Queue Status
-         * @description Returns the live status of the Lidarr background trickle worker.
-         */
-        get: operations["get_lidarr_queue_status_api_missing_lidarr_queue_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/missing/lidarr/queue/pause": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Pause Lidarr Queue
-         * @description Pauses the Lidarr background trickle worker.
-         */
-        post: operations["pause_lidarr_queue_api_missing_lidarr_queue_pause_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/missing/lidarr/queue/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Resume Lidarr Queue
-         * @description Resumes the Lidarr background trickle worker.
-         */
-        post: operations["resume_lidarr_queue_api_missing_lidarr_queue_resume_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/missing/lidarr/queue/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Cancel Lidarr Queue
-         * @description Cancels and stops the Lidarr background trickle worker.
-         */
-        post: operations["cancel_lidarr_queue_api_missing_lidarr_queue_cancel_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/missing/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Search Plex Tracks
-         * @description Searches the Plex library for tracks to enable manual matching and correction.
-         */
-        get: operations["search_plex_tracks_api_missing_search_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/missing/match": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create Match Override
-         * @description Records a manual match override (Match Memory) and removes corresponding missing tracks.
-         */
-        post: operations["create_match_override_api_missing_match_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/missing/matches": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Match Overrides
-         * @description Lists all stored Match Memory overrides.
-         */
-        get: operations["list_match_overrides_api_missing_matches_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/missing/match/{override_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Match Override
-         * @description Deletes a Match Memory override.
-         */
-        delete: operations["delete_match_override_api_missing_match__override_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/missing/{track_id}/grab": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Grab Missing Track
-         * @description Admin-only endpoint to trigger native search and grab for a missing track.
-         */
-        post: operations["grab_missing_track_api_missing__track_id__grab_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/discovery/trending": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Trending
-         * @description Retrieves trending music tracks and albums annotated with library & request status.
-         */
-        get: operations["get_trending_api_discovery_trending_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/discovery/new-releases": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get New Releases
-         * @description Retrieves latest album releases annotated with library & request status.
-         */
-        get: operations["get_new_releases_api_discovery_new_releases_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/discovery/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Search Discovery
-         * @description Performs unified multi-source search across iTunes and Deezer public APIs.
-         */
-        get: operations["search_discovery_api_discovery_search_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/discovery/album/{album_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Album
-         * @description Retrieves deep album details including tracklist and previews annotated with status.
-         */
-        get: operations["get_album_api_discovery_album__album_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/discovery/artist/{artist_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Artist
-         * @description Retrieves artist details and discography grouped into albums, singles_eps, and compilations.
-         */
-        get: operations["get_artist_api_discovery_artist__artist_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/requests": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Requests
-         * @description Lists requests. Non-admins see only their own requests; admins see all.
-         */
-        get: operations["list_requests_api_requests_get"];
-        put?: never;
-        /**
-         * Create Request
-         * @description Creates a new music request.
-         *
-         *     If the user is admin or auto_approve_requests is enabled, transitions immediately
-         *     to processing and dispatches to lidarr_worker (if Lidarr is configured).
-         *     Otherwise, sets status to pending.
-         */
-        post: operations["create_request_api_requests_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/requests/batch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create Batch Requests
-         * @description Creates multiple music requests in a single transaction within configured user quotas.
-         *
-         *     Non-admin user requests are validated against remaining quota.
-         *     Duplicates against active requests or within the batch are handled idempotently.
-         *     Approved requests attempt native grab, falling back to Lidarr trickle worker.
-         */
-        post: operations["create_batch_requests_api_requests_batch_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/requests/{request_id}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Approve Request
-         * @description Admin-only endpoint to approve a request, updating status to processing and dispatching to Lidarr.
-         */
-        post: operations["approve_request_api_requests__request_id__approve_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/requests/{request_id}/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reject Request
-         * @description Admin-only endpoint to reject a request.
-         */
-        post: operations["reject_request_api_requests__request_id__reject_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/requests/{request_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Request
-         * @description Deletes a request. Requesters can delete pending requests; admins can delete any.
-         */
-        delete: operations["delete_request_api_requests__request_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/requests/{request_id}/retry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Retry Request
-         * @description Forces re-search and grab for an existing request.
-         */
-        post: operations["retry_request_api_requests__request_id__retry_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/issues": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List media issues
-         * @description Lists issues. Filterable by status. Admin or MANAGE_REQUESTS see all; regular users see only their own.
-         */
-        get: operations["list_issues_api_issues_get"];
-        put?: never;
-        /**
-         * Report a media issue
-         * @description Creates an issue, emits ISSUE_REPORTED notification event, and returns the created issue.
-         */
-        post: operations["create_issue_api_issues_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/issues/{issue_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get media issue by ID
-         * @description Retrieves an issue by ID. If non-admin/non-manager and not owner, raises 403 Forbidden.
-         */
-        get: operations["get_issue_api_issues__issue_id__get"];
-        /**
-         * Update media issue
-         * @description Updates issue. Admin or MANAGE_REQUESTS can update status and problem_details.
-         *
-         *     Regular owners can only update problem_details if status is still open.
-         */
-        put: operations["update_issue_api_issues__issue_id__put"];
-        post?: never;
-        /**
-         * Delete media issue
-         * @description Deletes an issue. Admin or owner can delete.
-         */
-        delete: operations["delete_issue_api_issues__issue_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/stats": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Library Stats
-         * @description Retrieves aggregate statistics for the native library.
-         */
-        get: operations["get_library_stats_api_library_stats_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/artists": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Artists
-         * @description Lists library artists with optional filtering, search query, and pagination, attaching album and track counts.
-         */
-        get: operations["list_artists_api_library_artists_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/artists/ingest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Ingest Artist
-         * @description Ingests an artist discography from discovery metadata into the native catalog.
-         */
-        post: operations["ingest_artist_api_library_artists_ingest_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/artists/{artist_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Artist
-         * @description Retrieves a single artist by ID, including its child albums.
-         */
-        get: operations["get_artist_api_library_artists__artist_id__get"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete Artist
-         * @description Deletes an artist and cascades to child albums, tracks, and files. Optionally unlinks files on disk.
-         */
-        delete: operations["delete_artist_api_library_artists__artist_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/artists/{artist_id}/monitored": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Set Artist Monitored
-         * @description Updates monitoring status for an artist, optionally cascading to albums and tracks.
-         */
-        put: operations["set_artist_monitored_api_library_artists__artist_id__monitored_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/artists/{artist_id}/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Refresh Artist
-         * @description Refreshes artist discography from discovery metadata without overwriting existing files.
-         */
-        post: operations["refresh_artist_api_library_artists__artist_id__refresh_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/albums": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Albums
-         * @description Lists library albums with optional artist filtering, search query, and pagination, attaching artist name and track count.
-         */
-        get: operations["list_albums_api_library_albums_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/albums/{album_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Album
-         * @description Retrieves an album by ID, including its tracks and their linked library files.
-         */
-        get: operations["get_album_api_library_albums__album_id__get"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete Album
-         * @description Deletes an album and cascades to child tracks and files. Optionally unlinks files on disk.
-         */
-        delete: operations["delete_album_api_library_albums__album_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/albums/{album_id}/monitored": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Set Album Monitored
-         * @description Updates monitoring status for an album and optionally cascades to child tracks.
-         */
-        put: operations["set_album_monitored_api_library_albums__album_id__monitored_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/tracks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Tracks
-         * @description Lists library tracks with optional filtering and joins linked library file details.
-         */
-        get: operations["list_tracks_api_library_tracks_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/tracks/{track_id}/monitored": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Set Track Monitored
-         * @description Updates monitoring status for a single track.
-         */
-        put: operations["set_track_monitored_api_library_tracks__track_id__monitored_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/tracks/{track_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Track
-         * @description Deletes a library track and cascades to child files. Optionally unlinks files on disk.
-         */
-        delete: operations["delete_track_api_library_tracks__track_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/files/{file_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete File
-         * @description Deletes a library file record and optionally unlinks the physical file from disk.
-         */
-        delete: operations["delete_file_api_library_files__file_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/availability": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get library availability
-         * @description Resolves library presence and file availability. In gateway mode, forwards to Core.
-         */
-        get: operations["get_availability_api_library_availability_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/scan": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Trigger Scan
-         * @description Triggers an asynchronous background filesystem scan.
-         */
-        post: operations["trigger_scan_api_library_scan_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/scan/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Scan Status
-         * @description Retrieves current filesystem scanner status.
-         */
-        get: operations["get_scan_status_api_library_scan_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/scan/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Cancel Scan
-         * @description Signals active scan to stop and returns current scanner status.
-         */
-        post: operations["cancel_scan_api_library_scan_cancel_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/migrate-lidarr": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Trigger Lidarr Migration
-         * @description Triggers an asynchronous background Lidarr migration job.
-         */
-        post: operations["trigger_lidarr_migration_api_library_migrate_lidarr_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/migrate-lidarr/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Lidarr Migration Status
-         * @description Retrieves current Lidarr migration job status.
-         */
-        get: operations["get_lidarr_migration_status_api_library_migrate_lidarr_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/migrate-lidarr/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Cancel Lidarr Migration
-         * @description Signals active Lidarr migration job to stop and returns status.
-         */
-        post: operations["cancel_lidarr_migration_api_library_migrate_lidarr_cancel_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/manual-import/scan": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Manual Import Scan
-         * @description Scans a staging or download folder for audio files, inspects metadata, and calculates library match confidence.
-         */
-        post: operations["manual_import_scan_api_library_manual_import_scan_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/manual-import/commit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Manual Import Commit
-         * @description Commits selected manual import items: resolves/creates catalog entities, moves/copies files to destination, tags them, and registers them in the library.
-         */
-        post: operations["manual_import_commit_api_library_manual_import_commit_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/rename/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Rename Preview
-         * @description Previews proposed file path changes based on token naming templates and identifies files needing renaming.
-         */
-        post: operations["rename_preview_api_library_rename_preview_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/library/rename/apply": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Rename Apply
-         * @description Applies batch renaming to specified library files, moving them to their template-rendered destinations and updating the catalog.
-         */
-        post: operations["rename_apply_api_library_rename_apply_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/media-management": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Media Management Settings & Presets
-         * @description Retrieves current media management settings and preset templates.
-         */
-        get: operations["get_media_management_settings_api_settings_media_management_get"];
-        put?: never;
-        /**
-         * Update Media Management Settings (Admin Only)
-         * @description Admin-only: updates media management naming templates and options.
-         */
-        post: operations["update_media_management_settings_api_settings_media_management_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/media-management/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Live Preview Token Templates (In-Memory)
-         * @description Renders real-time example paths purely in-memory using provided or stored settings.
-         */
-        post: operations["preview_media_management_templates_api_settings_media_management_preview_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/lidarr": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Lidarr Automation Settings
-         * @description Retrieves Lidarr automation settings with masked API key.
-         */
-        get: operations["get_lidarr_settings_api_settings_lidarr_get"];
-        put?: never;
-        /**
-         * Update Lidarr Automation Settings (Admin Only)
-         * @description Admin-only: updates Lidarr automation settings in database.
-         *
-         *     Preserves existing API key if masked or empty.
-         */
-        post: operations["update_lidarr_settings_api_settings_lidarr_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/lidarr/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Test Lidarr Connection (Admin Only)
-         * @description Admin-only: tests connectivity and credentials for Lidarr instance.
-         */
-        post: operations["test_lidarr_connection_api_settings_lidarr_test_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/general": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get General Application Settings
-         * @description Retrieves general system settings including application URL.
-         */
-        get: operations["get_general_settings_api_settings_general_get"];
-        put?: never;
-        /**
-         * Update General Application Settings (Admin Only)
-         * @description Admin-only: updates general system settings in database.
-         */
-        post: operations["update_general_settings_api_settings_general_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/api-key": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get API Key (Admin or API Key)
-         * @description Retrieves the machine API key.
-         */
-        get: operations["get_api_key_api_settings_api_key_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/api-key/regenerate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Regenerate API Key (Admin Only)
-         * @description Regenerates the machine API key.
-         */
-        post: operations["regenerate_api_key_api_settings_api_key_regenerate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/download-clients": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List configured download clients
-         * @description Lists all configured download clients with masked credentials.
-         */
-        get: operations["list_download_clients_api_settings_download_clients_get"];
-        put?: never;
-        /**
-         * Create or update download client
-         * @description Admin-only endpoint to save or update a download client.
-         */
-        post: operations["create_or_update_download_client_api_settings_download_clients_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/download-clients/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Test download client connection
-         * @description Tests connectivity to a download client before saving.
-         */
-        post: operations["test_download_client_connection_api_settings_download_clients_test_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/download-clients/{client_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete download client
-         * @description Admin-only deletion of a download client.
-         */
-        delete: operations["delete_download_client_api_settings_download_clients__client_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/indexers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List configured indexers
-         * @description Lists all configured indexers with masked API keys.
-         */
-        get: operations["list_indexers_api_settings_indexers_get"];
-        put?: never;
-        /**
-         * Create or update indexer
-         * @description Admin-only endpoint to create or update an indexer.
-         */
-        post: operations["create_or_update_indexer_api_settings_indexers_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/indexers/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Test indexer capabilities
-         * @description Tests capabilities and connection against a Torznab/Newznab indexer.
-         */
-        post: operations["test_indexer_connection_api_settings_indexers_test_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/indexers/{indexer_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete indexer
-         * @description Admin-only deletion of an indexer.
-         */
-        delete: operations["delete_indexer_api_settings_indexers__indexer_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/quality-profiles": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List quality profiles
-         * @description Lists all configured quality profiles.
-         */
-        get: operations["list_quality_profiles_api_settings_quality_profiles_get"];
-        put?: never;
-        /**
-         * Create or update quality profile
-         * @description Creates or updates a quality profile.
-         */
-        post: operations["create_or_update_quality_profile_api_settings_quality_profiles_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/quality-profiles/{profile_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get quality profile by ID
-         * @description Retrieves a single quality profile.
-         */
-        get: operations["get_quality_profile_api_settings_quality_profiles__profile_id__get"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete quality profile
-         * @description Deletes a quality profile. Prevents deleting default profile.
-         */
-        delete: operations["delete_quality_profile_api_settings_quality_profiles__profile_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/quality-profiles/evaluate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Evaluate release title against profile
-         * @description Evaluates a raw release title string against a quality profile.
-         */
-        post: operations["evaluate_release_title_api_settings_quality_profiles_evaluate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/notifications": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List notification channels
-         * @description Admin-only endpoint listing all notification channels with masked secrets.
-         */
-        get: operations["list_notification_channels_api_settings_notifications_get"];
-        put?: never;
-        /**
-         * Create notification channel
-         * @description Admin-only endpoint to create a new notification channel.
-         */
-        post: operations["create_notification_channel_api_settings_notifications_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/notifications/{channel_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Update notification channel
-         * @description Admin-only endpoint to update an existing channel, preserving masked secrets.
-         */
-        put: operations["update_notification_channel_api_settings_notifications__channel_id__put"];
-        post?: never;
-        /**
-         * Delete notification channel
-         * @description Admin-only endpoint to delete a notification channel.
-         */
-        delete: operations["delete_notification_channel_api_settings_notifications__channel_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/notifications/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Test notification channel
-         * @description Admin-only endpoint to test a notification channel configuration.
-         */
-        post: operations["test_notification_channel_api_settings_notifications_test_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/queue": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List active download queue
-         * @description Returns active downloads in the activity queue with progress and client badges.
-         */
-        get: operations["get_queue_api_queue_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/queue/{download_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Cancel and remove download from queue
-         * @description Cancels a download with the underlying download client and removes it from the queue.
-         */
-        delete: operations["cancel_download_api_queue__download_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/acquisition/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Interactive multi-indexer search with quality evaluation
-         * @description Queries all configured Torznab, Newznab, and slskd indexers.
-         *
-         *     Parses each candidate release and evaluates it against the active or requested
-         *     Quality Profile, returning ranked and scored results with acceptance flags.
-         */
-        post: operations["search_releases_api_acquisition_search_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/acquisition/grab": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Force-enqueue a chosen candidate release to a download client
-         * @description Force-enqueues a manually selected candidate release to the target download client.
-         *
-         *     Creates an active download tracking record in the activity queue and transitions
-         *     associated requests to 'processing'.
-         */
-        post: operations["grab_release_api_acquisition_grab_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/acquisition/blocklist": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List blocklisted releases
-         * @description Returns list of blocklisted downloads/releases (admin required).
-         */
-        get: operations["list_blocklist_api_acquisition_blocklist_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/acquisition/blocklist/{blocklist_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Remove entry from blocklist
-         * @description Removes an item from the download blocklist by ID (admin required).
-         */
-        delete: operations["remove_from_blocklist_api_acquisition_blocklist__blocklist_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2081,21 +4903,291 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/health": {
+    "/api/system/tasks": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Health Check */
-        get: operations["health_check_api_health_get"];
+        /**
+         * List all scheduled background tasks
+         * @description Returns registry of background workers, intervals, statuses, and execution metadata.
+         */
+        get: operations["get_scheduled_tasks_api_system_tasks_get"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
-        /** Health Check */
-        head: operations["health_check_api_health_head"];
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/tasks/{task_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a running scheduled task
+         * @description Cancels a running task if supported (admin required).
+         */
+        post: operations["cancel_scheduled_task_api_system_tasks__task_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/tasks/{task_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger a scheduled task manually
+         * @description Dispatches the specified background task asynchronously (admin required).
+         */
+        post: operations["run_scheduled_task_api_system_tasks__task_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List tags with usage counts */
+        get: operations["list_tags_api_tags_get"];
+        put?: never;
+        /** Create a tag */
+        post: operations["create_tag_api_tags_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tags/{tag_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Rename a tag
+         * @description Renames the tag; delay/release profiles and import lists using the old label follow.
+         */
+        put: operations["rename_tag_api_tags__tag_id__put"];
+        post?: never;
+        /**
+         * Delete a tag
+         * @description Removes the tag from every artist, delay profile, release profile and import list.
+         */
+        delete: operations["delete_tag_api_tags__tag_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tags/{tag_id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Where a tag is used */
+        get: operations["tag_usage_api_tags__tag_id__usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Users
+         * @description Returns discovered Plex Home users (admin only).
+         */
+        get: operations["list_users_api_users_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Current User Profile
+         * @description Returns current user profile, permissions bitmask, and rolling request quota telemetry.
+         */
+        get: operations["get_current_user_profile_api_users_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Users
+         * @description Discovers users from the media server and upserts them to DB (admin only).
+         */
+        post: operations["refresh_users_api_users_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update User Governance Route
+         * @description Updates user governance, permissions, and request quotas (admin only).
+         *
+         *     Legacy shape kept for compatibility. It delegates to the same guarded update as
+         *     ``PATCH /api/admin/users/{id}``: ``request_limit_quota`` sets the user's track and album overrides,
+         *     ``request_limit_days`` the window override, and ``is_admin`` the ADMIN permission bit.
+         */
+        put: operations["update_user_governance_route_api_users__user_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wanted/cutoff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Files below their quality profile cutoff */
+        get: operations["list_cutoff_api_wanted_cutoff_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wanted/cutoff/index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Scrubber groups for the cutoff-unmet list (native only) */
+        get: operations["cutoff_index_api_wanted_cutoff_index_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wanted/missing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Monitored items that are not in the library */
+        get: operations["list_missing_api_wanted_missing_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wanted/missing/index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Scrubber groups for the missing list (native only) */
+        get: operations["missing_index_api_wanted_missing_index_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wanted/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Search for wanted items */
+        post: operations["search_wanted_api_wanted_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
         patch?: never;
         trace?: never;
     };
@@ -2103,15 +5195,76 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** AlbumMonitoredRequest */
-        AlbumMonitoredRequest: {
+        /** AccountSettingsBody */
+        AccountSettingsBody: {
+            /** Default Quota Albums */
+            default_quota_albums?: number | null;
+            /** Default Quota Discographies */
+            default_quota_discographies?: number | null;
+            /** Default Quota Tracks */
+            default_quota_tracks?: number | null;
+            /** Default Quota Window Days */
+            default_quota_window_days?: number | null;
+            /** Require Mfa Local */
+            require_mfa_local?: boolean | null;
+        };
+        /** ActionResponse */
+        ActionResponse: {
+            /** Action */
+            action: string;
+            issue: components["schemas"]["IssueResponse"];
+            /** Result */
+            result: {
+                [key: string]: unknown;
+            };
+        };
+        /** AddAlbumToCollectionRequest */
+        AddAlbumToCollectionRequest: {
+            /** Album Id */
+            album_id: string;
+            /**
+             * Order Index
+             * @default 0
+             */
+            order_index: number;
+        };
+        /** AddItemsRequest */
+        AddItemsRequest: {
+            /** Track Rating Keys */
+            track_rating_keys: string[];
+        };
+        /** AdminScrobbleConfigUpdate */
+        AdminScrobbleConfigUpdate: {
+            /** Lastfm Session Key */
+            lastfm_session_key?: string | null;
+            /** Lastfm Username */
+            lastfm_username?: string | null;
+            /** Listenbrainz Token */
+            listenbrainz_token?: string | null;
+            /** Scrobbling Enabled */
+            scrobbling_enabled?: boolean | null;
+            /**
+             * Unlink Lastfm
+             * @default false
+             */
+            unlink_lastfm: boolean;
+        };
+        /** AlbumBulkEditRequest */
+        AlbumBulkEditRequest: {
+            /** Album Ids */
+            album_ids: string[];
             /** Monitored */
             monitored: boolean;
+        };
+        /** AlbumMonitoredRequest */
+        AlbumMonitoredRequest: {
             /**
              * Cascade Tracks
              * @default true
              */
             cascade_tracks: boolean;
+            /** Monitored */
+            monitored: boolean;
         };
         /** ApiKeyRegenerateResponse */
         ApiKeyRegenerateResponse: {
@@ -2128,55 +5281,229 @@ export interface components {
             /** Api Key */
             api_key: string;
         };
+        /** ArtistBulkEditRequest */
+        ArtistBulkEditRequest: {
+            /** Add Tags */
+            add_tags?: number[];
+            /**
+             * All
+             * @default false
+             */
+            all: boolean;
+            /** Apply Monitor To Albums */
+            apply_monitor_to_albums?: boolean | null;
+            /** Artist Ids */
+            artist_ids?: string[] | null;
+            /** Metadata Profile Id */
+            metadata_profile_id?: number | null;
+            /** Monitor Option */
+            monitor_option?: string | null;
+            /** Monitored */
+            monitored?: boolean | null;
+            /** Quality Profile Id */
+            quality_profile_id?: string | null;
+            /** Remove Tags */
+            remove_tags?: number[];
+        };
         /** ArtistMonitoredRequest */
         ArtistMonitoredRequest: {
-            /** Monitored */
-            monitored: boolean;
+            /** Apply Monitor To Albums */
+            apply_monitor_to_albums?: boolean | null;
             /**
              * Cascade Children
              * @default true
              */
             cascade_children: boolean;
+            /** Metadata Profile Id */
+            metadata_profile_id?: number | null;
+            /** Monitor Option */
+            monitor_option?: string | null;
+            /** Monitored */
+            monitored: boolean;
         };
-        /** BatchCreateMusicRequestBody */
+        /** ArtistTagsRequest */
+        ArtistTagsRequest: {
+            /**
+             * Tags
+             * @description Tag ids; replaces the artist's tags
+             */
+            tags?: number[];
+        };
+        /** ArtistTagsResponse */
+        ArtistTagsResponse: {
+            /** Artist Id */
+            artist_id: string;
+            /** Tags */
+            tags: number[];
+        };
+        /**
+         * BatchCreateMusicRequestBody
+         * @description Up to 50 requests. ``kind="discography"`` (with ``artist``) makes it one discography request.
+         */
         BatchCreateMusicRequestBody: {
+            /** Artist */
+            artist?: string | null;
+            /** Kind */
+            kind?: "discography" | null;
             /** Requests */
             requests: components["schemas"]["CreateMusicRequestBody"][];
         };
+        /** ChangePasswordRequest */
+        ChangePasswordRequest: {
+            /** Current Password */
+            current_password: string;
+            /** New Password */
+            new_password: string;
+        };
+        /** CodeRequest */
+        CodeRequest: {
+            /** Code */
+            code: string;
+        };
+        /** CommentBody */
+        CommentBody: {
+            /** Body */
+            body: string;
+        };
+        /** CommentResponse */
+        CommentResponse: {
+            /** Body */
+            body: string;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Is Admin */
+            is_admin: boolean;
+            /** Is System */
+            is_system?: boolean | null;
+            /** Issue Id */
+            issue_id: string;
+            /**
+             * Mine
+             * @default false
+             */
+            mine: boolean;
+            /** User Id */
+            user_id?: string | null;
+            /** Username */
+            username?: string | null;
+        };
+        /** CommitRequest */
+        CommitRequest: {
+            /**
+             * Import Play Stats
+             * @default false
+             */
+            import_play_stats: boolean;
+            /**
+             * Include Folders
+             * @default false
+             */
+            include_folders: boolean;
+            /**
+             * Monitor Mode
+             * @description Defaults to 'none' for new playlists; an existing playlist keeps its mode
+             */
+            monitor_mode?: ("track" | "album" | "artist" | "none") | null;
+            /** Name Prefix */
+            name_prefix?: string | null;
+            /** Path Mappings */
+            path_mappings?: components["schemas"]["PathMapping"][];
+            /**
+             * Playlists
+             * @default all
+             */
+            playlists: "all" | string[];
+        };
+        /** CopyPayload */
+        CopyPayload: {
+            /** Name */
+            name?: string | null;
+        };
+        /** CopyRequest */
+        CopyRequest: {
+            /** Target Users */
+            target_users: string[];
+            /** Title */
+            title?: string | null;
+        };
+        /** CreateAdminUserBody */
+        CreateAdminUserBody: {
+            /** Email */
+            email?: string | null;
+            /** Permissions */
+            permissions?: number | null;
+            /** Quota Albums */
+            quota_albums?: number | null;
+            /** Quota Discographies */
+            quota_discographies?: number | null;
+            /** Quota Tracks */
+            quota_tracks?: number | null;
+            /** Quota Window Days */
+            quota_window_days?: number | null;
+            /** Quotas */
+            quotas?: {
+                [key: string]: number | null;
+            } | null;
+            /** Username */
+            username: string;
+        };
+        /** CreateCollectionRequest */
+        CreateCollectionRequest: {
+            /**
+             * Monitored
+             * @default true
+             */
+            monitored: boolean;
+            /** Name */
+            name: string;
+            /** Poster Url */
+            poster_url?: string | null;
+            /** Summary */
+            summary?: string | null;
+        };
         /** CreateIssueBody */
         CreateIssueBody: {
-            /** Media Title */
-            media_title: string;
+            /** Album Id */
+            album_id?: string | null;
             /** Artist */
             artist: string;
-            /** Issue Type */
-            issue_type: string;
+            /** Discovery Id */
+            discovery_id?: string | null;
+            issue_type: components["schemas"]["IssueType"];
+            /** Item Type */
+            item_type?: ("album" | "track") | null;
+            /** Media Title */
+            media_title: string;
             /** Problem Details */
             problem_details: string;
             /** Request Id */
             request_id?: string | null;
+            /** Track Id */
+            track_id?: string | null;
         };
         /** CreateMusicRequestBody */
         CreateMusicRequestBody: {
+            /** Album */
+            album?: string | null;
+            /** Artist */
+            artist: string;
+            /** Cover Url */
+            cover_url?: string | null;
+            /** Foreign Id */
+            foreign_id?: string | null;
             /**
              * Item Type
              * @default album
              */
             item_type: string;
-            /** Title */
-            title: string;
-            /** Artist */
-            artist: string;
-            /** Album */
-            album?: string | null;
-            /** Cover Url */
-            cover_url?: string | null;
-            /** Release Date */
-            release_date?: string | null;
-            /** Foreign Id */
-            foreign_id?: string | null;
             /** Preview Url */
             preview_url?: string | null;
+            /** Release Date */
+            release_date?: string | null;
+            /** Title */
+            title: string;
         };
         /** CreatePinRequest */
         CreatePinRequest: {
@@ -2185,6 +5512,43 @@ export interface components {
              * @description Optional redirect URL after Plex authorization
              */
             forward_url?: string | null;
+        };
+        /** CustomFormatPayload */
+        CustomFormatPayload: {
+            /**
+             * Include In Rename
+             * @default false
+             */
+            include_in_rename: boolean;
+            /** Name */
+            name: string;
+            /** Specifications */
+            specifications?: components["schemas"]["SpecificationModel"][];
+        };
+        /** CustomFormatResponse */
+        CustomFormatResponse: {
+            /** Created At */
+            created_at?: string | null;
+            /** Id */
+            id: number;
+            /**
+             * Include In Rename
+             * @default false
+             */
+            include_in_rename: boolean;
+            /** Name */
+            name: string;
+            /** Specifications */
+            specifications?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Unsupported
+             * @default false
+             */
+            unsupported: boolean;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /** DatabaseStatus */
         DatabaseStatus: {
@@ -2199,130 +5563,312 @@ export interface components {
                 [key: string]: number;
             };
         };
+        /** DelayProfilePayload */
+        DelayProfilePayload: {
+            /** Bypass If Above Score */
+            bypass_if_above_score?: number | null;
+            /**
+             * Bypass If Highest Quality
+             * @default true
+             */
+            bypass_if_highest_quality: boolean;
+            delays?: components["schemas"]["DelaysModel"];
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Preferred Protocol
+             * @default usenet
+             * @enum {string}
+             */
+            preferred_protocol: "usenet" | "torrent" | "soulseek";
+            /** Tags */
+            tags?: string[];
+        };
+        /** DelayProfileResponse */
+        DelayProfileResponse: {
+            /** Bypass If Above Score */
+            bypass_if_above_score?: number | null;
+            /** Bypass If Highest Quality */
+            bypass_if_highest_quality: boolean;
+            delays: components["schemas"]["DelaysModel"];
+            /** Id */
+            id: number;
+            /** Is Default */
+            is_default: boolean;
+            /** Name */
+            name: string;
+            /** Order */
+            order: number;
+            /** Preferred Protocol */
+            preferred_protocol: string;
+            /** Tags */
+            tags: string[];
+        };
+        /** DelaysModel */
+        DelaysModel: {
+            /**
+             * Soulseek
+             * @default 0
+             */
+            soulseek: number;
+            /**
+             * Torrent
+             * @default 0
+             */
+            torrent: number;
+            /**
+             * Usenet
+             * @default 0
+             */
+            usenet: number;
+        };
+        /** DeleteAdminUserBody */
+        DeleteAdminUserBody: {
+            /** Confirm Username */
+            confirm_username: string;
+        };
         /** DiskUsageItem */
         DiskUsageItem: {
-            /** Path */
-            path: string;
+            /** Free Bytes */
+            free_bytes: number;
             /** Label */
             label: string;
+            /** Path */
+            path: string;
+            /** Percent Used */
+            percent_used: number;
             /** Total Bytes */
             total_bytes: number;
             /** Used Bytes */
             used_bytes: number;
-            /** Free Bytes */
-            free_bytes: number;
-            /** Percent Used */
-            percent_used: number;
+        };
+        /** DismissRequest */
+        DismissRequest: {
+            /** Path */
+            path: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "file" | "folder";
         };
         /** DownloadClientItem */
         DownloadClientItem: {
+            /** Api Key */
+            api_key?: string | null;
+            /** Category */
+            category?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Driver Type */
+            driver_type: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Extra Settings Json */
+            extra_settings_json?: string | null;
+            /** Host Url */
+            host_url: string;
             /** Id */
             id: string;
             /** Name */
             name: string;
-            /** Driver Type */
-            driver_type: string;
-            /** Host Url */
-            host_url: string;
-            /** Api Key */
-            api_key?: string | null;
-            /** Username */
-            username?: string | null;
             /** Password */
             password?: string | null;
-            /**
-             * Enabled
-             * @default true
-             */
-            enabled: boolean;
             /**
              * Priority
              * @default 1
              */
             priority: number;
-            /** Category */
-            category?: string | null;
             /** Remote Path Mappings */
             remote_path_mappings?: {
                 [key: string]: string;
             }[] | null;
-            /** Extra Settings Json */
-            extra_settings_json?: string | null;
-            /** Created At */
-            created_at?: string | null;
             /** Updated At */
             updated_at?: string | null;
+            /** Username */
+            username?: string | null;
         };
         /** DownloadClientPayload */
         DownloadClientPayload: {
+            /** Api Key */
+            api_key?: string | null;
+            /** Category */
+            category?: string | null;
+            /** Driver Type */
+            driver_type: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Extra Settings Json */
+            extra_settings_json?: string | null;
+            /** Host Url */
+            host_url: string;
             /** Id */
             id?: string | null;
             /** Name */
             name: string;
-            /** Driver Type */
-            driver_type: string;
-            /** Host Url */
-            host_url: string;
-            /** Api Key */
-            api_key?: string | null;
-            /** Username */
-            username?: string | null;
             /** Password */
             password?: string | null;
-            /**
-             * Enabled
-             * @default true
-             */
-            enabled: boolean;
             /**
              * Priority
              * @default 1
              */
             priority: number;
-            /** Category */
-            category?: string | null;
             /** Remote Path Mappings */
             remote_path_mappings?: {
                 [key: string]: string;
             }[] | null;
-            /** Extra Settings Json */
-            extra_settings_json?: string | null;
+            /** Username */
+            username?: string | null;
+        };
+        /** DownloadRootsItem */
+        DownloadRootsItem: {
+            /** Client Id */
+            client_id: string;
+            /** Error */
+            error?: string | null;
+            /** Name */
+            name: string;
+            /** Roots */
+            roots: string[];
+        };
+        /** EmptyRecycleBinRequest */
+        EmptyRecycleBinRequest: {
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
         };
         /** EnvironmentStatus */
         EnvironmentStatus: {
+            /** Platform */
+            platform: string;
+            /** Python Version */
+            python_version: string;
+            /** Role */
+            role: string;
+            /** Uptime Seconds */
+            uptime_seconds: number;
             /**
              * Version
              * @default 1.0.0
              */
             version: string;
-            /** Python Version */
-            python_version: string;
-            /** Platform */
-            platform: string;
-            /** Role */
-            role: string;
-            /** Uptime Seconds */
-            uptime_seconds: number;
         };
         /** EvaluateTitlePayload */
         EvaluateTitlePayload: {
-            /** Title */
-            title: string;
+            /** Album Id */
+            album_id?: string | null;
+            /**
+             * Artist Id
+             * @description Library artist whose tags scope tag-restricted release profiles
+             */
+            artist_id?: string | null;
+            /** Current Title */
+            current_title?: string | null;
+            /**
+             * Indexer Flags
+             * @default 0
+             */
+            indexer_flags: number;
+            /** Indexer Id */
+            indexer_id?: string | null;
+            /** Indexer Name */
+            indexer_name?: string | null;
             /** Profile Id */
             profile_id?: string | null;
+            /** Protocol */
+            protocol?: string | null;
             /** Size Bytes */
             size_bytes?: number | null;
+            /** Title */
+            title: string;
+            /** Track Id */
+            track_id?: string | null;
         };
         /** EvaluateTitleResponse */
         EvaluateTitleResponse: {
-            /** Parsed */
-            parsed: {
+            /** Breakdown */
+            breakdown?: {
                 [key: string]: unknown;
-            };
+            } | null;
             /** Evaluation */
             evaluation: {
                 [key: string]: unknown;
             };
+            /** Parsed */
+            parsed: {
+                [key: string]: unknown;
+            };
+            /** Upgrade */
+            upgrade?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** FingerprintRequest */
+        FingerprintRequest: {
+            /** File Path */
+            file_path: string;
+        };
+        /** FlagsRequest */
+        FlagsRequest: {
+            /** Ignored */
+            ignored?: boolean | null;
+            /** Owner */
+            owner?: ("user" | "trackseerr") | null;
+        };
+        /** FormatItemModel */
+        FormatItemModel: {
+            /** Format Id */
+            format_id: number;
+            /**
+             * Score
+             * @default 0
+             */
+            score: number;
+        };
+        /**
+         * FormatPreviewModel
+         * @description How a single format string renders for every sample input, plus lint warnings.
+         */
+        FormatPreviewModel: {
+            /** Format */
+            format: string;
+            /** Samples */
+            samples?: components["schemas"]["FormatSamplePreviewModel"][];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /** FormatSamplePreviewModel */
+        FormatSamplePreviewModel: {
+            /** Output */
+            output: string;
+            /** Sample Id */
+            sample_id: string;
+            /** Sample Name */
+            sample_name: string;
+        };
+        /** GatewayHeartbeat */
+        GatewayHeartbeat: {
+            /** Active Sessions */
+            active_sessions: number;
+            /** Gateway Id */
+            gateway_id: string;
+            /** Protocol */
+            protocol: number;
+            /** Started At */
+            started_at: number;
+            /** Version */
+            version: string;
         };
         /** GeneralSettingsModel */
         GeneralSettingsModel: {
@@ -2348,16 +5894,174 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
-        /** IndexerItem */
-        IndexerItem: {
+        /** ImportList */
+        ImportList: {
+            /** Artist Monitor Option */
+            artist_monitor_option?: string | null;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            };
+            /** Created At */
+            created_at: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
             /** Id */
             id: string;
+            item_counts?: components["schemas"]["ImportListItemCounts"];
+            /** Last Error */
+            last_error?: string | null;
+            /** Last Status */
+            last_status?: string | null;
+            /** Last Synced At */
+            last_synced_at?: string | null;
+            /**
+             * Monitor Mode
+             * @default track
+             */
+            monitor_mode: string;
             /** Name */
             name: string;
-            /** Indexer Type */
-            indexer_type: string;
-            /** Host Url */
-            host_url: string;
+            /** Provider */
+            provider: string;
+            /** Quality Profile Id */
+            quality_profile_id?: string | null;
+            /**
+             * Sync Interval Minutes
+             * @default 1440
+             */
+            sync_interval_minutes: number;
+            /** Tags */
+            tags?: string[];
+            /** Updated At */
+            updated_at: string;
+        };
+        /** ImportListInput */
+        ImportListInput: {
+            /** Artist Monitor Option */
+            artist_monitor_option?: string | null;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Monitor Mode
+             * @default track
+             */
+            monitor_mode: string;
+            /** Name */
+            name: string;
+            /** Provider */
+            provider: string;
+            /** Quality Profile Id */
+            quality_profile_id?: string | null;
+            /**
+             * Sync Interval Minutes
+             * @default 1440
+             */
+            sync_interval_minutes: number;
+            /** Tags */
+            tags?: string[];
+        };
+        /** ImportListItemCounts */
+        ImportListItemCounts: {
+            /**
+             * Applied
+             * @default 0
+             */
+            applied: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /**
+             * Pending
+             * @default 0
+             */
+            pending: number;
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
+            /**
+             * Unresolved
+             * @default 0
+             */
+            unresolved: number;
+        };
+        /** ImportListItemOut */
+        ImportListItemOut: {
+            /**
+             * Album Title
+             * @default
+             */
+            album_title: string;
+            /** Applied Level */
+            applied_level?: string | null;
+            /**
+             * Artist Name
+             * @default
+             */
+            artist_name: string;
+            /** Error */
+            error?: string | null;
+            /** First Seen At */
+            first_seen_at?: string | null;
+            /**
+             * Id
+             * @default 0
+             */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Last Seen At */
+            last_seen_at?: string | null;
+            /** Mbid */
+            mbid?: string | null;
+            /**
+             * Status
+             * @default pending
+             */
+            status: string;
+            /**
+             * Track Title
+             * @default
+             */
+            track_title: string;
+        };
+        /** ImportListItemsPage */
+        ImportListItemsPage: {
+            /** Items */
+            items: components["schemas"]["ImportListItemOut"][];
+            /** Total */
+            total: number;
+        };
+        /** ImportListTestResult */
+        ImportListTestResult: {
+            /** Error */
+            error?: string | null;
+            /**
+             * Item Count
+             * @default 0
+             */
+            item_count: number;
+            /** Ok */
+            ok: boolean;
+            /** Sample */
+            sample?: components["schemas"]["ImportListItemOut"][];
+        };
+        /** IndexerItem */
+        IndexerItem: {
             /** Api Key */
             api_key?: string | null;
             /**
@@ -2365,34 +6069,39 @@ export interface components {
              * @default 3000,3010,3020,3030,3040
              */
             categories: string;
+            /** Created At */
+            created_at?: string | null;
+            /** Discography Seed Time Minutes */
+            discography_seed_time_minutes?: number | null;
             /**
              * Enabled
              * @default true
              */
             enabled: boolean;
+            /** Host Url */
+            host_url: string;
+            /** Id */
+            id: string;
+            /** Indexer Type */
+            indexer_type: string;
+            /** Minimum Seeders */
+            minimum_seeders?: number | null;
+            /** Name */
+            name: string;
             /**
              * Priority
              * @default 1
              */
             priority: number;
-            /** Created At */
-            created_at?: string | null;
+            /** Seed Ratio */
+            seed_ratio?: number | null;
+            /** Seed Time Minutes */
+            seed_time_minutes?: number | null;
             /** Updated At */
             updated_at?: string | null;
         };
         /** IndexerPayload */
         IndexerPayload: {
-            /** Id */
-            id?: string | null;
-            /** Name */
-            name: string;
-            /**
-             * Indexer Type
-             * @default torznab
-             */
-            indexer_type: string;
-            /** Host Url */
-            host_url: string;
             /** Api Key */
             api_key?: string | null;
             /**
@@ -2400,35 +6109,53 @@ export interface components {
              * @default 3000,3010,3020,3030,3040
              */
             categories: string;
+            /** Discography Seed Time Minutes */
+            discography_seed_time_minutes?: number | null;
             /**
              * Enabled
              * @default true
              */
             enabled: boolean;
+            /** Host Url */
+            host_url: string;
+            /** Id */
+            id?: string | null;
+            /**
+             * Indexer Type
+             * @default torznab
+             */
+            indexer_type: string;
+            /** Minimum Seeders */
+            minimum_seeders?: number | null;
+            /** Name */
+            name: string;
             /**
              * Priority
              * @default 1
              */
             priority: number;
+            /** Seed Ratio */
+            seed_ratio?: number | null;
+            /** Seed Time Minutes */
+            seed_time_minutes?: number | null;
         };
         /** IngestArtistRequest */
         IngestArtistRequest: {
-            /** Foreign Artist Id */
-            foreign_artist_id: string;
             /** Artist Name */
             artist_name: string;
-            /** Quality Profile Id */
-            quality_profile_id?: string | null;
-            /**
-             * Monitor Option
-             * @default all
-             */
-            monitor_option: string;
+            /** Foreign Artist Id */
+            foreign_artist_id: string;
+            /** Metadata Profile Id */
+            metadata_profile_id?: number | null;
+            /** Monitor Option */
+            monitor_option?: string | null;
             /**
              * Monitored
              * @default true
              */
             monitored: boolean;
+            /** Quality Profile Id */
+            quality_profile_id?: string | null;
             /** Root Folder */
             root_folder?: string | null;
         };
@@ -2437,44 +6164,12 @@ export interface components {
          * @description Candidate release item enriched with quality evaluation, scoring, and source metadata.
          */
         InteractiveReleaseItem: {
-            /** Id */
-            id: string;
-            /** Title */
-            title: string;
-            /** Indexer Name */
-            indexer_name: string;
-            /** Protocol */
-            protocol: string;
-            /** Size Bytes */
-            size_bytes: number;
-            /** Seeders */
-            seeders?: number | null;
-            /** Publish Date */
-            publish_date?: string | null;
+            /** Breakdown */
+            breakdown?: {
+                [key: string]: unknown;
+            } | null;
             /** Download Url */
             download_url?: string | null;
-            /** Magnet Url */
-            magnet_url?: string | null;
-            /** Parsed Quality */
-            parsed_quality: string;
-            /** Source */
-            source?: string | null;
-            /**
-             * Tags
-             * @default []
-             */
-            tags: string[];
-            /** Is Acceptable */
-            is_acceptable: boolean;
-            /** Score */
-            score: number;
-            /** Meets Cutoff */
-            meets_cutoff: boolean;
-            /**
-             * Rejection Reasons
-             * @default []
-             */
-            rejection_reasons: string[];
             /**
              * Extra
              * @default {}
@@ -2482,18 +6177,59 @@ export interface components {
             extra: {
                 [key: string]: unknown;
             };
+            /**
+             * Format Score
+             * @default 0
+             */
+            format_score: number;
+            /** Id */
+            id: string;
+            /** Indexer Name */
+            indexer_name: string;
+            /** Is Acceptable */
+            is_acceptable: boolean;
+            /** Magnet Url */
+            magnet_url?: string | null;
+            /** Meets Cutoff */
+            meets_cutoff: boolean;
+            /** Parsed Quality */
+            parsed_quality: string;
+            /** Protocol */
+            protocol: string;
+            /** Publish Date */
+            publish_date?: string | null;
+            /**
+             * Rejection Reasons
+             * @default []
+             */
+            rejection_reasons: string[];
+            /** Score */
+            score: number;
+            /** Seeders */
+            seeders?: number | null;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Source */
+            source?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+            /** Title */
+            title: string;
         };
         /**
          * InteractiveSearchQuery
          * @description Payload for manual multi-indexer search.
          */
         InteractiveSearchQuery: {
-            /** Artist */
-            artist: string;
-            /** Title */
-            title?: string | null;
             /** Album */
             album?: string | null;
+            /** Album Id */
+            album_id?: string | null;
+            /** Artist */
+            artist: string;
             /**
              * Item Type
              * @default track
@@ -2501,39 +6237,136 @@ export interface components {
             item_type: string;
             /** Quality Profile Id */
             quality_profile_id?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Track Id */
+            track_id?: string | null;
         };
-        /** IssueResponse */
+        /** InviteAcceptRequest */
+        InviteAcceptRequest: {
+            /** Password */
+            password: string;
+        };
+        /**
+         * IssueResponse
+         * @description Issue as returned to the viewer. Responses are built from a per-role whitelist and serialised with
+         *     ``exclude_unset``, so admin-only fields are absent (not null) for requesters.
+         */
         IssueResponse: {
-            /** Id */
-            id: string;
-            /** Media Title */
-            media_title: string;
+            /** Album Id */
+            album_id?: string | null;
             /** Artist */
             artist: string;
-            /** Issue Type */
-            issue_type: string;
-            /** Problem Details */
-            problem_details: string;
-            /** Status */
-            status: string;
-            /** User Id */
-            user_id: string;
-            /** Request Id */
-            request_id?: string | null;
-            /** Username */
-            username?: string | null;
+            /** Available Actions */
+            available_actions?: string[] | null;
+            /**
+             * Comment Count
+             * @default 0
+             */
+            comment_count: number;
             /** Created At */
             created_at?: string | null;
+            /** Discovery Id */
+            discovery_id?: string | null;
+            /** Id */
+            id: string;
+            /** Issue Type */
+            issue_type: string;
+            /** Item Type */
+            item_type?: string | null;
+            /** Last Activity At */
+            last_activity_at?: string | null;
+            /** Media Title */
+            media_title: string;
+            /** Problem Details */
+            problem_details: string;
+            /** Request Id */
+            request_id?: string | null;
+            /** Resolved At */
+            resolved_at?: string | null;
+            /** Resolved By */
+            resolved_by?: string | null;
+            /** Status */
+            status: string;
+            /** Track Id */
+            track_id?: string | null;
+            /** Unread */
+            unread?: boolean | null;
             /** Updated At */
             updated_at?: string | null;
+            /** User Id */
+            user_id: string;
+            /** Username */
+            username?: string | null;
+        };
+        /**
+         * IssueStatus
+         * @enum {string}
+         */
+        IssueStatus: "open" | "in_progress" | "resolved" | "wont_fix";
+        /**
+         * IssueType
+         * @enum {string}
+         */
+        IssueType: "audio_quality" | "corrupted_file" | "wrong_release" | "missing_tracks" | "incorrect_tags" | "request_stuck" | "other";
+        /** LibraryManagerModel */
+        LibraryManagerModel: {
+            /** Blocking Reason */
+            blocking_reason?: string | null;
+            /** Can Switch */
+            can_switch: boolean;
+            /** Lidarr Configured */
+            lidarr_configured: boolean;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "native" | "lidarr";
+            /** Native Configured */
+            native_configured: boolean;
+        };
+        /** LibraryManagerUpdateModel */
+        LibraryManagerUpdateModel: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "native" | "lidarr";
+        };
+        /** LidarrDefaultsResponse */
+        LidarrDefaultsResponse: {
+            metadata_profile: components["schemas"]["LidarrNamedProfile"];
+            /** Monitor */
+            monitor: string;
+            /** New Item Monitor */
+            new_item_monitor: string;
+            quality_profile: components["schemas"]["LidarrNamedProfile"];
+            /** Root Folder */
+            root_folder: string;
+            /** Root Folders */
+            root_folders: string[];
+            /**
+             * Singles Enabled
+             * @default true
+             */
+            singles_enabled: boolean;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "rootfolder" | "fallback";
+            /** Tags */
+            tags: components["schemas"]["LidarrTagModel"][];
+        };
+        /** LidarrNamedProfile */
+        LidarrNamedProfile: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
         };
         /** LidarrPushRequest */
         LidarrPushRequest: {
-            /**
-             * Track Ids
-             * @description Optional list of specific missing track IDs to push
-             */
-            track_ids?: number[] | null;
             /**
              * Auto Search
              * @description Override auto_search setting
@@ -2545,21 +6378,24 @@ export interface components {
              */
             batch_size?: number | null;
             /**
+             * Delay Seconds
+             * @description Delay pacing in seconds between lookups
+             */
+            delay_seconds?: number | null;
+            /**
+             * Track Ids
+             * @description Optional list of specific missing track IDs to push
+             */
+            track_ids?: number[] | null;
+            /**
              * Trickle
              * @description Process asynchronously via paced background trickle worker
              * @default false
              */
             trickle: boolean;
-            /**
-             * Delay Seconds
-             * @description Delay pacing in seconds between lookups
-             */
-            delay_seconds?: number | null;
         };
         /** LidarrSettingsModel */
         LidarrSettingsModel: {
-            /** Url */
-            url?: string | null;
             /** Api Key */
             api_key?: string | null;
             /**
@@ -2567,22 +6403,6 @@ export interface components {
              * @default true
              */
             auto_search: boolean;
-            /** Root Folder */
-            root_folder?: string | null;
-            /** Quality Profile Id */
-            quality_profile_id?: number | null;
-            /** Metadata Profile Id */
-            metadata_profile_id?: number | null;
-            /**
-             * Trickle Rate Seconds
-             * @default 3
-             */
-            trickle_rate_seconds: number;
-            /**
-             * Trickle Batch Size
-             * @default 25
-             */
-            trickle_batch_size: number;
             /**
              * Auto Trickle
              * @default false
@@ -2593,47 +6413,93 @@ export interface components {
              * @default 30
              */
             auto_trickle_interval_minutes: number;
+            /**
+             * Prefer Singles
+             * @default true
+             */
+            prefer_singles: boolean;
+            /** Root Folder */
+            root_folder?: string | null;
+            /**
+             * Search On Add
+             * @default true
+             */
+            search_on_add: boolean;
+            /**
+             * Trickle Batch Size
+             * @default 25
+             */
+            trickle_batch_size: number;
+            /**
+             * Trickle Rate Seconds
+             * @default 3
+             */
+            trickle_rate_seconds: number;
             /** Updated At */
             updated_at?: string | null;
-        };
-        /** LidarrSettingsUpdateModel */
-        LidarrSettingsUpdateModel: {
             /** Url */
             url?: string | null;
+        };
+        /**
+         * LidarrSettingsUpdateModel
+         * @description Unknown fields are ignored on purpose: older clients may still send the removed monitor / profile / tag
+         *     overrides (Lidarr's root-folder defaults decide those now).
+         */
+        LidarrSettingsUpdateModel: {
             /** Api Key */
             api_key?: string | null;
             /** Auto Search */
             auto_search?: boolean | null;
-            /** Root Folder */
-            root_folder?: string | null;
-            /** Quality Profile Id */
-            quality_profile_id?: number | null;
-            /** Metadata Profile Id */
-            metadata_profile_id?: number | null;
-            /** Trickle Rate Seconds */
-            trickle_rate_seconds?: number | null;
-            /** Trickle Batch Size */
-            trickle_batch_size?: number | null;
             /** Auto Trickle */
             auto_trickle?: boolean | null;
             /** Auto Trickle Interval Minutes */
             auto_trickle_interval_minutes?: number | null;
+            /** Prefer Singles */
+            prefer_singles?: boolean | null;
+            /** Root Folder */
+            root_folder?: string | null;
+            /** Search On Add */
+            search_on_add?: boolean | null;
+            /** Trickle Batch Size */
+            trickle_batch_size?: number | null;
+            /** Trickle Rate Seconds */
+            trickle_rate_seconds?: number | null;
+            /** Url */
+            url?: string | null;
+        };
+        /** LidarrTagModel */
+        LidarrTagModel: {
+            /** Id */
+            id: number;
+            /** Label */
+            label: string;
         };
         /** LidarrTestConnectionPayload */
         LidarrTestConnectionPayload: {
-            /** Url */
-            url: string;
             /** Api Key */
             api_key: string;
+            /** Url */
+            url: string;
         };
         /** LidarrTestConnectionResponse */
         LidarrTestConnectionResponse: {
+            /** Error */
+            error?: string | null;
             /** Online */
             online: boolean;
             /** Version */
             version?: string | null;
-            /** Error */
-            error?: string | null;
+        };
+        /** LocalLoginRequest */
+        LocalLoginRequest: {
+            /** Password */
+            password: string;
+            /** Recovery Code */
+            recovery_code?: string | null;
+            /** Totp Code */
+            totp_code?: string | null;
+            /** Username */
+            username: string;
         };
         /** M3UImportRequest */
         M3UImportRequest: {
@@ -2643,16 +6509,16 @@ export interface components {
              */
             content: string;
             /**
+             * Description
+             * @default Imported from M3U playlist file
+             */
+            description: string | null;
+            /**
              * Name
              * @description Playlist title
              * @default Imported M3U Playlist
              */
             name: string | null;
-            /**
-             * Description
-             * @default Imported from M3U playlist file
-             */
-            description: string | null;
             /**
              * Targets
              * @description Optional target user IDs
@@ -2664,86 +6530,93 @@ export interface components {
          * @description Payload to force-grab a specific release candidate to a download client.
          */
         ManualGrabPayload: {
-            release: components["schemas"]["InteractiveReleaseItem"];
-            /** Client Id */
-            client_id?: string | null;
-            /** Artist */
-            artist: string;
-            /** Title */
-            title: string;
             /** Album */
             album?: string | null;
+            /** Album Id */
+            album_id?: string | null;
+            /** Artist */
+            artist: string;
+            /** Client Id */
+            client_id?: string | null;
             /**
              * Item Type
              * @default track
              */
             item_type: string;
+            release: components["schemas"]["InteractiveReleaseItem"];
             /** Request Id */
             request_id?: string | null;
+            /** Title */
+            title: string;
+            /** Track Id */
+            track_id?: string | null;
         };
         /** ManualImportCommitRequest */
         ManualImportCommitRequest: {
+            /** Download Id */
+            download_id?: string | null;
+            /** Issue Id */
+            issue_id?: string | null;
             /** Items */
             items?: components["schemas"]["ManualImportItem"][];
         };
         /** ManualImportItem */
         ManualImportItem: {
-            /** Source Path */
-            source_path?: string | null;
-            /** File Path */
-            file_path?: string | null;
-            /** Artist Name */
-            artist_name?: string | null;
-            /** Artist Id */
-            artist_id?: string | null;
-            /** Album Title */
-            album_title?: string | null;
             /** Album Id */
             album_id?: string | null;
-            /** Track Title */
-            track_title?: string | null;
-            /** Track Id */
-            track_id?: string | null;
-            /**
-             * Track Number
-             * @default 1
-             */
-            track_number: number | null;
+            /** Album Title */
+            album_title?: string | null;
+            /** Artist Id */
+            artist_id?: string | null;
+            /** Artist Name */
+            artist_name?: string | null;
             /**
              * Disc Number
              * @default 1
              */
             disc_number: number | null;
+            /** File Path */
+            file_path?: string | null;
+            /** Mode */
+            mode?: ("move" | "hardlink" | "copy") | null;
+            /** Source Path */
+            source_path?: string | null;
+            /** Track Id */
+            track_id?: string | null;
+            /** Track Number */
+            track_number?: number | null;
+            /** Track Title */
+            track_title?: string | null;
+            /** Write Tags */
+            write_tags?: boolean | null;
             /** Year */
             year?: number | null;
-            /**
-             * Mode
-             * @default move
-             */
-            mode?: 'move' | 'hardlink' | 'copy' | null;
-            /**
-             * Write Tags
-             * @default true
-             */
-            write_tags: boolean;
         };
         /** ManualImportScanRequest */
         ManualImportScanRequest: {
+            /** Album Id */
+            album_id?: string | null;
+            /** Download Id */
+            download_id?: string | null;
+            /** File Paths */
+            file_paths?: string[] | null;
             /** Folder Path */
             folder_path?: string | null;
+        };
+        /** MappingRequest */
+        MappingRequest: {
+            /** Local Prefix */
+            local_prefix: string;
+            /** Server Prefix */
+            server_prefix: string;
         };
         /** MatchOverrideRequest */
         MatchOverrideRequest: {
             /**
-             * Source Title
-             * @description Title of the track from source playlist
+             * Plex Artist
+             * @description Artist of matched track in Plex
              */
-            source_title: string;
-            /**
-             * Source Artist
-             * @description Artist of the track from source playlist
-             */
-            source_artist: string;
+            plex_artist: string;
             /**
              * Plex Rating Key
              * @description Plex ratingKey of matched library track
@@ -2755,60 +6628,71 @@ export interface components {
              */
             plex_title: string;
             /**
-             * Plex Artist
-             * @description Artist of matched track in Plex
+             * Source Artist
+             * @description Artist of the track from source playlist
              */
-            plex_artist: string;
+            source_artist: string;
+            /**
+             * Source Title
+             * @description Title of the track from source playlist
+             */
+            source_title: string;
         };
         /** MediaManagementGetResponse */
         MediaManagementGetResponse: {
-            settings: components["schemas"]["MediaManagementSettingsModel"];
+            /** Preset Descriptions */
+            preset_descriptions?: {
+                [key: string]: string;
+            };
             /** Presets */
             presets: {
                 [key: string]: {
                     [key: string]: unknown;
                 };
             };
+            /**
+             * Seed Rule Conflict
+             * @default false
+             */
+            seed_rule_conflict: boolean;
+            settings: components["schemas"]["MediaManagementSettingsModel"];
+            /** Syntax Help */
+            syntax_help?: {
+                [key: string]: string;
+            }[];
+            /** Token Help */
+            token_help?: {
+                [key: string]: unknown;
+            }[];
         };
         /** MediaManagementSettingsModel */
         MediaManagementSettingsModel: {
+            /**
+             * Acoustid Api Key
+             * @description AcoustID API key for Chromaprint fingerprinting (masked on read)
+             */
+            acoustid_api_key?: string | null;
+            /**
+             * Add Metadata Profile Id
+             * @description Default metadata profile for added artists (null = none)
+             */
+            add_metadata_profile_id?: number | null;
+            /**
+             * Add Monitor Option
+             * @description Default monitor option for artists added manually
+             * @default existing
+             */
+            add_monitor_option: string;
+            /**
+             * Album Folder Format
+             * @description Legacy album directory format (superseded by the track formats)
+             */
+            album_folder_format: string;
             /**
              * Artist Folder Format
              * @description Format for artist directory
              */
             artist_folder_format: string;
-            /**
-             * Album Folder Format
-             * @description Format for album directory
-             */
-            album_folder_format: string;
-            /**
-             * Standard Track Format
-             * @description Format for standard track filenames
-             */
-            standard_track_format: string;
-            /**
-             * Compilation Track Format
-             * @description Format for compilation track filenames
-             */
-            compilation_track_format: string;
-            /**
-             * Multi Disc Folder Format
-             * @description Format for multi-disc subdirectories
-             */
-            multi_disc_folder_format: string;
-            /**
-             * Root Folder Path
-             * @description Base music library folder
-             * @default /data/media/music
-             */
-            root_folder_path: string;
-            /**
-             * Colon Replacement Format
-             * @description String to replace colons with
-             * @default -
-             */
-            colon_replacement_format: string;
             /**
              * Clean Artist Names
              * @description Whether to strip leading articles from artist names
@@ -2816,45 +6700,32 @@ export interface components {
              */
             clean_artist_names: boolean;
             /**
-             * Staging Folder Path
-             * @description Path for staging/downloads folder
-             * @default /data/downloads
+             * Colon Replacement Format
+             * @description String to replace colons with
+             * @default -
              */
-            staging_folder_path: string;
+            colon_replacement_format: string;
             /**
-             * Import Mode
-             * @description Import mode: move or hardlink
-             * @default move
+             * Compilation Track Format
+             * @description Format for compilation track filenames
              */
-            import_mode: string;
+            compilation_track_format: string;
             /**
-             * Write Audio Tags
-             * @description Whether to normalize audio tags on import
-             * @default true
+             * Effective Quarantine Folder Path
+             * @description Resolved quarantine folder (read-only)
              */
-            write_audio_tags: boolean;
+            effective_quarantine_folder_path?: string | null;
+            /**
+             * Effective Recycle Bin Path
+             * @description Resolved recycle bin folder (read-only)
+             */
+            effective_recycle_bin_path?: string | null;
             /**
              * Embed Artwork
              * @description Whether to embed cover artwork in audio files
              * @default true
              */
             embed_artwork: boolean;
-            /** Acoustid Api Key */
-            acoustid_api_key?: string | null;
-            /** Fingerprint On Weak Match */
-            fingerprint_on_weak_match?: boolean;
-            /**
-             * Save Cover Art File
-             * @description Whether to save cover.jpg in album directory
-             * @default true
-             */
-            save_cover_art_file: boolean;
-            /**
-             * Seed Complete Action
-             * @description What to do with a torrent once its seed goal is met
-             * @default keep
-             */
-            seed_complete_action: 'keep' | 'remove' | 'remove_and_delete';
             /**
              * Enable Quality Upgrades
              * @description Whether to monitor for quality cutoff upgrades
@@ -2862,11 +6733,108 @@ export interface components {
              */
             enable_quality_upgrades: boolean;
             /**
+             * Enrich Mbids
+             * @description Whether to enrich tracks and albums with MusicBrainz IDs
+             * @default true
+             */
+            enrich_mbids: boolean;
+            /**
+             * Fingerprint On Weak Match
+             * @description Fingerprint files via AcoustID during download import when the tag match is weak or missing
+             * @default false
+             */
+            fingerprint_on_weak_match: boolean;
+            /**
+             * Import Bitrate Check
+             * @description Per-track bitrate check on import: off, warn or reject
+             * @default warn
+             */
+            import_bitrate_check: string;
+            /**
+             * Import Mode
+             * @description Import mode: move, hardlink or copy (hardlink and copy keep the source so torrents keep seeding)
+             * @default move
+             * @enum {string}
+             */
+            import_mode: "move" | "hardlink" | "copy";
+            /**
              * Library Mode
              * @description Library management mode: native or lidarr
              * @default native
              */
             library_mode: string;
+            /**
+             * Mb Mirror Url
+             * @description MusicBrainz / BrainzMash API mirror base URL
+             * @default https://api.brainzmash.cc
+             */
+            mb_mirror_url: string;
+            /**
+             * Multi Disc Folder Format
+             * @description Legacy multi-disc subdirectory format (superseded)
+             */
+            multi_disc_folder_format: string;
+            /**
+             * Multi Disc Track Format
+             * @description Multi-disc track format: same as the standard format but for releases with more than one disc
+             * @default
+             */
+            multi_disc_track_format: string;
+            /**
+             * Prefer Local Artwork
+             * @description Whether to prefer local filesystem artwork over remote metadata art
+             * @default true
+             */
+            prefer_local_artwork: boolean;
+            /**
+             * Quarantine Folder Path
+             * @description Folder for downloads rejected by import security; empty = <library root>/.trackseerr-quarantine
+             * @default
+             */
+            quarantine_folder_path: string;
+            /**
+             * Recycle Bin Cleanup Days
+             * @description Delete recycle bin folders older than this many days (0 = never)
+             * @default 30
+             */
+            recycle_bin_cleanup_days: number;
+            /**
+             * Recycle Bin Path
+             * @description Recycle bin folder for replaced files; empty = <library root>/.trackseerr-recycle
+             * @default
+             */
+            recycle_bin_path: string;
+            /**
+             * Recycle Bin Permanent Delete
+             * @description Delete replaced files instead of recycling them (never implied by an empty path)
+             * @default false
+             */
+            recycle_bin_permanent_delete: boolean;
+            /**
+             * Root Folder Path
+             * @description Base music library folder
+             * @default /data/media/music
+             */
+            root_folder_path: string;
+            /**
+             * Save Cover Art File
+             * @description Whether to save cover.jpg in album directory
+             * @default true
+             */
+            save_cover_art_file: boolean;
+            /**
+             * Scan Monitor Option
+             * @description Monitor option given to artists created by a library scan
+             * @default existing
+             */
+            scan_monitor_option: string;
+            /**
+             * Seed Complete Action
+             * @description When seeding is done: keep the torrent seeding, remove it from the client (files kept), or remove it and delete its files (only when the safety gate passes; never in move mode)
+             * @default remove
+             * @enum {string}
+             */
+            seed_complete_action: "keep" | "remove" | "remove_and_delete";
             /**
              * Seed Ratio Limit
              * @description Target seed ratio before transfer cleanup
@@ -2877,51 +6845,172 @@ export interface components {
              * @description Target seeding duration in minutes before transfer cleanup
              */
             seed_time_limit_minutes?: number | null;
+            /**
+             * Staging Folder Path
+             * @description Optional extra allowed import folder; empty means download clients' folders only
+             * @default
+             */
+            staging_folder_path: string;
+            /**
+             * Standard Track Format
+             * @description Standard track format: '/'-separated path below the artist folder (album folder(s)/file name)
+             */
+            standard_track_format: string;
+            /**
+             * Torrent Hardlink Tags
+             * @description Tagging a hardlinked torrent file: write tags to a private copy, or keep the hardlink
+             * @default copy_and_tag
+             * @enum {string}
+             */
+            torrent_hardlink_tags: "copy_and_tag" | "keep_hardlink";
             /** Updated At */
             updated_at?: string | null;
+            /**
+             * Warnings
+             * @description Non-blocking notes from the last save (read-only)
+             */
+            warnings?: string[];
+            /**
+             * Write Audio Tags
+             * @description Whether to normalize audio tags on import
+             * @default true
+             */
+            write_audio_tags: boolean;
         };
         /** MediaManagementUpdateModel */
         MediaManagementUpdateModel: {
-            /** Artist Folder Format */
-            artist_folder_format?: string | null;
-            /** Album Folder Format */
-            album_folder_format?: string | null;
-            /** Standard Track Format */
-            standard_track_format?: string | null;
-            /** Compilation Track Format */
-            compilation_track_format?: string | null;
-            /** Multi Disc Folder Format */
-            multi_disc_folder_format?: string | null;
-            /** Root Folder Path */
-            root_folder_path?: string | null;
-            /** Colon Replacement Format */
-            colon_replacement_format?: string | null;
-            /** Clean Artist Names */
-            clean_artist_names?: boolean | null;
-            /** Staging Folder Path */
-            staging_folder_path?: string | null;
-            /** Import Mode */
-            import_mode?: string | null;
-            /** Write Audio Tags */
-            write_audio_tags?: boolean | null;
-            /** Embed Artwork */
-            embed_artwork?: boolean | null;
             /** Acoustid Api Key */
             acoustid_api_key?: string | null;
-            /** Fingerprint On Weak Match */
-            fingerprint_on_weak_match?: boolean | null;
-            /** Save Cover Art File */
-            save_cover_art_file?: boolean | null;
-            /** Seed Complete Action */
-            seed_complete_action?: 'keep' | 'remove' | 'remove_and_delete' | null;
+            /** Add Metadata Profile Id */
+            add_metadata_profile_id?: number | null;
+            /** Add Monitor Option */
+            add_monitor_option?: string | null;
+            /** Album Folder Format */
+            album_folder_format?: string | null;
+            /** Artist Folder Format */
+            artist_folder_format?: string | null;
+            /** Clean Artist Names */
+            clean_artist_names?: boolean | null;
+            /** Colon Replacement Format */
+            colon_replacement_format?: string | null;
+            /** Compilation Track Format */
+            compilation_track_format?: string | null;
+            /** Delete Completed Transfers */
+            delete_completed_transfers?: boolean | null;
+            /** Embed Artwork */
+            embed_artwork?: boolean | null;
             /** Enable Quality Upgrades */
             enable_quality_upgrades?: boolean | null;
+            /** Enrich Mbids */
+            enrich_mbids?: boolean | null;
+            /** Fingerprint On Weak Match */
+            fingerprint_on_weak_match?: boolean | null;
+            /** Import Bitrate Check */
+            import_bitrate_check?: ("off" | "warn" | "reject") | null;
+            /** Import Mode */
+            import_mode?: ("move" | "hardlink" | "copy") | null;
             /** Library Mode */
             library_mode?: string | null;
+            /** Mb Mirror Url */
+            mb_mirror_url?: string | null;
+            /** Multi Disc Folder Format */
+            multi_disc_folder_format?: string | null;
+            /** Multi Disc Track Format */
+            multi_disc_track_format?: string | null;
+            /** Prefer Local Artwork */
+            prefer_local_artwork?: boolean | null;
+            /** Quarantine Folder Path */
+            quarantine_folder_path?: string | null;
+            /** Recycle Bin Cleanup Days */
+            recycle_bin_cleanup_days?: number | null;
+            /** Recycle Bin Path */
+            recycle_bin_path?: string | null;
+            /** Recycle Bin Permanent Delete */
+            recycle_bin_permanent_delete?: boolean | null;
+            /** Root Folder Path */
+            root_folder_path?: string | null;
+            /** Save Cover Art File */
+            save_cover_art_file?: boolean | null;
+            /** Scan Monitor Option */
+            scan_monitor_option?: string | null;
+            /** Seed Complete Action */
+            seed_complete_action?: ("keep" | "remove" | "remove_and_delete") | null;
             /** Seed Ratio Limit */
             seed_ratio_limit?: number | null;
             /** Seed Time Limit Minutes */
             seed_time_limit_minutes?: number | null;
+            /** Staging Folder Path */
+            staging_folder_path?: string | null;
+            /** Standard Track Format */
+            standard_track_format?: string | null;
+            /** Torrent Hardlink Tags */
+            torrent_hardlink_tags?: ("copy_and_tag" | "keep_hardlink") | null;
+            /** Write Audio Tags */
+            write_audio_tags?: boolean | null;
+        };
+        /**
+         * MediaServerSettingsPayload
+         * @description What the Settings page submits. A secret sent back as ``********`` keeps the stored value.
+         */
+        MediaServerSettingsPayload: {
+            /**
+             * Api Key
+             * @default
+             */
+            api_key: string;
+            /**
+             * Password
+             * @default
+             */
+            password: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "subsonic" | "jellyfin" | "none";
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+            /**
+             * Username
+             * @default
+             */
+            username: string;
+        };
+        /** MediaServerSettingsResponse */
+        MediaServerSettingsResponse: {
+            /** Api Key */
+            api_key: string;
+            /** Effective Type */
+            effective_type: string;
+            /** Locked By Env */
+            locked_by_env: boolean;
+            /** Password */
+            password: string;
+            /** Type */
+            type: string;
+            /** Url */
+            url: string;
+            /** Username */
+            username: string;
+        };
+        /** MediaServerTestResponse */
+        MediaServerTestResponse: {
+            /** Message */
+            message: string;
+            /** Ok */
+            ok: boolean;
+        };
+        /** MetadataProfileBody */
+        MetadataProfileBody: {
+            /** Name */
+            name: string;
+            /** Primary Types */
+            primary_types: string[];
+            /** Secondary Types */
+            secondary_types: string[];
         };
         /** MigrateLidarrRequest */
         MigrateLidarrRequest: {
@@ -2931,57 +7020,192 @@ export interface components {
              */
             auto_switch_mode: boolean;
         };
-        /** NotificationChannelItem */
-        NotificationChannelItem: {
-            /** Id */
-            id: string;
-            /** Name */
-            name: string;
-            /** Channel Type */
-            channel_type: string;
+        /** MixCreateBody */
+        MixCreateBody: {
+            /**
+             * Auto Acquire Missing
+             * @default false
+             */
+            auto_acquire_missing: boolean;
+            /**
+             * Discovery Ratio
+             * @default 0.7
+             */
+            discovery_ratio: number;
             /**
              * Enabled
              * @default true
              */
             enabled: boolean;
+            /**
+             * Excluded Genres
+             * @default []
+             */
+            excluded_genres: string[];
+            /**
+             * Max Weekly Acquisitions
+             * @default 10
+             */
+            max_weekly_acquisitions: number;
+            /** Mix Type */
+            mix_type: string;
+            /** Name */
+            name?: string | null;
+            /** Quality Profile Id */
+            quality_profile_id?: string | null;
+            /** Seed Artist */
+            seed_artist?: string | null;
+            /**
+             * Seed Window Days
+             * @default 14
+             */
+            seed_window_days: number;
+            /**
+             * Track Count
+             * @default 30
+             */
+            track_count: number;
+            /** User Id */
+            user_id?: string | null;
+        };
+        /** MixSnapshotRequest */
+        MixSnapshotRequest: {
+            /**
+             * Auto Refresh
+             * @default false
+             */
+            auto_refresh: boolean;
+            /** Mix Key */
+            mix_key: string;
+            /** Title */
+            title?: string | null;
+        };
+        /** MixSnapshotUpdateRequest */
+        MixSnapshotUpdateRequest: {
+            /** Auto Refresh */
+            auto_refresh: boolean;
+        };
+        /** MixUpdateBody */
+        MixUpdateBody: {
+            /** Auto Acquire Missing */
+            auto_acquire_missing?: boolean | null;
+            /** Discovery Ratio */
+            discovery_ratio?: number | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Excluded Genres */
+            excluded_genres?: string[] | null;
+            /** Max Weekly Acquisitions */
+            max_weekly_acquisitions?: number | null;
+            /** Mix Type */
+            mix_type?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Quality Profile Id */
+            quality_profile_id?: string | null;
+            /** Seed Artist */
+            seed_artist?: string | null;
+            /** Seed Window Days */
+            seed_window_days?: number | null;
+            /** Track Count */
+            track_count?: number | null;
+        };
+        /** MoveItemRequest */
+        MoveItemRequest: {
+            /** After Playlist Item Id */
+            after_playlist_item_id?: number | null;
+        };
+        /** NotificationChannelItem */
+        NotificationChannelItem: {
+            /** Channel Type */
+            channel_type: string;
             /** Config */
             config?: {
                 [key: string]: unknown;
             };
-            /** Events */
-            events?: string[];
             /** Created At */
             created_at?: string | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Events */
+            events?: string[];
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
             /** Updated At */
             updated_at?: string | null;
         };
         /** NotificationChannelPayload */
         NotificationChannelPayload: {
-            /** Id */
-            id?: string | null;
-            /** Name */
-            name: string;
             /** Channel Type */
             channel_type: string;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            };
             /**
              * Enabled
              * @default true
              */
             enabled: boolean;
-            /** Config */
-            config?: {
-                [key: string]: unknown;
-            };
             /** Events */
             events?: string[] | null;
+            /** Id */
+            id?: string | null;
+            /** Name */
+            name: string;
+        };
+        /** PasswordAndCodeRequest */
+        PasswordAndCodeRequest: {
+            /** Code */
+            code: string;
+            /** Password */
+            password: string;
+        };
+        /** PasswordRequest */
+        PasswordRequest: {
+            /** Password */
+            password: string;
+        };
+        /** PathMapping */
+        PathMapping: {
+            /** From */
+            from: string;
+            /** To */
+            to: string;
+        };
+        /** PendingReleaseResponse */
+        PendingReleaseResponse: {
+            /** Added At */
+            added_at: string;
+            /** Album Id */
+            album_id?: string | null;
+            /** Artist Name */
+            artist_name: string;
+            /**
+             * Format Score
+             * @default 0
+             */
+            format_score: number;
+            /** Id */
+            id: number;
+            /** Protocol */
+            protocol: string;
+            /** Quality */
+            quality?: string | null;
+            /** Reason */
+            reason: string;
+            /** Release At */
+            release_at: string;
+            /** Title */
+            title: string;
         };
         /** PlaylistCreateRequest */
         PlaylistCreateRequest: {
-            /**
-             * Url Or Id
-             * @description Spotify/Deezer URL, URI, or alphanumeric/numeric ID
-             */
-            url_or_id: string;
             /**
              * Service
              * @description Optional service hint: 'spotify' or 'deezer'
@@ -2992,20 +7216,14 @@ export interface components {
              * @description Optional list of target user IDs
              */
             targets?: string[] | null;
+            /**
+             * Url Or Id
+             * @description Spotify/Deezer URL, URI, or alphanumeric/numeric ID
+             */
+            url_or_id: string;
         };
         /** PlaylistDirectImportRequest */
         PlaylistDirectImportRequest: {
-            /**
-             * Name
-             * @description Playlist name
-             */
-            name: string;
-            /**
-             * Service
-             * @description Service tag: spotify, deezer, or custom
-             * @default spotify
-             */
-            service: string | null;
             /**
              * Description
              * @description Playlist description
@@ -3013,29 +7231,56 @@ export interface components {
              */
             description: string | null;
             /**
+             * Name
+             * @description Playlist name
+             */
+            name: string;
+            /**
              * Poster Url
              * @description Cover artwork URL
              * @default
              */
             poster_url: string | null;
             /**
-             * Tracks
-             * @description List of tracks to import
+             * Service
+             * @description Service tag: spotify, deezer, or custom
+             * @default spotify
              */
-            tracks: components["schemas"]["TrackImportItem"][];
+            service: string | null;
             /**
              * Targets
              * @description Optional target user IDs
              */
             targets?: string[] | null;
+            /**
+             * Tracks
+             * @description List of tracks to import
+             */
+            tracks: components["schemas"]["TrackImportItem"][];
         };
-        /** PlaylistEnabledRequest */
+        /**
+         * PlaylistEnabledRequest
+         * @description Playlist settings update: ``enabled`` and/or ``monitor_mode`` (at least one).
+         */
         PlaylistEnabledRequest: {
             /**
              * Enabled
              * @description True if playlist should be auto-synced; False if paused/static
              */
-            enabled: boolean;
+            enabled?: boolean | null;
+            /**
+             * Monitor Mode
+             * @description What a sync does with missing tracks: track, album, artist or none
+             */
+            monitor_mode?: string | null;
+        };
+        /** PlaylistMonitorModeRequest */
+        PlaylistMonitorModeRequest: {
+            /**
+             * Monitor Mode
+             * @description track, album, artist or none
+             */
+            monitor_mode: string;
         };
         /** PlaylistTargetsRequest */
         PlaylistTargetsRequest: {
@@ -3049,184 +7294,284 @@ export interface components {
         PlexStatus: {
             /** Configured */
             configured: boolean;
-            /** Url */
-            url?: string | null;
+            /** Latency Ms */
+            latency_ms?: number | null;
+            /** Message */
+            message: string;
             /** Music Section */
             music_section?: string | null;
             /** Online */
             online: boolean;
-            /** Latency Ms */
-            latency_ms?: number | null;
-            /**
-             * User Count
-             * @default 0
-             */
-            user_count: number;
             /**
              * Playlist Count
              * @default 0
              */
             playlist_count: number;
-            /** Message */
-            message: string;
+            /** Url */
+            url?: string | null;
+            /**
+             * User Count
+             * @default 0
+             */
+            user_count: number;
         };
         /** PreviewItemModel */
         PreviewItemModel: {
-            /** Id */
-            id: string;
-            /** Name */
-            name: string;
             /** Description */
             description: string;
+            /** Id */
+            id: string;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
             };
+            /** Name */
+            name: string;
             /** Output Path */
             output_path: string;
         };
         /** PreviewRequestModel */
         PreviewRequestModel: {
-            /** Artist Folder Format */
-            artist_folder_format?: string | null;
             /** Album Folder Format */
             album_folder_format?: string | null;
-            /** Standard Track Format */
-            standard_track_format?: string | null;
-            /** Compilation Track Format */
-            compilation_track_format?: string | null;
-            /** Multi Disc Folder Format */
-            multi_disc_folder_format?: string | null;
-            /** Root Folder Path */
-            root_folder_path?: string | null;
-            /** Colon Replacement Format */
-            colon_replacement_format?: string | null;
+            /** Artist Folder Format */
+            artist_folder_format?: string | null;
             /** Clean Artist Names */
             clean_artist_names?: boolean | null;
-            /** Staging Folder Path */
-            staging_folder_path?: string | null;
-            /** Import Mode */
-            import_mode?: string | null;
-            /** Seed Complete Action */
-            seed_complete_action?: 'keep' | 'remove' | 'remove_and_delete' | null;
+            /** Colon Replacement Format */
+            colon_replacement_format?: string | null;
+            /** Compilation Track Format */
+            compilation_track_format?: string | null;
             /** Enable Quality Upgrades */
             enable_quality_upgrades?: boolean | null;
+            /** Import Mode */
+            import_mode?: ("move" | "hardlink" | "copy") | null;
             /** Library Mode */
             library_mode?: string | null;
+            /** Multi Disc Folder Format */
+            multi_disc_folder_format?: string | null;
+            /** Multi Disc Track Format */
+            multi_disc_track_format?: string | null;
+            /** Root Folder Path */
+            root_folder_path?: string | null;
+            /** Seed Complete Action */
+            seed_complete_action?: ("keep" | "remove" | "remove_and_delete") | null;
+            /** Staging Folder Path */
+            staging_folder_path?: string | null;
+            /** Standard Track Format */
+            standard_track_format?: string | null;
+            /** Torrent Hardlink Tags */
+            torrent_hardlink_tags?: ("copy_and_tag" | "keep_hardlink") | null;
         };
         /** PreviewResponseModel */
         PreviewResponseModel: {
+            /** Format Previews */
+            format_previews?: {
+                [key: string]: components["schemas"]["FormatPreviewModel"];
+            };
             /** Previews */
             previews: components["schemas"]["PreviewItemModel"][];
         };
-        /** QualityProfileItemModel */
-        QualityProfileItemModel: {
+        /** QualityDefinitionPayload */
+        QualityDefinitionPayload: {
+            /** Max Kbps */
+            max_kbps?: number | null;
+            /** Min Kbps */
+            min_kbps?: number | null;
+            /** Preferred Kbps */
+            preferred_kbps?: number | null;
+            /** Title */
+            title?: string | null;
+        };
+        /** QualityDefinitionResponse */
+        QualityDefinitionResponse: {
+            /** Default Max Kbps */
+            default_max_kbps?: number | null;
+            /** Default Min Kbps */
+            default_min_kbps?: number | null;
+            /** Default Preferred Kbps */
+            default_preferred_kbps?: number | null;
+            /**
+             * Is Default
+             * @default true
+             */
+            is_default: boolean;
+            /** Max Kbps */
+            max_kbps?: number | null;
+            /** Min Kbps */
+            min_kbps?: number | null;
+            /** Preferred Kbps */
+            preferred_kbps?: number | null;
             /** Quality */
             quality: string;
+            /** Title */
+            title: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * QualityProfileItemModel
+         * @description One ordered profile entry (top = best): a quality, or a group of equivalent qualities.
+         *
+         *     Legacy payloads (``{quality, allowed, weight}`` with no ``type``) are still accepted and ordered by weight.
+         */
+        QualityProfileItemModel: {
             /**
              * Allowed
              * @default true
              */
             allowed: boolean;
-            /**
-             * Weight
-             * @default 100
-             */
-            weight: number;
+            /** Items */
+            items?: string[];
+            /** Name */
+            name?: string | null;
+            /** Quality */
+            quality?: string | null;
+            /** Type */
+            type?: string | null;
+            /** Weight */
+            weight?: number | null;
         };
         /** QualityProfilePayload */
         QualityProfilePayload: {
-            /** Id */
-            id?: string | null;
-            /** Name */
-            name: string;
+            /** Custom Formats */
+            custom_formats?: {
+                [key: string]: unknown;
+            }[];
             /** Cutoff */
             cutoff: string;
-            /** Items */
-            items?: components["schemas"]["QualityProfileItemModel"][];
-            /** Preferred Tags */
-            preferred_tags?: string[];
+            /**
+             * Cutoff Format Score
+             * @default 0
+             */
+            cutoff_format_score: number;
+            /** Format Items */
+            format_items?: components["schemas"]["FormatItemModel"][] | null;
+            /** Id */
+            id?: string | null;
             /** Ignored Tags */
             ignored_tags?: string[];
-            /** Min Size Mb */
-            min_size_mb?: number | null;
-            /** Max Size Mb */
-            max_size_mb?: number | null;
             /**
              * Is Default
              * @default false
              */
             is_default: boolean;
-            /** Custom Formats */
-            custom_formats?: {
-                [key: string]: unknown;
-            }[];
+            /** Items */
+            items?: components["schemas"]["QualityProfileItemModel"][];
+            /** Max Size Mb */
+            max_size_mb?: number | null;
+            /**
+             * Min Format Score
+             * @default -100
+             */
+            min_format_score: number;
             /** Min Score */
             min_score?: number | null;
+            /** Min Size Mb */
+            min_size_mb?: number | null;
+            /**
+             * Min Upgrade Format Score
+             * @default 1
+             */
+            min_upgrade_format_score: number;
+            /** Name */
+            name: string;
+            /** Preferred Tags */
+            preferred_tags?: string[];
+            /**
+             * Upgrade Allowed
+             * @default true
+             */
+            upgrade_allowed: boolean;
         };
         /** QualityProfileResponse */
         QualityProfileResponse: {
-            /** Id */
-            id: string;
-            /** Name */
-            name: string;
+            /** Created At */
+            created_at?: string | null;
+            /** Custom Formats */
+            custom_formats?: {
+                [key: string]: unknown;
+            }[];
             /** Cutoff */
             cutoff: string;
-            /** Items */
-            items: components["schemas"]["QualityProfileItemModel"][];
-            /** Preferred Tags */
-            preferred_tags?: string[];
+            /**
+             * Cutoff Format Score
+             * @default 0
+             */
+            cutoff_format_score: number;
+            /** Format Items */
+            format_items?: components["schemas"]["FormatItemModel"][];
+            /** Id */
+            id: string;
             /** Ignored Tags */
             ignored_tags?: string[];
-            /** Min Size Mb */
-            min_size_mb?: number | null;
-            /** Max Size Mb */
-            max_size_mb?: number | null;
             /**
              * Is Default
              * @default false
              */
             is_default: boolean;
-            /** Custom Formats */
-            custom_formats?: {
-                [key: string]: unknown;
-            }[];
+            /** Items */
+            items: components["schemas"]["QualityProfileItemModel"][];
+            /** Max Size Mb */
+            max_size_mb?: number | null;
+            /**
+             * Min Format Score
+             * @default -100
+             */
+            min_format_score: number;
             /** Min Score */
             min_score?: number | null;
-            /** Created At */
-            created_at?: string | null;
+            /** Min Size Mb */
+            min_size_mb?: number | null;
+            /**
+             * Min Upgrade Format Score
+             * @default 1
+             */
+            min_upgrade_format_score: number;
+            /** Name */
+            name: string;
+            /** Preferred Tags */
+            preferred_tags?: string[];
             /** Updated At */
             updated_at?: string | null;
+            /**
+             * Upgrade Allowed
+             * @default true
+             */
+            upgrade_allowed: boolean;
         };
         /** QueueItemResponse */
         QueueItemResponse: {
-            /** Id */
-            id: string;
-            /** Request Id */
-            request_id?: string | null;
-            /** Client Id */
-            client_id: string;
-            /** Download Hash */
-            download_hash?: string | null;
-            /** Title */
-            title: string;
             /** Artist */
             artist: string;
+            /** Client Driver Type */
+            client_driver_type?: string | null;
+            /** Client Id */
+            client_id: string;
+            /** Client Name */
+            client_name?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Download Hash */
+            download_hash?: string | null;
+            /** Error Message */
+            error_message?: string | null;
+            /** Eta Seconds */
+            eta_seconds?: number | null;
+            /** Id */
+            id: string;
             /**
              * Item Type
              * @default track
              */
             item_type: string;
             /**
-             * Status
-             * @default queued
-             */
-            status: string;
-            /**
              * Progress
              * @default 0
              */
             progress: number;
+            /** Request Id */
+            request_id?: string | null;
             /**
              * Size Bytes
              * @default 0
@@ -3234,22 +7579,70 @@ export interface components {
             size_bytes: number;
             /** Source Path */
             source_path?: string | null;
-            /** Target Path */
-            target_path?: string | null;
-            /** Error Message */
-            error_message?: string | null;
-            /** Client Name */
-            client_name?: string | null;
-            /** Client Driver Type */
-            client_driver_type?: string | null;
             /** Speed Bps */
             speed_bps?: number | null;
-            /** Eta Seconds */
-            eta_seconds?: number | null;
-            /** Created At */
-            created_at?: string | null;
+            /**
+             * Status
+             * @default queued
+             */
+            status: string;
+            /** Target Path */
+            target_path?: string | null;
+            /** Title */
+            title: string;
             /** Updated At */
             updated_at?: string | null;
+        };
+        /** ReleaseProfilePayload */
+        ReleaseProfilePayload: {
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Ignored */
+            ignored?: string[];
+            /** Indexer Ids */
+            indexer_ids?: string[];
+            /** Name */
+            name: string;
+            /** Quality Profile Ids */
+            quality_profile_ids?: string[];
+            /** Required */
+            required?: string[];
+            /** Tags */
+            tags?: string[];
+        };
+        /** ReleaseProfileResponse */
+        ReleaseProfileResponse: {
+            /** Created At */
+            created_at?: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Id */
+            id: number;
+            /** Ignored */
+            ignored: string[];
+            /** Indexer Ids */
+            indexer_ids: unknown[];
+            /** Name */
+            name: string;
+            /** Quality Profile Ids */
+            quality_profile_ids: string[];
+            /** Required */
+            required: string[];
+            /** Tags */
+            tags: unknown[];
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** RemoveOrphanRequest */
+        RemoveOrphanRequest: {
+            /**
+             * Delete Files
+             * @default false
+             */
+            delete_files: boolean;
         };
         /** RenameApplyRequest */
         RenameApplyRequest: {
@@ -3258,44 +7651,114 @@ export interface components {
         };
         /** RenamePreviewRequest */
         RenamePreviewRequest: {
-            /** Artist Id */
-            artist_id?: string | null;
             /** Album Id */
             album_id?: string | null;
+            /** Artist Id */
+            artist_id?: string | null;
             /**
              * Limit
              * @default 200
              */
             limit: number;
         };
+        /** RenameRequest */
+        RenameRequest: {
+            /** Title */
+            title: string;
+        };
+        /** ReorderPayload */
+        ReorderPayload: {
+            /** Ids */
+            ids: number[];
+        };
         /** ScanRequest */
         ScanRequest: {
-            /** Root Folder */
-            root_folder?: string | null;
             /**
              * Prune Missing
              * @default false
              */
             prune_missing: boolean;
+            /** Root Folder */
+            root_folder?: string | null;
+        };
+        /** ScheduledTaskItem */
+        ScheduledTaskItem: {
+            /**
+             * Can Cancel
+             * @default false
+             */
+            can_cancel: boolean;
+            /**
+             * Can Trigger
+             * @default true
+             */
+            can_trigger: boolean;
+            /** Description */
+            description: string;
+            /** Id */
+            id: string;
+            /** Interval */
+            interval: string;
+            /** Last Run At */
+            last_run_at?: string | null;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+        };
+        /** ScrobbleConfigUpdate */
+        ScrobbleConfigUpdate: {
+            /** Listenbrainz Token */
+            listenbrainz_token?: string | null;
+            /** Scrobbling Enabled */
+            scrobbling_enabled?: boolean | null;
+            /**
+             * Unlink Lastfm
+             * @default false
+             */
+            unlink_lastfm: boolean;
+        };
+        /** ServerConfigUpdate */
+        ServerConfigUpdate: {
+            /** Lastfm Api Key */
+            lastfm_api_key?: string | null;
+            /** Lastfm Api Secret */
+            lastfm_api_secret?: string | null;
+            /** Plex History Poll Minutes */
+            plex_history_poll_minutes?: number | null;
         };
         /** ServicePingResult */
         ServicePingResult: {
-            /** Id */
-            id: string;
-            /** Name */
-            name: string;
-            /** Service Type */
-            service_type: string;
-            /** Host Url */
-            host_url: string;
             /** Enabled */
             enabled: boolean;
-            /** Online */
-            online: boolean;
+            /** Host Url */
+            host_url: string;
+            /** Id */
+            id: string;
             /** Latency Ms */
             latency_ms?: number | null;
             /** Message */
             message: string;
+            /** Name */
+            name: string;
+            /** Online */
+            online: boolean;
+            /** Service Type */
+            service_type: string;
+        };
+        /** SessionStatusRequest */
+        SessionStatusRequest: {
+            /**
+             * Record Login
+             * @default false
+             */
+            record_login: boolean;
+            /** Session Issued At */
+            session_issued_at: number;
+            /** User Id */
+            user_id: string;
+            /** Username */
+            username?: string | null;
         };
         /** SmartMixRequest */
         SmartMixRequest: {
@@ -3315,56 +7778,146 @@ export interface components {
              */
             targets?: string[] | null;
         };
+        /** SpecificationModel */
+        SpecificationModel: {
+            /** Fields */
+            fields?: unknown;
+            /** Implementation */
+            implementation: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Negate
+             * @default false
+             */
+            negate: boolean;
+            /**
+             * Required
+             * @default false
+             */
+            required: boolean;
+        };
+        /** StatusBody */
+        StatusBody: {
+            status: components["schemas"]["IssueStatus"];
+        };
         /** SystemStatusResponse */
         SystemStatusResponse: {
-            environment: components["schemas"]["EnvironmentStatus"];
-            /** Storage */
-            storage: components["schemas"]["DiskUsageItem"][];
             database: components["schemas"]["DatabaseStatus"];
-            plex: components["schemas"]["PlexStatus"];
             /** Download Clients */
             download_clients: components["schemas"]["ServicePingResult"][];
+            environment: components["schemas"]["EnvironmentStatus"];
             /** Indexers */
             indexers: components["schemas"]["ServicePingResult"][];
+            plex: components["schemas"]["PlexStatus"];
+            /** Storage */
+            storage: components["schemas"]["DiskUsageItem"][];
             workers: components["schemas"]["WorkerStatus"];
+        };
+        /** TagDeleted */
+        TagDeleted: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @default deleted
+             */
+            status: string;
+        };
+        /** TagOut */
+        TagOut: {
+            /**
+             * Artist Count
+             * @default 0
+             */
+            artist_count: number;
+            /** Created At */
+            created_at: string;
+            /**
+             * Delay Profile Count
+             * @default 0
+             */
+            delay_profile_count: number;
+            /** Id */
+            id: number;
+            /**
+             * Import List Count
+             * @default 0
+             */
+            import_list_count: number;
+            /** Label */
+            label: string;
+            /**
+             * Release Profile Count
+             * @default 0
+             */
+            release_profile_count: number;
+        };
+        /** TagPayload */
+        TagPayload: {
+            /**
+             * Label
+             * @description 1-40 characters of a-z, 0-9, space, hyphen or underscore (lower-cased)
+             */
+            label: string;
+        };
+        /** TagRef */
+        TagRef: {
+            /** Id */
+            id: number | string;
+            /** Name */
+            name: string;
+        };
+        /** TagUsage */
+        TagUsage: {
+            /** Artist Count */
+            artist_count: number;
+            /**
+             * Artists
+             * @description First 200 artists carrying the tag, by name
+             */
+            artists: components["schemas"]["TagRef"][];
+            /** Delay Profiles */
+            delay_profiles: components["schemas"]["TagRef"][];
+            /** Import Lists */
+            import_lists: components["schemas"]["TagRef"][];
+            /** Release Profiles */
+            release_profiles: components["schemas"]["TagRef"][];
+            tag: components["schemas"]["TagOut"];
         };
         /** TestConnectionPayload */
         TestConnectionPayload: {
-            /** Driver Type */
-            driver_type: string;
-            /** Host Url */
-            host_url: string;
             /** Api Key */
             api_key?: string | null;
-            /** Username */
-            username?: string | null;
-            /** Password */
-            password?: string | null;
             /** Category */
             category?: string | null;
+            /** Driver Type */
+            driver_type: string;
+            /** Extra Settings Json */
+            extra_settings_json?: string | null;
+            /** Host Url */
+            host_url: string;
+            /** Password */
+            password?: string | null;
             /** Remote Path Mappings */
             remote_path_mappings?: {
                 [key: string]: string;
             }[] | null;
-            /** Extra Settings Json */
-            extra_settings_json?: string | null;
+            /** Username */
+            username?: string | null;
         };
         /** TestConnectionResponse */
         TestConnectionResponse: {
-            /** Success */
-            success: boolean;
             /** Message */
             message: string;
+            /** Success */
+            success: boolean;
         };
         /** TestIndexerPayload */
         TestIndexerPayload: {
-            /**
-             * Indexer Type
-             * @default torznab
-             */
-            indexer_type: string;
-            /** Host Url */
-            host_url: string;
             /** Api Key */
             api_key?: string | null;
             /**
@@ -3372,39 +7925,56 @@ export interface components {
              * @default 3000,3010,3020,3030,3040
              */
             categories: string;
+            /** Host Url */
+            host_url: string;
+            /** Id */
+            id?: string | null;
+            /**
+             * Indexer Type
+             * @default torznab
+             */
+            indexer_type: string;
         };
         /** TestIndexerResponse */
         TestIndexerResponse: {
-            /** Success */
-            success: boolean;
             /** Message */
             message: string;
+            /** Success */
+            success: boolean;
         };
         /** TestNotificationPayload */
         TestNotificationPayload: {
+            /** Channel Id */
+            channel_id?: string | null;
             /** Channel Type */
             channel_type: string;
             /** Config */
             config?: {
                 [key: string]: unknown;
             };
-            /** Channel Id */
-            channel_id?: string | null;
         };
         /** TestNotificationResponse */
         TestNotificationResponse: {
-            /** Success */
-            success: boolean;
             /** Message */
             message: string;
+            /** Success */
+            success: boolean;
+        };
+        /** TrackBulkEditRequest */
+        TrackBulkEditRequest: {
+            /** Monitored */
+            monitored: boolean;
+            /** Track Ids */
+            track_ids: string[];
         };
         /** TrackImportItem */
         TrackImportItem: {
             /**
-             * Title
-             * @description Track title
+             * Album
+             * @description Album name
+             * @default
              */
-            title: string;
+            album: string | null;
             /**
              * Artist
              * @description Artist name
@@ -3412,11 +7982,10 @@ export interface components {
              */
             artist: string | null;
             /**
-             * Album
-             * @description Album name
-             * @default
+             * Title
+             * @description Track title
              */
-            album: string | null;
+            title: string;
             /**
              * Uri
              * @description Optional Spotify/Deezer URI or URL
@@ -3429,36 +7998,73 @@ export interface components {
             /** Monitored */
             monitored: boolean;
         };
-        /** UpdateIssueBody */
+        /** UpdateAdminUserBody */
+        UpdateAdminUserBody: {
+            /** Email */
+            email?: string | null;
+            /** Permissions */
+            permissions?: number | null;
+            /** Quota Albums */
+            quota_albums?: number | null;
+            /** Quota Discographies */
+            quota_discographies?: number | null;
+            /** Quota Tracks */
+            quota_tracks?: number | null;
+            /** Quota Window Days */
+            quota_window_days?: number | null;
+            /** Quotas */
+            quotas?: {
+                [key: string]: number | null;
+            } | null;
+        };
+        /**
+         * UpdateIssueBody
+         * @description Admin PUT. Unknown fields are refused so nothing but these two can be smuggled in.
+         */
         UpdateIssueBody: {
-            /** Status */
-            status?: string | null;
             /** Problem Details */
             problem_details?: string | null;
+            status?: components["schemas"]["IssueStatus"] | null;
         };
         /** UpdateUserGovernanceBody */
         UpdateUserGovernanceBody: {
-            /** Permissions */
-            permissions?: number | null;
-            /** Request Limit Quota */
-            request_limit_quota?: number | null;
-            /** Request Limit Days */
-            request_limit_days?: number | null;
             /** Is Admin */
             is_admin?: boolean | null;
+            /** Permissions */
+            permissions?: number | null;
+            /** Request Limit Days */
+            request_limit_days?: number | null;
+            /** Request Limit Quota */
+            request_limit_quota?: number | null;
         };
         /** ValidationError */
         ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
             msg: string;
             /** Error Type */
             type: string;
-            /** Input */
-            input?: unknown;
-            /** Context */
-            ctx?: Record<string, never>;
+        };
+        /** VerifyLocalRequest */
+        VerifyLocalRequest: {
+            /**
+             * Client Ip
+             * @default unknown
+             */
+            client_ip: string;
+            /** Password */
+            password: string;
+            /** Recovery Code */
+            recovery_code?: string | null;
+            /** Totp Code */
+            totp_code?: string | null;
+            /** Username */
+            username: string;
         };
         /** VerifyPinRequest */
         VerifyPinRequest: {
@@ -3473,28 +8079,48 @@ export interface components {
              */
             target_machine_id?: string | null;
         };
+        /**
+         * WantedSearchRequest
+         * @description Either explicit ``ids`` or ``all`` + ``list``.
+         */
+        WantedSearchRequest: {
+            /**
+             * All
+             * @default false
+             */
+            all: boolean;
+            /** Ids */
+            ids?: (string | number)[] | null;
+            /** List */
+            list?: ("missing" | "cutoff") | null;
+        };
+        /** WeeklyRequest */
+        WeeklyRequest: {
+            /** Enabled */
+            enabled: boolean;
+        };
         /** WorkerStatus */
         WorkerStatus: {
             /** Acquisition Worker */
             acquisition_worker: {
                 [key: string]: unknown;
             };
-            /** Lidarr Worker */
-            lidarr_worker: {
-                [key: string]: unknown;
-            };
-            /** Sync Coordinator */
-            sync_coordinator: {
-                [key: string]: unknown;
-            };
             /** Backlog Worker */
             backlog_worker?: {
                 [key: string]: unknown;
             } | null;
+            /** Lidarr Worker */
+            lidarr_worker: {
+                [key: string]: unknown;
+            };
             /** Rss Worker */
             rss_worker?: {
                 [key: string]: unknown;
             } | null;
+            /** Sync Coordinator */
+            sync_coordinator: {
+                [key: string]: unknown;
+            };
         };
     };
     responses: never;
@@ -3505,6 +8131,1328 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_account_api_account_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    mfa_confirm_api_account_mfa_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CodeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mfa_disable_api_account_mfa_disable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordAndCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mfa_regenerate_recovery_codes_api_account_mfa_recovery_codes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordAndCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mfa_setup_api_account_mfa_setup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_password_api_account_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_blocklist_api_acquisition_blocklist_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_from_blocklist_api_acquisition_blocklist__blocklist_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                blocklist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grab_release_api_acquisition_grab_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualGrabPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_pending_api_acquisition_pending_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingReleaseResponse"][];
+                };
+            };
+        };
+    };
+    drop_pending_api_acquisition_pending__pending_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pending_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grab_pending_now_api_acquisition_pending__pending_id__grab_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pending_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_releases_api_acquisition_search_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InteractiveSearchQuery"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_blocklist_api_activity_blocklist_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                sort_key?: string | null;
+                sort_dir?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_blocklist_item_api_activity_blocklist__blocklist_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                blocklist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_history_api_activity_history_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                sort_key?: string | null;
+                sort_dir?: string;
+                event?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    history_index_api_activity_history_index_get: {
+        parameters: {
+            query?: {
+                sort_key?: string | null;
+                sort_dir?: string;
+                event?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_history_failed_api_activity_history__history_id__failed_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                history_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_queue_api_activity_queue_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                sort_key?: string | null;
+                sort_dir?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_queue_item_api_activity_queue__queue_id__delete: {
+        parameters: {
+            query?: {
+                remove_from_client?: boolean;
+                blocklist?: boolean;
+            };
+            header?: never;
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_queue_item_api_activity_queue__queue_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gateway_status_api_admin_gateway_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    list_permission_labels_api_admin_permissions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    get_role_change_notice_api_admin_role_change_notice_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    dismiss_role_change_notice_api_admin_role_change_notice_dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_account_settings_api_admin_settings_accounts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    put_account_settings_api_admin_settings_accounts_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountSettingsBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_admin_users_api_admin_users_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    create_admin_user_api_admin_users_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAdminUserBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_admin_user_api_admin_users__user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteAdminUserBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_admin_user_api_admin_users__user_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAdminUserBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_admin_user_api_admin_users__user_id__disable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enable_admin_user_api_admin_users__user_id__enable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_admin_user_mfa_api_admin_users__user_id__reset_mfa_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_admin_user_password_api_admin_users__user_id__reset_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_admin_user_api_admin_users__user_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_admin_user_sessions_api_admin_users__user_id__revoke_sessions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_invite_api_auth_invite__token__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_invite_api_auth_invite__token__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InviteAcceptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    local_login_api_auth_local_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    logout_api_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_me_api_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     generate_pin_api_auth_plex_pin_post: {
         parameters: {
             query?: {
@@ -3577,108 +9525,16 @@ export interface operations {
             };
         };
     };
-    logout_api_auth_logout_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    get_me_api_auth_me_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    get_current_user_profile_api_users_me_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    list_users_api_users_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-        };
-    };
-    update_user_governance_route_api_users__user_id__put: {
+    get_album_api_discovery_album__album_id__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                user_id: string;
+                album_id: string;
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateUserGovernanceBody"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -3702,9 +9558,12 @@ export interface operations {
             };
         };
     };
-    refresh_users_api_users_refresh_post: {
+    get_artist_profile_api_discovery_artist_profile_get: {
         parameters: {
-            query?: never;
+            query?: {
+                discovery_id?: string | null;
+                library_artist_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3713,54 +9572,6 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-        };
-    };
-    list_playlists_api_playlists_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-        };
-    };
-    create_playlist_api_playlists_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PlaylistCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3781,812 +9592,13 @@ export interface operations {
             };
         };
     };
-    list_featured_charts_api_playlists_featured_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-        };
-    };
-    get_smart_mix_presets_api_playlists_smart_mix_presets_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-        };
-    };
-    create_smart_mix_api_playlists_smart_mix_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SmartMixRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_playlist_targets_api_playlists__playlist_id__targets_put: {
+    get_artist_api_discovery_artist__artist_id__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                playlist_id: string;
+                artist_id: string;
             };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PlaylistTargetsRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    set_playlist_enabled_api_playlists__playlist_id__enabled_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                playlist_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PlaylistEnabledRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_playlist_api_playlists__playlist_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                playlist_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    import_playlist_tracks_api_playlists_import_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PlaylistDirectImportRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    import_m3u_playlist_api_playlists_import_m3u_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["M3UImportRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    trigger_sync_api_sync_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    get_sync_status_api_sync_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    stream_sync_logs_api_sync_stream_get: {
-        parameters: {
-            query?: {
-                limit?: number | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    handle_sync_webhook_api_sync_webhook_post: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_missing_tracks_api_missing_get: {
-        parameters: {
-            query?: {
-                /** @description Optional playlist ID filter */
-                playlist_id?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    download_missing_csv_api_missing_csv_get: {
-        parameters: {
-            query?: {
-                /** @description Optional playlist ID filter */
-                playlist_id?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    feed_missing_rss_api_missing_rss_get: {
-        parameters: {
-            query?: {
-                /** @description Optional playlist ID filter */
-                playlist_id?: string | null;
-                token?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    feed_missing_text_api_missing_text_get: {
-        parameters: {
-            query?: {
-                /** @description Optional playlist ID filter */
-                playlist_id?: string | null;
-                token?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_lidarr_status_api_missing_lidarr_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    push_missing_to_lidarr_api_missing_lidarr_push_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["LidarrPushRequest"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_lidarr_queue_status_api_missing_lidarr_queue_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    pause_lidarr_queue_api_missing_lidarr_queue_pause_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    resume_lidarr_queue_api_missing_lidarr_queue_resume_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    cancel_lidarr_queue_api_missing_lidarr_queue_cancel_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    search_plex_tracks_api_missing_search_get: {
-        parameters: {
-            query: {
-                /** @description Query string to search Plex library tracks */
-                query: string;
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_match_override_api_missing_match_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MatchOverrideRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_match_overrides_api_missing_matches_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-        };
-    };
-    delete_match_override_api_missing_match__override_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                override_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    grab_missing_track_api_missing__track_id__grab_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                track_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_trending_api_discovery_trending_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -4681,7 +9693,1326 @@ export interface operations {
             };
         };
     };
-    get_album_api_discovery_album__album_id__get: {
+    get_track_api_discovery_track__track_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                track_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_trending_api_discovery_trending_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    health_check_api_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    health_ready_api_health_ready_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_import_lists_api_import_lists_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportList"][];
+                };
+            };
+        };
+    };
+    create_import_list_api_import_lists_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportListInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_providers_api_import_lists_providers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    test_import_list_api_import_lists_test_post: {
+        parameters: {
+            query?: {
+                /** @description Existing list whose stored secrets replace ******** values */
+                list_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportListInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportListTestResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_import_list_api_import_lists__list_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_import_list_api_import_lists__list_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportListInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_import_list_api_import_lists__list_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_items_api_import_lists__list_id__items_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                list_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportListItemsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_now_api_import_lists__list_id__sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_itunes_import_api_import_itunes_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    commit_itunes_import_api_import_itunes__import_id__commit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    itunes_import_status_api_import_itunes__import_id__status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_local_api_internal_auth_local_verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyLocalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    session_status_api_internal_auth_session_status_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gateway_heartbeat_api_internal_gateway_heartbeat_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GatewayHeartbeat"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    hello_api_internal_hello_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    list_issues_api_issues_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                media_title?: string | null;
+                artist?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_issue_api_issues_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateIssueBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_count_api_issues_open_count_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+        };
+    };
+    unread_count_api_issues_unread_count_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+        };
+    };
+    get_issue_api_issues__issue_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_issue_api_issues__issue_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateIssueBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_issue_api_issues__issue_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_issue_action_api_issues__issue_id__actions__action__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                issue_id: string;
+                action: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_comments_api_issues__issue_id__comments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_comment_api_issues__issue_id__comments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommentBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_seen_api_issues__issue_id__seen_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_issue_status_api_issues__issue_id__status_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StatusBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_library_health_api_library_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    start_library_health_check_api_library_health_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_library_health_count_api_library_health_count_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+        };
+    };
+    dismiss_library_health_api_library_health_dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DismissRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_library_health_mapping_api_library_health_mapping_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MappingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_library_health_mapping_api_library_health_mapping_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    put_library_health_weekly_api_library_health_weekly_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WeeklyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_albums_api_library_albums_get: {
+        parameters: {
+            query?: {
+                artist_id?: string | null;
+                monitored_only?: boolean;
+                query?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_edit_albums_api_library_albums_bulk_edit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlbumBulkEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    albums_index_api_library_albums_index_get: {
+        parameters: {
+            query?: {
+                sort_key?: string | null;
+                sort_dir?: string;
+                q?: string | null;
+                monitored_only?: boolean;
+                artist_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    paged_albums_api_library_albums_paged_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                sort_key?: string | null;
+                sort_dir?: string;
+                q?: string | null;
+                monitored_only?: boolean;
+                artist_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_album_api_library_albums__album_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -4714,7 +11045,330 @@ export interface operations {
             };
         };
     };
-    get_artist_api_discovery_artist__artist_id__get: {
+    delete_album_api_library_albums__album_id__delete: {
+        parameters: {
+            query?: {
+                delete_files?: boolean;
+            };
+            header?: never;
+            path: {
+                album_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_album_cover_api_library_albums__album_id__cover_get: {
+        parameters: {
+            query?: {
+                /** @description Thumbnail size: 250 or 500; anything else serves the original */
+                size?: number | null;
+                /** @description Art version token; the response is immutable only when it equals the served file's version */
+                v?: string | null;
+            };
+            header?: {
+                "if-none-match"?: string | null;
+            };
+            path: {
+                album_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_album_monitored_api_library_albums__album_id__monitored_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                album_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlbumMonitoredRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_album_api_library_albums__album_id__search_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                album_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_artists_api_library_artists_get: {
+        parameters: {
+            query?: {
+                monitored_only?: boolean;
+                query?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_edit_artists_api_library_artists_bulk_edit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtistBulkEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    artists_index_api_library_artists_index_get: {
+        parameters: {
+            query?: {
+                sort_key?: string | null;
+                sort_dir?: string;
+                q?: string | null;
+                monitored_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_artist_api_library_artists_ingest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IngestArtistRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    paged_artists_api_library_artists_paged_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                sort_key?: string | null;
+                sort_dir?: string;
+                q?: string | null;
+                monitored_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_artist_api_library_artists__artist_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -4743,6 +11397,3197 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_artist_api_library_artists__artist_id__delete: {
+        parameters: {
+            query?: {
+                delete_files?: boolean;
+            };
+            header?: never;
+            path: {
+                artist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_artist_banner_api_library_artists__artist_id__banner_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-none-match"?: string | null;
+            };
+            path: {
+                artist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_artist_image_api_library_artists__artist_id__image_get: {
+        parameters: {
+            query?: {
+                /** @description Thumbnail size: 250 or 500; anything else serves the original */
+                size?: number | null;
+                /** @description Art version token; the response is immutable only when it equals the served file's version */
+                v?: string | null;
+            };
+            header?: {
+                "if-none-match"?: string | null;
+            };
+            path: {
+                artist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_metadata_profile_api_library_artists__artist_id__metadata_profile_preview_get: {
+        parameters: {
+            query?: {
+                profile_id?: number | null;
+            };
+            header?: never;
+            path: {
+                artist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_artist_monitored_api_library_artists__artist_id__monitored_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtistMonitoredRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_artist_api_library_artists__artist_id__refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_metadata_profile_api_library_artists__artist_id__release_profile_preview_get: {
+        parameters: {
+            query?: {
+                profile_id?: number | null;
+            };
+            header?: never;
+            path: {
+                artist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_artist_api_library_artists__artist_id__search_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_artist_tags_api_library_artists__artist_id__tags_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtistTagsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtistTagsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_availability_api_library_availability_get: {
+        parameters: {
+            query?: {
+                artist_name?: string | null;
+                album_title?: string | null;
+                track_title?: string | null;
+                foreign_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_collections_api_library_collections_get: {
+        parameters: {
+            query?: {
+                query?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_collection_api_library_collections_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCollectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_collection_api_library_collections__collection_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_collection_api_library_collections__collection_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_album_to_collection_api_library_collections__collection_id__albums_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddAlbumToCollectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_album_from_collection_api_library_collections__collection_id__albums__album_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: string;
+                album_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_file_api_library_files__file_id__delete: {
+        parameters: {
+            query?: {
+                delete_file_from_disk?: boolean;
+            };
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    manual_import_album_tracks_api_library_manual_import_album_tracks_get: {
+        parameters: {
+            query: {
+                album_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    manual_import_commit_api_library_manual_import_commit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualImportCommitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fingerprint_file_api_library_manual_import_fingerprint_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FingerprintRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    manual_import_scan_api_library_manual_import_scan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ManualImportScanRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_metadata_profiles_api_library_metadata_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    create_metadata_profile_api_library_metadata_profiles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetadataProfileBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_metadata_profile_api_library_metadata_profiles__profile_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetadataProfileBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_metadata_profile_api_library_metadata_profiles__profile_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_lidarr_migration_api_library_migrate_lidarr_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["MigrateLidarrRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_lidarr_migration_api_library_migrate_lidarr_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_lidarr_migration_status_api_library_migrate_lidarr_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    list_metadata_profiles_api_library_release_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    create_metadata_profile_api_library_release_profiles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetadataProfileBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_metadata_profile_api_library_release_profiles__profile_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetadataProfileBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_metadata_profile_api_library_release_profiles__profile_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_apply_api_library_rename_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_preview_api_library_rename_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RenamePreviewRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_scan_api_library_scan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ScanRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_scan_api_library_scan_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_scan_status_api_library_scan_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_library_stats_api_library_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    list_tracks_api_library_tracks_get: {
+        parameters: {
+            query?: {
+                album_id?: string | null;
+                artist_id?: string | null;
+                monitored_only?: boolean;
+                query?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_edit_tracks_api_library_tracks_bulk_edit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrackBulkEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tracks_index_api_library_tracks_index_get: {
+        parameters: {
+            query?: {
+                sort_key?: string | null;
+                sort_dir?: string;
+                q?: string | null;
+                monitored_only?: boolean;
+                artist_id?: string | null;
+                album_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    paged_tracks_api_library_tracks_paged_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                sort_key?: string | null;
+                sort_dir?: string;
+                q?: string | null;
+                monitored_only?: boolean;
+                artist_id?: string | null;
+                album_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_track_api_library_tracks__track_id__delete: {
+        parameters: {
+            query?: {
+                delete_files?: boolean;
+            };
+            header?: never;
+            path: {
+                track_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_track_monitored_api_library_tracks__track_id__monitored_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                track_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrackMonitoredRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_item_history_api_library__entity___entity_id__history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /** @description Return events older than this event id */
+                before?: number | null;
+            };
+            header?: never;
+            path: {
+                entity: "artist" | "album" | "track";
+                entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_missing_tracks_api_missing_get: {
+        parameters: {
+            query?: {
+                /** @description Optional playlist ID filter */
+                playlist_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_missing_csv_api_missing_csv_get: {
+        parameters: {
+            query?: {
+                /** @description Optional playlist ID filter */
+                playlist_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_missing_to_lidarr_api_missing_lidarr_push_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["LidarrPushRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_lidarr_queue_status_api_missing_lidarr_queue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    cancel_lidarr_queue_api_missing_lidarr_queue_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    pause_lidarr_queue_api_missing_lidarr_queue_pause_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    resume_lidarr_queue_api_missing_lidarr_queue_resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_lidarr_status_api_missing_lidarr_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    create_match_override_api_missing_match_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MatchOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_match_override_api_missing_match__override_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                override_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_match_overrides_api_missing_matches_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    feed_missing_rss_api_missing_rss_get: {
+        parameters: {
+            query?: {
+                /** @description Optional playlist ID filter */
+                playlist_id?: string | null;
+                token?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_plex_tracks_api_missing_search_get: {
+        parameters: {
+            query: {
+                /** @description Query string to search Plex library tracks */
+                query: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    feed_missing_text_api_missing_text_get: {
+        parameters: {
+            query?: {
+                /** @description Optional playlist ID filter */
+                playlist_id?: string | null;
+                token?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grab_missing_track_api_missing__track_id__grab_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                track_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mixes_api_mixes_get: {
+        parameters: {
+            query?: {
+                user_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_mix_api_mixes_post: {
+        parameters: {
+            query?: {
+                user_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MixCreateBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_mix_api_mixes__mix_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mix_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MixUpdateBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_mix_api_mixes__mix_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mix_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_mix_api_mixes__mix_id__generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mix_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_mix_api_mixes__mix_id__preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mix_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mix_result_api_mixes__mix_id__result_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mix_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_playlists_api_playlists_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    create_playlist_api_playlists_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaylistCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_featured_charts_api_playlists_featured_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    import_playlist_tracks_api_playlists_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaylistDirectImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_m3u_playlist_api_playlists_import_m3u_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["M3UImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_smart_mix_api_playlists_smart_mix_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmartMixRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_smart_mix_presets_api_playlists_smart_mix_presets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    delete_playlist_api_playlists__playlist_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_playlist_enabled_api_playlists__playlist_id__enabled_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaylistEnabledRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_playlist_monitor_mode_api_playlists__playlist_id__monitor_mode_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaylistMonitorModeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_playlist_targets_api_playlists__playlist_id__targets_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaylistTargetsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_plex_playlists_api_plex_playlists_get: {
+        parameters: {
+            query?: {
+                user?: string | null;
+                include_ignored?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mixes_api_plex_playlists_mixes_get: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_snapshot_api_plex_playlists_mixes_snapshot_post: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MixSnapshotRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_snapshots_api_plex_playlists_mixes_snapshots_get: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_snapshot_api_plex_playlists_mixes_snapshots__snapshot_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                snapshot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MixSnapshotUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_snapshot_api_plex_playlists_mixes_snapshots__snapshot_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                snapshot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_plex_users_api_plex_playlists_users_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    delete_playlist_api_plex_playlists__rating_key__delete: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path: {
+                rating_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_playlist_api_plex_playlists__rating_key__patch: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path: {
+                rating_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    adopt_playlist_api_plex_playlists__rating_key__adopt_post: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path: {
+                rating_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    copy_playlist_api_plex_playlists__rating_key__copy_post: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path: {
+                rating_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CopyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_playlist_flags_api_plex_playlists__rating_key__flags_put: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path: {
+                rating_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FlagsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_playlist_items_api_plex_playlists__rating_key__items_get: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path: {
+                rating_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_playlist_items_api_plex_playlists__rating_key__items_post: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path: {
+                rating_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddItemsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_playlist_item_api_plex_playlists__rating_key__items__playlist_item_id__delete: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path: {
+                rating_key: string;
+                playlist_item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    move_playlist_item_api_plex_playlists__rating_key__items__playlist_item_id__move_post: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path: {
+                rating_key: string;
+                playlist_item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MoveItemRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_queue_api_queue_get: {
+        parameters: {
+            query?: {
+                /** @description Include completed and failed downloads */
+                include_history?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueueItemResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_download_api_queue__download_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                download_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    empty_recycle_bin_api_recycle_bin_empty_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmptyRecycleBinRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_recycle_bin_status_api_recycle_bin_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
@@ -4850,6 +14695,39 @@ export interface operations {
             };
         };
     };
+    delete_request_api_requests__request_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     approve_request_api_requests__request_id__approve_post: {
         parameters: {
             query?: never;
@@ -4916,39 +14794,6 @@ export interface operations {
             };
         };
     };
-    delete_request_api_requests__request_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                request_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     retry_request_api_requests__request_id__retry_post: {
         parameters: {
             query?: never;
@@ -4982,11 +14827,9 @@ export interface operations {
             };
         };
     };
-    list_issues_api_issues_get: {
+    get_my_config_api_scrobbles_config_get: {
         parameters: {
-            query?: {
-                status?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -4999,21 +14842,14 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["IssueResponse"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
     };
-    create_issue_api_issues_post: {
+    update_my_config_api_scrobbles_config_put: {
         parameters: {
             query?: never;
             header?: never;
@@ -5022,106 +14858,9 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateIssueBody"];
+                "application/json": components["schemas"]["ScrobbleConfigUpdate"];
             };
         };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IssueResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_issue_api_issues__issue_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                issue_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IssueResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_issue_api_issues__issue_id__put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                issue_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateIssueBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IssueResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_issue_api_issues__issue_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                issue_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -5145,9 +14884,11 @@ export interface operations {
             };
         };
     };
-    get_library_stats_api_library_stats_get: {
+    lastfm_auth_url_api_scrobbles_lastfm_auth_url_get: {
         parameters: {
-            query?: never;
+            query?: {
+                forward_url?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5161,19 +14902,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        [key: string]: unknown;
+                        [key: string]: string;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    list_artists_api_library_artists_get: {
+    list_my_listens_api_scrobbles_listens_get: {
         parameters: {
             query?: {
-                monitored_only?: boolean;
-                query?: string | null;
                 limit?: number;
                 offset?: number;
+                user_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -5203,7 +14952,62 @@ export interface operations {
             };
         };
     };
-    ingest_artist_api_library_artists_ingest_post: {
+    plex_webhook_api_scrobbles_plex_post: {
+        parameters: {
+            query?: {
+                token?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_server_config_api_scrobbles_server_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    update_server_config_api_scrobbles_server_config_put: {
         parameters: {
             query?: never;
             header?: never;
@@ -5212,7 +15016,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["IngestArtistRequest"];
+                "application/json": components["schemas"]["ServerConfigUpdate"];
             };
         };
         responses: {
@@ -5238,153 +15042,9 @@ export interface operations {
             };
         };
     };
-    get_artist_api_library_artists__artist_id__get: {
+    list_user_configs_api_scrobbles_users_get: {
         parameters: {
             query?: never;
-            header?: never;
-            path: {
-                artist_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_artist_api_library_artists__artist_id__delete: {
-        parameters: {
-            query?: {
-                delete_files?: boolean;
-            };
-            header?: never;
-            path: {
-                artist_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    set_artist_monitored_api_library_artists__artist_id__monitored_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                artist_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ArtistMonitoredRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    refresh_artist_api_library_artists__artist_id__refresh_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                artist_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_albums_api_library_albums_get: {
-        parameters: {
-            query?: {
-                artist_id?: string | null;
-                monitored_only?: boolean;
-                query?: string | null;
-                limit?: number;
-                offset?: number;
-            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5402,97 +15062,20 @@ export interface operations {
                     }[];
                 };
             };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
         };
     };
-    get_album_api_library_albums__album_id__get: {
+    update_user_config_api_scrobbles_users__user_id__config_put: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                album_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_album_api_library_albums__album_id__delete: {
-        parameters: {
-            query?: {
-                delete_files?: boolean;
-            };
-            header?: never;
-            path: {
-                album_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    set_album_monitored_api_library_albums__album_id__monitored_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                album_id: string;
+                user_id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AlbumMonitoredRequest"];
+                "application/json": components["schemas"]["AdminScrobbleConfigUpdate"];
             };
         };
         responses: {
@@ -5518,16 +15101,9 @@ export interface operations {
             };
         };
     };
-    list_tracks_api_library_tracks_get: {
+    rotate_webhook_secret_api_scrobbles_webhook_secret_rotate_post: {
         parameters: {
-            query?: {
-                album_id?: string | null;
-                artist_id?: string | null;
-                monitored_only?: boolean;
-                query?: string | null;
-                limit?: number;
-                offset?: number;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -5541,35 +15117,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                        [key: string]: string;
+                    };
                 };
             };
         };
     };
-    set_track_monitored_api_library_tracks__track_id__monitored_put: {
+    get_webhook_url_api_scrobbles_webhook_url_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+        };
+    };
+    retry_failed_cleanup_api_seed_cleanup_failed__finding_id__retry_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                track_id: string;
+                finding_id: string;
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TrackMonitoredRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -5593,315 +15178,18 @@ export interface operations {
             };
         };
     };
-    delete_track_api_library_tracks__track_id__delete: {
+    remove_orphan_torrent_api_seed_cleanup_orphans__finding_id__remove_post: {
         parameters: {
-            query?: {
-                delete_files?: boolean;
-            };
+            query?: never;
             header?: never;
             path: {
-                track_id: string;
+                finding_id: string;
             };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_file_api_library_files__file_id__delete: {
-        parameters: {
-            query?: {
-                delete_file_from_disk?: boolean;
-            };
-            header?: never;
-            path: {
-                file_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_availability_api_library_availability_get: {
-        parameters: {
-            query?: {
-                artist_name?: string | null;
-                album_title?: string | null;
-                track_title?: string | null;
-                foreign_id?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    trigger_scan_api_library_scan_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["ScanRequest"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_scan_status_api_library_scan_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    cancel_scan_api_library_scan_cancel_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    trigger_lidarr_migration_api_library_migrate_lidarr_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["MigrateLidarrRequest"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_lidarr_migration_status_api_library_migrate_lidarr_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    cancel_lidarr_migration_api_library_migrate_lidarr_cancel_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    manual_import_scan_api_library_manual_import_scan_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["ManualImportScanRequest"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    manual_import_commit_api_library_manual_import_commit_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ManualImportCommitRequest"];
+                "application/json": components["schemas"]["RemoveOrphanRequest"];
             };
         };
         responses: {
@@ -5927,53 +15215,34 @@ export interface operations {
             };
         };
     };
-    rename_preview_api_library_rename_preview_post: {
+    run_seed_cleanup_api_seed_cleanup_run_post: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["RenamePreviewRequest"] | null;
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": unknown;
                 };
             };
         };
     };
-    rename_apply_api_library_rename_apply_post: {
+    get_seed_cleanup_status_api_seed_cleanup_status_get: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RenameApplyRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -5984,240 +15253,6 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_media_management_settings_api_settings_media_management_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MediaManagementGetResponse"];
-                };
-            };
-        };
-    };
-    update_media_management_settings_api_settings_media_management_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MediaManagementUpdateModel"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MediaManagementSettingsModel"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    preview_media_management_templates_api_settings_media_management_preview_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["PreviewRequestModel"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PreviewResponseModel"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_lidarr_settings_api_settings_lidarr_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LidarrSettingsModel"];
-                };
-            };
-        };
-    };
-    update_lidarr_settings_api_settings_lidarr_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LidarrSettingsUpdateModel"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LidarrSettingsModel"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    test_lidarr_connection_api_settings_lidarr_test_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LidarrTestConnectionPayload"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LidarrTestConnectionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_general_settings_api_settings_general_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GeneralSettingsModel"];
-                };
-            };
-        };
-    };
-    update_general_settings_api_settings_general_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GeneralSettingsUpdateModel"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GeneralSettingsModel"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -6262,6 +15297,380 @@ export interface operations {
             };
         };
     };
+    list_formats_api_settings_custom_formats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFormatResponse"][];
+                };
+            };
+        };
+    };
+    create_format_api_settings_custom_formats_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomFormatPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFormatResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_formats_api_settings_custom_formats_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_format_api_settings_custom_formats__format_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                format_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFormatResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_format_api_settings_custom_formats__format_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                format_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomFormatPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFormatResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_format_api_settings_custom_formats__format_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                format_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_custom_format_api_settings_custom_formats__format_id__export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                format_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_delay_profiles_api_settings_delay_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DelayProfileResponse"][];
+                };
+            };
+        };
+    };
+    create_delay_profile_api_settings_delay_profiles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DelayProfilePayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DelayProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reorder_delay_profiles_api_settings_delay_profiles_reorder_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReorderPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DelayProfileResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_delay_profile_api_settings_delay_profiles__profile_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DelayProfilePayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DelayProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_delay_profile_api_settings_delay_profiles__profile_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_download_clients_api_settings_download_clients_get: {
         parameters: {
             query?: never;
@@ -6302,6 +15711,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DownloadClientItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_download_roots_api_settings_download_clients_roots_get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DownloadRootsItem"][];
                 };
             };
             /** @description Validation Error */
@@ -6368,6 +15808,59 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_general_settings_api_settings_general_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeneralSettingsModel"];
+                };
+            };
+        };
+    };
+    update_general_settings_api_settings_general_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GeneralSettingsUpdateModel"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeneralSettingsModel"];
                 };
             };
             /** @description Validation Error */
@@ -6500,7 +15993,7 @@ export interface operations {
             };
         };
     };
-    list_quality_profiles_api_settings_quality_profiles_get: {
+    get_library_manager_api_settings_library_manager_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -6515,12 +16008,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["QualityProfileResponse"][];
+                    "application/json": components["schemas"]["LibraryManagerModel"];
                 };
             };
         };
     };
-    create_or_update_quality_profile_api_settings_quality_profiles_post: {
+    set_library_manager_api_settings_library_manager_put: {
         parameters: {
             query?: never;
             header?: never;
@@ -6529,7 +16022,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["QualityProfilePayload"];
+                "application/json": components["schemas"]["LibraryManagerUpdateModel"];
             };
         };
         responses: {
@@ -6539,27 +16032,30 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["QualityProfileResponse"];
+                    "application/json": components["schemas"]["LibraryManagerModel"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Work is in flight */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Lidarr is not configured */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
+                content?: never;
             };
         };
     };
-    get_quality_profile_api_settings_quality_profiles__profile_id__get: {
+    get_lidarr_settings_api_settings_lidarr_get: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                profile_id: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -6570,7 +16066,31 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["QualityProfileResponse"];
+                    "application/json": components["schemas"]["LidarrSettingsModel"];
+                };
+            };
+        };
+    };
+    update_lidarr_settings_api_settings_lidarr_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LidarrSettingsUpdateModel"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LidarrSettingsModel"];
                 };
             };
             /** @description Validation Error */
@@ -6584,13 +16104,64 @@ export interface operations {
             };
         };
     };
-    delete_quality_profile_api_settings_quality_profiles__profile_id__delete: {
+    update_lidarr_settings_api_settings_lidarr_post: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                profile_id: string;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LidarrSettingsUpdateModel"];
             };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LidarrSettingsModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_lidarr_defaults_api_settings_lidarr_defaults_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LidarrDefaultsResponse"];
+                };
+            };
+        };
+    };
+    get_lidarr_options_api_settings_lidarr_options_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -6606,6 +16177,30 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    test_lidarr_connection_api_settings_lidarr_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LidarrTestConnectionPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LidarrTestConnectionResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -6617,7 +16212,27 @@ export interface operations {
             };
         };
     };
-    evaluate_release_title_api_settings_quality_profiles_evaluate_post: {
+    get_media_management_settings_api_settings_media_management_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaManagementGetResponse"];
+                };
+            };
+        };
+    };
+    update_media_management_settings_api_settings_media_management_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -6626,7 +16241,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["EvaluateTitlePayload"];
+                "application/json": components["schemas"]["MediaManagementUpdateModel"];
             };
         };
         responses: {
@@ -6636,7 +16251,126 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EvaluateTitleResponse"];
+                    "application/json": components["schemas"]["MediaManagementSettingsModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_media_management_templates_api_settings_media_management_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PreviewRequestModel"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewResponseModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_media_server_settings_api_settings_media_server_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaServerSettingsResponse"];
+                };
+            };
+        };
+    };
+    update_media_server_settings_api_settings_media_server_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MediaServerSettingsPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaServerSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_media_server_settings_api_settings_media_server_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MediaServerSettingsPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaServerTestResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6690,6 +16424,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotificationChannelItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_notification_channel_api_settings_notifications_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestNotificationPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestNotificationResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6771,45 +16538,9 @@ export interface operations {
             };
         };
     };
-    test_notification_channel_api_settings_notifications_test_post: {
+    list_definitions_api_settings_quality_definitions_get: {
         parameters: {
             query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TestNotificationPayload"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TestNotificationResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_queue_api_queue_get: {
-        parameters: {
-            query?: {
-                /** @description Include completed and failed downloads */
-                include_history?: boolean;
-            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6822,26 +16553,220 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["QueueItemResponse"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["QualityDefinitionResponse"][];
                 };
             };
         };
     };
-    cancel_download_api_queue__download_id__delete: {
+    reset_all_definitions_api_settings_quality_definitions_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityDefinitionResponse"][];
+                };
+            };
+        };
+    };
+    update_definition_api_settings_quality_definitions__quality__put: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                download_id: string;
+                quality: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QualityDefinitionPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityDefinitionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_definition_api_settings_quality_definitions__quality__reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quality: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityDefinitionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_quality_profiles_api_settings_quality_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityProfileResponse"][];
+                };
+            };
+        };
+    };
+    create_or_update_quality_profile_api_settings_quality_profiles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QualityProfilePayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    evaluate_release_title_api_settings_quality_profiles_evaluate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvaluateTitlePayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvaluateTitleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quality_profile_api_settings_quality_profiles__profile_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_quality_profile_api_settings_quality_profiles__profile_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
             };
             cookie?: never;
         };
@@ -6869,7 +16794,93 @@ export interface operations {
             };
         };
     };
-    search_releases_api_acquisition_search_post: {
+    copy_quality_profile_api_settings_quality_profiles__profile_id__copy_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CopyPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_default_quality_profile_api_settings_quality_profiles__profile_id__default_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_release_profiles_api_settings_release_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseProfileResponse"][];
+                };
+            };
+        };
+    };
+    create_release_profile_api_settings_release_profiles_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -6878,9 +16889,106 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["InteractiveSearchQuery"];
+                "application/json": components["schemas"]["ReleaseProfilePayload"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_release_profile_api_settings_release_profiles__profile_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_release_profile_api_settings_release_profiles__profile_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseProfilePayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_release_profile_api_settings_release_profiles__profile_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -6904,18 +17012,14 @@ export interface operations {
             };
         };
     };
-    grab_release_api_acquisition_grab_post: {
+    trigger_sync_api_sync_post: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ManualGrabPayload"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -6928,22 +17032,181 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation Error */
-            422: {
+        };
+    };
+    get_sync_status_api_sync_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
     };
-    list_blocklist_api_acquisition_blocklist_get: {
+    stream_sync_logs_api_sync_stream_get: {
         parameters: {
             query?: {
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    handle_sync_webhook_api_sync_webhook_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_system_events_api_system_events_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                event_type?: string | null;
+                severity?: string | null;
+                search?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_system_events_api_system_events_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_lidarr_health_api_system_lidarr_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_system_logs_api_system_logs_get: {
+        parameters: {
+            query?: {
+                level?: string | null;
+                search?: string | null;
                 limit?: number;
-                offset?: number;
             };
             header?: never;
             path?: never;
@@ -6973,12 +17236,160 @@ export interface operations {
             };
         };
     };
-    remove_from_blocklist_api_acquisition_blocklist__blocklist_id__delete: {
+    clear_system_logs_api_system_logs_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    download_system_logs_api_system_logs_download_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    stream_system_logs_api_system_logs_stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_media_server_status_api_system_media_server_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_job_queue_api_system_queue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: {
+                            [key: string]: unknown;
+                        }[];
+                    };
+                };
+            };
+        };
+    };
+    get_system_status_api_system_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemStatusResponse"];
+                };
+            };
+        };
+    };
+    get_scheduled_tasks_api_system_tasks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduledTaskItem"][];
+                };
+            };
+        };
+    };
+    cancel_scheduled_task_api_system_tasks__task_id__cancel_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                blocklist_id: string;
+                task_id: string;
             };
             cookie?: never;
         };
@@ -7006,7 +17417,40 @@ export interface operations {
             };
         };
     };
-    get_system_status_api_system_status_get: {
+    run_scheduled_task_api_system_tasks__task_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_tags_api_tags_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -7021,12 +17465,142 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SystemStatusResponse"];
+                    "application/json": components["schemas"]["TagOut"][];
                 };
             };
         };
     };
-    health_check_api_health_get: {
+    create_tag_api_tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_tag_api_tags__tag_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tag_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_tag_api_tags__tag_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tag_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagDeleted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tag_usage_api_tags__tag_id__usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tag_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagUsage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_users_api_users_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -7042,13 +17616,13 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        [key: string]: string;
-                    };
+                        [key: string]: unknown;
+                    }[];
                 };
             };
         };
     };
-    health_check_api_health_head: {
+    get_current_user_profile_api_users_me_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -7064,8 +17638,242 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        [key: string]: string;
+                        [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    refresh_users_api_users_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    update_user_governance_route_api_users__user_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateUserGovernanceBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_cutoff_api_wanted_cutoff_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                sort_key?: string | null;
+                sort_dir?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cutoff_index_api_wanted_cutoff_index_get: {
+        parameters: {
+            query?: {
+                sort_key?: string | null;
+                sort_dir?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_missing_api_wanted_missing_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                sort_key?: string | null;
+                sort_dir?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    missing_index_api_wanted_missing_index_get: {
+        parameters: {
+            query?: {
+                sort_key?: string | null;
+                sort_dir?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_wanted_api_wanted_search_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WantedSearchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

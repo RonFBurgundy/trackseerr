@@ -148,7 +148,8 @@ ORCHESTRATOR.md
 .gemini/
 .skills/
 skills/
-scripts/
+scripts/*
+!scripts/export_openapi.py
 docs/notes/
 *.notes.md
 handoff*.md

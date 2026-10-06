@@ -24,6 +24,7 @@ from plex_playlist_sync.import_list_worker import claim_sync, is_syncing, releas
 from plex_playlist_sync.library_monitoring import validate_list_monitor_mode, validate_monitor_option
 from plex_playlist_sync.redaction import safe_exc
 from plex_playlist_sync.storage import Database
+from plex_playlist_sync.tag_store import normalize_labels
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,13 @@ class ImportListInput(BaseModel):
     artist_monitor_option: Optional[str] = None
     quality_profile_id: Optional[str] = None
     sync_interval_minutes: int = Field(1440, ge=MIN_SYNC_INTERVAL_MINUTES, le=MAX_SYNC_INTERVAL_MINUTES)
+    # Tag labels applied to every artist this list adds to the library (Lidarr list tags).
+    tags: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("tags")
+    @classmethod
+    def _tags(cls, value: list[str]) -> list[str]:
+        return normalize_labels(value)
 
     @field_validator("name")
     @classmethod
@@ -151,6 +159,7 @@ def _present(db: Database, row: dict[str, Any]) -> ImportList:
         artist_monitor_option=row.get("artist_monitor_option"),
         quality_profile_id=row.get("quality_profile_id"),
         sync_interval_minutes=row["sync_interval_minutes"],
+        tags=row.get("tags", []),
         last_synced_at=row.get("last_synced_at"),
         last_status=row.get("last_status"),
         last_error=row.get("last_error"),

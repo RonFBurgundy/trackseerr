@@ -276,6 +276,7 @@ def evaluate_release(
     indexer_name: Optional[str] = None,
     indexer_flags: int = 0,
     duration: Optional[Any] = None,
+    artist_tags: Optional[Any] = None,
 ) -> EvaluationResult:
     """Evaluates a parsed release against a quality profile via the decision engine.
 
@@ -293,4 +294,5 @@ def evaluate_release(
         indexer_name=indexer_name,
         indexer_flags=indexer_flags,
         duration=duration,
+        artist_tags=artist_tags,
     )

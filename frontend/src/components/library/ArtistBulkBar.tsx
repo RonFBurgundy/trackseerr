@@ -5,7 +5,8 @@ import type { MetadataProfile } from '@/types/metadataProfiles';
 import { MONITOR_OPTIONS, MONITOR_OPTION_HINTS, MONITOR_OPTION_LABELS, type MonitorOption } from '@/types/monitoring';
 import type { UseBulkSelectionReturn } from '@/hooks/useBulkSelection';
 import type { ArtistBulkPatch, UseArtistBulkEditReturn } from '@/hooks/useArtistBulkEdit';
-import { ConfirmDialog, TapeDeckButton } from '@/components/ui';
+import { useTags } from '@/hooks/useTags';
+import { ConfirmDialog, TagPicker, TapeDeckButton } from '@/components/ui';
 import { BulkEditSheet, BulkField, bulkSelectClass } from './BulkEditSheet';
 
 /** Sentinel for "No change" in every field. */
@@ -53,6 +54,9 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
   const [option, setOption] = useState<string>(KEEP);
   const [quality, setQuality] = useState<string>(KEEP);
   const [metadataProfile, setMetadataProfile] = useState<string>(KEEP);
+  const tagCatalogue = useTags(true);
+  const [addTags, setAddTags] = useState<number[]>([]);
+  const [removeTags, setRemoveTags] = useState<number[]>([]);
   const [applyToAlbums, setApplyToAlbums] = useState<boolean>(false);
   // Until the user touches the checkbox it mirrors the server default; only a touched value is sent.
   const [applyTouched, setApplyTouched] = useState<boolean>(false);
@@ -60,7 +64,9 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
   const count = selection.count(total);
   const empty = count === 0;
   const countLabel = selection.allMatching ? `All ${total.toLocaleString()} artists` : `${count.toLocaleString()} selected`;
-  const dirty = monitored !== '' || option !== KEEP || quality !== KEEP || metadataProfile !== KEEP;
+  const tagOverlap = addTags.some((t) => removeTags.includes(t));
+  const dirty =
+    monitored !== '' || option !== KEEP || quality !== KEEP || metadataProfile !== KEEP || addTags.length > 0 || removeTags.length > 0;
   const cascadeRelevant = monitored !== '' || option !== KEEP || metadataProfile !== KEEP;
 
   // Server default: cascade on unmonitor, otherwise recompute only artists whose monitor option changes.
@@ -74,6 +80,8 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
     setOption(KEEP);
     setQuality(KEEP);
     setMetadataProfile(KEEP);
+    setAddTags([]);
+    setRemoveTags([]);
     setApplyToAlbums(false);
     setApplyTouched(false);
   };
@@ -82,6 +90,9 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
     v === NONE ? 'no quality profile' : (profiles.find((p) => String(p.id) === v)?.name ?? v);
   const releaseName = (v: string): string =>
     v === NONE ? 'no metadata profile' : (metadataProfiles.find((p) => String(p.id) === v)?.name ?? v);
+
+  const tagLabels = (ids: readonly number[]): string =>
+    ids.map((id) => tagCatalogue.tags.find((t) => t.id === id)?.label ?? String(id)).join(', ');
 
   const stage = (): void => {
     const patch: ArtistBulkPatch = {};
@@ -102,6 +113,14 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
     if (metadataProfile !== KEEP) {
       patch.metadata_profile_id = metadataProfile === NONE ? null : Number(metadataProfile);
       changes.push(`metadata profile ${releaseName(metadataProfile)}`);
+    }
+    if (addTags.length > 0) {
+      patch.add_tags = addTags;
+      changes.push(`add tags ${tagLabels(addTags)}`);
+    }
+    if (removeTags.length > 0) {
+      patch.remove_tags = removeTags;
+      changes.push(`remove tags ${tagLabels(removeTags)}`);
     }
     if (cascadeRelevant) {
       if (applyTouched) {
@@ -141,7 +160,7 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
       <BulkEditSheet
         ariaLabel="Bulk edit artists"
         countLabel={countLabel}
-        applyDisabled={empty || !dirty}
+        applyDisabled={empty || !dirty || tagOverlap}
         busy={edit.busy}
         onApply={stage}
         headerActions={
@@ -163,6 +182,11 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
           <>
             {isMonitorOption(option) && (
               <p className="text-[11px] font-mono text-neutral-500">{MONITOR_OPTION_HINTS[option]}</p>
+            )}
+            {tagOverlap && (
+              <p role="alert" className="text-[11px] font-mono text-[var(--status-error)]">
+                A tag cannot be both added and removed.
+              </p>
             )}
             {!canSelectAll && (
               <p className="text-[11px] font-mono text-neutral-500">Clear search and filters to select every artist.</p>
@@ -239,6 +263,35 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
             ))}
           </select>
         </BulkField>
+        <div className="col-span-2 sm:col-span-1 sm:w-56">
+          <TagPicker
+            mode="id"
+            compact
+            label="Add tags"
+            name="bulk-add-tags"
+            tags={tagCatalogue.tags}
+            loading={tagCatalogue.loading}
+            loadError={tagCatalogue.loadError}
+            onCreate={tagCatalogue.create}
+            disabled={edit.busy}
+            value={addTags}
+            onChange={setAddTags}
+          />
+        </div>
+        <div className="col-span-2 sm:col-span-1 sm:w-56">
+          <TagPicker
+            mode="id"
+            compact
+            label="Remove tags"
+            name="bulk-remove-tags"
+            tags={tagCatalogue.tags}
+            loading={tagCatalogue.loading}
+            loadError={tagCatalogue.loadError}
+            disabled={edit.busy}
+            value={removeTags}
+            onChange={setRemoveTags}
+          />
+        </div>
         {cascadeRelevant && (
           <label
             htmlFor={field('albums')}

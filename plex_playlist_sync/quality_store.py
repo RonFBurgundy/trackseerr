@@ -9,6 +9,7 @@ import sqlite3
 from typing import Any, Optional, Union
 
 from plex_playlist_sync.models import QualityProfile
+from plex_playlist_sync.tag_store import normalize_labels
 from plex_playlist_sync.quality_defaults import (
     DEFAULT_CUSTOM_FORMATS,
     DEFAULT_QUALITY_DEFINITIONS,
@@ -456,46 +457,62 @@ class QualityCatalogMixin:
         return self._release_profile_row(row) if row else None
 
     def create_release_profile(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Inserts a profile; new tag labels are registered in the same transaction (rolled back together)."""
+        tags = normalize_labels(data.get("tags", []))
         with self._lock:
-            cur = self.conn.execute(
-                "INSERT INTO release_profiles (name, enabled, required_json, ignored_json, indexer_ids_json, "
-                "tags_json, quality_profile_ids_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    data["name"],
-                    1 if data.get("enabled", True) else 0,
-                    json.dumps(data.get("required", [])),
-                    json.dumps(data.get("ignored", [])),
-                    json.dumps(data.get("indexer_ids", [])),
-                    json.dumps(data.get("tags", [])),
-                    json.dumps(data.get("quality_profile_ids", [])),
-                ),
-            )
-            self.conn.commit()
+            try:
+                self._register_tag_labels(tags)  # type: ignore[attr-defined]
+                cur = self.conn.execute(
+                    "INSERT INTO release_profiles (name, enabled, required_json, ignored_json, indexer_ids_json, "
+                    "tags_json, quality_profile_ids_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        data["name"],
+                        1 if data.get("enabled", True) else 0,
+                        json.dumps(data.get("required", [])),
+                        json.dumps(data.get("ignored", [])),
+                        json.dumps(data.get("indexer_ids", [])),
+                        json.dumps(tags),
+                        json.dumps(data.get("quality_profile_ids", [])),
+                    ),
+                )
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                logger.exception("create_release_profile failed; rolled back (no tags registered)")
+                raise
             new_id = int(cur.lastrowid)
         result = self.get_release_profile(new_id)
         assert result is not None
         return result
 
     def update_release_profile(self, profile_id: int, data: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """Updates a profile. Tags are registered only if the profile exists, in the same transaction as the write."""
+        tags = normalize_labels(data.get("tags", []))
         with self._lock:
-            cur = self.conn.execute(
-                "UPDATE release_profiles SET name = ?, enabled = ?, required_json = ?, ignored_json = ?, "
-                "indexer_ids_json = ?, tags_json = ?, quality_profile_ids_json = ?, updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = ?",
-                (
-                    data["name"],
-                    1 if data.get("enabled", True) else 0,
-                    json.dumps(data.get("required", [])),
-                    json.dumps(data.get("ignored", [])),
-                    json.dumps(data.get("indexer_ids", [])),
-                    json.dumps(data.get("tags", [])),
-                    json.dumps(data.get("quality_profile_ids", [])),
-                    int(profile_id),
-                ),
-            )
-            self.conn.commit()
-            if cur.rowcount == 0:
-                return None
+            try:
+                if self.conn.execute("SELECT 1 FROM release_profiles WHERE id = ?", (int(profile_id),)).fetchone() is None:
+                    return None
+                self._register_tag_labels(tags)  # type: ignore[attr-defined]
+                self.conn.execute(
+                    "UPDATE release_profiles SET name = ?, enabled = ?, required_json = ?, ignored_json = ?, "
+                    "indexer_ids_json = ?, tags_json = ?, quality_profile_ids_json = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ?",
+                    (
+                        data["name"],
+                        1 if data.get("enabled", True) else 0,
+                        json.dumps(data.get("required", [])),
+                        json.dumps(data.get("ignored", [])),
+                        json.dumps(data.get("indexer_ids", [])),
+                        json.dumps(tags),
+                        json.dumps(data.get("quality_profile_ids", [])),
+                        int(profile_id),
+                    ),
+                )
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                logger.exception("update_release_profile(%s) failed; rolled back (no tags registered)", profile_id)
+                raise
         return self.get_release_profile(profile_id)
 
     def delete_release_profile(self, profile_id: int) -> bool:

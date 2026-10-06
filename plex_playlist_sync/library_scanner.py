@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from plex_playlist_sync import art_pipeline
+from plex_playlist_sync import art_pipeline, delay_gate
 from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
 from plex_playlist_sync.library import (
     AUDIO_EXTENSIONS,
@@ -374,6 +374,7 @@ class LibraryScanner:
             track_cache: dict[tuple[str, str, int], dict[str, Any]] = {}
             track_id_cache: dict[str, dict[str, Any]] = {}
             quality_profile_cache: dict[Optional[str], Any] = {}
+            artist_tag_cache: dict[str, list[str]] = {}  # artist id -> tag labels, one lookup per artist
 
             CHUNK_SIZE = 100
             for i in range(0, len(audio_files), CHUNK_SIZE):
@@ -710,7 +711,13 @@ class LibraryScanner:
                                 parsed = parse_release_title(str(quality_input))
                                 if parsed.quality == "Unknown" and quality_input:
                                     parsed.quality = str(quality_input)
-                                eval_result = evaluate_release(parsed, qp, size_bytes=file_size)
+                                if artist_id not in artist_tag_cache:
+                                    artist_tag_cache[artist_id] = delay_gate.artist_tags(
+                                        db, artist_row.get("name"), artist_id
+                                    )
+                                eval_result = evaluate_release(
+                                    parsed, qp, size_bytes=file_size, artist_tags=artist_tag_cache[artist_id]
+                                )
                                 # A library file is scored from a bare quality string (its release title is unknown), so
                                 # its format score is 0 and could never reach ``cutoff_format_score``: judge the quality
                                 # tier only, i.e. treat the format-score cutoff as met.

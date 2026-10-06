@@ -4,15 +4,14 @@ Ranking has already picked the best candidate for an item; the gate decides whet
 ``pending_releases`` until ``release_at``. As in Lidarr the window is anchored on the first time the item was seen:
 a better candidate arriving inside the window replaces the pending one but never restarts the clock.
 
-Artist tags: ``library_artists`` has no tags column. Tags are read from ``metadata_json["tags"]`` when present (none are
-written today), so in practice every artist uses the default delay profile until artist tagging exists.
+Artist tags: read from the ``artist_tags`` table (see ``tag_store``), by artist id when the caller has one, else by
+library artist name. An artist with no tags (or one not in the library) uses the default delay profile.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-import json
 import logging
 import sqlite3
 from typing import Any, Optional
@@ -60,28 +59,15 @@ def parse_ts(value: str) -> datetime:
 # --------------------------------------------------------------------------------------------------------------------
 
 
-def artist_tags(db: Any, artist_name: Optional[str]) -> list[str]:
-    """Tags of the library artist named ``artist_name`` (empty when unknown or the artist carries none)."""
-    name = (artist_name or "").strip().lower()
-    if not name:
+def artist_tags(db: Any, artist_name: Optional[str], artist_id: Optional[str] = None) -> list[str]:
+    """Tag labels of a library artist, by ``artist_id`` or else by name (empty when unknown or untagged)."""
+    if not artist_id and not (artist_name or "").strip():
         return []
     try:
-        with db._lock:
-            row = db.conn.execute(
-                "SELECT metadata_json FROM library_artists WHERE clean_name = ? OR lower(name) = ? LIMIT 1",
-                (name, name),
-            ).fetchone()
+        return db.get_artist_tag_labels(artist_id=artist_id, artist_name=artist_name)
     except sqlite3.Error as exc:
-        logger.warning("Could not read artist tags for '%s': %s", artist_name, type(exc).__name__)
+        logger.warning("Could not read artist tags for '%s': %s", artist_name or artist_id, type(exc).__name__)
         return []
-    if not row or not row[0]:
-        return []
-    try:
-        meta = json.loads(row[0])
-    except (json.JSONDecodeError, TypeError):
-        return []
-    tags = meta.get("tags") if isinstance(meta, dict) else None
-    return [str(t) for t in tags] if isinstance(tags, list) else []
 
 
 def select_delay_profile(profiles: list[dict[str, Any]], tags: list[str]) -> dict[str, Any]:
@@ -106,13 +92,16 @@ def select_delay_profile(profiles: list[dict[str, Any]], tags: list[str]) -> dic
     }
 
 
-def resolve_delay_profile(db: Any, artist_name: Optional[str]) -> dict[str, Any]:
+def resolve_delay_profile(
+    db: Any, artist_name: Optional[str], artist_id: Optional[str] = None, tags: Optional[list[str]] = None
+) -> dict[str, Any]:
+    """Delay profile for an artist; pass ``tags`` when the caller already looked them up."""
     try:
         profiles = db.list_delay_profiles()
     except sqlite3.Error as exc:
         logger.warning("Could not load delay profiles (%s); delays disabled for this decision", type(exc).__name__)
         profiles = []
-    return select_delay_profile(profiles, artist_tags(db, artist_name))
+    return select_delay_profile(profiles, tags if tags is not None else artist_tags(db, artist_name, artist_id))
 
 
 def delay_minutes(profile: dict[str, Any], protocol: Optional[str]) -> int:

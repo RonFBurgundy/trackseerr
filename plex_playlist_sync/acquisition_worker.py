@@ -23,6 +23,7 @@ from typing import Any, Callable, Optional
 
 import httpx
 
+from plex_playlist_sync import delay_gate
 from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver, is_torrent_driver_type
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
@@ -1809,6 +1810,8 @@ class AcquisitionWorker:
 
                 # Native catalog upsert (when library_mode != "lidarr")
                 if media_settings.get("library_mode") != "lidarr":
+                    # Artist tag labels by artist id, looked up once per artist across the placed files.
+                    import_tag_cache: dict[str, list[str]] = {}
                     for placed_str in imported_paths:
                         try:
                             placed_p = Path(placed_str).resolve()
@@ -1958,8 +1961,15 @@ class AcquisitionWorker:
                             quality_str = parsed.quality
                             if prof_dict:
                                 profile_obj = _to_quality_profile(prof_dict)
+                                if artist_id not in import_tag_cache:
+                                    import_tag_cache[artist_id] = delay_gate.artist_tags(
+                                        db, artist_row.get("name"), artist_id
+                                    )
                                 eval_res = evaluate_release(
-                                    release=parsed, profile=profile_obj, size_bytes=file_size
+                                    release=parsed,
+                                    profile=profile_obj,
+                                    size_bytes=file_size,
+                                    artist_tags=import_tag_cache[artist_id],
                                 )
                                 quality_str = eval_res.parsed_quality
                                 cutoff_met = eval_res.meets_cutoff
@@ -2042,6 +2052,9 @@ class AcquisitionWorker:
                                 release=parsed,
                                 profile=profile,
                                 size_bytes=item.get("size_bytes"),
+                                artist_tags=delay_gate.artist_tags(
+                                    db, (req.get("artist") if req else None) or item.get("artist")
+                                ),
                             )
                             current_q = eval_res.parsed_quality
                             cutoff_met_val = 1 if eval_res.meets_cutoff else 0

@@ -82,6 +82,7 @@ export function useImportListEditor(
     artist_monitor_option: null,
     quality_profile_id: null,
     sync_interval_minutes: 1440,
+    tags: [],
   });
   const [testResult, setTestResult] = useState<ImportListTestResult | null>(null);
   const [testing, setTesting] = useState<boolean>(false);
@@ -101,6 +102,7 @@ export function useImportListEditor(
       artist_monitor_option: null,
       quality_profile_id: null,
       sync_interval_minutes: 1440,
+      tags: [],
     });
     setEditingId(null);
     setTestResult(null);

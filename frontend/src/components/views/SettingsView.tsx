@@ -216,6 +216,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         >
           <ProfilesPage
             enabled={mediaActive}
+            libraryMode={mode}
             media={data.media}
             onMediaChange={data.setMedia}
             indexers={data.indexers}

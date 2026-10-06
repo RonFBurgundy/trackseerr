@@ -96,6 +96,7 @@ class EvaluateTitlePayload(BaseModel):
     indexer_flags: int = 0
     album_id: Optional[str] = None
     track_id: Optional[str] = None
+    artist_id: Optional[str] = Field(None, description="Library artist whose tags scope tag-restricted release profiles")
     current_title: Optional[str] = Field(None, max_length=1000)
 
 
@@ -335,11 +336,12 @@ def evaluate_release_title(
         "indexer_name": payload.indexer_name,
         "indexer_flags": payload.indexer_flags,
         "duration": duration,
+        "artist_tags": db.get_artist_tag_labels(artist_id=payload.artist_id) if payload.artist_id else [],
     }
     evaluation = evaluate_prepared(parsed, prepared, payload.size_bytes or None, **ctx)
     upgrade = None
     if payload.current_title:
-        current = evaluate_prepared(parse_release_title(payload.current_title), prepared)
+        current = evaluate_prepared(parse_release_title(payload.current_title), prepared, artist_tags=ctx["artist_tags"])
         upgrade = evaluate_upgrade(current, evaluation, profile_obj).to_dict()
     return {
         "parsed": parsed.to_dict(),

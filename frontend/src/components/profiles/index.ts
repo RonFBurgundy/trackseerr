@@ -22,3 +22,5 @@ export * from './CustomFormatEditorModal';
 export * from './CustomFormatImportModal';
 export * from './CustomFormatExportModal';
 export * from './CustomFormatsPage';
+export * from './TagEditorModal';
+export * from './TagsSection';

@@ -85,3 +85,6 @@ export * from './useIssueDetail';
 export * from './useIssueQueue';
 export * from './useIssueActions';
 export * from './useItemHistory';
+export * from './useTags';
+export * from './useArtistTags';
+export * from './useTagManager';

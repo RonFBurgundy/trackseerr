@@ -427,6 +427,23 @@ TrackSeerr includes a first-class **Application URL** setting (configurable in t
 
 ---
 
+## API types (frontend/backend contract)
+
+`frontend/src/types/api.ts` is generated from the FastAPI OpenAPI schema (`scripts/export_openapi.py` + `openapi-typescript`); do not edit it by hand. After any backend route or Pydantic model change, run from `frontend/`:
+
+```bash
+npm run gen:api     # regenerate src/types/api.ts
+npm run check:api   # fail if the committed file is stale (CI runs this)
+```
+
+The export needs the backend dependencies (`requirements-dev.txt`) and runs `python3` by default. To use another interpreter, for example the test image, set `OPENAPI_PYTHON` to a command prefix that reads the repo at `/app` (`gen-api.mjs` exports `REPO`, the repo root, to the command):
+
+```bash
+OPENAPI_PYTHON='docker run --rm -i --user 1000:1000 -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -v "$REPO:/app" -w /app -e PYTHONPATH=/app trackseerr:test python' npm run gen:api
+```
+
+In new frontend code, take backend shapes from the contract with `Schema<'Name'>` (from `src/types`) instead of hand-writing interfaces; the raw generated module is exported as the `Api` namespace.
+
 ## Security Policy
 
 Security and least privilege are central to TrackSeerr's design. All user-supplied URLs are strictly validated against whitelists before dispatch, input file operations are sandboxed against path traversal, and no shell commands or subprocesses are executed from API endpoints.

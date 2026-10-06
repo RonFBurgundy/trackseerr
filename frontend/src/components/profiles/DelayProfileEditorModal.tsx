@@ -1,8 +1,10 @@
 import React, { useId, useState } from 'react';
-import { FormField, TactileSwitch } from '@/components/ui';
+import { FormField, TactileSwitch, TagPicker } from '@/components/ui';
+import type { LibraryManagerMode } from '@/types/models';
 import type { DelayProfile, DelayProfileInput } from '@/types/delayProfiles';
 import { RELEASE_PROTOCOLS, type ReleaseProtocol } from '@/types/qualityProfiles';
 import { useDelayProfileDraft } from '@/hooks/useDelayProfileDraft';
+import { useTags } from '@/hooks/useTags';
 import { inputClass } from '@/components/settings/formClasses';
 import { EditorModalShell } from './EditorModalShell';
 
@@ -12,20 +14,24 @@ export interface DelayProfileEditorModalProps {
   target: DelayProfileTarget | null;
   onClose: () => void;
   onSave: (id: number | null, input: DelayProfileInput) => Promise<string | null>;
+  /** In Lidarr mode native tags do not apply: the picker is hidden and existing tags are kept as they are. */
+  libraryMode: LibraryManagerMode;
 }
 
 function isProtocol(value: string): value is ReleaseProtocol {
   return RELEASE_PROTOCOLS.some((p) => p === value);
 }
 
-const EditorBody: React.FC<{ target: DelayProfileTarget; onClose: () => void; onSave: DelayProfileEditorModalProps['onSave'] }> = ({
-  target,
-  onClose,
-  onSave,
-}) => {
+const EditorBody: React.FC<{
+  target: DelayProfileTarget;
+  onClose: () => void;
+  onSave: DelayProfileEditorModalProps['onSave'];
+  libraryMode: LibraryManagerMode;
+}> = ({ target, onClose, onSave, libraryMode }) => {
   const uid = useId();
   const existing = target === 'new' ? null : target;
   const { draft, patch, problem, toInput } = useDelayProfileDraft(existing);
+  const tagCatalogue = useTags(libraryMode !== 'lidarr');
   const [saving, setSaving] = useState<boolean>(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const formId = `${uid}-form`;
@@ -127,15 +133,34 @@ const EditorBody: React.FC<{ target: DelayProfileTarget; onClose: () => void; on
             className={`${inputClass} font-mono`}
           />
         </FormField>
-        <p className="text-[11px] font-mono text-[var(--text-muted)]">
-          Only the default delay profile applies until artists can carry tags; additional profiles are saved but not matched yet.
-        </p>
+        {!isDefault && libraryMode !== 'lidarr' && (
+          <TagPicker
+            mode="label"
+            label="Tags"
+            name="delay_profile_tags"
+            tags={tagCatalogue.tags}
+            loading={tagCatalogue.loading}
+            loadError={tagCatalogue.loadError}
+            onCreate={tagCatalogue.create}
+            value={draft.tags}
+            onChange={(tags) => patch({ tags })}
+            hint="Applies to artists with any of these tags; untagged profile is the fallback"
+          />
+        )}
       </form>
     </EditorModalShell>
   );
 };
 
-export const DelayProfileEditorModal: React.FC<DelayProfileEditorModalProps> = ({ target, onClose, onSave }) => {
+export const DelayProfileEditorModal: React.FC<DelayProfileEditorModalProps> = ({ target, onClose, onSave, libraryMode }) => {
   if (target === null) return null;
-  return <EditorBody key={target === 'new' ? 'new' : target.id} target={target} onClose={onClose} onSave={onSave} />;
+  return (
+    <EditorBody
+      key={target === 'new' ? 'new' : target.id}
+      target={target}
+      onClose={onClose}
+      onSave={onSave}
+      libraryMode={libraryMode}
+    />
+  );
 };

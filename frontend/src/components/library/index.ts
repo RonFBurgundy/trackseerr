@@ -26,3 +26,4 @@ export * from './ArtistRestOfDiscography';
 export * from './itemHistoryFormat';
 export * from './ItemHistoryModal';
 export * from './ItemOriginCaption';
+export * from './ArtistTagsRow';

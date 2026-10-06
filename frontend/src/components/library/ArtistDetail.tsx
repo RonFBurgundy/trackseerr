@@ -28,6 +28,7 @@ import { ArtistAlbumCard } from './ArtistAlbumCard';
 import { ItemOriginCaption } from './ItemOriginCaption';
 import { AlbumBulkBar } from './AlbumBulkBar';
 import { ArtistRestOfDiscography } from './ArtistRestOfDiscography';
+import { ArtistTagsRow } from './ArtistTagsRow';
 
 type DiscographyTab = 'studio' | 'singles_eps' | 'live' | 'compilations';
 
@@ -94,7 +95,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   onViewInDiscover,
 }) => {
   const detail = useArtistDetail(artistId, onToast, onChanged);
-  const { artist, loading, refreshing, patchAlbumMonitored, patchArtistMonitored } = detail;
+  const { artist, loading, refreshing, patchAlbumMonitored, patchArtistMonitored, patchArtistTags } = detail;
   const [tab, setTab] = useState<DiscographyTab>('studio');
   const categorized = useMemo(() => categorize(artist?.albums ?? []), [artist]);
   const [hideOutside, setHideOutside] = useState<boolean>(false);
@@ -305,6 +306,16 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
                 </span>
               ))}
             </div>
+
+            {isAdmin && !lidarrMode && artist && (
+              <ArtistTagsRow
+                artistId={artistId}
+                artistName={artist.name}
+                tagIds={artist.tags ?? []}
+                onSaved={patchArtistTags}
+                onToast={onToast}
+              />
+            )}
 
             <div className="flex items-center gap-1 sm:gap-2 min-w-0">
               {artist?.mbid && (

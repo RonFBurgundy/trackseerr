@@ -19,3 +19,4 @@ export * from './MonitorModeSelect';
 export * from './OverflowMenu';
 export * from './SortableList';
 export * from './TokenInput';
+export * from './TagPicker';

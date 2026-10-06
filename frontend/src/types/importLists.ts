@@ -48,6 +48,8 @@ export interface ImportListInput {
   quality_profile_id: string | null;
   /** Minimum 60. */
   sync_interval_minutes: number;
+  /** Tag labels applied to every artist this list adds (native library). */
+  tags: string[];
 }
 
 export type ImportListStatus = 'ok' | 'error';
@@ -123,5 +125,6 @@ export function importListToInput(list: ImportList): ImportListInput {
     artist_monitor_option: list.artist_monitor_option,
     quality_profile_id: list.quality_profile_id,
     sync_interval_minutes: list.sync_interval_minutes,
+    tags: [...(list.tags ?? [])],
   };
 }

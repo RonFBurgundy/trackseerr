@@ -46,6 +46,7 @@ ITEM_EVENTS: frozenset[str] = frozenset(
         "renamed",
         "moved",
         "removed_from_library",
+        "tags_changed",
     }
 )
 
@@ -892,6 +893,7 @@ _PLAIN_MESSAGES: dict[str, str] = {
     "renamed": "File renamed",
     "moved": "File moved",
     "removed_from_library": "Removed from the library",
+    "tags_changed": "Tags changed",
 }
 
 

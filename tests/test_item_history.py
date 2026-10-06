@@ -140,8 +140,8 @@ def events_of(db: Database, entity: str, entity_id: str, event: str) -> list[dic
 
 # ------------------------------------------------------------------------------------------------------ storage
 def test_migration_creates_append_only_table_without_foreign_keys(db: Database):
-    assert SCHEMA_VERSION == 63
-    assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 63
+    assert SCHEMA_VERSION >= 63
+    assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
     cols = {r[1] for r in db.conn.execute("PRAGMA table_info(item_events)").fetchall()}
     assert {
         "id", "event", "artist_id", "album_id", "track_id", "artist_name", "album_title", "track_title", "trigger",

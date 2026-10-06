@@ -26,6 +26,7 @@ export interface UseArtistDetailReturn {
   ) => Promise<void>;
   patchAlbumMonitored: (albumId: number | string, monitored: boolean) => void;
   patchArtistMonitored: (monitored: boolean) => void;
+  patchArtistTags: (tagIds: number[]) => void;
 }
 
 /** Artist detail (with its releases) from `/api/library/artists/{id}`; works in native and Lidarr mode. */
@@ -120,6 +121,10 @@ export function useArtistDetail(
     setArtist((prev) => (prev ? { ...prev, monitored } : prev));
   }, []);
 
+  const patchArtistTags = useCallback((tagIds: number[]): void => {
+    setArtist((prev) => (prev ? { ...prev, tags: tagIds } : prev));
+  }, []);
+
   return {
     artist,
     loading,
@@ -129,5 +134,6 @@ export function useArtistDetail(
     applyMetadataProfile,
     patchAlbumMonitored,
     patchArtistMonitored,
+    patchArtistTags,
   };
 }

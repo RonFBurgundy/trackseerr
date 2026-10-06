@@ -7,8 +7,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
+import logging
 import sqlite3
 from typing import Any, Optional
+
+from .tag_store import normalize_labels
+
+logger = logging.getLogger(__name__)
 
 PROTOCOL_CHOICES = ("usenet", "torrent", "soulseek")
 
@@ -162,60 +167,81 @@ class DelayProfileMixin:
         return self._delay_profile_row(row) if row else None
 
     def create_delay_profile(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Appends a non-default profile after the existing ones (the default stays last)."""
+        """Appends a non-default profile after the existing ones (the default stays last).
+
+        New tag labels are registered in the same transaction as the insert (rolled back together on failure).
+        """
         delays = data["delays"]
+        tags = normalize_labels(data.get("tags") or [])
         with self._lock:
-            nxt = self.conn.execute(
-                "SELECT COALESCE(MAX(order_idx), 0) + 1 FROM delay_profiles WHERE is_default = 0"
-            ).fetchone()[0]
-            cur = self.conn.execute(
-                "INSERT INTO delay_profiles (name, order_idx, preferred_protocol, usenet_delay_min, torrent_delay_min, "
-                "soulseek_delay_min, bypass_if_highest_quality, bypass_if_above_score, tags_json, is_default) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
-                (
-                    data["name"],
-                    int(nxt),
-                    data["preferred_protocol"],
-                    int(delays["usenet"]),
-                    int(delays["torrent"]),
-                    int(delays["soulseek"]),
-                    1 if data["bypass_if_highest_quality"] else 0,
-                    data.get("bypass_if_above_score"),
-                    json.dumps(list(data.get("tags") or [])),
-                ),
-            )
-            self.conn.commit()
+            try:
+                nxt = self.conn.execute(
+                    "SELECT COALESCE(MAX(order_idx), 0) + 1 FROM delay_profiles WHERE is_default = 0"
+                ).fetchone()[0]
+                self._register_tag_labels(tags)  # type: ignore[attr-defined]
+                cur = self.conn.execute(
+                    "INSERT INTO delay_profiles (name, order_idx, preferred_protocol, usenet_delay_min, torrent_delay_min, "
+                    "soulseek_delay_min, bypass_if_highest_quality, bypass_if_above_score, tags_json, is_default) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+                    (
+                        data["name"],
+                        int(nxt),
+                        data["preferred_protocol"],
+                        int(delays["usenet"]),
+                        int(delays["torrent"]),
+                        int(delays["soulseek"]),
+                        1 if data["bypass_if_highest_quality"] else 0,
+                        data.get("bypass_if_above_score"),
+                        json.dumps(tags),
+                    ),
+                )
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                logger.exception("create_delay_profile failed; rolled back (no tags registered)")
+                raise
             new_id = int(cur.lastrowid)
         result = self.get_delay_profile(new_id)
         assert result is not None
         return result
 
     def update_delay_profile(self, profile_id: int, data: dict[str, Any]) -> Optional[dict[str, Any]]:
-        """Updates a profile. The default profile keeps empty tags regardless of the payload."""
+        """Updates a profile. The default profile keeps empty tags regardless of the payload.
+
+        Tags are only registered once the profile is known to exist and is not the default, in the same transaction
+        as the update (a missing or default profile registers nothing; a failed write rolls the tags back).
+        """
         delays = data["delays"]
+        new_tags = normalize_labels(data.get("tags") or [])
         with self._lock:
             row = self.conn.execute("SELECT is_default FROM delay_profiles WHERE id = ?", (int(profile_id),)).fetchone()
             if not row:
                 return None
-            tags = [] if row[0] else list(data.get("tags") or [])
-            self.conn.execute(
-                "UPDATE delay_profiles SET name = ?, preferred_protocol = ?, usenet_delay_min = ?, torrent_delay_min = ?, "
-                "soulseek_delay_min = ?, bypass_if_highest_quality = ?, bypass_if_above_score = ?, tags_json = ?, "
-                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (
-                    data["name"],
-                    data["preferred_protocol"],
-                    int(delays["usenet"]),
-                    int(delays["torrent"]),
-                    int(delays["soulseek"]),
-                    1 if data["bypass_if_highest_quality"] else 0,
-                    data.get("bypass_if_above_score"),
-                    json.dumps(tags),
-                    int(profile_id),
-                ),
-            )
-            self._recompute_pending_release_at(int(profile_id), delays)
-            self.conn.commit()
+            tags = [] if row[0] else new_tags
+            try:
+                self._register_tag_labels(tags)  # type: ignore[attr-defined]
+                self.conn.execute(
+                    "UPDATE delay_profiles SET name = ?, preferred_protocol = ?, usenet_delay_min = ?, torrent_delay_min = ?, "
+                    "soulseek_delay_min = ?, bypass_if_highest_quality = ?, bypass_if_above_score = ?, tags_json = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (
+                        data["name"],
+                        data["preferred_protocol"],
+                        int(delays["usenet"]),
+                        int(delays["torrent"]),
+                        int(delays["soulseek"]),
+                        1 if data["bypass_if_highest_quality"] else 0,
+                        data.get("bypass_if_above_score"),
+                        json.dumps(tags),
+                        int(profile_id),
+                    ),
+                )
+                self._recompute_pending_release_at(int(profile_id), delays)
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                logger.exception("update_delay_profile(%s) failed; rolled back (no tags registered)", profile_id)
+                raise
         return self.get_delay_profile(profile_id)
 
     def _recompute_pending_release_at(self, profile_id: int, delays: dict[str, Any]) -> None:

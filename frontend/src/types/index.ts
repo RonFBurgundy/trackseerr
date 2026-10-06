@@ -1,4 +1,5 @@
-export * from './api';
+export type * as Api from './api';
+export * from './apiSchema';
 export * from './models';
 export * from './account';
 export * from './deployment';
@@ -18,3 +19,4 @@ export * from './manualImport';
 export * from './libraryHealth';
 export * from './seedCleanup';
 export * from './itemHistory';
+export * from './tags';

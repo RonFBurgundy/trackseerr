@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "lint": "tsc --noEmit",
+    "gen:api": "node scripts/gen-api.mjs",
+    "check:api": "node scripts/gen-api.mjs --check",
     "preview": "vite preview"
   },
   "dependencies": {

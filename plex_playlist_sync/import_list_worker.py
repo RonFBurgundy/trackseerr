@@ -117,6 +117,7 @@ def _run_sync(
                 lst["monitor_mode"],
                 artist_monitor_option=lst.get("artist_monitor_option"),
                 quality_profile_id=lst.get("quality_profile_id"),
+                tags=lst.get("tags") or [],
                 requested_by=actor,
                 enricher=enricher,
                 lidarr_client=lidarr_client,

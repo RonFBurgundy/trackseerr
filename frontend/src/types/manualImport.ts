@@ -1,7 +1,7 @@
-import type { components } from './api';
+import type { Schema } from './apiSchema';
 
 /** Commit payload row; generated from the OpenAPI schema. */
-export type ManualImportItem = components['schemas']['ManualImportItem'];
+export type ManualImportItem = Schema<'ManualImportItem'>;
 
 export type ManualImportScope =
   | { kind: 'download'; downloadId: string; title: string }
