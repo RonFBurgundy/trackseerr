@@ -29,6 +29,7 @@ from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result
+from plex_playlist_sync.download_roots import AllowedRoots, allowed_roots_for_client
 from plex_playlist_sync.import_security import clear_exec_bits, quarantine_files, verify_files, QUARANTINE_DIRNAME
 from plex_playlist_sync.import_quality_check import CHECK_OFF, check_files, normalize_check_mode
 from plex_playlist_sync.library_health import record_weak_match
@@ -770,6 +771,7 @@ class AcquisitionWorker:
         self._is_running: bool = False
         self.poll_interval: float = 5.0
         self.staging_dir: str = "/downloads"
+        self.allowed_roots: Optional[AllowedRoots] = None
         self._archive_errors: list[str] = []
 
     def is_running(self) -> bool:
@@ -858,80 +860,93 @@ class AcquisitionWorker:
         if isinstance(exc, ArchiveLimitError):
             self._archive_errors.append(f"{archive.name}: {exc}")
 
-    def _find_audio_files(self, candidate_path: Optional[str | Path], search_term: str) -> list[Path]:
-        """Locates downloaded audio files from source path or staging directory.
+    def _effective_roots(self) -> AllowedRoots:
+        """Roots for the current item (set per client in the poll loop); bare staging dir when none is set."""
+        if self.allowed_roots is not None:
+            return self.allowed_roots
+        return AllowedRoots(roots=[Path(self.staging_dir).resolve()] if self.staging_dir else [])
 
-        Automatically extracts archives (.zip, .tar, etc.) encountered in candidate_path
-        or staging into a temporary subfolder in staging and discovers extracted audio files.
+    def _extract_into(self, archive: Path, root: Path) -> list[Path]:
+        """Extracts ``archive`` into a fresh ``_extracted_*`` folder under ``root``; failures are noted, not raised."""
+        extract_dir = root / f"_extracted_{archive.stem}_{os.getpid()}_{time.time_ns()}"
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            return list(extract_archive(archive, extract_dir))
+        except Exception as e:
+            self._note_archive_failure(archive, e)
+            return []
+
+    def _find_audio_files(self, candidate_path: Optional[str | Path], search_term: str) -> list[Path]:
+        """Locates downloaded audio files from the source path or, failing that, the allowed download roots.
+
+        A candidate is used only if it passes ``AllowedRoots.check`` (under a client-reported or legacy staging root,
+        never overlapping the library or config dir). Archives are extracted into a subfolder of the root that holds
+        them. The search-term fallback scans every allowed root, skipping the library and quarantine folders.
         """
         found: list[Path] = []
-        staging_path = Path(self.staging_dir).resolve()
+        allowed = self._effective_roots()
 
         if candidate_path:
+            ok, reason = allowed.check(candidate_path)
             src_path = Path(candidate_path).resolve()
-            if not src_path.is_relative_to(staging_path):
-                logger.warning("Rejecting source path outside staging directory: %s", candidate_path)
-            else:
-                if src_path.is_file():
-                    if src_path.suffix.lower() in AUDIO_EXTENSIONS:
-                        return [src_path]
-                    elif is_archive_file(src_path):
-                        extract_dir = staging_path / f"_extracted_{src_path.stem}_{os.getpid()}_{time.time_ns()}"
-                        extract_dir.mkdir(parents=True, exist_ok=True)
-                        try:
-                            extracted = extract_archive(src_path, extract_dir)
-                            if extracted:
-                                return sorted(extracted)
-                        except Exception as e:
-                            self._note_archive_failure(src_path, e)
-                elif src_path.is_dir():
-                    archives_in_src: list[Path] = []
-                    for root, _, files in os.walk(str(src_path)):
-                        for f in files:
-                            f_path = (Path(root) / f).resolve()
-                            if f_path.is_relative_to(staging_path) and QUARANTINE_DIRNAME not in f_path.relative_to(staging_path).parts:
-                                if f_path.suffix.lower() in AUDIO_EXTENSIONS:
-                                    found.append(f_path)
-                                elif is_archive_file(f_path):
-                                    archives_in_src.append(f_path)
-                    if found:
-                        return sorted(found)
-                    for arc_path in archives_in_src:
-                        extract_dir = staging_path / f"_extracted_{arc_path.stem}_{os.getpid()}_{time.time_ns()}"
-                        extract_dir.mkdir(parents=True, exist_ok=True)
-                        try:
-                            extracted = extract_archive(arc_path, extract_dir)
-                            found.extend(extracted)
-                        except Exception as e:
-                            self._note_archive_failure(arc_path, e)
-                    if found:
-                        return sorted(found)
+            root = allowed.matching_root(src_path) if ok else None
+            if not ok or root is None:
+                logger.warning("Rejecting source path %s: %s", candidate_path, reason)
+            elif src_path.is_file():
+                if src_path.suffix.lower() in AUDIO_EXTENSIONS:
+                    return [src_path]
+                if is_archive_file(src_path):
+                    extracted = self._extract_into(src_path, root)
+                    if extracted:
+                        return sorted(extracted)
+            elif src_path.is_dir():
+                archives_in_src: list[Path] = []
+                for walk_root, _, files in os.walk(str(src_path)):
+                    for f in files:
+                        f_path = (Path(walk_root) / f).resolve()
+                        if not allowed.is_allowed(f_path) or QUARANTINE_DIRNAME in f_path.relative_to(root).parts:
+                            continue
+                        if f_path.suffix.lower() in AUDIO_EXTENSIONS:
+                            found.append(f_path)
+                        elif is_archive_file(f_path):
+                            archives_in_src.append(f_path)
+                if found:
+                    return sorted(found)
+                for arc_path in archives_in_src:
+                    found.extend(self._extract_into(arc_path, root))
+                if found:
+                    return sorted(found)
 
-        # Fallback: scan staging directory for files matching search term
-        if staging_path.exists():
-            clean_term = search_term.lower()
-            staging_archives: list[Path] = []
-            for root, _, files in os.walk(str(staging_path)):
+        # Fallback: scan the allowed roots for files matching the search term
+        clean_term = search_term.lower()
+        if not clean_term:
+            return sorted(found)
+        scan_archives: list[tuple[Path, Path]] = []
+        for scan_root in allowed.usable_roots():
+            if not scan_root.exists():
+                continue
+            for walk_root, dirs, files in os.walk(str(scan_root)):
+                # Prune the library and the quarantine so a broad legacy root (e.g. /data) never sweeps them in.
+                dirs[:] = [
+                    d for d in dirs
+                    if d != QUARANTINE_DIRNAME
+                    and not (allowed.library_root is not None and _under_path(Path(walk_root, d).resolve(), allowed.library_root))
+                ]
                 for f in files:
-                    f_path = (Path(root) / f).resolve()
-                    if f_path.is_relative_to(staging_path) and QUARANTINE_DIRNAME not in f_path.relative_to(staging_path).parts:
-                        if clean_term in f.lower() or clean_term in root.lower():
-                            if f_path.suffix.lower() in AUDIO_EXTENSIONS:
-                                found.append(f_path)
-                            elif is_archive_file(f_path):
-                                staging_archives.append(f_path)
+                    f_path = (Path(walk_root) / f).resolve()
+                    if not allowed.is_allowed(f_path):
+                        continue
+                    if clean_term in f.lower() or clean_term in walk_root.lower():
+                        if f_path.suffix.lower() in AUDIO_EXTENSIONS:
+                            found.append(f_path)
+                        elif is_archive_file(f_path):
+                            scan_archives.append((f_path, scan_root))
 
-            if not found and staging_archives:
-                for arc_path in staging_archives:
-                    extract_dir = staging_path / f"_extracted_{arc_path.stem}_{os.getpid()}_{time.time_ns()}"
-                    extract_dir.mkdir(parents=True, exist_ok=True)
-                    try:
-                        extracted = extract_archive(arc_path, extract_dir)
-                        found.extend(extracted)
-                    except Exception as e:
-                        self._note_archive_failure(arc_path, e)
+        if not found:
+            for arc_path, scan_root in scan_archives:
+                found.extend(self._extract_into(arc_path, scan_root))
 
-        return sorted(found)
+        return sorted(dict.fromkeys(found))
 
     def poll_once(
         self,
@@ -959,7 +974,9 @@ class AcquisitionWorker:
         if staging_dir:
             self.staging_dir = staging_dir
         else:
-            self.staging_dir = media_settings.get("staging_folder_path", self.staging_dir)
+            self.staging_dir = str(media_settings.get("staging_folder_path") or "").strip()
+        if staging_dir:
+            media_settings = dict(media_settings, staging_folder_path=staging_dir)
 
         stats = {"polled": 0, "completed": 0, "failed": 0, "imported": 0}
         lidarr_mode = media_settings.get("library_mode") == "lidarr"
@@ -984,6 +1001,7 @@ class AcquisitionWorker:
             return stats
 
         for item in active_items:
+            self.allowed_roots = None
             download_id = item["id"]
             client_id = item.get("client_id")
             stats["polled"] += 1
@@ -1180,11 +1198,19 @@ class AcquisitionWorker:
 
                 raw_src = status_dict.get("source_path") or item.get("source_path")
                 candidate_src = translate_remote_path(raw_src, mappings) if raw_src else None
+                client_label = str(client_config.get("name") or client_id or "download client")
+                self.allowed_roots = allowed_roots_for_client(db, media_settings, client_config, driver=driver)
+                if not self.allowed_roots.roots:
+                    reason = "; ".join(self.allowed_roots.errors) or f"Could not read download folder from {client_label}"
+                    err_msg = f"{reason}; check client connection"
+                    logger.warning("Download %s cannot be imported yet: %s", download_id, err_msg)
+                    db.update_download_status(download_id, status=DownloadStatus.COMPLETED.value, error_message=err_msg)
+                    self.allowed_roots = None
+                    continue
                 if candidate_src:
-                    src_path = Path(candidate_src).resolve()
-                    staging_path = Path(self.staging_dir).resolve()
-                    if not src_path.is_relative_to(staging_path):
-                        logger.warning("Rejecting source path outside staging directory: %s", candidate_src)
+                    ok, reject_reason = self.allowed_roots.check(candidate_src)
+                    if not ok:
+                        logger.warning("Rejecting source path %s from %s: %s", candidate_src, client_label, reject_reason)
                         candidate_src = None
 
                 search_term = item.get("title") or item.get("artist") or ""
@@ -1220,10 +1246,10 @@ class AcquisitionWorker:
 
                 if not audio_files:
                     logger.warning(
-                        "Download %s marked completed but no audio files found at %s or staging %s",
+                        "Download %s marked completed but no audio files found at %s or download roots %s",
                         download_id,
                         candidate_src,
-                        self.staging_dir,
+                        ", ".join(str(r) for r in self._effective_roots().roots),
                     )
                     err_msg = "No audio files found for import in download staging"
                     db.update_download_status(
@@ -1251,7 +1277,11 @@ class AcquisitionWorker:
                 security = verify_files(audio_files, probes)
                 if security.failed:
                     err_msg = f"Security check failed: {security.reason()}"
-                    moved = quarantine_files([p for p, _ in security.failures], self.staging_dir, str(download_id))
+                    q_root = next(
+                        (r for r in (self._effective_roots().matching_root(Path(p).resolve()) for p, _ in security.failures) if r),
+                        Path(self.staging_dir or "."),
+                    )
+                    moved = quarantine_files([p for p, _ in security.failures], q_root, str(download_id))
                     try:
                         db.record_event(
                             "import_security",

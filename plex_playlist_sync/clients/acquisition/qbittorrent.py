@@ -258,6 +258,55 @@ class QbittorrentDriver(AcquisitionDriver):
             logger.error("Failed to cleanup completed qBittorrent torrent %s: %s", download_id, e)
             return False
 
+    def _get_json(self, client: httpx.Client, path: str) -> Any:
+        """Authenticated GET returning parsed JSON; re-logs in once on 403. Raises RuntimeError on non-200."""
+        url = f"{self.host_url}{path}"
+        if not self._cookie:
+            self._login(client)
+        if self._cookie:
+            client.headers["Cookie"] = self._cookie
+        resp = client.get(url)
+        if resp.status_code == 403:
+            self._login(client)
+            if self._cookie:
+                client.headers["Cookie"] = self._cookie
+            resp = client.get(url)
+        if resp.status_code != 200:
+            raise RuntimeError(f"qBittorrent {path} failed (HTTP {resp.status_code})")
+        return resp.json()
+
+    def get_download_roots(self) -> list[str]:
+        """Completed-download folders: the default ``save_path`` plus the configured category's ``savePath``.
+
+        ``temp_path`` (incomplete downloads) is deliberately never returned.
+        """
+        self.last_roots_error = None
+        if not is_safe_service_url(self.host_url):
+            self.last_roots_error = "Prohibited host URL"
+            return []
+        roots: list[str] = []
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                prefs = self._get_json(client, "/api/v2/app/preferences")
+                if isinstance(prefs, dict):
+                    save_path = str(prefs.get("save_path") or "").strip()
+                    if save_path:
+                        roots.append(save_path)
+                if self.category and self.category.strip():
+                    cats = self._get_json(client, "/api/v2/torrents/categories")
+                    cat = cats.get(self.category) if isinstance(cats, dict) else None
+                    if isinstance(cat, dict):
+                        cat_path = str(cat.get("savePath") or cat.get("save_path") or "").strip()
+                        if cat_path:
+                            roots.append(cat_path)
+        except (httpx.HTTPError, RuntimeError, ValueError) as e:
+            logger.warning("Could not read qBittorrent download folders from %s: %s", self.host_url, e)
+            self.last_roots_error = str(e) or type(e).__name__
+            return []
+        if not roots:
+            self.last_roots_error = "qBittorrent reported no save_path"
+        return list(dict.fromkeys(roots))
+
     def list_category(self) -> Optional[list[dict[str, Any]]]:
         """Every torrent in this client's configured category (``torrents/info?category=``).
 

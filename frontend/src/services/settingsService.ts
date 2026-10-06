@@ -2,6 +2,7 @@ import { apiRequest } from './apiClient';
 import type {
   GeneralSettings,
   DownloadClientItem,
+  DownloadClientRoots,
   IndexerItem,
   IndexerPayload,
   TestIndexerPayload,
@@ -27,6 +28,13 @@ export async function updateGeneralSettings(settings: Partial<GeneralSettings>):
 
 export async function getClientSettings(): Promise<DownloadClientItem[]> {
   const res = await apiRequest<DownloadClientItem[]>('/api/settings/download-clients');
+  return res || [];
+}
+
+export async function getDownloadClientRoots(refresh = false): Promise<DownloadClientRoots[]> {
+  const res = await apiRequest<DownloadClientRoots[]>(
+    `/api/settings/download-clients/roots${refresh ? '?refresh=true' : ''}`
+  );
   return res || [];
 }
 

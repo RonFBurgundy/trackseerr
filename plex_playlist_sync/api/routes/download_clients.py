@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from plex_playlist_sync.api.dependencies import get_db, require_admin
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver
+from plex_playlist_sync.download_roots import describe_client_roots
 from plex_playlist_sync.models import DownloadClientConfig, DownloadDriverType
 from plex_playlist_sync.security import is_safe_service_url, mask_secret
 from plex_playlist_sync.storage import Database
@@ -128,6 +129,23 @@ def list_download_clients(
     """Lists all configured download clients with masked credentials."""
     clients = db.list_download_clients()
     return [_mask_client_dict(c) for c in clients]
+
+
+class DownloadRootsItem(BaseModel):
+    client_id: str
+    name: str
+    roots: list[str]
+    error: Optional[str] = None
+
+
+@router.get("/roots", response_model=list[DownloadRootsItem], summary="Download folders reported by each client")
+def list_download_roots(
+    refresh: bool = False,
+    db: Database = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_admin),
+) -> list[dict[str, Any]]:
+    """Completed-download folders each enabled client reports (as TrackSeerr sees them after path mappings)."""
+    return describe_client_roots(db, force=refresh)
 
 
 @router.post("", response_model=DownloadClientItem, summary="Create or update download client")

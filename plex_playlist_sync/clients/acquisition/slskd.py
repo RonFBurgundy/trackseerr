@@ -1,6 +1,7 @@
 """Soulseek / slskd REST API Acquisition Driver."""
 
 import logging
+import posixpath
 import time
 from typing import Any, Optional
 from urllib.parse import quote, unquote
@@ -30,8 +31,10 @@ class SlskdDriver(AcquisitionDriver):
         self.api_key = (api_key or "").strip()
         self.username = username
         self.password = password
-        self.download_dir = download_dir or "/downloads/slskd"
+        # Explicit override only; otherwise the completed-downloads folder is read from slskd's own options.
+        self.download_dir = (download_dir or "").strip() or None
         self.timeout = timeout
+        self._downloads_root: Optional[str] = None
 
     def _headers(self) -> dict[str, str]:
         headers = {
@@ -41,6 +44,68 @@ class SlskdDriver(AcquisitionDriver):
         if self.api_key:
             headers["X-API-KEY"] = self.api_key
         return headers
+
+    def _read_downloads_root(self) -> Optional[str]:
+        """slskd's completed-downloads folder (``directories.downloads``), cached on the driver.
+
+        ``directories.incomplete`` is never used. Returns None (and sets ``last_roots_error``) when unreadable.
+        """
+        if self._downloads_root:
+            return self._downloads_root
+        self.last_roots_error = None
+        if not is_safe_service_url(self.host_url):
+            self.last_roots_error = "Prohibited host URL"
+            return None
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.get(f"{self.host_url}/api/v0/options", headers=self._headers())
+                if resp.status_code != 200:
+                    raise RuntimeError(f"slskd /options failed (HTTP {resp.status_code})")
+                data = resp.json()
+        except (httpx.HTTPError, RuntimeError, ValueError) as e:
+            logger.warning("Could not read slskd download folder from %s: %s", self.host_url, e)
+            self.last_roots_error = str(e) or type(e).__name__
+            return None
+        dirs = data.get("directories") if isinstance(data, dict) else None
+        downloads = str(dirs.get("downloads") or "").strip() if isinstance(dirs, dict) else ""
+        if not downloads:
+            self.last_roots_error = "slskd reported no directories.downloads"
+            return None
+        self._downloads_root = downloads
+        return downloads
+
+    def get_download_roots(self) -> list[str]:
+        """slskd's completed-downloads directory (``directories.downloads``); the incomplete folder is never returned."""
+        root = self._read_downloads_root()
+        roots = [root] if root else []
+        if self.download_dir and self.download_dir not in roots:
+            roots.append(self.download_dir)
+        return roots
+
+    @staticmethod
+    def _last_component(remote_path: str) -> str:
+        """Last path component of a remote (possibly Windows ``\\``-separated) path."""
+        return remote_path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+
+    def _local_source_path(self, transfer: dict[str, Any], remote_dir: Optional[str]) -> Optional[str]:
+        """Where slskd stored a completed transfer: ``<downloads>/<last remote directory component>/<file name>``."""
+        reported = str(transfer.get("localFilename") or "").strip()
+        if reported and posixpath.isabs(reported.replace("\\", "/")):
+            return reported
+        base = self.download_dir or self._read_downloads_root()
+        filename = str(transfer.get("filename") or "")
+        if not base or not filename:
+            return None
+        folder_src = remote_dir or filename.replace("\\", "/").rsplit("/", 1)[0]
+        folder = self._last_component(folder_src)
+        name = self._last_component(filename)
+        if not name or name in (".", ".."):
+            return None
+        parts = [base.rstrip("/") or "/"]
+        if folder and folder not in (".", ".."):
+            parts.append(folder)
+        parts.append(name)
+        return posixpath.join(*parts)
 
     def test_connection(self) -> tuple[bool, str]:
         """Validates slskd connectivity and API credentials."""
@@ -204,6 +269,7 @@ class SlskdDriver(AcquisitionDriver):
             # Each entry: {"username": ..., "directories": [{"files": [...]}]}
             # or a flat list of transfers depending on version
             transfer = None
+            transfer_dir: Optional[str] = None
             if isinstance(data, list):
                 for item in data:
                     item_user = item.get("username", "")
@@ -215,10 +281,14 @@ class SlskdDriver(AcquisitionDriver):
                         for f in d.get("files", []):
                             if target_file and f.get("filename") == target_file:
                                 transfer = f
+                                transfer_dir = d.get("directory")
                                 break
                             elif f.get("id") == download_id:
                                 transfer = f
+                                transfer_dir = d.get("directory")
                                 break
+                        if transfer:
+                            break
                     if transfer:
                         break
                     # Also check flat transfer files if present
@@ -259,7 +329,11 @@ class SlskdDriver(AcquisitionDriver):
             elif any(s in state for s in ("errored", "failed", "aborted", "cancelled", "rejected")):
                 status_str = DownloadStatus.FAILED.value
 
-            source_file = transfer.get("localFilename") or transfer.get("filename")
+            source_file = (
+                self._local_source_path(transfer, transfer_dir)
+                if status_str == DownloadStatus.COMPLETED.value
+                else None
+            )
             return {
                 "status": status_str,
                 "progress": round(progress, 1),

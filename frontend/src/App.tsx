@@ -16,6 +16,7 @@ import {
   useMediaServer,
   useStartupStatus,
   useAppRoute,
+  useSearchShortcut,
   defaultRoute,
 } from '@/hooks';
 import type { AppRoute, MainTab, NavigateOptions } from '@/hooks';
@@ -89,7 +90,8 @@ const MainApp: React.FC = () => {
   const libraryHook = useLibrary(auth.canUseAdminUi);
   const reviewHealth = useLibraryHealthCount(auth.canUseAdminUi);
 
-  const { route, navigate } = useAppRoute();
+  const { route, navigate, navigateUp } = useAppRoute();
+  useSearchShortcut();
   // Gate the requested location: MFA enrollment confines to Settings > Account, admin-only tabs fall back to
   // Discover, and hidden settings pages fall back to the first visible one.
   const activeRoute: AppRoute = useMemo(
@@ -426,8 +428,9 @@ const MainApp: React.FC = () => {
 
             {activeRoute.tab === 'library' && auth.canUseAdminUi && (
               <LibraryView
-                sub={activeRoute.sub}
-                onSubChange={(sub, o) => handleNavigate({ tab: 'library', sub }, o)}
+                route={activeRoute}
+                onNavigate={handleNavigate}
+                onNavigateUp={navigateUp}
                 libraryHook={libraryHook}
                 isAdmin={auth.canUseAdminUi}
               />

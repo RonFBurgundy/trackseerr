@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { useModalHistory } from '@/hooks/useModalHistory';
 import { TapeDeckButton } from './TapeDeckButton';
 import { ActionBar } from './ActionBar';
 
@@ -15,6 +16,11 @@ export interface ObsidianModalProps {
   children: React.ReactNode;
   footer?: React.ReactNode;
   maxWidth?: string;
+  /**
+   * Default true: Back (browser, OS gesture, mouse button) closes the modal via a sentinel history entry. Pass false
+   * when the modal's open state is already driven by the URL.
+   */
+  historyBacked?: boolean;
 }
 
 export const ObsidianModal: React.FC<ObsidianModalProps> = ({
@@ -25,6 +31,7 @@ export const ObsidianModal: React.FC<ObsidianModalProps> = ({
   children,
   footer,
   maxWidth = 'sm:max-w-2xl',
+  historyBacked = true,
 }) => {
   const idRef = useRef<symbol>(Symbol('obsidian-modal'));
 
@@ -35,6 +42,17 @@ export const ObsidianModal: React.FC<ObsidianModalProps> = ({
     return () => {
       const idx = openModalStack.indexOf(id);
       if (idx !== -1) openModalStack.splice(idx, 1);
+    };
+  }, [isOpen]);
+
+  useModalHistory(isOpen, onClose, historyBacked);
+
+  // Return focus to whatever opened the modal once it closes.
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => {
+      if (opener && opener.isConnected) opener.focus();
     };
   }, [isOpen]);
 

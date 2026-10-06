@@ -4451,7 +4451,8 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             res["write_audio_tags"] = bool(res.get("write_audio_tags", 1))
             res["embed_artwork"] = bool(res.get("embed_artwork", 1))
             res["save_cover_art_file"] = bool(res.get("save_cover_art_file", 1))
-            res["staging_folder_path"] = str(res.get("staging_folder_path") or "/data/downloads")
+            # An empty value is a deliberate "no extra import folder": download folders come from the clients.
+            res["staging_folder_path"] = str(res.get("staging_folder_path") or "")
             res["import_mode"] = str(res.get("import_mode") or "move")
             res["torrent_hardlink_tags"] = str(res.get("torrent_hardlink_tags") or "copy_and_tag")
             action = str(res.get("seed_complete_action") or "remove")
