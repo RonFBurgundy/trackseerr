@@ -33,6 +33,8 @@ export interface ArtistProfileViewProps {
   onNavigate: (route: AppRoute) => void;
   /** Opens the discovery tracklist modal for a release. */
   onOpenAlbum: (item: DiscoveryItem) => void;
+  /** Opens the track detail modal for a top track. */
+  onOpenTrack: (item: DiscoveryItem) => void;
   onPlayTrack: (track: AudioPreviewTrack) => void;
   currentPreviewTrackId?: string;
   isPreviewPlaying: boolean;
@@ -171,6 +173,7 @@ export const ArtistProfileView: React.FC<ArtistProfileViewProps> = ({
   onBack,
   onNavigate,
   onOpenAlbum,
+  onOpenTrack,
   onPlayTrack,
   currentPreviewTrackId,
   isPreviewPlaying,
@@ -219,6 +222,13 @@ export const ArtistProfileView: React.FC<ArtistProfileViewProps> = ({
       onPlayTrack({ id: track.id, title: track.title, artist: artistName, cover_url: artistImage, preview_url: track.preview_url });
     },
     [onPlayTrack, artistName, artistImage]
+  );
+
+  const handleOpenTrack = useCallback(
+    (track: ArtistProfileTrack): void => {
+      onOpenTrack(profileTrackToItem(track, artistName, artistImage));
+    },
+    [onOpenTrack, artistName, artistImage]
   );
 
   const handleRequestTrack = useCallback(
@@ -301,6 +311,7 @@ export const ArtistProfileView: React.FC<ArtistProfileViewProps> = ({
                 isPlaying={isPreviewPlaying && currentPreviewTrackId === track.id}
                 onPlay={handlePlay}
                 onRequest={handleRequestTrack}
+                onOpen={handleOpenTrack}
               />
             ))}
           </ul>

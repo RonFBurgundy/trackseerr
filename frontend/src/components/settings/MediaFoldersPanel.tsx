@@ -1,6 +1,6 @@
 import React, { useId, useState } from 'react';
-import { Eye, EyeOff, Loader2, RefreshCw, Save } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, FormField, MonitorOptionSelect } from '@/components/ui';
+import { Eye, EyeOff, Loader2, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { ConfirmDialog, TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, FormField, MonitorOptionSelect } from '@/components/ui';
 import type { MediaManagementSettings, SeedCompleteAction } from '@/types/models';
 import { useDownloadClientRoots } from '@/hooks/useDownloadClientRoots';
 import { updateMediaManagementSettings } from '@/services/settingsService';
@@ -29,12 +29,30 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
   const acoustidKeyId = useId();
   const roots = useDownloadClientRoots();
   const [showKey, setShowKey] = useState<boolean>(false);
+  const [confirmRemoveKey, setConfirmRemoveKey] = useState<boolean>(false);
+  const [removingKey, setRemovingKey] = useState<boolean>(false);
   // null = untouched: the server value (possibly masked) is shown and never sent back.
   const [keyDraft, setKeyDraft] = useState<string | null>(null);
   const serverKey = settings?.acoustid_api_key ?? '';
   const keyMasked = keyDraft === null && isMaskedKey(serverKey);
   const keyValue = keyDraft ?? serverKey;
   const keyConfigured = keyValue.trim().length > 0;
+
+  const handleRemoveKey = async (): Promise<void> => {
+    setRemovingKey(true);
+    try {
+      // An explicit empty string clears the stored key server-side.
+      const updated = await updateMediaManagementSettings({ acoustid_api_key: '' });
+      onChange((prev) => (prev ? { ...prev, acoustid_api_key: updated.acoustid_api_key ?? '', fingerprint_on_weak_match: updated.fingerprint_on_weak_match } : updated));
+      setKeyDraft(null);
+      setConfirmRemoveKey(false);
+      onToast('AcoustID key removed');
+    } catch {
+      onToast('Failed to remove AcoustID key', 'error');
+    } finally {
+      setRemovingKey(false);
+    }
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -325,6 +343,18 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
                 onClick={() => setShowKey((v) => !v)}
                 icon={showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               />
+              {serverKey.trim().length > 0 && (
+                <TapeDeckButton
+                  type="button"
+                  size="sm"
+                  aria-label="Remove AcoustID API key"
+                  title="Remove key"
+                  onClick={() => setConfirmRemoveKey(true)}
+                  icon={<Trash2 className="h-4 w-4" />}
+                >
+                  Remove key
+                </TapeDeckButton>
+              )}
             </div>
             <p className="text-[11px] text-neutral-500 font-mono mt-1">
               {keyMasked ? 'A key is configured; click the field to replace it. ' : ''}
@@ -363,6 +393,16 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
         </ActionBar>
       </form>
       </div>
+      <ConfirmDialog
+        isOpen={confirmRemoveKey}
+        title="Remove AcoustID key?"
+        confirmLabel="Remove key"
+        onConfirm={() => void handleRemoveKey()}
+        onCancel={() => setConfirmRemoveKey(false)}
+        busy={removingKey}
+      >
+        <p>Fingerprint identification stops until a new key is added.</p>
+      </ConfirmDialog>
     </MachinedCard>
   );
 };
