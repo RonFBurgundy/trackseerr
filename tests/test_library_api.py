@@ -454,6 +454,7 @@ def test_library_scan_and_migration_trigger_routes(
 ):
     app, client = app_and_client
     admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    test_db.update_media_management_settings({"root_folder_path": "/music"})
 
     # 1. Filesystem Scanner Endpoints
     with patch.object(library_scanner, "start_scan", return_value=True) as mock_start, \
@@ -850,6 +851,7 @@ def test_get_album_cover_local_file(
     _, client = app_and_client
     alice_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
 
+    test_db.update_media_management_settings({"root_folder_path": str(tmp_path / "music")})
     album_dir = tmp_path / "music" / "Local Cover Band" / "Local Album"
     album_dir.mkdir(parents=True, exist_ok=True)
     cover_file = album_dir / "cover.jpg"
