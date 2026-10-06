@@ -143,14 +143,15 @@ def test_verify_files_probe_parse_once_and_magic_failure_not_parsed(tmp_path):
 
 
 # ---------------------------------------------------------------- worker integration
-def _run(tmp_path, mode, files: dict[str, bytes], mutagen_result):
+def _run(tmp_path, mode, files: dict[str, bytes], mutagen_result, driver_type=DownloadDriverType.SABNZBD,
+         extra_settings=None):
     db = Database(":memory:")
     downloads, music = tmp_path / "downloads", tmp_path / "music"
     rel = downloads / "Album"
     rel.mkdir(parents=True)
     music.mkdir()
     db.create_download_client(
-        DownloadClientConfig(id="c1", name="SAB", driver_type=DownloadDriverType.SABNZBD, host_url="http://sab:8080", api_key="k")
+        DownloadClientConfig(id="c1", name="SAB", driver_type=driver_type, host_url="http://sab:8080", api_key="k")
     )
     db.create_active_download(
         ActiveDownload(id="dl-1", title="Album X", artist="Artist X", client_id="c1", download_hash="h1",
@@ -164,6 +165,7 @@ def _run(tmp_path, mode, files: dict[str, bytes], mutagen_result):
     settings = db.get_media_management_settings()
     settings["root_folder_path"] = str(music)
     settings["import_bitrate_check"] = mode
+    settings.update(extra_settings or {})
     db.update_media_management_settings(settings)
     driver = MagicMock()
     driver.get_status.return_value = {"status": DownloadStatus.COMPLETED.value, "progress": 100.0, "size_bytes": 1,
@@ -193,10 +195,11 @@ def test_unparseable_quarantined_even_with_check_off(tmp_path, mode):
     dl = db.get_active_download("dl-1")
     assert dl["status"] == DownloadStatus.FAILED.value
     assert dl["error_message"].startswith("Security check failed: 01.mp3: ")
-    assert not paths[0].exists()
-    assert (downloads / "_quarantine" / "dl-1").is_dir()
-    assert list((downloads / "_quarantine" / "dl-1").iterdir())
-    assert not any(music.rglob("*.mp3"))
+    assert not paths[0].exists()  # usenet source: nothing seeds, so it is moved out of the download folder
+    qdir = music / ".trackseerr-quarantine" / "dl-1"
+    assert qdir.is_dir() and list(qdir.iterdir())
+    assert not (downloads / "_quarantine").exists()  # the legacy location is never written
+    assert not any(p for p in music.rglob("*.mp3") if ".trackseerr-quarantine" not in p.parts)
 
 
 def test_whole_release_rejected_and_blocklisted_and_event(tmp_path):
@@ -207,8 +210,8 @@ def test_whole_release_rejected_and_blocklisted_and_event(tmp_path):
         mutagen_result=_audio(),
     )
     assert stats["failed"] == 1 and stats["imported"] == 0
-    assert not any(music.rglob("*"))  # nothing imported, not even the good files
-    qdir = downloads / "_quarantine" / "dl-1"
+    assert not any(p for p in music.rglob("*") if ".trackseerr-quarantine" not in p.parts)  # nothing imported
+    qdir = music / ".trackseerr-quarantine" / "dl-1"
     assert [p.name.split("_", 1)[1] for p in qdir.iterdir()] == ["02.mp3"]
     assert paths[0].exists() and paths[2].exists()  # innocent files left in staging
     rows = db.conn.execute("SELECT severity, message, details_json FROM system_events WHERE event_type='import_security'").fetchall()
@@ -229,9 +232,44 @@ def test_clean_release_imports_with_check_off(tmp_path):
 def test_quarantine_files_helper_sanitises_id(tmp_path):
     f = tmp_path / "x.mp3"
     f.write_bytes(b"x")
-    moved = quarantine_files([f], tmp_path, "../../evil")
-    assert moved and Path(tmp_path / "_quarantine") in moved[0].parents
+    moved = quarantine_files([f], tmp_path / "q", "../../evil")
+    assert moved and Path(tmp_path / "q") in moved[0].parents
+    assert moved[0].parent.parent == (tmp_path / "q").resolve()
     assert not f.exists()
+
+
+def test_quarantine_files_copy_leaves_source(tmp_path):
+    f = tmp_path / "x.mp3"
+    f.write_bytes(b"x")
+    moved = quarantine_files([f], tmp_path / "q", "dl", copy=True)
+    assert f.exists() and moved[0].read_bytes() == b"x"
+
+
+def test_torrent_reject_never_removes_files_from_the_torrent_root(tmp_path):
+    db, stats, paths, downloads, music = _run(
+        tmp_path, "off", {"01.mp3": b"\xff\xfb\x90\x00" + PAD, "02.mp3": b"<html>nope</html>"},
+        mutagen_result=_audio(), driver_type=DownloadDriverType.QBITTORRENT,
+    )
+    assert stats["failed"] == 1 and stats["imported"] == 0
+    assert all(p.exists() for p in paths)  # still where the torrent client seeds them
+    qdir = music / ".trackseerr-quarantine" / "dl-1"
+    copies = list(qdir.iterdir())
+    assert [c.name.split("_", 1)[1] for c in copies] == ["02.mp3"]
+    assert copies[0].read_bytes() == b"<html>nope</html>"
+    ev = db.conn.execute("SELECT details_json FROM system_events WHERE event_type='import_security'").fetchone()
+    assert '"sources_kept_for_seeding": true' in ev[0]
+    assert db.get_active_download("dl-1")["status"] == DownloadStatus.FAILED.value
+
+
+def test_custom_quarantine_path_is_used(tmp_path):
+    custom = tmp_path / "elsewhere" / "q"
+    db, stats, paths, downloads, music = _run(
+        tmp_path, "off", {"01.mp3": b"<html>nope</html>"}, mutagen_result=_audio(),
+        extra_settings={"quarantine_folder_path": str(custom)},
+    )
+    assert stats["failed"] == 1
+    assert [p.name for p in (custom / "dl-1").iterdir()] == ["000_01.mp3"]
+    assert not (music / ".trackseerr-quarantine").exists()
 
 
 # ---------------------------------------------------------------- chmod

@@ -5,6 +5,7 @@ import { IssueReportButton } from '@/components/issues';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
 import type { DiscoveryAlbumTrack } from '@/hooks/useDiscoveryAlbum';
 import type { AudioPreviewTrack, DiscoveryItem } from '@/types/models';
+import { MEDIA_ISSUE_TYPES } from '@/types/models';
 import { ArtistNameLink } from './ArtistNameLink';
 import { ProfileRequestButton } from './ProfileRequestButton';
 import { effectiveStatus } from './profileItems';
@@ -46,6 +47,8 @@ export const DiscoveryAlbumModal: React.FC<DiscoveryAlbumModalProps> = ({
   onOpenArtist,
 }) => {
   const isInLibrary = Boolean(album.in_library || album.status === 'in_library' || album.status === 'available');
+  // Reports are about media we have, so only for items that are (partly) in the library.
+  const canReport = isInLibrary || album.status === 'partial';
   const isRequested = Boolean(requestedIds.has(album.id) || album.requested || album.status === 'requested' || album.status === 'pending');
   const isProcessing = requestingId === album.id || album.status === 'processing';
 
@@ -99,14 +102,20 @@ export const DiscoveryAlbumModal: React.FC<DiscoveryAlbumModalProps> = ({
             </p>
             {album.release_date && <p className="font-mono text-xs text-neutral-500">Released: {album.release_date}</p>}
             {isInLibrary && (
-              <>
-                <span className="inline-flex items-center gap-1 rounded-[2px] bg-emerald-500/90 px-2 py-0.5 font-mono text-[10px] font-bold text-black">
-                  <Check className="h-3 w-3" /> In Library
-                </span>
-                <div>
-                  <IssueReportButton mediaTitle={album.title} artist={album.artist} issuesHook={issuesHook} />
-                </div>
-              </>
+              <span className="inline-flex items-center gap-1 rounded-[2px] bg-emerald-500/90 px-2 py-0.5 font-mono text-[10px] font-bold text-black">
+                <Check className="h-3 w-3" /> In Library
+              </span>
+            )}
+            {canReport && (
+              <div>
+                <IssueReportButton
+                  mediaTitle={album.title}
+                  artist={album.artist}
+                  types={MEDIA_ISSUE_TYPES}
+                  reference={{ discoveryId: album.id, itemType: 'album' }}
+                  issuesHook={issuesHook}
+                />
+              </div>
             )}
           </div>
         </div>

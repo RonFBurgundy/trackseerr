@@ -33,6 +33,7 @@ from plex_playlist_sync.api.routes import (
     library,
     library_health,
     seed_cleanup,
+    recycle_bin,
     missing,
     mixes,
     notifications,
@@ -232,6 +233,7 @@ def create_app(
     api_router.include_router(library.router, prefix="/library", tags=["library"])
     api_router.include_router(library_health.router, prefix="/library-health", tags=["library-health"])
     api_router.include_router(seed_cleanup.router, prefix="/seed-cleanup", tags=["seed-cleanup"])
+    api_router.include_router(recycle_bin.router, prefix="/recycle-bin", tags=["recycle-bin"])
     api_router.include_router(itunes_import.router, prefix="/import/itunes", tags=["itunes-import"])
     api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
     api_router.include_router(

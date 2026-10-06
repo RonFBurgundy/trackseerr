@@ -27,6 +27,7 @@ import {
   TracksPanel,
 } from '@/components/library';
 import { ManualImportModal } from '@/components/manualImport';
+import type { UseIssuesReturn } from '@/hooks/useIssues';
 
 export interface LibraryViewProps {
   libraryHook: UseLibraryReturn;
@@ -40,6 +41,8 @@ export interface LibraryViewProps {
   /** Request flow shared with Discover (rest-of-discography requests on the artist page). */
   onRequestItem: (item: DiscoveryItem) => Promise<void>;
   onRequestDiscography: (artist: string, albums: ArtistDiscographyAlbum[]) => Promise<void>;
+  /** Admin report keys on the album modal. */
+  issuesHook: UseIssuesReturn;
 }
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -59,6 +62,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   onNavigateUp,
   onRequestItem,
   onRequestDiscography,
+  issuesHook,
 }) => {
   const activeTab = route.sub;
   const {
@@ -168,6 +172,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       <AlbumDetailModal
         album={drill.album}
         isAdmin={isAdmin}
+        issuesHook={issuesHook}
         canCollect={canCollect}
         lidarrMode={lidarrMode}
         onClose={drill.closeAlbum}

@@ -1,7 +1,10 @@
 import React from 'react';
 import { Check, Loader2, Pause, Play, Plus } from 'lucide-react';
 import { ObsidianModal, TapeDeckButton } from '@/components/ui';
+import { IssueReportButton } from '@/components/issues';
+import type { UseIssuesReturn } from '@/hooks/useIssues';
 import type { AudioPreviewTrack, DiscoveryItem, DiscoveryTrackDetail } from '@/types/models';
+import { MEDIA_ISSUE_TYPES } from '@/types/models';
 import { ArtistNameLink } from './ArtistNameLink';
 import { ProfileRequestButton } from './ProfileRequestButton';
 import { ProfileStatusBadge } from './ProfileStatusBadge';
@@ -17,6 +20,7 @@ export interface DiscoveryTrackModalProps {
   requestingId: string | null;
   currentPreviewTrackId?: string;
   isPreviewPlaying: boolean;
+  issuesHook: UseIssuesReturn;
   onClose: () => void;
   onPlayTrack: (track: AudioPreviewTrack) => void;
   /** Request this single track (item carries `type: 'track'`). */
@@ -55,6 +59,7 @@ export const DiscoveryTrackModal: React.FC<DiscoveryTrackModalProps> = ({
   requestingId,
   currentPreviewTrackId,
   isPreviewPlaying,
+  issuesHook,
   onClose,
   onPlayTrack,
   onRequestTrack,
@@ -75,6 +80,8 @@ export const DiscoveryTrackModal: React.FC<DiscoveryTrackModalProps> = ({
   const trackBusy = requestingId === track.id;
   const albumRequested = albumId ? requestedIds.has(albumId) : false;
   const albumBusy = albumId ? requestingId === albumId : false;
+  // Reports are about media we have, so only for tracks that are in the library.
+  const canReport = status === 'in_library' || status === 'available' || status === 'partial';
   const isPlaying = currentPreviewTrackId === track.id && isPreviewPlaying;
 
   const trackItem: DiscoveryItem = {
@@ -169,6 +176,15 @@ export const DiscoveryTrackModal: React.FC<DiscoveryTrackModalProps> = ({
                 <span className="rounded-[2px] border border-neutral-600 px-1.5 py-0.5 font-mono text-[10px] font-bold text-neutral-300" title="Explicit">
                   E
                 </span>
+              )}
+              {canReport && (
+                <IssueReportButton
+                  mediaTitle={title}
+                  artist={artist}
+                  types={MEDIA_ISSUE_TYPES}
+                  reference={{ discoveryId: track.id, itemType: 'track' }}
+                  issuesHook={issuesHook}
+                />
               )}
               {previewUrl && (
                 <TapeDeckButton

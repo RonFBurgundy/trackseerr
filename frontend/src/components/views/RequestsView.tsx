@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Check, X, Trash2, Clock, CheckCircle2, AlertCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import type { UseRequestsReturn, RequestFilter } from '@/hooks/useRequests';
 import type { RequestItem } from '@/types/models';
+import { MEDIA_ISSUE_TYPES, REQUEST_ISSUE_TYPES } from '@/types/models';
 import {
   TabStrip,
   ActionBar,
@@ -23,6 +24,8 @@ export interface RequestsViewProps {
   requestsHook: UseRequestsReturn;
   isAdmin?: boolean;
   issuesHook: UseIssuesReturn;
+  /** Own issues with unseen admin activity; badge on the My issues key. */
+  issuesUnreadCount?: number;
   currentUserId?: string | number;
   /** From GET /api/account; drives the per-type remaining-quota panel. */
   account?: AccountInfo | null;
@@ -34,6 +37,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
   requestsHook,
   isAdmin = false,
   issuesHook,
+  issuesUnreadCount = 0,
   currentUserId,
   account = null,
 }) => {
@@ -144,6 +148,14 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
           onClick={() => onSubChange('issues')}
         >
           My issues
+          {issuesUnreadCount > 0 && (
+            <span
+              className="ml-1.5 px-1 rounded-[3px] bg-[var(--accent-amber)] text-[10px] font-mono font-bold text-black"
+              aria-label={`${issuesUnreadCount} with new activity`}
+            >
+              {issuesUnreadCount}
+            </span>
+          )}
         </TapeDeckButton>
       </TabStrip>
       }
@@ -159,7 +171,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
         </MachinedCard>
       )}
 
-      {section === 'issues' && <MyIssuesList issuesHook={issuesHook} />}
+      {section === 'issues' && <MyIssuesList issuesHook={issuesHook} currentUserId={currentUserId} />}
 
       {/* Loading state */}
       {section === 'requests' && isLoading && (
@@ -236,14 +248,16 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
 
                 {/* Actions */}
                 <ActionBar align="end" className="pt-2 border-t border-[#1f1f1f]">
-                  {(req.status === 'fulfilled' || req.status === 'available') &&
+                  {req.status !== 'rejected' &&
                     currentUserId !== undefined &&
                     (req.user_id ?? req.requested_by_id) !== undefined &&
                     String(req.user_id ?? req.requested_by_id) === String(currentUserId) && (
                       <IssueReportButton
                         mediaTitle={req.title}
                         artist={req.artist}
-                        requestId={String(req.id)}
+                        reference={{ requestId: String(req.id) }}
+                        types={req.status === 'fulfilled' || req.status === 'available' ? MEDIA_ISSUE_TYPES : REQUEST_ISSUE_TYPES}
+                        isAdmin={isAdmin}
                         issuesHook={issuesHook}
                       />
                     )}

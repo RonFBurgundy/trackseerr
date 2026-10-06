@@ -62,6 +62,16 @@ def format_notification(event: str, data: dict[str, Any]) -> tuple[str, str]:
         details = data.get("problem_details") or ""
         subj = f"Issue Reported: {artist} - {title} ({issue_type})"
         body = f"{username or 'A user'} reported an issue ({issue_type}) for '{artist} - {title}': {details}"
+    elif event == NotificationEvent.ISSUE_UPDATED.value:
+        issue_type = data.get("issue_type") or "Issue"
+        update = data.get("update") or "Issue updated"
+        subj = f"Issue Updated: {artist} - {title} ({issue_type})"
+        body = f"{update} on the {issue_type} issue for '{artist} - {title}' (status: {data.get('status') or 'unknown'})."
+    elif event == NotificationEvent.ISSUE_RESOLVED.value:
+        issue_type = data.get("issue_type") or "Issue"
+        outcome = "closed as won't fix" if data.get("status") == "wont_fix" else "resolved"
+        subj = f"Issue {outcome.capitalize()}: {artist} - {title} ({issue_type})"
+        body = f"The {issue_type} issue for '{artist} - {title}' was {outcome}."
     else:
         subj = f"TrackSeerr Notification: {event}"
         body = f"Notification event '{event}' for '{artist} - {title}'."
@@ -97,8 +107,14 @@ class NotificationDispatcher:
             "failed",
         ):
             color = 0xE74C3C  # Red
-        elif event in (NotificationEvent.ISSUE_REPORTED.value, "issue_reported"):
+        elif event in (
+            NotificationEvent.ISSUE_REPORTED.value,
+            NotificationEvent.ISSUE_UPDATED.value,
+            "issue_reported",
+        ):
             color = 0xE67E22  # Orange
+        elif event == NotificationEvent.ISSUE_RESOLVED.value:
+            color = 0x2ECC71  # Green
         else:
             color = 0x3498DB  # Blue
 
@@ -119,7 +135,7 @@ class NotificationDispatcher:
         if data.get("issue_type"):
             embed["fields"].append({"name": "Issue Type", "value": str(data["issue_type"]), "inline": True})
         if data.get("username"):
-            embed["fields"].append({"name": "Reported By" if event == NotificationEvent.ISSUE_REPORTED.value else "Requested By", "value": str(data["username"]), "inline": True})
+            embed["fields"].append({"name": "Reported By" if event in (NotificationEvent.ISSUE_REPORTED.value, NotificationEvent.ISSUE_UPDATED.value, NotificationEvent.ISSUE_RESOLVED.value) else "Requested By", "value": str(data["username"]), "inline": True})
         if data.get("problem_details"):
             embed["fields"].append({"name": "Details", "value": str(data["problem_details"])[:1024], "inline": False})
         if data.get("client"):

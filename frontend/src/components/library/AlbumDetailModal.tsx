@@ -5,11 +5,16 @@ import { useAlbumTracks } from '@/hooks/useAlbumTracks';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
 import { errorMessage } from '@/services/apiClient';
 import { ObsidianModal, TapeDeckButton } from '@/components/ui';
+import { IssueReportButton } from '@/components/issues';
+import type { UseIssuesReturn } from '@/hooks/useIssues';
+import { MEDIA_ISSUE_TYPES } from '@/types/models';
 import { AlbumTrackList } from './AlbumTrackList';
 
 export interface AlbumDetailModalProps {
   album: AlbumItem | null;
   isAdmin: boolean;
+  /** Admin-only report keys (album and track rows) submit through this. */
+  issuesHook: UseIssuesReturn;
   canCollect: boolean;
   lidarrMode: boolean;
   onClose: () => void;
@@ -24,6 +29,7 @@ export interface AlbumDetailModalProps {
 export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
   album,
   isAdmin,
+  issuesHook,
   canCollect,
   lidarrMode,
   onClose,
@@ -88,6 +94,16 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
                 Import files&hellip;
               </TapeDeckButton>
             )}
+            {isAdmin && album && (
+              <IssueReportButton
+                mediaTitle={album.title}
+                artist={album.artist_name || 'Unknown Artist'}
+                types={MEDIA_ISSUE_TYPES}
+                reference={{ albumId: String(album.id) }}
+                isAdmin
+                issuesHook={issuesHook}
+              />
+            )}
             {canCollect && (
               <TapeDeckButton
                 size="sm"
@@ -150,6 +166,22 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
             error={error}
             isAdmin={isAdmin}
             canMonitorTracks={!lidarrMode}
+            renderRowAction={
+              isAdmin
+                ? (t) => (
+                    <IssueReportButton
+                      mediaTitle={t.title}
+                      artist={album.artist_name || 'Unknown Artist'}
+                      types={MEDIA_ISSUE_TYPES}
+                      reference={{ albumId: String(album.id), trackId: String(t.id) }}
+                      isAdmin
+                      issuesHook={issuesHook}
+                      label="Report issue with this track"
+                      iconOnly
+                    />
+                  )
+                : undefined
+            }
             onToggleMonitored={(id, cur) => void handleToggle(id, cur)}
           />
         </div>

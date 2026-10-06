@@ -12,6 +12,8 @@ export interface AlbumTrackListProps {
   /** False in Lidarr mode: Lidarr has no per-track monitoring (the route is 409). */
   canMonitorTracks?: boolean;
   onToggleMonitored: (trackId: number | string, currentMonitored: boolean) => void;
+  /** Extra per-row control rendered after the quality badge (e.g. a report key). */
+  renderRowAction?: (track: TrackItem) => React.ReactNode;
   /** Tailwind max-height class that makes the list scroll internally. */
   scrollClass?: string;
 }
@@ -24,6 +26,7 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
   isAdmin,
   canMonitorTracks = true,
   onToggleMonitored,
+  renderRowAction,
   scrollClass = '',
 }) => {
   if (loading) {
@@ -64,6 +67,7 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
             <div className="flex items-center gap-3 flex-shrink-0 font-mono text-xs">
               <span className="text-neutral-500 hidden sm:inline">{formatTrackDuration(trackSeconds(t))}</span>
               <span className={`px-2 py-0.5 rounded-[2px] text-[10px] font-bold ${badge.className}`}>{badge.label}</span>
+              {renderRowAction?.(t)}
               {isAdmin && canMonitorTracks && t.monitored !== null && (
                 <div className="flex items-center gap-1.5 pl-1">
                   <span

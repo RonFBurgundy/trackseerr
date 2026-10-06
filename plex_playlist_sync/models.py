@@ -31,6 +31,7 @@ class IssueType(StrEnum):
     WRONG_RELEASE = "wrong_release"
     MISSING_TRACKS = "missing_tracks"
     INCORRECT_TAGS = "incorrect_tags"
+    REQUEST_STUCK = "request_stuck"
     OTHER = "other"
 
 
@@ -38,7 +39,7 @@ class IssueStatus(StrEnum):
     OPEN = "open"
     IN_PROGRESS = "in_progress"
     RESOLVED = "resolved"
-    CLOSED = "closed"
+    WONT_FIX = "wont_fix"
 
 
 @dataclass
@@ -608,6 +609,8 @@ class NotificationEvent(str, Enum):
     ITEM_AVAILABLE = "item_available"
     DOWNLOAD_FAILED = "download_failed"
     ISSUE_REPORTED = "issue_reported"
+    ISSUE_UPDATED = "issue_updated"
+    ISSUE_RESOLVED = "issue_resolved"
 
 
 @dataclass
@@ -626,6 +629,8 @@ class NotificationChannel:
             "item_available",
             "download_failed",
             "issue_reported",
+            "issue_updated",
+            "issue_resolved",
         ]
     )
     created_at: Optional[str] = None

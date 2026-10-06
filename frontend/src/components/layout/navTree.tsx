@@ -21,9 +21,16 @@ export interface RouteAccess {
   mfaEnrollmentRequired: boolean;
   /** Library-health findings awaiting review (admin only). */
   reviewCount?: number;
+  /** Open + in-progress issues awaiting an admin. */
+  issuesOpenCount?: number;
+  /** The user's own issues with unseen admin activity. */
+  issuesUnreadCount?: number;
 }
 
-export const routesEqual = (a: AppRoute, b: AppRoute): boolean => routeToHash(a) === routeToHash(b);
+/** Nav entries match a page, not the issue open on top of it. */
+const withoutIssue = (r: AppRoute): AppRoute => (r.tab === 'activity' && r.issueId !== undefined ? { tab: 'activity', sub: r.sub } : r);
+
+export const routesEqual = (a: AppRoute, b: AppRoute): boolean => routeToHash(withoutIssue(a)) === routeToHash(withoutIssue(b));
 
 /** Clamp a location to what this user may open (MFA enrollment, admin-only tabs, hidden settings pages). */
 export function gateRoute(route: AppRoute, access: RouteAccess): AppRoute {
@@ -40,7 +47,7 @@ const ico = 'h-4 w-4';
 const leaf = (key: string, label: string, route: AppRoute): NavNode => ({ key, label, route });
 
 /** Every main section the user may see, with its pages as children where it has any. */
-export function buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount = 0 }: RouteAccess): NavNode[] {
+export function buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount = 0, issuesOpenCount = 0, issuesUnreadCount = 0 }: RouteAccess): NavNode[] {
   const settingsChildren: NavNode[] = buildSettingsTree(isAdmin, mfaEnrollmentRequired).map((section) => {
     if (!hasChildRow(section)) {
       return {
@@ -84,13 +91,14 @@ export function buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount = 0 }
       label: 'Requests',
       description: 'Manage & monitor your queue',
       icon: <Inbox className={ico} />,
+      badge: issuesUnreadCount,
       children: [
         leaf('requests/all', 'All', { tab: 'requests', sub: 'all' }),
         leaf('requests/pending', 'Pending', { tab: 'requests', sub: 'pending' }),
         leaf('requests/approved', 'Approved', { tab: 'requests', sub: 'approved' }),
         leaf('requests/fulfilled', 'Fulfilled', { tab: 'requests', sub: 'fulfilled' }),
         leaf('requests/rejected', 'Rejected', { tab: 'requests', sub: 'rejected' }),
-        leaf('requests/issues', 'My issues', { tab: 'requests', sub: 'issues' }),
+        { ...leaf('requests/issues', 'My issues', { tab: 'requests', sub: 'issues' }), badge: issuesUnreadCount },
       ],
     },
   ];
@@ -122,12 +130,13 @@ export function buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount = 0 }
         label: 'Activity',
         description: 'Lidarr & download deck status',
         icon: <Activity className={ico} />,
-        badge: reviewCount,
+        badge: reviewCount + issuesOpenCount,
         children: [
           leaf('activity/queue', 'Queue', { tab: 'activity', sub: 'queue' }),
           leaf('activity/history', 'History', { tab: 'activity', sub: 'history' }),
           leaf('activity/blocklist', 'Blocklist', { tab: 'activity', sub: 'blocklist' }),
           { ...leaf('activity/review', 'Needs review', { tab: 'activity', sub: 'review' }), badge: reviewCount },
+          { ...leaf('activity/issues', 'Issues', { tab: 'activity', sub: 'issues' }), badge: issuesOpenCount },
         ],
       },
       {

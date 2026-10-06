@@ -116,6 +116,12 @@ from plex_playlist_sync.library_scanner import library_scanner
 from plex_playlist_sync.lidarr_migration import lidarr_migration_job
 from plex_playlist_sync.naming import build_track_path
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
+from plex_playlist_sync.recycle_bin import (
+    log_recycled,
+    recycle_in_place_target,
+    recycle_replaced_files,
+    restore_recycled,
+)
 from plex_playlist_sync.storage import Database, clean_library_name
 from plex_playlist_sync.track_counts import positive_int as _positive_int
 
@@ -244,6 +250,7 @@ class ManualImportItem(BaseModel):
 class ManualImportCommitRequest(BaseModel):
     items: list[ManualImportItem] = Field(default_factory=list)
     download_id: Optional[str] = None
+    issue_id: Optional[str] = None  # an issue's "Rematch files" flow: replaced files are reported on that issue
 
 
 class RenamePreviewRequest(BaseModel):
@@ -3155,6 +3162,15 @@ def manual_import_commit(
         client_cfg = db.get_download_client(download_row["client_id"])
         download_client_type = str(client_cfg.get("driver_type") or "") if client_cfg else None
 
+    try:
+        client_roots = list(allowed_roots_for_all_clients(db, media_settings).roots)
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        logger.warning("Could not read every download client's folders for the recycle check: %s", redact_text(str(exc)))
+        client_roots = []
+    batch_placed: set[str] = set()  # files placed by this commit: never recycled as another item's "old" file
+    replaced_retired: list[str] = []
+    replaced_kept: list[str] = []
+
     for item in body.items:
         source_str = item.source_path or item.file_path
         if not source_str:
@@ -3307,10 +3323,18 @@ def manual_import_commit(
             # A hardlinked library file keeps the torrent's inode: renaming a link never touches the other name.
             source_row = db.get_library_file_by_path(str(source_path))
             is_rematch = source_row is not None and source_path.is_relative_to(root_dir)
-            if is_rematch and Path(target_proposed).resolve() == source_path:
+            pre_recycled: Optional[tuple[Any, dict[str, Any]]] = None
+            desired_path = Path(target_proposed).resolve()
+            if is_rematch and desired_path == source_path:
                 target_dest = source_path  # already at its naming path for the new track
             else:
-                target_dest = resolve_collision(target_proposed)
+                if desired_path != source_path and str(desired_path) not in batch_placed:
+                    # The track's current file sits on the clean target name: rename it into the bin first so the
+                    # new file takes that name instead of ``Name (1).ext`` (restored below if placement fails).
+                    pre_recycled = recycle_in_place_target(
+                        db, media_settings, root_dir, desired_path, track_id, client_roots
+                    )
+                target_dest = desired_path if pre_recycled is not None else resolve_collision(target_proposed)
 
             # 5. Place file
             if is_rematch:
@@ -3327,7 +3351,25 @@ def manual_import_commit(
             if is_rematch and target_dest == source_path:
                 placed_file = source_path
             else:
-                placed_file = place_audio_file(source_path, target_dest, mode=effective_mode)
+                try:
+                    placed_file = place_audio_file(source_path, target_dest, mode=effective_mode)
+                except Exception:
+                    if pre_recycled is not None:
+                        restore_recycled(pre_recycled[0])  # the replacement never landed: put the old bytes back
+                    raise
+            newly_placed = placed_file != source_path or not is_rematch
+            if pre_recycled is not None:
+                # The old file's bytes now live in the bin; its row (same path) must go before the new row is keyed.
+                log_recycled(
+                    db, pre_recycled[0], placed_file, pre_recycled[1], quality_name,
+                    title=str(track.get("title") or ""), download_id=body.download_id,
+                    issue_id=body.issue_id, retired=replaced_retired,
+                    source="ManualImport", log_prefix="Manual import",
+                )
+                try:
+                    db.delete_library_file(str(pre_recycled[1]["id"]))
+                except sqlite3.Error as del_err:
+                    logger.warning("Could not remove stale library file row %s: %s", pre_recycled[1].get("id"), redact_text(str(del_err)))
             if is_rematch and source_row is not None and str(placed_file) != str(source_row["file_path"]):
                 db.delete_library_file(str(source_row["id"]))
 
@@ -3365,6 +3407,26 @@ def manual_import_commit(
                 "cutoff_met": cutoff_met,
             })
 
+            if newly_placed:
+                # A file really landed for this track: every other file it had is superseded (rename to the bin,
+                # same rules and ``file_recycled`` event as a worker import). Files from this batch, and the
+                # rematched library file itself (moved, not recycled), are never candidates.
+                batch_placed.add(str(placed_file))
+                skip_ids = {file_id} | ({str(source_row["id"])} if source_row is not None else set())
+                superseded = [
+                    r for r in db.list_library_files_for_track(track_id)
+                    if str(r["id"]) not in skip_ids
+                    and str(r.get("file_path") or "") not in batch_placed
+                    and str(r.get("file_path") or "") != str(source_path)
+                ]
+                if superseded:
+                    recycle_replaced_files(
+                        db, superseded, placed_file, root_dir, media_settings, client_roots, quality_name,
+                        replaced_retired, replaced_kept,
+                        title=str(track.get("title") or ""), download_id=body.download_id,
+                        issue_id=body.issue_id, source="ManualImport", log_prefix="Manual import",
+                    )
+
             if is_rematch:
                 for finding_path in {str(source_path), str(placed_file)}:
                     db.delete_library_health_finding_by_path(finding_path, kind="weak_match")
@@ -3399,6 +3461,18 @@ def manual_import_commit(
                 "status": "failed",
                 "error": redact_text(str(exc)),
             })
+
+    if body.issue_id and (replaced_retired or replaced_kept):
+        try:
+            if db.get_issue(body.issue_id):
+                comment = "Replacement imported"
+                for line in replaced_retired:
+                    comment += f"\nRetired old file: {line}"
+                for line in replaced_kept:
+                    comment += f"\nOld file kept at {line}"
+                db.add_issue_comment(body.issue_id, None, comment, is_admin=True, is_system=True, staff=True)
+        except sqlite3.Error as issue_err:
+            logger.warning("Could not comment on issue %s after manual import: %s", body.issue_id, redact_text(str(issue_err)))
 
     download_cleared = False
     if download_row is not None and str(download_row.get("status")) == DownloadStatus.WARNING.value:
