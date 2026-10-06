@@ -447,24 +447,25 @@ class TestStorageMigrationV14:
         cur = test_db.conn.execute("PRAGMA table_info(media_management_settings)")
         cols = {row[1]: row for row in cur.fetchall()}
 
-        assert "delete_completed_transfers" in cols
+        assert "delete_completed_transfers" in cols  # legacy column stays readable
+        assert "seed_complete_action" in cols
         assert "enable_quality_upgrades" in cols
 
         # Check default settings values
         settings = test_db.get_media_management_settings()
-        assert settings["delete_completed_transfers"] is False
+        assert settings["seed_complete_action"] == "keep"
         assert settings["enable_quality_upgrades"] is True
 
         # Check updating settings
         updated = test_db.update_media_management_settings(
-            {"delete_completed_transfers": True, "enable_quality_upgrades": False}
+            {"seed_complete_action": "remove", "enable_quality_upgrades": False}
         )
-        assert updated["delete_completed_transfers"] is True
+        assert updated["seed_complete_action"] == "remove"
         assert updated["enable_quality_upgrades"] is False
 
         # Re-fetch from DB to verify persistence
         re_fetched = test_db.get_media_management_settings()
-        assert re_fetched["delete_completed_transfers"] is True
+        assert re_fetched["seed_complete_action"] == "remove"
         assert re_fetched["enable_quality_upgrades"] is False
 
     def test_get_cutoff_unmet_requests_query(self, test_db: Database, seeded_users: dict[str, Any]) -> None:
@@ -740,7 +741,7 @@ class TestAcquisitionWorkerCutoffAndCleanup:
 
         # Enable delete_completed_transfers in settings
         settings = test_db.get_media_management_settings()
-        settings["delete_completed_transfers"] = True
+        settings["seed_complete_action"] = "remove"
         test_db.update_media_management_settings(settings)
 
         test_db.create_download_client(
@@ -785,6 +786,52 @@ class TestAcquisitionWorkerCutoffAndCleanup:
             # Assert driver.cleanup_completed was called with the download hash
             mock_driver.cleanup_completed.assert_called_once_with("hash-cleanup-123", delete_files=False)
 
+    @pytest.mark.parametrize(
+        "import_mode,expected_delete", [("copy", True), ("move", False)]
+    )
+    def test_import_remove_and_delete_deletes_files_only_when_safe(
+        self,
+        test_db: Database,
+        seeded_users: dict[str, Any],
+        staging_and_music: tuple[Path, Path],
+        import_mode: str,
+        expected_delete: bool,
+    ) -> None:
+        """remove_and_delete passes delete_files=True after a copy import (placed files recorded), never after a move."""
+        staging, music = staging_and_music
+        settings = test_db.get_media_management_settings()
+        settings["seed_complete_action"] = "remove_and_delete"
+        settings["import_mode"] = import_mode
+        test_db.update_media_management_settings(settings)
+        test_db.create_download_client(
+            DownloadClientConfig(
+                id="c-del", name="Del Client", driver_type=DownloadDriverType.QBITTORRENT,
+                host_url="http://127.0.0.1:8080", enabled=True,
+            )
+        )
+        audio_file = staging / "del_track.flac"
+        _create_minimal_flac(audio_file)
+        test_db.create_active_download(
+            ActiveDownload(
+                id="dl-del", title="Daft Punk - Aerodynamic [FLAC 16bit]", artist="Daft Punk",
+                client_id="c-del", download_hash="hash-del", status=DownloadStatus.COMPLETED.value,
+                source_path=str(audio_file),
+            )
+        )
+        mock_driver = MagicMock()
+        mock_driver.get_status.return_value = {
+            "status": DownloadStatus.COMPLETED.value, "progress": 100.0, "source_path": str(audio_file),
+            "content_path": str(audio_file), "error_message": None,
+        }
+        mock_driver.cleanup_completed.return_value = True
+        with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+            stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(staging))
+        assert stats["imported"] == 1
+        mock_driver.cleanup_completed.assert_called_once_with("hash-del", delete_files=expected_delete)
+        row = test_db.get_active_download("dl-del")
+        assert row["placed_mode"] == import_mode and len(row["placed_files"]) == 1
+        assert Path(row["placed_files"][0]).is_file() and str(music) in row["placed_files"][0]
+
     def test_import_with_delete_completed_transfers_false_skips_cleanup(
         self,
         test_db: Database,
@@ -794,7 +841,7 @@ class TestAcquisitionWorkerCutoffAndCleanup:
         staging, music = staging_and_music
 
         settings = test_db.get_media_management_settings()
-        settings["delete_completed_transfers"] = False
+        settings["seed_complete_action"] = "keep"
         test_db.update_media_management_settings(settings)
 
         test_db.create_download_client(
@@ -1196,9 +1243,10 @@ class TestMediaManagementSettingsAPI:
         data = res.json()
         assert "settings" in data
         settings = data["settings"]
-        assert "delete_completed_transfers" in settings
+        assert "seed_complete_action" in settings
+        assert "delete_completed_transfers" not in settings
         assert "enable_quality_upgrades" in settings
-        assert settings["delete_completed_transfers"] is False
+        assert settings["seed_complete_action"] == "keep"
         assert settings["enable_quality_upgrades"] is True
 
     def test_post_media_management_settings_updates_v14_fields(
@@ -1213,24 +1261,24 @@ class TestMediaManagementSettingsAPI:
         admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
 
         payload = {
-            "delete_completed_transfers": True,
+            "seed_complete_action": "remove_and_delete",
             "enable_quality_upgrades": False,
         }
         res = client.post("/api/settings/media-management", json=payload, headers=admin_headers)
         assert res.status_code == 200
         updated = res.json()
-        assert updated["delete_completed_transfers"] is True
+        assert updated["seed_complete_action"] == "remove_and_delete"
         assert updated["enable_quality_upgrades"] is False
 
         # Verify DB directly
         db_settings = test_db.get_media_management_settings()
-        assert db_settings["delete_completed_transfers"] is True
+        assert db_settings["seed_complete_action"] == "remove_and_delete"
         assert db_settings["enable_quality_upgrades"] is False
 
         # Subsequent GET confirms persistence
         get_res = client.get("/api/settings/media-management", headers=admin_headers)
         assert get_res.status_code == 200
-        assert get_res.json()["settings"]["delete_completed_transfers"] is True
+        assert get_res.json()["settings"]["seed_complete_action"] == "remove_and_delete"
         assert get_res.json()["settings"]["enable_quality_upgrades"] is False
 
     def test_media_management_settings_non_admin_forbidden(

@@ -61,6 +61,9 @@ export interface ActivitySeeding {
   ratio_target: number | null;
   seeding_minutes: number;
   time_target_minutes: number | null;
+  /** Minutes until seed cleanup acts on this torrent; null when no goal/ETA applies. */
+  removes_in_minutes?: number | null;
+  action?: 'keep' | 'remove' | 'remove_and_delete';
 }
 
 export type ActivityHistoryEvent =

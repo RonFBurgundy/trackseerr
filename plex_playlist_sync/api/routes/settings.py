@@ -160,7 +160,13 @@ class MediaManagementSettingsModel(BaseModel):
     write_audio_tags: bool = Field(True, description="Whether to normalize audio tags on import")
     embed_artwork: bool = Field(True, description="Whether to embed cover artwork in audio files")
     save_cover_art_file: bool = Field(True, description="Whether to save cover.jpg in album directory")
-    delete_completed_transfers: bool = Field(False, description="Whether to delete completed transfers from client")
+    seed_complete_action: Literal["keep", "remove", "remove_and_delete"] = Field(
+        "remove",
+        description=(
+            "When seeding is done: keep the torrent seeding, remove it from the client (files kept), or remove it "
+            "and delete its files (only when the safety gate passes; never in move mode)"
+        ),
+    )
     enable_quality_upgrades: bool = Field(True, description="Whether to monitor for quality cutoff upgrades")
     library_mode: str = Field("native", description="Library management mode: native or lidarr")
     seed_ratio_limit: float | None = Field(None, description="Target seed ratio before transfer cleanup")
@@ -195,7 +201,8 @@ class MediaManagementUpdateModel(BaseModel):
     write_audio_tags: bool | None = None
     embed_artwork: bool | None = None
     save_cover_art_file: bool | None = None
-    delete_completed_transfers: bool | None = None
+    seed_complete_action: Literal["keep", "remove", "remove_and_delete"] | None = None
+    delete_completed_transfers: bool | None = None  # deprecated: true -> remove, false -> keep (ignored when seed_complete_action is sent)
     enable_quality_upgrades: bool | None = None
     library_mode: str | None = None
     seed_ratio_limit: float | None = None
@@ -234,7 +241,7 @@ class PreviewRequestModel(BaseModel):
     staging_folder_path: str | None = None
     import_mode: Literal["move", "hardlink", "copy"] | None = None
     torrent_hardlink_tags: Literal["copy_and_tag", "keep_hardlink"] | None = None
-    delete_completed_transfers: bool | None = None
+    seed_complete_action: Literal["keep", "remove", "remove_and_delete"] | None = None
     enable_quality_upgrades: bool | None = None
     library_mode: str | None = None
 

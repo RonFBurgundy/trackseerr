@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, errorMessage } from '@/services/apiClient';
+import { removeOrphanTorrent, retryFailedCleanup } from '@/services/seedCleanupService';
 import {
   deleteLibraryHealthMapping,
   dismissLibraryHealth,
@@ -32,6 +33,8 @@ export interface UseLibraryHealthReturn {
   saveMapping: (serverPrefix: string, localPrefix: string) => Promise<void>;
   removeMapping: () => Promise<void>;
   setWeekly: (enabled: boolean) => Promise<void>;
+  removeOrphan: (findingId: string, deleteFiles: boolean) => Promise<void>;
+  retryFailed: (findingId: string) => Promise<void>;
 }
 
 /** Loads /api/library-health, polls every 5 s while a check runs, and wraps the mutating actions. */
@@ -137,5 +140,57 @@ export function useLibraryHealth({ onChanged, onToast }: UseLibraryHealthOptions
     [mutate]
   );
 
-  return { data, loading, error, running, busy, refresh, checkNow, dismiss, saveMapping, removeMapping, setWeekly };
+  const removeOrphan = useCallback(
+    async (findingId: string, deleteFiles: boolean): Promise<void> => {
+      setBusy(true);
+      try {
+        await removeOrphanTorrent(findingId, { delete_files: deleteFiles });
+        onToastRef.current(deleteFiles ? 'Torrent and files removed' : 'Torrent removed');
+      } catch (err: unknown) {
+        if (err instanceof ApiError && err.status === 404) onToastRef.current('That torrent is already gone; refreshing', 'error');
+        else onToastRef.current(errorMessage(err, 'Failed to remove the torrent'), 'error');
+      } finally {
+        await refresh();
+        onChangedRef.current();
+        setBusy(false);
+      }
+    },
+    [refresh]
+  );
+
+  const retryFailed = useCallback(
+    async (findingId: string): Promise<void> => {
+      setBusy(true);
+      try {
+        const res = await retryFailedCleanup(findingId);
+        if (res.removed) onToastRef.current('Cleanup retried; torrent removed');
+        else if (res.error) onToastRef.current(`Retry failed (attempt ${res.attempts}): ${res.error}`, 'error');
+        else onToastRef.current(`Cleanup retried: ${res.status}`);
+      } catch (err: unknown) {
+        if (err instanceof ApiError && err.status === 404) onToastRef.current('That item is already gone; refreshing', 'error');
+        else onToastRef.current(errorMessage(err, 'Failed to retry cleanup'), 'error');
+      } finally {
+        await refresh();
+        onChangedRef.current();
+        setBusy(false);
+      }
+    },
+    [refresh]
+  );
+
+  return {
+    data,
+    loading,
+    error,
+    running,
+    busy,
+    refresh,
+    checkNow,
+    dismiss,
+    saveMapping,
+    removeMapping,
+    setWeekly,
+    removeOrphan,
+    retryFailed,
+  };
 }

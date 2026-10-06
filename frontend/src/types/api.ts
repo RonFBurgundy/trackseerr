@@ -2850,11 +2850,11 @@ export interface components {
              */
             save_cover_art_file: boolean;
             /**
-             * Delete Completed Transfers
-             * @description Whether to delete completed transfers from client
-             * @default false
+             * Seed Complete Action
+             * @description What to do with a torrent once its seed goal is met
+             * @default keep
              */
-            delete_completed_transfers: boolean;
+            seed_complete_action: 'keep' | 'remove' | 'remove_and_delete';
             /**
              * Enable Quality Upgrades
              * @description Whether to monitor for quality cutoff upgrades
@@ -2912,8 +2912,8 @@ export interface components {
             fingerprint_on_weak_match?: boolean | null;
             /** Save Cover Art File */
             save_cover_art_file?: boolean | null;
-            /** Delete Completed Transfers */
-            delete_completed_transfers?: boolean | null;
+            /** Seed Complete Action */
+            seed_complete_action?: 'keep' | 'remove' | 'remove_and_delete' | null;
             /** Enable Quality Upgrades */
             enable_quality_upgrades?: boolean | null;
             /** Library Mode */
@@ -3107,8 +3107,8 @@ export interface components {
             staging_folder_path?: string | null;
             /** Import Mode */
             import_mode?: string | null;
-            /** Delete Completed Transfers */
-            delete_completed_transfers?: boolean | null;
+            /** Seed Complete Action */
+            seed_complete_action?: 'keep' | 'remove' | 'remove_and_delete' | null;
             /** Enable Quality Upgrades */
             enable_quality_upgrades?: boolean | null;
             /** Library Mode */

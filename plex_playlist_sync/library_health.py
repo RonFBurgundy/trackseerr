@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 KIND_UNINDEXED = "server_unindexed"
 KIND_STALE = "server_stale"
 KIND_WEAK = "weak_match"
+KIND_ORPHAN_TORRENT = "orphan_torrent"
+KIND_CLEANUP_FAILED = "cleanup_failed"
 
 CAUSE_FOLDER = "folder_not_in_server"
 CAUSE_NOT_SCANNED = "not_scanned_yet"
@@ -41,6 +43,8 @@ CAUSE_IGNORED = "ignored_by_rule"
 CAUSE_UNKNOWN = "unknown"
 CAUSE_STALE = "stale_on_server"
 CAUSE_WEAK = "weak_tag_match"
+CAUSE_ORPHAN_TORRENT = "orphan_torrent"
+CAUSE_CLEANUP_FAILED = "cleanup_failed"
 
 # Container extensions (no dot) each server type cannot play or index. Plex skips these; Jellyfin and Subsonic servers
 # index anything their ffmpeg/transcoder can read, so their sets are empty. These extensions are added to the disk walk
@@ -62,6 +66,8 @@ SUGGESTIONS: dict[str, str] = {
     CAUSE_UNKNOWN: "No known cause. Check the tags and path, then rescan the server library.",
     CAUSE_STALE: "The server lists files that no longer exist on disk. Empty the server's trash or rescan its library.",
     CAUSE_WEAK: "Imported on a weak tag match. Check it and use Re-match if it landed on the wrong track.",
+    CAUSE_ORPHAN_TORRENT: "This torrent is in TrackSeerr's category but TrackSeerr never grabbed or imported it. It is never removed automatically: remove it yourself, with or without its files.",
+    CAUSE_CLEANUP_FAILED: "TrackSeerr could not remove this finished torrent after 3 attempts. Check the download client, then retry.",
 }
 
 SUGGEST_SAMPLE = 500
@@ -630,6 +636,8 @@ __all__ = [
     "LibraryHealthBusy",
     "LibraryHealthWorker",
     "library_health_worker",
+    "KIND_CLEANUP_FAILED",
+    "KIND_ORPHAN_TORRENT",
     "SUGGESTIONS",
     "UNSUPPORTED_EXTENSIONS",
     "classify_unindexed",

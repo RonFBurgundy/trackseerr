@@ -189,6 +189,8 @@ class QbittorrentDriver(AcquisitionDriver):
                     "speed_bps": speed,
                     "eta_seconds": eta if eta < 8640000 else 0,
                     "source_path": source_path,
+                    "content_path": tor.get("content_path") or "",
+                    "save_path": tor.get("save_path") or "",
                     "ratio": ratio,
                     "seeding_time_seconds": seeding_time,
                     "error_message": None,
@@ -255,6 +257,54 @@ class QbittorrentDriver(AcquisitionDriver):
         except Exception as e:
             logger.error("Failed to cleanup completed qBittorrent torrent %s: %s", download_id, e)
             return False
+
+    def list_category(self) -> Optional[list[dict[str, Any]]]:
+        """Every torrent in this client's configured category (``torrents/info?category=``).
+
+        Returns normalized dicts: hash (lower case), name, size, ratio, seeding_time (seconds), content_path, state.
+        An empty category is refused (returns None, "unsupported"): qBittorrent treats ``category=`` as *uncategorized*,
+        which would sweep in torrents TrackSeerr never owned. Raises RuntimeError/httpx.HTTPError when the client
+        cannot be queried, so the caller can tell "no torrents" from "could not look".
+        """
+        if not self.category or not self.category.strip():
+            return None
+        if not is_safe_service_url(self.host_url):
+            raise RuntimeError("Prohibited host URL")
+        url = f"{self.host_url}/api/v2/torrents/info"
+        with httpx.Client(timeout=self.timeout) as client:
+            if self._cookie:
+                client.headers["Cookie"] = self._cookie
+            else:
+                self._login(client)
+                if self._cookie:
+                    client.headers["Cookie"] = self._cookie
+            resp = client.get(url, params={"category": self.category})
+            if resp.status_code == 403:
+                self._login(client)
+                if self._cookie:
+                    client.headers["Cookie"] = self._cookie
+                resp = client.get(url, params={"category": self.category})
+            if resp.status_code != 200:
+                raise RuntimeError(f"qBittorrent torrents/info failed (HTTP {resp.status_code})")
+            items = resp.json()
+        if not isinstance(items, list):
+            raise RuntimeError("qBittorrent torrents/info returned an unexpected payload")
+        out: list[dict[str, Any]] = []
+        for tor in items:
+            if not isinstance(tor, dict) or not tor.get("hash"):
+                continue
+            out.append(
+                {
+                    "hash": str(tor["hash"]).lower(),
+                    "name": str(tor.get("name") or ""),
+                    "size": int(tor.get("total_size") or tor.get("size") or 0),
+                    "ratio": float(tor.get("ratio") or 0.0),
+                    "seeding_time": int(tor.get("seeding_time") or tor.get("time_seeded") or 0),
+                    "content_path": str(tor.get("content_path") or ""),
+                    "state": str(tor.get("state") or ""),
+                }
+            )
+        return out
 
     def set_share_limits(
         self, lookup: str, ratio: Optional[float], seed_time_minutes: Optional[int]

@@ -119,6 +119,13 @@ class AcquisitionDriver(ABC):
         """
         return False
 
+    def list_category(self) -> Optional[list[dict[str, Any]]]:
+        """Torrents in TrackSeerr's category, as dicts (hash, name, size, ratio, seeding_time, content_path, state).
+
+        ``None`` (the default) means the driver cannot list them; seed cleanup then skips this client.
+        """
+        return None
+
     def set_share_limits(
         self, lookup: str, ratio: Optional[float], seed_time_minutes: Optional[int]
     ) -> bool:

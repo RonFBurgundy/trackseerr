@@ -264,7 +264,7 @@ def test_unsupported_driver_returns_false_and_logs_once(caplog):
 # ------------------------------------------------------------------ governance
 
 
-MS_ON = {"delete_completed_transfers": True, "seed_ratio_limit": None, "seed_time_limit_minutes": None}
+MS_ON = {"seed_complete_action": "remove", "seed_ratio_limit": None, "seed_time_limit_minutes": None}
 
 
 def _row(source="indexer", ratio=1.0, minutes=60):
@@ -320,13 +320,13 @@ def test_indexer_rule_all_zero_means_no_requirement():
 
 def test_indexer_rule_with_delete_completed_off_does_nothing():
     driver = MagicMock()
-    ms = {**MS_ON, "delete_completed_transfers": False}
+    ms = {**MS_ON, "seed_complete_action": "keep"}
     assert settle_transfer_after_import(driver, "h", ms, "move", _st(5, 10**6), _row()) == DownloadStatus.IMPORTED.value
     driver.cleanup_completed.assert_not_called()
 
 
 def test_legacy_row_uses_global_limits_unchanged():
-    ms = {"delete_completed_transfers": True, "seed_ratio_limit": 1.0, "seed_time_limit_minutes": None}
+    ms = {"seed_complete_action": "remove", "seed_ratio_limit": 1.0, "seed_time_limit_minutes": None}
     d1 = MagicMock()
     legacy = {"seed_rule_source": None, "seed_ratio_target": 99.0}  # stale snapshot values are ignored without a source
     assert settle_transfer_after_import(d1, "h", ms, "hardlink", _st(0.5), legacy) == DownloadStatus.COMPLETED.value
@@ -340,7 +340,7 @@ def test_legacy_row_uses_global_limits_unchanged():
 
 def test_global_snapshot_governs_like_globals():
     d = MagicMock()
-    ms = {"delete_completed_transfers": True, "seed_ratio_limit": 99.0, "seed_time_limit_minutes": None}
+    ms = {"seed_complete_action": "remove", "seed_ratio_limit": 99.0, "seed_time_limit_minutes": None}
     row = _row(source="global", ratio=1.0, minutes=None)
     assert settle_transfer_after_import(d, "h", ms, "hardlink", _st(1.1), row) == DownloadStatus.IMPORTED.value
 
@@ -406,7 +406,8 @@ def test_queue_seeding_field(db: Database):
     db.set_download_seed_rule("dl-1", "ix1", 1.0, 4320, "indexer")
     db.record_seed_progress("dl-1", 0.62, 31 * 3600)
     rec = svc.native_queue(db, 1, 25, "added_at", "desc")["records"][0]
-    assert rec["seeding"] == {"ratio": 0.62, "ratio_target": 1.0, "seeding_minutes": 31 * 60, "time_target_minutes": 4320}
+    assert rec["seeding"] == {"ratio": 0.62, "ratio_target": 1.0, "seeding_minutes": 31 * 60, "time_target_minutes": 4320,
+                              "removes_in_minutes": None, "action": "keep"}
 
 
 def test_queue_seeding_null_for_non_seeding_rows(db: Database):
@@ -423,7 +424,8 @@ def test_queue_seeding_legacy_row_uses_global_targets(db: Database):
     _download(db)
     db.set_download_release_meta("dl-1", protocol="torrent")
     s = svc.native_queue(db, 1, 25, "added_at", "desc")["records"][0]["seeding"]
-    assert s == {"ratio": 0.0, "ratio_target": 2.0, "seeding_minutes": 0, "time_target_minutes": 120}
+    assert s == {"ratio": 0.0, "ratio_target": 2.0, "seeding_minutes": 0, "time_target_minutes": 120,
+                 "removes_in_minutes": None, "action": "keep"}
 
 
 # ------------------------------------------------------------------ indexer test route key resolution
