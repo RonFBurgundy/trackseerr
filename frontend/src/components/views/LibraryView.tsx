@@ -3,7 +3,7 @@ import { Disc, Eye, FolderInput, Layers, Loader2, Music, RefreshCw, User } from 
 import type { UseLibraryReturn, LibraryTab } from '@/hooks/useLibrary';
 import type { AppRoute, LibraryRoute, NavigateOptions } from '@/hooks/useAppRoute';
 import { useLibraryDrilldown } from '@/hooks/useLibraryDrilldown';
-import type { AlbumItem } from '@/types/models';
+import type { AlbumItem, ArtistDiscographyAlbum, DiscoveryItem } from '@/types/models';
 import { useAddToCollection } from '@/hooks/useAddToCollection';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useLibraryManager } from '@/hooks/useLibraryManager';
@@ -33,9 +33,13 @@ export interface LibraryViewProps {
   isAdmin?: boolean;
   /** Current library route: sub-page (artists/albums/tracks/collections) plus any artist/collection/album drill-down. */
   route: LibraryRoute;
-  onNavigate: (route: LibraryRoute, options?: NavigateOptions) => void;
+  /** Any route: library pages plus the "View in Discover" jump from an artist. */
+  onNavigate: (route: AppRoute, options?: NavigateOptions) => void;
   /** Step up to `parent`: history back when the previous entry is that parent, otherwise replace with it. */
   onNavigateUp: (parent: AppRoute) => void;
+  /** Request flow shared with Discover (rest-of-discography requests on the artist page). */
+  onRequestItem: (item: DiscoveryItem) => Promise<void>;
+  onRequestDiscography: (artist: string, albums: ArtistDiscographyAlbum[]) => Promise<void>;
 }
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -47,7 +51,15 @@ const TABS: Array<{ id: LibraryTab; label: string; icon: React.ReactNode }> = [
   { id: 'collections', label: 'Collections', icon: <Layers className="h-3.5 w-3.5" /> },
 ];
 
-export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin = false, route, onNavigate, onNavigateUp }) => {
+export const LibraryView: React.FC<LibraryViewProps> = ({
+  libraryHook,
+  isAdmin = false,
+  route,
+  onNavigate,
+  onNavigateUp,
+  onRequestItem,
+  onRequestDiscography,
+}) => {
   const activeTab = route.sub;
   const {
     collections,
@@ -196,6 +208,9 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ libraryHook, isAdmin =
             onToggleAlbumMonitored={toggleAlbumMonitored}
             onToggleTrackMonitored={toggleTrackMonitored}
             onToast={showToast}
+            onRequestItem={onRequestItem}
+            onRequestDiscography={onRequestDiscography}
+            onViewInDiscover={(discoveryId) => onNavigate({ tab: 'discover', artistId: discoveryId })}
           />
         </PageFrame>
         {overlays}

@@ -28,6 +28,12 @@ export interface LibraryDetail {
   albumId?: string;
 }
 
+/** Discover, optionally drilled into one artist profile (`#/discover/artist/<encodedDiscoveryId>`). */
+export interface DiscoverRoute {
+  tab: 'discover';
+  artistId?: string;
+}
+
 export interface LibraryRoute {
   tab: 'library';
   sub: LibraryTab;
@@ -36,7 +42,7 @@ export interface LibraryRoute {
 
 /** Current location. `sub` is always present for tabs that have sub-pages; `leaf` only under settings sections with children. */
 export type AppRoute =
-  | { tab: 'discover' }
+  | DiscoverRoute
   | { tab: 'playlists' }
   | { tab: 'requests'; sub: RequestsSub }
   | LibraryRoute
@@ -135,12 +141,13 @@ function libraryDetailSegments(detail: LibraryDetail | undefined): string[] {
   return parts;
 }
 
-/** `#/<tab>[/<sub>[/<leaf>]]`; library adds `/artist/<id>`, `/collection/<id>` and `/album/<id>` drill-down segments. */
+/** `#/<tab>[/<sub>[/<leaf>]]`; discover adds `/artist/<id>`, library adds `/artist/<id>`, `/collection/<id>` and `/album/<id>` drill-down segments. */
 export function routeToHash(route: AppRoute): string {
   const parts: string[] = [route.tab];
   if ('sub' in route) parts.push(route.sub);
   if ('leaf' in route) parts.push(route.leaf);
   if (route.tab === 'library') parts.push(...libraryDetailSegments(route.detail));
+  if (route.tab === 'discover' && route.artistId) parts.push('artist', encodeURIComponent(route.artistId));
   return `#/${parts.join('/')}`;
 }
 
@@ -188,6 +195,10 @@ export function parseRouteHash(hash: string): AppRoute | null {
   if (!tab) return null;
   const sub = segments[1];
   switch (tab) {
+    case 'discover': {
+      const artistId = sub === 'artist' ? decodeSegment(segments[2]) : undefined;
+      return artistId === undefined ? { tab } : { tab, artistId };
+    }
     case 'requests':
       return { tab, sub: pick(REQUESTS_SUBS, sub) ?? 'all' };
     case 'library': {

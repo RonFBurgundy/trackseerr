@@ -150,7 +150,7 @@ export function buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount = 0 }
 export function activeAncestorKeys(nodes: NavNode[], route: AppRoute): string[] {
   const walk = (list: NavNode[], trail: string[]): string[] | null => {
     for (const node of list) {
-      if (node.route && routesEqual(node.route, route.tab === 'library' ? { tab: 'library', sub: route.sub } : route)) return trail;
+      if (node.route && routesEqual(node.route, route.tab === 'library' ? { tab: 'library', sub: route.sub } : route.tab === 'discover' ? { tab: 'discover' } : route)) return trail;
       if (node.children) {
         const found = walk(node.children, [...trail, node.key]);
         if (found) return found;

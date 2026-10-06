@@ -1,5 +1,5 @@
 import { apiRequest } from './apiClient';
-import type { ArtistDetail, DiscoveryItem } from '@/types/models';
+import type { ArtistProfile, ArtistProfileTarget, DiscoveryItem } from '@/types/models';
 
 export async function getTrending(): Promise<DiscoveryItem[]> {
   const res = await apiRequest<{ items: DiscoveryItem[] }>('/api/discovery/trending');
@@ -24,6 +24,9 @@ export async function getDiscoveryAlbumDetail(albumId: string): Promise<Record<s
   return apiRequest<Record<string, unknown>>(`/api/discovery/album/${encodeURIComponent(albumId)}`);
 }
 
-export async function getDiscoveryArtistDetail(artistId: string): Promise<ArtistDetail> {
-  return apiRequest<ArtistDetail>(`/api/discovery/artist/${encodeURIComponent(artistId)}`);
+export async function getArtistProfile(target: ArtistProfileTarget): Promise<ArtistProfile> {
+  const params = new URLSearchParams();
+  if ('discoveryId' in target) params.set('discovery_id', target.discoveryId);
+  else params.set('library_artist_id', target.libraryArtistId);
+  return apiRequest<ArtistProfile>(`/api/discovery/artist-profile?${params.toString()}`);
 }

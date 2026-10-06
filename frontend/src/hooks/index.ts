@@ -1,6 +1,7 @@
 export * from './useAuth';
 export * from './useAudioPlayer';
 export * from './useDiscovery';
+export * from './useDiscoveryAlbum';
 export * from './useRequests';
 export * from './useLibrary';
 export * from './useQueue';
@@ -36,6 +37,8 @@ export * from './useAlbumTracks';
 export * from './useLibraryCatalog';
 export * from './useAddToCollection';
 export * from './useArtistDetail';
+export * from './useArtistProfile';
+export * from './useProfileRequests';
 export * from './useLidarrSearch';
 export * from './useCollectionDetail';
 export * from './useFillViewportHeight';

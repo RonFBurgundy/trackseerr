@@ -3,8 +3,8 @@ import { Disc, Loader2, Trash2 } from 'lucide-react';
 import type { CollectionItem } from '@/types/models';
 import { useCollectionDetail } from '@/hooks/useCollectionDetail';
 import { MachinedCard, TapeDeckButton } from '@/components/ui';
-import { PageFrame } from '@/components/layout';
-import { DetailHeaderBar } from './DetailHeaderBar';
+import { DetailHeaderBar, PageFrame } from '@/components/layout';
+
 import { CollectionArt } from './CollectionArt';
 
 export interface CollectionDetailProps {

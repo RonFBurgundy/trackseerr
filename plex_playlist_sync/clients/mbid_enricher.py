@@ -230,6 +230,41 @@ class MbidEnricherClient:
             self._set_cached(cache_key, None)
             return None
 
+    def lookup_artist_mbid_by_url(self, resource_url: str) -> Optional[str]:
+        """Resolves the artist MBID that has a MusicBrainz URL relation to ``resource_url`` (e.g. a Deezer artist page).
+
+        Uses ``/ws/2/url?resource=...&inc=artist-rels``; None when MusicBrainz has no such URL, no artist relation,
+        or cannot be reached. Shares the client's rate limit, User-Agent, timeout and cache.
+        """
+        resource = (resource_url or "").strip()
+        if not resource:
+            return None
+        cache_key = f"urlrel:{resource.lower()}"
+        hit, cached_data = self._get_cached(cache_key)
+        if hit:
+            return cached_data
+
+        try:
+            resp = self._request(
+                f"{self.base_url}/ws/2/url", params={"resource": resource, "inc": "artist-rels", "fmt": "json"}
+            )
+            if resp is None or resp.status_code != 200:
+                if resp is not None and resp.status_code == 404:
+                    self._set_cached(cache_key, None)
+                return None
+            data = resp.json()
+            mbid: Optional[str] = None
+            for rel in data.get("relations") or []:
+                artist = rel.get("artist") if isinstance(rel, dict) else None
+                if isinstance(artist, dict) and artist.get("id"):
+                    mbid = str(artist["id"])
+                    break
+            self._set_cached(cache_key, mbid)
+            return mbid
+        except (ValueError, AttributeError, TypeError) as exc:
+            logger.warning("MbidEnricherClient: lookup_artist_mbid_by_url failed for '%s': %s", resource, exc)
+            return None
+
     def lookup_artist_mbid(self, artist_name: str) -> Optional[str]:
         """Queries the mirror for the canonical artist MBID."""
         clean_name = _sanitize_lucene_query(artist_name)

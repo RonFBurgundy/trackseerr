@@ -137,9 +137,10 @@ class DiscoveryItem:
     preview_url: Optional[str] = None
     release_date: Optional[str] = None
     status: str = "none"  # "none", "requested", "processing", "available", "in_library"
+    artist_discovery_id: Optional[str] = None  # e.g. "deezer:artist:27"; only emitted when the source provides it
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "id": self.id,
             "item_type": self.item_type,
             "title": self.title,
@@ -150,6 +151,9 @@ class DiscoveryItem:
             "release_date": self.release_date,
             "status": self.status,
         }
+        if self.artist_discovery_id:
+            data["artist_discovery_id"] = self.artist_discovery_id
+        return data
 
 
 @dataclass

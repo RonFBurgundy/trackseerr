@@ -103,6 +103,7 @@ def _stub_mbid_enricher(request, monkeypatch):
         from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
         mock_method = MagicMock(return_value=None)
         monkeypatch.setattr(MbidEnricherClient, "lookup_track_mbids", mock_method)
+        monkeypatch.setattr(MbidEnricherClient, "lookup_artist_mbid_by_url", MagicMock(return_value=None))
     yield
 
 

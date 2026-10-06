@@ -611,6 +611,7 @@ def _index(
 
 
 def _lidarr_paged(
+    db: Database,
     kind: str,
     page: int,
     page_size: int,
@@ -627,6 +628,8 @@ def _lidarr_paged(
         lambda: lidarr_library.list_page(kind, lidarr, page, page_size, key, sort_dir, q, monitored_only, artist_id),
         "Library",
     )
+    if kind == "artists":
+        records = _with_discovery_ids(db, records)
     return {
         "mode": "lidarr",
         "page": page,
@@ -710,7 +713,7 @@ def paged_artists(
 ) -> dict[str, Any]:
     """A page of library artists (with counts) plus the filtered total."""
     if _is_lidarr(db):
-        return _lidarr_paged("artists", page, page_size, sort_key, sort_dir, q, monitored_only, None, client)
+        return _lidarr_paged(db, "artists", page, page_size, sort_key, sort_dir, q, monitored_only, None, client)
     return _paged("artists", page, page_size, sort_key, sort_dir, q, monitored_only, None, None, db, _enrich_artists)
 
 
@@ -745,7 +748,7 @@ def paged_albums(
 ) -> dict[str, Any]:
     """A page of library albums (with artist name and track count) plus the filtered total."""
     if _is_lidarr(db):
-        return _lidarr_paged("albums", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, client)
+        return _lidarr_paged(db, "albums", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, client)
     return _paged("albums", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, None, db, _enrich_albums)
 
 
@@ -815,6 +818,17 @@ def tracks_index(
     return _index("tracks", sort_key, sort_dir, q, monitored_only, artist_id, album_id, db)
 
 
+def _with_discovery_ids(db: Database, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Adds ``discovery_id`` (None when unlinked) from the cached ``artist_links`` table; never touches the network."""
+    ids = [str(r["id"]) for r in records if r.get("id") is not None]
+    try:
+        linked = db.get_discovery_ids_for_library_artists(ids)
+    except sqlite3.Error as exc:
+        logger.warning("Could not read cached artist links: %s", exc)
+        linked = {}
+    return [{**r, "discovery_id": linked.get(str(r.get("id")))} for r in records]
+
+
 def _enrich_artists(db: Database, artists: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Attaches album/track counts and a resolved image URL to library artists."""
     artist_ids = [a["id"] for a in artists]
@@ -864,7 +878,7 @@ def _enrich_artists(db: Database, artists: list[dict[str, Any]]) -> list[dict[st
             img = cover_urls.get(artist["id"])
         a_dict["image_url"] = _versioned_art_url("artist", artist["id"], a_dict.get("art_version"), img)
         results.append(a_dict)
-    return results
+    return _with_discovery_ids(db, results)
 
 
 @router.get("/artists")
@@ -1254,7 +1268,8 @@ def get_artist(
     if _is_lidarr(db):
         numeric = lidarr_numeric_id(artist_id, "Artist")
         lidarr = require_lidarr(client)
-        return _lidarr_fetch(lambda: lidarr_library.artist_detail(lidarr, numeric), "Artist")
+        detail = _lidarr_fetch(lambda: lidarr_library.artist_detail(lidarr, numeric), "Artist")
+        return _with_discovery_ids(db, [detail])[0]
     artist = db.get_library_artist(artist_id)
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
@@ -1300,7 +1315,7 @@ def get_artist(
                 img = alb["cover_url"]
                 break
     result["image_url"] = _versioned_art_url("artist", artist_id, artist.get("art_version"), img)
-    return result
+    return _with_discovery_ids(db, [result])[0]
 
 
 @router.get("/artists/{artist_id}/image", dependencies=[Depends(require_core_tier)])

@@ -16,6 +16,13 @@ from plex_playlist_sync.track_counts import positive_int
 logger = logging.getLogger(__name__)
 
 
+def _deezer_artist_ref(artist_obj: Any) -> Optional[str]:
+    """``deezer:artist:<n>`` for a Deezer API artist object carrying an id, else None."""
+    if isinstance(artist_obj, dict) and artist_obj.get("id"):
+        return f"deezer:artist:{artist_obj['id']}"
+    return None
+
+
 class DiscoveryClient:
     """Thread-safe zero-key client for querying public trending, new release, and search APIs."""
 
@@ -84,6 +91,7 @@ class DiscoveryClient:
                             cover_url=cover or None,
                             preview_url=t.get("preview") or None,
                             release_date=t.get("release_date") or None,
+                            artist_discovery_id=_deezer_artist_ref(art),
                         ).to_dict()
                     )
 
@@ -105,6 +113,7 @@ class DiscoveryClient:
                             cover_url=cover or None,
                             preview_url=None,
                             release_date=a.get("release_date") or None,
+                            artist_discovery_id=_deezer_artist_ref(art),
                         ).to_dict()
                     )
         except Exception as e:
@@ -148,6 +157,7 @@ class DiscoveryClient:
                                 cover_url=cover or None,
                                 preview_url=None,
                                 release_date=a.get("release_date") or None,
+                                artist_discovery_id=_deezer_artist_ref(art),
                             ).to_dict()
                         )
             except Exception as e:
@@ -326,6 +336,101 @@ class DiscoveryClient:
         self._set_cached(cache_key, results)
         return results
 
+    def search_artists(self, query: str, limit: int = 10) -> Optional[list[dict[str, Any]]]:
+        """Keyless Deezer ``/search/artist``; returns ``[{id, name, image_url, nb_fan}]`` (``id`` is ``deezer:artist:<n>``).
+
+        ``[]`` means Deezer answered with no artists; None means the lookup itself failed (callers must not cache it).
+        """
+        clean_q = (query or "").strip()
+        if not clean_q:
+            return []
+        cache_key = f"artist_search_all:{clean_q.lower()}:{limit}"
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
+        try:
+            resp = self.session.get(
+                f"https://api.deezer.com/search/artist?q={urllib.parse.quote(clean_q)}&limit={int(limit)}",
+                timeout=self.timeout,
+            )
+            if resp.status_code != 200:
+                logger.warning("Deezer artist search for '%s' returned HTTP %s", clean_q, resp.status_code)
+                return None
+            data = resp.json()
+        except (requests.RequestException, ValueError) as exc:
+            logger.warning("Deezer artist search failed for '%s': %s", clean_q, exc)
+            return None
+
+        results: list[dict[str, Any]] = []
+        for art in data.get("data", []) if isinstance(data, dict) else []:
+            if not isinstance(art, dict) or not art.get("id"):
+                continue
+            name = str(art.get("name", "")).strip()
+            if not name:
+                continue
+            try:
+                nb_fan = int(art.get("nb_fan") or 0)
+            except (TypeError, ValueError):
+                nb_fan = 0
+            results.append(
+                {
+                    "id": f"deezer:artist:{art['id']}",
+                    "name": name,
+                    "image_url": art.get("picture_xl") or art.get("picture_big") or art.get("picture_medium") or art.get("picture"),
+                    "nb_fan": nb_fan,
+                }
+            )
+        self._set_cached(cache_key, results)
+        return results
+
+    def get_artist_top_tracks_detailed(self, deezer_artist_id: Any, limit: int = 10) -> list[dict[str, Any]]:
+        """Keyless Deezer ``/artist/{id}/top``; returns ``[{id, title, artist, album, duration, preview_url}]``."""
+        num_id = self._numeric_artist_id(deezer_artist_id)
+        if not num_id:
+            return []
+        cache_key = f"artist_top_detailed:{num_id}:{limit}"
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
+        try:
+            resp = self.session.get(
+                f"https://api.deezer.com/artist/{num_id}/top?limit={int(limit)}", timeout=self.timeout
+            )
+            if resp.status_code != 200:
+                logger.warning("Deezer artist top for %s returned HTTP %s", num_id, resp.status_code)
+                return []
+            data = resp.json()
+        except (requests.RequestException, ValueError) as exc:
+            logger.warning("Deezer artist top tracks query failed for %s: %s", num_id, exc)
+            return []
+
+        results: list[dict[str, Any]] = []
+        for t in data.get("data", []) if isinstance(data, dict) else []:
+            if not isinstance(t, dict) or not t.get("id"):
+                continue
+            title = str(t.get("title", "")).strip()
+            if not title:
+                continue
+            art = t.get("artist") if isinstance(t.get("artist"), dict) else {}
+            alb = t.get("album") if isinstance(t.get("album"), dict) else {}
+            try:
+                duration = int(t.get("duration") or 0)
+            except (TypeError, ValueError):
+                duration = 0
+            results.append(
+                {
+                    "id": f"deezer:track:{t['id']}",
+                    "title": title,
+                    "artist": str(art.get("name", "")).strip() or "Unknown Artist",
+                    "album": str(alb.get("title", "")).strip() or None,
+                    "duration": duration,
+                    "preview_url": t.get("preview") or None,
+                }
+            )
+        results = results[: max(0, int(limit))]
+        self._set_cached(cache_key, results)
+        return results
+
     def get_album_details(self, album_id: str) -> Optional[dict[str, Any]]:
         """Fetches full album details, tracklist, and audio previews from Deezer or iTunes with TTL caching."""
         clean_id = (album_id or "").strip()
@@ -476,6 +581,7 @@ class DiscoveryClient:
                                 cover_url=cover or None,
                                 preview_url=t.get("preview") or None,
                                 release_date=t.get("release_date") or None,
+                                artist_discovery_id=_deezer_artist_ref(art),
                             ).to_dict()
                         )
 
@@ -496,6 +602,7 @@ class DiscoveryClient:
                                 cover_url=cover or None,
                                 preview_url=None,
                                 release_date=a.get("release_date") or None,
+                                artist_discovery_id=_deezer_artist_ref(art),
                             ).to_dict()
                         )
         except Exception as e:
@@ -541,6 +648,9 @@ class DiscoveryClient:
                                     cover_url=cover or None,
                                     preview_url=preview or None,
                                     release_date=r.get("releaseDate") or None,
+                                    artist_discovery_id=(
+                                        f"itunes:artist:{r['artistId']}" if r.get("artistId") else None
+                                    ),
                                 ).to_dict()
                             )
             except Exception as e:

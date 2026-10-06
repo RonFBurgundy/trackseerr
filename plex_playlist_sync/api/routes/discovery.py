@@ -3,6 +3,7 @@
 import concurrent.futures
 import logging
 import os
+import sqlite3
 from typing import Any, Optional
 
 import httpx
@@ -12,9 +13,14 @@ from plex_playlist_sync.api.dependencies import (
     get_config,
     get_db,
     get_discovery_client,
+    get_lidarr_client,
     get_media_client,
     require_user,
 )
+from plex_playlist_sync import artist_profile, lidarr_library
+from plex_playlist_sync.artist_links import normalize_artist_name
+from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient, LidarrNotFound
+from plex_playlist_sync.library_manager import MODE_LIDARR, build_lidarr_client
 from plex_playlist_sync.clients.core_client import CoreClient
 from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.plex import PlexClient
@@ -66,6 +72,47 @@ def _core_availability(
         return []
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(_CORE_AVAILABILITY_WORKERS, len(items))) as pool:
         return list(pool.map(_one, items))
+
+
+def _is_admin(user: Optional[dict[str, Any]]) -> bool:
+    """True only for a direct admin session; forwarded (gateway-signed) calls and missing users are never admin."""
+    return bool(user and user.get("is_admin") and not user.get("forwarded"))
+
+
+def _library_artist_ids_by_name(
+    db: Database, config: Optional[Config], library_mode: str, clean_names: set[str]
+) -> dict[str, str]:
+    """``{clean_name: library_artist_id}`` for the given normalised names, in one batched lookup (no per-item queries)."""
+    names = sorted(n for n in clean_names if n)
+    if not names:
+        return {}
+    found: dict[str, str] = {}
+    if library_mode == MODE_LIDARR:
+        client = build_lidarr_client(db, config)
+        if client is None:
+            return {}
+        try:
+            for row in lidarr_library.snapshot("artists", client):
+                clean = row.record.get("clean_name") or normalize_artist_name(row.record.get("name"))
+                if clean in clean_names:
+                    found.setdefault(clean, str(row.id))
+        except (LidarrApiError, LidarrNotFound, httpx.HTTPError) as exc:
+            logger.warning("Lidarr artist list unavailable for library hints: %s", exc)
+        return found
+    try:
+        with db._lock:
+            for start in range(0, len(names), 500):
+                chunk = names[start : start + 500]
+                marks = ",".join("?" for _ in chunk)
+                rows = db.conn.execute(
+                    f"SELECT clean_name, id FROM library_artists WHERE clean_name IN ({marks}) ORDER BY name COLLATE NOCASE, id",
+                    chunk,
+                ).fetchall()
+                for clean, art_id in rows:
+                    found.setdefault(clean, str(art_id))
+    except sqlite3.Error as exc:
+        logger.warning("Could not look up library artists for discovery hints: %s", exc)
+    return found
 
 
 def annotate_item_statuses(
@@ -147,6 +194,21 @@ def annotate_item_statuses(
             it["status"] = "none"
 
         annotated.append(it)
+
+    # Routing hints: link each item to its library artist (one batched lookup). Admin-only: a library id is a
+    # library-management handle. Gateways hold no library and a forwarded call is never admin.
+    if core_client is None and _is_admin(user):
+        hints = _library_artist_ids_by_name(
+            db,
+            config,
+            library_mode,
+            {normalize_artist_name(it.get("artist")) for it in annotated if it.get("artist")},
+        )
+        if hints:
+            for it in annotated:
+                lib_id = hints.get(normalize_artist_name(it.get("artist")))
+                if lib_id:
+                    it["library_artist_id"] = lib_id
 
     # For items without matches, skip individual per-track network round trips on batch discovery lists (> 5 items).
     # For small sets (<= 5 items) when plex_client is provided, resolve concurrently via ThreadPoolExecutor.
@@ -258,6 +320,13 @@ def get_album(
     for t in raw_tracks:
         t.setdefault("item_type", "track")
 
+    album_artist_ref = album_dict.get("artist_id")
+    for t in raw_tracks:
+        if album_artist_ref and t.get("artist") == album_dict.get("artist"):
+            t.setdefault("artist_discovery_id", album_artist_ref)
+    if album_artist_ref:
+        album_dict.setdefault("artist_discovery_id", album_artist_ref)
+
     annotated_tracks = annotate_item_statuses(raw_tracks, db=db, plex_client=plex_client, config=config, user=_user)
     annotated_album = annotate_item_statuses([album_dict], db=db, plex_client=plex_client, config=config, user=_user)[0]
     annotated_album["tracks"] = annotated_tracks
@@ -289,3 +358,49 @@ def get_artist(
         artist_dict[group_key] = annotate_item_statuses(items, db=db, plex_client=plex_client, config=config, user=_user)
 
     return artist_dict
+
+
+@router.get("/artist-profile")
+def get_artist_profile(
+    discovery_id: Optional[str] = Query(default=None, min_length=1, max_length=200),
+    library_artist_id: Optional[str] = Query(default=None, min_length=1, max_length=200),
+    discovery: DiscoveryClient = Depends(get_discovery_client),
+    db: Database = Depends(get_db),
+    plex_client: Optional[Any] = Depends(get_media_client),
+    config: Config = Depends(get_config),
+    lidarr: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """Unified artist profile: top tracks plus the full discography merged with what the library owns.
+
+    Pass exactly one of ``discovery_id`` (``deezer:artist:<n>`` / ``itunes:artist:<n>``) or ``library_artist_id``.
+    Admins get the full profile; everyone else gets library-free fields only (see ``shape_for_requester``).
+    Library data survives a Deezer or MusicBrainz failure (empty discography, ``link_confidence: "none"``).
+    """
+    if bool(discovery_id) == bool(library_artist_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide exactly one of discovery_id or library_artist_id",
+        )
+
+    admin = _is_admin(_user)
+    if library_artist_id and not admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Library artist ids are admin-only")
+
+    is_gateway = _gateway_core_client(config) is not None
+    source = None if is_gateway else artist_profile.make_library_source(db, lidarr)
+
+    def _annotate(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return annotate_item_statuses(items, db=db, plex_client=plex_client, config=config, user=_user)
+
+    profile = artist_profile.build_profile(
+        db,
+        discovery,
+        source,
+        _annotate,
+        discovery_id=discovery_id,
+        library_artist_id=library_artist_id,
+    )
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
+    return profile if admin else artist_profile.shape_for_requester(profile)
