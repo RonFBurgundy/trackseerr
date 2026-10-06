@@ -42,7 +42,7 @@ GOOD = {
 }
 
 
-@pytest.mark.parametrize("name", sorted(GOOD))
+@pytest.mark.parametrize("name", sorted(GOOD), ids=sorted(GOOD))
 def test_magic_positive(tmp_path, name):
     f = tmp_path / name
     f.write_bytes(GOOD[name])
@@ -52,7 +52,8 @@ def test_magic_positive(tmp_path, name):
 def _zip_bytes() -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("x.txt", "hi")
+        info = zipfile.ZipInfo("x.txt", date_time=(1980, 1, 1, 0, 0, 0))
+        z.writestr(info, "hi")
     return buf.getvalue()
 
 
@@ -72,6 +73,7 @@ def _zip_bytes() -> bytes:
         ("x.flac", b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"notflac" + PAD),  # ID3 not followed by fLaC
         ("x.m4a", b"\x00\x00\x00\x20moov" + PAD),
     ],
+    ids=["evil.flac", "err.mp3", "arc.m4a", "e.flac", "e.mp3", "e.wav", "x.ogg", "x.wav", "x.aiff", "x.opus", "x.flac", "x.m4a"],
 )
 def test_magic_negative(tmp_path, name, content):
     f = tmp_path / name
