@@ -127,7 +127,7 @@ def test_build_jellyfin_shares_one_adapter_per_configuration():
 
 
 def test_capabilities_for_jellyfin_enable_users():
-    assert capabilities_for("jellyfin").to_dict() == {"playlists": True, "users": True, "mixes": False, "library_refresh": True}
+    assert capabilities_for("jellyfin").to_dict() == {"playlists": True, "users": True, "mixes": False, "library_refresh": True, "file_paths": True}
 
 
 def test_get_media_client_returns_the_jellyfin_adapter():
@@ -219,7 +219,7 @@ def test_status_endpoint_reports_jellyfin_capabilities(env):
     assert body == {
         "type": "jellyfin",
         "connected": True,
-        "capabilities": {"playlists": True, "users": True, "mixes": False, "library_refresh": True},
+        "capabilities": {"playlists": True, "users": True, "mixes": False, "library_refresh": True, "file_paths": True},
     }
 
 

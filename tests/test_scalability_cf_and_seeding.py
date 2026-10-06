@@ -376,6 +376,10 @@ def test_seeding_governance_preserves_hardlink_until_ratio_and_time_limits(
     torrent_file = staging / "01 - Around the World.flac"
     write_flac(torrent_file)
 
+    # Capture torrent file's inode and bytes BEFORE import
+    torrent_ino_before = torrent_file.stat().st_ino
+    torrent_bytes_before = torrent_file.read_bytes()
+
     test_db.create_active_download(
         ActiveDownload(
             id="dl-seeding-test",
@@ -422,8 +426,10 @@ def test_seeding_governance_preserves_hardlink_until_ratio_and_time_limits(
         # Assert hardlink file was created in music library
         placed_path = Path(dl_row1["target_path"])
         assert placed_path.exists()
-        # Verify hardlink inode match
-        assert placed_path.stat().st_ino == torrent_file.stat().st_ino
+        # Verify torrent file is untouched: still exists, same inode, same bytes
+        assert torrent_file.exists()
+        assert torrent_file.stat().st_ino == torrent_ino_before
+        assert torrent_file.read_bytes() == torrent_bytes_before
 
         # --- Tick 2: Subsequent poll, ratio reaches 1.5, seeding time 35 min (still below limits) ---
         mock_driver.get_status.return_value = {

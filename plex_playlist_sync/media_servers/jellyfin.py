@@ -34,6 +34,7 @@ never sent twice.
 import logging
 import time
 import weakref
+from datetime import datetime
 from typing import Any, Callable, Iterator, Optional, Sequence
 
 import httpx
@@ -46,12 +47,15 @@ from plex_playlist_sync.media_servers.base import (
     MediaServerConnectionError,
     MediaServerError,
     MediaServerNotFound,
+    MediaServerUnsupported,
     PlaylistSyncOptions,
     ServerCapabilities,
+    ServerFileRef,
     ServerTrackRef,
     ServerUser,
 )
 from plex_playlist_sync.media_servers.subsonic import (
+    _parse_iso_utc,
     _artist_variants,
     _chunks,
     _RedactHttpxUrls,
@@ -69,13 +73,14 @@ _httpx_logger = logging.getLogger("httpx")
 if not any(isinstance(f, _RedactHttpxUrls) for f in _httpx_logger.filters):
     _httpx_logger.addFilter(_RedactHttpxUrls())
 
-JELLYFIN_CAPABILITIES = ServerCapabilities(playlists=True, users=True, library_refresh=True, mixes=False, search=True)
+JELLYFIN_CAPABILITIES = ServerCapabilities(playlists=True, users=True, library_refresh=True, mixes=False, search=True, file_paths=True)
 
 CLIENT_NAME = "Trackseerr"
 _TICKS_PER_SECOND = 10_000_000
 _PAGE = 200  # list pages (playlists, playlist entries)
 _MAX_PAGES = 1000  # hard stop for a listing (200k rows at the default page size)
 _SEARCH_PAGE = 50
+_FILE_PAGE = 500  # file listing pages
 _SEARCH_MAX = 150  # candidates inspected per query before giving up
 _ID_CHUNK = 50  # item / entry ids per request: keeps query strings far below common 8 KB proxy limits
 _MAX_ATTEMPTS = 3
@@ -378,6 +383,63 @@ class JellyfinMediaServer(MediaServer):
             }
             for s in songs
         ]
+
+    def iter_library_files(self) -> Iterator[ServerFileRef]:
+        """All Audio items with their ``Path``. Needs an administrator API key: a user key returns items without
+        ``Path``, which raises :class:`MediaServerUnsupported` on the first page."""
+        params = [
+            ("IncludeItemTypes", "Audio"),
+            ("Recursive", "true"),
+            ("Fields", "Path,MediaSources"),
+        ]
+        first = True
+        for item in self._paged("/Items", params, page=_FILE_PAGE):
+            path = str(item.get("Path") or "")
+            if first:
+                first = False
+                if not path:
+                    detail = "Jellyfin API key must belong to an administrator to read file paths"
+                    raise MediaServerUnsupported(detail, safe_detail=detail)
+            if not path:
+                continue
+            container = str(item.get("Container") or "")
+            if not container:
+                sources = item.get("MediaSources") or []
+                if sources and isinstance(sources[0], dict):
+                    container = str(sources[0].get("Container") or "")
+            artists = item.get("Artists") or []
+            yield ServerFileRef(
+                server_id=str(item.get("Id") or ""),
+                path=path,
+                title=str(item.get("Name") or ""),
+                artist=str(artists[0] if artists else item.get("AlbumArtist") or ""),
+                album=str(item.get("Album") or ""),
+                container=container.lower(),
+            )
+
+    def last_scan_at(self) -> Optional[datetime]:
+        tasks = self._request("GET", "/ScheduledTasks")
+        for task in tasks if isinstance(tasks, list) else []:
+            if not isinstance(task, dict) or task.get("Name") != "Scan Media Library":
+                continue
+            result = task.get("LastExecutionResult")
+            raw = str(result.get("EndTimeUtc") or "") if isinstance(result, dict) else ""
+            if not raw:
+                return None
+            return _parse_iso_utc(raw)
+        return None
+
+    def library_roots(self) -> list[str]:
+        folders = self._request("GET", "/Library/VirtualFolders")
+        roots: list[str] = []
+        for folder in folders if isinstance(folders, list) else []:
+            if not isinstance(folder, dict):
+                continue
+            kind = str(folder.get("CollectionType") or "").lower()
+            if kind and kind != "music":
+                continue
+            roots.extend(str(loc) for loc in folder.get("Locations") or [] if loc)
+        return roots
 
     def refresh_library(self) -> bool:
         self._request("POST", "/Library/Refresh")

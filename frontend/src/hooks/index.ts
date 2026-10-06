@@ -68,3 +68,5 @@ export * from './useCustomFormatExport';
 export * from './useImportBitrateCheck';
 export * from './useManualImport';
 export * from './useIndexerDraft';
+export * from './useLibraryHealth';
+export * from './useLibraryHealthCount';

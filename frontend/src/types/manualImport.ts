@@ -6,6 +6,7 @@ export type ManualImportItem = components['schemas']['ManualImportItem'];
 export type ManualImportScope =
   | { kind: 'download'; downloadId: string; title: string }
   | { kind: 'album'; albumId: string; title: string }
+  | { kind: 'files'; filePaths: string[]; title: string }
   | { kind: 'folder' };
 
 export type MatchStrength = 'strong' | 'weak' | 'none';

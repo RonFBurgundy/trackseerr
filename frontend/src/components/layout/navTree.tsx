@@ -12,11 +12,15 @@ export interface NavNode {
   description?: string;
   route?: AppRoute;
   children?: NavNode[];
+  /** Count chip (admin-only items), hidden when 0. */
+  badge?: number;
 }
 
 export interface RouteAccess {
   isAdmin: boolean;
   mfaEnrollmentRequired: boolean;
+  /** Library-health findings awaiting review (admin only). */
+  reviewCount?: number;
 }
 
 export const routesEqual = (a: AppRoute, b: AppRoute): boolean => routeToHash(a) === routeToHash(b);
@@ -36,7 +40,7 @@ const ico = 'h-4 w-4';
 const leaf = (key: string, label: string, route: AppRoute): NavNode => ({ key, label, route });
 
 /** Every main section the user may see, with its pages as children where it has any. */
-export function buildNavTree({ isAdmin, mfaEnrollmentRequired }: RouteAccess): NavNode[] {
+export function buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount = 0 }: RouteAccess): NavNode[] {
   const settingsChildren: NavNode[] = buildSettingsTree(isAdmin, mfaEnrollmentRequired).map((section) => {
     if (!hasChildRow(section)) {
       return {
@@ -118,10 +122,12 @@ export function buildNavTree({ isAdmin, mfaEnrollmentRequired }: RouteAccess): N
         label: 'Activity',
         description: 'Lidarr & download deck status',
         icon: <Activity className={ico} />,
+        badge: reviewCount,
         children: [
           leaf('activity/queue', 'Queue', { tab: 'activity', sub: 'queue' }),
           leaf('activity/history', 'History', { tab: 'activity', sub: 'history' }),
           leaf('activity/blocklist', 'Blocklist', { tab: 'activity', sub: 'blocklist' }),
+          { ...leaf('activity/review', 'Needs review', { tab: 'activity', sub: 'review' }), badge: reviewCount },
         ],
       },
       {

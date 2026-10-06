@@ -8,6 +8,7 @@ never through the generic interface.
 
 import logging
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import Any, Iterator, Optional, Sequence
 
 import requests
@@ -23,6 +24,7 @@ from plex_playlist_sync.media_servers.base import (
     MediaServerNotFound,
     PlaylistSyncOptions,
     ServerCapabilities,
+    ServerFileRef,
     ServerTrackRef,
     ServerUser,
 )
@@ -31,7 +33,7 @@ from plex_playlist_sync.redaction import redact_text, safe_exc
 
 logger = logging.getLogger(__name__)
 
-PLEX_CAPABILITIES = ServerCapabilities(playlists=True, users=True, library_refresh=True, mixes=True, search=True)
+PLEX_CAPABILITIES = ServerCapabilities(playlists=True, users=True, library_refresh=True, mixes=True, search=True, file_paths=True)
 
 
 def translate_plex_error(exc: BaseException) -> MediaServerError:
@@ -52,6 +54,17 @@ def _translated() -> Iterator[None]:
         yield
     except (PlexApiException, requests.RequestException) as exc:
         raise translate_plex_error(exc) from exc
+
+
+_FILE_PAGE = 500
+
+
+def _utc(value: Any) -> Optional[datetime]:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        value = value.astimezone()  # plexapi yields naive local datetimes
+    return value.astimezone(timezone.utc)
 
 
 def _ref(item: Any) -> ServerTrackRef:
@@ -158,6 +171,48 @@ class PlexMediaServer(MediaServer):
             )
             for u in raw
         ]
+
+    def _music_sections(self) -> list[Any]:
+        with _translated():
+            sections = self._client.server.library.sections()
+        return [s for s in sections if getattr(s, "type", "") == "artist"]
+
+    def iter_library_files(self) -> Iterator[ServerFileRef]:
+        """Every part of every track in every music section; sections are searched in pages of 500."""
+        for section in self._music_sections():
+            start = 0
+            while True:
+                with _translated():
+                    tracks = list(section.search(libtype="track", container_start=start, container_size=_FILE_PAGE))
+                for track in tracks:
+                    for media in getattr(track, "media", None) or []:
+                        for part in getattr(media, "parts", None) or []:
+                            path = str(getattr(part, "file", "") or "")
+                            if not path:
+                                continue
+                            container = str(getattr(part, "container", "") or getattr(media, "container", "") or "")
+                            yield ServerFileRef(
+                                server_id=str(getattr(track, "ratingKey", "") or ""),
+                                path=path,
+                                title=str(getattr(track, "title", "") or ""),
+                                artist=str(getattr(track, "grandparentTitle", "") or ""),
+                                album=str(getattr(track, "parentTitle", "") or ""),
+                                container=container.lower(),
+                            )
+                if len(tracks) < _FILE_PAGE:
+                    break
+                start += len(tracks)
+
+    def last_scan_at(self) -> Optional[datetime]:
+        stamps = [
+            t
+            for t in (_utc(getattr(s, "scannedAt", None) or getattr(s, "updatedAt", None)) for s in self._music_sections())
+            if t is not None
+        ]
+        return max(stamps) if stamps else None
+
+    def library_roots(self) -> list[str]:
+        return [str(loc) for s in self._music_sections() for loc in (getattr(s, "locations", None) or []) if loc]
 
 
 def plex_extras(server: Optional[MediaServer]) -> Optional[PlexClient]:

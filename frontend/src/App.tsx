@@ -9,6 +9,7 @@ import {
   useRequests,
   useIssues,
   useLibrary,
+  useLibraryHealthCount,
   useAccount,
   useLocalLogin,
   useDeploymentIdentity,
@@ -85,6 +86,7 @@ const MainApp: React.FC = () => {
   const requestsHook = useRequests();
   const issuesHook = useIssues(auth.user?.id);
   const libraryHook = useLibrary(auth.canUseAdminUi);
+  const reviewHealth = useLibraryHealthCount(auth.canUseAdminUi);
 
   const { route, navigate } = useAppRoute();
   // Gate the requested location: MFA enrollment confines to Settings > Account, admin-only tabs fall back to
@@ -238,6 +240,7 @@ const MainApp: React.FC = () => {
         activeTab={activeTab}
         onTabChange={handleTabChange}
         isAdmin={auth.canUseAdminUi}
+        reviewCount={reviewHealth.count}
         tier={identity.tier}
         onLogin={() => {
           if (mediaServer.isPlex) setIsAuthModalOpen(true);
@@ -258,6 +261,7 @@ const MainApp: React.FC = () => {
         quota={requestsHook.quota}
         isAdmin={auth.canUseAdminUi}
         mfaEnrollmentRequired={mfaEnrollmentRequired}
+        reviewCount={reviewHealth.count}
         tier={identity.tier}
         onLogout={auth.logout}
       />
@@ -448,6 +452,8 @@ const MainApp: React.FC = () => {
               <ActivityView
                 sub={activeRoute.sub}
                 onSubChange={(sub, o) => handleNavigate({ tab: 'activity', sub }, o)}
+                reviewCount={reviewHealth.count}
+                onReviewChanged={() => void reviewHealth.refresh()}
               />
             )}
 

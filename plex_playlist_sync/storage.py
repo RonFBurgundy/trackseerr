@@ -73,7 +73,7 @@ def clean_library_name(text: str) -> str:
 
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
-SCHEMA_VERSION = 56  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 57  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:
@@ -348,6 +348,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 (54, self._migration_v54),
                 (55, self._migration_v55),
                 (56, self._migration_v56),
+                (57, self._migration_v57),
             ]
 
             applied = 0
@@ -1077,6 +1078,61 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         cur.execute("PRAGMA table_info(active_downloads);")
         if "unmatched_files" not in {row[1] for row in cur.fetchall()}:
             cur.execute("ALTER TABLE active_downloads ADD COLUMN unmatched_files TEXT;")
+
+    def _migration_v57(self, cur: sqlite3.Cursor) -> None:
+        """Library health: findings (server vs disk diff, weak import matches), run history, dismissals, and the
+        media-server path mapping (``media_server_settings.path_mapping_json``). The weekly-check toggle lives in
+        ``kv_store`` (``library_health_weekly``, default on)."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS library_health_findings (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL CHECK (kind IN ('server_unindexed', 'server_stale', 'weak_match')),
+                server_kind TEXT,
+                cause TEXT NOT NULL,
+                group_key TEXT NOT NULL,
+                path TEXT NOT NULL,
+                detail_json TEXT,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                dismissed INTEGER NOT NULL DEFAULT 0,
+                UNIQUE (kind, path)
+            );
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_health_findings_group ON library_health_findings(group_key);")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS library_health_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                server_kind TEXT,
+                disk_files INTEGER NOT NULL DEFAULT 0,
+                server_files INTEGER NOT NULL DEFAULT 0,
+                unindexed INTEGER NOT NULL DEFAULT 0,
+                stale INTEGER NOT NULL DEFAULT 0,
+                error TEXT
+            );
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS library_health_dismissals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scope TEXT NOT NULL CHECK (scope IN ('file', 'folder')),
+                path TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                UNIQUE (scope, path)
+            );
+            """
+        )
+        cur.execute("PRAGMA table_info(media_server_settings);")
+        if "path_mapping_json" not in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE media_server_settings ADD COLUMN path_mapping_json TEXT NOT NULL DEFAULT '';")
+        cur.execute(
+            "INSERT OR IGNORE INTO kv_store (key, value) VALUES ('library_health_weekly', 'true')"
+        )
 
     def _migration_v56(self, cur: sqlite3.Cursor) -> None:
         """Per-indexer seed rules (NULL = inherit global) and the seed-rule snapshot taken on each download at grab time."""
@@ -4732,6 +4788,172 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             )
             self.conn.commit()
         return self.get_media_server_settings()
+
+    # -------------------------------------------------------------------------
+    # Library health (server vs disk reconciliation, weak import matches)
+    # -------------------------------------------------------------------------
+
+    def get_media_server_path_mapping(self) -> Optional[dict[str, Any]]:
+        """Saved ``{server_prefix, local_prefix, auto, server_kind}`` or None."""
+        with self._lock:
+            row = self.conn.execute("SELECT path_mapping_json FROM media_server_settings WHERE id = 1").fetchone()
+        raw = (row["path_mapping_json"] if row else "") or ""
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            logger.warning("Ignoring unreadable media-server path mapping")
+            return None
+        if not isinstance(data, dict):
+            return None
+        return {
+            "server_prefix": str(data.get("server_prefix") or ""),
+            "local_prefix": str(data.get("local_prefix") or ""),
+            "auto": bool(data.get("auto")),
+            "server_kind": str(data.get("server_kind") or ""),
+        }
+
+    def set_media_server_path_mapping(self, mapping: Optional[dict[str, Any]]) -> None:
+        """Save (or with None clear) the path mapping without touching the rest of the media-server settings."""
+        raw = json.dumps(mapping) if mapping else ""
+        with self._lock:
+            self.conn.execute("INSERT OR IGNORE INTO media_server_settings (id) VALUES (1)")
+            self.conn.execute(
+                "UPDATE media_server_settings SET path_mapping_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+                (raw,),
+            )
+            self.conn.commit()
+
+    def get_library_health_weekly(self) -> bool:
+        return (self.get_kv("library_health_weekly") or "true").strip().lower() not in ("false", "0", "no", "off")
+
+    def set_library_health_weekly(self, enabled: bool) -> None:
+        self.set_kv("library_health_weekly", "true" if enabled else "false")
+
+    def upsert_library_health_findings(self, rows: list[dict[str, Any]], seen_at: str) -> int:
+        """Insert or refresh findings (unique on kind+path). ``first_seen`` and ``id`` survive; the rest is replaced."""
+        if not rows:
+            return 0
+        with self._lock:
+            for r in rows:
+                self.conn.execute(
+                    """
+                    INSERT INTO library_health_findings
+                        (id, kind, server_kind, cause, group_key, path, detail_json, first_seen, last_seen)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(kind, path) DO UPDATE SET
+                        server_kind = excluded.server_kind, cause = excluded.cause, group_key = excluded.group_key,
+                        detail_json = excluded.detail_json, last_seen = excluded.last_seen
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        r["kind"],
+                        r.get("server_kind"),
+                        r["cause"],
+                        r["group_key"],
+                        r["path"],
+                        json.dumps(r["detail"]) if r.get("detail") is not None else None,
+                        seen_at,
+                        seen_at,
+                    ),
+                )
+            self.conn.commit()
+        return len(rows)
+
+    def delete_library_health_findings_not_seen(self, kinds: list[str], seen_at: str) -> int:
+        """Drop findings of ``kinds`` whose last_seen is not ``seen_at`` (the current run's stamp)."""
+        if not kinds:
+            return 0
+        marks = ",".join("?" for _ in kinds)
+        with self._lock:
+            cur = self.conn.execute(
+                f"DELETE FROM library_health_findings WHERE kind IN ({marks}) AND last_seen <> ?",
+                (*kinds, seen_at),
+            )
+            self.conn.commit()
+            return cur.rowcount
+
+    def list_library_health_findings(self, include_dismissed: bool = False) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM library_health_findings"
+        if not include_dismissed:
+            sql += " WHERE dismissed = 0"
+        sql += " ORDER BY group_key, path"
+        with self._lock:
+            rows = self.conn.execute(sql).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["detail"] = json.loads(d.pop("detail_json") or "null")
+            except (TypeError, ValueError):
+                d["detail"] = None
+            out.append(d)
+        return out
+
+    def count_library_health_findings(self) -> int:
+        with self._lock:
+            row = self.conn.execute("SELECT COUNT(*) FROM library_health_findings WHERE dismissed = 0").fetchone()
+        return int(row[0]) if row else 0
+
+    def delete_library_health_finding_by_path(self, path: str, kind: Optional[str] = None) -> int:
+        sql, args = "DELETE FROM library_health_findings WHERE path = ?", [str(path)]
+        if kind:
+            sql += " AND kind = ?"
+            args.append(kind)
+        with self._lock:
+            cur = self.conn.execute(sql, args)
+            self.conn.commit()
+            return cur.rowcount
+
+    def delete_library_health_findings_under(self, folder: str) -> int:
+        """Delete findings at ``folder`` or beneath it (literal prefix match on a path boundary)."""
+        folder = str(folder).rstrip("/") or "/"
+        prefix = folder if folder.endswith("/") else folder + "/"
+        with self._lock:
+            cur = self.conn.execute(
+                "DELETE FROM library_health_findings WHERE path = ? OR substr(path, 1, ?) = ?",
+                (folder, len(prefix), prefix),
+            )
+            self.conn.commit()
+            return cur.rowcount
+
+    def add_library_health_dismissal(self, scope: str, path: str) -> None:
+        with self._lock:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO library_health_dismissals (scope, path) VALUES (?, ?)", (scope, str(path))
+            )
+            self.conn.commit()
+
+    def list_library_health_dismissals(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self.conn.execute("SELECT id, scope, path, created_at FROM library_health_dismissals").fetchall()
+        return [dict(r) for r in rows]
+
+    def record_library_health_run(self, run: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO library_health_runs "
+                "(started_at, finished_at, server_kind, disk_files, server_files, unindexed, stale, error) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run["started_at"],
+                    run.get("finished_at"),
+                    run.get("server_kind"),
+                    int(run.get("disk_files") or 0),
+                    int(run.get("server_files") or 0),
+                    int(run.get("unindexed") or 0),
+                    int(run.get("stale") or 0),
+                    run.get("error"),
+                ),
+            )
+            self.conn.commit()
+            return {**run, "id": cur.lastrowid}
+
+    def get_last_library_health_run(self) -> Optional[dict[str, Any]]:
+        with self._lock:
+            row = self.conn.execute("SELECT * FROM library_health_runs ORDER BY id DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
 
     # -------------------------------------------------------------------------
     # Download Clients CRUD

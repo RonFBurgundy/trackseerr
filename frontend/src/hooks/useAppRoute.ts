@@ -6,7 +6,7 @@ import type { RequestFilter } from './useRequests';
 export type MainTab = 'discover' | 'requests' | 'library' | 'playlists' | 'activity' | 'wanted' | 'settings';
 
 export type RequestsSub = RequestFilter | 'issues';
-export type ActivitySub = 'queue' | 'history' | 'blocklist';
+export type ActivitySub = 'queue' | 'history' | 'blocklist' | 'review';
 export type WantedSub = WantedListName;
 
 export type SettingsSection = 'general' | 'media-management' | 'lidarr' | 'requests' | 'system' | 'account';
@@ -41,7 +41,7 @@ export type Navigate = (route: AppRoute, options?: NavigateOptions) => void;
 export const MAIN_TABS: readonly MainTab[] = ['discover', 'requests', 'library', 'playlists', 'activity', 'wanted', 'settings'];
 export const REQUESTS_SUBS: readonly RequestsSub[] = ['all', 'pending', 'approved', 'fulfilled', 'rejected', 'issues'];
 export const LIBRARY_SUBS: readonly LibraryTab[] = ['artists', 'albums', 'tracks', 'collections'];
-export const ACTIVITY_SUBS: readonly ActivitySub[] = ['queue', 'history', 'blocklist'];
+export const ACTIVITY_SUBS: readonly ActivitySub[] = ['queue', 'history', 'blocklist', 'review'];
 export const WANTED_SUBS: readonly WantedSub[] = ['missing', 'cutoff'];
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   'general',

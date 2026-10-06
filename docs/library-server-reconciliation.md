@@ -27,12 +27,12 @@ The server and TrackSeerr usually mount the library at different paths (`/data/m
 Reuse the library scanner's file inventory (`library_scanner.py`), not a fresh walk, so a check costs one server listing plus one DB read.
 
 ## Cause classification
-Each unindexed file is checked in this order. The first rule that fires wins. Files are **grouped** by cause and folder, so 300 files in one excluded folder show as one finding, not 300.
+Each unindexed file is checked in this order. The first rule that fires wins. "Not scanned yet" goes first because a freshly imported album folder is unindexed only because the server has not scanned it yet, and would otherwise be misread as a folder outside the library. Files are **grouped** by cause and folder, so 300 files in one excluded folder show as one finding, not 300.
 
 | Cause | Detection | Suggested action |
 |---|---|---|
+| Not scanned yet | File (or its folder's newest file) modified after the server's last library scan; with no known scan time, within the last 24 h | "Refresh server library" (existing `refresh_library`) |
 | Folder outside the server's library roots / wrong mapping | Whole directory subtree unindexed while siblings are indexed, or zero overlap at all | Add the folder to the server library, or fix the path mapping |
-| Not scanned yet | File mtime newer than the server's last library scan | "Refresh server library" (existing `refresh_library`) |
 | Unsupported format | Extension/codec not in the per-server support table (e.g. `.ape`, `.wv`, `.dsf` on Plex) | Convert, or accept it as unplayable |
 | Corrupt / unreadable audio | The import-hardening probes fail (`import_security.check_magic`, mutagen parse) | Re-download; offer a Wanted search for the matched track |
 | Missing core tags | No artist, album or title tag | Retag (link to manual import / rename) |

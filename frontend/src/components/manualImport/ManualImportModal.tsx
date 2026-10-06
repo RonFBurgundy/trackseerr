@@ -18,6 +18,7 @@ const labelClass = 'block text-[10px] uppercase tracking-widest font-mono text-[
 function subtitleFor(scope: ManualImportScope | null): string | undefined {
   if (!scope) return undefined;
   if (scope.kind === 'folder') return 'Pick files from a folder';
+  if (scope.kind === 'files') return `Re-match: ${scope.title}`;
   return scope.title;
 }
 

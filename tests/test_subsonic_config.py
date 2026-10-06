@@ -176,6 +176,7 @@ def test_capabilities_for_subsonic_hides_plex_only_features():
         "users": False,
         "mixes": False,
         "library_refresh": True,
+        "file_paths": True,
     }
 
 
@@ -319,7 +320,7 @@ def test_status_endpoint_reports_subsonic(env):
     assert body == {
         "type": "subsonic",
         "connected": True,
-        "capabilities": {"playlists": True, "users": False, "mixes": False, "library_refresh": True},
+        "capabilities": {"playlists": True, "users": False, "mixes": False, "library_refresh": True, "file_paths": True},
     }
 
 
