@@ -23,6 +23,17 @@ def _deezer_artist_ref(artist_obj: Any) -> Optional[str]:
     return None
 
 
+class DiscoveryUpstreamError(Exception):
+    """Raised when a keyless discovery provider could not be reached (distinct from 'not found')."""
+
+
+def _deezer_album_ref(album_obj: Any) -> Optional[str]:
+    """``deezer:album:<n>`` for a Deezer API album object carrying an id, else None."""
+    if isinstance(album_obj, dict) and album_obj.get("id"):
+        return f"deezer:album:{album_obj['id']}"
+    return None
+
+
 class DiscoveryClient:
     """Thread-safe zero-key client for querying public trending, new release, and search APIs."""
 
@@ -92,6 +103,7 @@ class DiscoveryClient:
                             preview_url=t.get("preview") or None,
                             release_date=t.get("release_date") or None,
                             artist_discovery_id=_deezer_artist_ref(art),
+                        album_discovery_id=_deezer_album_ref(alb),
                         ).to_dict()
                     )
 
@@ -425,6 +437,7 @@ class DiscoveryClient:
                     "album": str(alb.get("title", "")).strip() or None,
                     "duration": duration,
                     "preview_url": t.get("preview") or None,
+                    **({"album_discovery_id": _deezer_album_ref(alb)} if _deezer_album_ref(alb) else {}),
                 }
             )
         results = results[: max(0, int(limit))]
@@ -463,6 +476,146 @@ class DiscoveryClient:
         if result is not None:
             self._set_cached(cache_key, result)
 
+        return result
+
+    def get_track_details(self, track_id: str) -> Optional[dict[str, Any]]:
+        """Fetches a single track (Deezer or iTunes) with full metadata, TTL cached. None when not found."""
+        clean_id = (track_id or "").strip()
+        if not clean_id:
+            return None
+        cache_key = f"track:{clean_id}"
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
+
+        result: Optional[dict[str, Any]] = None
+        if clean_id.startswith("itunes:track:"):
+            result = self._get_itunes_track_details(clean_id.removeprefix("itunes:track:"))
+        elif clean_id.startswith("deezer:track:"):
+            result = self._get_deezer_track_details(clean_id.removeprefix("deezer:track:"))
+        elif clean_id.isdigit():
+            result = self._get_deezer_track_details(clean_id)
+        if result is not None:
+            self._set_cached(cache_key, result)
+        return result
+
+    def _get_deezer_track_details(self, num_id: str) -> Optional[dict[str, Any]]:
+        """Deezer ``/track/{id}``; label/genres come from the (cached) album lookup and are omitted on failure."""
+        if not num_id.isdigit():
+            return None
+        try:
+            resp = self.session.get(f"https://api.deezer.com/track/{num_id}", timeout=self.timeout)
+            if resp.status_code != 200:
+                logger.warning("Deezer track query returned status %d for id %s", resp.status_code, num_id)
+                return None
+            data = resp.json()
+        except (requests.RequestException, ValueError) as exc:
+            logger.warning("Deezer track query failed for %s: %s", num_id, exc)
+            raise DiscoveryUpstreamError(f"Deezer track lookup failed: {exc}") from exc
+        if not isinstance(data, dict) or "error" in data or not data.get("id"):
+            return None
+
+        art = data.get("artist") if isinstance(data.get("artist"), dict) else {}
+        alb = data.get("album") if isinstance(data.get("album"), dict) else {}
+        album_ref = _deezer_album_ref(alb)
+        try:
+            duration = int(data.get("duration") or 0)
+        except (TypeError, ValueError):
+            duration = 0
+        result: dict[str, Any] = {
+            "id": f"deezer:track:{data['id']}",
+            "item_type": "track",
+            "title": str(data.get("title", "")).strip(),
+            "artist": str(art.get("name", "")).strip() or "Unknown Artist",
+            "album": str(alb.get("title", "")).strip() or None,
+            "cover_url": alb.get("cover_xl") or alb.get("cover_big") or alb.get("cover_medium") or None,
+            "preview_url": data.get("preview") or None,
+            "duration": duration,
+            "track_position": data.get("track_position") or None,
+            "disk_number": data.get("disk_number") or None,
+            "release_date": data.get("release_date") or alb.get("release_date") or None,
+            "isrc": data.get("isrc") or None,
+            "explicit": bool(data.get("explicit_lyrics")),
+            "contributors": [
+                {"name": str(c.get("name", "")).strip(), "role": str(c.get("role") or "Main").strip()}
+                for c in (data.get("contributors") or [])
+                if isinstance(c, dict) and c.get("name")
+            ],
+        }
+        artist_ref = _deezer_artist_ref(art)
+        if artist_ref:
+            result["artist_discovery_id"] = artist_ref
+        if album_ref:
+            result["album_discovery_id"] = album_ref
+        try:
+            if int(data.get("bpm") or 0) > 0:
+                result["bpm"] = int(data["bpm"])
+        except (TypeError, ValueError):
+            logger.debug("Deezer track %s has non-numeric bpm %r", num_id, data.get("bpm"))
+        if data.get("gain") is not None:
+            result["gain"] = data["gain"]
+        if album_ref:
+            try:
+                album_data = self.get_album_details(album_ref)
+            except (requests.RequestException, ValueError) as exc:
+                logger.warning("Deezer album enrichment failed for track %s: %s", num_id, exc)
+                album_data = None
+            if album_data:
+                if album_data.get("label"):
+                    result["label"] = album_data["label"]
+                if album_data.get("genres"):
+                    result["genres"] = list(album_data["genres"])
+        return result
+
+    def _get_itunes_track_details(self, num_id: str) -> Optional[dict[str, Any]]:
+        """iTunes lookup by track id."""
+        if not num_id.isdigit():
+            return None
+        try:
+            resp = self.session.get(f"https://itunes.apple.com/lookup?id={num_id}&entity=song", timeout=self.timeout)
+            if resp.status_code != 200:
+                logger.warning("iTunes track query returned status %d for id %s", resp.status_code, num_id)
+                return None
+            data = resp.json()
+        except (requests.RequestException, ValueError) as exc:
+            logger.warning("iTunes track query failed for %s: %s", num_id, exc)
+            raise DiscoveryUpstreamError(f"iTunes track lookup failed: {exc}") from exc
+        results = data.get("results") if isinstance(data, dict) else None
+        if not isinstance(results, list):
+            return None
+        r = next(
+            (x for x in results if isinstance(x, dict) and (x.get("wrapperType") == "track" or x.get("kind") == "song")),
+            None,
+        )
+        if r is None or not r.get("trackId"):
+            return None
+        cover = r.get("artworkUrl100") or ""
+        if cover:
+            cover = cover.replace("100x100bb", "600x600bb")
+        millis = r.get("trackTimeMillis") or 0
+        genre = r.get("primaryGenreName")
+        result: dict[str, Any] = {
+            "id": f"itunes:track:{r['trackId']}",
+            "item_type": "track",
+            "title": str(r.get("trackName", "")).strip(),
+            "artist": str(r.get("artistName", "")).strip() or "Unknown Artist",
+            "album": str(r.get("collectionName", "")).strip() or None,
+            "cover_url": cover or None,
+            "preview_url": r.get("previewUrl") or None,
+            "duration": int(round(millis / 1000.0)),
+            "track_position": r.get("trackNumber") or None,
+            "disk_number": r.get("discNumber") or None,
+            "release_date": r.get("releaseDate") or None,
+            "isrc": None,
+            "explicit": r.get("trackExplicitness") == "explicit",
+            "contributors": [],
+        }
+        if r.get("artistId"):
+            result["artist_discovery_id"] = f"itunes:artist:{r['artistId']}"
+        if r.get("collectionId"):
+            result["album_discovery_id"] = f"itunes:album:{r['collectionId']}"
+        if genre:
+            result["genres"] = [str(genre).strip()]
         return result
 
     def get_artist_details(self, artist_id: str) -> Optional[dict[str, Any]]:
@@ -582,6 +735,7 @@ class DiscoveryClient:
                                 preview_url=t.get("preview") or None,
                                 release_date=t.get("release_date") or None,
                                 artist_discovery_id=_deezer_artist_ref(art),
+                            album_discovery_id=_deezer_album_ref(alb),
                             ).to_dict()
                         )
 
@@ -650,6 +804,11 @@ class DiscoveryClient:
                                     release_date=r.get("releaseDate") or None,
                                     artist_discovery_id=(
                                         f"itunes:artist:{r['artistId']}" if r.get("artistId") else None
+                                    ),
+                                    album_discovery_id=(
+                                        f"itunes:album:{r['collectionId']}"
+                                        if mapped_type == "track" and r.get("collectionId")
+                                        else None
                                     ),
                                 ).to_dict()
                             )
@@ -744,6 +903,7 @@ class DiscoveryClient:
                         "duration_seconds": t_dur,
                         "preview_url": t_prev,
                         "release_date": rel_date,
+                        "album_discovery_id": f"deezer:album:{alb_id}",
                     }
                 )
 
@@ -830,6 +990,7 @@ class DiscoveryClient:
                         "duration_seconds": t_dur,
                         "preview_url": t_prev,
                         "release_date": r.get("releaseDate") or rel_date,
+                        "album_discovery_id": f"itunes:album:{col_id}",
                     }
                 )
 

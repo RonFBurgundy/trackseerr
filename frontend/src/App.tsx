@@ -165,8 +165,13 @@ const MainApp: React.FC = () => {
     album?: string;
     cover_url?: string;
     type?: string;
+    preview_url?: string;
+    release_date?: string;
   }) => {
     await requestsHook.submitRequest({
+      id: item.id,
+      preview_url: item.preview_url,
+      release_date: item.release_date,
       title: item.title,
       artist: item.artist,
       album: item.album,

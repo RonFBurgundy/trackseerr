@@ -5,4 +5,5 @@ export * from './ProfileAlbumCard';
 export * from './ProfileTrackRow';
 export * from './ArtistProfileView';
 export * from './DiscoveryAlbumModal';
+export * from './DiscoveryTrackModal';
 export * from './ArtistNameLink';

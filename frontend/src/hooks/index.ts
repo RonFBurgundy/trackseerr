@@ -2,6 +2,7 @@ export * from './useAuth';
 export * from './useAudioPlayer';
 export * from './useDiscovery';
 export * from './useDiscoveryAlbum';
+export * from './useDiscoveryTrack';
 export * from './useRequests';
 export * from './useLibrary';
 export * from './useQueue';

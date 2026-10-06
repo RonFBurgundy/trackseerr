@@ -58,8 +58,44 @@ export interface DiscoveryItem {
   status?: DiscoveryStatus;
   /** Deezer/iTunes artist id of this item's artist; present when the artist has a profile page. */
   artist_discovery_id?: string;
+  /** Tracks only: `deezer:album:<n>` / `itunes:album:<n>` of the album the track is on. */
+  album_discovery_id?: string;
+  /** Present on a track opened from an album tracklist or the track endpoint, so a request can reference its row. */
+  request_id?: number | null;
   /** Admin only: the matching library artist. */
   library_artist_id?: string;
+}
+
+export interface DiscoveryTrackContributor {
+  name: string;
+  role: string;
+}
+
+/** GET /api/discovery/track/{id}. Optional fields are omitted by the server when the provider has no value. */
+export interface DiscoveryTrackDetail {
+  id: string;
+  item_type: 'track';
+  title: string;
+  artist: string;
+  artist_discovery_id?: string;
+  album?: string | null;
+  album_discovery_id?: string;
+  cover_url?: string | null;
+  preview_url?: string | null;
+  /** Seconds. */
+  duration: number;
+  track_position?: number | null;
+  disk_number?: number | null;
+  release_date?: string | null;
+  isrc?: string | null;
+  explicit: boolean;
+  bpm?: number;
+  gain?: number;
+  contributors: DiscoveryTrackContributor[];
+  label?: string;
+  genres?: string[];
+  status: DiscoveryStatus;
+  request_id?: number | null;
 }
 
 export type DiscoveryStatus =
