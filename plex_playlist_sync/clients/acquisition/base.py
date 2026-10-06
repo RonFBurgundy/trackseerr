@@ -1,9 +1,14 @@
 """Base acquisition driver interface for native download clients."""
 
 from abc import ABC, abstractmethod
+import logging
 from typing import Any, Optional
 
 from plex_playlist_sync.models import AcquisitionSearchResult
+
+
+logger = logging.getLogger(__name__)
+_share_limits_unsupported_logged: set[str] = set()
 
 
 class AcquisitionRetryableError(RuntimeError):
@@ -109,4 +114,15 @@ class AcquisitionDriver(ABC):
         Returns:
             bool: True if successfully cleaned up, False otherwise.
         """
+        return False
+
+    def set_share_limits(
+        self, lookup: str, ratio: Optional[float], seed_time_minutes: Optional[int]
+    ) -> bool:
+        """Pushes seed limits to the client so they hold while TrackSeerr is down. ``None`` = use the client's
+        own default, ``0`` = no limit. Default: unsupported (logged once), returns False."""
+        name = type(self).__name__
+        if name not in _share_limits_unsupported_logged:
+            _share_limits_unsupported_logged.add(name)
+            logger.info("Download client driver %s doesn't support share limits; TrackSeerr governs seeding", name)
         return False

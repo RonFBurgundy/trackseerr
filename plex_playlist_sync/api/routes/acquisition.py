@@ -19,6 +19,7 @@ from plex_playlist_sync.api.dependencies import get_db, require_admin, require_c
 from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver
+from plex_playlist_sync.seed_rules import apply_seed_rules_at_grab
 from plex_playlist_sync.models import (
     AcquisitionSearchResult,
     ActiveDownload,
@@ -324,6 +325,10 @@ def _grab_release(payload: ManualGrabPayload, db: Database) -> dict[str, Any]:
     )
     try:
         db.create_active_download(active_dl)
+        apply_seed_rules_at_grab(
+            db, client_driver, download_id, download_hash, payload.release.title,
+            payload.release.protocol, search_result.extra,
+        )
         db.record_download_grab(
             download_id,
             indexer=payload.release.indexer_name,

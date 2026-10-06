@@ -3,6 +3,8 @@ import type {
   GeneralSettings,
   DownloadClientItem,
   IndexerItem,
+  IndexerPayload,
+  TestIndexerPayload,
   SystemStatusInfo,
   MediaManagementSettings,
   LidarrSettings,
@@ -53,20 +55,20 @@ export async function getIndexerSettings(): Promise<IndexerItem[]> {
   return res || [];
 }
 
-export async function saveIndexer(indexer: Partial<IndexerItem>): Promise<IndexerItem> {
+export async function saveIndexer(indexer: IndexerPayload): Promise<IndexerItem> {
   return apiRequest<IndexerItem>('/api/settings/indexers', {
     method: 'POST',
     body: indexer,
   });
 }
 
-export async function deleteIndexer(indexerId: number): Promise<void> {
+export async function deleteIndexer(indexerId: string): Promise<void> {
   await apiRequest<void>(`/api/settings/indexers/${indexerId}`, {
     method: 'DELETE',
   });
 }
 
-export async function testIndexer(indexer: Partial<IndexerItem>): Promise<{ success: boolean; message: string }> {
+export async function testIndexer(indexer: TestIndexerPayload): Promise<{ success: boolean; message: string }> {
   return apiRequest<{ success: boolean; message: string }>('/api/settings/indexers/test', {
     method: 'POST',
     body: indexer,

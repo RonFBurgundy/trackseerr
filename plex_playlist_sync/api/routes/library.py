@@ -3395,7 +3395,7 @@ def _govern_download_at_client(
         if not status_dict:
             logger.warning("Keeping transfer %s: driver returned no status", target_lookup)
             return DownloadStatus.COMPLETED.value
-        return settle_transfer_after_import(driver, target_lookup, media_settings, import_mode, status_dict)
+        return settle_transfer_after_import(driver, target_lookup, media_settings, import_mode, status_dict, download)
     except Exception as exc:  # the commit has already succeeded; never fail it over client governance
         logger.warning("Error settling transfer %s: %s", target_lookup, redact_text(str(exc)))
         return DownloadStatus.COMPLETED.value

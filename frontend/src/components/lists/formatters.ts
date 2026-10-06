@@ -82,3 +82,12 @@ export function formatDate(value: string | null | undefined): string {
 export function orDash(value: string | null | undefined): string {
   return value && value.trim() ? value : '-';
 }
+
+/** Minutes as a compact duration: "45 min", "31 h", "3.5 d". */
+export function formatMinutes(minutes: number | null | undefined): string {
+  if (minutes === null || minutes === undefined || !Number.isFinite(minutes) || minutes < 0) return '-';
+  if (minutes < 60) return `${Math.round(minutes)} min`;
+  const hours = minutes / 60;
+  if (hours < 48) return `${parseFloat(hours.toFixed(1))} h`;
+  return `${parseFloat((hours / 24).toFixed(1))} d`;
+}

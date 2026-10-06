@@ -325,7 +325,7 @@ def test_resolve_durations_known_partial_estimate_unknown():
 # ------------------------------------------------------------------ ranking and score
 
 
-def _cand(title, protocol="torrent", seeders=0, size=0, idx=0):
+def _cand(title, protocol="torrent", seeders=1, size=0, idx=0):
     return AcquisitionSearchResult(download_id=f"id{idx}", title=title, artist="A", protocol=protocol,
                                    seeders=seeders, size_bytes=size, source=protocol)
 

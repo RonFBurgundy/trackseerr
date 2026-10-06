@@ -247,7 +247,7 @@ class TestNativeQueue:
         assert set(rec) == {
             "id", "source", "artist", "album", "title", "release_title", "item_type", "quality", "protocol", "indexer",
             "client", "status", "progress", "size_bytes", "sizeleft_bytes", "eta_seconds", "added_at", "stalled",
-            "stalled_reason", "messages", "request_id", "download_id", "needs_manual_import", "unmatched_count",
+            "stalled_reason", "messages", "request_id", "download_id", "needs_manual_import", "unmatched_count", "seeding",
         }
         assert rec["source"] == "native" and rec["sizeleft_bytes"] == 150 and rec["progress"] == 0.5
         assert rec["added_at"] == "2026-10-01T10:00:00Z"

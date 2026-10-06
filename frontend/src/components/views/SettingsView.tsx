@@ -238,7 +238,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           onRequestSwitch={requestSwitch}
           managedExternally={managedByLidarr}
         >
-          <IndexersPanel indexers={data.indexers} reload={data.reload} onToast={showToast} />
+          <IndexersPanel indexers={data.indexers} media={data.media} reload={data.reload} onToast={showToast} />
         </InactiveGate>
       )}
 

@@ -52,6 +52,15 @@ export interface ActivityQueueRecord {
   /** The download finished but some files could not be matched; offer Manual import. */
   needs_manual_import: boolean;
   unmatched_count: number;
+  /** Seeding progress for a completed torrent still held for seeding; null otherwise. */
+  seeding?: ActivitySeeding | null;
+}
+
+export interface ActivitySeeding {
+  ratio: number;
+  ratio_target: number | null;
+  seeding_minutes: number;
+  time_target_minutes: number | null;
 }
 
 export type ActivityHistoryEvent =

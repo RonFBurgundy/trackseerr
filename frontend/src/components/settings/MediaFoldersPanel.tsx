@@ -123,6 +123,14 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
               <option value="hardlink">Hardlink</option>
               <option value="copy">Copy</option>
             </select>
+            {settings?.seed_rule_conflict && (settings?.import_mode ?? 'move') === 'move' && (
+              <p
+                role="alert"
+                className="mt-1.5 px-2 py-1.5 rounded-[3px] border border-[#e5a00d]/50 bg-[#e5a00d]/10 text-[11px] font-mono text-[#e5a00d]"
+              >
+                Move breaks seeding for indexers with seed rules &mdash; use Hardlink or Copy.
+              </p>
+            )}
           </div>
 
           <div className="flex flex-col justify-end">
