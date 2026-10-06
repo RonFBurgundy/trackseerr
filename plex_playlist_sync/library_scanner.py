@@ -35,7 +35,7 @@ from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.job_tracker import track_job
 from plex_playlist_sync.library_manager import ModeChanged, run_guarded
 from plex_playlist_sync.media_servers import as_media_server
-from plex_playlist_sync.import_security import QUARANTINE_DIRNAME
+from plex_playlist_sync.recycle_bin import is_excluded_entry, library_excluded_paths, prune_excluded_dirs
 from plex_playlist_sync.redaction import redact_text, safe_exc
 from plex_playlist_sync.storage import Database
 
@@ -328,17 +328,23 @@ class LibraryScanner:
 
             # Step c: Collect audio files
             audio_files: list[Path] = []
+            excluded = library_excluded_paths(media_settings)
             try:
-                for entry in root.rglob("*"):
+                # os.walk with in-place pruning: recycle/quarantine folders are never descended into, so a large
+                # bin adds no scan time. Symlinked directories are listed but not followed (as rglob did).
+                for walk_root, dirnames, filenames in os.walk(root, followlinks=False):
                     if self._stop_event.is_set():
                         break
-                    try:
-                        if QUARANTINE_DIRNAME in entry.relative_to(root).parts:
-                            continue  # retired/quarantined files are not library content
-                        if entry.is_file() and entry.suffix.lower() in AUDIO_EXTENSIONS:
-                            audio_files.append(entry.resolve())
-                    except OSError as oe:
-                        logger.warning("LibraryScanner: Cannot access entry %s: %s", entry, oe)
+                    dirnames[:] = prune_excluded_dirs(walk_root, dirnames, excluded)
+                    for fname in filenames:
+                        entry = Path(walk_root, fname)
+                        try:
+                            if is_excluded_entry(entry, root, excluded):
+                                continue  # recycled/quarantined files (new and legacy folders) are not library content
+                            if entry.is_file() and entry.suffix.lower() in AUDIO_EXTENSIONS:
+                                audio_files.append(entry.resolve())
+                        except OSError as oe:
+                            logger.warning("LibraryScanner: Cannot access entry %s: %s", entry, oe)
             except OSError as oe:
                 logger.warning("LibraryScanner: Directory walk error in %s: %s", root, oe)
 

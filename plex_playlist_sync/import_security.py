@@ -17,7 +17,7 @@ from typing import Iterable, Optional
 
 logger = logging.getLogger(__name__)
 
-QUARANTINE_DIRNAME = "_quarantine"
+QUARANTINE_DIRNAME = "_quarantine"  # legacy location: no longer written, still skipped by scans
 _HEADER_LEN = 16
 _ID3_HEADER_LEN = 10
 _MAX_ID3_SKIP = 64 * 1024 * 1024  # a larger "tag" is not a tag
@@ -117,42 +117,35 @@ def verify_files(files: Iterable[Path], probes: dict[str, "object"]) -> Security
     return result
 
 
-def quarantine_files(paths: Iterable[str | Path], staging_dir: Path | str, download_id: str) -> list[Path]:
-    """Moves files to ``<staging>/_quarantine/<download_id>/`` (never the library); returns the new locations."""
+def quarantine_files(
+    paths: Iterable[str | Path],
+    quarantine_dir: Path | str,
+    download_id: str,
+    *,
+    copy: bool = False,
+) -> list[Path]:
+    """Puts rejected files in ``<quarantine_dir>/<download_id>/`` (never the library); returns the new locations.
+
+    ``copy=False`` moves each file (usenet / Soulseek / staging sources, where nothing seeds). ``copy=True`` copies and
+    leaves the source in place: a file a torrent client is seeding must never leave its download folder.
+    """
     safe_id = "".join(c if c.isalnum() or c in "-_." else "_" for c in str(download_id)) or "unknown"
-    qdir = Path(staging_dir).resolve() / QUARANTINE_DIRNAME / safe_id
+    qdir = Path(quarantine_dir).resolve() / safe_id
     qdir.mkdir(parents=True, exist_ok=True)
     moved: list[Path] = []
     for i, src in enumerate(paths):
         src_p = Path(src)
         dest = qdir / f"{i:03d}_{src_p.name}"
         try:
-            shutil.move(str(src_p), str(dest))
+            if copy:
+                shutil.copyfile(str(src_p), str(dest))
+            else:
+                shutil.move(str(src_p), str(dest))
             os.chmod(dest, stat.S_IRUSR | stat.S_IWUSR)  # 0600: not executable, not readable by others
             moved.append(dest)
         except OSError as exc:
             logger.error("Quarantine of %s failed: %s: %s", src_p, type(exc).__name__, exc)
     return moved
-
-
-def retire_replaced_file(src: Path | str, library_root: Path | str, issue_id: str) -> Path:
-    """Renames a superseded library file to ``<library>/_quarantine/replaced/<issue_id>/`` (never deletes it).
-
-    Rename only, so a hardlink shared with a seeding torrent keeps its other link untouched. Raises ``OSError`` (e.g.
-    EXDEV when the move would cross filesystems) and leaves the file where it was; the caller decides what to do.
-    """
-    safe_id = "".join(c if c.isalnum() or c in "-_." else "_" for c in str(issue_id)) or "unknown"
-    qdir = Path(library_root) / QUARANTINE_DIRNAME / "replaced" / safe_id
-    qdir.mkdir(parents=True, exist_ok=True)
-    src_p = Path(src)
-    i = 0
-    while True:
-        dest = qdir / f"{i:03d}_{src_p.name}"
-        if not os.path.lexists(dest):
-            break
-        i += 1
-    os.rename(src_p, dest)
-    return dest
 
 
 def clear_exec_bits(path: Path | str) -> None:

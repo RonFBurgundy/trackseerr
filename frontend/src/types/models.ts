@@ -471,6 +471,26 @@ export interface MediaManagementSettings {
   seed_time_limit_minutes?: number | null;
   /** True when import_mode is move and an enabled torrent indexer has a seed rule (server-computed). */
   seed_rule_conflict?: boolean;
+  /** Recycle bin for replaced files; empty = `<library root>/.trackseerr-recycle`. */
+  recycle_bin_path?: string;
+  /** Delete recycle bin folders older than this many days; 0 = never. */
+  recycle_bin_cleanup_days?: number;
+  /** Delete replaced files instead of recycling them. Only an explicit true deletes. */
+  recycle_bin_permanent_delete?: boolean;
+  /** Folder for downloads rejected by import security; empty = `<library root>/.trackseerr-quarantine`. */
+  quarantine_folder_path?: string;
+  /** Resolved recycle bin folder (read-only, server-computed). */
+  effective_recycle_bin_path?: string | null;
+  /** Resolved quarantine folder (read-only, server-computed). */
+  effective_quarantine_folder_path?: string | null;
+  /** Non-blocking notes from the last save (read-only), e.g. a path on another filesystem. */
+  warnings?: string[];
+}
+
+export interface RecycleBinEmptyResult {
+  removed: number;
+  errors: string[];
+  skipped_reason: string;
 }
 
 export interface LidarrSettings {

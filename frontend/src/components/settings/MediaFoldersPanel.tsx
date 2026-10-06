@@ -5,6 +5,8 @@ import type { MediaManagementSettings, SeedCompleteAction } from '@/types/models
 import { useDownloadClientRoots } from '@/hooks/useDownloadClientRoots';
 import { updateMediaManagementSettings } from '@/services/settingsService';
 import { NamingFormatsEditor } from '@/components/naming/NamingFormatsEditor';
+import { ApiError } from '@/services/apiClient';
+import { RecycleBinSection } from './RecycleBinSection';
 import { inputClass, labelClass } from './formClasses';
 
 export interface MediaFoldersPanelProps {
@@ -28,6 +30,7 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
   const addMonitorId = useId();
   const acoustidKeyId = useId();
   const roots = useDownloadClientRoots();
+  const [saveWarnings, setSaveWarnings] = useState<string[]>([]);
   const [showKey, setShowKey] = useState<boolean>(false);
   const [confirmRemoveKey, setConfirmRemoveKey] = useState<boolean>(false);
   const [removingKey, setRemovingKey] = useState<boolean>(false);
@@ -60,16 +63,24 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
     setIsSaving(true);
     try {
       // library_mode is owned by /api/settings/library-manager; the media PUT ignores (and logs) it.
-      const { library_mode: _libraryMode, acoustid_api_key: _serverKey, ...rest } = settings;
+      const {
+        library_mode: _libraryMode,
+        acoustid_api_key: _serverKey,
+        effective_recycle_bin_path: _effRecycle,
+        effective_quarantine_folder_path: _effQuarantine,
+        warnings: _warnings,
+        ...rest
+      } = settings;
       // Only an edited key is sent ('' clears it); the untouched/masked server value is omitted.
       const payload: Partial<MediaManagementSettings> =
         keyDraft === null ? rest : { ...rest, acoustid_api_key: keyDraft };
       const updated = await updateMediaManagementSettings(payload);
       onChange(updated);
       setKeyDraft(null);
+      setSaveWarnings(updated.warnings ?? []);
       onToast('Media management settings saved');
-    } catch {
-      onToast('Failed to save media management settings', 'error');
+    } catch (err) {
+      onToast(err instanceof ApiError ? err.message : 'Failed to save media management settings', 'error');
     } finally {
       setIsSaving(false);
     }
@@ -280,6 +291,8 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
             </div>
           </div>
         </div>
+
+        <RecycleBinSection settings={settings} onChange={onChange} onToast={onToast} warnings={saveWarnings} />
 
         <div className="pt-2 border-t border-[#1f1f1f] space-y-3">
           <div>

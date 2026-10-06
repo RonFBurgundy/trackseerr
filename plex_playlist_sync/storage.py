@@ -74,7 +74,7 @@ def clean_library_name(text: str) -> str:
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
 SEED_COMPLETE_ACTIONS = ("keep", "remove", "remove_and_delete")
-SCHEMA_VERSION = 61  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 62  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:
@@ -358,6 +358,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 (59, self._migration_v59),
                 (60, self._migration_v60),
                 (61, self._migration_v61),
+                (62, self._migration_v62),
             ]
 
             applied = 0
@@ -1095,6 +1096,20 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN torrent_hardlink_tags TEXT NOT NULL DEFAULT 'copy_and_tag'"
             )
+
+    def _migration_v62(self, cur: sqlite3.Cursor) -> None:
+        """Recycle bin and quarantine settings. An empty path means the default folder under the library root; a replaced
+        file is only ever deleted instead of recycled when ``recycle_bin_permanent_delete`` is explicitly on."""
+        cur.execute("PRAGMA table_info(media_management_settings);")
+        have = {row[1] for row in cur.fetchall()}
+        for column, ddl in (
+            ("recycle_bin_path", "TEXT NOT NULL DEFAULT ''"),
+            ("recycle_bin_cleanup_days", "INTEGER NOT NULL DEFAULT 30"),
+            ("recycle_bin_permanent_delete", "INTEGER NOT NULL DEFAULT 0"),
+            ("quarantine_folder_path", "TEXT NOT NULL DEFAULT ''"),
+        ):
+            if column not in have:
+                cur.execute(f"ALTER TABLE media_management_settings ADD COLUMN {column} {ddl};")
 
     def _migration_v61(self, cur: sqlite3.Cursor) -> None:
         """Issue lifecycle: validated statuses (``wont_fix`` replaces ``closed``), resolution stamps, media refs,
@@ -4544,6 +4559,12 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             res["scan_monitor_option"] = str(res.get("scan_monitor_option") or "existing")
             res["add_monitor_option"] = str(res.get("add_monitor_option") or DEFAULT_MONITOR_OPTION)
             res["import_bitrate_check"] = normalize_check_mode(res.get("import_bitrate_check"))
+            res["recycle_bin_path"] = str(res.get("recycle_bin_path") or "")
+            res["recycle_bin_cleanup_days"] = (
+                int(res["recycle_bin_cleanup_days"]) if res.get("recycle_bin_cleanup_days") is not None else 30
+            )
+            res["recycle_bin_permanent_delete"] = bool(res.get("recycle_bin_permanent_delete", 0))
+            res["quarantine_folder_path"] = str(res.get("quarantine_folder_path") or "")
             res["add_metadata_profile_id"] = (
                 int(res["add_metadata_profile_id"]) if res.get("add_metadata_profile_id") is not None else None
             )
@@ -4582,7 +4603,13 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             "add_monitor_option",
             "add_metadata_profile_id",
             "import_bitrate_check",
+            "recycle_bin_path",
+            "recycle_bin_cleanup_days",
+            "recycle_bin_permanent_delete",
+            "quarantine_folder_path",
         }
+        if settings.get("recycle_bin_cleanup_days") is not None and int(settings["recycle_bin_cleanup_days"]) < 0:
+            raise ValueError("recycle_bin_cleanup_days must be 0 or greater")
         if settings.get("import_bitrate_check") is not None and str(settings["import_bitrate_check"]).strip().lower() not in CHECK_MODES:
             raise ValueError("import_bitrate_check must be one of: off, warn, reject")
         if settings.get("torrent_hardlink_tags") is not None and settings["torrent_hardlink_tags"] not in (
@@ -4612,9 +4639,16 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                     "enrich_mbids",
                     "fingerprint_on_weak_match",
                     "prefer_local_artwork",
+                    "recycle_bin_permanent_delete",
                 ):
                     if v is not None:
                         updates[k] = 1 if bool(v) else 0
+                elif k == "recycle_bin_cleanup_days":
+                    if v is not None:
+                        updates[k] = int(v)
+                elif k in ("recycle_bin_path", "quarantine_folder_path"):
+                    if v is not None:
+                        updates[k] = str(v).strip()
                 elif k == "add_metadata_profile_id":
                     if v is not None and self.get_metadata_profile(int(v)) is None:
                         raise ValueError(f"Metadata profile {v} does not exist")

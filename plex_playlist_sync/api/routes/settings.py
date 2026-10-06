@@ -8,14 +8,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from plex_playlist_sync import library_manager, lidarr_library
+from plex_playlist_sync import library_manager, lidarr_library, recycle_bin
+from plex_playlist_sync.download_roots import allowed_roots_for_all_clients
 from plex_playlist_sync.seed_rules import seed_rule_conflict
 from plex_playlist_sync.api.dependencies import get_config, get_db, require_admin, require_core_tier
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.media_servers import JellyfinMediaServer, MediaServerError, SubsonicMediaServer
 from plex_playlist_sync.media_servers import settings as media_server_settings
 from plex_playlist_sync.library_monitoring import accept_deprecated_profile_keys, validate_monitor_option
-from plex_playlist_sync.redaction import redact_text
+from plex_playlist_sync.redaction import redact_text, safe_exc
 from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient, invalidate_add_defaults
 from plex_playlist_sync.naming import (
     PRESET_DESCRIPTIONS,
@@ -182,6 +183,19 @@ class MediaManagementSettingsModel(BaseModel):
     add_monitor_option: str = Field("existing", description="Default monitor option for artists added manually")
     add_metadata_profile_id: int | None = Field(None, description="Default metadata profile for added artists (null = none)")
     import_bitrate_check: str = Field("warn", description="Per-track bitrate check on import: off, warn or reject")
+    recycle_bin_path: str = Field(
+        "", description="Recycle bin folder for replaced files; empty = <library root>/.trackseerr-recycle"
+    )
+    recycle_bin_cleanup_days: int = Field(30, ge=0, description="Delete recycle bin folders older than this many days (0 = never)")
+    recycle_bin_permanent_delete: bool = Field(
+        False, description="Delete replaced files instead of recycling them (never implied by an empty path)"
+    )
+    quarantine_folder_path: str = Field(
+        "", description="Folder for downloads rejected by import security; empty = <library root>/.trackseerr-quarantine"
+    )
+    effective_recycle_bin_path: str | None = Field(None, description="Resolved recycle bin folder (read-only)")
+    effective_quarantine_folder_path: str | None = Field(None, description="Resolved quarantine folder (read-only)")
+    warnings: list[str] = Field(default_factory=list, description="Non-blocking notes from the last save (read-only)")
     updated_at: str | None = None
 
 
@@ -216,6 +230,10 @@ class MediaManagementUpdateModel(BaseModel):
     add_monitor_option: str | None = None
     add_metadata_profile_id: int | None = None
     import_bitrate_check: Literal["off", "warn", "reject"] | None = None
+    recycle_bin_path: str | None = None
+    recycle_bin_cleanup_days: int | None = Field(None, ge=0)
+    recycle_bin_permanent_delete: bool | None = None
+    quarantine_folder_path: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -391,9 +409,15 @@ def _render_format_previews(settings: dict[str, Any]) -> dict[str, FormatPreview
 def _mask_media_management_secrets(settings: dict[str, Any]) -> dict[str, Any]:
     """Returns a copy with the AcoustID key masked (trailing 4 chars visible), like the Lidarr key."""
     res = dict(settings)
+    rec, quar = recycle_bin.effective_recycle_path(settings), recycle_bin.effective_quarantine_path(settings)
+    res["effective_recycle_bin_path"] = str(rec) if rec else None
+    res["effective_quarantine_folder_path"] = str(quar) if quar else None
     if res.get("acoustid_api_key"):
         res["acoustid_api_key"] = mask_secret(res["acoustid_api_key"])
     return res
+
+
+_STORAGE_PATH_KEYS = ("recycle_bin_path", "quarantine_folder_path", "root_folder_path", "staging_folder_path")
 
 
 @router.get(
@@ -460,8 +484,21 @@ def update_media_management_settings(
             # An empty string clears the key.
             updates["acoustid_api_key"] = key.strip() or None
 
+    warnings: list[str] = []
+    if any(k in updates for k in _STORAGE_PATH_KEYS):
+        merged = {**db.get_media_management_settings(), **{k: v for k, v in updates.items() if v is not None}}
+        try:
+            client_roots = allowed_roots_for_all_clients(db, merged).roots
+        except (sqlite3.Error, OSError, ValueError) as exc:
+            logger.warning("Could not read download client folders to validate storage paths: %s", safe_exc(exc))
+            client_roots = []
+        path_errors, warnings = recycle_bin.validate_storage_paths(merged, client_roots)
+        if path_errors:
+            raise HTTPException(status_code=422, detail="; ".join(path_errors))
+
     try:
         updated = db.update_media_management_settings(updates)
+        updated["warnings"] = warnings
         return MediaManagementSettingsModel(**_mask_media_management_secrets(updated))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e

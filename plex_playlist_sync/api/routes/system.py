@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from plex_playlist_sync import art_pipeline, library_health, seed_cleanup
+from plex_playlist_sync import art_pipeline, library_health, recycle_bin, seed_cleanup
 from plex_playlist_sync.acquisition_worker import acquisition_worker
 from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
 from plex_playlist_sync.api.dependencies import (
@@ -876,6 +876,7 @@ VALID_TASK_IDS = {
     "art_thumbnail_backfill",
     "seed_cleanup",
     "library_health",
+    "recycle_bin_cleanup",
 }
 
 _running_tasks: set[str] = set()
@@ -1081,6 +1082,25 @@ def get_all_scheduled_tasks(
         )
     )
 
+    # 11. recycle_bin_cleanup: prunes dated recycle folders older than the configured number of days
+    rb_stat = recycle_bin.get_status()
+    rb_days = int(db.get_media_management_settings().get("recycle_bin_cleanup_days") or 0)
+    tasks.append(
+        ScheduledTaskItem(
+            id="recycle_bin_cleanup",
+            name="Recycle Bin cleanup",
+            description=(
+                f"Deletes recycle bin folders older than {rb_days} days." if rb_days > 0
+                else "Automatic recycle bin cleanup is off (cleanup days is 0)."
+            ),
+            interval="Every 24h",
+            status="running" if (rb_stat.get("running") or "recycle_bin_cleanup" in _running_tasks) else "idle",
+            last_run_at=(rb_stat.get("last_run") or {}).get("finished_at") or _task_last_run_at.get("recycle_bin_cleanup"),
+            can_trigger=True,
+            can_cancel=False,
+        )
+    )
+
     return tasks
 
 
@@ -1121,6 +1141,9 @@ def run_scheduled_task(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Library manager is Lidarr; seed cleanup is disabled.")
         if not seed_cleanup.start_sweep_async(db):
             return {"success": True, "message": "Task 'seed_cleanup' is already running"}
+    elif task_id == "recycle_bin_cleanup":
+        if not recycle_bin.start_cleanup_async(db):
+            return {"success": True, "message": "Task 'recycle_bin_cleanup' is already running"}
     elif task_id == "library_health":
         music_root = Path(db.get_media_management_settings().get("root_folder_path") or "/music")
         if not library_health.start_check_async(db, media_server, music_root=music_root):

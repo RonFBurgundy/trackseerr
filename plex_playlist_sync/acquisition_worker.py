@@ -29,13 +29,24 @@ from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result
-from plex_playlist_sync.download_roots import AllowedRoots, allowed_roots_for_client
+from plex_playlist_sync.download_roots import AllowedRoots, allowed_roots_for_all_clients, allowed_roots_for_client
 from plex_playlist_sync.import_security import (
     clear_exec_bits,
     quarantine_files,
-    retire_replaced_file,
     verify_files,
-    QUARANTINE_DIRNAME,
+)
+from plex_playlist_sync.recycle_bin import (
+    EXCLUDED_DIRNAMES,
+    QUARANTINE_DIRNAME as DEFAULT_QUARANTINE_DIRNAME,
+    DisposeResult,
+    dispose_for_settings,
+    effective_quarantine_path,
+    effective_recycle_path,
+    library_excluded_paths,
+    log_recycled,
+    recycle_in_place_target,
+    recycle_replaced_files,
+    restore_recycled,
 )
 from plex_playlist_sync.import_quality_check import CHECK_OFF, check_files, normalize_check_mode
 from plex_playlist_sync.library_health import record_weak_match
@@ -783,6 +794,7 @@ class AcquisitionWorker:
         self.staging_dir: str = "/downloads"
         self.allowed_roots: Optional[AllowedRoots] = None
         self._archive_errors: list[str] = []
+        self._excluded_paths: list[Path] = []  # effective recycle + quarantine folders, skipped by download-root walks
 
     def is_running(self) -> bool:
         with self._lock:
@@ -870,57 +882,87 @@ class AcquisitionWorker:
         if isinstance(exc, ArchiveLimitError):
             self._archive_errors.append(f"{archive.name}: {exc}")
 
+    def _is_excluded_dir_entry(self, f_path: Path, root: Path) -> bool:
+        """True for a file inside a quarantine/recycle folder (legacy, default or configured) under ``root``."""
+        try:
+            parts = f_path.relative_to(root).parts
+        except ValueError:
+            parts = ()
+        return any(p in EXCLUDED_DIRNAMES for p in parts) or any(_under_path(f_path, ex) for ex in self._excluded_paths)
+
     def _effective_roots(self) -> AllowedRoots:
         """Roots for the current item (set per client in the poll loop); bare staging dir when none is set."""
         if self.allowed_roots is not None:
             return self.allowed_roots
         return AllowedRoots(roots=[Path(self.staging_dir).resolve()] if self.staging_dir else [])
 
-    def _retire_replaced_files(
+    def _recycle_roots(self, db: Database, media_settings: dict[str, Any]) -> list[Path]:
+        """Every download-client root (all clients, not only the current one) plus the current and staging roots."""
+        roots: list[Path] = list(self._effective_roots().roots)
+        if self.staging_dir:
+            roots.append(Path(self.staging_dir).resolve())
+        try:
+            roots.extend(allowed_roots_for_all_clients(db, media_settings).roots)
+        except (sqlite3.Error, OSError, ValueError) as exc:
+            logger.warning("Could not read every download client's folders for the recycle check: %s", safe_exc(exc))
+        return list(dict.fromkeys(roots))
+
+    def _dispose(
+        self, db: Database, media_settings: dict[str, Any], library_root: Path, old_p: Path
+    ) -> DisposeResult:
+        return dispose_for_settings(media_settings, library_root, old_p, self._recycle_roots(db, media_settings))
+
+    def _recycle_in_place_target(
         self,
         db: Database,
-        issue_id: str,
+        media_settings: dict[str, Any],
+        library_root: Path,
+        desired: Path,
+        matched_track: Optional[dict[str, Any]],
+    ) -> Optional[tuple[DisposeResult, dict[str, Any]]]:
+        """See ``recycle_bin.recycle_in_place_target`` (shared with manual import)."""
+        track_id = str(matched_track.get("id") or "") if matched_track else None
+        return recycle_in_place_target(
+            db, media_settings, library_root, desired, track_id, self._recycle_roots(db, media_settings)
+        )
+
+    def _log_recycled(
+        self,
+        db: Database,
+        item: dict[str, Any],
+        result: DisposeResult,
+        new_path: Path,
+        old_row: dict[str, Any],
+        new_quality: str,
+        media_settings: dict[str, Any],
+        issue_id: Optional[str],
+        retired: list[str],
+    ) -> None:
+        """Logs and records the history event for a replaced file, and feeds the issue's admin comment."""
+        log_recycled(
+            db, result, new_path, old_row, new_quality,
+            title=str(item.get("title", "")), download_id=item.get("id"), issue_id=issue_id, retired=retired,
+        )
+
+    def _recycle_replaced_files(
+        self,
+        db: Database,
+        item: dict[str, Any],
+        issue_id: Optional[str],
         old_rows: list[dict[str, Any]],
         new_path: Path,
         library_root: Path,
+        media_settings: dict[str, Any],
+        new_quality: str,
         retired: list[str],
         kept: list[str],
     ) -> None:
-        """Retires a track's previous library files after an issue-driven replacement was imported.
-
-        Only files inside the library root and outside every download root are moved (rename into the library's
-        quarantine, never a delete, so a hardlink shared with a seeding torrent is untouched). A file that cannot be
-        moved stays on disk and is reported in ``kept``. Stale rows are removed either way so the track points at the
-        new file only.
-        """
-        client_roots = [r for r in self._effective_roots().roots]
-        if self.staging_dir:
-            client_roots.append(Path(self.staging_dir).resolve())
-        for row in old_rows:
-            old_str = str(row.get("file_path") or "")
-            if not old_str or old_str == str(new_path):
-                continue
-            old_p = Path(os.path.abspath(old_str))
-            if old_p == new_path:
-                continue
-            try:
-                resolved = old_p.resolve()
-                in_client_root = any(_path_under(old_p, r) or _path_under(resolved, r) for r in client_roots)
-                if in_client_root or not _path_under(old_p, library_root) or not os.path.lexists(old_p):
-                    if os.path.lexists(old_p):
-                        kept.append(f"{old_p} (outside the library or inside a download folder: left in place)")
-                        logger.warning("Replacement of %s: old file not moved (outside library / in download root)", old_p)
-                else:
-                    dest = retire_replaced_file(old_p, library_root, issue_id)
-                    retired.append(f"{old_p} -> {dest}")
-                    logger.info("Replacement for issue %s: retired %s to %s", issue_id, old_p, dest)
-            except OSError as exc:
-                kept.append(f"{old_p}: could not move")
-                logger.warning("Replacement for issue %s: could not move old file %s: %s", issue_id, old_p, exc)
-            try:
-                db.delete_library_file(str(row["id"]))
-            except sqlite3.Error as del_err:
-                logger.warning("Could not remove stale library file row %s: %s", row.get("id"), safe_exc(del_err))
+        """Recycles a track's previous library files after an import replaced them (see ``recycle_replaced_files``)."""
+        recycle_replaced_files(
+            db, old_rows, new_path, library_root, media_settings, self._recycle_roots(db, media_settings),
+            new_quality, retired, kept,
+            title=str(item.get("title", "")), download_id=item.get("id"), issue_id=issue_id,
+        )
 
     def _extract_into(self, archive: Path, root: Path) -> list[Path]:
         """Extracts ``archive`` into a fresh ``_extracted_*`` folder under ``root``; failures are noted, not raised."""
@@ -960,7 +1002,7 @@ class AcquisitionWorker:
                 for walk_root, _, files in os.walk(str(src_path)):
                     for f in files:
                         f_path = (Path(walk_root) / f).resolve()
-                        if not allowed.is_allowed(f_path) or QUARANTINE_DIRNAME in f_path.relative_to(root).parts:
+                        if not allowed.is_allowed(f_path) or self._is_excluded_dir_entry(f_path, root):
                             continue
                         if f_path.suffix.lower() in AUDIO_EXTENSIONS:
                             found.append(f_path)
@@ -985,7 +1027,8 @@ class AcquisitionWorker:
                 # Prune the library and the quarantine so a broad legacy root (e.g. /data) never sweeps them in.
                 dirs[:] = [
                     d for d in dirs
-                    if d != QUARANTINE_DIRNAME
+                    if d not in EXCLUDED_DIRNAMES
+                    and not any(_under_path(Path(walk_root, d).resolve(), ex) for ex in self._excluded_paths)
                     and not (allowed.library_root is not None and _under_path(Path(walk_root, d).resolve(), allowed.library_root))
                 ]
                 for f in files:
@@ -1033,6 +1076,7 @@ class AcquisitionWorker:
             self.staging_dir = str(media_settings.get("staging_folder_path") or "").strip()
         if staging_dir:
             media_settings = dict(media_settings, staging_folder_path=staging_dir)
+        self._excluded_paths = library_excluded_paths(media_settings)
 
         stats = {"polled": 0, "completed": 0, "failed": 0, "imported": 0}
         lidarr_mode = media_settings.get("library_mode") == "lidarr"
@@ -1333,11 +1377,15 @@ class AcquisitionWorker:
                 security = verify_files(audio_files, probes)
                 if security.failed:
                     err_msg = f"Security check failed: {security.reason()}"
-                    q_root = next(
-                        (r for r in (self._effective_roots().matching_root(Path(p).resolve()) for p, _ in security.failures) if r),
-                        Path(self.staging_dir or "."),
+                    # Torrent sources keep seeding from their download folder, so they are copied, never moved. Usenet,
+                    # Soulseek and staging sources have nothing seeding and are moved out of the download folder.
+                    q_root = effective_quarantine_path(media_settings) or (
+                        Path(self.staging_dir or ".").resolve() / DEFAULT_QUARANTINE_DIRNAME
                     )
-                    moved = quarantine_files([p for p, _ in security.failures], q_root, str(download_id))
+                    keep_sources = is_torrent_driver_type(driver_type)
+                    moved = quarantine_files(
+                        [p for p, _ in security.failures], q_root, str(download_id), copy=keep_sources
+                    )
                     try:
                         db.record_event(
                             "import_security",
@@ -1348,6 +1396,7 @@ class AcquisitionWorker:
                                 "download_id": download_id,
                                 "files": [{"file": p, "reason": r} for p, r in security.failures],
                                 "quarantined_to": [str(m) for m in moved],
+                                "sources_kept_for_seeding": keep_sources,
                             },
                         )
                     except sqlite3.Error as ev_err:
@@ -1462,6 +1511,8 @@ class AcquisitionWorker:
 
                 remaining_expected_tracks = list(expected_tracks)
                 placed_to_track: dict[str, dict[str, Any]] = {}
+                # placed path -> (recycle result, old file row) for old files recycled right before an in-place replace
+                recycled_in_place: dict[str, tuple[DisposeResult, dict[str, Any]]] = {}
                 # Files with no catalog match when the release has expected tracks: left on disk for manual import.
                 held_files: list[str] = []
 
@@ -1526,13 +1577,27 @@ class AcquisitionWorker:
                     last_metadata = metadata
 
                     target_str = build_track_path(metadata, media_settings)
-                    final_target = resolve_collision(target_str)
+                    desired_path = Path(target_str).resolve()
+                    pre_recycled = self._recycle_in_place_target(
+                        db, media_settings, root_path, desired_path, matched_expected_track
+                    )
+                    final_target = desired_path if pre_recycled is not None else resolve_collision(target_str)
                     target_path = Path(final_target).resolve()
                     if not target_path.is_relative_to(root_path):
                         logger.error("Destination %s escapes music root %s", target_path, root_path)
+                        if pre_recycled is not None:
+                            restore_recycled(pre_recycled[0])
                         continue
 
-                    placed_path = place_audio_file(af, target_path, mode=import_mode)
+                    try:
+                        placed_path = place_audio_file(af, target_path, mode=import_mode)
+                    except Exception:
+                        if pre_recycled is not None:
+                            restore_recycled(pre_recycled[0])  # the replacement never landed: put the old bytes back
+                        raise
+                    if pre_recycled is not None:
+                        # The old file's bytes now live in the recycle bin; its row would point at the new file.
+                        recycled_in_place[str(placed_path)] = pre_recycled
                     imported_paths.append(str(placed_path))
                     if matched_expected_track:
                         placed_to_track[str(placed_path)] = matched_expected_track
@@ -1843,9 +1908,22 @@ class AcquisitionWorker:
                                 else str(placed_p)
                             )
                             file_id = f"fil-{uuid.uuid4().hex[:12]}"
-                            old_file_rows = (
-                                db.list_library_files_for_track(track_id) if replacement_issue_id else []
-                            )
+                            # Every other file the track has is superseded by this import (upgrade or issue
+                            # replacement), except files this same download placed (a multi-file release).
+                            sibling_paths = {str(Path(p).resolve()) for p in imported_paths} | {str(placed_p)}
+                            old_file_rows = [
+                                r for r in db.list_library_files_for_track(track_id)
+                                if str(r.get("file_path") or "") not in sibling_paths
+                            ]
+                            in_place = recycled_in_place.pop(str(placed_p), None)
+                            if in_place is not None:
+                                old_file_rows = [r for r in old_file_rows if str(r["id"]) != str(in_place[1]["id"])]
+                                self._log_recycled(db, item, in_place[0], placed_p, in_place[1], quality_str, media_settings,
+                                                   replacement_issue_id, replaced_retired)
+                                try:
+                                    db.delete_library_file(str(in_place[1]["id"]))
+                                except sqlite3.Error as del_err:
+                                    logger.warning("Could not remove stale library file row %s: %s", in_place[1].get("id"), safe_exc(del_err))
                             db.upsert_library_file(
                                 LibraryFile(
                                     id=file_id,
@@ -1867,10 +1945,10 @@ class AcquisitionWorker:
                                 track_id,
                                 cutoff_met,
                             )
-                            if replacement_issue_id and old_file_rows:
-                                self._retire_replaced_files(
-                                    db, replacement_issue_id, old_file_rows, placed_p, root_path,
-                                    replaced_retired, replaced_kept,
+                            if old_file_rows:
+                                self._recycle_replaced_files(
+                                    db, item, replacement_issue_id, old_file_rows, placed_p, root_path,
+                                    media_settings, quality_str, replaced_retired, replaced_kept,
                                 )
                         except Exception as upsert_err:
                             logger.exception(

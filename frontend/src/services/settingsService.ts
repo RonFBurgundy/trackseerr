@@ -8,6 +8,7 @@ import type {
   TestIndexerPayload,
   SystemStatusInfo,
   MediaManagementSettings,
+  RecycleBinEmptyResult,
   LidarrSettings,
   LidarrTestResult,
   LibraryManagerMode,
@@ -100,6 +101,14 @@ export async function updateMediaManagementSettings(
   return apiRequest<MediaManagementSettings>('/api/settings/media-management', {
     method: 'POST',
     body: settings,
+  });
+}
+
+/** Permanently deletes everything in the recycle bin (the server requires the explicit confirm flag). */
+export async function emptyRecycleBin(): Promise<RecycleBinEmptyResult> {
+  return apiRequest<RecycleBinEmptyResult>('/api/recycle-bin/empty', {
+    method: 'POST',
+    body: { confirm: true },
   });
 }
 

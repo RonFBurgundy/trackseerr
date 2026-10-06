@@ -300,7 +300,11 @@ export function useManualImport({ scope, isOpen, onImported }: UseManualImportOp
     setCommitError(null);
     try {
       const items = chosen.map(({ row, track }) => buildItem(row, track));
-      const res = await commitManualImport(items, scope.kind === 'download' ? scope.downloadId : undefined);
+      const res = await commitManualImport(
+        items,
+        scope.kind === 'download' ? scope.downloadId : undefined,
+        scope.kind === 'album' ? scope.issueId : undefined
+      );
       const byPath = new Map(res.results.map((r) => [r.source_path ?? '', r]));
       setRows((prev) =>
         prev.map((r) => {

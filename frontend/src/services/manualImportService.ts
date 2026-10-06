@@ -53,10 +53,15 @@ export async function fingerprintManualImportFile(filePath: string, signal?: Abo
 
 export async function commitManualImport(
   items: ManualImportItem[],
-  downloadId?: string
+  downloadId?: string,
+  issueId?: string
 ): Promise<ManualImportCommitResponse> {
   return apiRequest<ManualImportCommitResponse>(`${BASE}/commit`, {
     method: 'POST',
-    body: downloadId ? { items, download_id: downloadId } : { items },
+    body: {
+      items,
+      ...(downloadId ? { download_id: downloadId } : {}),
+      ...(issueId ? { issue_id: issueId } : {}),
+    },
   });
 }

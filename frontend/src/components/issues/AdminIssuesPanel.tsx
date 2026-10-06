@@ -57,6 +57,7 @@ export const AdminIssuesPanel: React.FC<AdminIssuesPanelProps> = ({ issueId, onO
       kind: 'album',
       albumId: rematch.scope.album_id,
       title: rematch.album.title ?? issue.media_title,
+      issueId: issue.id,
     });
   };
 
