@@ -40,6 +40,7 @@ from plex_playlist_sync.mediacover import MediaCoverService, mediacover_service
 from plex_playlist_sync.models import LibraryAlbum, LibraryArtist
 from plex_playlist_sync.storage import Database
 
+pytestmark = pytest.mark.real_mbid_enricher
 
 @pytest.fixture
 def test_db(tmp_path: Path):

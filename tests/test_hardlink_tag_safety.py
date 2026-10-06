@@ -29,7 +29,7 @@ def test_ensure_private_copy_breaks_link(tmp_path):
     assert b.stat().st_nlink == 1 and a.stat().st_nlink == 1
     assert a.stat().st_ino == ino and b.stat().st_ino != ino
     assert b.read_bytes() == b"original"
-    assert [p.name for p in tmp_path.iterdir()] == ["a.flac", "b.flac"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a.flac", "b.flac"]
 
 
 def test_ensure_private_copy_noop_when_unshared(tmp_path):
