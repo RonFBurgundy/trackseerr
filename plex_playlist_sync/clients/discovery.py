@@ -12,6 +12,7 @@ import requests
 
 from plex_playlist_sync.models import DiscoveryItem
 from plex_playlist_sync.track_counts import positive_int
+from plex_playlist_sync.system_paths import is_system_folder_name
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +222,9 @@ class DiscoveryClient:
         """Queries Deezer public search API to resolve canonical artist metadata and ID."""
         clean_name = (artist_name or "").strip()
         if not clean_name:
+            return None
+        if is_system_folder_name(clean_name):
+            logger.info("DiscoveryClient: skipping artist search for system/trash folder name %r", clean_name)
             return None
 
         cache_key = f"artist_search:{clean_name.lower()}"

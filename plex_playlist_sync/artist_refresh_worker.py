@@ -14,6 +14,7 @@ from typing import Any, Optional
 from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.job_tracker import tracked
+from plex_playlist_sync.system_paths import is_system_folder_name
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -200,6 +201,9 @@ class ArtistRefreshWorker:
 
                 art_id = str(art["id"])
                 art_name = str(art.get("name") or "Unknown Artist")
+                if is_system_folder_name(art_name):
+                    logger.info("ArtistRefreshWorker: skipping %r (%s): OS/NAS system or trash folder name", art_name, art_id)
+                    continue
                 try:
                     res = refresh_single_artist(
                         artist_id=art_id,

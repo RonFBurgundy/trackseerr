@@ -5,6 +5,7 @@ normalizes artists, albums, tracks, and files into SQLite catalog tables,
 and evaluates quality profile cutoff compliance.
 """
 
+import contextvars
 import concurrent.futures
 import logging
 import os
@@ -35,6 +36,7 @@ from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.job_tracker import track_job
 from plex_playlist_sync.library_manager import ModeChanged, run_guarded
 from plex_playlist_sync.media_servers import as_media_server
+from plex_playlist_sync.item_history import TRIGGER_SCAN, GrabTrigger, emit, provenance
 from plex_playlist_sync.recycle_bin import is_excluded_entry, library_excluded_paths, prune_excluded_dirs
 from plex_playlist_sync.redaction import redact_text, safe_exc
 from plex_playlist_sync.storage import Database
@@ -251,9 +253,10 @@ class LibraryScanner:
         Runs under the library-manager guard, so the mode cannot be switched while a scan is in progress.
         """
         try:
-            return run_guarded(
-                db, lambda: self._scan(db, root_folder, prune_missing, plex_client, _is_background)
-            )
+            with provenance(GrabTrigger(TRIGGER_SCAN, label="Library scan")):
+                return run_guarded(
+                    db, lambda: self._scan(db, root_folder, prune_missing, plex_client, _is_background)
+                )
         except ModeChanged:
             logger.warning("LibraryScanner: library manager changed repeatedly; scan skipped")
             with self._lock:
@@ -774,6 +777,13 @@ class LibraryScanner:
                         break
                     fpath = row.get("file_path")
                     if fpath and not Path(fpath).exists():
+                        if row.get("track_id"):
+                            emit(
+                                db, "file_missing", track_id=str(row["track_id"]), dedupe_last=True,
+                                message="Scanner found the file gone from disk",
+                                details={"path": str(fpath), "quality": row.get("quality_name"), "codec": row.get("codec")},
+                                trigger=TRIGGER_SCAN, trigger_label="Library scan",
+                            )
                         db.delete_library_file(str(row["id"]))
                         with self._lock:
                             self._status["files_pruned"] += 1
@@ -805,8 +815,12 @@ class LibraryScanner:
                 try:
                     from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
                     refresh_ids = list(newly_created_artist_ids)
+                    # Threads start with an empty context: carry the scan provenance so library writes stay labelled.
+                    hydration_context = contextvars.copy_context()
                     threading.Thread(
-                        target=lambda: artist_refresh_worker.refresh_once(db=db, artist_ids=refresh_ids),
+                        target=lambda: hydration_context.run(
+                            lambda: artist_refresh_worker.refresh_once(db=db, artist_ids=refresh_ids)
+                        ),
                         daemon=True,
                         name="AutoArtistHydrationThread",
                     ).start()

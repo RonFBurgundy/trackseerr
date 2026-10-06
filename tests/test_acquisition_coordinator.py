@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from plex_playlist_sync.item_history import GrabTrigger
 from plex_playlist_sync.acquisition_coordinator import (
     AcquisitionCoordinator,
     acquisition_coordinator,
@@ -459,6 +460,7 @@ def test_search_and_grab_qbittorrent(test_db):
             title="In Bloom",
             request_id="req-123",
             db=test_db,
+            trigger=GrabTrigger("request"),
         )
 
     assert result["success"] is True
@@ -520,6 +522,7 @@ def test_search_and_grab_sabnzbd(test_db):
             artist="Fleetwood Mac",
             title="Dreams",
             db=test_db,
+            trigger=GrabTrigger("request"),
         )
 
     assert res["success"] is True
@@ -560,6 +563,7 @@ def test_search_and_grab_slskd(test_db):
             artist="Aphex Twin",
             title="Xtal",
             db=test_db,
+            trigger=GrabTrigger("request"),
         )
 
     assert res["success"] is True
@@ -579,7 +583,7 @@ def test_search_and_grab_no_acceptable_releases(test_db):
 
     coordinator = AcquisitionCoordinator()
     with patch.object(coordinator, "search_all_indexers", return_value=[candidate_live]):
-        res = coordinator.search_and_grab("The Beatles", "Hey Jude", db=test_db)
+        res = coordinator.search_and_grab("The Beatles", "Hey Jude", db=test_db, trigger=GrabTrigger("request"))
 
     assert res["success"] is False
     assert "No acceptable releases found" in res["message"]
@@ -598,7 +602,7 @@ def test_search_and_grab_no_client_available(test_db):
 
     coordinator = AcquisitionCoordinator()
     with patch.object(coordinator, "search_all_indexers", return_value=[candidate_nzb]):
-        res = coordinator.search_and_grab("Led Zeppelin", "Kashmir", db=test_db)
+        res = coordinator.search_and_grab("Led Zeppelin", "Kashmir", db=test_db, trigger=GrabTrigger("request"))
 
     assert res["success"] is False
     assert "No enabled download client available for usenet" in res["message"]
@@ -798,6 +802,7 @@ def test_missing_track_grab_endpoint(app_and_client, test_db, test_config, seede
         album="Pablo Honey",
         item_type="track",
         db=test_db,
+        trigger=GrabTrigger("playlist", ref="pl-1", label="My Playlist", actor_user_id="admin-1"),
     )
 
 

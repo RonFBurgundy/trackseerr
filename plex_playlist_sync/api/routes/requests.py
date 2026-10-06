@@ -23,6 +23,7 @@ from plex_playlist_sync.api.dependencies import (
 from plex_playlist_sync.clients.core_client import CoreClient
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.config import Config
+from plex_playlist_sync.item_history import TRIGGER_REQUEST_APPROVED, TRIGGER_RETRY, request_trigger
 from plex_playlist_sync.library_manager import ModeChanged, dispatch_to_lidarr, native_is_configured, run_for_mode
 from plex_playlist_sync.models import (
     NotificationEvent,
@@ -33,6 +34,7 @@ from plex_playlist_sync.notifications import notification_dispatcher
 from plex_playlist_sync.request_submission import (
     MAX_BATCH_ITEMS,
     RequestRejected,
+    record_request_event,
     submit_batch_requests,
     submit_track_request,
 )
@@ -245,6 +247,7 @@ def create_batch_requests(
                         item_type=created.get("item_type", "track"),
                         request_id=req_id,
                         db=db,
+                        trigger=request_trigger(db, {**created, "username": created.get("username") or current_user.get("username")}),
                     )
                     if grab_res.get("success"):
                         logger.info(
@@ -270,6 +273,11 @@ def create_batch_requests(
     return {"created": created_items, "count": len(created_items)}
 
 
+def _actor_id(user: dict[str, Any]) -> Optional[str]:
+    uid = user.get("id")
+    return str(uid) if uid and uid != "api_key_user" else None
+
+
 @router.post("/{request_id}/approve")
 def approve_request(
     request_id: str,
@@ -285,6 +293,10 @@ def approve_request(
 
     db.update_request_status(request_id, RequestStatus.PROCESSING)
     updated = db.get_request(request_id)
+    record_request_event(
+        db, "request_approved", req, message="Approved",
+        actor_user_id=_actor_id(_admin),
+    )
 
     def _lidarr_approve() -> None:
         dispatch_to_lidarr(
@@ -314,6 +326,7 @@ def approve_request(
                 item_type=req.get("item_type", "track"),
                 request_id=request_id,
                 db=db,
+                trigger=request_trigger(db, req, kind=TRIGGER_REQUEST_APPROVED, actor_user_id=_actor_id(_admin)),
             )
             if grab_res.get("success"):
                 logger.info("Native acquisition grabbed approved request %s (%s - %s)", request_id, req["artist"], req["title"])
@@ -345,6 +358,10 @@ def reject_request(
 
     db.update_request_status(request_id, RequestStatus.REJECTED)
     updated = db.get_request(request_id)
+    record_request_event(
+        db, "request_declined", req, message="Declined",
+        actor_user_id=_actor_id(_admin),
+    )
     res_req = updated or req
     notification_dispatcher.dispatch(NotificationEvent.REQUEST_REJECTED, data=res_req, db=db)
     return res_req
@@ -471,6 +488,7 @@ def retry_request(
                     item_type=item_type,
                     request_id=request_id,
                     db=db,
+                    trigger=request_trigger(db, req, kind=TRIGGER_RETRY, actor_user_id=_actor_id(_admin)),
                 )
                 if grab_res.get("success"):
                     grabbed = True

@@ -36,8 +36,9 @@ from plex_playlist_sync.import_security import (
     verify_files,
 )
 from plex_playlist_sync.recycle_bin import (
+    is_system_dirname,
+    is_system_filename,
     EXCLUDED_DIRNAMES,
-    QUARANTINE_DIRNAME as DEFAULT_QUARANTINE_DIRNAME,
     DisposeResult,
     dispose_for_settings,
     effective_quarantine_path,
@@ -49,6 +50,7 @@ from plex_playlist_sync.recycle_bin import (
     restore_recycled,
 )
 from plex_playlist_sync.import_quality_check import CHECK_OFF, check_files, normalize_check_mode
+from plex_playlist_sync.item_history import TRIGGER_SEED_CLEANUP, download_trigger_kwargs, emit
 from plex_playlist_sync.library_health import record_weak_match
 from plex_playlist_sync.library_monitoring import NATIVE_MONITOR_OPTIONS
 from plex_playlist_sync.library_manager import ModeChanged, run_guarded
@@ -480,6 +482,13 @@ def evaluate_seed_cleanup(
     if done is False and getattr(driver, "is_torrent", False):
         logger.warning("Download client did not remove %s", target_lookup)
         return SeedOutcome(DownloadStatus.COMPLETED.value, error="The download client refused or failed the removal")
+    if delete_files and db is not None and (download or {}).get("id"):
+        db.record_download_item_event(
+            "file_deleted", str(download["id"]),  # type: ignore[index]
+            message="Seeding copy deleted after the seed goal was met",
+            details={"release": (download or {}).get("title"), "note": note, "scope": "download client copy"},
+            trigger=TRIGGER_SEED_CLEANUP, trigger_ref="", trigger_label="Seed cleanup",
+        )
     return SeedOutcome(DownloadStatus.IMPORTED.value, removed=True, deleted_files=delete_files, note=note)
 
 
@@ -782,6 +791,34 @@ def _path_under(path: Path, root: Path) -> bool:
     return path == root or root in path.parents
 
 
+def record_import_events(
+    db: Any,
+    item: dict[str, Any],
+    track_id: str,
+    placed: Path,
+    quality: Optional[str],
+    meta: dict[str, Any],
+    replaced_rows: list[dict[str, Any]],
+) -> None:
+    """``imported`` for a freshly linked file, plus ``upgraded`` (old -> new quality) when it replaced other files."""
+    download_id = str(item.get("id") or "") or None
+    provenance = download_trigger_kwargs(db, download_id)
+    codec = meta.get("codec") or placed.suffix.lstrip(".").upper()
+    common: dict[str, Any] = {
+        "track_id": track_id, "request_id": item.get("request_id"), "download_id": download_id, **provenance,
+    }
+    emit(
+        db, "imported", message=f"Imported {placed.name}",
+        details={"path": str(placed), "quality": quality, "codec": codec, "release": item.get("title")}, **common,
+    )
+    if replaced_rows:
+        old_quality = ", ".join(dict.fromkeys(str(r.get("quality_name") or "Unknown") for r in replaced_rows))
+        emit(
+            db, "upgraded", message=f"{old_quality} -> {quality}",
+            details={"from_quality": old_quality, "to_quality": quality, "release": item.get("title")}, **common,
+        )
+
+
 class AcquisitionWorker:
     """Thread-safe background runner monitoring active downloads and organizing media."""
 
@@ -791,7 +828,7 @@ class AcquisitionWorker:
         self._stop_event = threading.Event()
         self._is_running: bool = False
         self.poll_interval: float = 5.0
-        self.staging_dir: str = "/downloads"
+        self.staging_dir: str = ""
         self.allowed_roots: Optional[AllowedRoots] = None
         self._archive_errors: list[str] = []
         self._excluded_paths: list[Path] = []  # effective recycle + quarantine folders, skipped by download-root walks
@@ -999,8 +1036,11 @@ class AcquisitionWorker:
                         return sorted(extracted)
             elif src_path.is_dir():
                 archives_in_src: list[Path] = []
-                for walk_root, _, files in os.walk(str(src_path)):
+                for walk_root, walk_dirs, files in os.walk(str(src_path)):
+                    walk_dirs[:] = [d for d in walk_dirs if not is_system_dirname(d)]
                     for f in files:
+                        if is_system_filename(f):
+                            continue
                         f_path = (Path(walk_root) / f).resolve()
                         if not allowed.is_allowed(f_path) or self._is_excluded_dir_entry(f_path, root):
                             continue
@@ -1028,10 +1068,13 @@ class AcquisitionWorker:
                 dirs[:] = [
                     d for d in dirs
                     if d not in EXCLUDED_DIRNAMES
+                    and not is_system_dirname(d)
                     and not any(_under_path(Path(walk_root, d).resolve(), ex) for ex in self._excluded_paths)
                     and not (allowed.library_root is not None and _under_path(Path(walk_root, d).resolve(), allowed.library_root))
                 ]
                 for f in files:
+                    if is_system_filename(f):
+                        continue
                     f_path = (Path(walk_root) / f).resolve()
                     if not allowed.is_allowed(f_path):
                         continue
@@ -1211,6 +1254,7 @@ class AcquisitionWorker:
                         release_guid=item.get("id"),
                         info_hash=item.get("download_hash"),
                         reason=err_msg,
+                        download_id=download_id,
                     )
                 except Exception as bl_err:
                     logger.warning("Failed to add failed download to blocklist: %s", bl_err)
@@ -1338,6 +1382,7 @@ class AcquisitionWorker:
                             release_guid=item.get("id"),
                             info_hash=item.get("download_hash"),
                             reason=err_msg,
+                            download_id=download_id,
                         )
                     except Exception as bl_err:
                         logger.warning("Failed to add archive-rejected download to blocklist: %s", bl_err)
@@ -1365,6 +1410,7 @@ class AcquisitionWorker:
                             release_guid=item.get("id"),
                             info_hash=item.get("download_hash"),
                             reason=err_msg,
+                            download_id=download_id,
                         )
                     except Exception as bl_err:
                         logger.warning("Failed to add missing-audio download to blocklist: %s", bl_err)
@@ -1379,13 +1425,19 @@ class AcquisitionWorker:
                     err_msg = f"Security check failed: {security.reason()}"
                     # Torrent sources keep seeding from their download folder, so they are copied, never moved. Usenet,
                     # Soulseek and staging sources have nothing seeding and are moved out of the download folder.
-                    q_root = effective_quarantine_path(media_settings) or (
-                        Path(self.staging_dir or ".").resolve() / DEFAULT_QUARANTINE_DIRNAME
-                    )
+                    q_root = effective_quarantine_path(media_settings)
                     keep_sources = is_torrent_driver_type(driver_type)
-                    moved = quarantine_files(
-                        [p for p, _ in security.failures], q_root, str(download_id), copy=keep_sources
-                    )
+                    if q_root is None:
+                        # No quarantine or library root is configured: never fall back to the process cwd.
+                        logger.warning(
+                            "No quarantine folder or library root configured; leaving rejected files of download "
+                            "%s in place (release is still refused).", download_id,
+                        )
+                        moved = []
+                    else:
+                        moved = quarantine_files(
+                            [p for p, _ in security.failures], q_root, str(download_id), copy=keep_sources
+                        )
                     try:
                         db.record_event(
                             "import_security",
@@ -1401,6 +1453,14 @@ class AcquisitionWorker:
                         )
                     except sqlite3.Error as ev_err:
                         logger.warning("Failed to record import_security event: %s", ev_err)
+                    db.record_download_item_event(
+                        "quarantined", str(download_id), message=f"Import security: {security.reason()}",
+                        details={
+                            "release": item.get("title"),
+                            "files": [{"file": p, "reason": r} for p, r in security.failures],
+                            "quarantined_to": [str(m) for m in moved], "copied": keep_sources,
+                        },
+                    )
                     logger.error("Import security failure for download %s: %s", download_id, err_msg)
                     db.update_download_status(download_id, status=DownloadStatus.FAILED.value, error_message=err_msg)
                     _notify_failed(err_msg)
@@ -1411,6 +1471,7 @@ class AcquisitionWorker:
                             release_guid=item.get("id"),
                             info_hash=item.get("download_hash"),
                             reason=err_msg,
+                            download_id=download_id,
                         )
                     except Exception as bl_err:
                         logger.warning("Failed to add security-rejected download to blocklist: %s", bl_err)
@@ -1476,6 +1537,7 @@ class AcquisitionWorker:
                                 release_guid=item.get("id"),
                                 info_hash=item.get("download_hash"),
                                 reason=err_msg,
+                                download_id=download_id,
                             )
                         except Exception as bl_err:
                             logger.warning("Failed to add bitrate-rejected download to blocklist: %s", bl_err)
@@ -1721,6 +1783,7 @@ class AcquisitionWorker:
                             release_guid=item.get("id"),
                             info_hash=item.get("download_hash"),
                             reason=err_msg,
+                            download_id=download_id,
                         )
                     except Exception as bl_err:
                         logger.warning("Failed to add unplaced download to blocklist: %s", bl_err)
@@ -1944,6 +2007,10 @@ class AcquisitionWorker:
                                 file_id,
                                 track_id,
                                 cutoff_met,
+                            )
+                            record_import_events(
+                                db, item, str(track_id), placed_p, quality_str, f_meta,
+                                ([in_place[1]] if in_place is not None else []) + old_file_rows,
                             )
                             if old_file_rows:
                                 self._recycle_replaced_files(

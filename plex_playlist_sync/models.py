@@ -102,6 +102,9 @@ class MusicRequest:
     username: Optional[str] = None  # Joined for display
     batch_id: Optional[str] = None  # set on every album of a discography batch
     batch_kind: Optional[str] = None  # "discography" for those albums, otherwise None
+    trigger: Optional[str] = None  # what raised the request (item_history trigger kind); None = the requesting user
+    trigger_ref: Optional[str] = None
+    trigger_label: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -853,7 +856,7 @@ class LibraryCollection:
 class MediaManagementSettings:
     id: int = 1
     root_folder_path: str = "/data/music"
-    staging_folder_path: str = "/data/downloads"
+    staging_folder_path: str = ""
     artist_folder_format: str = "{Artist Name}"
     album_folder_format: str = "{Artist Name} - {Album Title} ({Release Year})"
     track_file_format: str = "{Track:02d} - {Track Title}"

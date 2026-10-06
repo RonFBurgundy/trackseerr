@@ -1,5 +1,5 @@
 import React, { useCallback, useId, useState } from 'react';
-import { BookmarkPlus, ChevronDown, ChevronUp, Disc, FolderInput, Info, Loader2, Search, Sliders } from 'lucide-react';
+import { BookmarkPlus, ChevronDown, ChevronUp, Disc, FolderInput, History, Info, Loader2, Search, Sliders } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
 import { useAlbumTracks } from '@/hooks/useAlbumTracks';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
@@ -13,6 +13,7 @@ import {
   type OverflowMenuItem,
 } from '@/components/ui';
 import { AlbumTrackList } from './AlbumTrackList';
+import { ItemHistoryModal } from './ItemHistoryModal';
 
 export interface ArtistAlbumCardProps {
   album: AlbumItem;
@@ -63,6 +64,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
     [onToggleTrackMonitored, patchMonitored, onToast]
   );
 
+  const [historyOpen, setHistoryOpen] = useState<boolean>(false);
   const toggleExpanded = (): void => setExpanded((v) => !v);
 
   const menuItems: OverflowMenuItem[] = [];
@@ -89,6 +91,12 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
     label: 'Album details',
     icon: <Info className="h-3.5 w-3.5" />,
     onSelect: () => onOpenAlbum(album),
+  });
+  menuItems.push({
+    key: 'history',
+    label: 'History',
+    icon: <History className="h-3.5 w-3.5" />,
+    onSelect: () => setHistoryOpen(true),
   });
   if (isAdmin && !lidarrMode) {
     menuItems.push({
@@ -259,6 +267,9 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
             onToggleMonitored={(id, cur) => void handleTrackToggle(id, cur)}
           />
         </div>
+      )}
+      {historyOpen && (
+        <ItemHistoryModal isOpen onClose={() => setHistoryOpen(false)} entity="album" entityId={String(album.id)} title={album.title} />
       )}
     </MachinedCard>
   );

@@ -29,12 +29,14 @@ from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
 from plex_playlist_sync import art_pipeline, art_thumbs
 from plex_playlist_sync import lidarr_library
 from plex_playlist_sync.download_roots import allowed_roots_for_all_clients
+from plex_playlist_sync.item_history import TRIGGER_MANUAL_IMPORT, GrabTrigger, HistoryPresenter, emit, set_provenance
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver, is_torrent_driver_type
 from plex_playlist_sync.acquisition_worker import (
     MATCH_NONE,
     MATCH_STRONG,
     effective_import_mode,
+    record_import_events,
     prepare_file_for_tagging,
     place_audio_file,
     preserves_source,
@@ -55,6 +57,7 @@ from plex_playlist_sync.api.dependencies import (
     require_admin,
     require_core_tier,
     require_user,
+    track_admin_actor,
 )
 from plex_playlist_sync.api.routes.activity import (
     MAX_PAGE,
@@ -101,6 +104,7 @@ from plex_playlist_sync.models import (
     LibraryCollection,
     LibraryFile,
     LibraryTrack,
+    UserPermission,
 )
 from plex_playlist_sync.library import (
     AUDIO_EXTENSIONS,
@@ -116,7 +120,11 @@ from plex_playlist_sync.library_scanner import library_scanner
 from plex_playlist_sync.lidarr_migration import lidarr_migration_job
 from plex_playlist_sync.naming import build_track_path
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
+from plex_playlist_sync.system_paths import is_system_folder_name
 from plex_playlist_sync.recycle_bin import (
+    is_excluded_entry,
+    is_system_dirname,
+    is_system_filename,
     log_recycled,
     recycle_in_place_target,
     recycle_replaced_files,
@@ -299,8 +307,9 @@ def _approved_media_bases(db: Optional[Database], purpose: str) -> list[Path]:
         if mm.get("root_folder_path"):
             bases.append(Path(mm["root_folder_path"]).resolve())
         if purpose in ("import", "internal"):
-            if mm.get("staging_folder_path"):
-                bases.append(Path(mm["staging_folder_path"]).resolve())
+            staging = str(mm.get("staging_folder_path") or "").strip()
+            if staging:
+                bases.append(Path(staging).resolve())
             roots = allowed_roots_for_all_clients(db, mm)
             bases.extend(roots.roots)
             if purpose == "internal":
@@ -1046,7 +1055,7 @@ def _defer_profile_recompute_after_ingest(
     )
 
 
-@router.post("/artists/ingest", dependencies=[Depends(require_core_tier)])
+@router.post("/artists/ingest", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
 def ingest_artist(
     body: IngestArtistRequest,
     db: Database = Depends(get_db),
@@ -1428,7 +1437,7 @@ def get_artist_banner(
     return RedirectResponse(url="/placeholder.svg", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
-@router.put("/artists/{artist_id}/monitored", dependencies=[Depends(require_core_tier)])
+@router.put("/artists/{artist_id}/monitored", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
 def set_artist_monitored(
     artist_id: str,
     body: ArtistMonitoredRequest,
@@ -1502,7 +1511,7 @@ def set_artist_monitored(
     return updated or {}
 
 
-@router.post("/artists/bulk-edit", dependencies=[Depends(require_core_tier)])
+@router.post("/artists/bulk-edit", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
 def bulk_edit_artists(
     body: ArtistBulkEditRequest,
     db: Database = Depends(get_db),
@@ -1703,7 +1712,7 @@ def reconcile_artist_files(db: Database, artist_id: str) -> int:
     try:
         for audio_ext in AUDIO_EXTENSIONS:
             for disk_file in artist_path.rglob(f"*{audio_ext}"):
-                if not disk_file.is_file():
+                if is_excluded_entry(disk_file, artist_path, []) or not disk_file.is_file():
                     continue
                 existing_f = db.get_library_file_by_path(str(disk_file))
                 if existing_f and db.get_library_track(existing_f["track_id"]):
@@ -1767,6 +1776,9 @@ def refresh_single_artist(
         return {"success": False, "message": "Artist not found", "artist_id": artist_id}
 
     artist_name = str(artist.get("name") or "").strip()
+    if is_system_folder_name(artist_name):
+        logger.info("Skipping metadata refresh for artist %r (%s): name is an OS/NAS system or trash folder", artist_name, artist_id)
+        return {"success": False, "message": "Artist is a system folder; skipped", "artist_id": artist_id}
     foreign_artist_id = artist.get("foreign_artist_id")
     # Optional metadata profile: shapes only the monitored flag of albums created by this refresh.
     metadata_profile = db.get_metadata_profile(artist["metadata_profile_id"]) if artist.get("metadata_profile_id") else None
@@ -2340,7 +2352,7 @@ def refresh_single_artist(
     }
 
 
-@router.post("/artists/{artist_id}/refresh", dependencies=[Depends(require_core_tier)])
+@router.post("/artists/{artist_id}/refresh", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
 def refresh_artist(
     artist_id: str,
     db: Database = Depends(get_db),
@@ -2367,7 +2379,7 @@ def refresh_artist(
     )
 
 
-@router.post("/artists/{artist_id}/search", dependencies=[Depends(require_core_tier)])
+@router.post("/artists/{artist_id}/search", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
 def search_artist(
     artist_id: str,
     db: Database = Depends(get_db),
@@ -2383,7 +2395,24 @@ def search_artist(
     return {"success": True, "message": "Search queued in Lidarr"}
 
 
-@router.delete("/artists/{artist_id}", dependencies=[Depends(require_core_tier), Depends(native_only)])
+def _unlink_library_file(db: Database, file_row: dict[str, Any]) -> None:
+    """Unlinks a library file's bytes on an admin's request; a failure is logged, and a success lands in item history."""
+    path = Path(file_row["file_path"])
+    try:
+        if not path.exists():
+            return
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Failed to delete file %s from disk: %s", path, exc)
+        return
+    if file_row.get("track_id"):
+        emit(
+            db, "file_deleted", track_id=str(file_row["track_id"]), message=f"Deleted {path.name} from disk",
+            details={"path": str(path), "quality": file_row.get("quality_name"), "codec": file_row.get("codec")},
+        )
+
+
+@router.delete("/artists/{artist_id}", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
 def delete_artist(
     artist_id: str,
     delete_files: bool = Query(False),
@@ -2400,12 +2429,7 @@ def delete_artist(
         for t in tracks:
             f = db.get_library_file_for_track(t["id"])
             if f and f.get("file_path"):
-                try:
-                    p = Path(f["file_path"])
-                    if p.exists():
-                        p.unlink(missing_ok=True)
-                except Exception as exc:
-                    logger.warning("Failed to delete file %s from disk: %s", f.get("file_path"), exc)
+                _unlink_library_file(db, f)
 
     success = db.delete_library_artist(artist_id)
     return {"success": success}
@@ -2509,7 +2533,7 @@ def get_album_cover(
     return RedirectResponse(url="/placeholder.svg", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
-@router.put("/albums/{album_id}/monitored", dependencies=[Depends(require_core_tier)])
+@router.put("/albums/{album_id}/monitored", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
 def set_album_monitored(
     album_id: str,
     body: AlbumMonitoredRequest,
@@ -2540,7 +2564,7 @@ def set_album_monitored(
     return updated or {}
 
 
-@router.post("/albums/bulk-edit", dependencies=[Depends(require_core_tier)])
+@router.post("/albums/bulk-edit", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
 def bulk_edit_albums(
     body: AlbumBulkEditRequest,
     db: Database = Depends(get_db),
@@ -2570,7 +2594,7 @@ def bulk_edit_albums(
     return {"albums_updated": db.bulk_set_albums_monitored(body.album_ids, body.monitored)}
 
 
-@router.post("/albums/{album_id}/search", dependencies=[Depends(require_core_tier)])
+@router.post("/albums/{album_id}/search", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
 def search_album(
     album_id: str,
     db: Database = Depends(get_db),
@@ -2586,7 +2610,7 @@ def search_album(
     return {"success": True, "message": "Search queued in Lidarr"}
 
 
-@router.delete("/albums/{album_id}", dependencies=[Depends(require_core_tier), Depends(native_only)])
+@router.delete("/albums/{album_id}", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
 def delete_album(
     album_id: str,
     delete_files: bool = Query(False),
@@ -2603,12 +2627,7 @@ def delete_album(
         for t in tracks:
             f = db.get_library_file_for_track(t["id"])
             if f and f.get("file_path"):
-                try:
-                    p = Path(f["file_path"])
-                    if p.exists():
-                        p.unlink(missing_ok=True)
-                except Exception as exc:
-                    logger.warning("Failed to delete file %s from disk: %s", f.get("file_path"), exc)
+                _unlink_library_file(db, f)
 
     success = db.delete_library_album(album_id)
     return {"success": success}
@@ -2664,7 +2683,7 @@ def list_tracks(
     return _enrich_tracks(db, tracks)
 
 
-@router.put("/tracks/{track_id}/monitored", dependencies=[Depends(require_core_tier), Depends(native_only)])
+@router.put("/tracks/{track_id}/monitored", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
 def set_track_monitored(
     track_id: str,
     body: TrackMonitoredRequest,
@@ -2681,7 +2700,7 @@ def set_track_monitored(
     return updated or {}
 
 
-@router.post("/tracks/bulk-edit", dependencies=[Depends(require_core_tier), Depends(native_only)])
+@router.post("/tracks/bulk-edit", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
 def bulk_edit_tracks(
     body: TrackBulkEditRequest,
     db: Database = Depends(get_db),
@@ -2693,7 +2712,7 @@ def bulk_edit_tracks(
     return {"tracks_updated": db.bulk_set_tracks_monitored(body.track_ids, body.monitored)}
 
 
-@router.delete("/tracks/{track_id}", dependencies=[Depends(require_core_tier), Depends(native_only)])
+@router.delete("/tracks/{track_id}", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
 def delete_track(
     track_id: str,
     delete_files: bool = Query(False),
@@ -2708,18 +2727,13 @@ def delete_track(
     if delete_files:
         f = db.get_library_file_for_track(track_id)
         if f and f.get("file_path"):
-            try:
-                p = Path(f["file_path"])
-                if p.exists():
-                    p.unlink(missing_ok=True)
-            except Exception as exc:
-                logger.warning("Failed to delete file %s from disk: %s", f.get("file_path"), exc)
+            _unlink_library_file(db, f)
 
     success = db.delete_library_track(track_id)
     return {"success": success}
 
 
-@router.delete("/files/{file_id}", dependencies=[Depends(require_core_tier), Depends(native_only)])
+@router.delete("/files/{file_id}", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
 def delete_file(
     file_id: str,
     delete_file_from_disk: bool = Query(True),
@@ -2732,15 +2746,56 @@ def delete_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
     if delete_file_from_disk and row.get("file_path"):
-        try:
-            p = Path(row["file_path"])
-            if p.exists():
-                p.unlink(missing_ok=True)
-        except Exception as exc:
-            logger.warning("Failed to unlink physical file %s: %s", row.get("file_path"), exc)
+        _unlink_library_file(db, row)
 
     success = db.delete_library_file(file_id)
     return {"success": success}
+
+
+_HISTORY_LOOKUPS: dict[str, str] = {
+    "artist": "get_library_artist", "album": "get_library_album", "track": "get_library_track",
+}
+
+
+@router.get(
+    "/{entity}/{entity_id}/history",
+    dependencies=[Depends(require_core_tier)],
+    summary="Audit trail of an artist, album or track",
+)
+def get_item_history(
+    entity: Literal["artist", "album", "track"],
+    entity_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    before: Optional[int] = Query(None, ge=1, description="Return events older than this event id"),
+    db: Database = Depends(get_db),
+    user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """Where an item came from and everything that happened to it since, newest first (keyset paging on ``before``).
+
+    Album history includes its tracks' events and artist history everything beneath the artist. Administrators see
+    every detail; everyone else gets the same events with indexer, client, protocol, hashes, file paths and other
+    users' identities removed. 404 when the id has neither a library row nor any history.
+    """
+    if getattr(db, _HISTORY_LOOKUPS[entity])(entity_id) is None and not db.has_item_events(entity, entity_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{entity.capitalize()} not found")
+    presenter = HistoryPresenter(db, user, _is_admin_principal(user))
+    rows = db.list_item_events(entity, entity_id, limit=limit + 1, before_id=before)
+    page = rows[:limit]
+    return {
+        "entity": entity,
+        "entity_id": entity_id,
+        "origin": presenter.present_origin(db.earliest_item_event(entity, entity_id)),
+        "events": [presenter.present(row) for row in page],
+        "next_before": int(page[-1]["id"]) if len(rows) > limit and page else None,
+    }
+
+
+def _is_admin_principal(user: dict[str, Any]) -> bool:
+    """True only for a real admin session or API key; gateway-forwarded principals never qualify."""
+    if user.get("forwarded"):
+        return False
+    perms = int(user.get("permissions") if user.get("permissions") is not None else 0)
+    return bool(user.get("is_admin") or perms & int(UserPermission.ADMIN))
 
 
 @router.get("/availability", summary="Get library availability")
@@ -2794,7 +2849,7 @@ def get_availability(
 # 2. Filesystem Scanner Controls
 # -------------------------------------------------------------------------
 
-@router.post("/scan", dependencies=[Depends(require_core_tier), Depends(native_only)])
+@router.post("/scan", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
 def trigger_scan(
     body: Optional[ScanRequest] = None,
     db: Database = Depends(get_db),
@@ -2823,7 +2878,7 @@ def get_scan_status(
     return library_scanner.get_status()
 
 
-@router.post("/scan/cancel", dependencies=[Depends(require_core_tier), Depends(native_only)])
+@router.post("/scan/cancel", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
 def cancel_scan(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
@@ -2835,7 +2890,7 @@ def cancel_scan(
 # 3. Lidarr Migration Controls
 # -------------------------------------------------------------------------
 
-@router.post("/migrate-lidarr", dependencies=[Depends(require_core_tier)])
+@router.post("/migrate-lidarr", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
 def trigger_lidarr_migration(
     body: Optional[MigrateLidarrRequest] = None,
     db: Database = Depends(get_db),
@@ -2873,7 +2928,7 @@ def get_lidarr_migration_status(
     return lidarr_migration_job.get_status()
 
 
-@router.post("/migrate-lidarr/cancel", dependencies=[Depends(require_core_tier)])
+@router.post("/migrate-lidarr/cancel", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
 def cancel_lidarr_migration(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
@@ -3035,15 +3090,18 @@ def _scoped_match_fields(
 
 def _walk_audio_files(folder: Path) -> list[Path]:
     found: list[Path] = []
-    for root, _, files in os.walk(str(folder)):
+    for root, dirs, files in os.walk(str(folder)):
+        dirs[:] = [d for d in dirs if not is_system_dirname(d)]
         for f in sorted(files):
+            if is_system_filename(f):
+                continue
             p = Path(root) / f
             if p.suffix.lower() in AUDIO_EXTENSIONS:
                 found.append(p)
     return found
 
 
-@router.post("/manual-import/scan", dependencies=[Depends(require_core_tier), Depends(native_only)])
+@router.post("/manual-import/scan", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
 def manual_import_scan(
     body: Optional[ManualImportScanRequest] = None,
     db: Database = Depends(get_db),
@@ -3132,7 +3190,7 @@ def manual_import_album_tracks(
     return _candidate_tracks(db, db.list_library_tracks(album_id=album_id, limit=1000))
 
 
-@router.post("/manual-import/commit", dependencies=[Depends(require_core_tier), Depends(native_only)])
+@router.post("/manual-import/commit", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
 def manual_import_commit(
     body: ManualImportCommitRequest,
     db: Database = Depends(get_db),
@@ -3140,6 +3198,12 @@ def manual_import_commit(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Commits selected manual import items: resolves/creates catalog entities, moves/copies files to destination, tags them, and registers them in the library."""
+    set_provenance(
+        GrabTrigger(
+            TRIGGER_MANUAL_IMPORT, label=_admin.get("username"),
+            actor_user_id=str(_admin["id"]) if _admin.get("id") and _admin["id"] != "api_key_user" else None,
+        )
+    )
     imported_count = 0
     failed_count = 0
     results: list[dict[str, Any]] = []
@@ -3407,6 +3471,7 @@ def manual_import_commit(
                 "cutoff_met": cutoff_met,
             })
 
+            superseded: list[dict[str, Any]] = []
             if newly_placed:
                 # A file really landed for this track: every other file it had is superseded (rename to the bin,
                 # same rules and ``file_recycled`` event as a worker import). Files from this batch, and the
@@ -3426,6 +3491,21 @@ def manual_import_commit(
                         title=str(track.get("title") or ""), download_id=body.download_id,
                         issue_id=body.issue_id, source="ManualImport", log_prefix="Manual import",
                     )
+
+            if is_rematch:
+                if str(placed_file) != str(source_path):
+                    emit(
+                        db, "moved", track_id=str(track_id), message=f"Moved to {placed_file.name}",
+                        details={"from": str(source_path), "to": str(placed_file), "reason": "manual rematch"},
+                    )
+            elif newly_placed:
+                record_import_events(
+                    db,
+                    {"id": body.download_id, "title": str(track.get("title") or ""),
+                     "request_id": download_row.get("request_id") if download_row else None},
+                    str(track_id), placed_file, quality_name, meta,
+                    superseded + ([pre_recycled[1]] if pre_recycled is not None else []),
+                )
 
             if is_rematch:
                 for finding_path in {str(source_path), str(placed_file)}:
@@ -3585,7 +3665,7 @@ def _album_total_discs(db: Database, album_id: str, *extra: Any) -> int:
     return max([1, *discs])
 
 
-@router.post("/rename/preview", dependencies=[Depends(require_core_tier), Depends(native_only)])
+@router.post("/rename/preview", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
 def rename_preview(
     body: Optional[RenamePreviewRequest] = None,
     db: Database = Depends(get_db),
@@ -3664,7 +3744,7 @@ def rename_preview(
     return preview_diffs
 
 
-@router.post("/rename/apply", dependencies=[Depends(require_core_tier), Depends(native_only)])
+@router.post("/rename/apply", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
 def rename_apply(
     body: RenameApplyRequest,
     db: Database = Depends(get_db),
@@ -3754,6 +3834,11 @@ def rename_apply(
                 "cutoff_met": f.get("cutoff_met", True),
             })
             renamed_count += 1
+            emit(
+                db, "renamed" if new_path.parent == old_parent else "moved", track_id=str(f["track_id"]),
+                message=f"{current_path.name} -> {new_path.name}",
+                details={"from": str(current_path), "to": str(new_path)},
+            )
 
             # Clean up empty parent folder if no other files remain
             try:
@@ -3779,7 +3864,7 @@ def rename_apply(
 # AcoustID On-Demand Fingerprinting
 # -------------------------------------------------------------------------
 
-@router.post("/manual-import/fingerprint", dependencies=[Depends(require_core_tier), Depends(native_only)])
+@router.post("/manual-import/fingerprint", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
 def fingerprint_file(
     body: FingerprintRequest,
     db: Database = Depends(get_db),
@@ -3832,7 +3917,7 @@ def list_collections(
     return db.list_library_collections(limit=limit, offset=offset, query=query)
 
 
-@router.post("/collections", dependencies=[Depends(require_core_tier)])
+@router.post("/collections", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
 def create_collection(
     body: CreateCollectionRequest,
     db: Database = Depends(get_db),
@@ -3867,7 +3952,7 @@ def get_collection(
     return result
 
 
-@router.delete("/collections/{collection_id}", dependencies=[Depends(require_core_tier)])
+@router.delete("/collections/{collection_id}", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
 def delete_collection(
     collection_id: str,
     db: Database = Depends(get_db),
@@ -3884,7 +3969,7 @@ def delete_collection(
     return {"success": deleted, "id": collection_id}
 
 
-@router.post("/collections/{collection_id}/albums", dependencies=[Depends(require_core_tier)])
+@router.post("/collections/{collection_id}/albums", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
 def add_album_to_collection(
     collection_id: str,
     body: AddAlbumToCollectionRequest,
@@ -3912,7 +3997,7 @@ def add_album_to_collection(
     return {"success": success, "collection_id": collection_id, "album_id": body.album_id}
 
 
-@router.delete("/collections/{collection_id}/albums/{album_id}", dependencies=[Depends(require_core_tier)])
+@router.delete("/collections/{collection_id}/albums/{album_id}", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
 def remove_album_from_collection(
     collection_id: str,
     album_id: str,

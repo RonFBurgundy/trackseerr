@@ -23,6 +23,7 @@ from plex_playlist_sync.import_security import check_magic
 from plex_playlist_sync.job_tracker import track_job
 from plex_playlist_sync.library import AUDIO_EXTENSIONS, inspect_audio_file
 from plex_playlist_sync.media_servers.base import MediaServerError, MediaServerUnsupported
+from plex_playlist_sync.recycle_bin import EXCLUDED_DIRNAMES, is_system_dirname, is_system_filename
 from plex_playlist_sync.redaction import safe_exc
 
 logger = logging.getLogger(__name__)
@@ -105,7 +106,10 @@ def _walk_audio(root: Path, extensions: frozenset[str]) -> Iterator[str]:
                 for entry in it:
                     try:
                         if entry.is_dir(follow_symlinks=False):
-                            stack.append(entry.path)
+                            if not is_system_dirname(entry.name) and entry.name not in EXCLUDED_DIRNAMES:
+                                stack.append(entry.path)
+                        elif is_system_filename(entry.name):
+                            continue
                         elif entry.is_file() and os.path.splitext(entry.name)[1].lower() in extensions:
                             yield entry.path
                     except OSError as exc:

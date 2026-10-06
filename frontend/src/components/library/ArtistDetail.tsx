@@ -25,6 +25,7 @@ import { ConfirmDialog, MachinedCard, TactileSwitch, TapeDeckButton, TabStrip } 
 import { DetailHeaderBar, PageFrame } from '@/components/layout';
 
 import { ArtistAlbumCard } from './ArtistAlbumCard';
+import { ItemOriginCaption } from './ItemOriginCaption';
 import { AlbumBulkBar } from './AlbumBulkBar';
 import { ArtistRestOfDiscography } from './ArtistRestOfDiscography';
 
@@ -250,6 +251,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
                 <h2 className="text-[17px] sm:text-3xl font-black text-white font-mono tracking-tight leading-tight line-clamp-2 sm:line-clamp-1 break-words text-left">
                   {artist?.name}
                 </h2>
+                {artist && <ItemOriginCaption entity="artist" entityId={artist.id} title={artist.name} />}
               </div>
               {isAdmin && (
                 <div className="flex shrink-0 items-center gap-1.5">

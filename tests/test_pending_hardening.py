@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from plex_playlist_sync.item_history import GrabTrigger
 from plex_playlist_sync import delay_gate, pending_worker
 from plex_playlist_sync.acquisition_coordinator import AcquisitionCoordinator
 from plex_playlist_sync.api.app import create_app
@@ -79,7 +80,8 @@ def grab(db, candidates, **kw):
         "plex_playlist_sync.acquisition_coordinator.get_acquisition_driver", return_value=driver
     ):
         res = coord.search_and_grab(
-            artist="Nirvana", title="Nevermind", album="Nevermind", db=db, quality_profile_id=HQ, **kw
+            artist="Nirvana", title="Nevermind", album="Nevermind", db=db, quality_profile_id=HQ,
+            trigger=kw.pop("trigger", GrabTrigger("request")), **kw
         )
     return res, driver
 

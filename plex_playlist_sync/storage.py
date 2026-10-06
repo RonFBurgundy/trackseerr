@@ -30,6 +30,7 @@ from plex_playlist_sync.library_monitoring import (
 )
 from plex_playlist_sync.list_index import SortDef, build_index, fold_search_text, library_sort_key, order_clause
 from plex_playlist_sync.delay_store import DelayProfileMixin
+from plex_playlist_sync.item_history import GrabTrigger, ItemHistoryMixin, trigger_kwargs
 from plex_playlist_sync.import_quality_check import CHECK_MODES, normalize_check_mode
 from plex_playlist_sync.quality_store import QualityCatalogMixin
 from plex_playlist_sync.models import (
@@ -74,7 +75,7 @@ def clean_library_name(text: str) -> str:
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
 SEED_COMPLETE_ACTIONS = ("keep", "remove", "remove_and_delete")
-SCHEMA_VERSION = 62  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 63  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:
@@ -177,7 +178,7 @@ def lidarr_item_due(row: dict[str, Any], now: Optional[datetime] = None) -> bool
 REPLACEMENT_MESSAGE_PREFIX = "Replacement search for issue "
 
 
-class Database(QualityCatalogMixin, DelayProfileMixin):
+class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin):
     """Thread-safe SQLite database wrapper with WAL mode, foreign keys, and migrations."""
 
     def __init__(self, db_path: Optional[Union[str, Path]] = None) -> None:
@@ -359,6 +360,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 (60, self._migration_v60),
                 (61, self._migration_v61),
                 (62, self._migration_v62),
+                (63, self._migration_v63),
             ]
 
             applied = 0
@@ -613,7 +615,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
     def _migration_v9(self, cur: sqlite3.Cursor) -> None:
         cur.execute(
             """
-            ALTER TABLE media_management_settings ADD COLUMN staging_folder_path TEXT NOT NULL DEFAULT '/data/downloads'
+            ALTER TABLE media_management_settings ADD COLUMN staging_folder_path TEXT NOT NULL DEFAULT ''
             """
         )
         cur.execute(
@@ -4265,8 +4267,8 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                     id, user_id, item_type, title, artist, album,
                     cover_url, preview_url, status, release_date, foreign_id,
                     quality_profile_id, current_quality, cutoff_met,
-                    batch_id, batch_kind, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    batch_id, batch_kind, "trigger", trigger_ref, trigger_label, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (
                     str(request.id),
@@ -4285,6 +4287,9 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                     cutoff_val,
                     getattr(request, "batch_id", None),
                     getattr(request, "batch_kind", None),
+                    getattr(request, "trigger", None),
+                    getattr(request, "trigger_ref", None),
+                    getattr(request, "trigger_label", None),
                 ),
             )
             self.conn.commit()
@@ -4301,7 +4306,8 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 SELECT r.id, r.user_id, r.item_type, r.title, r.artist, r.album,
                        r.cover_url, r.preview_url, r.status, r.release_date, r.foreign_id,
                        r.quality_profile_id, r.current_quality, r.cutoff_met,
-                       r.created_at, r.updated_at, r.batch_id, r.batch_kind, r.status_reason, r.status_message, u.username
+                       r.created_at, r.updated_at, r.batch_id, r.batch_kind, r.status_reason, r.status_message,
+                       r."trigger", r.trigger_ref, r.trigger_label, u.username
                 FROM music_requests r
                 LEFT JOIN users u ON r.user_id = u.id
                 WHERE r.id = ?
@@ -5014,8 +5020,13 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         """Insert or refresh findings (unique on kind+path). ``first_seen`` and ``id`` survive; the rest is replaced."""
         if not rows:
             return 0
+        fresh: list[dict[str, Any]] = []
         with self._lock:
             for r in rows:
+                if self.conn.execute(
+                    "SELECT 1 FROM library_health_findings WHERE kind = ? AND path = ?", (r["kind"], r["path"])
+                ).fetchone() is None:
+                    fresh.append(r)
                 self.conn.execute(
                     """
                     INSERT INTO library_health_findings
@@ -5038,7 +5049,33 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                     ),
                 )
             self.conn.commit()
+            for r in fresh:
+                self._record_health_finding_event(r)
         return len(rows)
+
+    def _record_health_finding_event(self, finding: dict[str, Any]) -> None:
+        """``health_finding`` on the item a NEW finding is about (its track, via the file path, tag match or download)."""
+        detail = finding.get("detail") or {}
+        message = f"Library health: {finding.get('cause')}"
+        details = {"kind": finding["kind"], "cause": finding.get("cause"), "path": finding["path"]}
+        track_id = str(detail["track_id"]) if detail.get("track_id") else None
+        if track_id is None and finding["kind"] != "cleanup_failed":
+            row = self.conn.execute(
+                "SELECT track_id FROM library_files WHERE file_path = ? AND track_id IS NOT NULL LIMIT 1",
+                (finding["path"],),
+            ).fetchone()
+            track_id = str(row["track_id"]) if row else None
+        if track_id:
+            self._safe_item_event(
+                "health_finding", track_id=track_id, message=message, dedupe_last=True, details=details,
+                trigger="system", trigger_label="Library health",
+            )
+        elif finding["kind"] == "cleanup_failed" and detail.get("download_id"):
+            self.record_download_item_event(
+                "health_finding", str(detail["download_id"]), message="Seed cleanup could not remove the download",
+                details={"kind": finding["kind"], "error": detail.get("error"), "attempts": detail.get("attempts")},
+                trigger="system", trigger_label="Library health",
+            )
 
     def delete_library_health_findings_not_seen(self, kinds: list[str], seen_at: str) -> int:
         """Drop findings of ``kinds`` whose last_seen is not ``seen_at`` (the current run's stamp)."""
@@ -5727,6 +5764,10 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                     )
                 except sqlite3.Error as exc:
                     logger.warning("Failed to record download history for %s: %s", download_id, type(exc).__name__)
+                if new_status == "failed":
+                    self.record_download_item_event(
+                        "download_failed", str(download_id), message=error_message or "", count_failures=True
+                    )
             return changed
 
     def delete_active_download(self, download_id: str) -> bool:
@@ -5805,6 +5846,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         cols = (
             "request_id", "track_id", "album_id", "item_type", "artist", "album", "title", "release_title",
             "quality", "indexer", "protocol", "client", "info_hash", "release_guid", "message",
+            "trigger", "trigger_ref", "trigger_label",
         )
         values: dict[str, Any] = {c: None for c in cols}
         with self._lock:
@@ -5820,14 +5862,17 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                         indexer=row["indexer"], protocol=row["protocol"], client=row["client_name"],
                         info_hash=row["download_hash"], release_guid=row["id"],
                     )
+            if download_id and event != "grabbed" and "trigger" not in fields:
+                values.update(self.get_download_trigger(download_id))
             for key, val in fields.items():
                 if key not in values:
                     raise ValueError(f"Unknown download history field: {key!r}")
                 if val is not None:
                     values[key] = val
             event_id = f"dh-{uuid.uuid4().hex[:16]}"
+            quoted_cols = ", ".join('"' + c + '"' for c in cols)  # "trigger" is an SQL keyword
             self.conn.execute(
-                f"INSERT INTO download_history (id, event, download_id, {', '.join(cols)}, created_at) "
+                f"INSERT INTO download_history (id, event, download_id, {quoted_cols}, created_at) "
                 f"VALUES (?, ?, ?, {', '.join('?' for _ in cols)}, CURRENT_TIMESTAMP)",
                 (event_id, str(event), download_id, *[values[c] for c in cols]),
             )
@@ -5910,21 +5955,43 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         protocol: Optional[str] = None,
         upgrade: bool = False,
         replacement_issue_id: Optional[str] = None,
+        trigger: Optional[GrabTrigger] = None,
     ) -> None:
         """Stores release metadata on a fresh download and writes its ``grabbed`` (and, for upgrades, ``upgraded``) event.
+
+        ``trigger`` (why the grab happened) is stamped on the history rows and the ``grabbed`` item event.
 
         ``replacement_issue_id`` tags the ``grabbed`` row's message (``REPLACEMENT_MESSAGE_PREFIX`` + id) so the import
         can find the issue via ``get_download_replacement_issue``.
         """
         self.set_download_release_meta(download_id, indexer=indexer, quality=quality, protocol=protocol)
+        history_trigger = {k: v for k, v in trigger_kwargs(trigger).items() if k != "actor_user_id"}
         self.record_download_event(
             "grabbed",
             download_id=download_id,
             message=f"{REPLACEMENT_MESSAGE_PREFIX}{replacement_issue_id}" if replacement_issue_id else None,
+            **history_trigger,
         )
         if upgrade:
             self.record_download_event(
-                "upgraded", download_id=download_id, message="Grabbed to replace a file below its quality cutoff"
+                "upgraded", download_id=download_id, message="Grabbed to replace a file below its quality cutoff",
+                **history_trigger,
+            )
+        with self._lock:
+            ctx = self.conn.execute(
+                self._QUEUE_SELECT + self._QUEUE_FROM + " WHERE d.id = ?", (str(download_id),)
+            ).fetchone()
+        if ctx is not None:
+            details = {
+                "indexer": ctx["indexer"], "release": ctx["title"], "quality": ctx["quality"],
+                "client": ctx["client_name"], "protocol": ctx["protocol"], "size_bytes": ctx["size_bytes"],
+                "info_hash": ctx["download_hash"],
+            }
+            if replacement_issue_id:
+                details["replacement_issue_id"] = replacement_issue_id
+            self.record_download_item_event(
+                "grabbed", download_id, message=f"Grabbed '{ctx['title']}'", details=details,
+                **trigger_kwargs(trigger),
             )
 
     def get_download_replacement_issue(self, download_id: str) -> Optional[str]:
@@ -6762,6 +6829,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         created_at = d.get("created_at")
 
         with self._lock:
+            is_new = self.conn.execute("SELECT 1 FROM library_artists WHERE id = ?", (artist_id,)).fetchone() is None
             self.conn.execute(
                 """
                 INSERT INTO library_artists (
@@ -6816,6 +6884,10 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 ),
             )
             self.conn.commit()
+            if is_new:
+                self._safe_item_event(
+                    "added_to_library", artist_id=artist_id, artist_name=name, message=f"Added artist '{name}'"
+                )
 
         artist = self.get_library_artist(artist_id)
         if artist is None:
@@ -6970,6 +7042,8 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 (str(album_id),),
             )
             self.conn.commit()
+            if album_cur.rowcount > 0:
+                self._safe_item_event("monitored", album_id=str(album_id), message="Album and its tracks monitored")
             return album_cur.rowcount > 0, track_cur.rowcount
 
     def list_library_artists(
@@ -6996,8 +7070,9 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             return [self._map_library_artist(row) for row in cur.fetchall()]
 
     def delete_library_artist(self, artist_id: str) -> bool:
-        """Deletes a library artist and cascades to child albums, tracks, and files."""
+        """Deletes a library artist and cascades to child albums, tracks, and files (history is kept)."""
         with self._lock:
+            self._emit_removed("artist", str(artist_id))
             cur = self.conn.execute(
                 "DELETE FROM library_artists WHERE id = ?",
                 (str(artist_id),),
@@ -7011,6 +7086,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         """Sets monitoring status for an artist and optionally cascades to child albums and tracks."""
         val = 1 if monitored else 0
         with self._lock:
+            before = self.conn.execute("SELECT monitored FROM library_artists WHERE id = ?", (str(artist_id),)).fetchone()
             cur = self.conn.execute(
                 "UPDATE library_artists SET monitored = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (val, str(artist_id)),
@@ -7027,6 +7103,11 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                     (val, str(artist_id)),
                 )
             self.conn.commit()
+            if before is not None and int(before["monitored"]) != val:
+                self._safe_item_event(
+                    "monitored" if val else "unmonitored", artist_id=str(artist_id),
+                    details={"cascade_children": bool(cascade_children)},
+                )
             return True
 
     # ---- native metadata profiles (optional; shape automatic monitoring only) ----
@@ -7342,11 +7423,17 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         val = 1 if monitored else 0
         unique = list(dict.fromkeys(str(i) for i in album_ids))
         updated = 0
+        changed: list[str] = []
         with self._lock:
             try:
                 for i in range(0, len(unique), self._BULK_CHUNK):
                     chunk = unique[i : i + self._BULK_CHUNK]
                     marks = ", ".join("?" for _ in chunk)
+                    changed += [
+                        r[0] for r in self.conn.execute(
+                            f"SELECT id FROM library_albums WHERE monitored <> ? AND id IN ({marks})", [val, *chunk]
+                        ).fetchall()
+                    ]
                     cur = self.conn.execute(
                         f"UPDATE library_albums SET monitored = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({marks})",
                         [val, *chunk],
@@ -7363,6 +7450,9 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 self.conn.rollback()
                 logger.exception("bulk_set_albums_monitored failed; transaction rolled back")
                 raise
+            self._safe_item_events_bulk(
+                [{"event": "monitored" if val else "unmonitored", "album_id": album_id} for album_id in changed]
+            )
         return updated
 
     def upsert_library_album(
@@ -7392,6 +7482,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         created_at = d.get("created_at")
 
         with self._lock:
+            is_new = self.conn.execute("SELECT 1 FROM library_albums WHERE id = ?", (album_id,)).fetchone() is None
             self.conn.execute(
                 """
                 INSERT INTO library_albums (
@@ -7446,6 +7537,10 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 ),
             )
             self.conn.commit()
+            if is_new:
+                self._safe_item_event(
+                    "added_to_library", album_id=album_id, artist_id=artist_id or None, message=f"Added album '{title}'"
+                )
 
         album = self.get_library_album(album_id)
         if album is None:
@@ -7545,8 +7640,9 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             return [self._map_library_album(row) for row in cur.fetchall()]
 
     def delete_library_album(self, album_id: str) -> bool:
-        """Deletes a library album and cascades to child tracks and files."""
+        """Deletes a library album and cascades to child tracks and files (history is kept)."""
         with self._lock:
+            self._emit_removed("album", str(album_id))
             cur = self.conn.execute(
                 "DELETE FROM library_albums WHERE id = ?",
                 (str(album_id),),
@@ -7602,6 +7698,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         """Sets monitoring status for an album and optionally cascades to child tracks."""
         val = 1 if monitored else 0
         with self._lock:
+            before = self.conn.execute("SELECT monitored FROM library_albums WHERE id = ?", (str(album_id),)).fetchone()
             cur = self.conn.execute(
                 "UPDATE library_albums SET monitored = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (val, str(album_id)),
@@ -7615,6 +7712,11 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                     (val, str(album_id)),
                 )
             self.conn.commit()
+            if before is not None and int(before["monitored"]) != val:
+                self._safe_item_event(
+                    "monitored" if val else "unmonitored", album_id=str(album_id),
+                    details={"cascade_tracks": bool(cascade_tracks)},
+                )
             return True
 
     def upsert_library_track(
@@ -7815,8 +7917,9 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             return [self._map_library_track(row) for row in cur.fetchall()]
 
     def delete_library_track(self, track_id: str) -> bool:
-        """Deletes a library track and cascades to child files."""
+        """Deletes a library track and cascades to child files (history is kept)."""
         with self._lock:
+            self._emit_removed("track", str(track_id))
             cur = self.conn.execute(
                 "DELETE FROM library_tracks WHERE id = ?",
                 (str(track_id),),
@@ -7828,6 +7931,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         """Sets monitoring status for a single library track."""
         val = 1 if monitored else 0
         with self._lock:
+            before = self.conn.execute("SELECT monitored FROM library_tracks WHERE id = ?", (str(track_id),)).fetchone()
             cur = self.conn.execute(
                 "UPDATE library_tracks SET monitored = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (val, str(track_id)),
@@ -7835,6 +7939,8 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             if cur.rowcount > 0:
                 self._cancel_pending_profile_recompute_for_tracks([str(track_id)])
             self.conn.commit()
+            if cur.rowcount > 0 and before is not None and int(before["monitored"]) != val:
+                self._safe_item_event("monitored" if val else "unmonitored", track_id=str(track_id))
             return cur.rowcount > 0
 
     def bulk_set_tracks_monitored(self, track_ids: list[str], monitored: bool) -> int:
@@ -7842,11 +7948,17 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         val = 1 if monitored else 0
         unique = list(dict.fromkeys(str(i) for i in track_ids))
         updated = 0
+        changed: list[str] = []
         with self._lock:
             try:
                 for i in range(0, len(unique), self._BULK_CHUNK):
                     chunk = unique[i : i + self._BULK_CHUNK]
                     marks = ", ".join("?" for _ in chunk)
+                    changed += [
+                        r[0] for r in self.conn.execute(
+                            f"SELECT id FROM library_tracks WHERE monitored <> ? AND id IN ({marks})", [val, *chunk]
+                        ).fetchall()
+                    ]
                     cur = self.conn.execute(
                         f"UPDATE library_tracks SET monitored = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({marks})",
                         [val, *chunk],
@@ -7858,6 +7970,9 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
                 self.conn.rollback()
                 logger.exception("bulk_set_tracks_monitored failed; transaction rolled back")
                 raise
+            self._safe_item_events_bulk(
+                [{"event": "monitored" if val else "unmonitored", "track_id": track_id} for track_id in changed]
+            )
         return updated
 
     def _file_link_is_new(self, file_id: str, track_id: str, file_path: str = "") -> bool:
@@ -8203,8 +8318,12 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
         protocol: Optional[str] = None,
         indexer: Optional[str] = None,
         reason: Optional[str] = None,
+        download_id: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Adds a release to the persistent download blocklist."""
+        """Adds a release to the persistent download blocklist.
+
+        ``download_id`` (the download the release came from) lets the ``blocklisted`` item event name the item.
+        """
         item_id = f"bl-{uuid.uuid4().hex[:12]}"
         clean_hash = info_hash.strip().lower() if info_hash else None
         clean_guid = release_guid.strip() if release_guid else None
@@ -8247,6 +8366,26 @@ class Database(QualityCatalogMixin, DelayProfileMixin):
             )
         except sqlite3.Error as exc:
             logger.warning("Failed to record blocklist history event: %s", type(exc).__name__)
+        details = {
+            "release": item.get("source_title"), "reason": item.get("reason"), "indexer": item.get("indexer"),
+            "protocol": item.get("protocol"), "info_hash": item.get("info_hash"),
+            "release_guid": item.get("release_guid"),
+        }
+        message = f"Blocklisted '{item.get('source_title')}'"
+        recorded = (
+            self.record_download_item_event("blocklisted", download_id, message=message, details=details)
+            if download_id else None
+        )
+        if recorded is None:
+            try:
+                ids = self.find_library_ids_by_name(item.get("artist"), item.get("album"))
+                if ids["album_id"] or ids["artist_id"]:
+                    self.record_item_event(
+                        "blocklisted", album_id=ids["album_id"], artist_id=ids["artist_id"], message=message,
+                        details=details,
+                    )
+            except sqlite3.Error:
+                logger.exception("Could not record the blocklisted item event")
         return item
 
     def get_blocklist_item(self, blocklist_id: str) -> Optional[dict[str, Any]]:

@@ -26,6 +26,7 @@ from typing import Any, Optional
 from plex_playlist_sync.clients.import_lists import ImportListError, fetch_items
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
+from plex_playlist_sync.item_history import TRIGGER_IMPORT_LIST, GrabTrigger
 from plex_playlist_sync.job_tracker import tracked
 from plex_playlist_sync.list_monitoring import STATUS_FAILED, apply_list_item, list_actor
 from plex_playlist_sync.redaction import safe_exc
@@ -120,6 +121,10 @@ def _run_sync(
                 enricher=enricher,
                 lidarr_client=lidarr_client,
                 artist_added=bool(row.get("artist_added_by_item")),
+                trigger=GrabTrigger(
+                    TRIGGER_IMPORT_LIST, ref=list_id, label=lst.get("name"),
+                    actor_user_id=str(actor["id"]) if actor else None,
+                ),
                 on_artist_added=lambda item_id=row["id"]: db.mark_import_item_artist_added(item_id),
             )
             status, level, error, mbid = result.status, result.applied_level, result.error, result.mbid

@@ -9,6 +9,7 @@ import { IssueReportButton } from '@/components/issues';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
 import { MEDIA_ISSUE_TYPES } from '@/types/models';
 import { AlbumTrackList } from './AlbumTrackList';
+import { ItemOriginCaption } from './ItemOriginCaption';
 
 export interface AlbumDetailModalProps {
   album: AlbumItem | null;
@@ -137,6 +138,7 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
               <h3 className="text-sm sm:text-lg font-bold text-white truncate font-mono" title={album.title}>
                 {album.title}
               </h3>
+              <ItemOriginCaption entity="album" entityId={album.id} title={album.title} />
               <button
                 type="button"
                 onClick={goToArtist}

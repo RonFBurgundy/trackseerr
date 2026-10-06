@@ -17,3 +17,4 @@ export * from './delayProfiles';
 export * from './manualImport';
 export * from './libraryHealth';
 export * from './seedCleanup';
+export * from './itemHistory';

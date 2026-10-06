@@ -24,6 +24,7 @@ from mutagen.oggopus import OggOpus
 from mutagen.oggvorbis import OggVorbis
 
 from plex_playlist_sync.naming import format_quality
+from plex_playlist_sync.recycle_bin import is_system_dirname, is_system_filename
 
 logger = logging.getLogger(__name__)
 
@@ -793,8 +794,11 @@ def extract_archive(archive_path: Path | str, target_dir: Path | str) -> list[Pa
         raise ValueError(f"Unsupported archive format: {archive.name}")
 
     extracted_audio: list[Path] = []
-    for root, _, files in os.walk(str(target)):
+    for root, dirs, files in os.walk(str(target)):
+        dirs[:] = [d for d in dirs if not is_system_dirname(d)]
         for f in files:
+            if is_system_filename(f):
+                continue
             f_path = Path(root) / f
             if f_path.suffix.lower() in AUDIO_EXTENSIONS:
                 extracted_audio.append(f_path)

@@ -21,7 +21,15 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from plex_playlist_sync.import_security import QUARANTINE_DIRNAME as LEGACY_QUARANTINE_DIRNAME
+from plex_playlist_sync.item_history import TRIGGER_RECYCLE_CLEANUP, download_trigger_kwargs, emit
 from plex_playlist_sync.redaction import safe_exc
+from plex_playlist_sync.system_paths import (  # noqa: F401  (re-exported for library walkers)
+    SYSTEM_DIRNAMES,
+    SYSTEM_FILENAMES,
+    is_system_dirname,
+    is_system_filename,
+    is_system_folder_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +87,8 @@ def is_excluded_entry(entry: Path, root: Path, excluded: Iterable[Path]) -> bool
         parts = ()
     if any(p in EXCLUDED_DIRNAMES for p in parts):
         return True
+    if any(is_system_dirname(p) for p in parts[:-1]) or (parts and is_system_filename(parts[-1])):
+        return True
     return any(_under(entry, ex) for ex in excluded)
 
 
@@ -87,7 +97,7 @@ def prune_excluded_dirs(walk_root: str, dirs: list[str], excluded: Iterable[Path
     excluded = list(excluded)
     return [
         d for d in dirs
-        if d not in EXCLUDED_DIRNAMES and not any(_under(Path(walk_root, d).resolve(), ex) for ex in excluded)
+        if d not in EXCLUDED_DIRNAMES and not is_system_dirname(d) and not any(_under(Path(walk_root, d).resolve(), ex) for ex in excluded)
     ]
 
 
@@ -263,6 +273,16 @@ def log_recycled(
         )
     except sqlite3.Error as ev_err:
         logger.warning("Failed to record file_recycled event: %s", safe_exc(ev_err))
+    emit(
+        db, "file_replaced", track_id=old_row.get("track_id"), download_id=str(download_id) if download_id else None,
+        message=f"Replaced {old_row.get('quality_name')} file ({action})",
+        details={
+            "old_path": str(result.old_path), "disposition": action,
+            "recycled_to": str(result.dest) if result.dest else None, "new_path": str(new_path),
+            "old_quality": old_row.get("quality_name"), "new_quality": new_quality, "issue_id": issue_id,
+        },
+        **download_trigger_kwargs(db, str(download_id) if download_id else None),
+    )
 
 
 def recycle_replaced_files(
@@ -303,6 +323,14 @@ def recycle_replaced_files(
                          issue_id=issue_id, retired=retired, source=source, log_prefix=log_prefix)
         elif result.status == "kept":
             kept.append(f"{old_p}: {result.reason}")
+            emit(
+                db, "file_replaced", track_id=row.get("track_id"),
+                download_id=str(download_id) if download_id else None,
+                message=f"Replaced file kept in place: {result.reason}",
+                details={"old_path": str(old_p), "disposition": "kept", "new_path": str(new_path),
+                         "old_quality": row.get("quality_name"), "new_quality": new_quality, "issue_id": issue_id},
+                **download_trigger_kwargs(db, str(download_id) if download_id else None),
+            )
             logger.warning("Replacement of %s: old file kept (%s)", old_p, result.reason)
         try:
             db.delete_library_file(str(row["id"]))
@@ -421,7 +449,43 @@ def run_cleanup(db: Any, *, empty_all: bool = False) -> CleanupResult:
         library_root=_library_root(mm), client_roots=_client_roots(db, mm), empty_all=empty_all,
     )
     _record_run(db, result, empty_all)
+    _record_purged_files(db, list(result.removed), empty_all)
     return result
+
+
+def _record_purged_files(db: Any, removed_paths: list[str], emptied: bool) -> None:
+    """``file_deleted`` item events for every replaced file whose recycled copy was just purged from the bin.
+
+    One history lookup and one bulk write for all purged paths, however many the cleanup removed.
+    """
+    if not removed_paths:
+        return
+    try:
+        events = db.find_recycled_item_events(removed_paths)
+    except sqlite3.Error:
+        logger.exception("Could not look up recycled files under %d purged path(s)", len(removed_paths))
+        return
+    if not events:
+        return
+    label = "Recycle bin emptied" if emptied else "Recycle bin cleanup"
+    batch = [
+        {
+            "event": "file_deleted", "track_id": ev.get("track_id"), "album_id": ev.get("album_id"),
+            "artist_id": ev.get("artist_id"), "artist_name": ev.get("artist_name"),
+            "album_title": ev.get("album_title"), "track_title": ev.get("track_title"),
+            "trigger": TRIGGER_RECYCLE_CLEANUP, "trigger_label": label,
+            "message": "Recycled file purged from the recycle bin",
+            "details": {
+                "path": (ev.get("details") or {}).get("recycled_to"),
+                "original_path": (ev.get("details") or {}).get("old_path"),
+            },
+        }
+        for ev in events
+    ]
+    try:
+        db.record_item_events_bulk(batch)
+    except sqlite3.Error:
+        logger.exception("Could not record %d purged recycle-bin file event(s)", len(batch))
 
 
 _status_lock = threading.Lock()

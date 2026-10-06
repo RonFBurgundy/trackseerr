@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from plex_playlist_sync import delay_gate
 from plex_playlist_sync.acquisition_coordinator import _extract_info_hash, acquisition_coordinator
+from plex_playlist_sync.item_history import TRIGGER_SYSTEM, TRIGGER_UPGRADE, GrabTrigger
 from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from plex_playlist_sync.storage import Database
 
@@ -133,6 +134,8 @@ def grab_pending(db: Database, row: dict[str, Any], *, count_failure: bool = Tru
                 track_id=claimed.get("track_id"),
                 album_id=claimed.get("album_id"),
                 upgrade=payload.get("upgrade_floor") is not None,
+                trigger=GrabTrigger.from_dict(payload.get("trigger"))
+                or GrabTrigger(TRIGGER_UPGRADE if payload.get("upgrade_floor") is not None else TRIGGER_SYSTEM),
             )
         failed = not result.get("success")
         return result

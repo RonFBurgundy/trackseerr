@@ -30,6 +30,7 @@ import httpx
 from plex_playlist_sync import lidarr_library
 from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
+from plex_playlist_sync.item_history import TRIGGER_PLAYLIST, GrabTrigger, provenance
 from plex_playlist_sync.library_manager import MODE_LIDARR, ModeChanged, build_lidarr_client, run_for_mode
 from plex_playlist_sync.library_monitoring import (
     LIST_MONITOR_MODES,
@@ -415,7 +416,12 @@ ALREADY_REQUESTED_NOTE = "already requested"
 
 
 def _submit_track(
-    db: Database, config: Any, item: ListItem, quality_profile_id: Optional[str], requested_by: dict[str, Any]
+    db: Database,
+    config: Any,
+    item: ListItem,
+    quality_profile_id: Optional[str],
+    requested_by: dict[str, Any],
+    trigger: Optional[GrabTrigger] = None,
 ) -> Optional[str]:
     """Track level: a normal request, attributed to ``requested_by`` but approved and quota-exempt like a system
     request (the user row is copied with admin rights for the policy check only; nothing is persisted on the user)."""
@@ -437,6 +443,7 @@ def _submit_track(
             quality_profile_id=quality_profile_id,
             source="list",
             foreign_id=item.mbid,
+            trigger=trigger,
         )
     except RequestRejected as exc:
         # Admin-level submissions are never quota-limited and skip the duplicate check, but stay defensive.
@@ -446,7 +453,17 @@ def _submit_track(
     return None
 
 
-def apply_list_item(
+def apply_list_item(db: Database, config: Any, item: Any, mode: str, **kwargs: Any) -> ApplyResult:
+    """``_apply_list_item`` with the item history provenance of ``trigger`` (the list or playlist it came from) set for
+    every library change the application makes (``added_to_library``, ``monitored``...)."""
+    trigger = kwargs.get("trigger")
+    if trigger is None:
+        return _apply_list_item(db, config, item, mode, **kwargs)
+    with provenance(trigger):
+        return _apply_list_item(db, config, item, mode, **kwargs)
+
+
+def _apply_list_item(
     db: Database,
     config: Any,
     item: Any,
@@ -459,12 +476,14 @@ def apply_list_item(
     lidarr_client: Optional[LidarrClient] = None,
     artist_added: bool = False,
     on_artist_added: Optional[Callable[[], None]] = None,
+    trigger: Optional[GrabTrigger] = None,
 ) -> ApplyResult:
     """Applies ``item`` (a :class:`ListItem` or a dict with the same fields) at the level ``mode`` widens to.
 
     ``artist_added`` is the persisted fact that an earlier attempt of this item added its artist; the artist
     post-add step (album load + monitor preset, or the native refresh) is then finished on this attempt.
     ``on_artist_added`` is called the moment this attempt adds the artist, so the caller can persist that fact.
+    ``trigger`` names the list/playlist the item came from; it is kept on the track request and on native adds.
 
     Never raises for a per-item problem; the outcome is the returned :class:`ApplyResult`. Raises ValueError for an
     invalid ``mode`` or ``artist_monitor_option``.
@@ -479,7 +498,7 @@ def apply_list_item(
         if level == "track":
             if requested_by is None:
                 return ApplyResult(STATUS_FAILED, error="No user to attribute the request to")
-            note = _submit_track(db, config, list_item, quality_profile_id, requested_by)
+            note = _submit_track(db, config, list_item, quality_profile_id, requested_by, trigger)
             return ApplyResult(STATUS_APPLIED, "track", error=note, mbid=list_item.mbid)
 
         if enricher is None:
@@ -594,6 +613,10 @@ def apply_playlist_missing(
                 enricher=enricher,
                 artist_added=bool(row.get("artist_added_by_item")),
                 on_artist_added=lambda tid=track_id: db.mark_missing_track_artist_added(tid),
+                trigger=GrabTrigger(
+                    TRIGGER_PLAYLIST, ref=playlist_id, label=playlist.get("name"),
+                    actor_user_id=str(actor["id"]) if actor else None,
+                ),
             )
         except Exception:  # one bad track must not abort the rest; the cause is logged with its traceback
             logger.exception("Playlist %s: applying missing track %s failed", playlist_id, track_id)

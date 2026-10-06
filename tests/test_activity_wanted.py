@@ -1,5 +1,6 @@
 """Phase 3 backend: Activity (queue / history / blocklist) and Wanted (missing / cutoff), native and Lidarr mode."""
 
+from plex_playlist_sync.item_history import GrabTrigger
 from plex_playlist_sync.storage import SCHEMA_VERSION
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -429,7 +430,9 @@ def _grab(db, release="Nirvana - In Bloom [FLAC]", min_score=None):
     with patch.object(coordinator, "search_all_indexers", return_value=[candidate]), patch(
         "plex_playlist_sync.acquisition_coordinator.get_acquisition_driver", return_value=driver
     ):
-        return coordinator.search_and_grab(artist="Nirvana", title="In Bloom", db=db, min_score=min_score)
+        return coordinator.search_and_grab(
+            artist="Nirvana", title="In Bloom", db=db, min_score=min_score, trigger=GrabTrigger("wanted")
+        )
 
 
 class TestNativeHistory:

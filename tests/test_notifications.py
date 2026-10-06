@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 import httpx
 import pytest
 
+from plex_playlist_sync.item_history import GrabTrigger
 from plex_playlist_sync.acquisition_coordinator import AcquisitionCoordinator
 from plex_playlist_sync.acquisition_worker import AcquisitionWorker
 from plex_playlist_sync.api.app import create_app
@@ -875,6 +876,7 @@ class TestNotificationEventTriggers:
                 item_type="album",
                 request_id="req-beatles",
                 db=test_db,
+                trigger=GrabTrigger("request"),
             )
             assert res["success"] is True
             assert len(dispatched) == 1

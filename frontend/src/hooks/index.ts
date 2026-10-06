@@ -84,3 +84,4 @@ export * from './useIssueCounts';
 export * from './useIssueDetail';
 export * from './useIssueQueue';
 export * from './useIssueActions';
+export * from './useItemHistory';
