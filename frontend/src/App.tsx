@@ -48,6 +48,7 @@ import {
   MachinedCard,
   InvitePage,
   LocalLoginForm,
+  CassetteLoader,
   StartupScreen,
 } from '@/components';
 import {
@@ -307,11 +308,8 @@ const MainApp: React.FC = () => {
         <PullRefreshIndicator {...pull} />
         {auth.isLoading ? (
           <PageFrame bodyClassName="flex">
-            <div className="m-auto flex flex-col items-center justify-center gap-3 py-8">
-              <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
-              <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">
-                Calibrating Analog Deck...
-              </span>
+            <div className="m-auto py-8">
+              <CassetteLoader size="lg" />
             </div>
           </PageFrame>
         ) : !auth.isAuthenticated ? (

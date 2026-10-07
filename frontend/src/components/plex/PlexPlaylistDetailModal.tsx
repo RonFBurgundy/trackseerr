@@ -8,7 +8,7 @@ import type {
   PlexUserOption,
 } from '@/types/models';
 import type { MoveDirection } from '@/hooks/usePlexPlaylists';
-import { ObsidianModal, TapeDeckButton, TactileSwitch } from '@/components/ui';
+import { ObsidianModal, TapeDeckButton, TactileSwitch, CassetteLoader } from '@/components/ui';
 import { PlexKindBadge, PlexOwnerBadge } from './PlexBadges';
 
 export interface PlexPlaylistDetailModalProps {
@@ -181,7 +181,7 @@ const DetailBody: React.FC<BodyProps> = ({
         )}
         {isItemsLoading ? (
           <div className="flex justify-center py-8">
-            <Loader2 className="h-6 w-6 text-[#e5a00d] animate-spin" />
+            <CassetteLoader size="sm" />
           </div>
         ) : items.length === 0 ? (
           <div className="text-center py-6 text-neutral-500 font-mono text-xs">No tracks.</div>

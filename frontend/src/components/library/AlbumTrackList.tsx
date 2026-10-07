@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { Loader2 } from 'lucide-react';
 import type { TrackItem } from '@/types/models';
-import { TactileSwitch } from '@/components/ui';
+import { TactileSwitch, CassetteLoader } from '@/components/ui';
 import { ItemHistoryModal } from './ItemHistoryModal';
 import { formatTrackDuration, getQualityBadge, trackSeconds } from './trackFormat';
 
@@ -37,7 +36,7 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
   if (loading) {
     return (
       <div className="flex justify-center py-6">
-        <Loader2 className="h-6 w-6 text-[#e5a00d] animate-spin" />
+        <CassetteLoader size="sm" />
       </div>
     );
   }

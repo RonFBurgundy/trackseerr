@@ -1,6 +1,5 @@
 import React from 'react';
-import { Loader2 } from 'lucide-react';
-import { MachinedCard, StatusMessage } from '@/components/ui';
+import { MachinedCard, StatusMessage, CassetteLoader } from '@/components/ui';
 import type { UseAccountReturn } from '@/hooks/useAccount';
 import { QuotaBars } from './QuotaBars';
 import { ChangePasswordForm } from './ChangePasswordForm';
@@ -22,7 +21,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
   if (isLoading && !account) {
     return (
       <div className="flex justify-center py-16">
-        <Loader2 className="h-8 w-8 text-[var(--accent-amber)] animate-spin" />
+        <CassetteLoader size="md" />
       </div>
     );
   }

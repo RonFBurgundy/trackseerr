@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Check, X, Trash2, Clock, CheckCircle2, AlertCircle, AlertTriangle, Loader2, RotateCw } from 'lucide-react';
+import { Check, X, Trash2, Clock, CheckCircle2, AlertCircle, AlertTriangle, RotateCw } from 'lucide-react';
 import type { UseRequestsReturn, RequestFilter } from '@/hooks/useRequests';
 import type { RequestItem } from '@/types/models';
 import { MEDIA_ISSUE_TYPES, REQUEST_ISSUE_TYPES } from '@/types/models';
@@ -10,7 +10,9 @@ import {
   MachinedCard,
   QuotaBadge,
   ConfirmDangerButton,
-  ToastBanner } from '@/components/ui';
+  ToastBanner,
+  CassetteLoader,
+} from '@/components/ui';
 import { PageFrame } from '@/components/layout';
 import { IssueReportButton, MyIssuesList, untilTime } from '@/components/issues';
 import { useToast } from '@/hooks/useToast';
@@ -192,11 +194,8 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
 
       {/* Loading state */}
       {section === 'requests' && isLoading && (
-        <div className="flex flex-col items-center justify-center py-20 gap-3">
-          <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
-          <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">
-            Loading Request Registry...
-          </span>
+        <div className="py-20">
+          <CassetteLoader size="md" />
         </div>
       )}
 

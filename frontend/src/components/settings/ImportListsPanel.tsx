@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
-import { Plus, RefreshCw, Pencil, History, Trash2, Loader2 } from 'lucide-react';
+import { Plus, RefreshCw, Pencil, History, Trash2 } from 'lucide-react';
 import { PageActionsPortal } from '@/components/layout';
-import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, ConfirmDangerButton } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, ConfirmDangerButton, CassetteLoader } from '@/components/ui';
 import { useImportLists } from '@/hooks/useImportLists';
 import { useImportListEditor } from '@/hooks/useImportListEditor';
 import { useMonitoringDefaults } from '@/hooks/useMonitoringDefaults';
@@ -59,7 +59,7 @@ export const ImportListsPanel: React.FC<ImportListsPanelProps> = ({ libraryMode,
 
       {lists.loading && (
         <div className="flex justify-center py-12">
-          <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
+          <CassetteLoader size="md" />
         </div>
       )}
 

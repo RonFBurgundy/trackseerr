@@ -1,6 +1,6 @@
 import React, { useId, useState } from 'react';
-import { Loader2, MessageSquare } from 'lucide-react';
-import { ConfirmDialog, MachinedCard, SearchBar } from '@/components/ui';
+import { MessageSquare } from 'lucide-react';
+import { ConfirmDialog, MachinedCard, SearchBar, CassetteLoader } from '@/components/ui';
 import { PageActionsPortal } from '@/components/layout';
 import { ManualImportModal } from '@/components/manualImport';
 import type { ManualImportScope } from '@/types/manualImport';
@@ -131,7 +131,7 @@ export const AdminIssuesPanel: React.FC<AdminIssuesPanelProps> = ({ issueId, onO
 
       {queue.isLoading && queue.total === 0 && (
         <div className="flex justify-center py-12">
-          <Loader2 className="h-6 w-6 text-[var(--accent-amber)] animate-spin" />
+          <CassetteLoader size="sm" />
         </div>
       )}
       {queue.error && (

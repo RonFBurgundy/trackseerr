@@ -1,6 +1,5 @@
 import React from 'react';
-import { Loader2 } from 'lucide-react';
-import { ObsidianModal, TabStrip, TapeDeckButton } from '@/components/ui';
+import { ObsidianModal, TabStrip, TapeDeckButton, CassetteLoader } from '@/components/ui';
 import { StatusMessage } from '@/components/ui/FormField';
 import { useImportListItems, IMPORT_ITEMS_PAGE_SIZE } from '@/hooks/useImportListItems';
 import { LIST_MONITOR_MODE_LABELS, type ImportList, type ImportListItemStatus } from '@/types/importLists';
@@ -72,7 +71,7 @@ export const ImportListHistoryModal: React.FC<ImportListHistoryModalProps> = ({ 
 
         {h.loading && (
           <div className="flex justify-center py-8">
-            <Loader2 className="h-6 w-6 text-[#e5a00d] animate-spin" />
+            <CassetteLoader size="sm" />
           </div>
         )}
 

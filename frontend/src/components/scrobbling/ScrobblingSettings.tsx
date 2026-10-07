@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
-import { Check, AlertTriangle, Loader2 } from 'lucide-react';
+import { Check, AlertTriangle } from 'lucide-react';
+import { CassetteLoader } from '@/components/ui';
 import { useScrobbling } from '@/hooks/useScrobbling';
 import { MusicIdentityCard } from './MusicIdentityCard';
 import { RecentListens } from './RecentListens';
@@ -41,9 +42,8 @@ export const ScrobblingSettings: React.FC<ScrobblingSettingsProps> = ({ isAdmin,
       )}
 
       {s.isLoading && (
-        <div className="flex flex-col items-center justify-center py-16 gap-3">
-          <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
-          <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">Loading Scrobbling...</span>
+        <div className="py-16">
+          <CassetteLoader size="md" />
         </div>
       )}
 

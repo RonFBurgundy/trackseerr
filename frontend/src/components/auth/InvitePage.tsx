@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, KeyRound } from 'lucide-react';
-import { MachinedCard, TapeDeckButton, StatusMessage } from '@/components/ui';
+import { MachinedCard, TapeDeckButton, StatusMessage, CassetteLoader } from '@/components/ui';
 import type { InviteInfo } from '@/types/account';
 import {
   INVALID_LINK_MESSAGE,
@@ -78,7 +78,7 @@ export const InvitePage: React.FC<InvitePageProps> = ({ token }) => {
   if (state.kind === 'loading') {
     body = (
       <div className="flex justify-center py-10">
-        <Loader2 className="h-8 w-8 text-[var(--accent-amber)] animate-spin" />
+        <CassetteLoader size="md" />
       </div>
     );
   } else if (state.kind === 'invalid') {

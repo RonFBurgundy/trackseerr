@@ -1,6 +1,6 @@
 import React from 'react';
 import { Check, Loader2, Pause, Play, Plus } from 'lucide-react';
-import { ObsidianModal, TapeDeckButton } from '@/components/ui';
+import { ObsidianModal, TapeDeckButton, CassetteLoader } from '@/components/ui';
 import { IssueReportButton } from '@/components/issues';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
 import type { DiscoveryAlbumTrack } from '@/hooks/useDiscoveryAlbum';
@@ -122,7 +122,7 @@ export const DiscoveryAlbumModal: React.FC<DiscoveryAlbumModalProps> = ({
 
         {isLoading ? (
           <div className="flex justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-[#e5a00d]" />
+            <CassetteLoader size="sm" />
           </div>
         ) : tracks.length > 0 ? (
           <div className="divide-y divide-[#1f1f1f] overflow-hidden rounded-[4px] border border-[#1f1f1f]">

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Check, Loader2, AlertTriangle } from 'lucide-react';
+import { Check, AlertTriangle } from 'lucide-react';
+import { CassetteLoader } from '@/components/ui';
 import type { LibraryManagerMode } from '@/types/models';
 import { ScrobblingSettings } from '@/components/scrobbling';
 import { AccountPanel } from '@/components/account';
@@ -190,11 +191,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       )}
 
       {data.isLoading && !isSelfServiceTab && (
-        <div className="flex flex-col items-center justify-center py-16 gap-3">
-          <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
-          <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">
-            Reading System Configuration...
-          </span>
+        <div className="py-16">
+          <CassetteLoader size="md" />
         </div>
       )}
 

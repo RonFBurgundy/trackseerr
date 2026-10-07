@@ -11,6 +11,7 @@ import {
   TapeDeckButton,
   MachinedCard,
   SearchBar,
+  CassetteLoader,
 } from '@/components/ui';
 import { PageFrame } from '@/components/layout';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
@@ -215,11 +216,8 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
     >
       {/* Loading state */}
       {discovery.isLoading && (
-        <div className="flex flex-col items-center justify-center py-20 gap-3">
-          <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
-          <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">
-            Scanning Analog Frequencies...
-          </span>
+        <div className="py-20">
+          <CassetteLoader size="md" />
         </div>
       )}
 

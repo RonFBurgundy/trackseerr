@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { Loader2, UserPlus } from 'lucide-react';
+import { UserPlus } from 'lucide-react';
 import {
   MachinedCard,
   SearchBar,
   StatusMessage,
   TapeDeckButton,
   TabStrip,
+  CassetteLoader,
 } from '@/components/ui';
 import type { AdminUser, AuthType } from '@/types/account';
 import type { UseAdminUsersReturn } from '@/hooks/useAdminUsers';
@@ -136,7 +137,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({ adminHook, currentUserId
 
           {isLoading && users.length === 0 ? (
             <div className="flex justify-center py-12">
-              <Loader2 className="h-8 w-8 text-[var(--accent-amber)] animate-spin" />
+              <CassetteLoader size="md" />
             </div>
           ) : (
             <MachinedCard className="overflow-x-auto">

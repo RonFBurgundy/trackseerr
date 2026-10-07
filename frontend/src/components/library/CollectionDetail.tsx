@@ -1,8 +1,8 @@
 import React from 'react';
-import { Disc, Loader2, Trash2 } from 'lucide-react';
+import { Disc, Trash2 } from 'lucide-react';
 import type { CollectionItem } from '@/types/models';
 import { useCollectionDetail } from '@/hooks/useCollectionDetail';
-import { MachinedCard, TapeDeckButton } from '@/components/ui';
+import { MachinedCard, TapeDeckButton, CassetteLoader } from '@/components/ui';
 import { DetailHeaderBar, PageFrame } from '@/components/layout';
 
 import { CollectionArt } from './CollectionArt';
@@ -67,9 +67,8 @@ export const CollectionDetail: React.FC<CollectionDetailProps> = ({
       </MachinedCard>
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-20 gap-3">
-          <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
-          <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">Loading Collection Albums...</span>
+        <div className="py-20">
+          <CassetteLoader size="md" />
         </div>
       ) : (
         <div className="space-y-3">

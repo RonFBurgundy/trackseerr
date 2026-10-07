@@ -1,7 +1,7 @@
 import React, { useId, useState } from 'react';
-import { Save, Trash2, Loader2 } from 'lucide-react';
+import { Save, Trash2 } from 'lucide-react';
 import type { PlexMix, PlexMixSnapshot } from '@/types/models';
-import { MachinedCard, TapeDeckButton, TactileSwitch } from '@/components/ui';
+import { MachinedCard, TapeDeckButton, TactileSwitch, CassetteLoader } from '@/components/ui';
 
 export interface PlexMixesPanelProps {
   mixes: PlexMix[];
@@ -71,7 +71,7 @@ export const PlexMixesPanel: React.FC<PlexMixesPanelProps> = ({
   if (isLoading) {
     return (
       <div className="flex justify-center py-12">
-        <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
+        <CassetteLoader size="md" />
       </div>
     );
   }
