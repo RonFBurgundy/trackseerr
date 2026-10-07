@@ -408,3 +408,18 @@ body,
 .kbps-range:focus-visible::-moz-range-thumb {
   outline: 1px solid var(--accent-amber);
 }
+
+/* Navigation search: brief amber outline on the setting a result points at. */
+@keyframes setting-pulse {
+  0%, 100% { outline-color: transparent; box-shadow: none; }
+  20%, 70% { outline-color: var(--accent-amber); box-shadow: 0 0 0 4px var(--accent-amber-glow); }
+}
+.setting-pulse {
+  outline: 2px solid transparent;
+  outline-offset: 3px;
+  border-radius: 3px;
+  animation: setting-pulse 2.2s ease-in-out 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .setting-pulse { animation: none; outline-color: var(--accent-amber); }
+}

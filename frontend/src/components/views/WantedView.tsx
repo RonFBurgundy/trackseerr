@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ArrowUpCircle, SearchX } from 'lucide-react';
 import { PageFrame } from '@/components/layout';
 import { TabStrip, TapeDeckButton, ToastBanner } from '@/components/ui';
 import { WantedPanel } from '@/components/wanted';
 import { useToast } from '@/hooks/useToast';
+import { useRefreshHandler } from '@/hooks/useRefreshHandler';
 import type { WantedSub, NavigateOptions } from '@/hooks/useAppRoute';
 
 const TABS: Array<{ id: WantedSub; label: string; icon: React.ReactNode }> = [
@@ -19,6 +20,8 @@ export interface WantedViewProps {
 
 export const WantedView: React.FC<WantedViewProps> = ({ sub: tab, onSubChange }) => {
   const { toast, showToast } = useToast();
+  const [reloadKey, setReloadKey] = useState<number>(0);
+  useRefreshHandler(() => setReloadKey((k) => k + 1));
 
   return (
     <PageFrame
@@ -36,7 +39,7 @@ export const WantedView: React.FC<WantedViewProps> = ({ sub: tab, onSubChange })
       </>
       }
     >
-      <WantedPanel key={tab} list={tab} onToast={showToast} />
+      <WantedPanel key={`${tab}:${reloadKey}`} list={tab} onToast={showToast} />
     </PageFrame>
   );
 };

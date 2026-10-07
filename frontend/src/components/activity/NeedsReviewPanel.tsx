@@ -6,6 +6,7 @@ import { ManualImportModal } from '@/components/manualImport';
 import { formatDateTime } from '@/components/lists';
 import { useLibraryHealth } from '@/hooks/useLibraryHealth';
 import { useSeedCleanup } from '@/hooks/useSeedCleanup';
+import { useHasDownloadClients } from '@/hooks/useHasDownloadClients';
 import type { ManualImportScope } from '@/types/manualImport';
 import type { LibraryHealthFinding, LibraryHealthRun } from '@/types/libraryHealth';
 import type { ActivityPanelProps } from './ActivityQueuePanel';
@@ -42,6 +43,8 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
     void refreshHealth();
     onChanged();
   }, [refreshHealth, onChanged]);
+  // Seed cleanup only applies when Trackseerr drives its own download clients.
+  const seedCleanupApplies = useHasDownloadClients() !== false;
   const sc = useSeedCleanup({ onFinished: handleCleanupFinished, onToast });
 
   const rematch = useCallback((f: LibraryHealthFinding): void => {
@@ -58,10 +61,10 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
     () => ({
       regularGroups: (data?.groups ?? []).filter((g) => g.kind !== 'weak_match' && !isSeedCleanupKind(g.kind)),
       weak: (data?.findings ?? []).filter((f) => f.kind === 'weak_match'),
-      orphans: (data?.findings ?? []).filter((f) => f.kind === 'orphan_torrent'),
-      failed: (data?.findings ?? []).filter((f) => f.kind === 'cleanup_failed'),
+      orphans: seedCleanupApplies ? (data?.findings ?? []).filter((f) => f.kind === 'orphan_torrent') : [],
+      failed: seedCleanupApplies ? (data?.findings ?? []).filter((f) => f.kind === 'cleanup_failed') : [],
     }),
-    [data]
+    [data, seedCleanupApplies]
   );
 
   if (loading && !data) {
@@ -132,7 +135,7 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
         </div>
       </div>
 
-      <SeedCleanupStrip status={sc.status} running={sc.running} onRun={() => void sc.run()} />
+      {seedCleanupApplies && <SeedCleanupStrip status={sc.status} running={sc.running} onRun={() => void sc.run()} />}
 
       {!supported ? (
         <p className="text-xs font-mono text-[var(--text-muted)]">

@@ -27,3 +27,4 @@ export * from './itemHistoryFormat';
 export * from './ItemHistoryModal';
 export * from './ItemOriginCaption';
 export * from './ArtistTagsRow';
+export * from './DiscographyFilter';

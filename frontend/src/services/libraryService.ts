@@ -240,6 +240,22 @@ export function getTracksIndex(q: IndexQuery, signal?: AbortSignal): Promise<Gro
 
 const ALBUM_TRACK_PAGE_SIZE = 200;
 
+const ARTIST_TRACK_FILTER_CAP = 1000;
+
+/** Tracks of one artist whose search text matches (`q` + `artist_id`), up to a safety cap. */
+export async function searchArtistTracks(artistId: number | string, text: string, signal?: AbortSignal): Promise<TrackItem[]> {
+  const tracks: TrackItem[] = [];
+  for (let page = 1; tracks.length < ARTIST_TRACK_FILTER_CAP; page += 1) {
+    const res = await getTracksPaged(
+      { page, pageSize: ALBUM_TRACK_PAGE_SIZE, sortKey: 'title', sortDir: 'asc', filters: { artist_id: String(artistId), q: text } },
+      signal
+    );
+    tracks.push(...res.records);
+    if (res.records.length === 0 || tracks.length >= res.total) break;
+  }
+  return tracks;
+}
+
 /** Every track of one album via the paged endpoint (`album_id` filter), in disc and track order. */
 export async function getAlbumTracksPaged(albumId: number | string, signal?: AbortSignal): Promise<TrackItem[]> {
   const tracks: TrackItem[] = [];

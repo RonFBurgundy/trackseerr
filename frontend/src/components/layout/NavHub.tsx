@@ -5,6 +5,8 @@ import type { DeploymentTier, User, UserQuota } from '@/types/models';
 import { TapeDeckButton, QuotaBadge } from '@/components/ui';
 import { activeAncestorKeys, buildNavTree, routesEqual } from './navTree';
 import type { NavNode } from './navTree';
+import { NavSearch } from './NavSearch';
+import type { NavSearchEntry } from './navSearchIndex';
 
 export interface NavHubProps {
   isOpen: boolean;
@@ -21,6 +23,8 @@ export interface NavHubProps {
   issuesUnreadCount?: number;
   onLogout?: () => void;
   tier?: DeploymentTier;
+  /** Called after navigating to a search result that points at one setting inside its page. */
+  onHighlight?: (target: { elementId?: string; anchor?: string }) => void;
 }
 
 const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -149,9 +153,11 @@ const HubPanel: React.FC<NavHubProps> = ({
   issuesUnreadCount = 0,
   onLogout,
   tier = 'all-in-one',
+  onHighlight,
 }) => {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const tree = buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount, issuesOpenCount, issuesUnreadCount });
+  const [searching, setSearching] = useState<boolean>(false);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(activeAncestorKeys(tree, route)));
 
   // Focus moves in on open and returns to whatever opened the hub (the Menu key) on close.
@@ -203,6 +209,11 @@ const HubPanel: React.FC<NavHubProps> = ({
   const go = (target: AppRoute): void => {
     onNavigate(target);
     onClose();
+  };
+
+  const selectResult = (entry: NavSearchEntry): void => {
+    go(entry.route);
+    if (entry.target) onHighlight?.(entry.target);
   };
 
   return (
@@ -266,12 +277,17 @@ const HubPanel: React.FC<NavHubProps> = ({
         )}
 
         <nav aria-label="Main navigation" className="flex-1 px-2 py-1.5 md:p-3 overflow-y-auto modal-body-scroll">
-          <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono px-1 pt-0.5 pb-1">Navigation Deck</div>
-          <ul className="flex flex-col gap-1">
-            {tree.map((node) => (
-              <NodeRow key={node.key} node={node} depth={0} route={route} expanded={expanded} onToggle={toggle} onGo={go} />
-            ))}
-          </ul>
+          <NavSearch access={{ isAdmin, mfaEnrollmentRequired }} onSelect={selectResult} onActiveChange={setSearching} />
+          {!searching && (
+            <>
+              <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono px-1 pt-0.5 pb-1">Navigation Deck</div>
+              <ul className="flex flex-col gap-1">
+                {tree.map((node) => (
+                  <NodeRow key={node.key} node={node} depth={0} route={route} expanded={expanded} onToggle={toggle} onGo={go} />
+                ))}
+              </ul>
+            </>
+          )}
         </nav>
 
         <div className="px-2 py-1.5 md:p-3 border-t border-[#1f1f1f] bg-[#0e0e0e] space-y-1">
