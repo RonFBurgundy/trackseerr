@@ -7,6 +7,7 @@ asks this module which side is active, so two managers never work one library at
 import logging
 import sqlite3
 import threading
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from typing import Any, Iterator, Optional
 
@@ -288,6 +289,56 @@ def dispatch_to_lidarr(db: Database, client: Any, items: list[dict[str, Any]], c
         result.get("message"),
     )
     return False
+
+
+# UTC ISO time of the last sweep tick, for the Scheduled Tasks page.
+last_retry_sweep_at: Optional[str] = None
+
+
+def retry_stuck_lidarr_requests(
+    db: Database, config: Optional[Config] = None, limit: int = 25, ignore_schedule: bool = False
+) -> int:
+    """Re-sends approved requests whose Lidarr outcome left them stuck and whose retry time has passed.
+
+    Lidarr mode only (a no-op otherwise). Each due request goes back through ``dispatch_to_lidarr``.
+    ``ignore_schedule`` (manual run) re-sends every request with a retryable reason, due or not.
+    Returns how many were handed to the trickle. Never raises.
+    """
+    global last_retry_sweep_at
+    try:
+        if get_library_mode(db) != MODE_LIDARR:
+            return 0
+        last_retry_sweep_at = datetime.now(timezone.utc).isoformat()
+        due = db.list_requests_due_for_retry(limit=limit, ignore_schedule=ignore_schedule)
+        if not due:
+            return 0
+        client = build_lidarr_client(db, config)
+        if client is None:
+            return 0
+        items = [
+            {
+                "id": row["id"],
+                "artist": row.get("artist") or "",
+                "album": (row.get("album") or row.get("title") or "")
+                if row.get("item_type") == "album"
+                else (row.get("album") or ""),
+                "title": row.get("title") or "",
+                "item_type": row.get("item_type") or "track",
+                "is_request": True,
+            }
+            for row in due
+        ]
+        # Push each schedule out first, so a refused or slow dispatch is not re-sent every tick; the trickle's
+        # own outcome (or a success) overwrites it afterwards.
+        for row in due:
+            db.defer_request_retry(str(row["id"]))
+        if dispatch_to_lidarr(db, client, items, config):
+            logger.info("Re-sent %d stuck request(s) to Lidarr", len(items))
+            return len(items)
+        return 0
+    except (sqlite3.Error, ValueError, TypeError) as exc:
+        logger.error("Retrying stuck Lidarr requests failed: %s", safe_exc(exc))
+        return 0
 
 
 LIBRARY_MODE_MIGRATION_KEY = "library_mode_migrated_v33"

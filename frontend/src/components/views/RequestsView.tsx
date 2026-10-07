@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Check, X, Trash2, Clock, CheckCircle2, AlertCircle, AlertTriangle, Loader2 } from 'lucide-react';
+import { Check, X, Trash2, Clock, CheckCircle2, AlertCircle, AlertTriangle, Loader2, RotateCw } from 'lucide-react';
 import type { UseRequestsReturn, RequestFilter } from '@/hooks/useRequests';
 import type { RequestItem } from '@/types/models';
 import { MEDIA_ISSUE_TYPES, REQUEST_ISSUE_TYPES } from '@/types/models';
@@ -9,9 +9,11 @@ import {
   TapeDeckButton,
   MachinedCard,
   QuotaBadge,
-  ConfirmDangerButton } from '@/components/ui';
+  ConfirmDangerButton,
+  ToastBanner } from '@/components/ui';
 import { PageFrame } from '@/components/layout';
-import { IssueReportButton, MyIssuesList } from '@/components/issues';
+import { IssueReportButton, MyIssuesList, untilTime } from '@/components/issues';
+import { useToast } from '@/hooks/useToast';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
 import type { AccountInfo } from '@/types/account';
 import { QuotaBars } from '@/components/account';
@@ -50,7 +52,9 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
     approve,
     reject,
     remove,
+    retry,
   } = requestsHook;
+  const { toast, showToast } = useToast();
 
   const [processingId, setProcessingId] = useState<string | null>(null);
   const section: 'requests' | 'issues' = sub === 'issues' ? 'issues' : 'requests';
@@ -81,6 +85,18 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
     setProcessingId(id);
     try {
       await reject(id);
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleRetry = async (id: string) => {
+    setProcessingId(id);
+    try {
+      const result = await retry(id);
+      showToast(result.message, result.success ? 'ok' : 'error');
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Retry failed', 'error');
     } finally {
       setProcessingId(null);
     }
@@ -160,6 +176,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
       </TabStrip>
       }
     >
+      {toast && <ToastBanner message={toast.message} tone={toast.tone} />}
       {!account && quota && <QuotaBadge quota={quota} />}
 
       {account && (
@@ -235,7 +252,10 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
                         data-reason={req.status_reason ?? undefined}
                       >
                         <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-px" />
-                        <span>{req.status_message}</span>
+                        <span>
+                          {req.status_message}
+                          {req.next_attempt_at ? ` - next retry ${untilTime(req.next_attempt_at)}` : ''}
+                        </span>
                       </p>
                     )}
                     {req.username && (
@@ -260,6 +280,16 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
                         issuesHook={issuesHook}
                       />
                     )}
+                  {isAdmin && req.status_reason && req.status !== 'pending' && req.status !== 'rejected' && (
+                    <TapeDeckButton
+                      size="sm"
+                      disabled={isBusy}
+                      onClick={() => void handleRetry(req.id)}
+                      icon={<RotateCw className="h-3.5 w-3.5" />}
+                    >
+                      Retry now
+                    </TapeDeckButton>
+                  )}
                   {isAdmin && req.status === 'pending' && (
                     <>
                       <TapeDeckButton

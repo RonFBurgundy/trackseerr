@@ -547,7 +547,7 @@ class AcquisitionCoordinator:
             )
             if request_id:
                 try:  # let the requester see why it is stuck; the request status is unchanged
-                    db.set_request_outcome(request_id, e.reason, str(e) or None)
+                    db.set_request_outcome(request_id, e.reason, str(e) or None, schedule=False)  # backlog sweep retries it
                 except sqlite3.Error as exc:
                     logger.warning("Could not record the dispatch outcome for request %s: %s", request_id, exc)
             return {

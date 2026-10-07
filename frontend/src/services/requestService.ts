@@ -43,6 +43,13 @@ export async function rejectRequest(requestId: string, reason?: string): Promise
   });
 }
 
+/** Admin-only POST /api/requests/{id}/retry: re-sends the request now and clears its retry schedule. */
+export async function retryRequest(requestId: string): Promise<Schema<'RetryResult'>> {
+  return apiRequest<Schema<'RetryResult'>>(`/api/requests/${requestId}/retry`, {
+    method: 'POST',
+  });
+}
+
 export async function deleteRequest(requestId: string): Promise<void> {
   return apiRequest<void>(`/api/requests/${requestId}`, {
     method: 'DELETE',

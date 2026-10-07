@@ -466,7 +466,13 @@ class LidarrTrickleWorker:
                         if ok:
                             db.update_request_status(str(item_id), "processing")
                         elif kind in _REQUEST_OUTCOME_KINDS:
-                            db.set_request_outcome(str(item_id), kind, str(outcome.get("message") or "") or None)
+                            retry_after = res.get("retry_after") if kind == "rate_limited" else None
+                            db.set_request_outcome(
+                                str(item_id),
+                                kind,
+                                str(outcome.get("message") or "") or None,
+                                retry_after=float(retry_after) if isinstance(retry_after, (int, float)) else None,
+                            )
                     elif isinstance(item_id, int) or (isinstance(item_id, str) and item_id.isdigit()):
                         db.update_missing_tracks_lidarr_status_bulk(
                             [int(item_id)], "monitored" if ok else _MISSING_TRACK_STATUS.get(kind, "error")

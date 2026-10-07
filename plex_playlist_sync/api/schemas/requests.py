@@ -31,6 +31,7 @@ class RequestRecord(ApiModel):
     batch_kind: Optional[str] = None
     status_reason: Optional[str] = None
     status_message: Optional[str] = None
+    next_attempt_at: Optional[str] = None  # UTC 'YYYY-MM-DD HH:MM:SS' of the next automatic Lidarr retry
     trigger: Optional[str] = None
     trigger_ref: Optional[str] = None
     trigger_label: Optional[str] = None
