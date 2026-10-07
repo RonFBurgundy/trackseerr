@@ -19,6 +19,14 @@ from plex_playlist_sync.api.dependencies import (
     get_db,
     require_admin,
 )
+from plex_playlist_sync.api.schemas.scrobbles import (
+    AuthUrl,
+    Listen,
+    ScrobbleConfig,
+    ServerConfig,
+    WebhookStatus,
+    WebhookUrl,
+)
 from plex_playlist_sync.clients.scrobbler import (
     LastFmError,
     ListenBrainzClient,
@@ -220,7 +228,7 @@ def _extract_webhook_payload(content_type: str, body: bytes) -> dict[str, Any]:
     return payload
 
 
-@router.post("/plex", summary="Plex webhook receiver (token auth only)")
+@router.post("/plex", response_model=WebhookStatus, response_model_exclude_unset=True, summary="Plex webhook receiver (token auth only)")
 async def plex_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -294,7 +302,7 @@ async def plex_webhook(
     return {"status": "ok"}
 
 
-@router.get("/webhook-url", summary="Plex webhook URL including its token (admin)")
+@router.get("/webhook-url", response_model=WebhookUrl, response_model_exclude_unset=True, summary="Plex webhook URL including its token (admin)")
 def get_webhook_url(
     request: Request,
     db: Database = Depends(get_db),
@@ -305,7 +313,7 @@ def get_webhook_url(
     return {"url": f"{_request_base_url(request)}/api/scrobbles/plex?token={quote(secret)}"}
 
 
-@router.post("/webhook-secret/rotate", summary="Regenerate the Plex webhook secret (admin)")
+@router.post("/webhook-secret/rotate", response_model=WebhookUrl, response_model_exclude_unset=True, summary="Regenerate the Plex webhook secret (admin)")
 def rotate_webhook_secret(
     request: Request,
     db: Database = Depends(get_db),
@@ -322,7 +330,7 @@ def rotate_webhook_secret(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/lastfm/auth-url", summary="Begin the Last.fm connect flow")
+@router.get("/lastfm/auth-url", response_model=AuthUrl, response_model_exclude_unset=True, summary="Begin the Last.fm connect flow")
 def lastfm_auth_url(
     request: Request,
     forward_url: Optional[str] = Query(default=None),
@@ -376,7 +384,7 @@ def lastfm_callback(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/config", summary="Own scrobble configuration (masked)")
+@router.get("/config", response_model=ScrobbleConfig, response_model_exclude_unset=True, summary="Own scrobble configuration (masked)")
 def get_my_config(
     db: Database = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
@@ -384,7 +392,7 @@ def get_my_config(
     return _config_for_user(db, current_user["id"], current_user.get("username"))
 
 
-@router.put("/config", summary="Update own scrobble configuration")
+@router.put("/config", response_model=ScrobbleConfig, response_model_exclude_unset=True, summary="Update own scrobble configuration")
 def update_my_config(
     body: ScrobbleConfigUpdate,
     db: Database = Depends(get_db),
@@ -394,7 +402,7 @@ def update_my_config(
     return _config_for_user(db, current_user["id"], current_user.get("username"))
 
 
-@router.get("/users", summary="Scrobble configuration for every user (admin)")
+@router.get("/users", response_model=list[ScrobbleConfig], response_model_exclude_unset=True, summary="Scrobble configuration for every user (admin)")
 def list_user_configs(
     db: Database = Depends(get_db),
     admin: dict[str, Any] = Depends(require_admin),
@@ -404,7 +412,7 @@ def list_user_configs(
     ]
 
 
-@router.put("/users/{user_id}/config", summary="Update any user's scrobble configuration (admin)")
+@router.put("/users/{user_id}/config", response_model=ScrobbleConfig, response_model_exclude_unset=True, summary="Update any user's scrobble configuration (admin)")
 def update_user_config(
     user_id: str,
     body: AdminScrobbleConfigUpdate,
@@ -418,7 +426,7 @@ def update_user_config(
     return _config_for_user(db, target["id"], target.get("username"))
 
 
-@router.get("/listens", summary="Recent listens")
+@router.get("/listens", response_model=list[Listen], response_model_exclude_unset=True, summary="Recent listens")
 def list_my_listens(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -439,7 +447,7 @@ def list_my_listens(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/server-config", summary="Server-level scrobbling settings (admin)")
+@router.get("/server-config", response_model=ServerConfig, response_model_exclude_unset=True, summary="Server-level scrobbling settings (admin)")
 def get_server_config(
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
@@ -454,7 +462,7 @@ def get_server_config(
     }
 
 
-@router.put("/server-config", summary="Update server-level scrobbling settings (admin)")
+@router.put("/server-config", response_model=ServerConfig, response_model_exclude_unset=True, summary="Update server-level scrobbling settings (admin)")
 def update_server_config(
     body: ServerConfigUpdate,
     db: Database = Depends(get_db),

@@ -21,7 +21,7 @@ const EVENTS: Array<{ id: ActivityHistoryEvent; label: string }> = [
   { id: 'upgraded', label: 'Upgraded' },
 ];
 
-const EVENT_STYLE: Record<ActivityHistoryEvent, { cls: string; icon: React.ReactNode }> = {
+const EVENT_STYLE: Readonly<Record<string, { cls: string; icon: React.ReactNode }>> = {
   grabbed: { cls: 'text-blue-300 border-blue-800 bg-blue-950/50', icon: <Download className="h-3 w-3" /> },
   imported: { cls: 'text-green-300 border-green-800 bg-green-950/50', icon: <CheckCircle2 className="h-3 w-3" /> },
   failed: { cls: 'text-red-300 border-red-800 bg-red-950/50', icon: <XCircle className="h-3 w-3" /> },
@@ -30,8 +30,8 @@ const EVENT_STYLE: Record<ActivityHistoryEvent, { cls: string; icon: React.React
   upgraded: { cls: 'text-[#e5a00d] border-[#e5a00d]/40 bg-[#e5a00d]/10', icon: <ArrowUpCircle className="h-3 w-3" /> },
 };
 
-const EventBadge: React.FC<{ event: ActivityHistoryEvent; message: string | null }> = ({ event, message }) => {
-  const style = EVENT_STYLE[event] ?? EVENT_STYLE.deleted;
+const EventBadge: React.FC<{ event: string | null | undefined; message: string | null | undefined }> = ({ event, message }) => {
+  const style = (event ? EVENT_STYLE[event] : undefined) ?? EVENT_STYLE.deleted;
   return (
     <span
       title={message ?? undefined}

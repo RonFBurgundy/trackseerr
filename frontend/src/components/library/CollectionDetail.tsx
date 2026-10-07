@@ -83,13 +83,13 @@ export const CollectionDetail: React.FC<CollectionDetailProps> = ({
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="h-12 w-12 rounded-[3px] bg-[#1a1a1a] border border-[#2a2a2a] overflow-hidden flex-shrink-0 flex items-center justify-center">
                       {alb.cover_url ? (
-                        <img src={alb.cover_url} alt={alb.title} className="w-full h-full object-cover" />
+                        <img src={alb.cover_url} alt={alb.title ?? ''} className="w-full h-full object-cover" />
                       ) : (
                         <Disc className="h-6 w-6 text-neutral-600" />
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <h4 className="font-bold text-sm text-white truncate" title={alb.title}>
+                      <h4 className="font-bold text-sm text-white truncate" title={alb.title ?? undefined}>
                         {alb.title}
                       </h4>
                       <p className="text-xs text-neutral-400 truncate mt-0.5">

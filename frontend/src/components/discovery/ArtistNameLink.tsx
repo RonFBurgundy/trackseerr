@@ -1,9 +1,9 @@
 import React from 'react';
 
 export interface ArtistNameLinkProps {
-  name: string;
+  name: string | null | undefined;
   /** When absent the artist has no profile and the name renders as plain text. */
-  discoveryId?: string;
+  discoveryId?: string | null;
   onOpen: (discoveryId: string) => void;
   className?: string;
 }
@@ -12,7 +12,7 @@ export interface ArtistNameLinkProps {
 export const ArtistNameLink: React.FC<ArtistNameLinkProps> = ({ name, discoveryId, onOpen, className = '' }) => {
   if (!discoveryId) {
     return (
-      <span className={`truncate ${className}`} title={name}>
+      <span className={`truncate ${className}`} title={name ?? undefined}>
         {name}
       </span>
     );

@@ -49,8 +49,8 @@ export function useItemHistory(entity: ItemHistoryEntity, id: string | null): Us
     getItemHistory(entity, id, { limit: PAGE_SIZE }, controller.signal)
       .then((res) => {
         setEvents(res.events);
-        setOrigin(res.origin);
-        setNextBefore(res.next_before);
+        setOrigin(res.origin ?? null);
+        setNextBefore(res.next_before ?? null);
         setIsLoading(false);
       })
       .catch((err: unknown) => {
@@ -70,7 +70,7 @@ export function useItemHistory(entity: ItemHistoryEntity, id: string | null): Us
     getItemHistory(entity, id, { limit: PAGE_SIZE, before: nextBefore }, controller.signal)
       .then((res) => {
         setEvents((prev) => [...prev, ...res.events]);
-        setNextBefore(res.next_before);
+        setNextBefore(res.next_before ?? null);
         setIsLoadingMore(false);
       })
       .catch((err: unknown) => {
@@ -103,7 +103,7 @@ export function useItemOrigin(entity: ItemHistoryEntity, id: string | null): Use
     setIsLoading(true);
     getItemHistory(entity, id, { limit: 1 }, controller.signal)
       .then((res) => {
-        setOrigin(res.origin);
+        setOrigin(res.origin ?? null);
         setIsLoading(false);
       })
       .catch((err: unknown) => {

@@ -156,7 +156,7 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
         width: '150px',
         xlOnly: true,
         hideOnMobile: true,
-        render: (t) => formatDateTime(t.added_at),
+        render: (t) => formatDateTime(t.created_at),
       },
     ],
     []
@@ -164,7 +164,7 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
 
   const rowActions = useCallback(
     (t: TrackItem): React.ReactNode => {
-      const monitored = overrides.resolve(t.id, t.monitored);
+      const monitored = overrides.resolve(t.id, t.monitored ?? null);
       // Unknown (Lidarr mode may not report it): no indicator at all rather than a false "Unmonitored".
       if (monitored === null) return null;
       return (

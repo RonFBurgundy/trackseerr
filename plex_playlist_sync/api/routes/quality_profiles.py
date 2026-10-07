@@ -7,9 +7,11 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from plex_playlist_sync.api.response_models import ApiModel
 
 from plex_playlist_sync.acquisition_coordinator import _to_quality_profile, resolve_duration
 from plex_playlist_sync.api.dependencies import get_db, require_admin, require_core_tier
+from plex_playlist_sync.api.schemas.quality_profiles import DeletedResponse
 from plex_playlist_sync.decision_engine import evaluate_prepared, evaluate_upgrade, prepare_profile
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.safe_regex import UnsafeRegexError, validate_pattern
@@ -41,6 +43,20 @@ class QualityProfileItemModel(BaseModel):
     weight: Optional[int] = None
 
 
+class FormatItemResponse(ApiModel):
+    format_id: int
+    score: int = 0
+
+
+class QualityProfileItemResponse(ApiModel):
+    type: Optional[str] = None
+    quality: Optional[str] = None
+    name: Optional[str] = None
+    allowed: bool = True
+    items: list[str] = Field(default_factory=list)
+    weight: Optional[int] = None
+
+
 class QualityProfilePayload(BaseModel):
     id: Optional[str] = None
     name: str = Field(..., min_length=1, max_length=120)
@@ -61,16 +77,16 @@ class QualityProfilePayload(BaseModel):
     min_score: Optional[int] = None
 
 
-class QualityProfileResponse(BaseModel):
+class QualityProfileResponse(ApiModel):
     id: str
     name: str
     cutoff: str
-    items: list[QualityProfileItemModel]
+    items: list[QualityProfileItemResponse]
     upgrade_allowed: bool = True
     min_format_score: int = -100
     cutoff_format_score: int = 0
     min_upgrade_format_score: int = 1
-    format_items: list[FormatItemModel] = Field(default_factory=list)
+    format_items: list[FormatItemResponse] = Field(default_factory=list)
     is_default: bool = False
     preferred_tags: list[str] = Field(default_factory=list)
     ignored_tags: list[str] = Field(default_factory=list)
@@ -80,6 +96,11 @@ class QualityProfileResponse(BaseModel):
     min_score: Optional[int] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+def _wire(profile: dict[str, Any]) -> dict[str, Any]:
+    """Only the declared response fields: store rows also carry raw ``*_json`` columns and the decision ``catalog``."""
+    return {k: v for k, v in profile.items() if k in QualityProfileResponse.model_fields}
 
 
 class CopyPayload(BaseModel):
@@ -100,7 +121,7 @@ class EvaluateTitlePayload(BaseModel):
     current_title: Optional[str] = Field(None, max_length=1000)
 
 
-class EvaluateTitleResponse(BaseModel):
+class EvaluateTitleResponse(ApiModel):
     parsed: dict[str, Any]
     evaluation: dict[str, Any]
     breakdown: Optional[dict[str, Any]] = None
@@ -195,7 +216,7 @@ def list_quality_profiles(
     db: Database = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """Lists all configured quality profiles."""
-    return db.list_quality_profiles()
+    return [_wire(p) for p in db.list_quality_profiles()]
 
 
 @router.get("/{profile_id}", response_model=QualityProfileResponse, summary="Get quality profile by ID")
@@ -210,7 +231,7 @@ def get_quality_profile(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Quality profile '{profile_id}' not found",
         )
-    return profile
+    return _wire(profile)
 
 
 @router.post("", response_model=QualityProfileResponse, summary="Create or update quality profile")
@@ -235,7 +256,7 @@ def create_or_update_quality_profile(
     added_ign = [t for t in saved.get("ignored_tags") or [] if t not in old_ign]
     if added_pref or added_ign:
         saved = db.apply_legacy_tags(p_id, added_pref, added_ign) or saved
-    return saved
+    return _wire(saved)
 
 
 @router.post("/{profile_id}/copy", response_model=QualityProfileResponse, summary="Copy a quality profile")
@@ -257,7 +278,7 @@ def copy_quality_profile(
         n += 1
     clone = dict(source)
     clone.update(id=str(uuid.uuid4()), name=name, is_default=False)
-    return db.upsert_quality_profile(clone)
+    return _wire(db.upsert_quality_profile(clone))
 
 
 @router.post("/{profile_id}/default", response_model=QualityProfileResponse, summary="Set the default profile")
@@ -268,10 +289,10 @@ def set_default_quality_profile(
     result = db.set_default_quality_profile(profile_id)
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Quality profile '{profile_id}' not found")
-    return result
+    return _wire(result)
 
 
-@router.delete("/{profile_id}", summary="Delete quality profile")
+@router.delete("/{profile_id}", response_model=DeletedResponse, response_model_exclude_unset=True, summary="Delete quality profile")
 def delete_quality_profile(
     profile_id: str,
     db: Database = Depends(get_db),

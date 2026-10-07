@@ -7,6 +7,7 @@ from typing import Any, Literal, Union
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
+from plex_playlist_sync.api.response_models import ApiModel
 
 from plex_playlist_sync import library_manager, lidarr_library, recycle_bin
 from plex_playlist_sync.download_roots import allowed_roots_for_all_clients
@@ -28,7 +29,8 @@ from plex_playlist_sync.naming import (
     resolve_track_formats,
     validate_format,
 )
-from plex_playlist_sync.security import is_safe_service_url, mask_secret
+from plex_playlist_sync.api.schemas.settings import LidarrOptionsResponse
+from plex_playlist_sync.security import MASK_MARKER, is_safe_service_url, mask_secret, resolve_masked_value
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -128,7 +130,13 @@ SAMPLE_PREVIEW_ITEMS: list[dict[str, Any]] = [
 ]
 
 
-class GeneralSettingsModel(BaseModel):
+def _declared(model: type[BaseModel], data: dict[str, Any]) -> dict[str, Any]:
+    """Only the keys the response model declares. DB rows carry internals (row id, legacy columns) and, for the
+    general settings, secrets (API key, webhook secrets); none of those may reach the wire."""
+    return {k: v for k, v in data.items() if k in model.model_fields}
+
+
+class GeneralSettingsModel(ApiModel):
     application_url: str = Field("", description="External application URL for redirects and notifications")
     updated_at: str | None = None
 
@@ -137,7 +145,7 @@ class GeneralSettingsUpdateModel(BaseModel):
     application_url: str | None = Field(None, description="External application URL (e.g. https://trackseerr.mydomain.com)")
 
 
-class MediaManagementSettingsModel(BaseModel):
+class MediaManagementSettingsModel(ApiModel):
     artist_folder_format: str = Field(..., description="Format for artist directory")
     album_folder_format: str = Field(..., description="Legacy album directory format (superseded by the track formats)")
     standard_track_format: str = Field(
@@ -264,7 +272,7 @@ class PreviewRequestModel(BaseModel):
     library_mode: str | None = None
 
 
-class PreviewItemModel(BaseModel):
+class PreviewItemModel(ApiModel):
     id: str
     name: str
     description: str
@@ -272,13 +280,13 @@ class PreviewItemModel(BaseModel):
     output_path: str
 
 
-class FormatSamplePreviewModel(BaseModel):
+class FormatSamplePreviewModel(ApiModel):
     sample_id: str
     sample_name: str
     output: str
 
 
-class FormatPreviewModel(BaseModel):
+class FormatPreviewModel(ApiModel):
     """How a single format string renders for every sample input, plus lint warnings."""
 
     format: str
@@ -286,14 +294,14 @@ class FormatPreviewModel(BaseModel):
     samples: list[FormatSamplePreviewModel] = Field(default_factory=list)
 
 
-class PreviewResponseModel(BaseModel):
+class PreviewResponseModel(ApiModel):
     previews: list[PreviewItemModel]
     format_previews: dict[str, FormatPreviewModel] = Field(default_factory=dict)
 
 
 
 
-class LidarrSettingsModel(BaseModel):
+class LidarrSettingsModel(ApiModel):
     url: str | None = None
     api_key: str | None = None
     auto_search: bool = True
@@ -323,17 +331,17 @@ class LidarrSettingsUpdateModel(BaseModel):
     prefer_singles: bool | None = None
 
 
-class LidarrNamedProfile(BaseModel):
+class LidarrNamedProfile(ApiModel):
     id: int
     name: str
 
 
-class LidarrTagModel(BaseModel):
+class LidarrTagModel(ApiModel):
     id: int
     label: str
 
 
-class LidarrDefaultsResponse(BaseModel):
+class LidarrDefaultsResponse(ApiModel):
     root_folder: str
     quality_profile: LidarrNamedProfile
     metadata_profile: LidarrNamedProfile
@@ -350,13 +358,13 @@ class LidarrTestConnectionPayload(BaseModel):
     api_key: str
 
 
-class LidarrTestConnectionResponse(BaseModel):
+class LidarrTestConnectionResponse(ApiModel):
     online: bool
     version: str | None = None
     error: str | None = None
 
 
-class MediaManagementGetResponse(BaseModel):
+class MediaManagementGetResponse(ApiModel):
     settings: MediaManagementSettingsModel
     presets: dict[str, dict[str, Any]]
     preset_descriptions: dict[str, str] = Field(default_factory=dict)
@@ -433,7 +441,7 @@ def get_media_management_settings(
     settings_dict = _mask_media_management_secrets(db.get_media_management_settings())
     return MediaManagementGetResponse(
         seed_rule_conflict=seed_rule_conflict(settings_dict.get("import_mode"), db.list_indexers()),
-        settings=MediaManagementSettingsModel(**settings_dict),
+        settings=MediaManagementSettingsModel(**_declared(MediaManagementSettingsModel, settings_dict)),
         presets=PRESETS,
         preset_descriptions=PRESET_DESCRIPTIONS,
         token_help=[
@@ -471,15 +479,21 @@ def update_media_management_settings(
         updates.pop("library_mode")
     if not updates:
         current = db.get_media_management_settings()
-        return MediaManagementSettingsModel(**_mask_media_management_secrets(current))
+        return MediaManagementSettingsModel(**_declared(MediaManagementSettingsModel, _mask_media_management_secrets(current)))
 
     if "acoustid_api_key" in updates:
         key = updates["acoustid_api_key"]
+        stored_key = db.get_media_management_settings().get("acoustid_api_key")
         if key is None:
             updates.pop("acoustid_api_key")
-        elif "*" in key or "•" in key:
-            # The masked value echoed back by the UI must never overwrite the real key.
+        elif stored_key and key == mask_secret(stored_key):
+            # The exact masked value echoed back by the UI must never overwrite the real key.
             updates.pop("acoustid_api_key")
+        elif MASK_MARKER in key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="'acoustid_api_key' contains a masked placeholder that does not match the saved key; enter the full key",
+            )
         else:
             # An empty string clears the key.
             updates["acoustid_api_key"] = key.strip() or None
@@ -499,7 +513,7 @@ def update_media_management_settings(
     try:
         updated = db.update_media_management_settings(updates)
         updated["warnings"] = warnings
-        return MediaManagementSettingsModel(**_mask_media_management_secrets(updated))
+        return MediaManagementSettingsModel(**_declared(MediaManagementSettingsModel, _mask_media_management_secrets(updated)))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except Exception as e:
@@ -559,7 +573,7 @@ def get_lidarr_settings(
     """Retrieves Lidarr automation settings with masked API key."""
     settings = db.get_lidarr_settings()
     masked = _mask_lidarr_settings(settings)
-    return LidarrSettingsModel(**masked)
+    return LidarrSettingsModel(**_declared(LidarrSettingsModel, masked))
 
 
 @router.put(
@@ -597,20 +611,19 @@ def update_lidarr_settings(
 
     if "api_key" in updates:
         k = updates["api_key"]
-        # If masked (contains * or •) or empty, keep existing
-        if k and ("*" in k or "•" in k):
-            updates["api_key"] = existing.get("api_key")
-        elif not k:
-            updates["api_key"] = existing.get("api_key")
-        else:
-            updates["api_key"] = k.strip()
+        # Exactly the masked form of the saved key, or empty, keeps the saved key; a half-edited mask is a 400.
+        try:
+            k = resolve_masked_value(k, existing.get("api_key"), mask_secret(existing.get("api_key")), "api_key")
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        updates["api_key"] = k.strip() if k else existing.get("api_key")
 
     try:
         updated = db.update_lidarr_settings(updates)
         lidarr_library.invalidate()  # URL / key may have changed: never serve the old server's cached library
         invalidate_add_defaults()  # ...nor its cached root-folder defaults
         masked = _mask_lidarr_settings(updated)
-        return LidarrSettingsModel(**masked)
+        return LidarrSettingsModel(**_declared(LidarrSettingsModel, masked))
     except Exception as e:
         logger.error("Failed to update Lidarr settings: %s", redact_text(str(e)))
         raise HTTPException(
@@ -639,9 +652,20 @@ def test_lidarr_connection(
         )
 
     api_key = payload.api_key.strip()
-    if not api_key or "*" in api_key or "•" in api_key:
-        existing = db.get_lidarr_settings()
-        api_key = str(existing.get("api_key") or "")
+    existing = db.get_lidarr_settings()
+    stored_key = str(existing.get("api_key") or "")
+    # The saved key is only ever sent to the saved URL: a changed URL gets none of it.
+    same_url = clean_url.lower() == str(existing.get("url") or "").strip().rstrip("/").lower()
+    if same_url:
+        try:
+            api_key = resolve_masked_value(api_key, stored_key, mask_secret(stored_key), "api_key") or stored_key
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    elif MASK_MARKER in api_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The URL changed: enter the API key again instead of keeping the saved one",
+        )
 
     try:
         client = LidarrClient(base_url=clean_url, api_key=api_key)
@@ -675,7 +699,7 @@ class MediaServerSettingsPayload(BaseModel):
     api_key: str = Field("", max_length=1024)
 
 
-class MediaServerSettingsResponse(BaseModel):
+class MediaServerSettingsResponse(ApiModel):
     type: str
     url: str
     username: str
@@ -685,7 +709,7 @@ class MediaServerSettingsResponse(BaseModel):
     locked_by_env: bool
 
 
-class MediaServerTestResponse(BaseModel):
+class MediaServerTestResponse(ApiModel):
     ok: bool
     message: str
 
@@ -814,7 +838,7 @@ def get_general_settings(
 ) -> GeneralSettingsModel:
     """Retrieves general system settings including application URL."""
     settings = db.get_general_settings()
-    return GeneralSettingsModel(**settings)
+    return GeneralSettingsModel(**_declared(GeneralSettingsModel, settings))
 
 
 @router.post(
@@ -841,7 +865,7 @@ def update_general_settings(
 
     try:
         updated = db.update_general_settings(updates)
-        return GeneralSettingsModel(**updated)
+        return GeneralSettingsModel(**_declared(GeneralSettingsModel, updated))
     except Exception as e:
         logger.error("Failed to update general settings: %s", redact_text(str(e)))
         raise HTTPException(
@@ -855,11 +879,11 @@ def update_general_settings(
 # -----------------------------------------------------------------------------
 
 
-class ApiKeyResponse(BaseModel):
+class ApiKeyResponse(ApiModel):
     api_key: str
 
 
-class ApiKeyRegenerateResponse(BaseModel):
+class ApiKeyRegenerateResponse(ApiModel):
     api_key: str
     message: str = "API key successfully regenerated"
 
@@ -900,7 +924,7 @@ def regenerate_api_key(
 # -----------------------------------------------------------------------------
 
 
-class LibraryManagerModel(BaseModel):
+class LibraryManagerModel(ApiModel):
     mode: Literal["native", "lidarr"]
     lidarr_configured: bool
     native_configured: bool
@@ -1018,6 +1042,8 @@ def get_lidarr_defaults(
 
 @router.get(
     "/lidarr/options",
+    response_model=LidarrOptionsResponse,
+    response_model_exclude_unset=True,
     summary="Live Lidarr Root Folders, Profiles and Tags (Admin Only)",
     dependencies=[Depends(require_core_tier)],
 )

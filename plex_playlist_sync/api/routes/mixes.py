@@ -18,6 +18,12 @@ from plex_playlist_sync.api.dependencies import (
     get_discovery_client,
     get_media_client,
 )
+from plex_playlist_sync.api.schemas.mixes import (
+    MixConfig,
+    MixGenerateResponse,
+    MixPreviewResponse,
+    MixResult,
+)
 from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.config import Config
@@ -168,7 +174,7 @@ def _run_generation(
             _generating.discard(mix_id)
 
 
-@router.get("")
+@router.get("", response_model=list[MixConfig], response_model_exclude_unset=True)
 def list_mixes(
     user_id: Optional[str] = None,
     db: Database = Depends(get_db),
@@ -177,7 +183,7 @@ def list_mixes(
     return [_public(r) for r in db.list_mix_configs(_target_user(current_user, user_id))]
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=MixConfig, response_model_exclude_unset=True, status_code=status.HTTP_201_CREATED)
 def create_mix(
     body: MixCreateBody,
     user_id: Optional[str] = None,
@@ -231,7 +237,7 @@ def _create(
     return _public(row)
 
 
-@router.put("/{mix_id}")
+@router.put("/{mix_id}", response_model=MixConfig, response_model_exclude_unset=True)
 def update_mix(
     mix_id: str,
     body: MixUpdateBody,
@@ -270,7 +276,7 @@ def delete_mix(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{mix_id}/preview")
+@router.post("/{mix_id}/preview", response_model=MixPreviewResponse, response_model_exclude_unset=True)
 def preview_mix(
     mix_id: str,
     db: Database = Depends(get_db),
@@ -287,7 +293,7 @@ def preview_mix(
     return {"tracks": [{"artist": t.artist, "title": t.title, "album": t.album, "origin": t.origin} for t in tracks]}
 
 
-@router.post("/{mix_id}/generate", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/{mix_id}/generate", response_model=MixGenerateResponse, response_model_exclude_unset=True, status_code=status.HTTP_202_ACCEPTED)
 def generate_mix(
     mix_id: str,
     background_tasks: BackgroundTasks,
@@ -337,7 +343,7 @@ def generate_mix(
     return {"status": "queued"}
 
 
-@router.get("/{mix_id}/result")
+@router.get("/{mix_id}/result", response_model=MixResult, response_model_exclude_unset=True)
 def get_mix_result(
     mix_id: str,
     db: Database = Depends(get_db),

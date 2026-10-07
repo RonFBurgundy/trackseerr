@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { RefreshCw, Plus, Play, ExternalLink, Trash2, FileText, Link as LinkIcon, Loader2 } from 'lucide-react';
+import { RefreshCw, Plus, Play, Trash2, FileText, Link as LinkIcon, Loader2 } from 'lucide-react';
 import type { Playlist, User } from '@/types/models';
+import type { ImportPlaylistPayload } from '@/services/playlistService';
 import type { MediaServerType } from '@/types/mediaServer';
 import {
   TabStrip,
@@ -23,10 +24,10 @@ import { NoMediaServerNote } from '@/components/mediaServer';
 export interface PlaylistsViewProps {
   playlists: Playlist[];
   users: User[];
-  currentUserId?: number;
+  currentUserId?: string;
   onSync: () => Promise<void>;
   onToggleTarget: (playlistId: number | string, userIds: string[]) => Promise<void>;
-  onImport: (payload: { name: string; source_type: string; source_url?: string; tracks?: string[] }) => Promise<void>;
+  onImport: (payload: ImportPlaylistPayload) => Promise<void>;
   onToggleActive?: (playlistId: number | string, active: boolean) => Promise<void>;
   onSetMonitorMode?: (playlist: Playlist, mode: ListMonitorMode) => Promise<void>;
   onDelete?: (playlistId: number | string) => Promise<void>;
@@ -81,7 +82,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   };
 
   const handleTargetClick = async (playlist: Playlist, userIdStr: string) => {
-    const existing = playlist.target_user_ids.map(String);
+    const existing = playlist.targets;
     const updated = existing.includes(userIdStr)
       ? existing.filter((id) => id !== userIdStr)
       : [...existing, userIdStr];
@@ -90,27 +91,18 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
 
   const handleImportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!playlistName.trim()) return;
+    if (importTab === 'paste' && !playlistName.trim()) return;
 
     setIsSubmittingImport(true);
     try {
       if (importTab === 'link') {
-        const sourceType = playlistUrl.includes('deezer') ? 'deezer' : 'spotify';
-        await onImport({
-          name: playlistName.trim(),
-          source_type: sourceType,
-          source_url: playlistUrl.trim(),
-        });
+        await onImport({ source: 'link', url: playlistUrl.trim() });
       } else {
         const tracks = pastedTracks
           .split('\n')
           .map((l) => l.trim())
           .filter(Boolean);
-        await onImport({
-          name: playlistName.trim(),
-          source_type: 'csv',
-          tracks,
-        });
+        await onImport({ source: 'tracks', name: playlistName.trim(), tracks });
       }
       setIsImportModalOpen(false);
       setPlaylistName('');
@@ -189,11 +181,11 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
               <div>
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <span className="px-2 py-0.5 rounded-[2px] bg-[#1a1a1a] border border-[#2a2a2a] text-[10px] font-mono uppercase text-neutral-300">
-                    {pl.source_type}
+                    {pl.service}
                   </span>
                   {onToggleActive && (
                     <TactileSwitch
-                      checked={pl.is_active}
+                      checked={pl.enabled}
                       onChange={(val) => onToggleActive(pl.id, val)}
                       ariaLabel={`Playlist ${pl.name} active`}
                     />
@@ -205,14 +197,12 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                 </h4>
 
                 <div className="flex items-center gap-3 text-xs text-neutral-400 font-mono mt-2">
-                  <span>{pl.track_count ?? 0} tracks</span>
-                  <span>&middot;</span>
-                  <span>{pl.matched_count ?? 0} matched</span>
+                  <span>{pl.sync_status}</span>
                 </div>
 
-                {pl.last_synced && (
+                {pl.last_synced_at && (
                   <p className="text-[10px] text-neutral-500 font-mono mt-1">
-                    Last sync: {new Date(pl.last_synced).toLocaleString()}
+                    Last sync: {new Date(pl.last_synced_at).toLocaleString()}
                   </p>
                 )}
               </div>
@@ -229,7 +219,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                     id={`pl-mode-${pl.id}`}
                     compact
                     allowedModes={isAdmin ? LIST_MONITOR_MODES : NON_ADMIN_MONITOR_MODES}
-                    value={pl.monitor_mode ?? 'track'}
+                    value={pl.monitor_mode}
                     onChange={(m) => void onSetMonitorMode(pl, m)}
                   />
                 </div>
@@ -249,7 +239,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                   <div className="flex flex-wrap gap-1.5">
                     {targetUsers.map((u) => {
                       const uIdStr = String(u.id);
-                      const isTarget = pl.target_user_ids.map(String).includes(uIdStr);
+                      const isTarget = pl.targets.includes(uIdStr);
                       const canEdit = isAdmin || u.id === currentUserId;
 
                       return (
@@ -264,7 +254,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                               : 'bg-[#121212] border border-[#222222] text-neutral-500 hover:text-neutral-300'
                           } ${!canEdit ? 'cursor-default opacity-80' : 'cursor-pointer'}`}
                         >
-                          {u.plex_username}
+                          {u.username}
                         </button>
                       );
                     })}
@@ -273,21 +263,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
               )}
 
               {/* Actions */}
-              <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
-                {pl.source_url ? (
-                  <a
-                    href={pl.source_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white"
-                  >
-                    <ExternalLink className="h-3 w-3" />
-                    <span>View Source</span>
-                  </a>
-                ) : (
-                  <span />
-                )}
-
+              <div className="flex items-center justify-end pt-2 border-t border-[#1f1f1f]">
                 {isAdmin && onDelete && (
                   <ConfirmDangerButton
                     onConfirm={() => onDelete(pl.id)}
@@ -338,7 +314,8 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
           </TabStrip>
 
           <form onSubmit={handleImportSubmit} className="space-y-4">
-            <div>
+            {importTab === 'paste' && (
+              <div>
               <label
                 htmlFor="import-playlist-name"
                 className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1"
@@ -355,7 +332,8 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                 placeholder="e.g. Synthwave Night Drive"
                 className="w-full bg-[#0d0d0d] border border-[#2a2a2a] rounded-[3px] px-3 py-2 text-sm text-white focus:outline-none focus:border-[#e5a00d]"
               />
-            </div>
+              </div>
+            )}
 
             {importTab === 'link' && (
               <div>

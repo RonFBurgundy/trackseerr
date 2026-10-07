@@ -20,6 +20,13 @@ from plex_playlist_sync.api.dependencies import (
     require_admin,
     require_user,
 )
+from plex_playlist_sync.api.schemas.requests import (
+    BatchCreatedResponse,
+    RequestDeleted,
+    RequestListResponse,
+    RequestRecord,
+    RetryResult,
+)
 from plex_playlist_sync.clients.core_client import CoreClient
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.config import Config
@@ -64,7 +71,7 @@ class BatchCreateMusicRequestBody(BaseModel):
     artist: Optional[str] = Field(default=None, max_length=512)
 
 
-@router.get("")
+@router.get("", response_model=RequestListResponse, response_model_exclude_unset=True)
 def list_requests(
     status_filter: Optional[str] = Query(default=None, alias="status"),
     db: Database = Depends(get_db),
@@ -76,7 +83,7 @@ def list_requests(
     return {"requests": requests, "count": len(requests)}
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED, response_model=RequestRecord, response_model_exclude_unset=True)
 def create_request(
     body: CreateMusicRequestBody,
     db: Database = Depends(get_db),
@@ -146,7 +153,7 @@ def create_request(
     return created
 
 
-@router.post("/batch", status_code=status.HTTP_201_CREATED)
+@router.post("/batch", status_code=status.HTTP_201_CREATED, response_model=BatchCreatedResponse, response_model_exclude_unset=True)
 def create_batch_requests(
     body: BatchCreateMusicRequestBody,
     db: Database = Depends(get_db),
@@ -278,7 +285,7 @@ def _actor_id(user: dict[str, Any]) -> Optional[str]:
     return str(uid) if uid and uid != "api_key_user" else None
 
 
-@router.post("/{request_id}/approve")
+@router.post("/{request_id}/approve", response_model=RequestRecord, response_model_exclude_unset=True)
 def approve_request(
     request_id: str,
     db: Database = Depends(get_db),
@@ -345,7 +352,7 @@ def approve_request(
     return res_req
 
 
-@router.post("/{request_id}/reject")
+@router.post("/{request_id}/reject", response_model=RequestRecord, response_model_exclude_unset=True)
 def reject_request(
     request_id: str,
     db: Database = Depends(get_db),
@@ -367,7 +374,7 @@ def reject_request(
     return res_req
 
 
-@router.delete("/{request_id}")
+@router.delete("/{request_id}", response_model=RequestDeleted, response_model_exclude_unset=True)
 def delete_request(
     request_id: str,
     db: Database = Depends(get_db),
@@ -425,7 +432,7 @@ def delete_request(
     return {"status": "deleted", "id": request_id}
 
 
-@router.post("/{request_id}/retry")
+@router.post("/{request_id}/retry", response_model=RetryResult, response_model_exclude_unset=True)
 def retry_request(
     request_id: str,
     db: Database = Depends(get_db),

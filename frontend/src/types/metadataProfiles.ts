@@ -1,3 +1,4 @@
+import type { Narrow, Schema } from './apiSchema';
 /**
  * Native-library metadata profiles (optional, off by default). A profile only shapes AUTOMATIC monitoring: it never
  * hides a release from the catalog and never blocks a manual monitor or request.
@@ -61,21 +62,9 @@ export const RELEASE_SECONDARY_LABELS: Readonly<Record<ReleaseSecondaryType, str
   'field recording': 'Field recording',
 };
 
-export interface MetadataProfile {
-  id: number;
-  name: string;
-  primary_types: ReleasePrimaryType[];
-  secondary_types: ReleaseSecondaryType[];
-  /** How many artists use this profile. */
-  artist_count: number;
-  created_at?: string;
-  updated_at?: string;
-}
+export type MetadataProfile = Narrow<Schema<'MetadataProfile'>, { primary_types: ReleasePrimaryType[]; secondary_types: ReleaseSecondaryType[] }>;
 
-export interface MetadataProfileList {
-  profiles: MetadataProfile[];
-  default_profile_id: number | null;
-}
+export type MetadataProfileList = Narrow<Schema<'MetadataProfilesResponse'>, { profiles: MetadataProfile[] }>;
 
 export interface MetadataProfileInput {
   name: string;
@@ -83,25 +72,11 @@ export interface MetadataProfileInput {
   secondary_types: ReleaseSecondaryType[];
 }
 
-export interface MetadataProfileDeleteResult {
-  deleted: number;
-  artists_cleared: number;
-}
+export type MetadataProfileDeleteResult = Schema<'MetadataProfileDeleteResponse'>;
 
-/** Dry run of applying a profile to an artist's existing albums and tracks. */
-export interface MetadataProfileWouldChange {
-  albums_to_monitor: number;
-  albums_to_unmonitor: number;
-  tracks_to_monitor: number;
-  tracks_to_unmonitor: number;
-}
+export type MetadataProfileWouldChange = Schema<'MetadataProfileChange'>;
 
-/** `{matching, total}` release-group counts of an artist's catalog under a profile, plus the apply dry run. */
-export interface MetadataProfilePreview {
-  matching: number;
-  total: number;
-  would_change: MetadataProfileWouldChange;
-}
+export type MetadataProfilePreview = Schema<'MetadataProfilePreview'>;
 
 /** Editor target: an existing profile, or `'new'` for a blank one. */
 export type ReleaseOrNew = MetadataProfile | 'new';

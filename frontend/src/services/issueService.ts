@@ -1,3 +1,4 @@
+import type { Schema } from '@/types/apiSchema';
 import { apiRequest } from './apiClient';
 import type {
   CreateIssuePayload,
@@ -31,7 +32,7 @@ export async function createIssue(payload: CreateIssuePayload): Promise<Issue> {
 }
 
 export async function getUnreadIssueCount(signal?: AbortSignal): Promise<number> {
-  const res = await apiRequest<{ count: number }>('/api/issues/unread-count', { signal });
+  const res = await apiRequest<Schema<'IssueCount'>>('/api/issues/unread-count', { signal });
   return res.count;
 }
 

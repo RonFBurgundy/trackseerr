@@ -161,6 +161,56 @@ def mask_secret(secret: Optional[str], visible_chars: int = 4) -> str:
     return (mask_char * (len(secret) - visible_chars)) + secret[-visible_chars:]
 
 
+def _mask_url_credentials(url: str) -> str:
+    """Keep scheme://host[:port] visible and fully mask userinfo, path and query (tokens live there).
+
+    No trailing characters are revealed. The output is deterministic, so a client echoing it back
+    can be recognised by exact comparison with ``_mask_url_credentials(stored)``.
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+        port = f":{parts.port}" if parts.port else ""
+    except ValueError:
+        return mask_secret(url, visible_chars=0)
+    if not parts.scheme or not host:
+        return mask_secret(url, visible_chars=0)
+    if ":" in host:  # IPv6 literal: urlsplit strips the brackets
+        host = f"[{host}]"
+    base = f"{parts.scheme}://{host}{port}"
+    rest = url.split("://", 1)[1][len(parts.netloc) :]
+    has_userinfo = bool(parts.username or parts.password)
+    if has_userinfo:
+        return f"{base}/{mask_secret(rest.lstrip('/') or 'xxx', visible_chars=0)}"
+    if rest in ("", "/"):
+        return base + rest
+    return base + mask_secret(rest, visible_chars=0)
+
+
+MASK_MARKER = "•••"
+
+
+def resolve_masked_value(submitted: Any, stored: Any, masked_stored: Any, field: str = "value") -> Any:
+    """Decide what to persist for a field a client echoed back.
+
+    * ``submitted`` exactly equals the masked form of ``stored`` -> the client did not touch it; keep ``stored``.
+    * Otherwise the submitted value is taken, unless it still contains the mask marker: that is a
+      half-edited placeholder, rejected with ``ValueError`` rather than silently stored or reverted.
+    """
+    if not isinstance(submitted, str):
+        return submitted
+    if isinstance(stored, str) and stored and submitted == masked_stored:
+        return stored
+    if MASK_MARKER in submitted:
+        raise ValueError(
+            f"'{field}' contains a masked placeholder that does not match the stored value; "
+            "enter the full value or leave it unchanged"
+        )
+    return submitted
+
+
 def mask_channel_config(channel_type: str, config: dict[str, Any]) -> dict[str, Any]:
     """Masks sensitive credentials in notification channel configuration."""
     if not isinstance(config, dict):
@@ -170,11 +220,7 @@ def mask_channel_config(channel_type: str, config: dict[str, Any]) -> dict[str, 
     if ctype == "discord":
         url = c.get("webhook_url")
         if url and isinstance(url, str):
-            parts = url.rstrip("/").rsplit("/", 1)
-            if len(parts) == 2 and "webhooks" in parts[0]:
-                c["webhook_url"] = f"{parts[0]}/{mask_secret(parts[1])}"
-            else:
-                c["webhook_url"] = mask_secret(url)
+            c["webhook_url"] = _mask_url_credentials(url)
     elif ctype == "telegram":
         if c.get("bot_token"):
             c["bot_token"] = mask_secret(str(c["bot_token"]))
@@ -186,6 +232,10 @@ def mask_channel_config(channel_type: str, config: dict[str, Any]) -> dict[str, 
         if c.get("token"):
             c["token"] = mask_secret(str(c["token"]))
     elif ctype == "webhook":
+        for url_key in ("webhook_url", "url"):
+            wurl = c.get(url_key)
+            if wurl and isinstance(wurl, str):
+                c[url_key] = _mask_url_credentials(wurl)
         if c.get("secret_header"):
             c["secret_header"] = mask_secret(str(c["secret_header"]))
         if c.get("secret"):

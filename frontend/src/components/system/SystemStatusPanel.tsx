@@ -4,7 +4,9 @@ import { MachinedCard } from '@/components/ui';
 import { RequestPortalCard } from '@/components/deployment';
 import { useSystemOverview } from '@/hooks/useSystemOverview';
 import { useMediaServer } from '@/hooks/useMediaServer';
+import { formatBytes } from '@/components/lists/formatters';
 import type { LibraryManagerMode, LidarrHealthItem } from '@/types/models';
+import { formatDuration } from './formatters';
 
 export interface SystemStatusPanelProps {
   isCore: boolean;
@@ -18,9 +20,32 @@ const HEALTH_STYLE: Record<LidarrHealthItem['type'], string> = {
   error: 'text-red-300 border-red-800/50 bg-red-950/40',
 };
 
+const StatusRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+  <div className="py-2.5 flex justify-between gap-3">
+    <span className="text-neutral-400">{label}</span>
+    {children}
+  </div>
+);
+
+/** Worker heartbeats are free-form dicts on the wire; read one boolean key defensively. */
+function flag(heartbeat: Record<string, unknown>, key: string): boolean {
+  return heartbeat[key] === true;
+}
+
+const WorkerState: React.FC<{ running: boolean; runningLabel?: string; idleLabel?: string }> = ({
+  running,
+  runningLabel = 'Running',
+  idleLabel = 'Stopped',
+}) => (
+  <span className={running ? 'text-green-400' : 'text-neutral-500'}>{running ? runningLabel : idleLabel}</span>
+);
+
 export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, libraryMode }) => {
   const { status, statusError, lidarrHealth, healthError, isLoading } = useSystemOverview(libraryMode === 'lidarr');
   const mediaServer = useMediaServer();
+  const mediaConnected = mediaServer.isPlex ? Boolean(status?.plex.online) : Boolean(mediaServer.status?.connected);
+  const clientsOnline = status?.download_clients.filter((c) => c.online).length ?? 0;
+  const indexersOnline = status?.indexers.filter((i) => i.online).length ?? 0;
 
   return (
     <div className="space-y-6">
@@ -40,32 +65,60 @@ export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, li
         )}
         {status && (
           <div className="divide-y divide-[#1f1f1f] text-xs font-mono">
-            <div className="py-2.5 flex justify-between gap-3">
-              <span className="text-neutral-400">TrackSeerr Version:</span>
-              <span className="text-white">{status.version || '1.0.0'}</span>
-            </div>
-            <div className="py-2.5 flex justify-between gap-3">
-              <span className="text-neutral-400">Database Engine:</span>
-              <span className="text-green-400">{status.database_status || 'SQLite OK'}</span>
-            </div>
-            <div className="py-2.5 flex justify-between gap-3">
-              <span className="text-neutral-400">
-                {mediaServer.isPlex ? 'Plex Server Connection:' : 'Media Server:'}
+            <StatusRow label="TrackSeerr Version:">
+              <span className="text-white">{status.environment.version}</span>
+            </StatusRow>
+            <StatusRow label="Role:">
+              <span className="text-white">{status.environment.role}</span>
+            </StatusRow>
+            <StatusRow label="Uptime:">
+              <span className="text-white">{formatDuration(status.environment.uptime_seconds * 1000)}</span>
+            </StatusRow>
+            <StatusRow label="Runtime:">
+              <span className="text-white text-right break-words">
+                Python {status.environment.python_version} &middot; {status.environment.platform}
               </span>
-              <span className={mediaServer.isPlex ? (status.plex_connected ? 'text-green-400' : 'text-neutral-400') : mediaServer.status?.connected ? 'text-green-400' : 'text-neutral-400'}>
-                {!mediaServer.hasMediaServer
-                  ? 'Not configured'
-                  : (mediaServer.isPlex ? status.plex_connected : mediaServer.status?.connected)
-                    ? 'Connected'
-                    : 'Configured'}
+            </StatusRow>
+            <StatusRow label="Database:">
+              <span className="text-green-400">
+                SQLite {status.database.sqlite_version} &middot; {formatBytes(status.database.size_bytes)}
               </span>
-            </div>
-            <div className="py-2.5 flex justify-between gap-3">
-              <span className="text-neutral-400">Lidarr Connection:</span>
-              <span className={status.lidarr_connected ? 'text-green-400' : 'text-neutral-500'}>
-                {status.lidarr_connected ? 'Connected' : 'Standalone Mode'}
+            </StatusRow>
+            <StatusRow label={mediaServer.isPlex ? 'Plex Server Connection:' : 'Media Server:'}>
+              <span className={mediaConnected ? 'text-green-400' : 'text-neutral-400'}>
+                {!mediaServer.hasMediaServer ? 'Not configured' : mediaConnected ? 'Connected' : 'Configured'}
               </span>
-            </div>
+            </StatusRow>
+            <StatusRow label="Download Clients:">
+              <span className={clientsOnline > 0 ? 'text-green-400' : 'text-neutral-500'}>
+                {status.download_clients.length === 0
+                  ? 'None configured'
+                  : `${clientsOnline} of ${status.download_clients.length} online`}
+              </span>
+            </StatusRow>
+            <StatusRow label="Indexers:">
+              <span className={indexersOnline > 0 ? 'text-green-400' : 'text-neutral-500'}>
+                {status.indexers.length === 0
+                  ? 'None configured'
+                  : `${indexersOnline} of ${status.indexers.length} online`}
+              </span>
+            </StatusRow>
+            <StatusRow label="Acquisition Worker:">
+              <WorkerState running={flag(status.workers.acquisition_worker, 'running')} />
+            </StatusRow>
+            <StatusRow label="Lidarr Worker:">
+              <WorkerState running={flag(status.workers.lidarr_worker, 'running')} />
+            </StatusRow>
+            <StatusRow label="Playlist Sync:">
+              <WorkerState running={flag(status.workers.sync_coordinator, 'is_syncing')} idleLabel="Idle" runningLabel="Syncing" />
+            </StatusRow>
+            {status.storage.map((d) => (
+              <StatusRow key={d.path} label={`${d.label}:`}>
+                <span className="text-white text-right">
+                  {formatBytes(d.used_bytes)} / {formatBytes(d.total_bytes)} ({Math.round(d.percent_used)}%)
+                </span>
+              </StatusRow>
+            ))}
           </div>
         )}
       </MachinedCard>

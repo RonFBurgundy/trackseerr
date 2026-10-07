@@ -1,3 +1,4 @@
+import type { Narrow, Schema } from './apiSchema';
 import type { MonitorOption } from './monitoring';
 
 /** How far a list item is escalated when applied. Shared by import lists and synced playlists. */
@@ -21,20 +22,9 @@ export const LIST_MONITOR_MODE_HELP: Readonly<Record<ListMonitorMode, string>> =
 
 export type ProviderFieldType = 'text' | 'secret' | 'select' | 'number';
 
-export interface ProviderField {
-  key: string;
-  label: string;
-  type: ProviderFieldType;
-  required: boolean;
-  options?: string[];
-}
+export type ProviderField = Narrow<Schema<'ProviderField'>, { type: ProviderFieldType }>;
 
-export interface ProviderMeta {
-  provider: string;
-  label: string;
-  sources: string[];
-  fields: ProviderField[];
-}
+export type ProviderMeta = Narrow<Schema<'ProviderMeta'>, { fields: ProviderField[] }>;
 
 export type ImportListConfig = Record<string, string | number>;
 
@@ -54,54 +44,18 @@ export interface ImportListInput {
 
 export type ImportListStatus = 'ok' | 'error';
 
-export interface ImportListItemCounts {
-  applied: number;
-  pending: number;
-  unresolved: number;
-  failed: number;
-  skipped: number;
-}
+export type ImportListItemCounts = Schema<'ImportListItemCounts'>;
 
-export interface ImportList extends ImportListInput {
-  id: string;
-  last_synced_at: string | null;
-  last_status: ImportListStatus | null;
-  last_error: string | null;
-  item_counts: ImportListItemCounts;
-  created_at: string;
-  updated_at: string;
-}
+export type ImportList = Narrow<Schema<'ImportList'>, { config: ImportListConfig; item_counts: ImportListItemCounts; tags: string[]; monitor_mode: ListMonitorMode; artist_monitor_option: MonitorOption | null; quality_profile_id: string | null; last_status: ImportListStatus | null; last_error: string | null; last_synced_at: string | null }>;
 
 export type ImportListItemKind = 'artist' | 'album' | 'track';
 export type ImportListItemStatus = 'pending' | 'applied' | 'unresolved' | 'skipped' | 'failed';
 
-export interface ImportListItemOut {
-  /** 0 for test-sample rows, which are not stored. */
-  id: number;
-  kind: ImportListItemKind;
-  mbid: string | null;
-  artist_name: string;
-  album_title: string;
-  track_title: string;
-  status: ImportListItemStatus;
-  applied_level: ListMonitorMode | null;
-  error: string | null;
-  /** Null for test-sample rows. */
-  first_seen_at: string | null;
-  last_seen_at: string | null;
-}
+export type ImportListItemOut = Narrow<Schema<'ImportListItemOut'>, { kind: ImportListItemKind; status: ImportListItemStatus; applied_level?: ListMonitorMode | null }>;
 
-export interface ImportListItemsPage {
-  items: ImportListItemOut[];
-  total: number;
-}
+export type ImportListItemsPage = Narrow<Schema<'ImportListItemsPage'>, { items: ImportListItemOut[] }>;
 
-export interface ImportListTestResult {
-  ok: boolean;
-  item_count: number;
-  sample: ImportListItemOut[];
-  error: string | null;
-}
+export type ImportListTestResult = Narrow<Schema<'ImportListTestResult'>, { sample: ImportListItemOut[] }>;
 
 /** Placeholder the server returns for stored secrets; sending it back keeps the stored value. */
 export const SECRET_MASK = '********';

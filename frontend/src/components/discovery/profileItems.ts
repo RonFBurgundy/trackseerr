@@ -5,6 +5,7 @@ import type {
   DiscoveryItem,
   DiscoveryStatus,
 } from '@/types/models';
+import { isDiscoveryStatus } from '@/types/models';
 
 /** Statuses meaning the release is already (at least partly) in the library. */
 export function isOwnedStatus(status: DiscoveryStatus | undefined): boolean {
@@ -17,11 +18,11 @@ export function isPendingStatus(status: DiscoveryStatus | undefined): boolean {
 
 /** Status to display: a request made this session wins over a stale `missing`/`none`/`partial`/`rejected` from the server. */
 export function effectiveStatus(
-  status: DiscoveryStatus | undefined,
+  status: string | null | undefined,
   id: string,
   requestedIds: ReadonlySet<string>
 ): DiscoveryStatus {
-  const base = status ?? 'none';
+  const base: DiscoveryStatus = isDiscoveryStatus(status) ? status : 'none';
   if (requestedIds.has(id) && !isOwnedStatus(base) && base !== 'processing') return 'requested';
   return base;
 }

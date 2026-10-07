@@ -7,13 +7,15 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from plex_playlist_sync.api.response_models import ApiModel
 
 from plex_playlist_sync.api.dependencies import get_db, require_admin
+from plex_playlist_sync.api.schemas.download_clients import DeletedResponse
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver
 from plex_playlist_sync.download_roots import describe_client_roots
 from plex_playlist_sync.models import DownloadClientConfig, DownloadDriverType
-from plex_playlist_sync.security import is_safe_service_url, mask_secret
+from plex_playlist_sync.security import is_safe_service_url, mask_secret, resolve_masked_value
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -21,7 +23,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-class DownloadClientItem(BaseModel):
+class DownloadClientItem(ApiModel):
     id: str
     name: str
     driver_type: str
@@ -64,7 +66,7 @@ class TestConnectionPayload(BaseModel):
     extra_settings_json: Optional[str] = None
 
 
-class TestConnectionResponse(BaseModel):
+class TestConnectionResponse(ApiModel):
     success: bool
     message: str
 
@@ -131,7 +133,7 @@ def list_download_clients(
     return [_mask_client_dict(c) for c in clients]
 
 
-class DownloadRootsItem(BaseModel):
+class DownloadRootsItem(ApiModel):
     client_id: str
     name: str
     roots: list[str]
@@ -178,16 +180,19 @@ def create_or_update_download_client(
 
     # Preserve secret if masked or omitted during edit
     api_key = payload.api_key
-    if api_key and "•••" in api_key and existing:
-        api_key = existing.get("api_key")
-    elif not api_key and existing:
-        api_key = existing.get("api_key")
-
     password = payload.password
-    if password and "•••" in password and existing:
-        password = existing.get("password")
-    elif not password and existing:
-        password = existing.get("password")
+    if existing:
+        try:
+            api_key = resolve_masked_value(api_key, existing.get("api_key"), mask_secret(existing.get("api_key")), "api_key")
+            password = resolve_masked_value(password, existing.get("password"), mask_secret(existing.get("password")), "password")
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        if not api_key:
+            api_key = existing.get("api_key")
+        if not password:
+            password = existing.get("password")
+    elif (api_key and "•••" in api_key) or (password and "•••" in password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Masked placeholder submitted for a new client; enter the full value")
 
     extra_settings = _normalize_extra_settings(
         payload.extra_settings_json,
@@ -250,7 +255,7 @@ def test_download_client_connection(
         return TestConnectionResponse(success=False, message=f"Connection failed: {redact_text(str(e))}")
 
 
-@router.delete("/{client_id}", summary="Delete download client")
+@router.delete("/{client_id}", response_model=DeletedResponse, response_model_exclude_unset=True, summary="Delete download client")
 def delete_download_client(
     client_id: str,
     db: Database = Depends(get_db),

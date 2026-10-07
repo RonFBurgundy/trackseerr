@@ -76,7 +76,7 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
                   {t.title}
                 </button>
               ) : (
-                <span className="text-sm text-neutral-200 min-w-0 flex-1 truncate" title={t.title}>
+                <span className="text-sm text-neutral-200 min-w-0 flex-1 truncate" title={t.title ?? undefined}>
                   {t.title}
                 </span>
               )}
@@ -95,7 +95,7 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
                     {t.monitored ? 'Monitored' : 'Unmonitored'}
                   </span>
                   <TactileSwitch
-                    checked={t.monitored}
+                    checked={t.monitored === true}
                     onChange={() => onToggleMonitored(t.id, t.monitored === true)}
                     ariaLabel={`Monitor ${t.title}`}
                   />
@@ -107,7 +107,7 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
       })}
     </div>
     {historyTrack && (
-      <ItemHistoryModal isOpen onClose={() => setHistoryTrack(null)} entity="track" entityId={String(historyTrack.id)} title={historyTrack.title} />
+      <ItemHistoryModal isOpen onClose={() => setHistoryTrack(null)} entity="track" entityId={String(historyTrack.id)} title={historyTrack.title ?? ''} />
     )}
     </>
   );

@@ -1,3 +1,4 @@
+import type { Schema } from '@/types/apiSchema';
 import { ApiError, apiRequest, getAuthToken } from './apiClient';
 import type {
   ItunesCommitRequest,
@@ -29,8 +30,8 @@ export async function previewItunesImport(file: File): Promise<ItunesPreview> {
   return data as ItunesPreview;
 }
 
-export async function commitItunesImport(importId: string, req: ItunesCommitRequest): Promise<{ job_id: string }> {
-  return apiRequest<{ job_id: string }>(`${BASE}/${encodeURIComponent(importId)}/commit`, {
+export async function commitItunesImport(importId: string, req: ItunesCommitRequest): Promise<Schema<'ItunesCommitResponse'>> {
+  return apiRequest<Schema<'ItunesCommitResponse'>>(`${BASE}/${encodeURIComponent(importId)}/commit`, {
     method: 'POST',
     body: req,
   });

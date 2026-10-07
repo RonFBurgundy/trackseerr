@@ -5195,6 +5195,36 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AccountResponse */
+        AccountResponse: {
+            /** Auth Type */
+            auth_type: string;
+            auto_approve: components["schemas"]["AutoApprove"];
+            /** Id */
+            id: string;
+            /** Mfa Enabled */
+            mfa_enabled: boolean;
+            /** Mfa Required */
+            mfa_required: boolean;
+            quotas: components["schemas"]["QuotaSnapshot"];
+            /** Recovery Codes Remaining */
+            recovery_codes_remaining: number;
+            /** Username */
+            username: string;
+        };
+        /** AccountSettings */
+        AccountSettings: {
+            /** Default Quota Albums */
+            default_quota_albums: number;
+            /** Default Quota Discographies */
+            default_quota_discographies: number;
+            /** Default Quota Tracks */
+            default_quota_tracks: number;
+            /** Default Quota Window Days */
+            default_quota_window_days: number;
+            /** Require Mfa Local */
+            require_mfa_local: boolean;
+        };
         /** AccountSettingsBody */
         AccountSettingsBody: {
             /** Default Quota Albums */
@@ -5218,6 +5248,13 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** ActionResult */
+        ActionResult: {
+            /** Message */
+            message: string;
+            /** Success */
+            success: boolean;
+        };
         /** AddAlbumToCollectionRequest */
         AddAlbumToCollectionRequest: {
             /** Album Id */
@@ -5232,6 +5269,17 @@ export interface components {
         AddItemsRequest: {
             /** Track Rating Keys */
             track_rating_keys: string[];
+        };
+        /** AdminQuotaValues */
+        AdminQuotaValues: {
+            /** Albums */
+            albums?: number | null;
+            /** Discographies */
+            discographies?: number | null;
+            /** Tracks */
+            tracks?: number | null;
+            /** Window Days */
+            window_days?: number | null;
         };
         /** AdminScrobbleConfigUpdate */
         AdminScrobbleConfigUpdate: {
@@ -5249,6 +5297,52 @@ export interface components {
              */
             unlink_lastfm: boolean;
         };
+        /** AdminUser */
+        AdminUser: {
+            /** Auth Type */
+            auth_type: string;
+            /** Created At */
+            created_at?: string | null;
+            /** Disabled */
+            disabled: boolean;
+            /** Email */
+            email?: string | null;
+            /** Id */
+            id: string;
+            /** Is Admin */
+            is_admin: boolean;
+            /** Last Login At */
+            last_login_at?: string | null;
+            /** Mfa Enabled */
+            mfa_enabled: boolean;
+            /** Permissions */
+            permissions: number;
+            quotas: components["schemas"]["AdminUserQuotas"];
+            usage: components["schemas"]["AdminUserUsage"];
+            /** Username */
+            username: string;
+        };
+        /** AdminUserAck */
+        AdminUserAck: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+        };
+        /** AdminUserQuotas */
+        AdminUserQuotas: {
+            effective: components["schemas"]["AdminQuotaValues"];
+            overrides: components["schemas"]["AdminQuotaValues"];
+        };
+        /** AdminUserUsage */
+        AdminUserUsage: {
+            /** Albums */
+            albums: number;
+            /** Discographies */
+            discographies: number;
+            /** Tracks */
+            tracks: number;
+        };
         /** AlbumBulkEditRequest */
         AlbumBulkEditRequest: {
             /** Album Ids */
@@ -5265,6 +5359,28 @@ export interface components {
             cascade_tracks: boolean;
             /** Monitored */
             monitored: boolean;
+        };
+        /** AlbumsPage */
+        AlbumsPage: {
+            /** Mode */
+            mode: string;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Records */
+            records: components["schemas"]["LibraryAlbumRecord"][];
+            /** Sort Dir */
+            sort_dir: string;
+            /** Sort Key */
+            sort_key: string;
+            /** Total */
+            total: number;
+        };
+        /** AlbumsUpdatedResponse */
+        AlbumsUpdatedResponse: {
+            /** Albums Updated */
+            albums_updated: number;
         };
         /** ApiKeyRegenerateResponse */
         ApiKeyRegenerateResponse: {
@@ -5321,6 +5437,25 @@ export interface components {
             /** Monitored */
             monitored: boolean;
         };
+        /** ArtistProfileResponse */
+        ArtistProfileResponse: {
+            artist: components["schemas"]["ProfileArtist"];
+            discography: components["schemas"]["ProfileDiscography"];
+            library?: components["schemas"]["ProfileLibrary"] | null;
+            /** Top Tracks */
+            top_tracks: components["schemas"]["ProfileTopTrack"][];
+        };
+        /** ArtistRefreshResponse */
+        ArtistRefreshResponse: {
+            /** Artist Id */
+            artist_id?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Refreshed At */
+            refreshed_at?: string | null;
+            /** Success */
+            success: boolean;
+        };
         /** ArtistTagsRequest */
         ArtistTagsRequest: {
             /**
@@ -5336,6 +5471,55 @@ export interface components {
             /** Tags */
             tags: number[];
         };
+        /** ArtistsPage */
+        ArtistsPage: {
+            /** Mode */
+            mode: string;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Records */
+            records: components["schemas"]["LibraryArtistRecord"][];
+            /** Sort Dir */
+            sort_dir: string;
+            /** Sort Key */
+            sort_key: string;
+            /** Total */
+            total: number;
+        };
+        /** AuthUrl */
+        AuthUrl: {
+            /** Url */
+            url: string;
+        };
+        /** AutoApprove */
+        AutoApprove: {
+            /** Albums */
+            albums: boolean;
+            /** Discographies */
+            discographies: boolean;
+            /** Tracks */
+            tracks: boolean;
+        };
+        /** AvailabilityResponse */
+        AvailabilityResponse: {
+            /** File Count */
+            file_count: number;
+            /** In Library */
+            in_library: boolean;
+            /** Monitored */
+            monitored: boolean;
+            /** Quality */
+            quality?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "available" | "partial" | "cutoff_unmet" | "missing" | "none";
+            /** Track Count */
+            track_count: number;
+        };
         /**
          * BatchCreateMusicRequestBody
          * @description Up to 50 requests. ``kind="discography"`` (with ``artist``) makes it one discography request.
@@ -5348,6 +5532,98 @@ export interface components {
             /** Requests */
             requests: components["schemas"]["CreateMusicRequestBody"][];
         };
+        /** BatchCreatedResponse */
+        BatchCreatedResponse: {
+            /** Count */
+            count: number;
+            /** Created */
+            created: components["schemas"]["RequestRecord"][];
+        };
+        /** BlocklistEntry */
+        BlocklistEntry: {
+            /** Album */
+            album?: string | null;
+            /** Artist */
+            artist?: string | null;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Indexer */
+            indexer?: string | null;
+            /** Info Hash */
+            info_hash?: string | null;
+            /** Protocol */
+            protocol?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Release Guid */
+            release_guid?: string | null;
+            /** Source Title */
+            source_title: string;
+        };
+        /** BlocklistPage */
+        BlocklistPage: {
+            /** Mode */
+            mode: string;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Records */
+            records: components["schemas"]["BlocklistRecord"][];
+            /** Sort Dir */
+            sort_dir: string;
+            /** Sort Key */
+            sort_key: string;
+            /** Total */
+            total: number;
+        };
+        /** BlocklistRecord */
+        BlocklistRecord: {
+            /** Album */
+            album?: string | null;
+            /** Artist */
+            artist?: string | null;
+            /** Date */
+            date?: string | null;
+            /** Id */
+            id: string;
+            /** Indexer */
+            indexer?: string | null;
+            /** Protocol */
+            protocol?: string | null;
+            /** Quality */
+            quality?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Release Title */
+            release_title?: string | null;
+            /** Source */
+            source: string;
+            /** Title */
+            title?: string | null;
+        };
+        /** BlocklistRemovedResponse */
+        BlocklistRemovedResponse: {
+            /** Message */
+            message: string;
+            /** Success */
+            success: boolean;
+        };
+        /** BulkArtistsResult */
+        BulkArtistsResult: {
+            /** Albums Monitored */
+            albums_monitored: number;
+            /** Albums Unmonitored */
+            albums_unmonitored: number;
+            /** Artists Updated */
+            artists_updated: number;
+            /** Tags Added */
+            tags_added?: number | null;
+            /** Tags Removed */
+            tags_removed?: number | null;
+        };
         /** ChangePasswordRequest */
         ChangePasswordRequest: {
             /** Current Password */
@@ -5355,10 +5631,42 @@ export interface components {
             /** New Password */
             new_password: string;
         };
+        /** ChangePasswordResponse */
+        ChangePasswordResponse: {
+            /** Reissue Session */
+            reissue_session?: boolean | null;
+            /** Session Floor Us */
+            session_floor_us?: number | null;
+            /** Status */
+            status: string;
+        };
         /** CodeRequest */
         CodeRequest: {
             /** Code */
             code: string;
+        };
+        /** CollectionAlbumResponse */
+        CollectionAlbumResponse: {
+            /** Album Id */
+            album_id: string;
+            /** Collection Id */
+            collection_id: string;
+            /** Success */
+            success: boolean;
+        };
+        /** CollectionDeleteResponse */
+        CollectionDeleteResponse: {
+            /** Id */
+            id: string;
+            /** Success */
+            success: boolean;
+        };
+        /** CommandResponse */
+        CommandResponse: {
+            /** Message */
+            message?: string | null;
+            /** Success */
+            success: boolean;
         };
         /** CommentBody */
         CommentBody: {
@@ -5513,6 +5821,62 @@ export interface components {
              */
             forward_url?: string | null;
         };
+        /** CreatedAdminUser */
+        CreatedAdminUser: {
+            /** Invite Url */
+            invite_url: string;
+            user: components["schemas"]["AdminUser"];
+        };
+        /** CurrentUserProfile */
+        CurrentUserProfile: {
+            /** Active Request Count */
+            active_request_count: number;
+            /** Active Requests */
+            active_requests: number;
+            /** Created At */
+            created_at?: string | null;
+            /** Email */
+            email?: string | null;
+            /** Id */
+            id: string;
+            /** Is Admin */
+            is_admin: boolean;
+            /** Permissions */
+            permissions: number;
+            /** Quota Limit */
+            quota_limit: number;
+            quotas: components["schemas"]["QuotaSnapshot"];
+            /** Remaining Quota */
+            remaining_quota: number;
+            /** Request Limit Days */
+            request_limit_days: number;
+            /** Request Limit Quota */
+            request_limit_quota?: number | null;
+            /** Rolling Days */
+            rolling_days: number;
+            /** Tier */
+            tier: string;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Username */
+            username: string;
+        };
+        /** CustomFormatImportError */
+        CustomFormatImportError: {
+            /** Errors */
+            errors: string[];
+            /** Index */
+            index: number;
+            /** Name */
+            name?: string | null;
+        };
+        /** CustomFormatImportResponse */
+        CustomFormatImportResponse: {
+            /** Errors */
+            errors: components["schemas"]["CustomFormatImportError"][];
+            /** Imported */
+            imported: components["schemas"]["ImportedCustomFormat"][];
+        };
         /** CustomFormatPayload */
         CustomFormatPayload: {
             /**
@@ -5593,7 +5957,7 @@ export interface components {
             bypass_if_above_score?: number | null;
             /** Bypass If Highest Quality */
             bypass_if_highest_quality: boolean;
-            delays: components["schemas"]["DelaysModel"];
+            delays: components["schemas"]["DelaysResponse"];
             /** Id */
             id: number;
             /** Is Default */
@@ -5625,10 +5989,235 @@ export interface components {
              */
             usenet: number;
         };
+        /** DelaysResponse */
+        DelaysResponse: {
+            /** Soulseek */
+            soulseek: number;
+            /** Torrent */
+            torrent: number;
+            /** Usenet */
+            usenet: number;
+        };
         /** DeleteAdminUserBody */
         DeleteAdminUserBody: {
             /** Confirm Username */
             confirm_username: string;
+        };
+        /** DiscoveryAlbumDetail */
+        DiscoveryAlbumDetail: {
+            /** Album */
+            album?: string | null;
+            /** Album Discovery Id */
+            album_discovery_id?: string | null;
+            /** Artist */
+            artist?: string | null;
+            /** Artist Discovery Id */
+            artist_discovery_id?: string | null;
+            /** Artist Id */
+            artist_id?: string | null;
+            /** Cover Url */
+            cover_url?: string | null;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /** Genres */
+            genres?: string[] | null;
+            /** Id */
+            id: string;
+            /** Item Type */
+            item_type?: string | null;
+            /** Label */
+            label?: string | null;
+            /** Library Artist Id */
+            library_artist_id?: string | null;
+            /** Preview Url */
+            preview_url?: string | null;
+            /** Quality */
+            quality?: string | null;
+            /** Record Type */
+            record_type?: string | null;
+            /** Release Date */
+            release_date?: string | null;
+            /** Request Id */
+            request_id?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Title */
+            title: string;
+            /** Track Count */
+            track_count?: number | null;
+            /** Tracks */
+            tracks: components["schemas"]["DiscoveryAlbumTrack"][];
+        };
+        /** DiscoveryAlbumTrack */
+        DiscoveryAlbumTrack: {
+            /** Album */
+            album?: string | null;
+            /** Album Discovery Id */
+            album_discovery_id?: string | null;
+            /** Artist */
+            artist?: string | null;
+            /** Artist Discovery Id */
+            artist_discovery_id?: string | null;
+            /** Cover Url */
+            cover_url?: string | null;
+            /** Disc Number */
+            disc_number?: number | null;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /** Id */
+            id: string;
+            /** Item Type */
+            item_type?: string | null;
+            /** Library Artist Id */
+            library_artist_id?: string | null;
+            /** Preview Url */
+            preview_url?: string | null;
+            /** Quality */
+            quality?: string | null;
+            /** Record Type */
+            record_type?: string | null;
+            /** Release Date */
+            release_date?: string | null;
+            /** Request Id */
+            request_id?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Title */
+            title: string;
+            /** Track Count */
+            track_count?: number | null;
+            /** Track Number */
+            track_number?: number | null;
+        };
+        /** DiscoveryArtistDetail */
+        DiscoveryArtistDetail: {
+            /** Albums */
+            albums: components["schemas"]["DiscoveryItem"][];
+            /** Compilations */
+            compilations: components["schemas"]["DiscoveryItem"][];
+            /** Id */
+            id: string;
+            /** Image Url */
+            image_url?: string | null;
+            /** Name */
+            name: string;
+            /** Nb Album */
+            nb_album?: number | null;
+            /** Nb Fan */
+            nb_fan?: number | null;
+            /** Singles Eps */
+            singles_eps: components["schemas"]["DiscoveryItem"][];
+        };
+        /**
+         * DiscoveryItem
+         * @description A discovery track or album (also the discography entries of an artist).
+         */
+        DiscoveryItem: {
+            /** Album */
+            album?: string | null;
+            /** Album Discovery Id */
+            album_discovery_id?: string | null;
+            /** Artist */
+            artist?: string | null;
+            /** Artist Discovery Id */
+            artist_discovery_id?: string | null;
+            /** Cover Url */
+            cover_url?: string | null;
+            /** Id */
+            id: string;
+            /** Item Type */
+            item_type?: string | null;
+            /** Library Artist Id */
+            library_artist_id?: string | null;
+            /** Preview Url */
+            preview_url?: string | null;
+            /** Quality */
+            quality?: string | null;
+            /** Record Type */
+            record_type?: string | null;
+            /** Release Date */
+            release_date?: string | null;
+            /** Request Id */
+            request_id?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Title */
+            title: string;
+            /** Track Count */
+            track_count?: number | null;
+        };
+        /** DiscoveryListResponse */
+        DiscoveryListResponse: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["DiscoveryItem"][];
+        };
+        /** DiscoverySearchResponse */
+        DiscoverySearchResponse: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["DiscoveryItem"][];
+            /** Query */
+            query: string;
+            /** Type */
+            type: string;
+        };
+        /** DiscoveryTrackDetail */
+        DiscoveryTrackDetail: {
+            /** Album */
+            album?: string | null;
+            /** Album Discovery Id */
+            album_discovery_id?: string | null;
+            /** Artist */
+            artist?: string | null;
+            /** Artist Discovery Id */
+            artist_discovery_id?: string | null;
+            /** Bpm */
+            bpm?: number | null;
+            /** Contributors */
+            contributors?: components["schemas"]["TrackContributor"][] | null;
+            /** Cover Url */
+            cover_url?: string | null;
+            /** Disk Number */
+            disk_number?: number | null;
+            /** Duration */
+            duration?: number | null;
+            /** Explicit */
+            explicit?: boolean | null;
+            /** Gain */
+            gain?: number | null;
+            /** Genres */
+            genres?: string[] | null;
+            /** Id */
+            id: string;
+            /** Isrc */
+            isrc?: string | null;
+            /** Item Type */
+            item_type?: string | null;
+            /** Label */
+            label?: string | null;
+            /** Library Artist Id */
+            library_artist_id?: string | null;
+            /** Preview Url */
+            preview_url?: string | null;
+            /** Quality */
+            quality?: string | null;
+            /** Record Type */
+            record_type?: string | null;
+            /** Release Date */
+            release_date?: string | null;
+            /** Request Id */
+            request_id?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Title */
+            title: string;
+            /** Track Count */
+            track_count?: number | null;
+            /** Track Position */
+            track_position?: number | null;
         };
         /** DiskUsageItem */
         DiskUsageItem: {
@@ -5814,10 +6403,85 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /**
+         * ExportedCustomFormat
+         * @description Lidarr/Servarr-schema JSON (camelCase key is the external schema).
+         */
+        ExportedCustomFormat: {
+            /** Includecustomformatwhenrenaming */
+            includeCustomFormatWhenRenaming: boolean;
+            /** Name */
+            name: string;
+            /** Specifications */
+            specifications: components["schemas"]["ExportedSpecification"][];
+        };
+        /** ExportedSpecification */
+        ExportedSpecification: {
+            /** Fields */
+            fields: {
+                [key: string]: unknown;
+            };
+            /** Implementation */
+            implementation: string;
+            /** Name */
+            name: string;
+            /** Negate */
+            negate: boolean;
+            /** Required */
+            required: boolean;
+        };
+        /** FeaturedChart */
+        FeaturedChart: {
+            /** Category */
+            category: string;
+            /** Description */
+            description: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Poster Url */
+            poster_url: string;
+            /** Service */
+            service: string;
+            /** Url Or Id */
+            url_or_id: string;
+        };
+        /** FingerprintLibraryTrack */
+        FingerprintLibraryTrack: {
+            /** Album Id */
+            album_id?: string | null;
+            /** Artist */
+            artist?: string | null;
+            /** Id */
+            id: string;
+            /** Title */
+            title?: string | null;
+        };
+        /** FingerprintMatch */
+        FingerprintMatch: {
+            /** Artist */
+            artist?: string | null;
+            /** Recording Id */
+            recording_id: string;
+            /** Score */
+            score: number;
+            /** Title */
+            title?: string | null;
+        };
         /** FingerprintRequest */
         FingerprintRequest: {
             /** File Path */
             file_path: string;
+        };
+        /** FingerprintResponse */
+        FingerprintResponse: {
+            fingerprint?: components["schemas"]["FingerprintMatch"] | null;
+            library_track?: components["schemas"]["FingerprintLibraryTrack"] | null;
+            /** Message */
+            message?: string | null;
+            /** Success */
+            success: boolean;
         };
         /** FlagsRequest */
         FlagsRequest: {
@@ -5826,8 +6490,25 @@ export interface components {
             /** Owner */
             owner?: ("user" | "trackseerr") | null;
         };
+        /** FormatDeletedResponse */
+        FormatDeletedResponse: {
+            /** Id */
+            id: number;
+            /** Status */
+            status: string;
+        };
         /** FormatItemModel */
         FormatItemModel: {
+            /** Format Id */
+            format_id: number;
+            /**
+             * Score
+             * @default 0
+             */
+            score: number;
+        };
+        /** FormatItemResponse */
+        FormatItemResponse: {
             /** Format Id */
             format_id: number;
             /**
@@ -5870,6 +6551,25 @@ export interface components {
             /** Version */
             version: string;
         };
+        /** GatewayStatus */
+        GatewayStatus: {
+            /** Active Sessions */
+            active_sessions?: number | null;
+            /** Configured */
+            configured: boolean;
+            /** Last Seen At */
+            last_seen_at?: string | null;
+            /** Protocol */
+            protocol?: number | null;
+            /** Public Url */
+            public_url?: string | null;
+            /** State */
+            state: string;
+            /** Version */
+            version?: string | null;
+            /** Version Match */
+            version_match?: boolean | null;
+        };
         /** GeneralSettingsModel */
         GeneralSettingsModel: {
             /**
@@ -5889,10 +6589,135 @@ export interface components {
              */
             application_url?: string | null;
         };
+        /** GrabResponse */
+        GrabResponse: {
+            /** Client */
+            client: string;
+            /** Download Id */
+            download_id: string;
+            /** Message */
+            message: string;
+            /** Success */
+            success: boolean;
+        };
+        /**
+         * GrabResult
+         * @description ``acquisition_coordinator.search_and_grab`` result: success carries the download, failures a message.
+         */
+        GrabResult: {
+            /** Candidates Count */
+            candidates_count?: number | null;
+            /** Client */
+            client?: string | null;
+            /** Delayed */
+            delayed?: boolean | null;
+            /** Download Hash */
+            download_hash?: string | null;
+            /** Download Id */
+            download_id?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Mode Changed */
+            mode_changed?: boolean | null;
+            /** Pending Id */
+            pending_id?: number | null;
+            /** Reason */
+            reason?: string | null;
+            /** Release */
+            release?: string | null;
+            /** Release At */
+            release_at?: string | null;
+            /** Retryable */
+            retryable?: boolean | null;
+            /** Score */
+            score?: number | null;
+            /** Success */
+            success: boolean;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HeartbeatResponse */
+        HeartbeatResponse: {
+            /** Ok */
+            ok: boolean;
+            /** Protocol */
+            protocol: number;
+            /** Version */
+            version: string;
+        };
+        /** HelloResponse */
+        HelloResponse: {
+            /** Instance Id */
+            instance_id: string;
+            /** Protocol */
+            protocol: number;
+            /** Role */
+            role: string;
+            /** Version */
+            version: string;
+        };
+        /**
+         * HistoryIndexResponse
+         * @description Scrubber groups; ``empty_index`` (Lidarr mode) is the same shape with no groups.
+         */
+        HistoryIndexResponse: {
+            /** Groups */
+            groups: components["schemas"]["IndexGroup"][];
+            /** Sort Dir */
+            sort_dir: string;
+            /** Sort Key */
+            sort_key: string;
+            /** Total */
+            total: number;
+        };
+        /** HistoryPage */
+        HistoryPage: {
+            /** Mode */
+            mode: string;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Records */
+            records: components["schemas"]["HistoryRecord"][];
+            /** Sort Dir */
+            sort_dir: string;
+            /** Sort Key */
+            sort_key: string;
+            /** Total */
+            total: number;
+        };
+        /** HistoryRecord */
+        HistoryRecord: {
+            /** Album */
+            album?: string | null;
+            /** Artist */
+            artist?: string | null;
+            /** Can Mark Failed */
+            can_mark_failed: boolean;
+            /** Client */
+            client?: string | null;
+            /** Date */
+            date?: string | null;
+            /** Event */
+            event?: string | null;
+            /** Id */
+            id: string;
+            /** Indexer */
+            indexer?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Quality */
+            quality?: string | null;
+            /** Release Title */
+            release_title?: string | null;
+            /** Source */
+            source: string;
+            /** Title */
+            title?: string | null;
         };
         /** ImportList */
         ImportList: {
@@ -5938,6 +6763,13 @@ export interface components {
             tags?: string[];
             /** Updated At */
             updated_at: string;
+        };
+        /** ImportListDeleted */
+        ImportListDeleted: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
         };
         /** ImportListInput */
         ImportListInput: {
@@ -6046,6 +6878,11 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** ImportListQueued */
+        ImportListQueued: {
+            /** Queued */
+            queued: boolean;
+        };
         /** ImportListTestResult */
         ImportListTestResult: {
             /** Error */
@@ -6059,6 +6896,45 @@ export interface components {
             ok: boolean;
             /** Sample */
             sample?: components["schemas"]["ImportListItemOut"][];
+        };
+        /**
+         * ImportedCustomFormat
+         * @description A stored custom format plus the import outcome (``created`` or ``updated``).
+         */
+        ImportedCustomFormat: {
+            /** Action */
+            action: string;
+            /** Created At */
+            created_at?: string | null;
+            /** Id */
+            id: number;
+            /**
+             * Include In Rename
+             * @default false
+             */
+            include_in_rename: boolean;
+            /** Name */
+            name: string;
+            /** Specifications */
+            specifications: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Unsupported
+             * @default false
+             */
+            unsupported: boolean;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** IndexGroup */
+        IndexGroup: {
+            /** Count */
+            count: number;
+            /** Label */
+            label: string;
+            /** Offset */
+            offset: number;
         };
         /** IndexerItem */
         IndexerItem: {
@@ -6160,6 +7036,86 @@ export interface components {
             root_folder?: string | null;
         };
         /**
+         * IngestArtistResponse
+         * @description The artist (native row, or the Lidarr stub ``{id, artist_name, mode}``) plus what the ingest did.
+         */
+        IngestArtistResponse: {
+            /** Added At */
+            added_at?: string | null;
+            /** Album Count */
+            album_count?: number | null;
+            /** Albums */
+            albums?: components["schemas"]["LibraryAlbumRecord"][] | null;
+            /** Albums Ingested */
+            albums_ingested: number;
+            /** Already Existed */
+            already_existed?: boolean | null;
+            /** Art Version */
+            art_version?: string | null;
+            /** Artist Name */
+            artist_name?: string | null;
+            /** Banner Url */
+            banner_url?: string | null;
+            /** Bio */
+            bio?: string | null;
+            /** Clean Name */
+            clean_name?: string | null;
+            /** Country */
+            country?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Discovery Id */
+            discovery_id?: string | null;
+            /** Foreign Artist Id */
+            foreign_artist_id?: string | null;
+            /** Genres */
+            genres?: string | string[] | null;
+            /** Id */
+            id: string;
+            /** Image Url */
+            image_url?: string | null;
+            /** Mbid */
+            mbid?: string | null;
+            /** Metadata Json */
+            metadata_json?: string | null;
+            /** Metadata Profile Id */
+            metadata_profile_id?: number | null;
+            /** Mode */
+            mode?: string | null;
+            /** Monitor Option */
+            monitor_option?: string | null;
+            /** Monitored */
+            monitored?: boolean | null;
+            /** Name */
+            name?: string | null;
+            /** Path */
+            path?: string | null;
+            /** Pending Profile Recompute */
+            pending_profile_recompute?: number | null;
+            /** Quality Profile Id */
+            quality_profile_id?: string | null;
+            /** Size Bytes */
+            size_bytes?: number | null;
+            /** Sort Name */
+            sort_name?: string | null;
+            /** Source */
+            source?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Tags */
+            tags?: number[] | null;
+            /** Total Track Count */
+            total_track_count?: number | null;
+            /** Track Count */
+            track_count?: number | null;
+            /** Track File Count */
+            track_file_count?: number | null;
+            /** Tracks Ingested */
+            tracks_ingested: number;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
          * InteractiveReleaseItem
          * @description Candidate release item enriched with quality evaluation, scoring, and source metadata.
          */
@@ -6247,6 +7203,39 @@ export interface components {
             /** Password */
             password: string;
         };
+        /** InviteAcceptedResponse */
+        InviteAcceptedResponse: {
+            /** Status */
+            status: string;
+            /** Username */
+            username: string;
+        };
+        /** InviteInfoResponse */
+        InviteInfoResponse: {
+            /** Expires At */
+            expires_at?: string | null;
+            /** Purpose */
+            purpose: string;
+            /** Username */
+            username: string;
+        };
+        /**
+         * IssueCount
+         * @description ``unread-count`` (count) and ``open-count`` (count plus ``in_progress``, admin only).
+         */
+        IssueCount: {
+            /** Count */
+            count: number;
+            /** In Progress */
+            in_progress?: number | null;
+        };
+        /** IssueDeleted */
+        IssueDeleted: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+        };
         /**
          * IssueResponse
          * @description Issue as returned to the viewer. Responses are built from a per-role whitelist and serialised with
@@ -6299,6 +7288,13 @@ export interface components {
             /** Username */
             username?: string | null;
         };
+        /** IssueSeen */
+        IssueSeen: {
+            /** Id */
+            id: string;
+            /** Unread */
+            unread: boolean;
+        };
         /**
          * IssueStatus
          * @enum {string}
@@ -6309,6 +7305,560 @@ export interface components {
          * @enum {string}
          */
         IssueType: "audio_quality" | "corrupted_file" | "wrong_release" | "missing_tracks" | "incorrect_tags" | "request_stuck" | "other";
+        /** ItemHistoryEvent */
+        ItemHistoryEvent: {
+            /** Actor Display */
+            actor_display: string;
+            /** Album Id */
+            album_id?: string | null;
+            /**
+             * Album Title
+             * @default
+             */
+            album_title: string;
+            /** Artist Id */
+            artist_id?: string | null;
+            /**
+             * Artist Name
+             * @default
+             */
+            artist_name: string;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Details
+             * @default {}
+             */
+            details: {
+                [key: string]: unknown;
+            };
+            /** Event */
+            event: string;
+            /** Id */
+            id: number;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /** Track Id */
+            track_id?: string | null;
+            /**
+             * Track Title
+             * @default
+             */
+            track_title: string;
+            /** Trigger */
+            trigger?: string | null;
+            /** Trigger Label */
+            trigger_label?: string | null;
+        };
+        /** ItemHistoryOrigin */
+        ItemHistoryOrigin: {
+            /** Actor Display */
+            actor_display: string;
+            /** Created At */
+            created_at?: string | null;
+            /** Trigger */
+            trigger?: string | null;
+            /** Trigger Label */
+            trigger_label?: string | null;
+        };
+        /** ItemHistoryResponse */
+        ItemHistoryResponse: {
+            /**
+             * Entity
+             * @enum {string}
+             */
+            entity: "artist" | "album" | "track";
+            /** Entity Id */
+            entity_id: string;
+            /** Events */
+            events: components["schemas"]["ItemHistoryEvent"][];
+            /** Next Before */
+            next_before?: number | null;
+            origin?: components["schemas"]["ItemHistoryOrigin"] | null;
+        };
+        /** ItunesCommitResponse */
+        ItunesCommitResponse: {
+            /** Job Id */
+            job_id: string;
+        };
+        /** ItunesImportStatus */
+        ItunesImportStatus: {
+            /**
+             * Done
+             * @default 0
+             */
+            done: number;
+            /** Error */
+            error?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+            play_stats?: components["schemas"]["ItunesPlayStats"] | null;
+            /** Playlists */
+            playlists: components["schemas"]["ItunesJobPlaylist"][];
+            /** State */
+            state: string;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /** ItunesJobPlaylist */
+        ItunesJobPlaylist: {
+            /** Created Playlist Id */
+            created_playlist_id?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Key */
+            key: string;
+            /**
+             * Matched
+             * @default 0
+             */
+            matched: number;
+            /**
+             * Missing
+             * @default 0
+             */
+            missing: number;
+            /** Name */
+            name: string;
+            /** State */
+            state: string;
+            /** Updated */
+            updated?: boolean | null;
+        };
+        /** ItunesPlayStats */
+        ItunesPlayStats: {
+            /** Applied */
+            applied: boolean;
+            /** Note */
+            note?: string | null;
+            /** Requested */
+            requested: boolean;
+        };
+        /** ItunesPreviewPlaylist */
+        ItunesPreviewPlaylist: {
+            /** Is Smart */
+            is_smart: boolean;
+            /** Item Count */
+            item_count: number;
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+        };
+        /** ItunesPreviewResponse */
+        ItunesPreviewResponse: {
+            /** Import Id */
+            import_id: string;
+            /** Playlists */
+            playlists: components["schemas"]["ItunesPreviewPlaylist"][];
+            skipped: components["schemas"]["ItunesSkipped"];
+            /** Suggested Mappings */
+            suggested_mappings: components["schemas"]["ItunesSuggestedMapping"][];
+            /** Track Count */
+            track_count: number;
+        };
+        /** ItunesSkipped */
+        ItunesSkipped: {
+            /**
+             * Builtin
+             * @default 0
+             */
+            builtin: number;
+            /**
+             * Empty
+             * @default 0
+             */
+            empty: number;
+            /**
+             * Folders
+             * @default 0
+             */
+            folders: number;
+        };
+        /** ItunesSuggestedMapping */
+        ItunesSuggestedMapping: {
+            /** From */
+            from: string;
+            /** Sample Matches */
+            sample_matches: number;
+            /** To */
+            to: string;
+        };
+        /** JobQueueSnapshot */
+        JobQueueSnapshot: {
+            /** Queued */
+            queued: components["schemas"]["JobRecord"][];
+            /** Recent */
+            recent: components["schemas"]["JobRecord"][];
+            /** Running */
+            running: components["schemas"]["JobRecord"][];
+        };
+        /** JobRecord */
+        JobRecord: {
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Id */
+            id: string;
+            /** Message */
+            message?: string | null;
+            /** Name */
+            name: string;
+            /** Started At */
+            started_at?: string | null;
+            /** State */
+            state: string;
+            /** Task Id */
+            task_id: string;
+        };
+        /**
+         * LibraryAlbumRecord
+         * @description A library album (native row plus enrichments, or Lidarr's mapped album).
+         */
+        LibraryAlbumRecord: {
+            /** Added At */
+            added_at?: string | null;
+            /** Album Type */
+            album_type?: string | null;
+            /** Art Version */
+            art_version?: string | null;
+            /** Artist Id */
+            artist_id?: string | null;
+            /** Artist Name */
+            artist_name?: string | null;
+            /** Clean Title */
+            clean_title?: string | null;
+            /** Cover Url */
+            cover_url?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Foreign Album Id */
+            foreign_album_id?: string | null;
+            /** Genres */
+            genres?: string | null;
+            /** Id */
+            id: string;
+            /** In Profile */
+            in_profile?: boolean | null;
+            /** Mb Release Group Id */
+            mb_release_group_id?: string | null;
+            /** Mb Release Id */
+            mb_release_id?: string | null;
+            /** Mbid */
+            mbid?: string | null;
+            /** Monitored */
+            monitored?: boolean | null;
+            /** Order Index */
+            order_index?: number | null;
+            /** Path */
+            path?: string | null;
+            /** Release Date */
+            release_date?: string | null;
+            /** Secondary Types */
+            secondary_types?: string[] | null;
+            /** Size Bytes */
+            size_bytes?: number | null;
+            /** Sort Title */
+            sort_title?: string | null;
+            /** Source */
+            source?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Total Tracks */
+            total_tracks?: number | null;
+            /** Track Count */
+            track_count?: number | null;
+            /** Track File Count */
+            track_file_count?: number | null;
+            /** Tracks */
+            tracks?: components["schemas"]["LibraryTrackRecord"][] | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Year */
+            year?: number | null;
+        };
+        /** LibraryArtistRecord */
+        LibraryArtistRecord: {
+            /** Added At */
+            added_at?: string | null;
+            /** Album Count */
+            album_count?: number | null;
+            /** Albums */
+            albums?: components["schemas"]["LibraryAlbumRecord"][] | null;
+            /** Art Version */
+            art_version?: string | null;
+            /** Banner Url */
+            banner_url?: string | null;
+            /** Bio */
+            bio?: string | null;
+            /** Clean Name */
+            clean_name?: string | null;
+            /** Country */
+            country?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Discovery Id */
+            discovery_id?: string | null;
+            /** Foreign Artist Id */
+            foreign_artist_id?: string | null;
+            /** Genres */
+            genres?: string | string[] | null;
+            /** Id */
+            id: string;
+            /** Image Url */
+            image_url?: string | null;
+            /** Mbid */
+            mbid?: string | null;
+            /** Metadata Json */
+            metadata_json?: string | null;
+            /** Metadata Profile Id */
+            metadata_profile_id?: number | null;
+            /** Monitor Option */
+            monitor_option?: string | null;
+            /** Monitored */
+            monitored?: boolean | null;
+            /** Name */
+            name: string;
+            /** Path */
+            path?: string | null;
+            /** Pending Profile Recompute */
+            pending_profile_recompute?: number | null;
+            /** Quality Profile Id */
+            quality_profile_id?: string | null;
+            /** Size Bytes */
+            size_bytes?: number | null;
+            /** Sort Name */
+            sort_name?: string | null;
+            /** Source */
+            source?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Tags */
+            tags?: number[] | null;
+            /** Total Track Count */
+            total_track_count?: number | null;
+            /** Track Count */
+            track_count?: number | null;
+            /** Track File Count */
+            track_file_count?: number | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** LibraryCollectionRecord */
+        LibraryCollectionRecord: {
+            /**
+             * Album Count
+             * @default 0
+             */
+            album_count: number;
+            /** Albums */
+            albums?: components["schemas"]["LibraryAlbumRecord"][] | null;
+            /** Clean Name */
+            clean_name?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Foreign Id */
+            foreign_id?: string | null;
+            /** Id */
+            id: string;
+            /** Monitored */
+            monitored?: boolean | null;
+            /** Name */
+            name: string;
+            /** Poster Url */
+            poster_url?: string | null;
+            /**
+             * Preview Covers
+             * @default []
+             */
+            preview_covers: string[];
+            /** Summary */
+            summary?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * LibraryFileRecord
+         * @description A track's file. Native: a ``library_files`` row. Lidarr: ``{id, file_path, size_bytes, quality}``.
+         */
+        LibraryFileRecord: {
+            /** Bitrate */
+            bitrate?: number | null;
+            /** Bits Per Sample */
+            bits_per_sample?: number | null;
+            /** Codec */
+            codec?: string | null;
+            /** Cutoff Met */
+            cutoff_met?: boolean | null;
+            /** Date Added */
+            date_added?: string | null;
+            /** File Path */
+            file_path?: string | null;
+            /** Id */
+            id: string;
+            /** Quality */
+            quality?: string | null;
+            /** Quality Name */
+            quality_name?: string | null;
+            /** Relative Path */
+            relative_path?: string | null;
+            /** Sample Rate */
+            sample_rate?: number | null;
+            /** Size Bytes */
+            size_bytes?: number | null;
+            /** Track Id */
+            track_id?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** LibraryHealthCount */
+        LibraryHealthCount: {
+            /** Count */
+            count: number;
+        };
+        /** LibraryHealthDismissed */
+        LibraryHealthDismissed: {
+            /** Dismissed */
+            dismissed: boolean;
+            /** Removed */
+            removed: number;
+        };
+        /** LibraryHealthFinding */
+        LibraryHealthFinding: {
+            /** Cause */
+            cause: string;
+            /** Detail */
+            detail?: unknown | null;
+            /** First Seen */
+            first_seen: string;
+            /** Group Key */
+            group_key: string;
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Last Seen */
+            last_seen: string;
+            /** Path */
+            path: string;
+        };
+        /** LibraryHealthGroup */
+        LibraryHealthGroup: {
+            /** Cause */
+            cause: string;
+            /** Count */
+            count: number;
+            /** Group Key */
+            group_key: string;
+            /** Kind */
+            kind: string;
+            /** Sample Path */
+            sample_path: string;
+            /** Suggestion */
+            suggestion: string;
+        };
+        /** LibraryHealthMapping */
+        LibraryHealthMapping: {
+            /** Auto */
+            auto: boolean;
+            /** Local Prefix */
+            local_prefix: string;
+            /** Server Prefix */
+            server_prefix: string;
+        };
+        /** LibraryHealthMappingResponse */
+        LibraryHealthMappingResponse: {
+            mapping?: components["schemas"]["LibraryHealthMapping"] | null;
+        };
+        /** LibraryHealthResponse */
+        LibraryHealthResponse: {
+            /** Count */
+            count: number;
+            /** Findings */
+            findings: components["schemas"]["LibraryHealthFinding"][];
+            /** Groups */
+            groups: components["schemas"]["LibraryHealthGroup"][];
+            last_run?: components["schemas"]["LibraryHealthRun"] | null;
+            mapping?: components["schemas"]["LibraryHealthMapping"] | null;
+            /** Running */
+            running: boolean;
+            server?: components["schemas"]["LibraryHealthServer"] | null;
+            /** Weekly */
+            weekly: boolean;
+        };
+        /** LibraryHealthRun */
+        LibraryHealthRun: {
+            /**
+             * Disk Files
+             * @default 0
+             */
+            disk_files: number;
+            /** Error */
+            error?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Id */
+            id: number;
+            /**
+             * Server Files
+             * @default 0
+             */
+            server_files: number;
+            /** Server Kind */
+            server_kind?: string | null;
+            /**
+             * Stale
+             * @default 0
+             */
+            stale: number;
+            /** Started At */
+            started_at: string;
+            /**
+             * Unindexed
+             * @default 0
+             */
+            unindexed: number;
+        };
+        /** LibraryHealthServer */
+        LibraryHealthServer: {
+            /** File Paths */
+            file_paths: boolean;
+            /** Kind */
+            kind: string;
+        };
+        /** LibraryHealthStarted */
+        LibraryHealthStarted: {
+            /** Started */
+            started: boolean;
+        };
+        /** LibraryHealthWeekly */
+        LibraryHealthWeekly: {
+            /** Weekly */
+            weekly: boolean;
+        };
+        /**
+         * LibraryIndexResponse
+         * @description Scrubber groups for a list. ``mode`` is only present in Lidarr mode.
+         */
+        LibraryIndexResponse: {
+            /** Groups */
+            groups: components["schemas"]["IndexGroup"][];
+            /** Mode */
+            mode?: string | null;
+            /** Sort Dir */
+            sort_dir: string;
+            /** Sort Key */
+            sort_key: string;
+            /** Total */
+            total: number;
+        };
         /** LibraryManagerModel */
         LibraryManagerModel: {
             /** Blocking Reason */
@@ -6332,6 +7882,102 @@ export interface components {
              * @enum {string}
              */
             mode: "native" | "lidarr";
+        };
+        /** LibraryStats */
+        LibraryStats: {
+            /** Album Count */
+            album_count: number;
+            /** Artist Count */
+            artist_count: number;
+            /** Continuing Artist Count */
+            continuing_artist_count?: number | null;
+            /** Cutoff Unmet Track Count */
+            cutoff_unmet_track_count?: number | null;
+            /** Ended Artist Count */
+            ended_artist_count?: number | null;
+            /** File Count */
+            file_count?: number | null;
+            /** Missing Track Count */
+            missing_track_count?: number | null;
+            /** Monitored Artist Count */
+            monitored_artist_count?: number | null;
+            /** Monitored Track Count */
+            monitored_track_count?: number | null;
+            /** Source */
+            source: string;
+            /** Total Size Bytes */
+            total_size_bytes?: number | null;
+            /** Total Track Count */
+            total_track_count?: number | null;
+            /** Track Count */
+            track_count: number;
+            /** Track File Count */
+            track_file_count?: number | null;
+            /** Unmonitored Artist Count */
+            unmonitored_artist_count?: number | null;
+        };
+        /**
+         * LibraryTrackRecord
+         * @description A library track (native row plus the list/detail enrichments, or Lidarr's mapped track).
+         */
+        LibraryTrackRecord: {
+            /** Album Id */
+            album_id?: string | null;
+            /** Album Title */
+            album_title?: string | null;
+            /** Artist Id */
+            artist_id?: string | null;
+            /** Artist Name */
+            artist_name?: string | null;
+            /** Clean Title */
+            clean_title?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Disc Number */
+            disc_number?: number | null;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            file?: components["schemas"]["LibraryFileRecord"] | null;
+            /** Foreign Track Id */
+            foreign_track_id?: string | null;
+            /** Has File */
+            has_file?: boolean | null;
+            /** Id */
+            id: string;
+            /** Isrc */
+            isrc?: string | null;
+            /** Last Searched At */
+            last_searched_at?: string | null;
+            /** Mb Recording Id */
+            mb_recording_id?: string | null;
+            /** Monitored */
+            monitored?: boolean | null;
+            /** Sort Title */
+            sort_title?: string | null;
+            /** Source */
+            source?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Track Number */
+            track_number?: number | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * LidarrConnectionStatus
+         * @description ``LidarrClient.test_connection()`` or the "not configured" stub.
+         */
+        LidarrConnectionStatus: {
+            /** App Name */
+            app_name?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Online */
+            online: boolean;
+            /** Version */
+            version?: string | null;
         };
         /** LidarrDefaultsResponse */
         LidarrDefaultsResponse: {
@@ -6358,12 +8004,89 @@ export interface components {
             /** Tags */
             tags: components["schemas"]["LidarrTagModel"][];
         };
+        /** LidarrHealthCheck */
+        LidarrHealthCheck: {
+            /** Message */
+            message: string;
+            /** Source */
+            source: string;
+            /** Type */
+            type: string;
+            /** Wiki Url */
+            wiki_url?: string | null;
+        };
+        /** LidarrHealthResponse */
+        LidarrHealthResponse: {
+            /** Health */
+            health: components["schemas"]["LidarrHealthCheck"][];
+            /** Mode */
+            mode: string;
+            /** Reachable */
+            reachable?: boolean | null;
+            /** Version */
+            version?: string | null;
+        };
+        /** LidarrNamedOption */
+        LidarrNamedOption: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
         /** LidarrNamedProfile */
         LidarrNamedProfile: {
             /** Id */
             id: number;
             /** Name */
             name: string;
+        };
+        /** LidarrOptionsResponse */
+        LidarrOptionsResponse: {
+            /** Metadata Profiles */
+            metadata_profiles: components["schemas"]["LidarrNamedOption"][];
+            /** Quality Profiles */
+            quality_profiles: components["schemas"]["LidarrNamedOption"][];
+            /** Root Folders */
+            root_folders: components["schemas"]["LidarrRootFolder"][];
+            /** Tags */
+            tags: components["schemas"]["LidarrTagOption"][];
+        };
+        /** LidarrOutcome */
+        LidarrOutcome: {
+            /** Album Id */
+            album_id?: number | null;
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * LidarrPushItemResult
+         * @description One ``LidarrClient.search_and_add_track`` result: ``added``/``already_monitored`` or a raw failure dict.
+         */
+        LidarrPushItemResult: {
+            /** Added */
+            added?: boolean | null;
+            /** Album */
+            album?: string | null;
+            /** Artist */
+            artist?: string | null;
+            /** Artist Id */
+            artist_id?: number | null;
+            /** Lidarr Id */
+            lidarr_id?: number | null;
+            /** Matched Album Ids */
+            matched_album_ids?: number[] | null;
+            /** Message */
+            message?: string | null;
+            /** Outcomes */
+            outcomes?: components["schemas"]["LidarrOutcome"][] | null;
+            /** Retry After */
+            retry_after?: number | null;
+            /** Searched */
+            searched?: boolean | null;
+            /** Status */
+            status: string;
         };
         /** LidarrPushRequest */
         LidarrPushRequest: {
@@ -6393,6 +8116,118 @@ export interface components {
              * @default false
              */
             trickle: boolean;
+        };
+        /**
+         * LidarrPushResponse
+         * @description Trickle mode reports the queue; synchronous mode reports counts and per-item results.
+         */
+        LidarrPushResponse: {
+            /** Added */
+            added?: number | null;
+            /** Already Monitored */
+            already_monitored?: number | null;
+            /** Auto Search */
+            auto_search?: boolean | null;
+            /** Deduplicated Items */
+            deduplicated_items?: number | null;
+            /** Delay Seconds */
+            delay_seconds?: number | null;
+            /** Failed */
+            failed?: number | null;
+            /** Message */
+            message?: string | null;
+            queue_status?: components["schemas"]["LidarrQueueStatus"] | null;
+            /** Queued Count */
+            queued_count?: number | null;
+            /** Results */
+            results?: components["schemas"]["LidarrPushItemResult"][] | null;
+            /** Status */
+            status: string;
+            /** Total Requested */
+            total_requested?: number | null;
+            /** Trickle */
+            trickle: boolean;
+        };
+        /** LidarrQueueAction */
+        LidarrQueueAction: {
+            /** Action Message */
+            action_message?: string | null;
+            /** Action Status */
+            action_status?: string | null;
+            /** Auto Search */
+            auto_search: boolean;
+            /** Current Album */
+            current_album?: string | null;
+            /** Current Artist */
+            current_artist?: string | null;
+            /** Delay Seconds */
+            delay_seconds: number;
+            /** Failed Items */
+            failed_items: number;
+            /** Is Paused */
+            is_paused: boolean;
+            /** Is Rate Limited */
+            is_rate_limited: boolean;
+            /** Is Running */
+            is_running: boolean;
+            /** Last Processed At */
+            last_processed_at?: string | null;
+            /** Message */
+            message: string;
+            /** Processed Items */
+            processed_items: number;
+            /** Rate Limit Seconds Remaining */
+            rate_limit_seconds_remaining: number;
+            /** Remaining Items */
+            remaining_items: number;
+            /** Started At */
+            started_at?: string | null;
+            /** Successful Items */
+            successful_items: number;
+            /** Total Items */
+            total_items: number;
+        };
+        /** LidarrQueueStatus */
+        LidarrQueueStatus: {
+            /** Auto Search */
+            auto_search: boolean;
+            /** Current Album */
+            current_album?: string | null;
+            /** Current Artist */
+            current_artist?: string | null;
+            /** Delay Seconds */
+            delay_seconds: number;
+            /** Failed Items */
+            failed_items: number;
+            /** Is Paused */
+            is_paused: boolean;
+            /** Is Rate Limited */
+            is_rate_limited: boolean;
+            /** Is Running */
+            is_running: boolean;
+            /** Last Processed At */
+            last_processed_at?: string | null;
+            /** Message */
+            message: string;
+            /** Processed Items */
+            processed_items: number;
+            /** Rate Limit Seconds Remaining */
+            rate_limit_seconds_remaining: number;
+            /** Remaining Items */
+            remaining_items: number;
+            /** Started At */
+            started_at?: string | null;
+            /** Successful Items */
+            successful_items: number;
+            /** Total Items */
+            total_items: number;
+        };
+        /** LidarrRootFolder */
+        LidarrRootFolder: {
+            /** Free Space */
+            free_space: number;
+            /** Path */
+            path: string;
         };
         /** LidarrSettingsModel */
         LidarrSettingsModel: {
@@ -6467,8 +8302,32 @@ export interface components {
             /** Url */
             url?: string | null;
         };
+        /**
+         * LidarrStatusResponse
+         * @description Native mode: only ``mode`` and ``connected`` (null). Lidarr mode: the rest.
+         */
+        LidarrStatusResponse: {
+            /** Auto Search */
+            auto_search?: boolean | null;
+            /** Configured */
+            configured?: boolean | null;
+            /** Connected */
+            connected?: boolean | null;
+            /** Mode */
+            mode?: string | null;
+            status?: components["schemas"]["LidarrConnectionStatus"] | null;
+            /** Url */
+            url?: string | null;
+        };
         /** LidarrTagModel */
         LidarrTagModel: {
+            /** Id */
+            id: number;
+            /** Label */
+            label: string;
+        };
+        /** LidarrTagOption */
+        LidarrTagOption: {
             /** Id */
             id: number;
             /** Label */
@@ -6490,6 +8349,25 @@ export interface components {
             /** Version */
             version?: string | null;
         };
+        /** Listen */
+        Listen: {
+            /** Album */
+            album?: string | null;
+            /** Artist */
+            artist: string;
+            /** Id */
+            id: number;
+            /** Lastfm Status */
+            lastfm_status: string;
+            /** Listenbrainz Status */
+            listenbrainz_status: string;
+            /** Played At */
+            played_at: string;
+            /** Source */
+            source: string;
+            /** Title */
+            title: string;
+        };
         /** LocalLoginRequest */
         LocalLoginRequest: {
             /** Password */
@@ -6500,6 +8378,60 @@ export interface components {
             totp_code?: string | null;
             /** Username */
             username: string;
+        };
+        /** LocalLoginResponse */
+        LocalLoginResponse: {
+            /** Mfa Enrollment Required */
+            mfa_enrollment_required: boolean;
+            user: components["schemas"]["LocalLoginUser"];
+        };
+        /**
+         * LocalLoginUser
+         * @description Gateway tier answers with just ``{id, username, is_admin}``; core answers with the full user record.
+         */
+        LocalLoginUser: {
+            /** Auth Type */
+            auth_type?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Disabled */
+            disabled?: boolean | null;
+            /** Email */
+            email?: string | null;
+            /** Id */
+            id: string;
+            /** Is Admin */
+            is_admin: boolean;
+            /** Permissions */
+            permissions?: number | null;
+            /** Request Limit Days */
+            request_limit_days?: number | null;
+            /** Request Limit Quota */
+            request_limit_quota?: number | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Username */
+            username: string;
+        };
+        /** LogEntry */
+        LogEntry: {
+            /** Id */
+            id: string;
+            /** Level */
+            level: string;
+            /** Message */
+            message: string;
+            /** Name */
+            name: string;
+            /** Timestamp */
+            timestamp: string;
+        };
+        /** LogoutResponse */
+        LogoutResponse: {
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
         };
         /** M3UImportRequest */
         M3UImportRequest: {
@@ -6551,6 +8483,27 @@ export interface components {
             /** Track Id */
             track_id?: string | null;
         };
+        /** ManualImportCandidateTrack */
+        ManualImportCandidateTrack: {
+            /** Album Id */
+            album_id?: string | null;
+            /** Album Title */
+            album_title?: string | null;
+            /** Artist Id */
+            artist_id?: string | null;
+            /** Artist Name */
+            artist_name?: string | null;
+            /** Disc Number */
+            disc_number?: number | null;
+            /** Has File */
+            has_file: boolean;
+            /** Id */
+            id: string;
+            /** Title */
+            title?: string | null;
+            /** Track Number */
+            track_number?: number | null;
+        };
         /** ManualImportCommitRequest */
         ManualImportCommitRequest: {
             /** Download Id */
@@ -6559,6 +8512,17 @@ export interface components {
             issue_id?: string | null;
             /** Items */
             items?: components["schemas"]["ManualImportItem"][];
+        };
+        /** ManualImportCommitResponse */
+        ManualImportCommitResponse: {
+            /** Download Cleared */
+            download_cleared: boolean;
+            /** Failed Count */
+            failed_count: number;
+            /** Imported Count */
+            imported_count: number;
+            /** Results */
+            results: components["schemas"]["ManualImportResult"][];
         };
         /** ManualImportItem */
         ManualImportItem: {
@@ -6592,6 +8556,59 @@ export interface components {
             /** Year */
             year?: number | null;
         };
+        /** ManualImportResult */
+        ManualImportResult: {
+            /** Album Id */
+            album_id?: string | null;
+            /** Artist Id */
+            artist_id?: string | null;
+            /** Destination Path */
+            destination_path?: string | null;
+            /** Error */
+            error?: string | null;
+            /** File Id */
+            file_id?: string | null;
+            /** Mode */
+            mode?: string | null;
+            /** Rematch */
+            rematch?: boolean | null;
+            /** Source Path */
+            source_path?: string | null;
+            /** Status */
+            status: string;
+            /** Track Id */
+            track_id?: string | null;
+        };
+        /** ManualImportScanItem */
+        ManualImportScanItem: {
+            /** Candidate Tracks */
+            candidate_tracks: components["schemas"]["ManualImportCandidateTrack"][];
+            /** Confidence */
+            confidence: number;
+            /** File Path */
+            file_path: string;
+            /** Filename */
+            filename: string;
+            /** Match Strength */
+            match_strength: string;
+            /** Matched Album Id */
+            matched_album_id?: string | null;
+            /** Matched Album Title */
+            matched_album_title?: string | null;
+            /** Matched Artist Id */
+            matched_artist_id?: string | null;
+            /** Matched Artist Name */
+            matched_artist_name?: string | null;
+            /** Matched Track Id */
+            matched_track_id?: string | null;
+            /** Matched Track Title */
+            matched_track_title?: string | null;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Suggested Track Id */
+            suggested_track_id?: string | null;
+            tags: components["schemas"]["ManualImportTags"];
+        };
         /** ManualImportScanRequest */
         ManualImportScanRequest: {
             /** Album Id */
@@ -6603,12 +8620,100 @@ export interface components {
             /** Folder Path */
             folder_path?: string | null;
         };
+        /**
+         * ManualImportTags
+         * @description ``inspect_audio_file`` output (or the minimal filename fallback when the file cannot be read).
+         */
+        ManualImportTags: {
+            /** Album */
+            album?: string | null;
+            /** Album Artist */
+            album_artist?: string | null;
+            /** Artist */
+            artist?: string | null;
+            /** Artists */
+            artists?: string[] | null;
+            /** Bitrate */
+            bitrate?: number | null;
+            /** Bits Per Sample */
+            bits_per_sample?: number | null;
+            /** Codec */
+            codec?: string | null;
+            /** Disc Number */
+            disc_number?: number | null;
+            /** Duration */
+            duration?: number | null;
+            /** Extension */
+            extension?: string | null;
+            /** File Path */
+            file_path?: string | null;
+            /** Isrc */
+            isrc?: string | null;
+            /** Musicbrainz Albumartistid */
+            musicbrainz_albumartistid?: string | null;
+            /** Musicbrainz Albumid */
+            musicbrainz_albumid?: string | null;
+            /** Musicbrainz Artistid */
+            musicbrainz_artistid?: string | null;
+            /** Musicbrainz Releasegroupid */
+            musicbrainz_releasegroupid?: string | null;
+            /** Musicbrainz Trackid */
+            musicbrainz_trackid?: string | null;
+            /** Quality Full */
+            quality_full?: string | null;
+            /** Release Year */
+            release_year?: number | null;
+            /** Sample Rate */
+            sample_rate?: number | null;
+            /** Title */
+            title?: string | null;
+            /** Total Discs */
+            total_discs?: number | null;
+            /** Total Tracks */
+            total_tracks?: number | null;
+            /** Track Number */
+            track_number?: number | null;
+            /** Year */
+            year?: number | null;
+        };
         /** MappingRequest */
         MappingRequest: {
             /** Local Prefix */
             local_prefix: string;
             /** Server Prefix */
             server_prefix: string;
+        };
+        /** MatchCreatedResponse */
+        MatchCreatedResponse: {
+            override: components["schemas"]["MatchOverride"];
+            /** Status */
+            status: string;
+        };
+        /** MatchDeletedResponse */
+        MatchDeletedResponse: {
+            /** Id */
+            id: number;
+            /** Status */
+            status: string;
+        };
+        /** MatchOverride */
+        MatchOverride: {
+            /** Created At */
+            created_at: string;
+            /** Created By */
+            created_by?: string | null;
+            /** Id */
+            id: number;
+            /** Plex Artist */
+            plex_artist: string;
+            /** Plex Rating Key */
+            plex_rating_key: string;
+            /** Plex Title */
+            plex_title: string;
+            /** Source Artist */
+            source_artist: string;
+            /** Source Title */
+            source_title: string;
         };
         /** MatchOverrideRequest */
         MatchOverrideRequest: {
@@ -6637,6 +8742,12 @@ export interface components {
              * @description Title of the track from source playlist
              */
             source_title: string;
+        };
+        /** MeResponse */
+        MeResponse: {
+            /** Tier */
+            tier: string;
+            user: components["schemas"]["UserRecord"];
         };
         /** MediaManagementGetResponse */
         MediaManagementGetResponse: {
@@ -6948,6 +9059,19 @@ export interface components {
             /** Write Audio Tags */
             write_audio_tags?: boolean | null;
         };
+        /** MediaServerCapabilities */
+        MediaServerCapabilities: {
+            /** File Paths */
+            file_paths: boolean;
+            /** Library Refresh */
+            library_refresh: boolean;
+            /** Mixes */
+            mixes: boolean;
+            /** Playlists */
+            playlists: boolean;
+            /** Users */
+            users: boolean;
+        };
         /**
          * MediaServerSettingsPayload
          * @description What the Settings page submits. A secret sent back as ``********`` keeps the stored value.
@@ -6996,12 +9120,60 @@ export interface components {
             /** Username */
             username: string;
         };
+        /** MediaServerStatus */
+        MediaServerStatus: {
+            capabilities: components["schemas"]["MediaServerCapabilities"];
+            /** Connected */
+            connected: boolean;
+            /** Type */
+            type: string;
+        };
         /** MediaServerTestResponse */
         MediaServerTestResponse: {
             /** Message */
             message: string;
             /** Ok */
             ok: boolean;
+        };
+        /**
+         * MediaTrackHit
+         * @description A media-server track search hit. Plex adds ``thumb``; Jellyfin and Subsonic add ``id``.
+         */
+        MediaTrackHit: {
+            /** Album */
+            album?: string | null;
+            /** Artist */
+            artist: string;
+            /** Duration */
+            duration?: number | null;
+            /** Id */
+            id?: string | null;
+            /** Rating Key */
+            rating_key: string;
+            /** Thumb */
+            thumb?: string | null;
+            /** Title */
+            title: string;
+        };
+        /** MetadataProfile */
+        MetadataProfile: {
+            /**
+             * Artist Count
+             * @default 0
+             */
+            artist_count: number;
+            /** Created At */
+            created_at?: string | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Primary Types */
+            primary_types: string[];
+            /** Secondary Types */
+            secondary_types: string[];
+            /** Updated At */
+            updated_at?: string | null;
         };
         /** MetadataProfileBody */
         MetadataProfileBody: {
@@ -7012,6 +9184,50 @@ export interface components {
             /** Secondary Types */
             secondary_types: string[];
         };
+        /** MetadataProfileChange */
+        MetadataProfileChange: {
+            /** Albums To Monitor */
+            albums_to_monitor: number;
+            /** Albums To Unmonitor */
+            albums_to_unmonitor: number;
+            /** Tracks To Monitor */
+            tracks_to_monitor: number;
+            /** Tracks To Unmonitor */
+            tracks_to_unmonitor: number;
+        };
+        /** MetadataProfileDeleteResponse */
+        MetadataProfileDeleteResponse: {
+            /** Artists Cleared */
+            artists_cleared: number;
+            /** Deleted */
+            deleted: number;
+        };
+        /** MetadataProfilePreview */
+        MetadataProfilePreview: {
+            /** Matching */
+            matching: number;
+            /** Total */
+            total: number;
+            would_change: components["schemas"]["MetadataProfileChange"];
+        };
+        /** MetadataProfilesResponse */
+        MetadataProfilesResponse: {
+            /** Default Profile Id */
+            default_profile_id?: number | null;
+            /** Primary Types */
+            primary_types: string[];
+            /** Profiles */
+            profiles: components["schemas"]["MetadataProfile"][];
+            /** Secondary Types */
+            secondary_types: string[];
+        };
+        /** MfaSetupResponse */
+        MfaSetupResponse: {
+            /** Otpauth Uri */
+            otpauth_uri: string;
+            /** Secret */
+            secret: string;
+        };
         /** MigrateLidarrRequest */
         MigrateLidarrRequest: {
             /**
@@ -7019,6 +9235,118 @@ export interface components {
              * @default true
              */
             auto_switch_mode: boolean;
+        };
+        /** MigrationStatus */
+        MigrationStatus: {
+            /**
+             * Albums Migrated
+             * @default 0
+             */
+            albums_migrated: number;
+            /**
+             * Artists Migrated
+             * @default 0
+             */
+            artists_migrated: number;
+            /** Completed At */
+            completed_at?: string | null;
+            /** Error */
+            error?: string | null;
+            /**
+             * Files Migrated
+             * @default 0
+             */
+            files_migrated: number;
+            /** Is Migrating */
+            is_migrating: boolean;
+            /** Started At */
+            started_at?: string | null;
+            /** Status */
+            status: string;
+            /**
+             * Tracks Migrated
+             * @default 0
+             */
+            tracks_migrated: number;
+        };
+        /** MigrationTriggerResponse */
+        MigrationTriggerResponse: {
+            status: components["schemas"]["MigrationStatus"];
+            /** Success */
+            success: boolean;
+        };
+        /** MissingTrack */
+        MissingTrack: {
+            /**
+             * Album
+             * @default
+             */
+            album: string;
+            /** Artist */
+            artist: string;
+            /**
+             * Artist Added By Item
+             * @default 0
+             */
+            artist_added_by_item: number;
+            /**
+             * Attempts
+             * @default 0
+             */
+            attempts: number;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Lidarr Status */
+            lidarr_status: string;
+            /** List Applied At */
+            list_applied_at?: string | null;
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
+            /** Playlist Id */
+            playlist_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+        };
+        /**
+         * MixConfig
+         * @description A tailored mix config (``PUBLIC_FIELDS`` of the row; the stored result blob is served by ``/result`` only).
+         */
+        MixConfig: {
+            /** Auto Acquire Missing */
+            auto_acquire_missing: boolean;
+            /** Discovery Ratio */
+            discovery_ratio: number;
+            /** Enabled */
+            enabled: boolean;
+            /** Excluded Genres */
+            excluded_genres: string[];
+            /** Id */
+            id: string;
+            /** Last Generated At */
+            last_generated_at?: string | null;
+            /** Max Weekly Acquisitions */
+            max_weekly_acquisitions: number;
+            /** Mix Type */
+            mix_type: string;
+            /** Name */
+            name: string;
+            /** Quality Profile Id */
+            quality_profile_id?: string | null;
+            /** Seed Artist */
+            seed_artist?: string | null;
+            /** Seed Window Days */
+            seed_window_days: number;
+            /** Track Count */
+            track_count: number;
+            /** User Id */
+            user_id: string;
         };
         /** MixCreateBody */
         MixCreateBody: {
@@ -7067,6 +9395,106 @@ export interface components {
             track_count: number;
             /** User Id */
             user_id?: string | null;
+        };
+        /** MixGenerateResponse */
+        MixGenerateResponse: {
+            /** Status */
+            status: string;
+        };
+        /** MixPreviewResponse */
+        MixPreviewResponse: {
+            /** Tracks */
+            tracks: components["schemas"]["MixPreviewTrack"][];
+        };
+        /** MixPreviewTrack */
+        MixPreviewTrack: {
+            /** Album */
+            album?: string | null;
+            /** Artist */
+            artist: string;
+            /** Origin */
+            origin: string;
+            /** Title */
+            title: string;
+        };
+        /**
+         * MixResult
+         * @description ``TailoredMixResult.to_dict()`` as persisted after the last generation.
+         */
+        MixResult: {
+            /**
+             * Acquisitions Queued
+             * @default 0
+             */
+            acquisitions_queued: number;
+            /**
+             * Available
+             * @default 0
+             */
+            available: number;
+            /** Generated At */
+            generated_at: string;
+            /**
+             * Missing
+             * @default 0
+             */
+            missing: number;
+            /** Mix Id */
+            mix_id: string;
+            /**
+             * Quota Remaining
+             * @default 0
+             */
+            quota_remaining: number;
+            /** Sync Error */
+            sync_error?: string | null;
+            /**
+             * Synced
+             * @default false
+             */
+            synced: boolean;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Tracks
+             * @default []
+             */
+            tracks: components["schemas"]["MixResultTrack"][];
+        };
+        /** MixResultTrack */
+        MixResultTrack: {
+            /** Album */
+            album?: string | null;
+            /** Artist */
+            artist: string;
+            /** Origin */
+            origin: string;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
+        };
+        /** MixSnapshot */
+        MixSnapshot: {
+            /** Auto Refresh */
+            auto_refresh: boolean;
+            /** Id */
+            id: string;
+            /** Last Refreshed At */
+            last_refreshed_at?: string | null;
+            /** Mix Key */
+            mix_key: string;
+            /** Mix Title */
+            mix_title: string;
+            /** Playlist Title */
+            playlist_title: string;
+            /** Plex User */
+            plex_user: string;
+            /** Rating Key */
+            rating_key?: string | null;
         };
         /** MixSnapshotRequest */
         MixSnapshotRequest: {
@@ -7178,6 +9606,24 @@ export interface components {
             /** To */
             to: string;
         };
+        /** PendingDeletedResponse */
+        PendingDeletedResponse: {
+            /** Id */
+            id: number;
+            /** Status */
+            status: string;
+        };
+        /** PendingGrabResponse */
+        PendingGrabResponse: {
+            /** Download Id */
+            download_id?: string | null;
+            /** Id */
+            id: number;
+            /** Release */
+            release?: string | null;
+            /** Success */
+            success: boolean;
+        };
         /** PendingReleaseResponse */
         PendingReleaseResponse: {
             /** Added At */
@@ -7204,6 +9650,30 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** PermissionLabel */
+        PermissionLabel: {
+            /** Bit */
+            bit: number;
+            /** Label */
+            label: string;
+            /** Name */
+            name: string;
+        };
+        /** PlaylistCopyResult */
+        PlaylistCopyResult: {
+            /** Copied Tracks */
+            copied_tracks: number;
+            /** Error */
+            error?: string | null;
+            /** Omitted Tracks */
+            omitted_tracks: number;
+            /** Rating Key */
+            rating_key?: string | null;
+            /** Success */
+            success: boolean;
+            /** Username */
+            username: string;
+        };
         /** PlaylistCreateRequest */
         PlaylistCreateRequest: {
             /**
@@ -7221,6 +9691,13 @@ export interface components {
              * @description Spotify/Deezer URL, URI, or alphanumeric/numeric ID
              */
             url_or_id: string;
+        };
+        /** PlaylistDeletedResponse */
+        PlaylistDeletedResponse: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
         };
         /** PlaylistDirectImportRequest */
         PlaylistDirectImportRequest: {
@@ -7274,6 +9751,34 @@ export interface components {
              */
             monitor_mode?: string | null;
         };
+        /** PlaylistEnabledResponse */
+        PlaylistEnabledResponse: {
+            /** Enabled */
+            enabled: boolean;
+            /** Id */
+            id: string;
+            /** Monitor Mode */
+            monitor_mode?: string | null;
+        };
+        /** PlaylistImportResponse */
+        PlaylistImportResponse: {
+            /** Id */
+            id: string;
+            /** Matched Count */
+            matched_count: number;
+            /** Missing Count */
+            missing_count: number;
+            /** Name */
+            name: string;
+            /** Service */
+            service?: string | null;
+            /** Status */
+            status: string;
+            /** Targets */
+            targets: string[];
+            /** Track Count */
+            track_count: number;
+        };
         /** PlaylistMonitorModeRequest */
         PlaylistMonitorModeRequest: {
             /**
@@ -7282,6 +9787,53 @@ export interface components {
              */
             monitor_mode: string;
         };
+        /** PlaylistMonitorModeResponse */
+        PlaylistMonitorModeResponse: {
+            /** Id */
+            id: string;
+            /** Monitor Mode */
+            monitor_mode: string;
+        };
+        /**
+         * PlaylistRecord
+         * @description A ``playlists`` row plus its target user ids. Non-admins only receive playlists they created or that target them.
+         */
+        PlaylistRecord: {
+            /** Created At */
+            created_at: string;
+            /** Creator Id */
+            creator_id?: string | null;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Id */
+            id: string;
+            /** Last Synced At */
+            last_synced_at?: string | null;
+            /** Monitor Mode */
+            monitor_mode: string;
+            /** Name */
+            name: string;
+            /**
+             * Poster Url
+             * @default
+             */
+            poster_url: string;
+            /** Service */
+            service: string;
+            /** Sync Status */
+            sync_status: string;
+            /** Targets */
+            targets: string[];
+            /** Tracks Json */
+            tracks_json?: string | null;
+            /** Updated At */
+            updated_at: string;
+        };
         /** PlaylistTargetsRequest */
         PlaylistTargetsRequest: {
             /**
@@ -7289,6 +9841,77 @@ export interface components {
              * @description List of target user IDs for this playlist
              */
             user_ids: string[];
+        };
+        /** PlaylistTargetsResponse */
+        PlaylistTargetsResponse: {
+            /** Id */
+            id: string;
+            /** Targets */
+            targets: string[];
+        };
+        /** PlexMix */
+        PlexMix: {
+            /** Hub Title */
+            hub_title: string;
+            /** Mix Key */
+            mix_key: string;
+            /** Snapshot Id */
+            snapshot_id?: string | null;
+            /** Thumb Url */
+            thumb_url?: string | null;
+            /** Title */
+            title: string;
+            /** Track Count */
+            track_count?: number | null;
+        };
+        /** PlexPinResponse */
+        PlexPinResponse: {
+            /** Auth Url */
+            auth_url: string;
+            /** Code */
+            code: string;
+            /** Id */
+            id: number;
+        };
+        /** PlexPlaylistItem */
+        PlexPlaylistItem: {
+            /** Album */
+            album: string;
+            /** Artist */
+            artist: string;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Playlist Item Id */
+            playlist_item_id: number;
+            /** Rating Key */
+            rating_key: string;
+            /** Title */
+            title: string;
+        };
+        /** PlexPlaylistSummary */
+        PlexPlaylistSummary: {
+            /** Duration Ms */
+            duration_ms: number;
+            /** Ignored */
+            ignored: boolean;
+            /** Kind */
+            kind: string;
+            /** Owner */
+            owner: string;
+            /** Plex User */
+            plex_user: string;
+            /** Rating Key */
+            rating_key: string;
+            /** Thumb Url */
+            thumb_url?: string | null;
+            /** Title */
+            title: string;
+            /** Track Count */
+            track_count: number;
+            /** Trackseerr Playlist Id */
+            trackseerr_playlist_id?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /** PlexStatus */
         PlexStatus: {
@@ -7314,6 +9937,21 @@ export interface components {
              * @default 0
              */
             user_count: number;
+        };
+        /** PlexUser */
+        PlexUser: {
+            /** Is Admin Account */
+            is_admin_account: boolean;
+            /** Is Self */
+            is_self: boolean;
+            /** Username */
+            username: string;
+        };
+        /** PlexVerifyResponse */
+        PlexVerifyResponse: {
+            /** Token */
+            token: string;
+            user: components["schemas"]["UserRecord"];
         };
         /** PreviewItemModel */
         PreviewItemModel: {
@@ -7372,6 +10010,129 @@ export interface components {
             /** Previews */
             previews: components["schemas"]["PreviewItemModel"][];
         };
+        /**
+         * ProfileAlbum
+         * @description A discography entry. Non-admins only ever get the subset ``_REQUESTER_ITEM_KEYS`` (or ``{title, year, status}``).
+         */
+        ProfileAlbum: {
+            /** Album */
+            album?: string | null;
+            /** Artist */
+            artist?: string | null;
+            /** Artist Discovery Id */
+            artist_discovery_id?: string | null;
+            /** Cover Url */
+            cover_url?: string | null;
+            /** Have Tracks */
+            have_tracks?: number | null;
+            /** Id */
+            id?: string | null;
+            /** Item Type */
+            item_type?: string | null;
+            /** Library Album Id */
+            library_album_id?: string | null;
+            /** Quality */
+            quality?: string | null;
+            /** Record Type */
+            record_type?: string | null;
+            /** Release Date */
+            release_date?: string | null;
+            /** Request Id */
+            request_id?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Title */
+            title: string;
+            /** Total Tracks */
+            total_tracks?: number | null;
+            /** Track Count */
+            track_count?: number | null;
+            /** Year */
+            year?: number | null;
+        };
+        /** ProfileArtist */
+        ProfileArtist: {
+            /** Discovery Id */
+            discovery_id?: string | null;
+            /** Image Url */
+            image_url?: string | null;
+            /** Library Artist Id */
+            library_artist_id?: string | null;
+            /** Link Confidence */
+            link_confidence?: string | null;
+            /** Mbid */
+            mbid?: string | null;
+            /** Name */
+            name: string;
+        };
+        /** ProfileDiscography */
+        ProfileDiscography: {
+            /** Albums */
+            albums: components["schemas"]["ProfileAlbum"][];
+            /** Compilations */
+            compilations: components["schemas"]["ProfileAlbum"][];
+            /** Library Only */
+            library_only: components["schemas"]["ProfileAlbum"][];
+            /** Singles Eps */
+            singles_eps: components["schemas"]["ProfileAlbum"][];
+        };
+        /**
+         * ProfileLibrary
+         * @description Admin-only library summary (null for everyone else).
+         */
+        ProfileLibrary: {
+            /** Album Count */
+            album_count: number;
+            /** Artist Id */
+            artist_id: string;
+            /** Monitored */
+            monitored: boolean;
+            /** Track Count */
+            track_count: number;
+            /** Track File Count */
+            track_file_count: number;
+        };
+        /** ProfileTopTrack */
+        ProfileTopTrack: {
+            /** Album */
+            album?: string | null;
+            /** Duration */
+            duration?: number | null;
+            /** Id */
+            id?: string | null;
+            /** Preview Url */
+            preview_url?: string | null;
+            /** Request Id */
+            request_id?: string | null;
+            /** Status */
+            status: string;
+            /** Title */
+            title?: string | null;
+        };
+        /** ProviderField */
+        ProviderField: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Options */
+            options?: string[] | null;
+            /** Required */
+            required: boolean;
+            /** Type */
+            type: string;
+        };
+        /** ProviderMeta */
+        ProviderMeta: {
+            /** Fields */
+            fields: components["schemas"]["ProviderField"][];
+            /** Label */
+            label: string;
+            /** Provider */
+            provider: string;
+            /** Sources */
+            sources: string[];
+        };
         /** QualityDefinitionPayload */
         QualityDefinitionPayload: {
             /** Max Kbps */
@@ -7416,6 +10177,24 @@ export interface components {
          *     Legacy payloads (``{quality, allowed, weight}`` with no ``type``) are still accepted and ordered by weight.
          */
         QualityProfileItemModel: {
+            /**
+             * Allowed
+             * @default true
+             */
+            allowed: boolean;
+            /** Items */
+            items?: string[];
+            /** Name */
+            name?: string | null;
+            /** Quality */
+            quality?: string | null;
+            /** Type */
+            type?: string | null;
+            /** Weight */
+            weight?: number | null;
+        };
+        /** QualityProfileItemResponse */
+        QualityProfileItemResponse: {
             /**
              * Allowed
              * @default true
@@ -7500,7 +10279,7 @@ export interface components {
              */
             cutoff_format_score: number;
             /** Format Items */
-            format_items?: components["schemas"]["FormatItemModel"][];
+            format_items?: components["schemas"]["FormatItemResponse"][];
             /** Id */
             id: string;
             /** Ignored Tags */
@@ -7511,7 +10290,7 @@ export interface components {
              */
             is_default: boolean;
             /** Items */
-            items: components["schemas"]["QualityProfileItemModel"][];
+            items: components["schemas"]["QualityProfileItemResponse"][];
             /** Max Size Mb */
             max_size_mb?: number | null;
             /**
@@ -7540,10 +10319,26 @@ export interface components {
              */
             upgrade_allowed: boolean;
         };
+        /** QueueCancelResponse */
+        QueueCancelResponse: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+        };
         /** QueueItemResponse */
         QueueItemResponse: {
+            /** Album Id */
+            album_id?: string | null;
             /** Artist */
             artist: string;
+            /**
+             * Cleanup Attempts
+             * @default 0
+             */
+            cleanup_attempts: number;
+            /** Cleanup Error */
+            cleanup_error?: string | null;
             /** Client Driver Type */
             client_driver_type?: string | null;
             /** Client Id */
@@ -7560,18 +10355,45 @@ export interface components {
             eta_seconds?: number | null;
             /** Id */
             id: string;
+            /** Indexer */
+            indexer?: string | null;
+            /** Indexer Id */
+            indexer_id?: string | null;
             /**
              * Item Type
              * @default track
              */
             item_type: string;
             /**
+             * Placed Files
+             * @default []
+             */
+            placed_files: string[];
+            /** Placed Mode */
+            placed_mode?: string | null;
+            /**
              * Progress
              * @default 0
              */
             progress: number;
+            /** Progress Updated At */
+            progress_updated_at?: string | null;
+            /** Protocol */
+            protocol?: string | null;
+            /** Quality */
+            quality?: string | null;
             /** Request Id */
             request_id?: string | null;
+            /** Seed Ratio Current */
+            seed_ratio_current?: number | null;
+            /** Seed Ratio Target */
+            seed_ratio_target?: number | null;
+            /** Seed Rule Source */
+            seed_rule_source?: string | null;
+            /** Seed Time Target Minutes */
+            seed_time_target_minutes?: number | null;
+            /** Seeding Seconds */
+            seeding_seconds?: number | null;
             /**
              * Size Bytes
              * @default 0
@@ -7590,8 +10412,139 @@ export interface components {
             target_path?: string | null;
             /** Title */
             title: string;
+            /** Track Id */
+            track_id?: string | null;
+            /**
+             * Unmatched Files
+             * @default []
+             */
+            unmatched_files: string[];
             /** Updated At */
             updated_at?: string | null;
+        };
+        /** QueuePage */
+        QueuePage: {
+            /** Mode */
+            mode: string;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Records */
+            records: components["schemas"]["QueueRecord"][];
+            /** Sort Dir */
+            sort_dir: string;
+            /** Sort Key */
+            sort_key: string;
+            /** Total */
+            total: number;
+        };
+        /** QueueRecord */
+        QueueRecord: {
+            /** Added At */
+            added_at?: string | null;
+            /** Album */
+            album?: string | null;
+            /** Artist */
+            artist?: string | null;
+            /** Client */
+            client?: string | null;
+            /** Download Id */
+            download_id?: string | null;
+            /** Eta Seconds */
+            eta_seconds?: number | null;
+            /** Id */
+            id: string;
+            /** Indexer */
+            indexer?: string | null;
+            /** Item Type */
+            item_type: string;
+            /** Messages */
+            messages: string[];
+            /** Needs Manual Import */
+            needs_manual_import: boolean;
+            /** Progress */
+            progress: number;
+            /** Protocol */
+            protocol?: string | null;
+            /** Quality */
+            quality?: string | null;
+            /** Release Title */
+            release_title?: string | null;
+            /** Request Id */
+            request_id?: string | null;
+            seeding?: components["schemas"]["Seeding"] | null;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Sizeleft Bytes */
+            sizeleft_bytes: number;
+            /** Source */
+            source: string;
+            /** Stalled */
+            stalled: boolean;
+            /** Stalled Reason */
+            stalled_reason?: string | null;
+            /** Status */
+            status: string;
+            /** Title */
+            title?: string | null;
+            /** Unmatched Count */
+            unmatched_count: number;
+        };
+        /**
+         * QuotaSnapshot
+         * @description ``request_submission.quota_snapshot``: limits are ``None`` for an unlimited admin.
+         */
+        QuotaSnapshot: {
+            /** Albums */
+            albums?: number | null;
+            /** Discographies */
+            discographies?: number | null;
+            /** Tracks */
+            tracks?: number | null;
+            used: components["schemas"]["QuotaUsage"];
+            /** Window Days */
+            window_days: number;
+        };
+        /** QuotaUsage */
+        QuotaUsage: {
+            /** Albums */
+            albums: number;
+            /** Discographies */
+            discographies: number;
+            /** Tracks */
+            tracks: number;
+        };
+        /** RecoveryCodesResponse */
+        RecoveryCodesResponse: {
+            /** Recovery Codes */
+            recovery_codes: string[];
+        };
+        /** RecycleBinEmptyResponse */
+        RecycleBinEmptyResponse: {
+            /** Errors */
+            errors: string[];
+            /** Removed */
+            removed: number;
+            /** Skipped Reason */
+            skipped_reason: string;
+        };
+        /** RecycleBinLastRun */
+        RecycleBinLastRun: {
+            /** Emptied */
+            emptied: boolean;
+            /** Errors */
+            errors: number;
+            /** Finished At */
+            finished_at: string;
+            /** Removed */
+            removed: number;
+        };
+        /** RecycleBinStatus */
+        RecycleBinStatus: {
+            last_run?: components["schemas"]["RecycleBinLastRun"] | null;
+            /** Running */
+            running: boolean;
         };
         /** ReleaseProfilePayload */
         ReleaseProfilePayload: {
@@ -7644,10 +10597,37 @@ export interface components {
              */
             delete_files: boolean;
         };
+        /** RemoveOrphanResponse */
+        RemoveOrphanResponse: {
+            /** Delete Files */
+            delete_files: boolean;
+            /** Removed */
+            removed: boolean;
+        };
         /** RenameApplyRequest */
         RenameApplyRequest: {
             /** File Ids */
             file_ids?: string[];
+        };
+        /** RenameApplyResponse */
+        RenameApplyResponse: {
+            /** Errors */
+            errors: string[];
+            /** Renamed Count */
+            renamed_count: number;
+        };
+        /** RenamePreviewItem */
+        RenamePreviewItem: {
+            /** Current Path */
+            current_path: string;
+            /** File Id */
+            file_id: string;
+            /** Needs Rename */
+            needs_rename: boolean;
+            /** Proposed Path */
+            proposed_path: string;
+            /** Track Id */
+            track_id: string;
         };
         /** RenamePreviewRequest */
         RenamePreviewRequest: {
@@ -7671,6 +10651,113 @@ export interface components {
             /** Ids */
             ids: number[];
         };
+        /** RequestDeleted */
+        RequestDeleted: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+        };
+        /** RequestListResponse */
+        RequestListResponse: {
+            /** Count */
+            count: number;
+            /** Requests */
+            requests: components["schemas"]["RequestRecord"][];
+        };
+        /** RequestRecord */
+        RequestRecord: {
+            /** Album */
+            album?: string | null;
+            /** Artist */
+            artist: string;
+            /** Batch Id */
+            batch_id?: string | null;
+            /** Batch Kind */
+            batch_kind?: string | null;
+            /** Cover Url */
+            cover_url?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Current Quality */
+            current_quality?: string | null;
+            /** Cutoff Met */
+            cutoff_met?: number | null;
+            /** Foreign Id */
+            foreign_id?: string | null;
+            /** Id */
+            id: string;
+            /** Item Type */
+            item_type: string;
+            /** Preview Url */
+            preview_url?: string | null;
+            /** Quality Profile Id */
+            quality_profile_id?: string | null;
+            /** Release Date */
+            release_date?: string | null;
+            /** Status */
+            status: string;
+            /** Status Message */
+            status_message?: string | null;
+            /** Status Reason */
+            status_reason?: string | null;
+            /** Title */
+            title: string;
+            /** Trigger */
+            trigger?: string | null;
+            /** Trigger Label */
+            trigger_label?: string | null;
+            /** Trigger Ref */
+            trigger_ref?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** User Id */
+            user_id: string;
+            /** Username */
+            username?: string | null;
+        };
+        /** ResetPasswordResponse */
+        ResetPasswordResponse: {
+            /** Reset Url */
+            reset_url: string;
+        };
+        /** RetryFailedResponse */
+        RetryFailedResponse: {
+            /** Attempts */
+            attempts: number;
+            /** Error */
+            error?: string | null;
+            /** Removed */
+            removed: boolean;
+            /** Retried */
+            retried: boolean;
+            /** Status */
+            status?: string | null;
+        };
+        /** RetryResult */
+        RetryResult: {
+            /** Download Id */
+            download_id?: string | null;
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+            /** Success */
+            success: boolean;
+        };
+        /** RoleChangeNotice */
+        RoleChangeNotice: {
+            /** Active */
+            active: boolean;
+            /** Changed At */
+            changed_at?: string | null;
+            /** Checklist */
+            checklist: string[];
+            /** From Role */
+            from_role?: string | null;
+            /** To Role */
+            to_role?: string | null;
+        };
         /** ScanRequest */
         ScanRequest: {
             /**
@@ -7680,6 +10767,62 @@ export interface components {
             prune_missing: boolean;
             /** Root Folder */
             root_folder?: string | null;
+        };
+        /** ScanStatus */
+        ScanStatus: {
+            /**
+             * Albums Created
+             * @default 0
+             */
+            albums_created: number;
+            /**
+             * Artists Created
+             * @default 0
+             */
+            artists_created: number;
+            /** Completed At */
+            completed_at?: string | null;
+            /** Current File */
+            current_file?: string | null;
+            /** Error */
+            error?: string | null;
+            /**
+             * Files Indexed
+             * @default 0
+             */
+            files_indexed: number;
+            /**
+             * Files Pruned
+             * @default 0
+             */
+            files_pruned: number;
+            /** Is Scanning */
+            is_scanning: boolean;
+            /**
+             * Processed Files
+             * @default 0
+             */
+            processed_files: number;
+            /** Started At */
+            started_at?: string | null;
+            /** Status */
+            status: string;
+            /**
+             * Total Files Found
+             * @default 0
+             */
+            total_files_found: number;
+            /**
+             * Tracks Created
+             * @default 0
+             */
+            tracks_created: number;
+        };
+        /** ScanTriggerResponse */
+        ScanTriggerResponse: {
+            status: components["schemas"]["ScanStatus"];
+            /** Success */
+            success: boolean;
         };
         /** ScheduledTaskItem */
         ScheduledTaskItem: {
@@ -7706,6 +10849,25 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** ScrobbleConfig */
+        ScrobbleConfig: {
+            /** Lastfm Connected */
+            lastfm_connected: boolean;
+            /** Lastfm Username */
+            lastfm_username?: string | null;
+            /** Listenbrainz Connected */
+            listenbrainz_connected: boolean;
+            /** Listenbrainz Username */
+            listenbrainz_username?: string | null;
+            /** Scrobbling Enabled */
+            scrobbling_enabled: boolean;
+            /** Updated At */
+            updated_at?: string | null;
+            /** User Id */
+            user_id: string;
+            /** Username */
+            username?: string | null;
+        };
         /** ScrobbleConfigUpdate */
         ScrobbleConfigUpdate: {
             /** Listenbrainz Token */
@@ -7717,6 +10879,171 @@ export interface components {
              * @default false
              */
             unlink_lastfm: boolean;
+        };
+        /** SearchQueryEcho */
+        SearchQueryEcho: {
+            /** Album */
+            album?: string | null;
+            /** Album Id */
+            album_id?: string | null;
+            /** Artist */
+            artist: string;
+            /**
+             * Item Type
+             * @default track
+             */
+            item_type: string;
+            /** Quality Profile Id */
+            quality_profile_id?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Track Id */
+            track_id?: string | null;
+        };
+        /**
+         * SearchRelease
+         * @description A candidate release with its quality evaluation.
+         */
+        SearchRelease: {
+            /** Breakdown */
+            breakdown?: {
+                [key: string]: unknown;
+            } | null;
+            /** Download Url */
+            download_url?: string | null;
+            /**
+             * Extra
+             * @default {}
+             */
+            extra: {
+                [key: string]: unknown;
+            };
+            /**
+             * Format Score
+             * @default 0
+             */
+            format_score: number;
+            /** Id */
+            id: string;
+            /** Indexer Name */
+            indexer_name: string;
+            /** Is Acceptable */
+            is_acceptable: boolean;
+            /** Magnet Url */
+            magnet_url?: string | null;
+            /** Meets Cutoff */
+            meets_cutoff: boolean;
+            /** Parsed Quality */
+            parsed_quality: string;
+            /** Protocol */
+            protocol: string;
+            /** Publish Date */
+            publish_date?: string | null;
+            /**
+             * Rejection Reasons
+             * @default []
+             */
+            rejection_reasons: string[];
+            /** Score */
+            score: number;
+            /** Seeders */
+            seeders?: number | null;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Source */
+            source?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+            /** Title */
+            title: string;
+        };
+        /** SearchResponse */
+        SearchResponse: {
+            /** Count */
+            count: number;
+            /** Profile Name */
+            profile_name: string;
+            query: components["schemas"]["SearchQueryEcho"];
+            /** Results */
+            results: components["schemas"]["SearchRelease"][];
+        };
+        /** SeedCleanupLastRun */
+        SeedCleanupLastRun: {
+            /** Error */
+            error?: string | null;
+            /** Finished At */
+            finished_at: string;
+            /** Started At */
+            started_at: string;
+            stats: components["schemas"]["SeedCleanupStats"];
+        };
+        /** SeedCleanupStarted */
+        SeedCleanupStarted: {
+            /** Started */
+            started: boolean;
+        };
+        /** SeedCleanupStats */
+        SeedCleanupStats: {
+            /**
+             * Deleted Files
+             * @default 0
+             */
+            deleted_files: number;
+            /**
+             * Evaluated
+             * @default 0
+             */
+            evaluated: number;
+            /**
+             * Failures
+             * @default 0
+             */
+            failures: number;
+            /**
+             * Orphans
+             * @default 0
+             */
+            orphans: number;
+            /**
+             * Removed
+             * @default 0
+             */
+            removed: number;
+        };
+        /** SeedCleanupStatus */
+        SeedCleanupStatus: {
+            last_run?: components["schemas"]["SeedCleanupLastRun"] | null;
+            /** Running */
+            running: boolean;
+        };
+        /** Seeding */
+        Seeding: {
+            /** Action */
+            action: string;
+            /** Ratio */
+            ratio: number;
+            /** Ratio Target */
+            ratio_target?: number | null;
+            /** Removes In Minutes */
+            removes_in_minutes?: number | null;
+            /** Seeding Minutes */
+            seeding_minutes: number;
+            /** Time Target Minutes */
+            time_target_minutes?: number | null;
+        };
+        /** ServerConfig */
+        ServerConfig: {
+            /** Lastfm Api Key Masked */
+            lastfm_api_key_masked: string;
+            /** Lastfm Configured */
+            lastfm_configured: boolean;
+            /** Lastfm From Env */
+            lastfm_from_env: boolean;
+            /** Plex History Poll Minutes */
+            plex_history_poll_minutes: number;
         };
         /** ServerConfigUpdate */
         ServerConfigUpdate: {
@@ -7759,6 +11086,24 @@ export interface components {
             user_id: string;
             /** Username */
             username?: string | null;
+        };
+        /** SessionStatusResponse */
+        SessionStatusResponse: {
+            /** Reason */
+            reason?: string | null;
+            /** Valid */
+            valid: boolean;
+        };
+        /** SmartMixPreset */
+        SmartMixPreset: {
+            /** Description */
+            description: string;
+            /** Icon */
+            icon: string;
+            /** Mix Type */
+            mix_type: string;
+            /** Name */
+            name: string;
         };
         /** SmartMixRequest */
         SmartMixRequest: {
@@ -7803,6 +11148,88 @@ export interface components {
         /** StatusBody */
         StatusBody: {
             status: components["schemas"]["IssueStatus"];
+        };
+        /** StatusResponse */
+        StatusResponse: {
+            /** Status */
+            status: string;
+        };
+        /** SuccessFlag */
+        SuccessFlag: {
+            /** Success */
+            success: boolean;
+        };
+        /** SuccessResponse */
+        SuccessResponse: {
+            /** Success */
+            success: boolean;
+        };
+        /** SyncRunStats */
+        SyncRunStats: {
+            /** Success Count */
+            success_count: number;
+            /** Total Matched */
+            total_matched: number;
+            /** Total Missing */
+            total_missing: number;
+            /** Total Playlists */
+            total_playlists: number;
+        };
+        /** SyncStatusResponse */
+        SyncStatusResponse: {
+            /** Is Syncing */
+            is_syncing: boolean;
+            /** Last Run At */
+            last_run_at?: string | null;
+            last_run_stats: components["schemas"]["SyncRunStats"];
+        };
+        /** SyncTriggerResponse */
+        SyncTriggerResponse: {
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /** SyncWebhookResponse */
+        SyncWebhookResponse: {
+            /** Fulfilled Requests */
+            fulfilled_requests: number;
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /** SystemEvent */
+        SystemEvent: {
+            /** Created At */
+            created_at?: string | null;
+            /** Details */
+            details?: {
+                [key: string]: unknown;
+            } | null;
+            /** Details Json */
+            details_json?: string | null;
+            /** Event Type */
+            event_type: string;
+            /** Id */
+            id: number;
+            /** Message */
+            message: string;
+            /** Severity */
+            severity?: string | null;
+            /** Source */
+            source?: string | null;
+        };
+        /** SystemEventsPage */
+        SystemEventsPage: {
+            /** Items */
+            items: components["schemas"]["SystemEvent"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Total */
+            total: number;
         };
         /** SystemStatusResponse */
         SystemStatusResponse: {
@@ -7888,6 +11315,13 @@ export interface components {
             release_profiles: components["schemas"]["TagRef"][];
             tag: components["schemas"]["TagOut"];
         };
+        /** TaskActionResult */
+        TaskActionResult: {
+            /** Message */
+            message: string;
+            /** Success */
+            success: boolean;
+        };
         /** TestConnectionPayload */
         TestConnectionPayload: {
             /** Api Key */
@@ -7967,6 +11401,13 @@ export interface components {
             /** Track Ids */
             track_ids: string[];
         };
+        /** TrackContributor */
+        TrackContributor: {
+            /** Name */
+            name: string;
+            /** Role */
+            role: string;
+        };
         /** TrackImportItem */
         TrackImportItem: {
             /**
@@ -7997,6 +11438,28 @@ export interface components {
         TrackMonitoredRequest: {
             /** Monitored */
             monitored: boolean;
+        };
+        /** TracksPage */
+        TracksPage: {
+            /** Mode */
+            mode: string;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Records */
+            records: components["schemas"]["LibraryTrackRecord"][];
+            /** Sort Dir */
+            sort_dir: string;
+            /** Sort Key */
+            sort_key: string;
+            /** Total */
+            total: number;
+        };
+        /** TracksUpdatedResponse */
+        TracksUpdatedResponse: {
+            /** Tracks Updated */
+            tracks_updated: number;
         };
         /** UpdateAdminUserBody */
         UpdateAdminUserBody: {
@@ -8037,6 +11500,33 @@ export interface components {
             /** Request Limit Quota */
             request_limit_quota?: number | null;
         };
+        /** UserRecord */
+        UserRecord: {
+            /** Auth Type */
+            auth_type?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Disabled */
+            disabled?: boolean | null;
+            /** Email */
+            email?: string | null;
+            /** Forwarded */
+            forwarded?: boolean | null;
+            /** Id */
+            id: string;
+            /** Is Admin */
+            is_admin: boolean;
+            /** Permissions */
+            permissions?: number | null;
+            /** Request Limit Days */
+            request_limit_days?: number | null;
+            /** Request Limit Quota */
+            request_limit_quota?: number | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Username */
+            username: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -8049,6 +11539,13 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** VerifiedUser */
+        VerifiedUser: {
+            /** Id */
+            id: string;
+            /** Username */
+            username: string;
         };
         /** VerifyLocalRequest */
         VerifyLocalRequest: {
@@ -8066,6 +11563,16 @@ export interface components {
             /** Username */
             username: string;
         };
+        /** VerifyLocalResponse */
+        VerifyLocalResponse: {
+            /** Mfa Enrollment Required */
+            mfa_enrollment_required: boolean;
+            /** Mfa Required */
+            mfa_required: boolean;
+            /** Session Floor Us */
+            session_floor_us: number;
+            user: components["schemas"]["VerifiedUser"];
+        };
         /** VerifyPinRequest */
         VerifyPinRequest: {
             /**
@@ -8078,6 +11585,50 @@ export interface components {
              * @description Optional Plex Server machine identifier to verify access against
              */
             target_machine_id?: string | null;
+        };
+        /** WantedPage */
+        WantedPage: {
+            /** Mode */
+            mode: string;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Records */
+            records: components["schemas"]["WantedRecord"][];
+            /** Sort Dir */
+            sort_dir: string;
+            /** Sort Key */
+            sort_key: string;
+            /** Total */
+            total: number;
+        };
+        /** WantedRecord */
+        WantedRecord: {
+            /** Album */
+            album?: string | null;
+            /** Album Id */
+            album_id?: string | null;
+            /** Artist */
+            artist?: string | null;
+            /** Current Quality */
+            current_quality?: string | null;
+            /** Cutoff Quality */
+            cutoff_quality?: string | null;
+            /** Id */
+            id: string;
+            /** Item Type */
+            item_type: string;
+            /** Last Searched At */
+            last_searched_at?: string | null;
+            /** Monitored */
+            monitored: boolean;
+            /** Release Date */
+            release_date?: string | null;
+            /** Source */
+            source: string;
+            /** Title */
+            title?: string | null;
         };
         /**
          * WantedSearchRequest
@@ -8093,6 +11644,23 @@ export interface components {
             ids?: (string | number)[] | null;
             /** List */
             list?: ("missing" | "cutoff") | null;
+        };
+        /** WantedSearchResponse */
+        WantedSearchResponse: {
+            /** Message */
+            message?: string | null;
+            /** Queued */
+            queued: number;
+        };
+        /** WebhookStatus */
+        WebhookStatus: {
+            /** Status */
+            status: string;
+        };
+        /** WebhookUrl */
+        WebhookUrl: {
+            /** Url */
+            url: string;
         };
         /** WeeklyRequest */
         WeeklyRequest: {
@@ -8122,6 +11690,41 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** DeletedResponse */
+        plex_playlist_sync__api__schemas__delay_profiles__DeletedResponse: {
+            /** Id */
+            id: number;
+            /** Status */
+            status: string;
+        };
+        /** DeletedResponse */
+        plex_playlist_sync__api__schemas__download_clients__DeletedResponse: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+        };
+        /** DeletedResponse */
+        plex_playlist_sync__api__schemas__indexers__DeletedResponse: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+        };
+        /** DeletedResponse */
+        plex_playlist_sync__api__schemas__notifications__DeletedResponse: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+        };
+        /** DeletedResponse */
+        plex_playlist_sync__api__schemas__quality_profiles__DeletedResponse: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -8146,9 +11749,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AccountResponse"];
                 };
             };
         };
@@ -8172,9 +11773,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RecoveryCodesResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8207,9 +11806,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8242,9 +11839,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RecoveryCodesResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8277,9 +11872,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MfaSetupResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8312,9 +11905,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ChangePasswordResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8346,9 +11937,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["BlocklistEntry"][];
                 };
             };
             /** @description Validation Error */
@@ -8379,9 +11968,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["BlocklistRemovedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8414,9 +12001,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["GrabResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8467,9 +12052,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PendingDeletedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8500,9 +12083,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PendingGrabResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8535,9 +12116,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SearchResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8571,9 +12150,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["BlocklistPage"];
                 };
             };
             /** @description Validation Error */
@@ -8604,9 +12181,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ActionResult"];
                 };
             };
             /** @description Validation Error */
@@ -8641,9 +12216,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["HistoryPage"];
                 };
             };
             /** @description Validation Error */
@@ -8676,9 +12249,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["HistoryIndexResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8709,9 +12280,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ActionResult"];
                 };
             };
             /** @description Validation Error */
@@ -8745,9 +12314,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["QueuePage"];
                 };
             };
             /** @description Validation Error */
@@ -8781,9 +12348,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ActionResult"];
                 };
             };
             /** @description Validation Error */
@@ -8814,9 +12379,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ActionResult"];
                 };
             };
             /** @description Validation Error */
@@ -8845,9 +12408,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["GatewayStatus"];
                 };
             };
         };
@@ -8867,9 +12428,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["PermissionLabel"][];
                 };
             };
         };
@@ -8889,9 +12448,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RoleChangeNotice"];
                 };
             };
         };
@@ -8911,9 +12468,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RoleChangeNotice"];
                 };
             };
         };
@@ -8933,9 +12488,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AccountSettings"];
                 };
             };
         };
@@ -8959,9 +12512,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AccountSettings"];
                 };
             };
             /** @description Validation Error */
@@ -8990,9 +12541,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["AdminUser"][];
                 };
             };
         };
@@ -9016,9 +12565,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CreatedAdminUser"];
                 };
             };
             /** @description Validation Error */
@@ -9053,9 +12600,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminUserAck"];
                 };
             };
             /** @description Validation Error */
@@ -9090,9 +12635,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminUser"];
                 };
             };
             /** @description Validation Error */
@@ -9123,9 +12666,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminUser"];
                 };
             };
             /** @description Validation Error */
@@ -9156,9 +12697,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminUser"];
                 };
             };
             /** @description Validation Error */
@@ -9189,9 +12728,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminUser"];
                 };
             };
             /** @description Validation Error */
@@ -9222,9 +12759,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ResetPasswordResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9255,9 +12790,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminUserAck"];
                 };
             };
             /** @description Validation Error */
@@ -9288,9 +12821,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminUserAck"];
                 };
             };
             /** @description Validation Error */
@@ -9321,9 +12852,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["InviteInfoResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9358,9 +12887,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["InviteAcceptedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9393,9 +12920,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LocalLoginResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9424,9 +12949,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LogoutResponse"];
                 };
             };
         };
@@ -9446,9 +12969,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MeResponse"];
                 };
             };
         };
@@ -9474,9 +12995,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PlexPinResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9509,9 +13028,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PlexVerifyResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9542,9 +13059,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DiscoveryAlbumDetail"];
                 };
             };
             /** @description Validation Error */
@@ -9576,9 +13091,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ArtistProfileResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9609,9 +13122,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DiscoveryArtistDetail"];
                 };
             };
             /** @description Validation Error */
@@ -9642,9 +13153,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DiscoveryListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9677,9 +13186,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DiscoverySearchResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9710,9 +13217,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DiscoveryTrackDetail"];
                 };
             };
             /** @description Validation Error */
@@ -9743,9 +13248,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DiscoveryListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9869,9 +13372,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["ProviderMeta"][];
                 };
             };
         };
@@ -9995,9 +13496,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ImportListDeleted"];
                 };
             };
             /** @description Validation Error */
@@ -10063,9 +13562,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: boolean;
-                    };
+                    "application/json": components["schemas"]["ImportListQueued"];
                 };
             };
             /** @description Validation Error */
@@ -10094,9 +13591,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ItunesPreviewResponse"];
                 };
             };
         };
@@ -10122,9 +13617,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ItunesCommitResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10155,9 +13648,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ItunesImportStatus"];
                 };
             };
             /** @description Validation Error */
@@ -10190,9 +13681,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["VerifyLocalResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10225,9 +13714,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SessionStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10260,9 +13747,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["HeartbeatResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10291,9 +13776,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["HelloResponse"];
                 };
             };
         };
@@ -10379,9 +13862,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: number;
-                    };
+                    "application/json": components["schemas"]["IssueCount"];
                 };
             };
         };
@@ -10401,9 +13882,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: number;
-                    };
+                    "application/json": components["schemas"]["IssueCount"];
                 };
             };
         };
@@ -10491,9 +13970,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["IssueDeleted"];
                 };
             };
             /** @description Validation Error */
@@ -10622,9 +14099,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["IssueSeen"];
                 };
             };
             /** @description Validation Error */
@@ -10688,9 +14163,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LibraryHealthResponse"];
                 };
             };
         };
@@ -10710,7 +14183,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["LibraryHealthStarted"];
                 };
             };
         };
@@ -10730,9 +14203,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: number;
-                    };
+                    "application/json": components["schemas"]["LibraryHealthCount"];
                 };
             };
         };
@@ -10756,9 +14227,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LibraryHealthDismissed"];
                 };
             };
             /** @description Validation Error */
@@ -10791,9 +14260,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LibraryHealthMappingResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10822,9 +14289,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LibraryHealthMappingResponse"];
                 };
             };
         };
@@ -10848,9 +14313,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: boolean;
-                    };
+                    "application/json": components["schemas"]["LibraryHealthWeekly"];
                 };
             };
             /** @description Validation Error */
@@ -10885,9 +14348,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["LibraryAlbumRecord"][];
                 };
             };
             /** @description Validation Error */
@@ -10920,9 +14381,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: number;
-                    };
+                    "application/json": components["schemas"]["AlbumsUpdatedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10957,9 +14416,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LibraryIndexResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10996,9 +14453,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AlbumsPage"];
                 };
             };
             /** @description Validation Error */
@@ -11029,9 +14484,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LibraryAlbumRecord"];
                 };
             };
             /** @description Validation Error */
@@ -11064,9 +14517,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SuccessResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11139,9 +14590,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LibraryAlbumRecord"];
                 };
             };
             /** @description Validation Error */
@@ -11172,9 +14621,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CommandResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11208,9 +14655,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["LibraryArtistRecord"][];
                 };
             };
             /** @description Validation Error */
@@ -11243,9 +14688,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: number;
-                    };
+                    "application/json": components["schemas"]["BulkArtistsResult"];
                 };
             };
             /** @description Validation Error */
@@ -11279,9 +14722,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LibraryIndexResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11314,9 +14755,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["IngestArtistResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11352,9 +14791,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ArtistsPage"];
                 };
             };
             /** @description Validation Error */
@@ -11385,9 +14822,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LibraryArtistRecord"];
                 };
             };
             /** @description Validation Error */
@@ -11420,9 +14855,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SuccessResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11526,9 +14959,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MetadataProfilePreview"];
                 };
             };
             /** @description Validation Error */
@@ -11563,9 +14994,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LibraryArtistRecord"];
                 };
             };
             /** @description Validation Error */
@@ -11596,9 +15025,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ArtistRefreshResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11631,9 +15058,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MetadataProfilePreview"];
                 };
             };
             /** @description Validation Error */
@@ -11664,9 +15089,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CommandResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11735,9 +15158,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AvailabilityResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11770,9 +15191,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["LibraryCollectionRecord"][];
                 };
             };
             /** @description Validation Error */
@@ -11805,9 +15224,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LibraryCollectionRecord"];
                 };
             };
             /** @description Validation Error */
@@ -11838,9 +15255,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LibraryCollectionRecord"];
                 };
             };
             /** @description Validation Error */
@@ -11871,9 +15286,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CollectionDeleteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11908,9 +15321,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CollectionAlbumResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11942,9 +15353,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CollectionAlbumResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11977,9 +15386,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SuccessResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12010,9 +15417,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["ManualImportCandidateTrack"][];
                 };
             };
             /** @description Validation Error */
@@ -12045,9 +15450,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ManualImportCommitResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12080,9 +15483,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["FingerprintResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12115,9 +15516,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["ManualImportScanItem"][];
                 };
             };
             /** @description Validation Error */
@@ -12146,9 +15545,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MetadataProfilesResponse"];
                 };
             };
         };
@@ -12172,9 +15569,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MetadataProfile"];
                 };
             };
             /** @description Validation Error */
@@ -12209,9 +15604,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MetadataProfile"];
                 };
             };
             /** @description Validation Error */
@@ -12242,9 +15635,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: number;
-                    };
+                    "application/json": components["schemas"]["MetadataProfileDeleteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12277,9 +15668,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MigrationTriggerResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12308,9 +15697,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MigrationStatus"];
                 };
             };
         };
@@ -12330,9 +15717,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MigrationStatus"];
                 };
             };
         };
@@ -12352,9 +15737,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MetadataProfilesResponse"];
                 };
             };
         };
@@ -12378,9 +15761,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MetadataProfile"];
                 };
             };
             /** @description Validation Error */
@@ -12415,9 +15796,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MetadataProfile"];
                 };
             };
             /** @description Validation Error */
@@ -12448,9 +15827,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: number;
-                    };
+                    "application/json": components["schemas"]["MetadataProfileDeleteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12483,9 +15860,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RenameApplyResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12518,9 +15893,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["RenamePreviewItem"][];
                 };
             };
             /** @description Validation Error */
@@ -12553,9 +15926,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScanTriggerResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12584,9 +15955,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScanStatus"];
                 };
             };
         };
@@ -12606,9 +15975,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScanStatus"];
                 };
             };
         };
@@ -12628,9 +15995,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LibraryStats"];
                 };
             };
         };
@@ -12657,9 +16022,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["LibraryTrackRecord"][];
                 };
             };
             /** @description Validation Error */
@@ -12692,9 +16055,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: number;
-                    };
+                    "application/json": components["schemas"]["TracksUpdatedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12730,9 +16091,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LibraryIndexResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12770,9 +16129,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["TracksPage"];
                 };
             };
             /** @description Validation Error */
@@ -12805,9 +16162,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SuccessResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12842,9 +16197,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LibraryTrackRecord"];
                 };
             };
             /** @description Validation Error */
@@ -12880,9 +16233,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ItemHistoryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12914,9 +16265,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["MissingTrack"][];
                 };
             };
             /** @description Validation Error */
@@ -12981,9 +16330,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LidarrPushResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13012,9 +16359,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LidarrQueueStatus"];
                 };
             };
         };
@@ -13034,9 +16379,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LidarrQueueAction"];
                 };
             };
         };
@@ -13056,9 +16399,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LidarrQueueAction"];
                 };
             };
         };
@@ -13078,9 +16419,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LidarrQueueAction"];
                 };
             };
         };
@@ -13100,9 +16439,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LidarrStatusResponse"];
                 };
             };
         };
@@ -13126,9 +16463,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MatchCreatedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13159,9 +16494,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MatchDeletedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13190,9 +16523,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["MatchOverride"][];
                 };
             };
         };
@@ -13249,9 +16580,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["MediaTrackHit"][];
                 };
             };
             /** @description Validation Error */
@@ -13315,9 +16644,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["GrabResult"];
                 };
             };
             /** @description Validation Error */
@@ -13348,9 +16675,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["MixConfig"][];
                 };
             };
             /** @description Validation Error */
@@ -13385,9 +16710,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MixConfig"];
                 };
             };
             /** @description Validation Error */
@@ -13422,9 +16745,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MixConfig"];
                 };
             };
             /** @description Validation Error */
@@ -13484,9 +16805,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["MixGenerateResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13517,9 +16836,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MixPreviewResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13550,9 +16867,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MixResult"];
                 };
             };
             /** @description Validation Error */
@@ -13581,9 +16896,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["PlaylistRecord"][];
                 };
             };
         };
@@ -13607,9 +16920,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PlaylistRecord"];
                 };
             };
             /** @description Validation Error */
@@ -13638,9 +16949,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["FeaturedChart"][];
                 };
             };
         };
@@ -13664,9 +16973,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PlaylistImportResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13699,9 +17006,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PlaylistImportResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13734,9 +17039,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PlaylistImportResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13765,9 +17068,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["SmartMixPreset"][];
                 };
             };
         };
@@ -13789,9 +17090,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PlaylistDeletedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13826,9 +17125,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PlaylistEnabledResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13863,9 +17160,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PlaylistMonitorModeResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13900,9 +17195,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PlaylistTargetsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13934,9 +17227,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["PlexPlaylistSummary"][];
                 };
             };
             /** @description Validation Error */
@@ -13967,9 +17258,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["PlexMix"][];
                 };
             };
             /** @description Validation Error */
@@ -14004,9 +17293,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MixSnapshot"];
                 };
             };
             /** @description Validation Error */
@@ -14037,9 +17324,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["MixSnapshot"][];
                 };
             };
             /** @description Validation Error */
@@ -14074,9 +17359,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MixSnapshot"];
                 };
             };
             /** @description Validation Error */
@@ -14134,9 +17417,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["PlexUser"][];
                 };
             };
         };
@@ -14195,9 +17476,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PlexPlaylistSummary"];
                 };
             };
             /** @description Validation Error */
@@ -14230,9 +17509,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PlaylistRecord"];
                 };
             };
             /** @description Validation Error */
@@ -14269,9 +17546,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["PlaylistCopyResult"][];
                 };
             };
             /** @description Validation Error */
@@ -14308,9 +17583,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["PlexPlaylistSummary"];
                 };
             };
             /** @description Validation Error */
@@ -14343,9 +17616,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["PlexPlaylistItem"][];
                 };
             };
             /** @description Validation Error */
@@ -14382,9 +17653,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["PlexPlaylistItem"][];
                 };
             };
             /** @description Validation Error */
@@ -14454,9 +17723,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["PlexPlaylistItem"][];
                 };
             };
             /** @description Validation Error */
@@ -14519,9 +17786,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["QueueCancelResponse"];
                 };
             };
             /** @description Validation Error */
@@ -14554,9 +17819,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RecycleBinEmptyResponse"];
                 };
             };
             /** @description Validation Error */
@@ -14585,9 +17848,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RecycleBinStatus"];
                 };
             };
         };
@@ -14609,9 +17870,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RequestListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -14644,9 +17903,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RequestRecord"];
                 };
             };
             /** @description Validation Error */
@@ -14679,9 +17936,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["BatchCreatedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -14712,9 +17967,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RequestDeleted"];
                 };
             };
             /** @description Validation Error */
@@ -14745,9 +17998,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RequestRecord"];
                 };
             };
             /** @description Validation Error */
@@ -14778,9 +18029,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RequestRecord"];
                 };
             };
             /** @description Validation Error */
@@ -14811,9 +18060,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RetryResult"];
                 };
             };
             /** @description Validation Error */
@@ -14842,9 +18089,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScrobbleConfig"];
                 };
             };
         };
@@ -14868,9 +18113,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScrobbleConfig"];
                 };
             };
             /** @description Validation Error */
@@ -14901,9 +18144,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["AuthUrl"];
                 };
             };
             /** @description Validation Error */
@@ -14936,9 +18177,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["Listen"][];
                 };
             };
             /** @description Validation Error */
@@ -14969,9 +18208,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["WebhookStatus"];
                 };
             };
             /** @description Validation Error */
@@ -15000,9 +18237,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ServerConfig"];
                 };
             };
         };
@@ -15026,9 +18261,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ServerConfig"];
                 };
             };
             /** @description Validation Error */
@@ -15057,9 +18290,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["ScrobbleConfig"][];
                 };
             };
         };
@@ -15085,9 +18316,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScrobbleConfig"];
                 };
             };
             /** @description Validation Error */
@@ -15116,9 +18345,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["WebhookUrl"];
                 };
             };
         };
@@ -15138,9 +18365,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["WebhookUrl"];
                 };
             };
         };
@@ -15162,9 +18387,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RetryFailedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -15199,9 +18422,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RemoveOrphanResponse"];
                 };
             };
             /** @description Validation Error */
@@ -15230,7 +18451,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SeedCleanupStarted"];
                 };
             };
         };
@@ -15250,9 +18471,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SeedCleanupStatus"];
                 };
             };
         };
@@ -15369,9 +18588,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CustomFormatImportResponse"];
                 };
             };
             /** @description Validation Error */
@@ -15468,9 +18685,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["FormatDeletedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -15501,9 +18716,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ExportedCustomFormat"];
                 };
             };
             /** @description Validation Error */
@@ -15655,9 +18868,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["plex_playlist_sync__api__schemas__delay_profiles__DeletedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -15805,9 +19016,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["plex_playlist_sync__api__schemas__download_clients__DeletedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -15977,9 +19186,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["plex_playlist_sync__api__schemas__indexers__DeletedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -16172,9 +19379,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LidarrOptionsResponse"];
                 };
             };
         };
@@ -16522,9 +19727,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["plex_playlist_sync__api__schemas__notifications__DeletedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -16778,9 +19981,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["plex_playlist_sync__api__schemas__quality_profiles__DeletedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -16996,9 +20197,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["FormatDeletedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -17027,9 +20226,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SyncTriggerResponse"];
                 };
             };
         };
@@ -17049,9 +20246,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SyncStatusResponse"];
                 };
             };
         };
@@ -17104,9 +20299,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SyncWebhookResponse"];
                 };
             };
             /** @description Validation Error */
@@ -17141,9 +20334,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SystemEventsPage"];
                 };
             };
             /** @description Validation Error */
@@ -17172,9 +20363,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SuccessFlag"];
                 };
             };
         };
@@ -17194,9 +20383,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LidarrHealthResponse"];
                 };
             };
         };
@@ -17220,9 +20407,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["LogEntry"][];
                 };
             };
             /** @description Validation Error */
@@ -17251,9 +20436,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SuccessFlag"];
                 };
             };
         };
@@ -17313,9 +20496,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MediaServerStatus"];
                 };
             };
         };
@@ -17335,11 +20516,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: {
-                            [key: string]: unknown;
-                        }[];
-                    };
+                    "application/json": components["schemas"]["JobQueueSnapshot"];
                 };
             };
         };
@@ -17401,9 +20578,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["TaskActionResult"];
                 };
             };
             /** @description Validation Error */
@@ -17434,9 +20609,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["TaskActionResult"];
                 };
             };
             /** @description Validation Error */
@@ -17615,9 +20788,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["UserRecord"][];
                 };
             };
         };
@@ -17637,9 +20808,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CurrentUserProfile"];
                 };
             };
         };
@@ -17659,9 +20828,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["UserRecord"][];
                 };
             };
         };
@@ -17687,9 +20854,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["UserRecord"];
                 };
             };
             /** @description Validation Error */
@@ -17723,9 +20888,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["WantedPage"];
                 };
             };
             /** @description Validation Error */
@@ -17757,9 +20920,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["HistoryIndexResponse"];
                 };
             };
             /** @description Validation Error */
@@ -17793,9 +20954,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["WantedPage"];
                 };
             };
             /** @description Validation Error */
@@ -17827,9 +20986,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["HistoryIndexResponse"];
                 };
             };
             /** @description Validation Error */
@@ -17862,9 +21019,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["WantedSearchResponse"];
                 };
             };
             /** @description Validation Error */

@@ -73,8 +73,8 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
       key: 'monitor',
       label: 'Monitored',
       icon: <Sliders className="h-3.5 w-3.5 text-[#e5a00d]" />,
-      checked: album.monitored,
-      onSelect: () => onToggleAlbumMonitored(album.id, album.monitored),
+      checked: album.monitored === true,
+      onSelect: () => onToggleAlbumMonitored(album.id, album.monitored === true),
     });
   }
   if (isAdmin && lidarrMode) {
@@ -134,14 +134,14 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
             }`}
           >
             {album.cover_url ? (
-              <img src={album.cover_url} alt={album.title} className="w-full h-full object-cover" loading="lazy" />
+              <img src={album.cover_url} alt={album.title ?? ''} className="w-full h-full object-cover" loading="lazy" />
             ) : (
               <Disc className="h-6 w-6 text-neutral-600" />
             )}
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <h4 className="font-bold text-[13px] sm:text-sm leading-tight text-white truncate" title={album.title}>
+              <h4 className="font-bold text-[13px] sm:text-sm leading-tight text-white truncate" title={album.title ?? undefined}>
                 {album.title}
               </h4>
               {expanded ? (
@@ -190,8 +190,8 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
           {isAdmin && (
             <div className="flex items-center gap-2">
               <TactileSwitch
-                checked={album.monitored}
-                onChange={() => onToggleAlbumMonitored(album.id, album.monitored)}
+                checked={album.monitored === true}
+                onChange={() => onToggleAlbumMonitored(album.id, album.monitored === true)}
                 label={album.monitored ? 'Monitored' : 'Unmonitored'}
                 title={album.monitored ? 'Monitored for automated library acquisition' : 'Unmonitored'}
               />
@@ -269,7 +269,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
         </div>
       )}
       {historyOpen && (
-        <ItemHistoryModal isOpen onClose={() => setHistoryOpen(false)} entity="album" entityId={String(album.id)} title={album.title} />
+        <ItemHistoryModal isOpen onClose={() => setHistoryOpen(false)} entity="album" entityId={String(album.id)} title={album.title ?? ''} />
       )}
     </MachinedCard>
   );

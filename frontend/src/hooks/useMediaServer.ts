@@ -8,6 +8,7 @@ const LEGACY_CAPABILITIES: MediaServerCapabilities = {
   users: true,
   mixes: true,
   library_refresh: true,
+  file_paths: true,
 };
 
 const MEDIA_SERVER_LABELS: Record<MediaServerType, string> = {

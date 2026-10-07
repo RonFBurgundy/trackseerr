@@ -14,7 +14,7 @@ export function useLidarrSearch(onToast: (msg: string, tone?: 'ok' | 'error') =>
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
   const run = useCallback(
-    async (key: string, call: () => Promise<{ message?: string }>, okMessage: string, failMessage: string): Promise<void> => {
+    async (key: string, call: () => Promise<{ message?: string | null }>, okMessage: string, failMessage: string): Promise<void> => {
       setBusyKey(key);
       try {
         const res = await call();

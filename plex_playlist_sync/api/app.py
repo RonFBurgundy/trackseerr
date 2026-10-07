@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from fastapi.exceptions import ResponseValidationError
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -147,6 +148,16 @@ def _role_of(app: FastAPI) -> str:
     return role if role in ("gateway", "core") else "all-in-one"
 
 
+def response_validation_error_response(request: Request, exc: Exception) -> JSONResponse:
+    """A handler produced data its response model rejects: log shape (never values), return a generic 500."""
+    errors = exc.errors() if isinstance(exc, ResponseValidationError) else []
+    summary = "; ".join(
+        f"{'.'.join(str(p) for p in e.get('loc', ()))}: {e.get('type')}: {e.get('msg')}" for e in errors[:20]
+    )
+    logger.error("Response validation failed for %s %s: %s", request.method, request.url.path, summary)
+    return JSONResponse(status_code=500, content={"detail": "Internal response error"})
+
+
 def create_app(
     db: Optional[Database] = None,
     config: Optional[Config] = None,
@@ -214,6 +225,7 @@ def create_app(
             )
 
     app.add_exception_handler(MediaServerUnavailable, media_server_unavailable_response)
+    app.add_exception_handler(ResponseValidationError, response_validation_error_response)
 
     # 3. Mount Routers under /api
     api_router = APIRouter(prefix="/api")

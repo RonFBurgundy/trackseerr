@@ -13,6 +13,14 @@ from pydantic import BaseModel, Field
 
 from plex_playlist_sync import library_health
 from plex_playlist_sync.api.dependencies import get_active_media_server, get_db, require_admin, require_core_tier
+from plex_playlist_sync.api.schemas.library_health import (
+    LibraryHealthCount,
+    LibraryHealthDismissed,
+    LibraryHealthMappingResponse,
+    LibraryHealthResponse,
+    LibraryHealthStarted,
+    LibraryHealthWeekly,
+)
 from plex_playlist_sync.media_servers.base import MediaServer
 from plex_playlist_sync.storage import Database
 
@@ -35,7 +43,7 @@ def _music_root(db: Database) -> Path:
     return Path(db.get_media_management_settings().get("root_folder_path") or "/music")
 
 
-@router.get("", summary="Library health findings, grouped, with the last run")
+@router.get("", response_model=LibraryHealthResponse, response_model_exclude_unset=True, summary="Library health findings, grouped, with the last run")
 def get_library_health(
     db: Database = Depends(get_db),
     server: Optional[MediaServer] = Depends(get_active_media_server),
@@ -53,12 +61,12 @@ def get_library_health(
     }
 
 
-@router.get("/count", summary="Number of open findings (nav badge)")
+@router.get("/count", response_model=LibraryHealthCount, response_model_exclude_unset=True, summary="Number of open findings (nav badge)")
 def get_library_health_count(db: Database = Depends(get_db)) -> dict[str, int]:
     return {"count": db.count_library_health_findings()}
 
 
-@router.post("/check", status_code=status.HTTP_202_ACCEPTED, summary="Start a check in the background")
+@router.post("/check", response_model=LibraryHealthStarted, response_model_exclude_unset=True, status_code=status.HTTP_202_ACCEPTED, summary="Start a check in the background")
 def start_library_health_check(
     db: Database = Depends(get_db),
     server: Optional[MediaServer] = Depends(get_active_media_server),
@@ -68,7 +76,7 @@ def start_library_health_check(
     return JSONResponse({"started": True}, status_code=status.HTTP_202_ACCEPTED)
 
 
-@router.post("/dismiss", summary="Ignore a file or folder from now on")
+@router.post("/dismiss", response_model=LibraryHealthDismissed, response_model_exclude_unset=True, summary="Ignore a file or folder from now on")
 def dismiss_library_health(body: DismissRequest, db: Database = Depends(get_db)) -> dict[str, Any]:
     path = body.path.rstrip("/") if len(body.path) > 1 else body.path
     db.add_library_health_dismissal(body.scope, path)
@@ -80,7 +88,7 @@ def dismiss_library_health(body: DismissRequest, db: Database = Depends(get_db))
     return {"dismissed": True, "removed": removed}
 
 
-@router.put("/mapping", summary="Save the media-server path mapping")
+@router.put("/mapping", response_model=LibraryHealthMappingResponse, response_model_exclude_unset=True, summary="Save the media-server path mapping")
 def put_library_health_mapping(body: MappingRequest, db: Database = Depends(get_db)) -> dict[str, Any]:
     kind = ""
     existing = db.get_media_server_path_mapping()
@@ -92,7 +100,7 @@ def put_library_health_mapping(body: MappingRequest, db: Database = Depends(get_
     return {"mapping": library_health.mapping_view(db)}
 
 
-@router.delete("/mapping", summary="Clear the media-server path mapping")
+@router.delete("/mapping", response_model=LibraryHealthMappingResponse, response_model_exclude_unset=True, summary="Clear the media-server path mapping")
 def delete_library_health_mapping(db: Database = Depends(get_db)) -> dict[str, Any]:
     db.set_media_server_path_mapping(None)
     return {"mapping": None}
@@ -102,7 +110,7 @@ class WeeklyRequest(BaseModel):
     enabled: bool
 
 
-@router.put("/weekly", summary="Turn the weekly check on or off")
+@router.put("/weekly", response_model=LibraryHealthWeekly, response_model_exclude_unset=True, summary="Turn the weekly check on or off")
 def put_library_health_weekly(body: WeeklyRequest, db: Database = Depends(get_db)) -> dict[str, bool]:
     db.set_library_health_weekly(body.enabled)
     return {"weekly": db.get_library_health_weekly()}

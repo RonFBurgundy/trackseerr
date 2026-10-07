@@ -38,7 +38,7 @@ export function useIssueCounts(enabled: boolean, isAdmin: boolean): UseIssueCoun
     if (!isAdmin) return;
     try {
       const counts = await getOpenIssueCount(signal);
-      if (!signal.aborted) setOpen(counts.count + counts.in_progress);
+      if (!signal.aborted) setOpen(counts.count + (counts.in_progress ?? 0));
     } catch (err: unknown) {
       if (!isAbort(err)) console.warn('Open issue count refresh failed', err);
     }

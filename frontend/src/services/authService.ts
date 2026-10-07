@@ -1,4 +1,5 @@
 import { apiRequest, setAuthToken } from './apiClient';
+import type { Schema } from '@/types/apiSchema';
 import type { AuthPinResponse, AuthVerifyResponse, DeploymentTier, User } from '@/types/models';
 
 export async function startPlexAuth(forwardUrl?: string): Promise<AuthPinResponse> {
@@ -30,11 +31,15 @@ export async function pollPin(
   });
 }
 
+function toDeploymentTier(value: string | undefined): DeploymentTier | undefined {
+  return value === 'gateway' || value === 'core' || value === 'all-in-one' ? value : undefined;
+}
+
 export async function getCurrentUser(): Promise<User | null> {
   try {
-    const res = await apiRequest<{ user: User; tier?: DeploymentTier }>('/api/auth/me');
+    const res = await apiRequest<Schema<'MeResponse'>>('/api/auth/me');
     if (!res?.user) return null;
-    const tier = res.user.tier ?? res.tier;
+    const tier = toDeploymentTier(res.tier);
     return tier ? { ...res.user, tier } : res.user;
   } catch {
     return null;

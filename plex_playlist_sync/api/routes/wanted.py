@@ -20,6 +20,7 @@ from plex_playlist_sync.api.routes.activity import (
     run_mutation,
     validate_sort_key,
 )
+from plex_playlist_sync.api.schemas.wanted import WantedIndexResponse, WantedPage, WantedSearchResponse
 from plex_playlist_sync.backlog_worker import ReplacementSpec, backlog_worker
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.library_manager import MODE_LIDARR, get_library_mode
@@ -63,7 +64,7 @@ def _wanted_list(
     return svc.native_wanted(db, kind, page, page_size, key, sort_dir)
 
 
-@router.get("/missing", summary="Monitored items that are not in the library")
+@router.get("/missing", response_model=WantedPage, response_model_exclude_unset=True, summary="Monitored items that are not in the library")
 def list_missing(
     page: int = Query(1, ge=1, le=MAX_PAGE),
     page_size: int = Query(50, ge=1, le=200),
@@ -76,7 +77,7 @@ def list_missing(
     return _wanted_list("missing", page, page_size, sort_key, sort_dir, db, client)
 
 
-@router.get("/cutoff", summary="Files below their quality profile cutoff")
+@router.get("/cutoff", response_model=WantedPage, response_model_exclude_unset=True, summary="Files below their quality profile cutoff")
 def list_cutoff(
     page: int = Query(1, ge=1, le=MAX_PAGE),
     page_size: int = Query(50, ge=1, le=200),
@@ -98,7 +99,7 @@ def _wanted_index(
     return svc.native_wanted_index(db, kind, key, sort_dir)
 
 
-@router.get("/missing/index", summary="Scrubber groups for the missing list (native only)")
+@router.get("/missing/index", response_model=WantedIndexResponse, response_model_exclude_unset=True, summary="Scrubber groups for the missing list (native only)")
 def missing_index(
     sort_key: Optional[str] = Query(None),
     sort_dir: str = Query("asc", pattern=SORT_DIR_PATTERN),
@@ -108,7 +109,7 @@ def missing_index(
     return _wanted_index("missing", sort_key, sort_dir, db)
 
 
-@router.get("/cutoff/index", summary="Scrubber groups for the cutoff-unmet list (native only)")
+@router.get("/cutoff/index", response_model=WantedIndexResponse, response_model_exclude_unset=True, summary="Scrubber groups for the cutoff-unmet list (native only)")
 def cutoff_index(
     sort_key: Optional[str] = Query(None),
     sort_dir: str = Query("asc", pattern=SORT_DIR_PATTERN),
@@ -118,7 +119,7 @@ def cutoff_index(
     return _wanted_index("cutoff", sort_key, sort_dir, db)
 
 
-@router.post("/search", summary="Search for wanted items")
+@router.post("/search", response_model=WantedSearchResponse, response_model_exclude_unset=True, summary="Search for wanted items")
 def search_wanted(
     body: WantedSearchRequest,
     db: Database = Depends(get_db),

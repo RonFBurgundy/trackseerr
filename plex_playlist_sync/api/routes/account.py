@@ -14,6 +14,13 @@ from pydantic import BaseModel, Field
 
 from plex_playlist_sync import local_auth
 from plex_playlist_sync.api.dependencies import get_config, get_current_user, get_db
+from plex_playlist_sync.api.schemas.account import (
+    AccountResponse,
+    ChangePasswordResponse,
+    MfaSetupResponse,
+    RecoveryCodesResponse,
+    StatusResponse,
+)
 from plex_playlist_sync.api.sessions import start_session
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.local_login import (
@@ -134,7 +141,7 @@ def _auto_approve(user: dict[str, Any], config: Config) -> dict[str, bool]:
     }
 
 
-@router.get("")
+@router.get("", response_model=AccountResponse, response_model_exclude_unset=True)
 def get_account(
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
@@ -157,7 +164,7 @@ def get_account(
     }
 
 
-@router.post("/password")
+@router.post("/password", response_model=ChangePasswordResponse, response_model_exclude_unset=True)
 def change_password(
     body: ChangePasswordRequest,
     request: Request,
@@ -206,7 +213,7 @@ def _pending_get(user_id: str) -> Optional[tuple[str, int]]:
         return secret, attempts
 
 
-@router.post("/mfa/setup")
+@router.post("/mfa/setup", response_model=MfaSetupResponse, response_model_exclude_unset=True)
 def mfa_setup(
     body: PasswordRequest,
     db: Database = Depends(get_db),
@@ -226,7 +233,7 @@ def mfa_setup(
     return {"secret": secret, "otpauth_uri": local_auth.otpauth_uri(secret, current_user["username"])}
 
 
-@router.post("/mfa/confirm")
+@router.post("/mfa/confirm", response_model=RecoveryCodesResponse, response_model_exclude_unset=True)
 def mfa_confirm(
     body: CodeRequest,
     db: Database = Depends(get_db),
@@ -259,7 +266,7 @@ def mfa_confirm(
     return {"recovery_codes": codes}
 
 
-@router.post("/mfa/disable")
+@router.post("/mfa/disable", response_model=StatusResponse, response_model_exclude_unset=True)
 def mfa_disable(
     body: PasswordAndCodeRequest,
     db: Database = Depends(get_db),
@@ -276,7 +283,7 @@ def mfa_disable(
     return {"status": "success"}
 
 
-@router.post("/mfa/recovery-codes")
+@router.post("/mfa/recovery-codes", response_model=RecoveryCodesResponse, response_model_exclude_unset=True)
 def mfa_regenerate_recovery_codes(
     body: PasswordAndCodeRequest,
     db: Database = Depends(get_db),

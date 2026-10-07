@@ -544,7 +544,10 @@ def test_m3u_import_swaps_to_the_reading_whose_artist_the_library_knows(api):
     api.db.upsert_library_artist(LibraryArtist(id="kv", name="Kavinsky", monitored=True))
     content = "#EXTINF:1,The Crash - Kavinsky\nsomewhere/else/Unrelated.mp3\n"
     with patch("plex_playlist_sync.api.routes.playlists.import_playlist_tracks") as imp:
-        imp.return_value = {"status": "imported"}
+        imp.return_value = {
+            "id": "imp_abc", "name": "Imported M3U Playlist", "service": "m3u", "track_count": 1, "matched_count": 0,
+            "missing_count": 0, "targets": ["admin-1"], "status": "imported",
+        }
         resp = api.post("/api/playlists/import/m3u", {"content": content})
     assert resp.status_code == 201, resp.text
     (item,) = imp.call_args.kwargs["req"].tracks

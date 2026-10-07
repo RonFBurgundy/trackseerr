@@ -240,8 +240,8 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
       {!discovery.isLoading && discovery.items.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
           {discovery.items.map((item) => {
-            const isInLibrary = Boolean(item.in_library || item.status === 'in_library' || item.status === 'available');
-            const isRequested = Boolean(requestedIds.has(item.id) || item.requested || item.status === 'requested' || item.status === 'pending');
+            const isInLibrary = Boolean(item.status === 'in_library' || item.status === 'available');
+            const isRequested = Boolean(requestedIds.has(item.id) || item.status === 'requested' || item.status === 'pending');
             const isProcessing = Boolean(requestingId === item.id || item.status === 'processing');
             const isPlayingThis = currentPreviewTrackId === item.id && isPreviewPlaying;
 
@@ -294,8 +294,8 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                         onPlayTrack({
                           id: item.id,
                           title: item.title,
-                          artist: item.artist,
-                          cover_url: item.cover_url,
+                          artist: item.artist ?? '',
+                          cover_url: item.cover_url ?? undefined,
                           preview_url: item.preview_url!,
                         });
                       }}

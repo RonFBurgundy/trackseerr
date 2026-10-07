@@ -87,7 +87,7 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
     (artist: ArtistItem): React.ReactNode => (
       <ArtistTile
         artist={artist}
-        monitored={artist.monitored}
+        monitored={artist.monitored === true}
         onOpen={onOpenArtist}
         selection={
           selecting

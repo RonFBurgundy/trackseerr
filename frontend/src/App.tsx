@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Loader2, LogIn } from 'lucide-react';
-import type { ArtistDiscographyAlbum, Playlist, User } from '@/types/models';
+import type { ArtistDiscographyAlbum, DiscoveryItem, Playlist, User } from '@/types/models';
 import type { ListMonitorMode } from '@/types/importLists';
 import {
   useAuth,
@@ -50,6 +50,7 @@ import {
   deletePlaylist,
   triggerSync,
   importPlaylist,
+  type ImportPlaylistPayload,
 } from '@/services/playlistService';
 import { apiRequest } from '@/services/apiClient';
 import { createDiscographyRequest, MAX_BATCH_ITEMS } from '@/services/requestService';
@@ -160,24 +161,15 @@ const MainApp: React.FC = () => {
   }, [auth.isAuthenticated, activeRoute, route, navigate]);
 
   // Request an item from discovery
-  const handleRequestItem = async (item: {
-    id: string;
-    title: string;
-    artist: string;
-    album?: string;
-    cover_url?: string;
-    type?: string;
-    preview_url?: string;
-    release_date?: string;
-  }) => {
+  const handleRequestItem = async (item: DiscoveryItem) => {
     await requestsHook.submitRequest({
       id: item.id,
-      preview_url: item.preview_url,
-      release_date: item.release_date,
+      preview_url: item.preview_url ?? undefined,
+      release_date: item.release_date ?? undefined,
       title: item.title,
-      artist: item.artist,
-      album: item.album,
-      cover_url: item.cover_url,
+      artist: item.artist ?? '',
+      album: item.album ?? undefined,
+      cover_url: item.cover_url ?? undefined,
       type: item.type,
     });
     setRequestedIds((prev) => new Set([...prev, item.id]));
@@ -220,7 +212,7 @@ const MainApp: React.FC = () => {
   };
 
   const handleSetPlaylistMonitorMode = async (playlist: Playlist, mode: ListMonitorMode) => {
-    await updatePlaylistSettings(playlist.id, { enabled: playlist.is_active, monitor_mode: mode });
+    await updatePlaylistSettings(playlist.id, { enabled: playlist.enabled, monitor_mode: mode });
     await loadPlaylistsAndUsers();
   };
 
@@ -229,12 +221,7 @@ const MainApp: React.FC = () => {
     await loadPlaylistsAndUsers();
   };
 
-  const handleImportPlaylist = async (payload: {
-    name: string;
-    source_type: string;
-    source_url?: string;
-    tracks?: string[];
-  }) => {
+  const handleImportPlaylist = async (payload: ImportPlaylistPayload) => {
     await importPlaylist(payload);
     await loadPlaylistsAndUsers();
   };
@@ -459,7 +446,7 @@ const MainApp: React.FC = () => {
               <PlaylistsView
                 playlists={playlists}
                 users={users}
-                currentUserId={typeof auth.user?.id === 'number' ? auth.user.id : undefined}
+                currentUserId={auth.user?.id}
                 onSync={handleSyncPlaylists}
                 onToggleTarget={handleToggleTarget}
                 onImport={handleImportPlaylist}

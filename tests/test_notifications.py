@@ -41,6 +41,7 @@ from plex_playlist_sync.notifications import (
     format_notification,
     notification_dispatcher,
 )
+from plex_playlist_sync.security import mask_secret
 from plex_playlist_sync.storage import Database
 
 
@@ -720,7 +721,7 @@ class TestNotificationAPI:
             "name": "Renamed Channel",
             "channel_type": "telegram",
             "enabled": True,
-            "config": {"bot_token": "••••••••••••token", "chat_id": "-1002"},
+            "config": {"bot_token": mask_secret("12345:secretbottoken"), "chat_id": "-1002"},
             "events": ["item_available"],
         }
         res = client.put(f"/api/settings/notifications/{ch['id']}", json=update_payload, headers=headers)
@@ -1044,3 +1045,164 @@ class TestNotificationEventTriggers:
             res = worker.poll_once(db=test_db)
             assert res["grabs_triggered"] == 1
             assert any(ev == NotificationEvent.DOWNLOAD_STARTED for ev, data in dispatched)
+
+
+class TestWebhookUrlMasking:
+    RAW = "https://ntfy.example.com/topic-xyz?auth=tok_SECRET99"
+
+    def _create(self, client, headers, key="webhook_url"):
+        res = client.post(
+            "/api/settings/notifications",
+            json={"name": "Hook", "channel_type": "webhook", "config": {key: self.RAW}},
+            headers=headers,
+        )
+        assert res.status_code == status.HTTP_201_CREATED, res.text
+        return res.json()
+
+    def test_mask_helper_covers_url_and_webhook_url(self):
+        from plex_playlist_sync.security import mask_channel_config
+
+        for key in ("url", "webhook_url"):
+            out = mask_channel_config("webhook", {key: self.RAW})
+            assert out[key].startswith("https://ntfy.example.com")
+            assert "tok_SECRET99" not in out[key] and "topic-xyz" not in out[key]
+            assert "•••" in out[key]
+        out = mask_channel_config("webhook", {"url": "https://user:pw@h.example/x"})
+        assert "pw" not in out["url"] and "user" not in out["url"]
+
+    def test_list_get_never_return_raw_url(self, app_and_client, test_db, test_config, seeded_users):
+        _, client = app_and_client
+        headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+        created = self._create(client, headers)
+        assert "tok_SECRET99" not in created["config"]["webhook_url"]
+        listed = client.get("/api/settings/notifications", headers=headers)
+        assert "tok_SECRET99" not in listed.text
+        assert "topic-xyz" not in listed.text
+
+    def test_update_with_masked_placeholder_keeps_original(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
+        _, client = app_and_client
+        headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+        created = self._create(client, headers)
+        masked = created["config"]["webhook_url"]
+        res = client.put(
+            f"/api/settings/notifications/{created['id']}",
+            json={"name": "Hook2", "channel_type": "webhook", "config": {"webhook_url": masked}},
+            headers=headers,
+        )
+        assert res.status_code == status.HTTP_200_OK, res.text
+        assert "tok_SECRET99" not in res.text
+        assert test_db.get_notification_channel(created["id"])["config"]["webhook_url"] == self.RAW
+
+    def test_update_with_new_url_replaces(self, app_and_client, test_db, test_config, seeded_users):
+        _, client = app_and_client
+        headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+        created = self._create(client, headers)
+        new = "https://hooks.example.com/new/tok_NEW12345"
+        res = client.put(
+            f"/api/settings/notifications/{created['id']}",
+            json={"name": "Hook", "channel_type": "webhook", "config": {"webhook_url": new}},
+            headers=headers,
+        )
+        assert res.status_code == status.HTTP_200_OK, res.text
+        assert "tok_NEW12345" not in res.text
+        assert test_db.get_notification_channel(created["id"])["config"]["webhook_url"] == new
+
+    def test_update_edited_host_with_masked_path_is_400(self, app_and_client, test_db, test_config, seeded_users):
+        _, client = app_and_client
+        headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+        created = self._create(client, headers)
+        masked = created["config"]["webhook_url"]
+        edited = masked.replace("ntfy.example.com", "evil.example.com")
+        assert edited != masked and "•••" in edited
+        res = client.put(
+            f"/api/settings/notifications/{created['id']}",
+            json={"name": "Hook", "channel_type": "webhook", "config": {"webhook_url": edited}},
+            headers=headers,
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST, res.text
+        assert "placeholder" in res.json()["detail"]
+        assert test_db.get_notification_channel(created["id"])["config"]["webhook_url"] == self.RAW
+
+    def test_discord_mask_reveals_no_token_and_round_trips(self, app_and_client, test_db, test_config, seeded_users):
+        from plex_playlist_sync.security import mask_channel_config
+
+        raw = "https://discord.com/api/webhooks/12345/supersecrettoken"
+        masked = mask_channel_config("discord", {"webhook_url": raw})["webhook_url"]
+        assert masked.startswith("https://discord.com") and "oken" not in masked and "12345" not in masked
+        _, client = app_and_client
+        headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+        created = client.post(
+            "/api/settings/notifications",
+            json={"name": "D", "channel_type": "discord", "config": {"webhook_url": raw}},
+            headers=headers,
+        ).json()
+        res = client.put(
+            f"/api/settings/notifications/{created['id']}",
+            json={"name": "D2", "channel_type": "discord", "config": {"webhook_url": created["config"]["webhook_url"]}},
+            headers=headers,
+        )
+        assert res.status_code == status.HTTP_200_OK, res.text
+        assert test_db.get_notification_channel(created["id"])["config"]["webhook_url"] == raw
+
+    def test_masked_url_leaks_no_trailing_characters(self):
+        from plex_playlist_sync.security import mask_channel_config
+
+        out = mask_channel_config("webhook", {"url": "https://ntfy.example.com/topic/abcd1234"})["url"]
+        assert out == "https://ntfy.example.com" + "•" * len("/topic/abcd1234")
+        v6 = mask_channel_config("webhook", {"url": "http://[::1]:8080/hook/tok"})["url"]
+        assert v6.startswith("http://[::1]:8080") and "tok" not in v6
+
+    def test_short_path_mask_round_trips(self, app_and_client, test_db, test_config, seeded_users):
+        _, client = app_and_client
+        headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+        raw = "https://h.example.com/x"
+        res = client.post(
+            "/api/settings/notifications",
+            json={"name": "S", "channel_type": "webhook", "config": {"webhook_url": raw}},
+            headers=headers,
+        )
+        created = res.json()
+        masked = created["config"]["webhook_url"]
+        assert masked == "https://h.example.com••"
+        res = client.put(
+            f"/api/settings/notifications/{created['id']}",
+            json={"name": "S2", "channel_type": "webhook", "config": {"webhook_url": masked}},
+            headers=headers,
+        )
+        assert res.status_code == status.HTTP_200_OK, res.text
+        assert test_db.get_notification_channel(created["id"])["config"]["webhook_url"] == raw
+
+    def test_test_endpoint_does_not_send_stored_secrets_to_new_url(
+        self, app_and_client, test_db, test_config, seeded_users, monkeypatch
+    ):
+        _, client = app_and_client
+        headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+        ch = test_db.create_notification_channel(
+            NotificationChannel(
+                id="chan-exfil",
+                name="W",
+                channel_type="webhook",
+                config={"webhook_url": "https://good.example.com/hook", "secret_header": "TOPSECRET"},
+            )
+        )
+        seen: list[dict] = []
+        monkeypatch.setattr(
+            notification_dispatcher, "test_channel", lambda channel_type, config: (seen.append(dict(config)) or (True, "ok"))
+        )
+        res = client.post(
+            "/api/settings/notifications/test",
+            json={"channel_type": "webhook", "channel_id": ch["id"], "config": {"webhook_url": "https://evil.example.com/x"}},
+            headers=headers,
+        )
+        assert res.status_code == status.HTTP_200_OK, res.text
+        assert seen[-1] == {"webhook_url": "https://evil.example.com/x"}
+        # Unchanged destination (omitted URL) still merges the stored secret.
+        res = client.post(
+            "/api/settings/notifications/test",
+            json={"channel_type": "webhook", "channel_id": ch["id"], "config": {}},
+            headers=headers,
+        )
+        assert res.status_code == status.HTTP_200_OK, res.text
+        assert seen[-1]["secret_header"] == "TOPSECRET"

@@ -248,13 +248,25 @@ def api(db, config):
     return TestClient(app)
 
 
+def _scanned_item():
+    """A scan item in the shape ``_scan_one_file`` really returns (the route's response model is strict)."""
+    return {
+        "file_path": "scanned", "filename": "Song.mp3", "size_bytes": 1, "tags": {"title": "Song"},
+        "matched_artist_id": None, "matched_artist_name": None, "matched_album_id": None,
+        "matched_album_title": None, "matched_track_id": None, "matched_track_title": None, "confidence": 0.0,
+    }
+
+
+_NO_MATCH = {"match_strength": "none", "suggested_track_id": None, "candidate_tracks": []}
+
+
 def test_manual_import_default_folder_is_first_client_root(db, api, headers, tree):
     _client(db)
     db.update_media_management_settings({"root_folder_path": str(tree["library"]), "staging_folder_path": ""})
     write_mp3(tree["qbit"] / "Song.mp3")
     with patch("plex_playlist_sync.download_roots.get_acquisition_driver", return_value=_driver([str(tree["qbit"])])), \
-         patch("plex_playlist_sync.api.routes.library._scan_one_file", return_value=(MagicMock(), {"file_path": "scanned"})) as scan, \
-         patch("plex_playlist_sync.api.routes.library._unscoped_match_fields", return_value={}):
+         patch("plex_playlist_sync.api.routes.library._scan_one_file", return_value=(MagicMock(), _scanned_item())) as scan, \
+         patch("plex_playlist_sync.api.routes.library._unscoped_match_fields", return_value=_NO_MATCH):
         resp = api.post("/api/library/manual-import/scan", json={}, headers=headers)
     assert resp.status_code == 200, resp.text
     assert [Path(c.args[1]) for c in scan.call_args_list] == [(tree["qbit"] / "Song.mp3").resolve()]

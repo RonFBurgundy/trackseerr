@@ -3,7 +3,6 @@ export * from './authService';
 export * from './discoveryService';
 export * from './requestService';
 export * from './libraryService';
-export * from './queueService';
 export * from './playlistService';
 export * from './settingsService';
 export * from './systemService';

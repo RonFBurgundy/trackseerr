@@ -46,10 +46,10 @@ export const DiscoveryAlbumModal: React.FC<DiscoveryAlbumModalProps> = ({
   onOpenTrack,
   onOpenArtist,
 }) => {
-  const isInLibrary = Boolean(album.in_library || album.status === 'in_library' || album.status === 'available');
+  const isInLibrary = Boolean(album.status === 'in_library' || album.status === 'available');
   // Reports are about media we have, so only for items that are (partly) in the library.
   const canReport = isInLibrary || album.status === 'partial';
-  const isRequested = Boolean(requestedIds.has(album.id) || album.requested || album.status === 'requested' || album.status === 'pending');
+  const isRequested = Boolean(requestedIds.has(album.id) || album.status === 'requested' || album.status === 'pending');
   const isProcessing = requestingId === album.id || album.status === 'processing';
 
   return (
@@ -110,7 +110,7 @@ export const DiscoveryAlbumModal: React.FC<DiscoveryAlbumModalProps> = ({
               <div>
                 <IssueReportButton
                   mediaTitle={album.title}
-                  artist={album.artist}
+                  artist={album.artist ?? ''}
                   types={MEDIA_ISSUE_TYPES}
                   reference={{ discoveryId: album.id, itemType: 'album' }}
                   issuesHook={issuesHook}
@@ -157,7 +157,7 @@ export const DiscoveryAlbumModal: React.FC<DiscoveryAlbumModalProps> = ({
                         size="sm"
                         aria-label={isPlaying ? `Pause preview of ${t.title}` : `Play preview of ${t.title}`}
                         onClick={() =>
-                          onPlayTrack({ id: t.id, title: t.title, artist: album.artist, cover_url: album.cover_url, preview_url: t.preview_url ?? '' })
+                          onPlayTrack({ id: t.id, title: t.title, artist: album.artist ?? '', cover_url: album.cover_url ?? undefined, preview_url: t.preview_url ?? '' })
                         }
                         icon={isPlaying ? <Pause className="h-3 w-3 text-[#e5a00d]" /> : <Play className="h-3 w-3 fill-current" />}
                       />

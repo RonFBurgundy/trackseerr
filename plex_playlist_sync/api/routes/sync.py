@@ -19,6 +19,7 @@ from plex_playlist_sync.api.dependencies import (
     require_admin,
     verify_feed_access,
 )
+from plex_playlist_sync.api.schemas.sync import SyncStatusResponse, SyncTriggerResponse, SyncWebhookResponse
 from plex_playlist_sync.clients.deezer import DeezerClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import MediaServerError, PlaylistSyncOptions, as_media_server, describe_error
@@ -293,7 +294,7 @@ class SyncState:
 sync_state = SyncState()
 
 
-@router.post("")
+@router.post("", response_model=SyncTriggerResponse, response_model_exclude_unset=True)
 def trigger_sync(
     background_tasks: BackgroundTasks,
     _admin: dict[str, Any] = Depends(require_admin),
@@ -325,7 +326,7 @@ def trigger_sync(
     }
 
 
-@router.get("/status")
+@router.get("/status", response_model=SyncStatusResponse, response_model_exclude_unset=True)
 def get_sync_status(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
@@ -380,7 +381,7 @@ async def stream_sync_logs(
     )
 
 
-@router.post("/webhook")
+@router.post("/webhook", response_model=SyncWebhookResponse, response_model_exclude_unset=True)
 async def handle_sync_webhook(
     background_tasks: BackgroundTasks,
     request: Request,

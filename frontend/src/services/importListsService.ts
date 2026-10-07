@@ -1,3 +1,4 @@
+import type { Schema } from '@/types/apiSchema';
 import { apiRequest } from './apiClient';
 import type {
   ImportList,
@@ -31,8 +32,8 @@ export async function deleteImportList(id: string): Promise<void> {
 }
 
 /** Queues a sync; the server answers 409 (surfaced as an ApiError) when one is already running. */
-export async function syncImportList(id: string): Promise<{ queued: boolean }> {
-  return apiRequest<{ queued: boolean }>(`/api/import-lists/${encodeURIComponent(id)}/sync`, { method: 'POST' });
+export async function syncImportList(id: string): Promise<Schema<'ImportListQueued'>> {
+  return apiRequest<Schema<'ImportListQueued'>>(`/api/import-lists/${encodeURIComponent(id)}/sync`, { method: 'POST' });
 }
 
 /**

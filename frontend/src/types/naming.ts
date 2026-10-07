@@ -1,3 +1,4 @@
+import type { Narrow, Schema } from './apiSchema';
 /** Lidarr-style naming formats: shared types for the naming editor and preview API. */
 
 export interface NamingFormats {
@@ -19,21 +20,11 @@ export interface NamingPreset extends NamingFormats {
 
 export type NamingFormatKey = 'artist_folder_format' | 'standard_track_format' | 'multi_disc_track_format';
 
-export interface NamingFormatSample {
-  sample_id: string;
-  sample_name: string;
-  output: string;
-}
+export type NamingFormatSample = Schema<'FormatSamplePreviewModel'>;
 
-export interface NamingFormatPreview {
-  format: string;
-  warnings: string[];
-  samples: NamingFormatSample[];
-}
+export type NamingFormatPreview = Narrow<Schema<'FormatPreviewModel'>, { samples: NamingFormatSample[]; warnings: string[] }>;
 
-export interface NamingPreviewResponse {
-  format_previews: Record<NamingFormatKey, NamingFormatPreview>;
-}
+export type NamingPreviewResponse = Narrow<Schema<'PreviewResponseModel'>, { format_previews: Record<NamingFormatKey, NamingFormatPreview> }>;
 
 export interface NamingTokenHelp {
   token: string;

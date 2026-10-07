@@ -5,8 +5,10 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
+from plex_playlist_sync.api.response_models import ApiModel
 
 from plex_playlist_sync.api.dependencies import get_db, require_admin, require_core_tier
+from plex_playlist_sync.api.schemas.delay_profiles import DeletedResponse
 from plex_playlist_sync.storage import Database
 from plex_playlist_sync.tag_store import normalize_labels
 
@@ -23,6 +25,12 @@ class DelaysModel(BaseModel):
     soulseek: int = Field(0, ge=0, le=MAX_DELAY_MIN)
 
 
+class DelaysResponse(ApiModel):
+    usenet: int
+    torrent: int
+    soulseek: int
+
+
 class DelayProfilePayload(BaseModel):
     name: str = Field("", max_length=120)
     preferred_protocol: Literal["usenet", "torrent", "soulseek"] = "usenet"
@@ -37,12 +45,12 @@ class DelayProfilePayload(BaseModel):
         return normalize_labels(tags)
 
 
-class DelayProfileResponse(BaseModel):
+class DelayProfileResponse(ApiModel):
     id: int
     order: int
     name: str
     preferred_protocol: str
-    delays: DelaysModel
+    delays: DelaysResponse
     bypass_if_highest_quality: bool
     bypass_if_above_score: int | None = None
     tags: list[str]
@@ -94,7 +102,7 @@ def update_delay_profile(profile_id: int, payload: DelayProfilePayload, db: Data
     return updated
 
 
-@router.delete("/{profile_id}", summary="Delete a delay profile")
+@router.delete("/{profile_id}", response_model=DeletedResponse, response_model_exclude_unset=True, summary="Delete a delay profile")
 def delete_delay_profile(profile_id: int, db: Database = Depends(get_db)) -> dict[str, Any]:
     outcome = db.delete_delay_profile(profile_id)
     if outcome == "not_found":

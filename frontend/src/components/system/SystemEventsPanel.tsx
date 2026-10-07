@@ -18,7 +18,7 @@ const EVENT_TYPES = [
   'library_manager_changed',
 ];
 
-const SeverityBadge: React.FC<{ severity: string }> = ({ severity }) => {
+const SeverityBadge: React.FC<{ severity: string | null | undefined }> = ({ severity }) => {
   const s = (severity || 'info').toLowerCase();
   if (s === 'error') {
     return (

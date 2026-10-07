@@ -7,7 +7,13 @@ from typing import Any, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
+from plex_playlist_sync.api.response_models import ApiModel
 from plex_playlist_sync.api.dependencies import get_db, require_admin, require_core_tier
+from plex_playlist_sync.api.schemas.quality_catalog import (
+    CustomFormatImportResponse,
+    ExportedCustomFormat,
+    FormatDeletedResponse,
+)
 from plex_playlist_sync.decision_engine import (
     export_format,
     check_raw_format,
@@ -49,7 +55,7 @@ class QualityDefinitionPayload(BaseModel):
     max_kbps: Optional[float] = Field(None, ge=0, le=100000)
 
 
-class QualityDefinitionResponse(BaseModel):
+class QualityDefinitionResponse(ApiModel):
     quality: str
     title: str
     min_kbps: Optional[float] = None
@@ -127,7 +133,7 @@ class CustomFormatPayload(BaseModel):
     specifications: list[SpecificationModel] = Field(default_factory=list, max_length=50)
 
 
-class CustomFormatResponse(BaseModel):
+class CustomFormatResponse(ApiModel):
     id: int
     name: str
     include_in_rename: bool = False
@@ -164,7 +170,7 @@ def create_format(payload: CustomFormatPayload, db: Database = Depends(get_db)) 
         raise _bad(f"A custom format named '{fmt['name']}' already exists")
 
 
-@formats_router.post("/import", summary="Import Lidarr-schema custom format JSON (one object or a list)")
+@formats_router.post("/import", response_model=CustomFormatImportResponse, response_model_exclude_unset=True, summary="Import Lidarr-schema custom format JSON (one object or a list)")
 def import_formats(payload: Any = Body(...), db: Database = Depends(get_db)) -> dict[str, Any]:
     """Accepts one Lidarr/Servarr custom-format object or a list of them.
 
@@ -202,7 +208,7 @@ def import_formats(payload: Any = Body(...), db: Database = Depends(get_db)) -> 
     return {"imported": imported, "errors": errors}
 
 
-@formats_router.get("/{format_id}/export", summary="Export a custom format as Lidarr-schema JSON")
+@formats_router.get("/{format_id}/export", response_model=ExportedCustomFormat, response_model_exclude_unset=True, summary="Export a custom format as Lidarr-schema JSON")
 def export_custom_format(format_id: int, db: Database = Depends(get_db)) -> dict[str, Any]:
     fmt = db.get_custom_format(format_id)
     if not fmt:
@@ -230,7 +236,7 @@ def update_format(format_id: int, payload: CustomFormatPayload, db: Database = D
     return result
 
 
-@formats_router.delete("/{format_id}", summary="Delete a custom format")
+@formats_router.delete("/{format_id}", response_model=FormatDeletedResponse, response_model_exclude_unset=True, summary="Delete a custom format")
 def delete_format(format_id: int, db: Database = Depends(get_db)) -> dict[str, Any]:
     if not db.delete_custom_format(format_id):
         raise _not_found("Custom format")
@@ -257,7 +263,7 @@ class ReleaseProfilePayload(BaseModel):
         return normalize_labels(tags)
 
 
-class ReleaseProfileResponse(BaseModel):
+class ReleaseProfileResponse(ApiModel):
     id: int
     name: str
     enabled: bool
@@ -322,7 +328,7 @@ def update_release_profile(
     return rp
 
 
-@release_profiles_router.delete("/{profile_id}", summary="Delete a release profile")
+@release_profiles_router.delete("/{profile_id}", response_model=FormatDeletedResponse, response_model_exclude_unset=True, summary="Delete a release profile")
 def delete_release_profile(profile_id: int, db: Database = Depends(get_db)) -> dict[str, Any]:
     if not db.delete_release_profile(profile_id):
         raise _not_found("Release profile")

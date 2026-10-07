@@ -7,6 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from plex_playlist_sync import __version__
 from plex_playlist_sync.api.dependencies import get_config, get_db, require_service_principal, tier_of
+from plex_playlist_sync.api.schemas.internal import (
+    HeartbeatResponse,
+    HelloResponse,
+    SessionStatusResponse,
+    VerifyLocalResponse,
+)
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.gateway_link import record_heartbeat
 from plex_playlist_sync.internal_auth import PROTOCOL_VERSION
@@ -24,7 +30,7 @@ class VerifyLocalRequest(LocalLoginRequest):
     client_ip: str = Field(default="unknown", max_length=64)
 
 
-@router.post("/auth/local/verify")
+@router.post("/auth/local/verify", response_model=VerifyLocalResponse, response_model_exclude_unset=True)
 def verify_local(
     req: VerifyLocalRequest,
     request: Request,
@@ -59,7 +65,7 @@ class SessionStatusRequest(BaseModel):
     username: Optional[str] = Field(default=None, max_length=128)
 
 
-@router.post("/auth/session-status")
+@router.post("/auth/session-status", response_model=SessionStatusResponse, response_model_exclude_unset=True)
 def session_status(
     req: SessionStatusRequest,
     db: Database = Depends(get_db),
@@ -87,7 +93,7 @@ def session_status(
     return {"valid": reason is None} if reason is None else {"valid": False, "reason": reason}
 
 
-@router.get("/hello")
+@router.get("/hello", response_model=HelloResponse, response_model_exclude_unset=True)
 def hello(
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
@@ -110,7 +116,7 @@ class GatewayHeartbeat(BaseModel):
     active_sessions: int = Field(..., ge=0, le=10_000_000)
 
 
-@router.post("/gateway-heartbeat")
+@router.post("/gateway-heartbeat", response_model=HeartbeatResponse, response_model_exclude_unset=True)
 def gateway_heartbeat(
     req: GatewayHeartbeat,
     db: Database = Depends(get_db),

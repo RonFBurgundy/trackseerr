@@ -26,7 +26,7 @@ export interface RequestsViewProps {
   issuesHook: UseIssuesReturn;
   /** Own issues with unseen admin activity; badge on the My issues key. */
   issuesUnreadCount?: number;
-  currentUserId?: string | number;
+  currentUserId?: string;
   /** From GET /api/account; drives the per-type remaining-quota panel. */
   account?: AccountInfo | null;
 }
@@ -52,7 +52,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
     remove,
   } = requestsHook;
 
-  const [processingId, setProcessingId] = useState<number | null>(null);
+  const [processingId, setProcessingId] = useState<string | null>(null);
   const section: 'requests' | 'issues' = sub === 'issues' ? 'issues' : 'requests';
 
   // The request list loads through the hook's filter; keep it in step with the route.
@@ -68,7 +68,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
     { id: 'rejected', label: 'Rejected' },
   ];
 
-  const handleApprove = async (id: number) => {
+  const handleApprove = async (id: string) => {
     setProcessingId(id);
     try {
       await approve(id);
@@ -77,7 +77,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
     }
   };
 
-  const handleReject = async (id: number) => {
+  const handleReject = async (id: string) => {
     setProcessingId(id);
     try {
       await reject(id);
@@ -86,7 +86,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
     }
   };
 
-  const handleRemove = async (id: number) => {
+  const handleRemove = async (id: string) => {
     setProcessingId(id);
     try {
       await remove(id);
@@ -218,7 +218,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
                     <div className="flex items-center justify-between gap-2 mb-1">
                       {getStatusBadge(req.status)}
                       <span className="text-[10px] text-neutral-500 font-mono">
-                        {new Date(req.created_at).toLocaleDateString()}
+                        {req.created_at ? new Date(req.created_at).toLocaleDateString() : ''}
                       </span>
                     </div>
 
@@ -238,9 +238,9 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
                         <span>{req.status_message}</span>
                       </p>
                     )}
-                    {req.requested_by_username && (
+                    {req.username && (
                       <p className="text-[10px] text-neutral-500 font-mono mt-1">
-                        By: {req.requested_by_username}
+                        By: {req.username}
                       </p>
                     )}
                   </div>
@@ -250,8 +250,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
                 <ActionBar align="end" className="pt-2 border-t border-[#1f1f1f]">
                   {req.status !== 'rejected' &&
                     currentUserId !== undefined &&
-                    (req.user_id ?? req.requested_by_id) !== undefined &&
-                    String(req.user_id ?? req.requested_by_id) === String(currentUserId) && (
+                    req.user_id === String(currentUserId) && (
                       <IssueReportButton
                         mediaTitle={req.title}
                         artist={req.artist}

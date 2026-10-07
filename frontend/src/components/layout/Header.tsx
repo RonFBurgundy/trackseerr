@@ -198,7 +198,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-[#141414] border border-[#222222] rounded-[3px]">
                 {user.is_admin && <Shield className="h-3.5 w-3.5 text-[#e5a00d]" />}
                 <span className="text-xs font-mono font-medium text-neutral-200">
-                  {user.plex_username}
+                  {user.username}
                 </span>
               </div>
               <TapeDeckButton

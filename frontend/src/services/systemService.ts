@@ -1,3 +1,4 @@
+import type { Schema } from '@/types/apiSchema';
 import { apiRequest } from './apiClient';
 import type {
   ScheduledTaskItem,
@@ -36,8 +37,8 @@ export async function getSystemEvents(
   return await apiRequest<SystemEventsResponse>(url);
 }
 
-export async function clearSystemEvents(): Promise<{ success: boolean }> {
-  return await apiRequest<{ success: boolean }>('/api/system/events', {
+export async function clearSystemEvents(): Promise<Schema<'SuccessFlag'>> {
+  return await apiRequest<Schema<'SuccessFlag'>>('/api/system/events', {
     method: 'DELETE',
   });
 }
@@ -56,8 +57,8 @@ export async function getSystemLogs(
   return res || [];
 }
 
-export async function clearSystemLogs(): Promise<{ success: boolean }> {
-  return await apiRequest<{ success: boolean }>('/api/system/logs', {
+export async function clearSystemLogs(): Promise<Schema<'SuccessFlag'>> {
+  return await apiRequest<Schema<'SuccessFlag'>>('/api/system/logs', {
     method: 'DELETE',
   });
 }
@@ -73,8 +74,8 @@ export async function getScheduledTasks(): Promise<ScheduledTaskItem[]> {
 
 export async function triggerScheduledTask(
   taskId: string
-): Promise<{ success: boolean; message: string }> {
-  return await apiRequest<{ success: boolean; message: string }>(
+): Promise<Schema<'TaskActionResult'>> {
+  return await apiRequest<Schema<'TaskActionResult'>>(
     `/api/system/tasks/${taskId}/run`,
     {
       method: 'POST',
@@ -84,8 +85,8 @@ export async function triggerScheduledTask(
 
 export async function cancelScheduledTask(
   taskId: string
-): Promise<{ success: boolean; message: string }> {
-  return await apiRequest<{ success: boolean; message: string }>(
+): Promise<Schema<'TaskActionResult'>> {
+  return await apiRequest<Schema<'TaskActionResult'>>(
     `/api/system/tasks/${taskId}/cancel`,
     {
       method: 'POST',

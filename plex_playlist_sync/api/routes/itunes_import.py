@@ -17,6 +17,11 @@ from starlette.concurrency import run_in_threadpool
 
 from plex_playlist_sync import itunes_import as imp
 from plex_playlist_sync.api.dependencies import get_config, get_db, require_admin, require_core_tier
+from plex_playlist_sync.api.schemas.itunes_import import (
+    ItunesCommitResponse,
+    ItunesImportStatus,
+    ItunesPreviewResponse,
+)
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.storage import Database
 
@@ -53,7 +58,7 @@ def _parse_upload(path: str) -> dict[str, Any]:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
-@router.post("/preview")
+@router.post("/preview", response_model=ItunesPreviewResponse, response_model_exclude_unset=True)
 async def preview_itunes_import(
     request: Request,
     db: Database = Depends(get_db),
@@ -96,7 +101,7 @@ async def preview_itunes_import(
     return {"import_id": import_id, **preview}
 
 
-@router.post("/{import_id}/commit", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/{import_id}/commit", response_model=ItunesCommitResponse, response_model_exclude_unset=True, status_code=status.HTTP_202_ACCEPTED)
 def commit_itunes_import(
     import_id: str,
     req: CommitRequest,
@@ -144,7 +149,7 @@ def commit_itunes_import(
     return {"job_id": job_id}
 
 
-@router.get("/{import_id}/status")
+@router.get("/{import_id}/status", response_model=ItunesImportStatus, response_model_exclude_unset=True)
 def itunes_import_status(
     import_id: str,
     config: Config = Depends(get_config),

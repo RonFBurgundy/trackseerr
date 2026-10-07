@@ -1,6 +1,6 @@
 import { apiRequest } from './apiClient';
+import type { Schema } from '@/types/apiSchema';
 import type {
-  FormatScore,
   QualityEntry,
   QualityProfile,
   QualityProfileInput,
@@ -11,18 +11,8 @@ import type {
 const BASE = '/api/settings/quality-profiles';
 
 /** Wire shape of one stored item; legacy rows may lack `type`. */
-interface RawEntry {
-  type?: string | null;
-  quality?: string | null;
-  name?: string | null;
-  allowed?: boolean;
-  items?: string[];
-}
-
-interface RawProfile extends Omit<QualityProfile, 'items' | 'format_items'> {
-  items: RawEntry[];
-  format_items?: FormatScore[] | null;
-}
+type RawEntry = Schema<'QualityProfileItemModel'>;
+type RawProfile = Schema<'QualityProfileResponse'>;
 
 function toEntry(raw: RawEntry): QualityEntry | null {
   const allowed = raw.allowed !== false;

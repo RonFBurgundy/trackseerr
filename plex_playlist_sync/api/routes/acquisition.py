@@ -7,6 +7,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from plex_playlist_sync.api.response_models import ApiModel
 
 from plex_playlist_sync.acquisition_coordinator import (
     _to_quality_profile,
@@ -16,6 +17,14 @@ from plex_playlist_sync.acquisition_coordinator import (
 )
 from plex_playlist_sync import delay_gate
 from plex_playlist_sync.api.dependencies import get_db, require_admin, require_core_tier
+from plex_playlist_sync.api.schemas.acquisition import (
+    BlocklistEntry,
+    BlocklistRemovedResponse,
+    GrabResponse,
+    PendingDeletedResponse,
+    PendingGrabResponse,
+    SearchResponse,
+)
 from plex_playlist_sync.item_history import TRIGGER_MANUAL, GrabTrigger
 from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from plex_playlist_sync.redaction import redact_text
@@ -87,7 +96,7 @@ class ManualGrabPayload(BaseModel):
     track_id: Optional[str] = None
 
 
-@router.post("/search", summary="Interactive multi-indexer search with quality evaluation")
+@router.post("/search", response_model=SearchResponse, response_model_exclude_unset=True, summary="Interactive multi-indexer search with quality evaluation")
 def search_releases(
     query: InteractiveSearchQuery,
     db: Database = Depends(get_db),
@@ -221,6 +230,8 @@ def search_releases(
 
 @router.post(
     "/grab",
+    response_model=GrabResponse,
+    response_model_exclude_unset=True,
     summary="Force-enqueue a chosen candidate release to a download client",
     dependencies=[Depends(require_core_tier)],
 )
@@ -388,7 +399,7 @@ def _grab_release(payload: ManualGrabPayload, db: Database, admin: dict[str, Any
     }
 
 
-class PendingReleaseResponse(BaseModel):
+class PendingReleaseResponse(ApiModel):
     id: int
     title: str
     album_id: Optional[str] = None
@@ -418,7 +429,7 @@ def list_pending(
 
 
 @router.delete(
-    "/pending/{pending_id}", summary="Drop a pending release", dependencies=[Depends(require_core_tier)]
+    "/pending/{pending_id}", response_model=PendingDeletedResponse, response_model_exclude_unset=True, summary="Drop a pending release", dependencies=[Depends(require_core_tier)]
 )
 def drop_pending(
     pending_id: int, db: Database = Depends(get_db), _admin: dict[str, Any] = Depends(require_admin)
@@ -430,6 +441,8 @@ def drop_pending(
 
 @router.post(
     "/pending/{pending_id}/grab",
+    response_model=PendingGrabResponse,
+    response_model_exclude_unset=True,
     summary="Grab a pending release now, skipping its delay",
     dependencies=[Depends(require_core_tier)],
 )
@@ -461,7 +474,7 @@ def grab_pending_now(
     return {"success": True, "id": pending_id, "download_id": result.get("download_id"), "release": result.get("release")}
 
 
-@router.get("/blocklist", summary="List blocklisted releases")
+@router.get("/blocklist", response_model=list[BlocklistEntry], response_model_exclude_unset=True, summary="List blocklisted releases")
 def list_blocklist(
     limit: int = 100,
     offset: int = 0,
@@ -472,7 +485,7 @@ def list_blocklist(
     return db.list_blocklist(limit=limit, offset=offset)
 
 
-@router.delete("/blocklist/{blocklist_id}", summary="Remove entry from blocklist")
+@router.delete("/blocklist/{blocklist_id}", response_model=BlocklistRemovedResponse, response_model_exclude_unset=True, summary="Remove entry from blocklist")
 def remove_from_blocklist(
     blocklist_id: str,
     db: Database = Depends(get_db),

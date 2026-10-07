@@ -1,3 +1,4 @@
+import type { Schema } from './apiSchema';
 /** Per-item audit trail (`GET /api/library/{entity}/{id}/history`). */
 
 export type ItemHistoryEntity = 'artist' | 'album' | 'track';
@@ -46,36 +47,8 @@ export type ItemTriggerKind =
   | 'recycle_cleanup'
   | 'system';
 
-export interface ItemHistoryOrigin {
-  /** Server-sent kind; typed loosely so a newer backend trigger still renders. */
-  trigger: string | null;
-  trigger_label: string | null;
-  actor_display: string;
-  created_at: string;
-}
+export type ItemHistoryOrigin = Schema<'ItemHistoryOrigin'>;
 
-export interface ItemHistoryEvent {
-  id: number;
-  /** Server-sent event name; typed loosely so a newer backend event still renders. */
-  event: string;
-  created_at: string;
-  track_id: string | number | null;
-  album_id: string | number | null;
-  artist_id: string | number | null;
-  track_title: string;
-  album_title: string;
-  artist_name: string;
-  trigger: string | null;
-  trigger_label: string | null;
-  actor_display: string;
-  message: string;
-  details: Record<string, unknown>;
-}
+export type ItemHistoryEvent = Schema<'ItemHistoryEvent'>;
 
-export interface ItemHistoryResponse {
-  entity: ItemHistoryEntity;
-  entity_id: string;
-  origin: ItemHistoryOrigin | null;
-  events: ItemHistoryEvent[];
-  next_before: number | null;
-}
+export type ItemHistoryResponse = Schema<'ItemHistoryResponse'>;

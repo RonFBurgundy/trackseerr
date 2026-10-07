@@ -31,9 +31,9 @@ const rowTone = (r: ActivityQueueRecord): RowTone => (r.stalled ? 'warning' : nu
 
 const SeedingLine: React.FC<{ seeding: ActivitySeeding }> = ({ seeding }) => {
   const ratio =
-    seeding.ratio_target === null ? seeding.ratio.toFixed(2) : `${seeding.ratio.toFixed(2)} / ${parseFloat(seeding.ratio_target.toFixed(2))}`;
+    seeding.ratio_target == null ? seeding.ratio.toFixed(2) : `${seeding.ratio.toFixed(2)} / ${parseFloat(seeding.ratio_target.toFixed(2))}`;
   const time =
-    seeding.time_target_minutes === null
+    seeding.time_target_minutes == null
       ? formatMinutes(seeding.seeding_minutes)
       : `${formatMinutes(seeding.seeding_minutes)} / ${formatMinutes(seeding.time_target_minutes)}`;
   const mins = seeding.removes_in_minutes;

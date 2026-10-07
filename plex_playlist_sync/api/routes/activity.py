@@ -14,6 +14,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from plex_playlist_sync import activity_service as svc
 from plex_playlist_sync.api.dependencies import actor_id as _actor_id
 from plex_playlist_sync.api.dependencies import get_db, get_lidarr_client, require_admin, require_core_tier
+from plex_playlist_sync.api.schemas.activity import (
+    ActionResult,
+    BlocklistPage,
+    HistoryIndexResponse,
+    HistoryPage,
+    QueuePage,
+)
 from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient, _exc_text
 from plex_playlist_sync.library_manager import MODE_LIDARR, ModeChanged, get_library_mode, run_for_mode
 from plex_playlist_sync.redaction import redact_text
@@ -81,7 +88,7 @@ def _is_lidarr(db: Database) -> bool:
 # ------------------------------------------------------------------------------------------------------- queue
 
 
-@router.get("/queue", summary="Download queue (native or Lidarr)")
+@router.get("/queue", response_model=QueuePage, response_model_exclude_unset=True, summary="Download queue (native or Lidarr)")
 def list_queue(
     page: int = Query(1, ge=1, le=MAX_PAGE),
     page_size: int = Query(50, ge=1, le=200),
@@ -97,7 +104,7 @@ def list_queue(
     return svc.native_queue(db, page, page_size, key, sort_dir)
 
 
-@router.delete("/queue/{queue_id}", summary="Remove a queue item, optionally blocklisting it")
+@router.delete("/queue/{queue_id}", response_model=ActionResult, response_model_exclude_unset=True, summary="Remove a queue item, optionally blocklisting it")
 def delete_queue_item(
     queue_id: str,
     remove_from_client: bool = Query(True),
@@ -120,7 +127,7 @@ def delete_queue_item(
     return run_mutation(db, native, lidarr)
 
 
-@router.post("/queue/{queue_id}/retry", summary="Search again for a queue item")
+@router.post("/queue/{queue_id}/retry", response_model=ActionResult, response_model_exclude_unset=True, summary="Search again for a queue item")
 def retry_queue_item(
     queue_id: str,
     db: Database = Depends(get_db),
@@ -148,7 +155,7 @@ def retry_queue_item(
 # ------------------------------------------------------------------------------------------------------ history
 
 
-@router.get("/history", summary="Download history (native or Lidarr)")
+@router.get("/history", response_model=HistoryPage, response_model_exclude_unset=True, summary="Download history (native or Lidarr)")
 def list_history(
     page: int = Query(1, ge=1, le=MAX_PAGE),
     page_size: int = Query(50, ge=1, le=200),
@@ -170,7 +177,7 @@ def list_history(
     return svc.native_history(db, page, page_size, sort_dir, event)
 
 
-@router.get("/history/index", summary="Scrubber groups for the download history (native only)")
+@router.get("/history/index", response_model=HistoryIndexResponse, response_model_exclude_unset=True, summary="Scrubber groups for the download history (native only)")
 def history_index(
     sort_key: Optional[str] = Query(None),
     sort_dir: str = Query("desc", pattern=SORT_DIR_PATTERN),
@@ -189,7 +196,7 @@ def history_index(
     return svc.native_history_index(db, sort_dir, event)
 
 
-@router.post("/history/{history_id}/failed", summary="Mark a grab as failed: blocklist it and search again")
+@router.post("/history/{history_id}/failed", response_model=ActionResult, response_model_exclude_unset=True, summary="Mark a grab as failed: blocklist it and search again")
 def mark_history_failed(
     history_id: str,
     db: Database = Depends(get_db),
@@ -216,7 +223,7 @@ def mark_history_failed(
 # ---------------------------------------------------------------------------------------------------- blocklist
 
 
-@router.get("/blocklist", summary="Blocklisted releases (native or Lidarr)")
+@router.get("/blocklist", response_model=BlocklistPage, response_model_exclude_unset=True, summary="Blocklisted releases (native or Lidarr)")
 def list_blocklist(
     page: int = Query(1, ge=1, le=MAX_PAGE),
     page_size: int = Query(50, ge=1, le=200),
@@ -232,7 +239,7 @@ def list_blocklist(
     return svc.native_blocklist(db, page, page_size, key, sort_dir)
 
 
-@router.delete("/blocklist/{blocklist_id}", summary="Remove an entry from the blocklist")
+@router.delete("/blocklist/{blocklist_id}", response_model=ActionResult, response_model_exclude_unset=True, summary="Remove an entry from the blocklist")
 def delete_blocklist_item(
     blocklist_id: str,
     db: Database = Depends(get_db),

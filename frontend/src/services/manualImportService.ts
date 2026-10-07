@@ -36,8 +36,8 @@ export async function searchManualImportAlbums(q: string, signal?: AbortSignal):
   );
   return (res ?? []).map((a) => ({
     id: String(a.id),
-    title: a.title,
-    artist_id: String(a.artist_id),
+    title: a.title ?? '',
+    artist_id: String(a.artist_id ?? ''),
     artist_name: a.artist_name ?? 'Unknown Artist',
     year: a.year ?? (a.release_date ? Number.parseInt(a.release_date.slice(0, 4), 10) || null : null),
   }));

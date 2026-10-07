@@ -13,6 +13,9 @@ const DEFAULT_LIDARR: LidarrSettings = {
   auto_trickle: false,
   trickle_rate_seconds: 3.0,
   trickle_batch_size: 25,
+  auto_search: true,
+  auto_trickle_interval_minutes: 30,
+  prefer_singles: true,
 };
 
 export interface LidarrPanelProps {
