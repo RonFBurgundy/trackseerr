@@ -310,6 +310,10 @@ def api(tmp_path, root_state):
     app = create_app(db=db, config=config)
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_config] = lambda: config
+    for h in list(root_state.handlers):  # create_app() runs setup_logging(), which attaches its own file handler
+        if isinstance(h, TimedLogFileHandler):
+            root_state.removeHandler(h)
+            h.close()
     secret = get_or_create_secret_key(data_dir=str(tmp_path))
     log_dir = tmp_path / "logs"
     log_dir.mkdir()

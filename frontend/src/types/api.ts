@@ -4913,11 +4913,70 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Download rotated disk log file
-         * @description Returns active trackseerr.log file for download (admin required).
+         * Download the current disk log file
+         * @description Returns the active ``trackseerr.txt`` for download (admin required). Kept for compatibility; the
+         *     log-file listing endpoints serve rotated files.
          */
         get: operations["download_system_logs_api_system_logs_download_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/logs/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List log files, newest first */
+        get: operations["list_system_log_files_api_system_logs_files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/logs/files/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download one log file
+         * @description The name must be one of the listed log files; anything else (traversal, absolute paths) is a 404.
+         */
+        get: operations["download_system_log_file_api_system_logs_files__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/logs/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get log rotation, retention and level settings */
+        get: operations["get_log_settings_api_system_logs_settings_get"];
+        /**
+         * Update log settings (applied live)
+         * @description Validates, persists and immediately applies the changed settings (admin required).
+         */
+        put: operations["update_log_settings_api_system_logs_settings_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -8700,6 +8759,52 @@ export interface components {
             name: string;
             /** Timestamp */
             timestamp: string;
+        };
+        /** LogFileEntry */
+        LogFileEntry: {
+            /** End At */
+            end_at?: string | null;
+            /** Name */
+            name: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Start At */
+            start_at?: string | null;
+        };
+        /** LogSettingsResponse */
+        LogSettingsResponse: {
+            /** Level Options */
+            level_options: string[];
+            /** Log Level */
+            log_level: string;
+            /** Log Max Total Mb */
+            log_max_total_mb: number;
+            /** Log Retention Days */
+            log_retention_days: number;
+            /** Log Rotation Hours */
+            log_rotation_hours: number;
+            /** Max Total Mb Options */
+            max_total_mb_options: number[];
+            /** Retention Days Max */
+            retention_days_max: number;
+            /** Retention Days Min */
+            retention_days_min: number;
+            /** Rotation Hours Options */
+            rotation_hours_options: number[];
+        };
+        /**
+         * LogSettingsUpdate
+         * @description Body of ``PUT /logs/settings``. Every field is optional; only the ones sent are changed.
+         */
+        LogSettingsUpdate: {
+            /** Log Level */
+            log_level?: string | null;
+            /** Log Max Total Mb */
+            log_max_total_mb?: number | null;
+            /** Log Retention Days */
+            log_retention_days?: number | null;
+            /** Log Rotation Hours */
+            log_rotation_hours?: number | null;
         };
         /** LogoutResponse */
         LogoutResponse: {
@@ -20993,6 +21098,110 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_system_log_files_api_system_logs_files_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogFileEntry"][];
+                };
+            };
+        };
+    };
+    download_system_log_file_api_system_logs_files__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_log_settings_api_system_logs_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogSettingsResponse"];
+                };
+            };
+        };
+    };
+    update_log_settings_api_system_logs_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
