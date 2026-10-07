@@ -247,7 +247,7 @@ class TestScheduledTask:
         assert "lidarr_request_retry" not in self.tasks(client, headers)
         db.update_media_management_settings({"library_mode": "lidarr"})
         task = self.tasks(client, headers)["lidarr_request_retry"]
-        assert task["name"] == "Retry Stuck Lidarr Requests" and task["interval"] == "Every 1m" and task["can_trigger"]
+        assert task["name"] == "Retry Stuck Lidarr Requests" and task["interval"] == "Checks every 1m" and task["can_trigger"]
 
     def test_run_now_is_refused_in_native_mode(self, admin_client):
         client, headers = admin_client

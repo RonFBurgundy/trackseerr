@@ -329,19 +329,24 @@ def test_forwarded_delete_is_owner_scoped(core, db):
 # --------------------------------------------------------------------------- scrobbles on core
 
 
-def test_lastfm_callback_accepts_forwarded_principal_and_checks_state_owner(core, db):
+def test_lastfm_complete_accepts_forwarded_principal_and_checks_state_owner(core, db):
+    import json
+
     client, _ = core
+    path = "/api/scrobbles/lastfm/complete"
+
+    def post(state, **who):
+        body = json.dumps({"state": state, "token": "LFTOKENabc123"}).encode()
+        return client.post(path, content=body, headers=_signed("POST", path, body=body, **who))
+
     own = db.create_lastfm_auth_state("1001", None)
-    target = f"/api/scrobbles/lastfm/callback?state={own}"
-    res = client.get(target, headers=_signed("GET", target), follow_redirects=False)
-    assert res.status_code == 303
-    assert "scrobble_error=state" not in res.headers["location"]  # state accepted (Last.fm itself not configured)
+    res = post(own)  # alice's own state: accepted (the exchange then fails because Last.fm is not configured)
+    assert res.status_code == 503 and res.json()["detail"]["reason"] == "lastfm"
 
     foreign = db.create_lastfm_auth_state("1001", None)
-    target = f"/api/scrobbles/lastfm/callback?state={foreign}"
-    res = client.get(target, headers=_signed("GET", target, user_id="1002", user_name="bob"), follow_redirects=False)
-    assert res.status_code == 303
-    assert "scrobble_error=state" in res.headers["location"]
+    res = post(foreign, user_id="1002", user_name="bob")
+    assert res.status_code == 403 and res.json()["detail"]["reason"] == "state_user"
+    assert db.take_lastfm_auth_state(foreign)[1] == "unknown"  # consumed
 
 
 def test_webhook_url_uses_request_base_url_not_application_url(db, tmp_path):

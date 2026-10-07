@@ -19,7 +19,8 @@ export interface UseIssuesReturn {
 const norm = (v: string): string => v.trim().toLowerCase();
 
 /** The signed-in user's own issues (admins get everyone's from the API; consumers filter by user). */
-export function useIssues(currentUserId?: string | number): UseIssuesReturn {
+/** `enabled` must stay false until the user is signed in; the first load runs when it turns true. */
+export function useIssues(currentUserId?: string | number, enabled: boolean = true): UseIssuesReturn {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,8 +38,9 @@ export function useIssues(currentUserId?: string | number): UseIssuesReturn {
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     void refresh();
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   const submit = useCallback(async (payload: CreateIssuePayload): Promise<Issue> => {
     const created = await createIssue(payload);

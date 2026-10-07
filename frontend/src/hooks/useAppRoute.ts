@@ -243,7 +243,7 @@ function readRoute(initial: boolean): AppRoute {
   // The params are left in place: useScrobbling reads and strips them when the scrobbling page mounts.
   if (initial) {
     const q = new URLSearchParams(window.location.search);
-    if (q.has('connected') || q.has('scrobble_error')) return settingsRouteFor('requests', 'scrobbling');
+    if (q.has('connected') || q.has('scrobble_error') || q.has('lastfm_state')) return settingsRouteFor('requests', 'scrobbling');
   }
   return defaultRoute('discover');
 }

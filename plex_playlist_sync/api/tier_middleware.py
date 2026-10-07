@@ -87,6 +87,7 @@ GATEWAY_FORWARD_ALLOWLIST: tuple[tuple[frozenset[str], str], ...] = (
     (frozenset({"GET", "PUT"}), "/api/scrobbles/config"),  # own scrobble settings
     (READ, "/api/scrobbles/listens"),  # own listen history
     (READ, "/api/scrobbles/lastfm/auth-url"),  # begin Last.fm connect
+    (frozenset({"POST"}), "/api/scrobbles/lastfm/complete"),  # finish Last.fm connect under the user's own session
     (READ, "/api/scrobbles/lastfm/callback"),  # Last.fm return; core's 303 Location is passed through
 )
 

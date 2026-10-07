@@ -16,7 +16,8 @@ export interface UseDiscoveryReturn {
   refresh: () => Promise<void>;
 }
 
-export function useDiscovery(): UseDiscoveryReturn {
+/** `enabled` must stay false until the user is signed in; the first load runs when it turns true. */
+export function useDiscovery(enabled: boolean = true): UseDiscoveryReturn {
   const [category, setCategory] = useState<DiscoveryCategory>('trending');
   const [query, setQuery] = useState<string>('');
   const [items, setItems] = useState<DiscoveryItem[]>([]);
@@ -47,10 +48,10 @@ export function useDiscovery(): UseDiscoveryReturn {
   }, []);
 
   useEffect(() => {
-    if (category !== 'search') {
+    if (enabled && category !== 'search') {
       loadCategory(category);
     }
-  }, [category, loadCategory]);
+  }, [enabled, category, loadCategory]);
 
   const search = useCallback(async (searchQuery: string) => {
     setQuery(searchQuery);

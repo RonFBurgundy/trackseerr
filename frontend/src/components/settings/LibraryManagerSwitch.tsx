@@ -1,6 +1,6 @@
 import React from 'react';
-import { Loader2, AlertTriangle, Check } from 'lucide-react';
-import { TabStrip, TapeDeckButton, MachinedCard, ActionBar } from '@/components/ui';
+import { Loader2, AlertTriangle } from 'lucide-react';
+import { TabStrip, TapeDeckButton, MachinedCard } from '@/components/ui';
 import type { LibraryManagerMode } from '@/types/models';
 import type { UseLibraryManagerReturn } from '@/hooks/useLibraryManager';
 import { MANAGER_LABEL } from './InactiveGate';
@@ -9,43 +9,18 @@ export interface LibraryManagerSwitchProps {
   manager: UseLibraryManagerReturn;
   /** Effective mode (server value, or the media-settings fallback when the endpoint is unavailable). */
   mode: LibraryManagerMode;
-  pendingMode: LibraryManagerMode | null;
-  onPendingChange: (mode: LibraryManagerMode | null) => void;
-  onToast: (msg: string, tone?: 'ok' | 'error') => void;
+  /** Opens the shared confirmation (rendered by the parent) for the chosen mode. */
+  onRequestSwitch: (mode: LibraryManagerMode) => void;
 }
-
-const CONSEQUENCE: Record<LibraryManagerMode, string> = {
-  native:
-    'TrackSeerr will search, download, import and rename on its own. Requests stop going to Lidarr. Lidarr settings are kept.',
-  lidarr:
-    'Requests will be sent to Lidarr, and TrackSeerr acts as its front-end. Native downloads, imports and the scanner pause. Media Management settings are kept.',
-};
 
 export const LibraryManagerSwitch: React.FC<LibraryManagerSwitchProps> = ({
   manager,
   mode,
-  pendingMode,
-  onPendingChange,
-  onToast,
+  onRequestSwitch,
 }) => {
   const { state, isLoading, isSwitching, loadError } = manager;
   const blocked = state ? !state.can_switch : false;
   const modes: LibraryManagerMode[] = ['native', 'lidarr'];
-
-  const confirm = async () => {
-    if (!pendingMode) return;
-    const target = pendingMode;
-    const res = await manager.switchTo(target);
-    if (res.ok) {
-      onToast(`Library manager is now ${MANAGER_LABEL[target]}`);
-      onPendingChange(null);
-    } else {
-      onToast(res.message, 'error');
-      // Keep the confirm panel closed; the server message is the explanation (409 in-flight / 422 unconfigured).
-      onPendingChange(null);
-      void manager.refresh();
-    }
-  };
 
   return (
     <MachinedCard className="p-3 sm:p-5 max-w-2xl space-y-4">
@@ -67,7 +42,7 @@ export const LibraryManagerSwitch: React.FC<LibraryManagerSwitchProps> = ({
               aria-pressed={mode === m}
               className="flex-1 sm:flex-none sm:min-w-[120px]"
               onClick={() => {
-                if (m !== mode) onPendingChange(m);
+                if (m !== mode) onRequestSwitch(m);
               }}
             >
               {MANAGER_LABEL[m]}
@@ -103,31 +78,6 @@ export const LibraryManagerSwitch: React.FC<LibraryManagerSwitchProps> = ({
         </p>
       )}
 
-      {pendingMode && (
-        <div className="border border-[#e5a00d]/40 bg-[#101010] rounded-[4px] p-4 space-y-3" role="alertdialog" aria-label="Confirm library manager switch">
-          <p className="text-xs font-mono text-white">
-            Switch library manager from {MANAGER_LABEL[mode]} to {MANAGER_LABEL[pendingMode]}?
-          </p>
-          <p className="text-[11px] font-mono text-neutral-400">{CONSEQUENCE[pendingMode]}</p>
-          {blocked && state?.blocking_reason && (
-            <p className="text-[11px] font-mono text-amber-300">Currently blocked: {state.blocking_reason}</p>
-          )}
-          <ActionBar align="end" stackOnMobile className="max-sm:[&>*:last-child]:order-first">
-            <TapeDeckButton size="sm" onClick={() => onPendingChange(null)} disabled={isSwitching}>
-              Cancel
-            </TapeDeckButton>
-            <TapeDeckButton
-              size="sm"
-              variant="amber"
-              onClick={() => void confirm()}
-              disabled={isSwitching || blocked}
-              icon={isSwitching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-            >
-              Switch to {MANAGER_LABEL[pendingMode]}
-            </TapeDeckButton>
-          </ActionBar>
-        </div>
-      )}
     </MachinedCard>
   );
 };

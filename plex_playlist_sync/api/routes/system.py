@@ -1119,8 +1119,8 @@ def get_all_scheduled_tasks(
             ScheduledTaskItem(
                 id="lidarr_request_retry",
                 name="Retry Stuck Lidarr Requests",
-                description="Re-sends approved requests Lidarr could not finish yet (releases still loading, rate limits, failed monitoring) on a backoff schedule.",
-                interval="Every 1m",
+                description="Re-sends approved requests Lidarr could not finish yet (releases still loading, rate limits, failed monitoring) on a backoff schedule. Each stuck request backs off on its own schedule (2m, 5m, 15m, 1h, 6h, then daily); Lidarr is contacted only for requests that are due.",
+                interval="Checks every 1m",
                 status="running" if "lidarr_request_retry" in _running_tasks else "idle",
                 last_run_at=library_manager.last_retry_sweep_at or _task_last_run_at.get("lidarr_request_retry"),
                 can_trigger=True,

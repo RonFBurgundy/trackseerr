@@ -737,95 +737,210 @@ def test_auth_url_drops_unsafe_forward_url(db, lfm_config, users, bad):
     assert row["forward_url"] is None
 
 
-def callback(tc, token, state, lf_token="LFTOKEN"):
-    return tc.get(
-        f"/api/scrobbles/lastfm/callback?state={state}&token={lf_token}",
-        cookies={"session_token": token},
-        follow_redirects=False,
+def callback(tc, state, lf_token="LFTOKENabc123", glue=False):
+    qs = f"state={state}?token={lf_token}" if glue else f"state={state}&token={lf_token}"
+    return tc.get(f"/api/scrobbles/lastfm/callback?{qs}", follow_redirects=False)
+
+
+def complete(tc, headers, state, token="LFTOKENabc123"):
+    return tc.post("/api/scrobbles/lastfm/complete", json={"state": state, "token": token}, headers=headers)
+
+
+def _linked(db, uid):
+    cfg = db.get_scrobble_config(uid)
+    return bool(cfg and cfg.get("lastfm_session_key"))
+
+
+# --- auth-url origin selection ---------------------------------------------------------------------------------
+
+
+def _cb_origin(url):
+    from urllib.parse import parse_qs, urlsplit
+
+    cb = parse_qs(urlsplit(url).query)["cb"][0]
+    parts = urlsplit(cb)
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def test_auth_url_uses_browser_origin_when_it_matches_host(db, lfm_config, users):
+    tc = make_client(db, lfm_config)
+    alice, _ = auth_headers(users["alice"], db, lfm_config)
+    r = tc.get("/api/scrobbles/lastfm/auth-url", params={"origin": "http://testserver"}, headers=alice)
+    assert _cb_origin(r.json()["url"]) == "http://testserver"
+
+
+def test_auth_url_accepts_application_url_origin(db, lfm_config, users):
+    db.update_general_settings({"application_url": "https://ts.example"})
+    tc = make_client(db, lfm_config)
+    alice, _ = auth_headers(users["alice"], db, lfm_config)
+    r = tc.get("/api/scrobbles/lastfm/auth-url", params={"origin": "https://ts.example"}, headers=alice)
+    assert _cb_origin(r.json()["url"]) == "https://ts.example"
+
+
+@pytest.mark.parametrize(
+    "spoof", ["https://evil.example", "http://testserver.evil.example", "https://user@testserver", "javascript:alert(1)", "http://testserver/path"]
+)
+def test_auth_url_rejects_spoofed_origin_and_falls_back(db, lfm_config, users, spoof):
+    tc = make_client(db, lfm_config)
+    alice, _ = auth_headers(users["alice"], db, lfm_config)
+    r = tc.get("/api/scrobbles/lastfm/auth-url", params={"origin": spoof}, headers=alice)
+    assert r.status_code == 200
+    assert _cb_origin(r.json()["url"]) == "http://testserver"  # _base_url fallback
+
+
+def test_auth_url_ignores_forwarded_host_from_untrusted_peer(db, lfm_config, users):
+    tc = make_client(db, lfm_config)
+    alice, _ = auth_headers(users["alice"], db, lfm_config)
+    r = tc.get(
+        "/api/scrobbles/lastfm/auth-url",
+        params={"origin": "https://spoof.example"},
+        headers={**alice, "X-Forwarded-Host": "spoof.example", "X-Forwarded-Proto": "https"},
     )
+    assert _cb_origin(r.json()["url"]) == "http://testserver"
 
 
-def test_callback_success_saves_session_and_redirects(db, lfm_config, users):
+# --- callback: shape check and bounce only ----------------------------------------------------------------------
+
+
+def test_callback_redirects_to_spa_with_params_and_links_nothing(db, lfm_config, users):
     tc = make_client(db, lfm_config)
-    _, tok = auth_headers(users["alice"], db, lfm_config)
-    state = db.create_lastfm_auth_state("1001", "/settings?tab=scrobbling")
-    with patch.object(LastFmClient, "exchange_token_for_session", return_value=("al_fm", "NEWSK")) as ex:
-        r = callback(tc, tok, state)
-    ex.assert_called_once_with("LFTOKEN")
-    assert r.status_code == 303 and r.headers["location"] == "/settings?tab=scrobbling&connected=lastfm"
-    cfg = db.get_scrobble_config("1001")
-    assert cfg["lastfm_username"] == "al_fm" and cfg["lastfm_session_key"] == "NEWSK"
-
-
-def test_callback_default_redirect_target(db, lfm_config, users):
-    tc = make_client(db, lfm_config)
-    _, tok = auth_headers(users["alice"], db, lfm_config)
     state = db.create_lastfm_auth_state("1001", None)
-    with patch.object(LastFmClient, "exchange_token_for_session", return_value=("u", "k")):
-        r = callback(tc, tok, state)
-    assert r.headers["location"] == "/?connected=lastfm"
-
-
-def test_callback_rejects_reused_state(db, lfm_config, users):
-    tc = make_client(db, lfm_config)
-    _, tok = auth_headers(users["alice"], db, lfm_config)
-    state = db.create_lastfm_auth_state("1001", None)
-    with patch.object(LastFmClient, "exchange_token_for_session", return_value=("u", "k")):
-        assert "connected=lastfm" in callback(tc, tok, state).headers["location"]
-        r = callback(tc, tok, state)
-    assert r.status_code == 303 and r.headers["location"] == "/?scrobble_error=state"
-
-
-def test_callback_rejects_expired_state(db, lfm_config, users):
-    tc = make_client(db, lfm_config)
-    _, tok = auth_headers(users["alice"], db, lfm_config)
-    state = db.create_lastfm_auth_state("1001", None)
-    db.conn.execute("UPDATE lastfm_auth_states SET created_at = datetime('now', '-11 minutes')")
     with patch.object(LastFmClient, "exchange_token_for_session") as ex:
-        r = callback(tc, tok, state)
-    assert r.headers["location"] == "/?scrobble_error=state" and ex.call_count == 0
-    assert db.get_scrobble_config("1001") is None
-
-
-def test_callback_rejects_other_users_state(db, lfm_config, users):
-    tc = make_client(db, lfm_config)
-    _, bob_tok = auth_headers(users["bob"], db, lfm_config)
-    state = db.create_lastfm_auth_state("1001", None)  # minted for alice
-    with patch.object(LastFmClient, "exchange_token_for_session") as ex:
-        r = callback(tc, bob_tok, state)
-    assert r.headers["location"] == "/?scrobble_error=state" and ex.call_count == 0
-    assert db.get_scrobble_config("u-bob") is None and db.get_scrobble_config("1001") is None
-
-
-def test_callback_without_session_redirects_with_state_error(db, lfm_config, users):
-    tc = make_client(db, lfm_config)
-    state = db.create_lastfm_auth_state("1001", None)
-    r = tc.get(f"/api/scrobbles/lastfm/callback?state={state}&token=t", follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"] == "/?scrobble_error=state"
-
-
-def test_callback_exchange_failure_redirects_with_lastfm_error(db, lfm_config, users):
-    tc = make_client(db, lfm_config)
-    _, tok = auth_headers(users["alice"], db, lfm_config)
-    state = db.create_lastfm_auth_state("1001", "/settings")
-    with patch.object(LastFmClient, "exchange_token_for_session", side_effect=LastFmError(4, "bad token")):
-        r = callback(tc, tok, state)
-    assert r.headers["location"] == "/settings?scrobble_error=lastfm"
-    assert db.get_scrobble_config("1001") is None
+        r = callback(tc, state)
+    assert r.status_code == 303
+    assert r.headers["location"] == f"/?lastfm_state={state}&lastfm_token=LFTOKENabc123"
+    assert ex.call_count == 0 and not _linked(db, "1001")
+    assert db.take_lastfm_auth_state(state)[1] == "ok"  # the callback did not consume it
 
 
 def test_callback_tolerates_token_glued_onto_state(db, lfm_config, users):
     tc = make_client(db, lfm_config)
+    state = db.create_lastfm_auth_state("1001", None)
+    r = callback(tc, state, glue=True)
+    assert r.headers["location"] == f"/?lastfm_state={state}&lastfm_token=LFTOKENabc123"
+
+
+@pytest.mark.parametrize("qs", ["state=&token=abcdefgh1", "state=short&token=abcdefgh1", "state=abcdefgh1234&token=", "state=abc%3Cdef%3E123&token=abcdefgh1"])
+def test_callback_malformed_shape_goes_to_state_error(db, lfm_config, users, qs):
+    tc = make_client(db, lfm_config)
+    r = tc.get(f"/api/scrobbles/lastfm/callback?{qs}", follow_redirects=False)
+    assert r.headers["location"] == "/?scrobble_error=state"
+
+
+# --- complete: bound to the signed-in session -----------------------------------------------------------------------
+
+
+def test_complete_as_state_owner_links_account(db, lfm_config, users):
+    tc = make_client(db, lfm_config)
+    alice, _ = auth_headers(users["alice"], db, lfm_config)
+    state = db.create_lastfm_auth_state("1001", None)
+    with patch.object(LastFmClient, "exchange_token_for_session", return_value=("al_fm", "NEWSK")) as ex:
+        r = complete(tc, alice, state)
+    assert r.status_code == 200 and r.json() == {"connected": True, "username": "al_fm"}
+    ex.assert_called_once_with("LFTOKENabc123")
+    cfg = db.get_scrobble_config("1001")
+    assert cfg["lastfm_username"] == "al_fm" and cfg["lastfm_session_key"] == "NEWSK"
+
+
+def test_complete_works_with_session_cookie_too(db, lfm_config, users):
+    tc = make_client(db, lfm_config)
     _, tok = auth_headers(users["alice"], db, lfm_config)
     state = db.create_lastfm_auth_state("1001", None)
-    with patch.object(LastFmClient, "exchange_token_for_session", return_value=("u", "k")) as ex:
-        r = tc.get(
-            f"/api/scrobbles/lastfm/callback?state={state}?token=GLUED",
-            cookies={"session_token": tok},
-            follow_redirects=False,
-        )
-    ex.assert_called_once_with("GLUED")
-    assert "connected=lastfm" in r.headers["location"]
+    tc.cookies.set("session_token", tok)
+    with patch.object(LastFmClient, "exchange_token_for_session", return_value=("al_fm", "SK")):
+        r = tc.post("/api/scrobbles/lastfm/complete", json={"state": state, "token": "LFTOKENabc123"})
+    assert r.status_code == 200
+
+
+def test_complete_as_different_user_cannot_bind_and_state_is_consumed(db, lfm_config, users, caplog):
+    """Account-linking CSRF: a victim holding the attacker's state must not link to the attacker's account."""
+    tc = make_client(db, lfm_config)
+    bob, _ = auth_headers(users["bob"], db, lfm_config)  # the victim
+    state = db.create_lastfm_auth_state("1001", None)  # minted by the attacker (alice)
+    with patch.object(LastFmClient, "exchange_token_for_session") as ex, caplog.at_level("WARNING"):
+        r = complete(tc, bob, state, token="VICTIMTOKEN123")
+    assert r.status_code == 403 and r.json()["detail"]["reason"] == "state_user"
+    assert ex.call_count == 0
+    assert not _linked(db, "1001") and not _linked(db, "u-bob")
+    assert "VICTIMTOKEN123" not in caplog.text
+    assert db.take_lastfm_auth_state(state) == (None, "unknown")  # consumed
+
+
+def test_complete_without_auth_is_401_and_links_nothing(db, lfm_config, users):
+    tc = make_client(db, lfm_config)
+    state = db.create_lastfm_auth_state("1001", None)
+    with patch.object(LastFmClient, "exchange_token_for_session") as ex:
+        r = tc.post("/api/scrobbles/lastfm/complete", json={"state": state, "token": "LFTOKENabc123"})
+    assert r.status_code == 401 and ex.call_count == 0 and not _linked(db, "1001")
+    assert db.take_lastfm_auth_state(state)[1] == "ok"  # an unauthenticated probe does not burn the state
+
+
+def test_complete_rejects_reused_state(db, lfm_config, users, caplog):
+    tc = make_client(db, lfm_config)
+    alice, _ = auth_headers(users["alice"], db, lfm_config)
+    state = db.create_lastfm_auth_state("1001", None)
+    with patch.object(LastFmClient, "exchange_token_for_session", return_value=("u", "k")):
+        assert complete(tc, alice, state).status_code == 200
+        with caplog.at_level("WARNING"):
+            r = complete(tc, alice, state)
+    assert r.status_code == 400 and r.json()["detail"]["reason"] == "state"
+    assert "unknown state" in caplog.text
+
+
+def test_complete_rejects_expired_state(db, lfm_config, users, caplog):
+    tc = make_client(db, lfm_config)
+    alice, _ = auth_headers(users["alice"], db, lfm_config)
+    state = db.create_lastfm_auth_state("1001", None)
+    db.conn.execute("UPDATE lastfm_auth_states SET created_at = datetime('now', '-11 minutes')")
+    with patch.object(LastFmClient, "exchange_token_for_session") as ex, caplog.at_level("WARNING"):
+        r = complete(tc, alice, state, token="SECRETTOKEN1")
+    assert r.status_code == 400 and r.json()["detail"]["reason"] == "state_expired"
+    assert ex.call_count == 0 and "expired state" in caplog.text and "SECRETTOKEN1" not in caplog.text
+    assert not _linked(db, "1001")
+
+
+def test_complete_unknown_state(db, lfm_config, users):
+    tc = make_client(db, lfm_config)
+    alice, _ = auth_headers(users["alice"], db, lfm_config)
+    r = complete(tc, alice, "nope-nope-nope")
+    assert r.status_code == 400 and r.json()["detail"]["reason"] == "state"
+
+
+def test_complete_exchange_failure_is_502(db, lfm_config, users):
+    tc = make_client(db, lfm_config)
+    alice, _ = auth_headers(users["alice"], db, lfm_config)
+    state = db.create_lastfm_auth_state("1001", None)
+    with patch.object(LastFmClient, "exchange_token_for_session", side_effect=LastFmError(4, "bad token")):
+        r = complete(tc, alice, state)
+    assert r.status_code == 502 and r.json()["detail"]["reason"] == "lastfm"
+    assert not _linked(db, "1001")
+
+
+@pytest.mark.parametrize("fmt", ["%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S+00:00", "%Y-%m-%d %H:%M:%S"])
+def test_state_freshness_understands_stored_timestamp_shapes(db, users, fmt):
+    """created_at in ISO-T/Z/offset shapes must not look stale (SQLite datetime() returns NULL for some)."""
+    fresh = db.create_lastfm_auth_state("1001", None)
+    db.conn.execute("UPDATE lastfm_auth_states SET created_at = ?", (datetime.now(timezone.utc).strftime(fmt),))
+    record, why = db.take_lastfm_auth_state(fresh)
+    assert why == "ok" and record["user_id"] == "1001"
+    old = db.create_lastfm_auth_state("1001", None)
+    stale = (datetime.now(timezone.utc) - timedelta(minutes=11)).strftime(fmt)
+    db.conn.execute("UPDATE lastfm_auth_states SET created_at = ?", (stale,))
+    assert db.take_lastfm_auth_state(old) == (None, "expired")
+
+
+def test_full_flow_browser_origin_callback_then_complete(db, lfm_config, users):
+    from urllib.parse import parse_qs, unquote, urlsplit
+
+    tc = make_client(db, lfm_config)
+    alice, _ = auth_headers(users["alice"], db, lfm_config)
+    url = tc.get("/api/scrobbles/lastfm/auth-url", params={"origin": "http://testserver"}, headers=alice).json()["url"]
+    cb = parse_qs(urlsplit(url).query)["cb"][0]
+    r = tc.get(unquote(cb.split("http://testserver", 1)[1]) + "?token=LFTOKENabc123", follow_redirects=False)
+    q = parse_qs(urlsplit(r.headers["location"]).query)
+    with patch.object(LastFmClient, "exchange_token_for_session", return_value=("al_fm", "SK")):
+        done = complete(tc, alice, q["lastfm_state"][0], q["lastfm_token"][0])
+    assert done.status_code == 200 and _linked(db, "1001")
 
 
 # ---------------------------------------------------------------------------

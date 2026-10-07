@@ -11,6 +11,7 @@ import {
   SettingsNav,
   InactiveGate,
   LibraryManagerSwitch,
+  ModeSwitchConfirm,
   GeneralPanel,
   MediaFoldersPanel,
   ClientsPanel,
@@ -32,6 +33,7 @@ import type { SettingsRoute } from '@/hooks/useAppRoute';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useSettingsData } from '@/hooks/useSettingsData';
 import { useLibraryManager } from '@/hooks/useLibraryManager';
+import { useLibraryModeSwitch } from '@/hooks/useLibraryModeSwitch';
 
 export type { SettingsTab } from '@/components/settings';
 
@@ -71,7 +73,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const adminUsersHook = useAdminUsers(isAdmin && activeTab === 'users' && !mfaEnrollmentRequired);
   const data = useSettingsData(isAdmin);
   const libraryManager = useLibraryManager(isAdmin && !mfaEnrollmentRequired);
-  const [pendingMode, setPendingMode] = useState<LibraryManagerMode | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastTimer = useRef<number | null>(null);
 
@@ -80,6 +81,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), tone === 'error' ? 5000 : 3000);
   }, []);
+
+  const modeSwitch = useLibraryModeSwitch(libraryManager, showToast);
+  const { request: requestSwitch } = modeSwitch;
 
   useEffect(
     () => () => {
@@ -99,9 +103,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     else inactiveIds.add('lidarr');
   }
 
-  const requestSwitch = (target: LibraryManagerMode) => {
-    setPendingMode(target);
-    onNavigate(settingsRouteFor('general'));
+  // A saved, working Lidarr connection: refresh the server's "configured" flag, then offer the switch in place.
+  const handleLidarrVerified = async () => {
+    await libraryManager.refresh();
+    requestSwitch('lidarr');
   };
 
   const lidarrUrl = data.lidarr?.url || null;
@@ -153,6 +158,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       )}
 
+      {isAdmin && !mfaEnrollmentRequired && modeSwitch.pendingMode && (
+        <ModeSwitchConfirm
+          mode={mode}
+          pendingMode={modeSwitch.pendingMode}
+          state={libraryManager.state}
+          isSwitching={libraryManager.isSwitching}
+          onCancel={modeSwitch.cancel}
+          onConfirm={() => void modeSwitch.confirm()}
+        />
+      )}
+
       {activeTab === 'scrobbling' && !mfaEnrollmentRequired && <ScrobblingSettings isAdmin={isAdmin} hasMediaServer={hasMediaServer} />}
 
       {activeTab === 'account' && (
@@ -187,9 +203,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <LibraryManagerSwitch
             manager={libraryManager}
             mode={mode}
-            pendingMode={pendingMode}
-            onPendingChange={setPendingMode}
-            onToast={showToast}
+            onRequestSwitch={requestSwitch}
           />
           <GeneralPanel settings={data.general} onChange={data.setGeneral} onToast={showToast} />
         </div>
@@ -270,6 +284,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           isActive={mode === 'lidarr'}
           activeManager={mode}
           onRequestSwitch={requestSwitch}
+          canSwitchToLidarr={libraryManager.state?.lidarr_configured ?? false}
+          onCredentialsVerified={handleLidarrVerified}
           onToast={showToast}
         />
       )}

@@ -4,6 +4,7 @@ import hmac
 import json
 import logging
 import os
+import re
 from email import policy
 from email.parser import BytesParser
 from typing import Any, Optional
@@ -21,6 +22,7 @@ from plex_playlist_sync.api.dependencies import (
 )
 from plex_playlist_sync.api.schemas.scrobbles import (
     AuthUrl,
+    LastfmComplete,
     Listen,
     ScrobbleConfig,
     ServerConfig,
@@ -32,6 +34,7 @@ from plex_playlist_sync.clients.scrobbler import (
     ListenBrainzClient,
     ListenBrainzError,
 )
+from plex_playlist_sync import local_auth
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.models import UserListen, UserScrobbleConfig
 from plex_playlist_sync.scrobbling import (
@@ -80,6 +83,55 @@ def _request_base_url(request: Request) -> str:
     return str(request.base_url).rstrip("/")
 
 
+def _origin_of(raw: Optional[str]) -> Optional[str]:
+    """``scheme://host[:port]`` (lower-cased) of a bare origin; None for anything with a path, userinfo or odd scheme."""
+    if not raw:
+        return None
+    parts = urlsplit(raw.strip())
+    if parts.scheme not in ("http", "https") or not parts.netloc or "@" in parts.netloc:
+        return None
+    if parts.path not in ("", "/") or parts.query or parts.fragment:
+        return None
+    return f"{parts.scheme}://{parts.netloc}".lower()
+
+
+def _host_port(origin: str) -> str:
+    return urlsplit(origin).netloc
+
+
+def _callback_base_url(request: Request, db: Database, config: Config, browser_origin: Optional[str]) -> str:
+    """The origin Last.fm should call back on: the one the user is browsing, so the session cookie and stored
+    token travel with them.
+
+    ``browser_origin`` (sent by the SPA as ``window.location.origin``) is honoured only when its host:port equals
+    the one this request reached (``Host``, or ``X-Forwarded-Host`` from a TRUSTED_PROXIES peer; never on a core,
+    whose request host is the LAN address) or the configured Application URL. Anything else falls back to
+    :func:`_base_url`, so an arbitrary origin can never be injected.
+    """
+    claimed = _origin_of(browser_origin)
+    if claimed:
+        general = db.get_general_settings()
+        app_origin = _origin_of(str(general.get("application_url") or config.application_url or ""))
+        allowed: set[str] = {_host_port(app_origin)} if app_origin else set()
+        role = (config.role or os.getenv("ROLE", "all-in-one")).lower().strip()
+        if role != "core":
+            trusted = local_auth.parse_trusted_proxies(config.trusted_proxies or os.getenv("TRUSTED_PROXIES"))
+            seen = local_auth.resolve_request_origin(
+                request.url.scheme,
+                request.headers.get("host"),
+                request.client.host if request.client else None,
+                request.headers.get("x-forwarded-proto"),
+                request.headers.get("x-forwarded-host"),
+                trusted,
+            )
+            if seen:
+                allowed.add(_host_port(seen))
+        if _host_port(claimed) in allowed:
+            return claimed
+        logger.warning("Last.fm auth-url: ignoring a browser origin that does not match this server")
+    return _base_url(request, db, config)
+
+
 def _safe_forward_url(raw: Optional[str]) -> Optional[str]:
     """Only same-origin relative paths survive; anything else is dropped."""
     if not raw:
@@ -125,17 +177,6 @@ def _mask_key(key: str) -> str:
 
 def _is_admin(user: dict[str, Any]) -> bool:
     return bool(user.get("is_admin"))
-
-
-def _optional_user(
-    request: Request,
-    db: Database = Depends(get_db),
-    config: Config = Depends(get_config),
-) -> Optional[dict[str, Any]]:
-    try:
-        return get_current_user(request, db=db, config=config)
-    except HTTPException:
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +375,7 @@ def rotate_webhook_secret(
 def lastfm_auth_url(
     request: Request,
     forward_url: Optional[str] = Query(default=None),
+    origin: Optional[str] = Query(default=None, description="The origin the browser is using (window.location.origin)"),
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
     current_user: dict[str, Any] = Depends(get_current_user),
@@ -341,42 +383,84 @@ def lastfm_auth_url(
     client = build_lastfm_client(db, config)
     if client is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=NOT_CONFIGURED_DETAIL)
-    base_url = _base_url(request, db, config)
+    base_url = _callback_base_url(request, db, config, origin)
     state = db.create_lastfm_auth_state(current_user["id"], _safe_forward_url(forward_url))
     callback = f"{base_url}/api/scrobbles/lastfm/callback?state={quote(state)}"
     return {"url": client.build_auth_url(callback)}
+
+
+_STATE_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+_LASTFM_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 
 
 @router.get("/lastfm/callback", summary="Last.fm redirect target", include_in_schema=False)
 def lastfm_callback(
     state: str = Query(default=""),
     token: str = Query(default=""),
+) -> RedirectResponse:
+    """Hand the Last.fm return trip to the SPA; this route links nothing.
+
+    Linking an account from an unauthenticated top-level GET would let an attacker feed a victim a link built from
+    the attacker's own state and bind the victim's Last.fm session to the attacker's account. So the callback only
+    checks the shape and bounces to the SPA, which completes the flow with ``POST /lastfm/complete`` under the
+    browser's own session (the state must belong to that session's user).
+    """
+    # Last.fm appends its own "?token=" to the callback; tolerate a malformed join into the state value.
+    for marker in ("?token=", "&token="):
+        if marker in state:
+            state, _, embedded = state.partition(marker)
+            token = token or embedded
+            break
+    state = state.strip()
+    token = token.strip()
+    if not _STATE_RE.match(state) or not _LASTFM_TOKEN_RE.match(token):
+        logger.warning("Last.fm callback rejected: malformed state or token")
+        return _redirect("/?scrobble_error=state")
+    return _redirect("/?" + urlencode({"lastfm_state": state, "lastfm_token": token}))
+
+
+class LastfmCompleteRequest(BaseModel):
+    state: str = Field(..., min_length=1, max_length=256)
+    token: str = Field(..., min_length=1, max_length=256)
+
+
+def _complete_error(code: int, reason: str, message: str) -> HTTPException:
+    return HTTPException(status_code=code, detail={"reason": reason, "message": message})
+
+
+@router.post(
+    "/lastfm/complete",
+    response_model=LastfmComplete,
+    response_model_exclude_unset=True,
+    summary="Finish the Last.fm connect flow for the signed-in user",
+    responses={400: {"description": "Unknown, reused or expired state"}, 403: {"description": "State belongs to another user"}},
+)
+def lastfm_complete(
+    body: LastfmCompleteRequest,
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
-    current_user: Optional[dict[str, Any]] = Depends(_optional_user),
-) -> RedirectResponse:
-    # Last.fm appends its own "?token=" to the callback; tolerate a malformed join into the state value.
-    if "?token=" in state:
-        state, _, embedded = state.partition("?token=")
-        token = token or embedded
-    consumed = db.consume_lastfm_auth_state(state)
-    if consumed is None or current_user is None or str(consumed["user_id"]) != str(current_user["id"]):
-        logger.warning("Last.fm callback rejected: invalid, expired, reused or foreign state")
-        return _redirect("/?scrobble_error=state")
-
-    target = _safe_forward_url(consumed.get("forward_url")) or "/"
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    state = body.state.strip()
+    consumed, reason = db.take_lastfm_auth_state(state)  # single use: consumed even when the checks below fail
+    if consumed is None:
+        logger.warning("Last.fm complete rejected: %s state", reason)
+        if reason == "expired":
+            raise _complete_error(400, "state_expired", "The Last.fm connection took longer than 10 minutes.")
+        raise _complete_error(400, "state", "This Last.fm connection link is unknown or was already used.")
+    if str(consumed["user_id"]) != str(current_user["id"]):
+        logger.warning("Last.fm complete rejected: state was issued to a different user")
+        raise _complete_error(403, "state_user", "This Last.fm connection was started by a different account.")
     client = build_lastfm_client(db, config)
-    if client is None or not token:
-        return _redirect(_with_query(target, scrobble_error="lastfm"))
+    if client is None:
+        raise _complete_error(503, "lastfm", NOT_CONFIGURED_DETAIL)
     try:
-        username, session_key = client.exchange_token_for_session(token)
+        username, session_key = client.exchange_token_for_session(body.token.strip())
     except LastFmError as exc:
         logger.warning("Last.fm session exchange failed for user %s: %s", current_user["id"], exc)
-        return _redirect(_with_query(target, scrobble_error="lastfm"))
-    db.upsert_scrobble_config(
-        current_user["id"], lastfm_username=username, lastfm_session_key=session_key
-    )
-    return _redirect(_with_query(target, connected="lastfm"))
+        raise _complete_error(502, "lastfm", "Last.fm rejected the connection.") from exc
+    db.upsert_scrobble_config(current_user["id"], lastfm_username=username, lastfm_session_key=session_key)
+    return {"connected": True, "username": username}
 
 
 # ---------------------------------------------------------------------------

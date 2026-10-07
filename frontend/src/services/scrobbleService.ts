@@ -26,8 +26,15 @@ export async function getListens(limit = 20, offset = 0): Promise<UserListen[]> 
 
 /** Returns the Last.fm authorisation URL. Rejects with the server's 503 detail when unconfigured. */
 export async function getLastfmAuthUrl(forwardUrl?: string): Promise<ScrobbleUrlResponse> {
-  const qs = forwardUrl ? `?forward_url=${encodeURIComponent(forwardUrl)}` : '';
-  return apiRequest<ScrobbleUrlResponse>(`${BASE}/lastfm/auth-url${qs}`);
+  // The origin lets the server put the callback where this browser's session lives (it verifies the claim).
+  const qs = new URLSearchParams({ origin: window.location.origin });
+  if (forwardUrl) qs.set('forward_url', forwardUrl);
+  return apiRequest<ScrobbleUrlResponse>(`${BASE}/lastfm/auth-url?${qs.toString()}`);
+}
+
+/** Finishes the Last.fm connect under the signed-in session. Rejects with an ApiError whose detail has a `reason`. */
+export async function completeLastfm(state: string, token: string): Promise<void> {
+  await apiRequest<unknown>(`${BASE}/lastfm/complete`, { method: 'POST', body: { state, token } });
 }
 
 export async function getScrobbleUsers(): Promise<ScrobbleConfig[]> {

@@ -154,6 +154,20 @@ class TestLibraryManagerMode:
         assert resp.json()["mode"] == "native"
         assert test_db.get_lidarr_settings()["url"] == "http://lidarr.test:8686"
 
+    def test_saving_lidarr_credentials_enables_in_place_switch(self, app_and_client, test_db, test_config, seeded_users):
+        """The Lidarr page saves host + key, refreshes status, then switches without a trip back to General."""
+        _, client = app_and_client
+        headers = _headers(seeded_users["admin"], test_db, test_config)
+        assert client.get("/api/settings/library-manager", headers=headers).json()["lidarr_configured"] is False
+        assert client.put("/api/settings/library-manager", json={"mode": "lidarr"}, headers=headers).status_code == 422
+        saved = client.put(
+            "/api/settings/lidarr", json={"url": "http://lidarr.test:8686", "api_key": API_KEY}, headers=headers
+        )
+        assert saved.status_code == 200
+        status = client.get("/api/settings/library-manager", headers=headers).json()
+        assert status["lidarr_configured"] is True and status["can_switch"] is True
+        assert client.put("/api/settings/library-manager", json={"mode": "lidarr"}, headers=headers).json()["mode"] == "lidarr"
+
     def test_put_same_mode_is_a_noop_without_event(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client
         resp = client.put(
