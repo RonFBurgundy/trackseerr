@@ -12,7 +12,8 @@ import {
   Search,
   User,
 } from 'lucide-react';
-import type { AlbumItem, ArtistDiscographyAlbum, DiscoveryItem } from '@/types/models';
+import type { AlbumItem, ArtistDiscographyAlbum, AudioPreviewTrack, DiscoveryItem } from '@/types/models';
+import type { UseIssuesReturn } from '@/hooks/useIssues';
 import { MONITOR_OPTIONS } from '@/types/monitoring';
 import type { MetadataProfilePreview } from '@/types/metadataProfiles';
 import { useArtistDetail, type MonitorPreset } from '@/hooks/useArtistDetail';
@@ -57,6 +58,12 @@ export interface ArtistDetailProps {
   onRequestItem: (item: DiscoveryItem) => Promise<void>;
   onRequestDiscography: (artist: string, albums: ArtistDiscographyAlbum[]) => Promise<void>;
   onViewInDiscover: (discoveryId: string) => void;
+  /** Release detail modal wiring for the rest-of-discography section. */
+  onPlayTrack: (track: AudioPreviewTrack) => void;
+  currentPreviewTrackId?: string;
+  isPreviewPlaying: boolean;
+  requestedIds: ReadonlySet<string>;
+  issuesHook: UseIssuesReturn;
 }
 
 /** 32px icon key: the page actions live inside the hero, so they stay small on every viewport. */
@@ -96,6 +103,11 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   onRequestItem,
   onRequestDiscography,
   onViewInDiscover,
+  onPlayTrack,
+  currentPreviewTrackId,
+  isPreviewPlaying,
+  requestedIds,
+  issuesHook,
 }) => {
   const detail = useArtistDetail(artistId, onToast, onChanged);
   const { artist, loading, refreshing, patchAlbumMonitored, patchArtistMonitored, patchArtistTags } = detail;
@@ -505,6 +517,11 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
           onRequestItem={onRequestItem}
           onRequestDiscography={onRequestDiscography}
           onViewInDiscover={onViewInDiscover}
+          onPlayTrack={onPlayTrack}
+          currentPreviewTrackId={currentPreviewTrackId}
+          isPreviewPlaying={isPreviewPlaying}
+          requestedIds={requestedIds}
+          issuesHook={issuesHook}
         />
       )}
       <ConfirmDialog
