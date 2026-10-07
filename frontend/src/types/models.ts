@@ -157,6 +157,12 @@ export type LidarrTestResult = Schema<'LidarrTestConnectionResponse'>;
 
 export type SystemLogItem = Schema<'LogEntry'>;
 
+export type LogFileItem = Schema<'LogFileEntry'>;
+
+export type LogSettings = Schema<'LogSettingsResponse'>;
+
+export type LogSettingsUpdate = Schema<'LogSettingsUpdate'>;
+
 export type ScheduledTaskItem = Schema<'ScheduledTaskItem'>;
 
 export type TaskProgress = Schema<'TaskProgress'>;

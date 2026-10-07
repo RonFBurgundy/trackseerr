@@ -1,13 +1,24 @@
 import type { Schema } from '@/types/apiSchema';
-import { apiRequest } from './apiClient';
+import { apiRequest, getAuthToken } from './apiClient';
 import type {
   ScheduledTaskItem,
   SystemActivity,
   SystemResources,
   TaskRunItem,
   SystemLogItem,
+  LogFileItem,
+  LogSettings,
+  LogSettingsUpdate,
   LidarrHealth,
 } from '@/types/models';
+
+export type SystemEventItem = Schema<'SystemEvent'>;
+
+/** Newest lifecycle events (scan/download/sync/library changes), for the Logs panel's Events toggle. */
+export async function getSystemEvents(pageSize: number): Promise<SystemEventItem[]> {
+  const page = await apiRequest<Schema<'SystemEventsPage'>>(`/api/system/events?page=1&page_size=${pageSize}`);
+  return page.items || [];
+}
 
 export interface GetSystemLogsParams {
   level?: string;
@@ -37,6 +48,28 @@ export async function clearSystemLogs(): Promise<Schema<'SuccessFlag'>> {
 
 export function getSystemLogDownloadUrl(): string {
   return '/api/system/logs/download';
+}
+
+export async function getLogFiles(): Promise<LogFileItem[]> {
+  return (await apiRequest<LogFileItem[]>('/api/system/logs/files')) || [];
+}
+
+export async function getLogSettings(): Promise<LogSettings> {
+  return await apiRequest<LogSettings>('/api/system/logs/settings');
+}
+
+export async function updateLogSettings(update: LogSettingsUpdate): Promise<LogSettings> {
+  return await apiRequest<LogSettings>('/api/system/logs/settings', { method: 'PUT', body: update });
+}
+
+/** Fetches one log file as a Blob (the endpoint needs the auth header, so a plain link cannot be used). */
+export async function fetchLogFileBlob(name: string): Promise<Blob> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(`/api/system/logs/files/${encodeURIComponent(name)}`, { headers });
+  if (!res.ok) throw new Error(`Download failed with status ${res.status}`);
+  return await res.blob();
 }
 
 export async function getScheduledTasks(): Promise<ScheduledTaskItem[]> {

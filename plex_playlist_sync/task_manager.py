@@ -499,6 +499,15 @@ def default_interval_seconds(db: Any, config: Any, task_id: str) -> Optional[int
     return configured or spec.default_interval_seconds
 
 
+def schedule_disabled(config: Any, task_id: str) -> bool:
+    """True when the task's loop is not started at all: ``WAIT_SECONDS=0`` means playlist sync runs on demand only
+    (``cli`` gates the sync scheduler on ``wait_seconds > 0``)."""
+    if task_id != "playlist_sync" or config is None:
+        return False
+    value = getattr(config, "wait_seconds", None)
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value <= 0
+
+
 def effective_interval_seconds(db: Any, config: Any, task_id: str) -> Optional[int]:
     """DB override > config/env value > code default. None for tasks without an interval."""
     spec = TASKS.get(task_id)

@@ -1,5 +1,4 @@
 import logging
-from logging.handlers import RotatingFileHandler
 import os
 import signal
 import sqlite3
@@ -24,7 +23,8 @@ from .media_servers import settings as media_server_settings
 from .clients.spotify import SpotifyClient
 from .clients.spotify_scraper import SpotifyWebScraper
 from .config import MEDIA_SERVER_NONE, MEDIA_SERVER_PLEX, Config, ConfigError
-from .redaction import redact_sensitive_query, redact_text, safe_exc
+from .log_rotation import TimedLogFileHandler, apply_saved_log_settings, numeric_level
+from .redaction import RedactLogFilter, redact_sensitive_query, redact_text, safe_exc
 from .security import safe_data_path
 from .storage import Database
 from .sync import SyncCoordinator
@@ -57,32 +57,6 @@ class RedactAccessLogFilter(logging.Filter):
             record.args = tuple(redact_sensitive_query(a) if isinstance(a, str) else a for a in record.args)
         if isinstance(record.msg, str):
             record.msg = redact_sensitive_query(record.msg)
-        return True
-
-
-class RedactLogFilter(logging.Filter):
-    """Handler-level filter: renders the record and redacts invite/reset tokens and secret query params."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        try:
-            message = record.getMessage()
-        except (TypeError, ValueError):
-            return True
-        redacted = redact_text(message)
-        if redacted != message:
-            record.msg = redacted
-            record.args = None
-        # Exception text and stack dumps are rendered later by Formatter.format; pre-render and redact
-        # them here (Formatter reuses a cached ``exc_text``) so tracebacks cannot leak tokens either.
-        if record.exc_info and not record.exc_text:
-            try:
-                record.exc_text = logging.Formatter().formatException(record.exc_info)
-            except (TypeError, ValueError, AttributeError):
-                record.exc_text = None
-        if record.exc_text:
-            record.exc_text = redact_text(record.exc_text)
-        if record.stack_info:
-            record.stack_info = redact_text(record.stack_info)
         return True
 
 
@@ -119,7 +93,7 @@ def _find_stdout_handler(root_logger: logging.Logger) -> Optional[logging.Stream
 def setup_logging(level_name: str, config: Optional[Config] = None) -> None:
     """Configures the root logger. Idempotent: repeat calls never duplicate handlers, and every root
     handler (stdout, ring buffer, rotating file, anything else attached) ends up with the redaction filter."""
-    numeric_level = getattr(logging, level_name.upper(), logging.INFO)
+    level_value = numeric_level(level_name)
     fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     datefmt = "%Y-%m-%d %H:%M:%S"
     # Line-buffer stdout so boot lines reach `docker logs` immediately, even without PYTHONUNBUFFERED.
@@ -128,7 +102,7 @@ def setup_logging(level_name: str, config: Optional[Config] = None) -> None:
     except (AttributeError, ValueError, OSError):
         pass
     root_logger = logging.getLogger()
-    root_logger.setLevel(numeric_level)
+    root_logger.setLevel(level_value)
     # Importing ``api.routes.system`` already attached the ring buffer to the root logger, which made
     # ``logging.basicConfig`` a silent no-op (it does nothing when the root has any handler) and left
     # the container with no stdout handler at all. Add one explicitly, identified by name so a second
@@ -141,32 +115,29 @@ def setup_logging(level_name: str, config: Optional[Config] = None) -> None:
         root_logger.addHandler(stdout_handler)
     elif stdout_handler.stream is not sys.stdout:
         stdout_handler.setStream(sys.stdout)
-    stdout_handler.setLevel(numeric_level)
+    stdout_handler.setLevel(level_value)
+    stdout_handler.follows_log_level = True  # type: ignore[attr-defined]
 
     # Attach LogRingBuffer to root logger
     if log_ring_buffer not in root_logger.handlers:
         root_logger.addHandler(log_ring_buffer)
-    log_ring_buffer.setLevel(numeric_level)
+    log_ring_buffer.setLevel(level_value)
+    log_ring_buffer.follows_log_level = True
 
-    # Attach RotatingFileHandler
+    # Attach the time-rotating file handler (trackseerr.txt; rotation/retention/size limits are tunable live).
     try:
         log_path = get_log_file_path(config)
-        has_rfh = any(
-            isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", "") == str(log_path)
+        has_file_handler = any(
+            isinstance(h, TimedLogFileHandler) and getattr(h, "baseFilename", "") == str(log_path)
             for h in root_logger.handlers
         )
-        if not has_rfh:
-            rfh = RotatingFileHandler(
-                str(log_path),
-                maxBytes=5 * 1024 * 1024,
-                backupCount=3,
-                encoding="utf-8",
-            )
-            rfh.setLevel(numeric_level)
-            rfh.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
-            root_logger.addHandler(rfh)
+        if not has_file_handler:
+            file_handler = TimedLogFileHandler(log_path)
+            file_handler.setLevel(level_value)
+            file_handler.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
+            root_logger.addHandler(file_handler)
     except (OSError, ValueError) as ex:
-        logger.warning("Could not initialize RotatingFileHandler: %s", ex)
+        logger.warning("Could not initialize the log file handler: %s", safe_exc(ex))
 
     # httpx/httpcore log every request URL at INFO, which would carry invite/reset tokens
     # relayed by the gateway. Keep them quiet, and redact whatever else reaches a handler.
@@ -775,6 +746,8 @@ def main() -> int:
                     db_base_dir,
                 )
                 return 1
+
+    apply_saved_log_settings(db)  # saved level/rotation settings override the LOG_LEVEL env default
 
     # Remember the role this database last ran as; on a flip (all-in-one <-> core) log the one-time checklist.
     try:

@@ -28,6 +28,8 @@ export * from './useSystemActivity';
 export * from './useNow';
 export * from './useSystemOverview';
 export * from './useSystemLogs';
+export * from './useLogFiles';
+export * from './useLogSettings';
 export * from './useVirtualPagedList';
 export * from './useGroupIndex';
 export * from './useMediaQuery';

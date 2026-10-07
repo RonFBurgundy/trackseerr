@@ -59,7 +59,7 @@ def test_setup_logging_is_idempotent_and_every_root_handler_is_redacting(tmp_pat
     setup_logging("INFO", cfg)
     stdout_handlers = [h for h in root.handlers if getattr(h, "name", None) == cli._STDOUT_HANDLER_NAME]
     assert len(stdout_handlers) == 1
-    assert len([h for h in root.handlers if type(h).__name__ == "RotatingFileHandler"]) == 1
+    assert len([h for h in root.handlers if type(h).__name__ == "TimedLogFileHandler"]) == 1
     assert len([h for h in root.handlers if type(h).__name__ == "LogRingBuffer"]) == 1
     for handler in root.handlers:
         assert sum(isinstance(f, RedactLogFilter) for f in handler.filters) == 1, handler

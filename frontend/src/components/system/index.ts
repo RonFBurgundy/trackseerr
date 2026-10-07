@@ -2,6 +2,8 @@ export * from './SystemPage';
 export * from './SystemStatusPanel';
 export * from './SystemTasksPanel';
 export * from './SystemLogsPanel';
+export * from './LogFilesModal';
+export * from './LogSettingsModal';
 export * from './taskFormat';
 export * from './TaskStatusBadge';
 export * from './TaskResourceStrip';
