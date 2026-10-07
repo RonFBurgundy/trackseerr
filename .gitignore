@@ -141,6 +141,13 @@ Notebooks/
 # Local Orchestration & Runner Harness
 .opencode/
 .claude/
+.agents/
+.gemini/
+.cursor/
+.codex/
+.windsurf/
+.continue/
+.aider*
 CLAUDE.md
 AGENTS.md
 GEMINI.md
