@@ -1,7 +1,7 @@
 import React from 'react';
-import { Layers, Loader2 } from 'lucide-react';
+import { Layers } from 'lucide-react';
 import type { UseAddToCollectionReturn } from '@/hooks/useAddToCollection';
-import { ObsidianModal } from '@/components/ui';
+import { ObsidianModal, CassetteLoader } from '@/components/ui';
 
 export interface AddToCollectionModalProps {
   picker: UseAddToCollectionReturn;
@@ -17,7 +17,7 @@ export const AddToCollectionModal: React.FC<AddToCollectionModalProps> = ({ pick
     <div className="space-y-3">
       {picker.loading ? (
         <div className="flex justify-center py-8">
-          <Loader2 className="h-6 w-6 text-[#e5a00d] animate-spin" />
+          <CassetteLoader size="sm" />
         </div>
       ) : picker.collections.length > 0 ? (
         <div className="divide-y divide-[#222] border border-[#262626] rounded-[4px] max-h-80 overflow-y-auto bg-[#141414]">

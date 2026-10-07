@@ -20,3 +20,4 @@ export * from './OverflowMenu';
 export * from './SortableList';
 export * from './TokenInput';
 export * from './TagPicker';
+export * from './CassetteLoader';

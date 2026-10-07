@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Loader2, RotateCcw, CheckCheck } from 'lucide-react';
-import { ObsidianModal, TapeDeckButton } from '@/components/ui';
+import { RotateCcw, CheckCheck } from 'lucide-react';
+import { ObsidianModal, TapeDeckButton, CassetteLoader } from '@/components/ui';
 import { useIssueActions } from '@/hooks/useIssueActions';
 import { useIssueDetail } from '@/hooks/useIssueDetail';
 import { notifyIssuesChanged, deleteIssue } from '@/services/issueService';
@@ -120,8 +120,8 @@ export const IssueDetailModal: React.FC<IssueDetailModalProps> = ({
       footer={footer}
     >
       {isLoading && !issue && (
-        <div className="flex justify-center py-10" role="status" aria-label="Loading issue">
-          <Loader2 className="h-6 w-6 text-[var(--accent-amber)] animate-spin" />
+        <div className="flex justify-center py-10">
+          <CassetteLoader size="sm" />
         </div>
       )}
       {error && (

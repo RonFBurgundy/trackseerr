@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Loader2, MessageSquare } from 'lucide-react';
-import { MachinedCard } from '@/components/ui';
+import { MessageSquare } from 'lucide-react';
+import { MachinedCard, CassetteLoader } from '@/components/ui';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
 import { ISSUE_TYPE_LABELS } from '@/types/models';
 import { IssueDetailModal } from './IssueDetailModal';
@@ -24,7 +24,7 @@ export const MyIssuesList: React.FC<MyIssuesListProps> = ({ issuesHook, currentU
   if (isLoading && issues.length === 0) {
     return (
       <div className="flex justify-center py-12">
-        <Loader2 className="h-6 w-6 text-[var(--accent-amber)] animate-spin" />
+        <CassetteLoader size="sm" />
       </div>
     );
   }

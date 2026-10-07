@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Loader2, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useTailoredMixes } from '@/hooks/useTailoredMixes';
-import { TapeDeckButton, ActionBar } from '@/components/ui';
+import { TapeDeckButton, ActionBar, CassetteLoader } from '@/components/ui';
 import { MixCard } from './MixCard';
 import { NewMixForm } from './NewMixForm';
 
@@ -55,9 +55,8 @@ export const TailoredMixesSection: React.FC<TailoredMixesSectionProps> = ({ isAd
       {showNew && <NewMixForm onCreate={m.create} onCancel={() => setShowNew(false)} />}
 
       {m.isLoading && (
-        <div className="flex flex-col items-center justify-center py-16 gap-3">
-          <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
-          <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">Loading Mixes...</span>
+        <div className="py-16">
+          <CassetteLoader size="md" />
         </div>
       )}
 

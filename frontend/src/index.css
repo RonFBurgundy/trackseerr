@@ -470,3 +470,26 @@ body,
     pointer-events: none;
   }
 }
+
+/* Cassette loader spool clockwise rotation */
+@keyframes cassette-spool-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cassette-spool {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: cassette-spool-spin 1.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cassette-spool {
+    animation: none;
+  }
+}
+

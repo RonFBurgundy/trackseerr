@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, RefreshCw, X } from 'lucide-react';
+import { RefreshCw, X } from 'lucide-react';
 import { usePlexPlaylists } from '@/hooks/usePlexPlaylists';
-import { TabStrip, TapeDeckButton, MachinedCard, TactileSwitch } from '@/components/ui';
+import { TabStrip, TapeDeckButton, MachinedCard, TactileSwitch, CassetteLoader } from '@/components/ui';
 import { PlexKindBadge, PlexOwnerBadge } from './PlexBadges';
 import { PlexPlaylistDetailModal } from './PlexPlaylistDetailModal';
 import { PlexMixesPanel } from './PlexMixesPanel';
@@ -81,11 +81,8 @@ export const PlexPlaylistsSection: React.FC<PlexPlaylistsSectionProps> = ({ isAd
       {subTab === 'playlists' && (
         <>
           {plex.isLoading && plex.playlists.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
-              <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">
-                Reading Plex library...
-              </span>
+            <div className="py-16">
+              <CassetteLoader size="md" />
             </div>
           )}
 

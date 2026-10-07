@@ -1,7 +1,7 @@
 import React, { useCallback } from 'react';
 import { Plus, Pencil, Trash2, Loader2, FlaskConical } from 'lucide-react';
 import { PageActionsPortal } from '@/components/layout';
-import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, ConfirmDangerButton } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, ConfirmDangerButton, CassetteLoader } from '@/components/ui';
 import { useNotificationChannels } from '@/hooks/useNotificationChannels';
 import { useNotificationChannelEditor } from '@/hooks/useNotificationChannelEditor';
 import {
@@ -43,7 +43,7 @@ export const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ onToast 
 
       {channels.loading && (
         <div className="flex justify-center py-12">
-          <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
+          <CassetteLoader size="md" />
         </div>
       )}
 

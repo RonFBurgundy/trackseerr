@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo } from 'react';
 import { Disc, Library, Loader2, Plus, User } from 'lucide-react';
-import { MachinedCard, StatusMessage, TapeDeckButton } from '@/components/ui';
+import { MachinedCard, StatusMessage, TapeDeckButton, CassetteLoader } from '@/components/ui';
 import { DetailHeaderBar, PageFrame } from '@/components/layout';
 import { useArtistProfile } from '@/hooks/useArtistProfile';
 import { useProfileRequests } from '@/hooks/useProfileRequests';
@@ -262,9 +262,8 @@ export const ArtistProfileView: React.FC<ArtistProfileViewProps> = ({
   if (isLoading) {
     return (
       <PageFrame nav={header} ariaLabel="Artist profile">
-        <div className="flex flex-col items-center justify-center gap-3 py-20">
-          <Loader2 className="h-8 w-8 animate-spin text-[#e5a00d]" />
-          <span className="font-mono text-xs uppercase tracking-widest text-neutral-400">Loading artist...</span>
+        <div className="py-20">
+          <CassetteLoader size="md" />
         </div>
       </PageFrame>
     );

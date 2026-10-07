@@ -23,7 +23,7 @@ import { useDiscographyFilter } from '@/hooks/useDiscographyFilter';
 import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { useAlbumBulkEdit } from '@/hooks/useAlbumBulkEdit';
 import { errorMessage } from '@/services/apiClient';
-import { ConfirmDialog, MachinedCard, TactileSwitch, TapeDeckButton, TabStrip } from '@/components/ui';
+import { ConfirmDialog, MachinedCard, TactileSwitch, TapeDeckButton, TabStrip, CassetteLoader } from '@/components/ui';
 import { DetailHeaderBar, PageFrame } from '@/components/layout';
 
 import { ArtistAlbumCard } from './ArtistAlbumCard';
@@ -477,9 +477,8 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
       </MachinedCard>
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-20 gap-3">
-          <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
-          <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">Loading Artist Discography...</span>
+        <div className="py-20">
+          <CassetteLoader size="md" />
         </div>
       ) : (
         <div className="space-y-2 sm:space-y-4">

@@ -1,6 +1,6 @@
 import React from 'react';
-import { Loader2 } from 'lucide-react';
 import { MachinedCard } from './MachinedCard';
+import { CassetteLoader } from './CassetteLoader';
 
 export interface StartupScreenProps {
   step: string | null;
@@ -14,7 +14,7 @@ export const StartupScreen: React.FC<StartupScreenProps> = ({ step }) => (
     aria-live="polite"
   >
     <MachinedCard className="m-auto w-full max-w-sm p-3 sm:p-6 flex flex-col items-center gap-4 text-center">
-      <Loader2 className="w-8 h-8 text-[#e5a00d] animate-spin" aria-hidden="true" />
+      <CassetteLoader size="lg" />
       <h1 className="text-sm font-semibold uppercase tracking-[0.05em] text-white">
         TrackSeerr is starting&hellip;
       </h1>

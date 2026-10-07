@@ -11,7 +11,9 @@ import {
   ObsidianModal,
   TactileSwitch,
   ConfirmDangerButton,
-  MonitorModeSelect } from '@/components/ui';
+  MonitorModeSelect,
+  CassetteLoader,
+} from '@/components/ui';
 import { PageFrame } from '@/components/layout';
 import { LIST_MONITOR_MODES, type ListMonitorMode } from '@/types/importLists';
 
@@ -176,11 +178,8 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
 
       {/* Loading state */}
       {isLoading && (
-        <div className="flex flex-col items-center justify-center py-16 gap-3">
-          <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
-          <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">
-            Calibrating Playlist Synchronizer...
-          </span>
+        <div className="py-16">
+          <CassetteLoader size="md" />
         </div>
       )}
 

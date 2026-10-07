@@ -12,7 +12,7 @@ import type { ManualImportScope } from '@/types/manualImport';
 import { deleteCollection } from '@/services/libraryService';
 import { errorMessage } from '@/services/apiClient';
 import { PageFrame } from '@/components/layout';
-import { SearchBar, TapeDeckButton, TabStrip, ToastBanner } from '@/components/ui';
+import { SearchBar, TapeDeckButton, TabStrip, ToastBanner, CassetteLoader } from '@/components/ui';
 import {
   AddToCollectionModal,
   AlbumDetailModal,
@@ -411,9 +411,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       {activeTab === 'collections' &&
         !lidarrMode &&
         (isLoading ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-3">
-            <Loader2 className="h-8 w-8 text-[#e5a00d] animate-spin" />
-            <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">Loading Collections...</span>
+          <div className="py-16">
+            <CassetteLoader size="md" />
           </div>
         ) : (
           <CollectionsPanel

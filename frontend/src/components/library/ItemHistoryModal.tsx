@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import type { ItemHistoryEntity, ItemHistoryEvent } from '@/types/itemHistory';
 import { useItemHistory } from '@/hooks/useItemHistory';
-import { ObsidianModal, TapeDeckButton } from '@/components/ui';
+import { ObsidianModal, TapeDeckButton, CassetteLoader } from '@/components/ui';
 import {
   absoluteTime,
   detailRows,
@@ -125,7 +125,7 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ isOpen, onCl
     >
       {history.isLoading ? (
         <div className="flex justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-[#e5a00d]" />
+          <CassetteLoader size="sm" />
         </div>
       ) : history.error && history.events.length === 0 ? (
         <p role="alert" className="py-6 text-center font-mono text-xs text-red-300">
