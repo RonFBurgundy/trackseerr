@@ -19,3 +19,4 @@ export * from './library';
 export * from './mediaServer';
 export * from './profiles';
 export * from './manualImport';
+export * from './notifications';

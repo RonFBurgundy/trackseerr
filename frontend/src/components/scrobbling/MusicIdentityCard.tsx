@@ -7,6 +7,10 @@ export interface MusicIdentityCardProps {
   config: ScrobbleConfig;
   isSaving: boolean;
   lastfmUnavailable: boolean;
+  /** Admins can fix an unavailable Last.fm themselves, so they get setup guidance instead of "ask your admin". */
+  isAdmin?: boolean;
+  /** DOM id of the Server Scrobbling card to scroll to. */
+  serverCardId?: string;
   onConnectLastfm: () => Promise<void>;
   onDisconnectLastfm: () => Promise<void>;
   onToggleEnabled: (enabled: boolean) => Promise<void>;
@@ -21,6 +25,8 @@ export const MusicIdentityCard: React.FC<MusicIdentityCardProps> = ({
   config,
   isSaving,
   lastfmUnavailable,
+  isAdmin = false,
+  serverCardId,
   onConnectLastfm,
   onDisconnectLastfm,
   onToggleEnabled,
@@ -63,7 +69,34 @@ export const MusicIdentityCard: React.FC<MusicIdentityCardProps> = ({
             </TapeDeckButton>
           </div>
         ) : lastfmUnavailable ? (
-          <p className="text-sm text-neutral-400">Your server admin hasn&apos;t enabled Last.fm yet</p>
+          isAdmin ? (
+            <div className="space-y-2 text-sm text-neutral-400">
+              <p>Last.fm needs a server API key and secret &mdash; add them in Server Scrobbling below.</p>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                <a
+                  href="https://www.last.fm/api/account/create"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#e5a00d] hover:underline"
+                >
+                  Create a Last.fm API account
+                </a>
+                {serverCardId && (
+                  <button
+                    type="button"
+                    className="text-[#e5a00d] hover:underline"
+                    onClick={() =>
+                      document.getElementById(serverCardId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                    }
+                  >
+                    Go to Server Scrobbling
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-neutral-400">Your server admin hasn&apos;t enabled Last.fm yet</p>
+          )
         ) : (
           <div className="space-y-2">
             <TapeDeckButton

@@ -6,6 +6,7 @@ import { AccountPanel } from '@/components/account';
 import { UsersPanel } from '@/components/admin';
 import { RoleChangeBanner } from '@/components/deployment';
 import { MediaServerPanel } from '@/components/mediaServer';
+import { NotificationsPanel } from '@/components/notifications';
 import {
   SettingsNav,
   InactiveGate,
@@ -161,6 +162,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       )}
 
       {activeTab === 'import-lists' && isAdmin && !mfaEnrollmentRequired && <ImportListsPanel libraryMode={mode} onToast={showToast} />}
+
+      {activeTab === 'notifications' && isAdmin && !mfaEnrollmentRequired && <NotificationsPanel onToast={showToast} />}
 
       {activeTab === 'media-server' && isAdmin && !mfaEnrollmentRequired && <MediaServerPanel onToast={showToast} />}
 

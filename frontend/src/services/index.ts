@@ -31,3 +31,4 @@ export * from './libraryHealthService';
 export * from './seedCleanupService';
 export * from './itemHistoryService';
 export * from './tagService';
+export * from './notificationsService';

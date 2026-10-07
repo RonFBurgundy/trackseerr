@@ -20,6 +20,7 @@ import {
   Inbox,
   Gauge,
   Tags,
+  Bell,
 } from 'lucide-react';
 import { settingsRouteFor } from '@/hooks/useAppRoute';
 import type { SettingsLeafId, SettingsRoute, SettingsSection } from '@/hooks/useAppRoute';
@@ -38,6 +39,7 @@ export type SettingsTab =
   | 'import-lists'
   | 'users'
   | 'scrobbling'
+  | 'notifications'
   | 'system'
   | 'account';
 
@@ -107,7 +109,11 @@ export function buildSettingsTree(isAdmin: boolean, mfaEnrollmentRequired: boole
       id: 'requests',
       label: 'Requests',
       icon: <Inbox className={ico} />,
-      leaves: [leaf('users', 'Users', <Users className={ico} />), leaf('scrobbling', 'Scrobbling', <Radio className={ico} />)],
+      leaves: [
+        leaf('users', 'Users', <Users className={ico} />),
+        leaf('scrobbling', 'Scrobbling', <Radio className={ico} />),
+        leaf('notifications', 'Notifications', <Bell className={ico} />),
+      ],
     },
     {
       id: 'system',
@@ -155,6 +161,7 @@ export function settingsPanel(route: SettingsRoute): SettingsTab {
 /** Tabs that only touch the signed-in user's own data and need no admin settings load. */
 export const SELF_SERVICE_TABS: ReadonlySet<SettingsTab> = new Set<SettingsTab>([
   'scrobbling',
+  'notifications',
   'account',
   'users',
   'system',
