@@ -1,4 +1,6 @@
 export * from './Header';
+export * from './BrandActivity';
+export * from './BrandActivityPopover';
 export * from './Navigation';
 export * from './NavHub';
 export * from './navTree';

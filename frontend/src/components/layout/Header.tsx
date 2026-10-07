@@ -16,6 +16,8 @@ import {
 import type { DeploymentTier, User, UserQuota } from '@/types/models';
 import type { MainTab } from '@/hooks/useAppRoute';
 import { TapeDeckButton, TapeTransportBay, QuotaBadge } from '@/components/ui';
+import { useSystemActivity } from '@/hooks/useSystemActivity';
+import { BrandActivity } from './BrandActivity';
 
 export interface HeaderProps {
   user: User | null;
@@ -35,6 +37,10 @@ export interface HeaderProps {
   /** The user's own issues with unseen admin activity, shown on the Requests key. */
   issuesUnreadCount?: number;
   tier?: DeploymentTier;
+  /** Admin with a usable session: the logo shows task activity and opens the activity popover (polls /api/system/activity). */
+  activityEnabled?: boolean;
+  /** Popover link target: Settings > System > Tasks. */
+  onOpenTasks?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -51,7 +57,12 @@ export const Header: React.FC<HeaderProps> = ({
   issuesOpenCount = 0,
   issuesUnreadCount = 0,
   tier = 'all-in-one',
+  activityEnabled = false,
+  onOpenTasks,
 }) => {
+  // One poll shared by the desktop and mobile logos.
+  const activity = useSystemActivity(activityEnabled && user !== null);
+  const showActivity = activityEnabled && user !== null && onOpenTasks !== undefined;
   const isGateway = tier === 'gateway';
   const brandSuffix = isGateway ? <span className="text-white"> Requests</span> : null;
   const coreBadge =
@@ -83,14 +94,31 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Brand / Logo */}
         {/* Desktop Brand */}
         <div className="hidden md:flex items-center gap-3 select-none flex-shrink-0">
-          <img
-            src="/trackseerr-logo.svg"
-            alt="TrackSeerr"
-            className="h-8 w-8 object-contain"
-            onError={(e) => {
-              e.currentTarget.src = '/static/trackseerr-logo.svg';
-            }}
-          />
+          {showActivity ? (
+            <BrandActivity
+              activity={activity}
+              onOpenTasks={onOpenTasks}
+              className="flex items-center justify-center h-8 w-8 rounded-[3px] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--accent-amber)]"
+            >
+              <img
+                src="/trackseerr-logo.svg"
+                alt=""
+                className="h-8 w-8 object-contain"
+                onError={(e) => {
+                  e.currentTarget.src = '/static/trackseerr-logo.svg';
+                }}
+              />
+            </BrandActivity>
+          ) : (
+            <img
+              src="/trackseerr-logo.svg"
+              alt="TrackSeerr"
+              className="h-8 w-8 object-contain"
+              onError={(e) => {
+                e.currentTarget.src = '/static/trackseerr-logo.svg';
+              }}
+            />
+          )}
           <span className="hidden lg:inline text-base sm:text-lg font-black tracking-wider uppercase text-white font-mono leading-none">
             Track<span className="text-[#e5a00d]">Seerr</span>
             {brandSuffix}
@@ -98,14 +126,32 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         </div>
 
-        {/* Mobile brand: compact logo key (always visible on phones) that returns to Discover */}
-        <button
-          type="button"
-          onClick={() => onTabChange?.('discover')}
-          className="md:hidden relative flex items-center justify-center w-9 h-9 rounded-[3px] border border-[#222222] bg-[#121212] hover:border-[#383838] active:translate-y-[1px] transition-all flex-shrink-0 after:absolute after:content-[''] after:-inset-[2px]"
-          aria-label="TrackSeerr Home"
-          title="TrackSeerr Home"
-        >
+        {/* Mobile brand: compact logo key (always visible on phones). Admins get the task-activity popover; others return to Discover. */}
+        {showActivity ? (
+          <BrandActivity
+            activity={activity}
+            onOpenTasks={onOpenTasks}
+            className="md:hidden flex items-center justify-center w-9 h-9 rounded-[3px] border border-[#222222] bg-[#121212] hover:border-[#383838] active:translate-y-[1px] transition-all flex-shrink-0 after:absolute after:content-[''] after:-inset-[2px]"
+          >
+            <img
+              src="/trackseerr-logo.svg"
+              alt=""
+              width={24}
+              height={24}
+              className="h-6 w-6 object-contain"
+              onError={(e) => {
+                e.currentTarget.src = '/static/trackseerr-logo.svg';
+              }}
+            />
+          </BrandActivity>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onTabChange?.('discover')}
+            className="md:hidden relative flex items-center justify-center w-9 h-9 rounded-[3px] border border-[#222222] bg-[#121212] hover:border-[#383838] active:translate-y-[1px] transition-all flex-shrink-0 after:absolute after:content-[''] after:-inset-[2px]"
+            aria-label="TrackSeerr Home"
+            title="TrackSeerr Home"
+          >
           <img
             src="/trackseerr-logo.svg"
             alt=""
@@ -116,7 +162,8 @@ export const Header: React.FC<HeaderProps> = ({
               e.currentTarget.src = '/static/trackseerr-logo.svg';
             }}
           />
-        </button>
+          </button>
+        )}
 
         {/* Desktop Sticky Navigation Buttons */}
         {user && activeTab && onTabChange && (

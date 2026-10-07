@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import type { SystemEventItem, SystemLogItem } from '@/types/models';
-import { getSystemLogs, clearSystemLogs, getSystemLogDownloadUrl, getSystemEvents } from '@/services/systemService';
+import type { SystemLogItem } from '@/types/models';
+import { getSystemLogs, clearSystemLogs, getSystemLogDownloadUrl, getSystemEvents, type SystemEventItem } from '@/services/systemService';
 import { getAuthToken, errorMessage } from '@/services/apiClient';
 
 const MAX_LOG_LINES = 1000;
@@ -116,9 +116,9 @@ export function useSystemLogs(): UseSystemLogsReturn {
     }
     let active = true;
     const load = (): void => {
-      getSystemEvents({ page: 1, page_size: EVENT_FETCH_SIZE })
-        .then((res) => {
-          if (active) setEvents((res.items || []).map(eventToLogItem));
+      getSystemEvents(EVENT_FETCH_SIZE)
+        .then((items) => {
+          if (active) setEvents(items.map(eventToLogItem));
         })
         .catch((err: unknown) => {
           console.warn('System events load failed:', err);

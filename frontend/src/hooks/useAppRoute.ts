@@ -12,7 +12,7 @@ export type WantedSub = WantedListName;
 export type SettingsSection = 'general' | 'media-management' | 'lidarr' | 'requests' | 'system' | 'account';
 export type MediaManagementLeaf = 'media' | 'quality' | 'profiles' | 'custom-formats' | 'clients' | 'indexers' | 'import-lists' | 'media-server';
 export type RequestsLeaf = 'users' | 'scrobbling' | 'notifications';
-export type SystemLeaf = 'status' | 'queue' | 'tasks' | 'events' | 'logs';
+export type SystemLeaf = 'status' | 'tasks' | 'logs';
 export type SettingsLeafId = MediaManagementLeaf | RequestsLeaf | SystemLeaf;
 
 export type SettingsRoute =
@@ -99,7 +99,9 @@ export const MEDIA_MANAGEMENT_LEAVES: readonly MediaManagementLeaf[] = [
   'media-server',
 ];
 export const REQUESTS_LEAVES: readonly RequestsLeaf[] = ['users', 'scrobbling', 'notifications'];
-export const SYSTEM_LEAVES: readonly SystemLeaf[] = ['status', 'queue', 'tasks', 'events', 'logs'];
+export const SYSTEM_LEAVES: readonly SystemLeaf[] = ['status', 'tasks', 'logs'];
+/** Retired System leaves folded into the Tasks page; old bookmarks land there instead of on Status. */
+const LEGACY_SYSTEM_LEAVES: readonly string[] = ['queue', 'events'];
 
 /** Narrow an untrusted string to a member of `list` without a cast. */
 export function pick<T extends string>(list: readonly T[], value: string | null | undefined): T | undefined {
@@ -114,7 +116,7 @@ export function settingsRouteFor(section: SettingsSection, leaf?: string | null)
     case 'requests':
       return { tab: 'settings', sub: section, leaf: pick(REQUESTS_LEAVES, leaf) ?? 'users' };
     case 'system':
-      return { tab: 'settings', sub: section, leaf: pick(SYSTEM_LEAVES, leaf) ?? 'status' };
+      return { tab: 'settings', sub: section, leaf: pick(SYSTEM_LEAVES, leaf) ?? (LEGACY_SYSTEM_LEAVES.includes(leaf ?? '') ? 'tasks' : 'status') };
     default:
       return { tab: 'settings', sub: section };
   }

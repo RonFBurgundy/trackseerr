@@ -423,3 +423,50 @@ body,
 @media (prefers-reduced-motion: reduce) {
   .setting-pulse { animation: none; outline-color: var(--accent-amber); }
 }
+
+/* Task manager: indeterminate progress sweep (transform only). */
+@keyframes task-progress-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+.task-progress-sweep {
+  animation: task-progress-sweep 1.4s ease-in-out infinite;
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-progress-sweep { animation: none; width: 100%; opacity: 0.45; }
+}
+
+/* Brand logo activity: concentric sound-wave rings while background tasks run (transform + opacity only). */
+@keyframes brand-wave {
+  0% { transform: scale(1); opacity: 0.5; }
+  100% { transform: scale(2.1); opacity: 0; }
+}
+.brand-wave-ring {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--accent-amber);
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+  animation: brand-wave 2.4s ease-out infinite;
+  will-change: transform, opacity;
+}
+.brand-wave-ring:nth-child(2) { animation-delay: 0.8s; }
+.brand-wave-ring:nth-child(3) { animation-delay: 1.6s; }
+.brand-wave-dot { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .brand-wave-ring { display: none; }
+  .brand-wave-dot {
+    display: block;
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-amber);
+    box-shadow: 0 0 6px var(--accent-amber-glow);
+    pointer-events: none;
+  }
+}
