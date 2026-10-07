@@ -2,45 +2,17 @@ import type { Schema } from '@/types/apiSchema';
 import { apiRequest } from './apiClient';
 import type {
   ScheduledTaskItem,
-  SystemEventsResponse,
+  SystemActivity,
+  SystemResources,
+  TaskRunItem,
   SystemLogItem,
-  SystemQueueResponse,
   LidarrHealth,
 } from '@/types/models';
-
-export interface GetSystemEventsParams {
-  page?: number;
-  page_size?: number;
-  event_type?: string;
-  severity?: string;
-  search?: string;
-}
 
 export interface GetSystemLogsParams {
   level?: string;
   search?: string;
   limit?: number;
-}
-
-export async function getSystemEvents(
-  params: GetSystemEventsParams = {}
-): Promise<SystemEventsResponse> {
-  const query = new URLSearchParams();
-  if (params.page !== undefined) query.set('page', params.page.toString());
-  if (params.page_size !== undefined) query.set('page_size', params.page_size.toString());
-  if (params.event_type) query.set('event_type', params.event_type);
-  if (params.severity && params.severity !== 'all') query.set('severity', params.severity);
-  if (params.search) query.set('search', params.search);
-
-  const qs = query.toString();
-  const url = qs ? `/api/system/events?${qs}` : '/api/system/events';
-  return await apiRequest<SystemEventsResponse>(url);
-}
-
-export async function clearSystemEvents(): Promise<Schema<'SuccessFlag'>> {
-  return await apiRequest<Schema<'SuccessFlag'>>('/api/system/events', {
-    method: 'DELETE',
-  });
 }
 
 export async function getSystemLogs(
@@ -94,15 +66,36 @@ export async function cancelScheduledTask(
   );
 }
 
-export async function getSystemQueue(): Promise<SystemQueueResponse> {
-  const res = await apiRequest<SystemQueueResponse | null>('/api/system/queue');
-  return {
-    running: res?.running ?? [],
-    queued: res?.queued ?? [],
-    recent: res?.recent ?? [],
-  };
-}
-
 export async function getLidarrHealth(): Promise<LidarrHealth> {
   return apiRequest<LidarrHealth>('/api/system/lidarr-health');
+}
+
+export async function updateTaskSchedule(
+  taskId: string,
+  intervalSeconds: number | null
+): Promise<ScheduledTaskItem> {
+  return await apiRequest<ScheduledTaskItem>(
+    `/api/system/tasks/${encodeURIComponent(taskId)}/schedule`,
+    { method: 'PUT', body: { interval_seconds: intervalSeconds } }
+  );
+}
+
+export async function getTaskRuns(
+  taskId: string,
+  days: number = 7,
+  limit: number = 200
+): Promise<TaskRunItem[]> {
+  const res = await apiRequest<TaskRunItem[] | null>(
+    `/api/system/tasks/${encodeURIComponent(taskId)}/runs?days=${days}&limit=${limit}`
+  );
+  return res ?? [];
+}
+
+export async function getSystemActivity(): Promise<SystemActivity> {
+  const res = await apiRequest<SystemActivity | null>('/api/system/activity');
+  return { running: res?.running ?? [], recent: res?.recent ?? [] };
+}
+
+export async function getSystemResources(): Promise<SystemResources> {
+  return await apiRequest<SystemResources>('/api/system/resources');
 }

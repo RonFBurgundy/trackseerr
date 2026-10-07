@@ -128,9 +128,7 @@ const SETTINGS: readonly SettingDef[] = [
   // System
   { label: 'System Diagnostics', section: 'system', leaf: 'status', keywords: 'version uptime database health workers' },
   { label: 'Lidarr Health', section: 'system', leaf: 'status', keywords: 'lidarr connection health status' },
-  { label: 'Job Queue', section: 'system', leaf: 'queue', keywords: 'background jobs duration state' },
-  { label: 'Scheduled Tasks & Background Workers', section: 'system', leaf: 'tasks', anchor: 'Scheduled Tasks', keywords: 'cron run now cancel interval scan sync' },
-  { label: 'System Events', section: 'system', leaf: 'events', keywords: 'errors warnings audit log events' },
+  { label: 'Tasks & Background Workers', section: 'system', leaf: 'tasks', anchor: 'Scheduled Tasks', keywords: 'cron run now cancel interval scan sync schedule history job queue events resources cpu memory' },
   { label: 'Application Logs', section: 'system', leaf: 'logs', keywords: 'log stream debug console output' },
   // Account
   { label: 'Change password', section: 'account', keywords: 'password credentials security' },
