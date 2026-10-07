@@ -3,6 +3,7 @@ export * from './layout';
 export * from './views';
 export * from './plex';
 export * from './scrobbling';
+export * from './listening';
 export * from './mixes';
 export * from './issues';
 export * from './auth';

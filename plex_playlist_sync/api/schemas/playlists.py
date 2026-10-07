@@ -19,6 +19,9 @@ class PlaylistRecord(ApiModel):
     last_synced_at: Optional[str] = None
     sync_status: str
     monitor_mode: str
+    source_kind: Optional[str] = None  # listening playlists: loved, top_tracks, playlist or created_for
+    source_ref: Optional[str] = None  # listening playlists: Last.fm period, ListenBrainz playlist id or created-for kind
+    auto_request: bool = False  # listening playlists: request missing tracks automatically (needs permission)
     created_at: str
     updated_at: str
     targets: list[str]
@@ -71,3 +74,29 @@ class PlaylistImportResponse(ApiModel):
     missing_count: int
     targets: list[str]
     status: str
+
+
+class ListeningSourceItem(ApiModel):
+    kind: str
+    ref: str
+    label: str
+    date: Optional[str] = None
+
+
+class ListeningProviderSources(ApiModel):
+    linked: bool
+    username: Optional[str] = None
+    available: bool
+    reason: Optional[str] = None
+    lists: list[ListeningSourceItem]
+
+
+class ListeningSourcesResponse(ApiModel):
+    lastfm: ListeningProviderSources
+    listenbrainz: ListeningProviderSources
+    can_auto_request: bool
+
+
+class PlaylistAutoRequestResponse(ApiModel):
+    id: str
+    auto_request: bool

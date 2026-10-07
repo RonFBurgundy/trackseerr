@@ -353,7 +353,7 @@ def test_patch_can_grant_and_revoke_admin_for_another_user_on_core(env):
     assert revoked.status_code == 200 and revoked.json()["is_admin"] is False
 
 
-@pytest.mark.parametrize("perms", [128, 255, 1 << 20, -2])
+@pytest.mark.parametrize("perms", [256, 511, 1 << 20, -2])
 def test_patch_unknown_permission_bits_are_422(env, perms):
     res = env["client"].patch("/api/admin/users/1001", json={"permissions": perms}, headers=env["admin"])
     assert res.status_code == 422
@@ -656,7 +656,8 @@ def test_permission_labels(env):
     res = env["client"].get("/api/admin/permissions", headers=env["admin"])
     assert res.status_code == 200
     by_bit = {row["bit"]: row for row in res.json()}
-    assert set(by_bit) == {1, 2, 4, 8, 16, 32, 64}
+    assert set(by_bit) == {1, 2, 4, 8, 16, 32, 64, 128}
+    assert by_bit[int(UserPermission.AUTO_REQUEST_PLAYLISTS)]["label"] == "Auto-request playlist tracks"
     assert by_bit[int(UserPermission.AUTO_APPROVE_DISCOGRAPHY)]["label"]
 
 

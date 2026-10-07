@@ -95,3 +95,5 @@ export * from './useSettingHighlight';
 export * from './useNavSearch';
 export * from './useDiscographyFilter';
 export * from './useHasDownloadClients';
+export * from './useListeningSources';
+export * from './useCanAutoRequestPlaylists';

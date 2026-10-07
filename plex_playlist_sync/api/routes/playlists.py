@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 import threading
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -17,9 +17,12 @@ from plex_playlist_sync.api.dependencies import (
     get_media_client,
     require_media_server,
     get_spotify_client,
+    has_permission,
 )
 from plex_playlist_sync.api.schemas.playlists import (
     FeaturedChart,
+    ListeningSourcesResponse,
+    PlaylistAutoRequestResponse,
     PlaylistDeletedResponse,
     PlaylistEnabledResponse,
     PlaylistImportResponse,
@@ -29,6 +32,8 @@ from plex_playlist_sync.api.schemas.playlists import (
     SmartMixPreset,
 )
 from plex_playlist_sync.clients.deezer import DeezerClient
+from plex_playlist_sync.clients.import_lists import listenbrainz as lb_provider
+from plex_playlist_sync.clients.import_lists.base import ImportListError
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import PlaylistSyncOptions, as_media_server, describe_error, plex_extras
 from plex_playlist_sync.clients.spotify import SpotifyClient
@@ -38,7 +43,19 @@ from plex_playlist_sync.native_match import match_playlist_tracks_native
 from plex_playlist_sync.library_monitoring import validate_list_monitor_mode
 from plex_playlist_sync.list_monitoring import apply_playlist_missing_safely
 from plex_playlist_sync.m3u import parse_m3u
-from plex_playlist_sync.models import Playlist, Track
+from plex_playlist_sync.listening_playlists import (
+    PROVIDER_LISTENBRAINZ,
+    KIND_LB_CREATED_FOR,
+    ListeningSourceError,
+    describe_source,
+    fetch_listening_tracks,
+    list_sources,
+    playlist_id_for,
+    resolve_created_for_slug,
+    validate_source,
+)
+from plex_playlist_sync.models import Playlist, Track, UserPermission
+from plex_playlist_sync.playlist_policy import initial_monitor_mode_forced, is_listening_playlist
 from plex_playlist_sync.redaction import safe_exc
 from plex_playlist_sync.security import (
     extract_deezer_id,
@@ -52,16 +69,45 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Album and artist modes add to the library with no quota or approval, so only admins may pick them.
+# Album and artist modes add to the library with no quota or approval, so only admins may pick them. Track mode
+# searches every missing track on its own, so it needs admin or the AUTO_REQUEST_PLAYLISTS permission.
 NON_ADMIN_MONITOR_MODES = ("track", "none")
+LISTENING_MODE_DETAIL = "Listening playlists only list missing tracks; use auto-request instead"
 
 
 def _require_mode_allowed(current_user: dict[str, Any], mode: Optional[str]) -> None:
-    if mode is not None and mode not in NON_ADMIN_MONITOR_MODES and not current_user.get("is_admin"):
+    if mode is None or mode == "none" or current_user.get("is_admin"):
+        return
+    if mode not in NON_ADMIN_MONITOR_MODES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can set an album or artist monitor mode",
         )
+    if not has_permission(current_user, UserPermission.AUTO_REQUEST_PLAYLISTS):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You need the auto-request playlist tracks permission to acquire missing tracks automatically",
+        )
+
+
+def _require_auto_request_allowed(current_user: dict[str, Any]) -> None:
+    if not has_permission(current_user, UserPermission.AUTO_REQUEST_PLAYLISTS):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You need the auto-request playlist tracks permission to request missing tracks automatically",
+        )
+
+
+def _reject_listening_mode(playlist: dict[str, Any], mode: Optional[str]) -> None:
+    if mode not in (None, "none") and is_listening_playlist(playlist):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=LISTENING_MODE_DETAIL)
+
+
+def _force_list_only_if_not_allowed(db: Database, playlist_id: str, current_user: dict[str, Any]) -> None:
+    """A new playlist of a user who may not auto-request is list-only whatever the column default is."""
+    forced = initial_monitor_mode_forced(current_user)
+    if forced is not None:
+        db.set_playlist_monitor_mode(playlist_id, forced)
 
 
 def _apply_missing_in_background(db: Database, config: Config, playlist_id: str) -> None:
@@ -129,6 +175,27 @@ class PlaylistMonitorModeRequest(BaseModel):
     @classmethod
     def _valid_mode(cls, value: str) -> str:
         return validate_list_monitor_mode(value)
+
+
+class ListeningPlaylistCreateRequest(BaseModel):
+    provider: Literal["lastfm", "listenbrainz"] = Field(..., description="Linked scrobbling account to read")
+    kind: str = Field(
+        ...,
+        description="Last.fm: loved or top_tracks. ListenBrainz: playlist or created_for",
+    )
+    ref: str = Field(
+        default="",
+        max_length=200,
+        description="Last.fm top_tracks period, or the ListenBrainz playlist id (for created_for: that playlist or its kind)",
+    )
+    keep_in_sync: bool = Field(default=True, description="Refresh the playlist on every sync cycle")
+    auto_request: bool = Field(
+        default=False, description="Request missing tracks automatically (admin or auto-request permission)"
+    )
+
+
+class PlaylistAutoRequestRequest(BaseModel):
+    auto_request: bool
 
 
 class SmartMixRequest(BaseModel):
@@ -351,11 +418,134 @@ def create_playlist(
         creator_id=creator_id,
     )
 
+    if existing is None:
+        _force_list_only_if_not_allowed(db, pl_id, current_user)
+        playlist = db.get_playlist(pl_id) or playlist
     initial_targets = _resolve_targets(db, pl_id, existing, current_user, req.targets)
     db.set_playlist_targets(pl_id, initial_targets)
     playlist["targets"] = db.get_playlist_targets(pl_id)
 
     return playlist
+
+
+@router.get("/listening/sources", response_model=ListeningSourcesResponse, response_model_exclude_unset=True)
+def get_listening_sources(
+    current_user: dict[str, Any] = Depends(get_current_user),
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+) -> dict[str, Any]:
+    """What the current user can build a playlist from: their own linked Last.fm / ListenBrainz accounts only."""
+    sources = list_sources(db, config, str(current_user["id"]))
+    sources["can_auto_request"] = has_permission(current_user, UserPermission.AUTO_REQUEST_PLAYLISTS)
+    return sources
+
+
+@router.post("/listening", response_model=PlaylistImportResponse, response_model_exclude_unset=True, status_code=status.HTTP_201_CREATED)
+def create_listening_playlist(
+    req: ListeningPlaylistCreateRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+    plex_client: Optional[Any] = Depends(get_media_client),
+) -> dict[str, Any]:
+    """Creates a playlist from the current user's own Last.fm or ListenBrainz listening.
+
+    Missing tracks are listed only. ``auto_request`` opts into requesting them and needs admin or the
+    auto-request permission. The owner is also the only target, and the monitor mode is always ``none``.
+    """
+    if req.auto_request:
+        _require_auto_request_allowed(current_user)
+    user_id = str(current_user["id"])
+    try:
+        kind, ref = validate_source(req.provider, req.kind, req.ref)
+        title: Optional[str] = None
+        if req.provider == PROVIDER_LISTENBRAINZ and kind == KIND_LB_CREATED_FOR:
+            ref, title = resolve_created_for_slug(db, user_id, ref)
+        playlist_id = playlist_id_for(user_id, req.provider, kind, ref)
+        draft = {
+            "creator_id": user_id,
+            "service": req.provider,
+            "source_kind": kind,
+            "source_ref": ref,
+        }
+        tracks = fetch_listening_tracks(db, config, draft)
+    except ListeningSourceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if req.provider == PROVIDER_LISTENBRAINZ and kind != KIND_LB_CREATED_FOR:
+        title = _own_playlist_title(db, user_id, ref)
+    name = sanitize_text(describe_source(req.provider, kind, ref, title))
+    _guard_existing_playlist(db, playlist_id, current_user)
+    tracks_json = json.dumps([{"title": t.title, "artist": t.artist, "album": t.album} for t in tracks])
+    db.upsert_playlist(
+        playlist_id=playlist_id,
+        name=name,
+        service=req.provider,
+        description="Built from your listening history",
+        enabled=req.keep_in_sync,
+        creator_id=user_id,
+        tracks_json=tracks_json,
+    )
+    db.set_playlist_source(playlist_id, kind, ref)
+    db.set_playlist_monitor_mode(playlist_id, "none")
+    db.set_playlist_auto_request(playlist_id, req.auto_request)
+    targets = [user_id]
+    db.set_playlist_targets(playlist_id, targets)
+
+    matched_count, missing_count = _sync_stored_playlist(
+        db, config, plex_client, playlist_id, name, "Built from your listening history", "", tracks, targets
+    )
+    return {
+        "id": playlist_id,
+        "name": name,
+        "service": req.provider,
+        "track_count": len(tracks),
+        "matched_count": matched_count,
+        "missing_count": missing_count,
+        "targets": targets,
+        "status": "created",
+    }
+
+
+def _own_playlist_title(db: Database, user_id: str, mbid: str) -> Optional[str]:
+    """Title of one of the user's own ListenBrainz playlists, or None when it is someone else's or unreachable."""
+    cfg = db.get_scrobble_config(user_id) or {}
+    username = str(cfg.get("listenbrainz_username") or "").strip()
+    if not username:
+        return None
+    try:
+        for entry in lb_provider.list_user_playlists(username, {"token": str(cfg.get("listenbrainz_token") or "")}):
+            if entry["mbid"] == mbid:
+                return entry["title"] or None
+    except ImportListError as exc:
+        logger.info("Could not look up the title of ListenBrainz playlist %s: %s", mbid, exc)
+    return None
+
+
+@router.put("/{playlist_id}/auto-request", response_model=PlaylistAutoRequestResponse, response_model_exclude_unset=True)
+def set_playlist_auto_request(
+    playlist_id: str,
+    req: PlaylistAutoRequestRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    db: Database = Depends(get_db),
+) -> dict[str, Any]:
+    """Turns automatic requesting of a listening playlist's missing tracks on or off.
+
+    Turning it on needs admin or the auto-request permission (403 otherwise); turning it off is always allowed.
+    """
+    playlist = db.get_playlist(playlist_id)
+    is_admin = bool(current_user.get("is_admin"))
+    is_creator = bool(playlist) and str(playlist.get("creator_id")) == str(current_user["id"])
+    if not playlist or not (is_admin or is_creator):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
+    if not is_listening_playlist(playlist):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Only listening playlists can auto-request missing tracks"
+        )
+    if req.auto_request:
+        _require_auto_request_allowed(current_user)
+    db.set_playlist_auto_request(playlist_id, req.auto_request)
+    return {"id": playlist_id, "auto_request": req.auto_request}
 
 
 @router.get("/featured", response_model=list[FeaturedChart], response_model_exclude_unset=True)
@@ -492,6 +682,7 @@ def set_playlist_enabled(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Playlist not found",
         )
+    _reject_listening_mode(playlist, req.monitor_mode)
     _require_mode_allowed(current_user, req.monitor_mode)
 
     if req.enabled is not None:
@@ -519,6 +710,7 @@ def set_playlist_monitor_mode(
     is_creator = bool(playlist) and str(playlist.get("creator_id")) == str(current_user["id"])
     if not playlist or not (is_admin or is_creator):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
+    _reject_listening_mode(playlist, req.monitor_mode)
     _require_mode_allowed(current_user, req.monitor_mode)
     db.set_playlist_monitor_mode(playlist_id, req.monitor_mode)
     return {"id": playlist_id, "monitor_mode": req.monitor_mode}
@@ -542,6 +734,81 @@ def delete_playlist(
 
     db.delete_playlist(playlist_id)
     return {"status": "deleted", "id": playlist_id}
+
+
+def _sync_stored_playlist(
+    db: Database,
+    config: Config,
+    plex_client: Optional[Any],
+    playlist_id: str,
+    name: str,
+    description: str,
+    poster_url: str,
+    model_tracks: list[Track],
+    targets: list[str],
+) -> tuple[int, int]:
+    """Pushes a just-stored playlist to the media server (or matches it natively) and records its missing tracks.
+
+    Returns ``(matched, missing)``. Failures are logged and recorded on the playlist, never raised.
+    """
+    matched_count = 0
+    missing_count = 0
+    server = as_media_server(plex_client)
+    if server and model_tracks:
+        target_usernames = []
+        for uid in targets:
+            user_row = db.get_user(uid)
+            if user_row:
+                target_usernames.append(user_row["username"])
+
+        if target_usernames:
+            model_playlist = Playlist(
+                id=playlist_id,
+                name=name,
+                tracks=model_tracks,
+                description=description,
+                poster=poster_url,
+            )
+            try:
+                results = server.sync_playlist(
+                    model_playlist, target_usernames, PlaylistSyncOptions.from_config(config, db=db)
+                )
+                matched, missing = server.match_playlist_tracks(
+                    model_tracks, threshold=config.search_similarity_threshold
+                )
+                matched_count = len(matched)
+                missing_count = len(missing)
+                success = any(r.success for r in results) if results else False
+                db.record_sync_result(
+                    playlist_id,
+                    status="success" if (success and not missing) else ("partial" if success else "error"),
+                    missing_tracks=missing,
+                )
+            except Exception as e:
+                logger.error("Error during direct import sync to Plex: %s", describe_error(e))
+                logger.debug("Direct import sync traceback", exc_info=True)
+                db.record_sync_result(playlist_id, status="error")
+            else:
+                _apply_missing_in_background(db, config, playlist_id)
+    elif config.media_server_type == MEDIA_SERVER_NONE and model_tracks:
+        # No media server: nothing to push, but the playlist is still matched against the native library so its
+        # missing tracks feed monitoring / wanted.
+        try:
+            matched, missing = match_playlist_tracks_native(db, model_tracks)
+            matched_count = len(matched)
+            missing_count = len(missing)
+            db.record_sync_result(
+                playlist_id,
+                status="success" if not missing else "partial",
+                missing_tracks=missing,
+            )
+        except Exception as e:  # the playlist is already stored; the root cause is logged
+            logger.error("Native library match failed for imported playlist: %s", safe_exc(e))
+            logger.debug("Native match traceback", exc_info=True)
+            db.record_sync_result(playlist_id, status="error")
+        else:
+            _apply_missing_in_background(db, config, playlist_id)
+    return matched_count, missing_count
 
 
 @router.post("/import", response_model=PlaylistImportResponse, response_model_exclude_unset=True, status_code=status.HTTP_201_CREATED)
@@ -582,6 +849,8 @@ def import_playlist_tracks(
         creator_id=str(current_user["id"]),
         tracks_json=tracks_json_str,
     )
+    if existing is None:
+        _force_list_only_if_not_allowed(db, import_id, current_user)
 
     # Admins can target anyone; regular users only add themselves (never wiping others' targets)
     if current_user.get("is_admin") and req.targets is not None:
@@ -602,63 +871,9 @@ def import_playlist_tracks(
         if t.title.strip()
     ]
 
-    matched_count = 0
-    missing_count = 0
-    server = as_media_server(plex_client)
-    if server and model_tracks:
-        target_usernames = []
-        for uid in targets:
-            user_row = db.get_user(uid)
-            if user_row:
-                target_usernames.append(user_row["username"])
-
-        if target_usernames:
-            model_playlist = Playlist(
-                id=import_id,
-                name=clean_name,
-                tracks=model_tracks,
-                description=clean_desc,
-                poster=poster_url,
-            )
-            try:
-                results = server.sync_playlist(
-                    model_playlist, target_usernames, PlaylistSyncOptions.from_config(config, db=db)
-                )
-                matched, missing = server.match_playlist_tracks(
-                    model_tracks, threshold=config.search_similarity_threshold
-                )
-                matched_count = len(matched)
-                missing_count = len(missing)
-                success = any(r.success for r in results) if results else False
-                db.record_sync_result(
-                    import_id,
-                    status="success" if (success and not missing) else ("partial" if success else "error"),
-                    missing_tracks=missing,
-                )
-            except Exception as e:
-                logger.error("Error during direct import sync to Plex: %s", describe_error(e))
-                logger.debug("Direct import sync traceback", exc_info=True)
-                db.record_sync_result(import_id, status="error")
-            else:
-                _apply_missing_in_background(db, config, import_id)
-    elif config.media_server_type == MEDIA_SERVER_NONE and model_tracks:
-        # No media server: nothing to push, but the playlist is still matched against the native library so its
-        # missing tracks feed monitoring / wanted.
-        try:
-            matched, missing = match_playlist_tracks_native(db, model_tracks)
-            matched_count = len(matched)
-            missing_count = len(missing)
-            db.record_sync_result(
-                import_id,
-                status="success" if not missing else "partial",
-                missing_tracks=missing,
-            )
-        except Exception as e:  # the playlist is already stored; the root cause is logged
-            logger.error("Native library match failed for imported playlist: %s", safe_exc(e))
-            logger.debug("Native match traceback", exc_info=True)
-            db.record_sync_result(import_id, status="error")
-        else:
-            _apply_missing_in_background(db, config, import_id)
+    matched_count, missing_count = _sync_stored_playlist(
+        db, config, plex_client, import_id, clean_name, clean_desc, poster_url, model_tracks, targets
+    )
 
     return {
         "id": import_id,

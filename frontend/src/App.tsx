@@ -12,6 +12,7 @@ import {
   useLibrary,
   useLibraryHealthCount,
   useAccount,
+  useCanAutoRequestPlaylists,
   useLocalLogin,
   useDeploymentIdentity,
   useMediaServer,
@@ -59,6 +60,7 @@ import {
   type ImportPlaylistPayload,
 } from '@/services/playlistService';
 import { apiRequest } from '@/services/apiClient';
+import { setPlaylistAutoRequest } from '@/services/listeningService';
 import { createDiscographyRequest, MAX_BATCH_ITEMS } from '@/services/requestService';
 
 /** Manual path routing: only /invite/:token is a distinct page; everything else is the SPA shell. */
@@ -78,6 +80,7 @@ const MainApp: React.FC = () => {
   const identity = useDeploymentIdentity(auth.tier, auth.isAuthenticated);
   const mediaServer = useMediaServer();
   const accountHook = useAccount(auth.isAuthenticated);
+  const canAutoRequestPlaylists = useCanAutoRequestPlaylists(auth.isAuthenticated);
   const localLogin = useLocalLogin({ onSignedIn: auth.completeLocalSignIn });
   const [showLocalLogin, setShowLocalLogin] = useState<boolean>(false);
   // Mandatory MFA enrollment: the server returns 403 for everything but /api/account*,
@@ -229,6 +232,11 @@ const MainApp: React.FC = () => {
 
   const handleSetPlaylistMonitorMode = async (playlist: Playlist, mode: ListMonitorMode) => {
     await updatePlaylistSettings(playlist.id, { enabled: playlist.enabled, monitor_mode: mode });
+    await loadPlaylistsAndUsers();
+  };
+
+  const handleSetPlaylistAutoRequest = async (playlist: Playlist, autoRequest: boolean) => {
+    await setPlaylistAutoRequest(playlist.id, autoRequest);
     await loadPlaylistsAndUsers();
   };
 
@@ -481,6 +489,9 @@ const MainApp: React.FC = () => {
                 onImport={handleImportPlaylist}
                 onToggleActive={handleTogglePlaylistActive}
                 onSetMonitorMode={handleSetPlaylistMonitorMode}
+                canAutoRequest={canAutoRequestPlaylists}
+                onSetAutoRequest={handleSetPlaylistAutoRequest}
+                onListeningCreated={loadPlaylistsAndUsers}
                 onDelete={handleDeletePlaylist}
                 isLoading={isPlaylistsLoading}
                 isAdmin={auth.canUseAdminUi}

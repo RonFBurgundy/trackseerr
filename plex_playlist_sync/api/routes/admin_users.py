@@ -44,6 +44,7 @@ PERMISSION_LABELS: tuple[tuple[UserPermission, str], ...] = (
     (UserPermission.AUTO_APPROVE_DISCOGRAPHY, "Auto-approve discography requests"),
     (UserPermission.MANAGE_REQUESTS, "Manage requests"),
     (UserPermission.REPORT_ISSUE, "Report media issues"),
+    (UserPermission.AUTO_REQUEST_PLAYLISTS, "Auto-request playlist tracks"),
 )
 
 # Serialises guard-check-then-write sequences (last admin, self rules) within this process.

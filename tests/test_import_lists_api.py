@@ -323,6 +323,11 @@ def test_non_admin_cannot_set_album_or_artist_monitor_mode(app_and_client, test_
         assert client.put("/api/playlists/pl-a/enabled", json={"enabled": False, "monitor_mode": mode}, headers=alice).status_code == 403
     pl = test_db.get_playlist("pl-a")
     assert pl["monitor_mode"] == "track" and pl["enabled"]  # nothing was written, not even `enabled`
+    # Track mode needs the auto-request permission; list-only (none) never does.
+    assert client.put("/api/playlists/pl-a/monitor-mode", json={"monitor_mode": "none"}, headers=alice).status_code == 200
+    assert client.put("/api/playlists/pl-a/enabled", json={"monitor_mode": "none"}, headers=alice).status_code == 200
+    assert client.put("/api/playlists/pl-a/monitor-mode", json={"monitor_mode": "track"}, headers=alice).status_code == 403
+    test_db.update_user_admin_fields("user-alice", {"permissions": 34 | 128})
     for mode in ("none", "track"):
         assert client.put("/api/playlists/pl-a/monitor-mode", json={"monitor_mode": mode}, headers=alice).status_code == 200
         assert client.put("/api/playlists/pl-a/enabled", json={"monitor_mode": mode}, headers=alice).status_code == 200

@@ -76,7 +76,7 @@ def clean_library_name(text: str) -> str:
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
 SEED_COMPLETE_ACTIONS = ("keep", "remove", "remove_and_delete")
-SCHEMA_VERSION = 64  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 65  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:
@@ -363,6 +363,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                 (62, self._migration_v62),
                 (63, self._migration_v63),
                 (64, self._migration_v64),
+                (65, self._migration_v65),
             ]
 
             applied = 0
@@ -1966,6 +1967,17 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
         if "prefer_singles" not in {row[1] for row in cur.fetchall()}:
             cur.execute("ALTER TABLE lidarr_settings ADD COLUMN prefer_singles INTEGER NOT NULL DEFAULT 1;")
 
+    def _migration_v65(self, cur: sqlite3.Cursor) -> None:
+        """Listening playlists: the source (kind/ref) of a Last.fm / ListenBrainz playlist and its auto-request opt-in."""
+        cur.execute("PRAGMA table_info(playlists);")
+        have = {row[1] for row in cur.fetchall()}
+        if "source_kind" not in have:
+            cur.execute("ALTER TABLE playlists ADD COLUMN source_kind TEXT;")
+        if "source_ref" not in have:
+            cur.execute("ALTER TABLE playlists ADD COLUMN source_ref TEXT;")
+        if "auto_request" not in have:
+            cur.execute("ALTER TABLE playlists ADD COLUMN auto_request INTEGER NOT NULL DEFAULT 0;")
+
     def _migration_v37(self, cur: sqlite3.Cursor) -> None:
         """Import lists, per-playlist monitor mode and the missing-track "already applied" marker."""
         cur.execute("PRAGMA table_info(playlists);")
@@ -2757,7 +2769,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
             cur = self.conn.execute(
                 """
                 SELECT id, name, service, description, poster_url, enabled, creator_id, tracks_json,
-                       last_synced_at, sync_status, monitor_mode, created_at, updated_at
+                       last_synced_at, sync_status, monitor_mode, source_kind, source_ref, auto_request, created_at, updated_at
                 FROM playlists
                 WHERE id = ?
                 """,
@@ -2768,6 +2780,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                 return None
             d = dict(row)
             d["enabled"] = bool(d["enabled"])
+            d["auto_request"] = bool(d["auto_request"])
             return d
 
     def list_playlists(
@@ -2781,7 +2794,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                     cur = self.conn.execute(
                         """
                         SELECT DISTINCT p.id, p.name, p.service, p.description, p.poster_url, p.enabled, p.creator_id, p.tracks_json,
-                               p.last_synced_at, p.sync_status, p.monitor_mode, p.created_at, p.updated_at
+                               p.last_synced_at, p.sync_status, p.monitor_mode, p.source_kind, p.source_ref, p.auto_request, p.created_at, p.updated_at
                         FROM playlists p
                         LEFT JOIN playlist_targets pt ON p.id = pt.playlist_id
                         WHERE (pt.user_id = ? OR p.creator_id = ?) AND p.enabled = 1
@@ -2793,7 +2806,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                     cur = self.conn.execute(
                         """
                         SELECT DISTINCT p.id, p.name, p.service, p.description, p.poster_url, p.enabled, p.creator_id, p.tracks_json,
-                               p.last_synced_at, p.sync_status, p.monitor_mode, p.created_at, p.updated_at
+                               p.last_synced_at, p.sync_status, p.monitor_mode, p.source_kind, p.source_ref, p.auto_request, p.created_at, p.updated_at
                         FROM playlists p
                         LEFT JOIN playlist_targets pt ON p.id = pt.playlist_id
                         WHERE (pt.user_id = ? OR p.creator_id = ?)
@@ -2806,7 +2819,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                     cur = self.conn.execute(
                         """
                         SELECT id, name, service, description, poster_url, enabled, creator_id, tracks_json,
-                               last_synced_at, sync_status, monitor_mode, created_at, updated_at
+                               last_synced_at, sync_status, monitor_mode, source_kind, source_ref, auto_request, created_at, updated_at
                         FROM playlists
                         WHERE enabled = 1
                         ORDER BY name ASC
@@ -2816,7 +2829,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                     cur = self.conn.execute(
                         """
                         SELECT id, name, service, description, poster_url, enabled, creator_id, tracks_json,
-                               last_synced_at, sync_status, monitor_mode, created_at, updated_at
+                               last_synced_at, sync_status, monitor_mode, source_kind, source_ref, auto_request, created_at, updated_at
                         FROM playlists
                         ORDER BY name ASC
                         """
@@ -2826,6 +2839,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
             for row in cur.fetchall():
                 d = dict(row)
                 d["enabled"] = bool(d["enabled"])
+                d["auto_request"] = bool(d["auto_request"])
                 results.append(d)
             return results
 
@@ -3272,6 +3286,26 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
             cur = self.conn.execute(
                 "UPDATE playlists SET monitor_mode = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (validated, str(playlist_id)),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def set_playlist_source(self, playlist_id: str, source_kind: Optional[str], source_ref: Optional[str]) -> bool:
+        """Records where a listening playlist (Last.fm / ListenBrainz) pulls its tracks from."""
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE playlists SET source_kind = ?, source_ref = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (source_kind, source_ref, str(playlist_id)),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def set_playlist_auto_request(self, playlist_id: str, auto_request: bool) -> bool:
+        """Turns the per-playlist opt-in to automatically request missing tracks on or off."""
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE playlists SET auto_request = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (1 if auto_request else 0, str(playlist_id)),
             )
             self.conn.commit()
             return cur.rowcount > 0

@@ -102,12 +102,31 @@ def _playlist_items(playlist_mbid: str, config: dict[str, Any]) -> list[ImportLi
     return items
 
 
-def _created_for_playlist_mbids(username: str, config: dict[str, Any]) -> list[str]:
-    mbids: list[str] = []
+def _playlist_slug(inner: dict[str, Any]) -> str:
+    """Stable kind of a created-for playlist (``weekly-jams``, ``weekly-exploration``, ...).
+
+    ListenBrainz names them "Weekly Jams for user, week of 2025-01-06 Mon"; the generating patch is the reliable key
+    and the title prefix before " for " the fallback.
+    """
+    ext = (inner.get("extension") or {}).get(_JSPF_PLAYLIST_EXT)
+    meta = ext.get("additional_metadata") if isinstance(ext, dict) else None
+    algo = meta.get("algorithm_metadata") if isinstance(meta, dict) else None
+    patch = str(algo.get("source_patch") or "").strip().lower() if isinstance(algo, dict) else ""
+    if patch:
+        return patch
+    title = str(inner.get("title") or "").strip()
+    prefix = title.split(" for ", 1)[0].strip().lower()
+    return re.sub(r"[^a-z0-9]+", "-", prefix).strip("-")
+
+
+def _list_playlist_entries(username: str, path: str, config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Pages through a user's playlist listing: ``[{"mbid", "title", "date", "slug"}, ...]``, de-duplicated by mbid."""
+    entries_out: list[dict[str, Any]] = []
+    seen: set[str] = set()
     offset = 0
     while True:
         data = get_json(
-            f"{API_URL}/user/{urllib.parse.quote(username, safe='')}/playlists/createdfor",
+            f"{API_URL}/user/{urllib.parse.quote(username, safe='')}/playlists{path}",
             params={"count": PLAYLIST_PAGE_SIZE, "offset": offset},
             headers=_headers(config),
         )
@@ -116,13 +135,56 @@ def _created_for_playlist_mbids(username: str, config: dict[str, Any]) -> list[s
         entries = data.get("playlists") or []
         for entry in entries:
             inner = entry.get("playlist") if isinstance(entry, dict) else None
-            mbid = _mbid_from(inner.get("identifier")) if isinstance(inner, dict) else None
-            if mbid and mbid not in mbids:
-                mbids.append(mbid)
+            if not isinstance(inner, dict):
+                continue
+            mbid = _mbid_from(inner.get("identifier"))
+            if not mbid or mbid in seen:
+                continue
+            seen.add(mbid)
+            entries_out.append(
+                {
+                    "mbid": mbid,
+                    "title": str(inner.get("title") or "").strip(),
+                    "date": str(inner.get("date") or "").strip(),
+                    "slug": _playlist_slug(inner),
+                }
+            )
         total = int(data.get("playlist_count") or 0)
         offset += PLAYLIST_PAGE_SIZE
         if not entries or offset >= total:
-            return mbids
+            return entries_out
+
+
+def list_created_for(username: str, config: dict[str, Any]) -> list[dict[str, Any]]:
+    """The playlists ListenBrainz generated for ``username`` (Weekly Jams, Weekly Exploration, ...), newest first."""
+    entries = _list_playlist_entries(_valid_username(username), "/createdfor", config)
+    return sorted(entries, key=lambda e: e["date"], reverse=True)
+
+
+def list_user_playlists(username: str, config: dict[str, Any]) -> list[dict[str, Any]]:
+    """The playlists ``username`` created themselves, newest first."""
+    entries = _list_playlist_entries(_valid_username(username), "", config)
+    return sorted(entries, key=lambda e: e["date"], reverse=True)
+
+
+def newest_created_for(username: str, slug: str, config: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """The most recent created-for playlist of kind ``slug``, or None when ListenBrainz has none."""
+    for entry in list_created_for(username, config):
+        if entry["slug"] == slug:
+            return entry
+    return None
+
+
+def playlist_items(playlist_mbid: str, config: dict[str, Any]) -> list[ImportListItem]:
+    """The tracks of one ListenBrainz playlist (``config`` may carry a ``token`` for private playlists)."""
+    mbid = _mbid_from(playlist_mbid)
+    if not mbid:
+        raise ImportListError("A playlist MBID (or playlist URL) is required")
+    return _dedupe(_playlist_items(mbid, config))
+
+
+def _created_for_playlist_mbids(username: str, config: dict[str, Any]) -> list[str]:
+    return [entry["mbid"] for entry in _list_playlist_entries(username, "/createdfor", config)]
 
 
 def _stats_items(source: str, username: str, config: dict[str, Any]) -> list[ImportListItem]:

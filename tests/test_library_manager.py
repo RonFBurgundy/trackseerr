@@ -562,7 +562,7 @@ class TestLidarrSettingsFields:
         assert res["status"] == "success"
         sent = fake.requests("POST", "artist")[0]
         assert sent["qualityProfileId"] == 4 and sent["metadataProfileId"] == 6 and sent["tags"] == [7]
-        assert sent["monitorNewItems"] == "new" and sent["addOptions"]["monitor"] == "none"
+        assert sent["monitorNewItems"] == "none" and sent["addOptions"]["monitor"] == "none"
 
 
 class TestLidarrHealth:

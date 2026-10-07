@@ -3048,6 +3048,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/playlists/listening": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Listening Playlist
+         * @description Creates a playlist from the current user's own Last.fm or ListenBrainz listening.
+         *
+         *     Missing tracks are listed only. ``auto_request`` opts into requesting them and needs admin or the
+         *     auto-request permission. The owner is also the only target, and the monitor mode is always ``none``.
+         */
+        post: operations["create_listening_playlist_api_playlists_listening_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playlists/listening/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Listening Sources
+         * @description What the current user can build a playlist from: their own linked Last.fm / ListenBrainz accounts only.
+         */
+        get: operations["get_listening_sources_api_playlists_listening_sources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/playlists/smart-mix": {
         parameters: {
             query?: never;
@@ -3103,6 +3146,28 @@ export interface paths {
          * @description Deletes a playlist (admin, or the creator; others get 404).
          */
         delete: operations["delete_playlist_api_playlists__playlist_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playlists/{playlist_id}/auto-request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Playlist Auto Request
+         * @description Turns automatic requesting of a listening playlist's missing tracks on or off.
+         *
+         *     Turning it on needs admin or the auto-request permission (403 otherwise); turning it off is always allowed.
+         */
+        put: operations["set_playlist_auto_request_api_playlists__playlist_id__auto_request_put"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -8376,6 +8441,69 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** ListeningPlaylistCreateRequest */
+        ListeningPlaylistCreateRequest: {
+            /**
+             * Auto Request
+             * @description Request missing tracks automatically (admin or auto-request permission)
+             * @default false
+             */
+            auto_request: boolean;
+            /**
+             * Keep In Sync
+             * @description Refresh the playlist on every sync cycle
+             * @default true
+             */
+            keep_in_sync: boolean;
+            /**
+             * Kind
+             * @description Last.fm: loved or top_tracks. ListenBrainz: playlist or created_for
+             */
+            kind: string;
+            /**
+             * Provider
+             * @description Linked scrobbling account to read
+             * @enum {string}
+             */
+            provider: "lastfm" | "listenbrainz";
+            /**
+             * Ref
+             * @description Last.fm top_tracks period, or the ListenBrainz playlist id (for created_for: that playlist or its kind)
+             * @default
+             */
+            ref: string;
+        };
+        /** ListeningProviderSources */
+        ListeningProviderSources: {
+            /** Available */
+            available: boolean;
+            /** Linked */
+            linked: boolean;
+            /** Lists */
+            lists: components["schemas"]["ListeningSourceItem"][];
+            /** Reason */
+            reason?: string | null;
+            /** Username */
+            username?: string | null;
+        };
+        /** ListeningSourceItem */
+        ListeningSourceItem: {
+            /** Date */
+            date?: string | null;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Ref */
+            ref: string;
+        };
+        /** ListeningSourcesResponse */
+        ListeningSourcesResponse: {
+            /** Can Auto Request */
+            can_auto_request: boolean;
+            lastfm: components["schemas"]["ListeningProviderSources"];
+            listenbrainz: components["schemas"]["ListeningProviderSources"];
+        };
         /** LocalLoginRequest */
         LocalLoginRequest: {
             /** Password */
@@ -9667,6 +9795,18 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** PlaylistAutoRequestRequest */
+        PlaylistAutoRequestRequest: {
+            /** Auto Request */
+            auto_request: boolean;
+        };
+        /** PlaylistAutoRequestResponse */
+        PlaylistAutoRequestResponse: {
+            /** Auto Request */
+            auto_request: boolean;
+            /** Id */
+            id: string;
+        };
         /** PlaylistCopyResult */
         PlaylistCopyResult: {
             /** Copied Tracks */
@@ -9807,6 +9947,11 @@ export interface components {
          * @description A ``playlists`` row plus its target user ids. Non-admins only receive playlists they created or that target them.
          */
         PlaylistRecord: {
+            /**
+             * Auto Request
+             * @default false
+             */
+            auto_request: boolean;
             /** Created At */
             created_at: string;
             /** Creator Id */
@@ -9833,6 +9978,10 @@ export interface components {
             poster_url: string;
             /** Service */
             service: string;
+            /** Source Kind */
+            source_kind?: string | null;
+            /** Source Ref */
+            source_ref?: string | null;
             /** Sync Status */
             sync_status: string;
             /** Targets */
@@ -17028,6 +17177,59 @@ export interface operations {
             };
         };
     };
+    create_listening_playlist_api_playlists_listening_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListeningPlaylistCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_listening_sources_api_playlists_listening_sources_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListeningSourcesResponse"];
+                };
+            };
+        };
+    };
     create_smart_mix_api_playlists_smart_mix_post: {
         parameters: {
             query?: never;
@@ -17099,6 +17301,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlaylistDeletedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_playlist_auto_request_api_playlists__playlist_id__auto_request_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaylistAutoRequestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistAutoRequestResponse"];
                 };
             };
             /** @description Validation Error */

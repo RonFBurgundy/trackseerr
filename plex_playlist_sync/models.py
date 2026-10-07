@@ -22,6 +22,7 @@ class UserPermission(IntFlag):
     MANAGE_REQUESTS = 16
     REPORT_ISSUE = 32
     AUTO_APPROVE_DISCOGRAPHY = 64
+    AUTO_REQUEST_PLAYLISTS = 128  # automatic acquisition of playlist tracks (track-mode lists, listening playlists)
     DEFAULT = 34  # REQUEST | REPORT_ISSUE
 
 
