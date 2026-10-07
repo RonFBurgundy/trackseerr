@@ -1,43 +1,19 @@
-export interface SeedCleanupStats {
-  evaluated: number;
-  removed: number;
-  deleted_files: number;
-  orphans: number;
-  failures: number;
-}
+import type { Schema } from './apiSchema';
+export type SeedCleanupStats = Schema<'SeedCleanupStats'>;
 
-export interface SeedCleanupRun {
-  started_at: string;
-  finished_at: string | null;
-  stats: SeedCleanupStats;
-  error: string | null;
-}
+export type SeedCleanupRun = Schema<'SeedCleanupLastRun'>;
 
-export interface SeedCleanupStatus {
-  running: boolean;
-  last_run: SeedCleanupRun | null;
-}
+export type SeedCleanupStatus = Schema<'SeedCleanupStatus'>;
 
-export interface SeedCleanupStarted {
-  started: boolean;
-}
+export type SeedCleanupStarted = Schema<'SeedCleanupStarted'>;
 
 export interface OrphanRemoveRequest {
   delete_files: boolean;
 }
 
-export interface OrphanRemoveResponse {
-  removed: boolean;
-  delete_files: boolean;
-}
+export type OrphanRemoveResponse = Schema<'RemoveOrphanResponse'>;
 
-export interface FailedRetryResponse {
-  retried: boolean;
-  removed: boolean;
-  status: string;
-  attempts: number;
-  error: string | null;
-}
+export type FailedRetryResponse = Schema<'RetryFailedResponse'>;
 
 /** The parts of an orphan_torrent finding's `detail` the panel renders. */
 export interface OrphanTorrentInfo {

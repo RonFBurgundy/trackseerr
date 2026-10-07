@@ -1,3 +1,4 @@
+import type { Narrow, Schema } from './apiSchema';
 /**
  * Types for local accounts, MFA, request quotas and admin user management.
  * Mirrors docs/users-and-accounts.md.
@@ -14,41 +15,15 @@ export const QUOTA_LABELS: Record<QuotaKind, string> = {
   discographies: 'Discographies',
 };
 
-export interface QuotaUsage {
-  tracks: number;
-  albums: number;
-  discographies: number;
-}
+export type QuotaUsage = Schema<'QuotaUsage'>;
 
-/** Limits are null for unlimited admins. */
-export interface AccountQuotas {
-  tracks: number | null;
-  albums: number | null;
-  discographies: number | null;
-  window_days: number;
-  used: QuotaUsage;
-}
+export type AccountQuotas = Schema<'QuotaSnapshot'>;
 
-/** GET /api/account */
-export interface AccountInfo {
-  id: string | number;
-  username: string;
-  auth_type: AuthType;
-  mfa_enabled: boolean;
-  mfa_required: boolean;
-  recovery_codes_remaining: number;
-  quotas: AccountQuotas;
-  auto_approve: { tracks: boolean; albums: boolean; discographies: boolean };
-}
+export type AccountInfo = Narrow<Schema<'AccountResponse'>, { auth_type: AuthType }>;
 
-export interface MfaSetupResponse {
-  secret: string;
-  otpauth_uri: string;
-}
+export type MfaSetupResponse = Schema<'MfaSetupResponse'>;
 
-export interface MfaConfirmResponse {
-  recovery_codes: string[];
-}
+export type MfaConfirmResponse = Schema<'RecoveryCodesResponse'>;
 
 export interface ChangePasswordPayload {
   current_password: string;
@@ -69,11 +44,7 @@ export interface LocalLoginPayload {
   recovery_code?: string;
 }
 
-export interface LocalLoginResponse {
-  token?: string;
-  user?: { id: string | number; username?: string; is_admin?: boolean };
-  mfa_enrollment_required?: boolean;
-}
+export type LocalLoginResponse = Schema<'LocalLoginResponse'>;
 
 export type LocalLoginOutcome =
   | { kind: 'success'; mfaEnrollmentRequired: boolean }
@@ -84,11 +55,7 @@ export type LocalLoginOutcome =
 
 export type InvitePurpose = 'invite' | 'reset';
 
-export interface InviteInfo {
-  username: string;
-  purpose: InvitePurpose;
-  expires_at: string;
-}
+export type InviteInfo = Narrow<Schema<'InviteInfoResponse'>, { purpose: InvitePurpose }>;
 
 // ---- Admin user management -------------------------------------------------
 
@@ -174,13 +141,7 @@ export interface UpdateUserPayload {
   quota_window_days?: number | null;
 }
 
-export interface AccountDefaultSettings {
-  require_mfa_local: boolean;
-  default_quota_tracks: number;
-  default_quota_albums: number;
-  default_quota_discographies: number;
-  default_quota_window_days: number;
-}
+export type AccountDefaultSettings = Schema<'AccountSettings'>;
 
 // ---- Batch requests --------------------------------------------------------
 

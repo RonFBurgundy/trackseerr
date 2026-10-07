@@ -309,7 +309,7 @@ class TestGrabRoute:
 
         def fake(payload, db, admin):
             observed.append(lm.in_flight_count(lm.MODE_NATIVE))
-            return {"success": True}
+            return {"success": True, "download_id": "dl-1", "client": "qbit", "message": "Successfully enqueued"}
 
         with patch("plex_playlist_sync.api.routes.acquisition._grab_release", side_effect=fake):
             resp = client.post(

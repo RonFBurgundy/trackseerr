@@ -53,7 +53,7 @@ def _client(db: Database, config: Config) -> TestClient:
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_config] = lambda: config
     discovery = MagicMock()
-    discovery.get_trending.return_value = [{"id": "d1", "title": "Song", "artist": "Band", "type": "track"}]
+    discovery.get_trending.return_value = [{"id": "deezer:track:1", "item_type": "track", "title": "Song", "artist": "Band", "album": None, "cover_url": None, "preview_url": None, "release_date": None, "status": "none"}]
     app.dependency_overrides[get_discovery_client] = lambda: discovery
     return TestClient(app)
 

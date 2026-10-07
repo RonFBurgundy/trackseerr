@@ -68,7 +68,7 @@ export const DiscoveryTrackModal: React.FC<DiscoveryTrackModalProps> = ({
   onOpenAlbum,
 }) => {
   const title = detail?.title || track.title;
-  const artist = detail?.artist || track.artist;
+  const artist = detail?.artist || track.artist || '';
   const artistId = detail?.artist_discovery_id ?? track.artist_discovery_id;
   const albumTitle = detail?.album ?? track.album ?? undefined;
   const albumId = detail?.album_discovery_id ?? track.album_discovery_id;
@@ -211,7 +211,7 @@ export const DiscoveryTrackModal: React.FC<DiscoveryTrackModalProps> = ({
 
         {detail && (
           <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {detail.duration > 0 && <MetaCell label="Duration">{formatTrackDuration(detail.duration)}</MetaCell>}
+            {(detail.duration ?? 0) > 0 && <MetaCell label="Duration">{formatTrackDuration(detail.duration ?? undefined)}</MetaCell>}
             {position && <MetaCell label="Position">{position}</MetaCell>}
             {releaseDate && <MetaCell label="Released">{releaseDate.slice(0, 10)}</MetaCell>}
             {detail.bpm ? <MetaCell label="BPM">{detail.bpm}</MetaCell> : null}

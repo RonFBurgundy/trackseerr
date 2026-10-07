@@ -50,11 +50,14 @@ export interface LidarrMigrationBannerProps {
   status: LidarrStatus;
 }
 
-export const LidarrMigrationBanner: React.FC<LidarrMigrationBannerProps> = ({ status }) => (
-  <div className="px-3 py-2 bg-[#151515] border border-blue-800/60 rounded-[4px] flex items-center gap-3 text-xs font-mono min-w-0">
-    <HardDrive className="h-4 w-4 text-blue-400 animate-spin" />
-    <span className="text-blue-300 truncate" title={`Lidarr Migration Active: ${status.migrated_artists} of ${status.total_artists} artists migrated (${status.progress}%)`}>
-      Lidarr Migration Active: {status.migrated_artists} of {status.total_artists} artists migrated ({status.progress}%)
-    </span>
-  </div>
-);
+export const LidarrMigrationBanner: React.FC<LidarrMigrationBannerProps> = ({ status }) => {
+  const summary = `Lidarr Migration Active: ${status.artists_migrated} artists, ${status.albums_migrated} albums, ${status.tracks_migrated} tracks migrated`;
+  return (
+    <div className="px-3 py-2 bg-[#151515] border border-blue-800/60 rounded-[4px] flex items-center gap-3 text-xs font-mono min-w-0">
+      <HardDrive className="h-4 w-4 text-blue-400 animate-spin" />
+      <span className="text-blue-300 truncate" title={summary}>
+        {summary}
+      </span>
+    </div>
+  );
+};

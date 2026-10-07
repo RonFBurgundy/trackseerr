@@ -1,4 +1,4 @@
-import { ApiError, apiRequest, setAuthToken } from './apiClient';
+import { ApiError, apiRequest } from './apiClient';
 import type {
   InviteInfo,
   LocalLoginOutcome,
@@ -24,9 +24,6 @@ export async function localLogin(payload: LocalLoginPayload): Promise<LocalLogin
       body: payload,
       passthroughUnauthorized: true,
     });
-    if (res?.token) {
-      setAuthToken(res.token);
-    }
     return { kind: 'success', mfaEnrollmentRequired: Boolean(res?.mfa_enrollment_required) };
   } catch (err: unknown) {
     if (err instanceof ApiError) {

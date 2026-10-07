@@ -6,12 +6,14 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from plex_playlist_sync.api.response_models import ApiModel
 
 from plex_playlist_sync.api.dependencies import get_db, require_admin
+from plex_playlist_sync.api.schemas.indexers import DeletedResponse
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.clients.acquisition import get_indexer_driver
 from plex_playlist_sync.models import IndexerConfig
-from plex_playlist_sync.security import is_safe_service_url, mask_secret
+from plex_playlist_sync.security import MASK_MARKER, is_safe_service_url, mask_secret, resolve_masked_value
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -19,7 +21,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-class IndexerItem(BaseModel):
+class IndexerItem(ApiModel):
     id: str
     name: str
     indexer_type: str
@@ -60,7 +62,7 @@ class TestIndexerPayload(BaseModel):
     categories: str = "3000,3010,3020,3030,3040"
 
 
-class TestIndexerResponse(BaseModel):
+class TestIndexerResponse(ApiModel):
     success: bool
     message: str
 
@@ -103,10 +105,15 @@ def create_or_update_indexer(
 
     # Preserve secret if masked or omitted
     api_key = payload.api_key
-    if api_key and "•••" in api_key and existing:
-        api_key = existing.get("api_key")
-    elif not api_key and existing:
-        api_key = existing.get("api_key")
+    if existing:
+        try:
+            api_key = resolve_masked_value(api_key, existing.get("api_key"), mask_secret(existing.get("api_key")), "api_key")
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        if not api_key:
+            api_key = existing.get("api_key")
+    elif api_key and "•••" in api_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Masked placeholder submitted for a new indexer; enter the full value")
 
     config = IndexerConfig(
         id=indexer_id,
@@ -142,15 +149,23 @@ def test_indexer_connection(
         )
 
     api_key = payload.api_key
-    if not api_key or "•" in api_key:
-        existing = db.get_indexer(payload.id.strip()) if payload.id and payload.id.strip() else None
-        if existing:
-            api_key = existing.get("api_key")
-        elif api_key:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The API key is masked and no saved indexer matches the given id; re-enter the key to test.",
+    existing = db.get_indexer(payload.id.strip()) if payload.id and payload.id.strip() else None
+    # The saved key is only ever sent to the saved host: a changed host gets none of it.
+    same_host = bool(existing) and (existing.get("host_url") or "").strip().rstrip("/").lower() == clean_host.rstrip("/").lower()
+    try:
+        if same_host:
+            api_key = resolve_masked_value(api_key, existing.get("api_key"), mask_secret(existing.get("api_key")), "api_key")
+            if not api_key:
+                api_key = existing.get("api_key")
+        elif api_key and MASK_MARKER in api_key:
+            detail = (
+                "The host URL changed: enter the API key again instead of keeping the saved one"
+                if existing
+                else "The API key is masked and no saved indexer matches the given id; re-enter the key to test."
             )
+            raise ValueError(detail)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     try:
         driver = get_indexer_driver(
@@ -168,7 +183,7 @@ def test_indexer_connection(
         return TestIndexerResponse(success=False, message=f"Connection failed: {redact_text(str(e))}")
 
 
-@router.delete("/{indexer_id}", summary="Delete indexer")
+@router.delete("/{indexer_id}", response_model=DeletedResponse, response_model_exclude_unset=True, summary="Delete indexer")
 def delete_indexer(
     indexer_id: str,
     db: Database = Depends(get_db),

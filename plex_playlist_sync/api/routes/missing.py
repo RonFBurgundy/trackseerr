@@ -22,6 +22,18 @@ from plex_playlist_sync.api.dependencies import (
     require_admin,
     verify_feed_access,
 )
+from plex_playlist_sync.api.schemas.missing import (
+    GrabResult,
+    LidarrPushResponse,
+    LidarrQueueAction,
+    LidarrQueueStatus,
+    LidarrStatusResponse,
+    MatchCreatedResponse,
+    MatchDeletedResponse,
+    MatchOverride,
+    MediaTrackHit,
+    MissingTrack,
+)
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import as_media_server
@@ -93,7 +105,7 @@ def _filter_missing_for_user(
     return [t for t in all_tracks if t.get("playlist_id") in user_playlists]
 
 
-@router.get("")
+@router.get("", response_model=list[MissingTrack], response_model_exclude_unset=True)
 def get_missing_tracks(
     playlist_id: Optional[str] = Query(default=None, description="Optional playlist ID filter"),
     current_user: dict[str, Any] = Depends(require_admin),
@@ -237,7 +249,7 @@ def feed_missing_text(
     return Response(content="\n".join(lines) + ("\n" if lines else ""), media_type="text/plain; charset=utf-8")
 
 
-@router.get("/lidarr/status")
+@router.get("/lidarr/status", response_model=LidarrStatusResponse, response_model_exclude_unset=True)
 def get_lidarr_status(
     _current_user: dict[str, Any] = Depends(require_admin),
     config: Config = Depends(get_config),
@@ -277,7 +289,7 @@ def get_lidarr_status(
     }
 
 
-@router.post("/lidarr/push")
+@router.post("/lidarr/push", response_model=LidarrPushResponse, response_model_exclude_unset=True)
 def push_missing_to_lidarr(
     req: Optional[LidarrPushRequest] = None,
     current_user: dict[str, Any] = Depends(require_admin),
@@ -419,7 +431,7 @@ def _push_missing_to_lidarr(
     }
 
 
-@router.get("/lidarr/queue")
+@router.get("/lidarr/queue", response_model=LidarrQueueStatus, response_model_exclude_unset=True)
 def get_lidarr_queue_status(
     _current_user: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
@@ -427,7 +439,7 @@ def get_lidarr_queue_status(
     return lidarr_worker.get_status()
 
 
-@router.post("/lidarr/queue/pause")
+@router.post("/lidarr/queue/pause", response_model=LidarrQueueAction, response_model_exclude_unset=True)
 def pause_lidarr_queue(
     _current_user: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
@@ -437,7 +449,7 @@ def pause_lidarr_queue(
     return {**status, "action_status": res.get("status"), "action_message": res.get("message")}
 
 
-@router.post("/lidarr/queue/resume")
+@router.post("/lidarr/queue/resume", response_model=LidarrQueueAction, response_model_exclude_unset=True)
 def resume_lidarr_queue(
     _current_user: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
@@ -447,7 +459,7 @@ def resume_lidarr_queue(
     return {**status, "action_status": res.get("status"), "action_message": res.get("message")}
 
 
-@router.post("/lidarr/queue/cancel")
+@router.post("/lidarr/queue/cancel", response_model=LidarrQueueAction, response_model_exclude_unset=True)
 def cancel_lidarr_queue(
     _current_user: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
@@ -457,7 +469,7 @@ def cancel_lidarr_queue(
     return {**status, "action_status": res.get("status"), "action_message": res.get("message")}
 
 
-@router.get("/search", dependencies=[Depends(require_media_server)])
+@router.get("/search", response_model=list[MediaTrackHit], response_model_exclude_unset=True, dependencies=[Depends(require_media_server)])
 def search_plex_tracks(
     query: str = Query(..., min_length=1, description="Query string to search Plex library tracks"),
     limit: int = Query(default=15, ge=1, le=50),
@@ -474,7 +486,7 @@ def search_plex_tracks(
     return server.search_tracks(query, limit=limit)
 
 
-@router.post("/match", status_code=status.HTTP_201_CREATED)
+@router.post("/match", response_model=MatchCreatedResponse, response_model_exclude_unset=True, status_code=status.HTTP_201_CREATED)
 def create_match_override(
     req: MatchOverrideRequest,
     current_user: dict[str, Any] = Depends(require_admin),
@@ -500,7 +512,7 @@ def create_match_override(
     return {"status": "matched", "override": override}
 
 
-@router.get("/matches")
+@router.get("/matches", response_model=list[MatchOverride], response_model_exclude_unset=True)
 def list_match_overrides(
     current_user: dict[str, Any] = Depends(require_admin),
     db: Database = Depends(get_db),
@@ -509,7 +521,7 @@ def list_match_overrides(
     return db.list_match_overrides()
 
 
-@router.delete("/match/{override_id}")
+@router.delete("/match/{override_id}", response_model=MatchDeletedResponse, response_model_exclude_unset=True)
 def delete_match_override(
     override_id: int,
     current_user: dict[str, Any] = Depends(require_admin),
@@ -538,7 +550,7 @@ def _playlist_trigger(db: Database, track: dict[str, Any], admin: dict[str, Any]
     )
 
 
-@router.post("/{track_id}/grab")
+@router.post("/{track_id}/grab", response_model=GrabResult, response_model_exclude_unset=True)
 def grab_missing_track(
     track_id: int,
     db: Database = Depends(get_db),

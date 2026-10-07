@@ -10,6 +10,7 @@ import type { UseIssuesReturn } from '@/hooks/useIssues';
 import { MEDIA_ISSUE_TYPES } from '@/types/models';
 import { AlbumTrackList } from './AlbumTrackList';
 import { ItemOriginCaption } from './ItemOriginCaption';
+import { genreNames } from './genres';
 
 export interface AlbumDetailModalProps {
   album: AlbumItem | null;
@@ -57,12 +58,12 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
   );
 
   const goToArtist = (): void => {
-    if (!album) return;
+    if (!album || !album.artist_id) return;
     // The drill-down hook swaps the album entry for the artist, so the modal is not closed separately.
     onGoToArtist(album.artist_id);
   };
 
-  const genres = album?.genres && album.genres.length > 0 ? album.genres.join(', ') : null;
+  const genres = album ? genreNames(album.genres).join(', ') || null : null;
 
   return (
     <ObsidianModal
@@ -97,7 +98,7 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
             )}
             {isAdmin && album && (
               <IssueReportButton
-                mediaTitle={album.title}
+                mediaTitle={album.title ?? ''}
                 artist={album.artist_name || 'Unknown Artist'}
                 types={MEDIA_ISSUE_TYPES}
                 reference={{ albumId: String(album.id) }}
@@ -129,16 +130,16 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
           <div className="flex items-center gap-4 p-3 bg-[#181818] border border-[#262626] rounded-[4px]">
             <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-[3px] bg-[#1a1a1a] border border-[#2a2a2a] overflow-hidden flex-shrink-0 flex items-center justify-center shadow-md">
               {album.cover_url ? (
-                <img src={album.cover_url} alt={album.title} className="w-full h-full object-cover" loading="lazy" />
+                <img src={album.cover_url} alt={album.title ?? ''} className="w-full h-full object-cover" loading="lazy" />
               ) : (
                 <Disc className="h-8 w-8 text-neutral-600" />
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <h3 className="text-sm sm:text-lg font-bold text-white truncate font-mono" title={album.title}>
+              <h3 className="text-sm sm:text-lg font-bold text-white truncate font-mono" title={album.title ?? undefined}>
                 {album.title}
               </h3>
-              <ItemOriginCaption entity="album" entityId={album.id} title={album.title} />
+              <ItemOriginCaption entity="album" entityId={album.id} title={album.title ?? ""} />
               <button
                 type="button"
                 onClick={goToArtist}
@@ -172,7 +173,7 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
               isAdmin
                 ? (t) => (
                     <IssueReportButton
-                      mediaTitle={t.title}
+                      mediaTitle={t.title ?? ''}
                       artist={album.artist_name || 'Unknown Artist'}
                       types={MEDIA_ISSUE_TYPES}
                       reference={{ albumId: String(album.id), trackId: String(t.id) }}

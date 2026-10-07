@@ -1,67 +1,21 @@
+import type { Narrow, Schema } from './apiSchema';
 export type LibraryHealthKind = 'server_unindexed' | 'server_stale' | 'weak_match' | 'orphan_torrent' | 'cleanup_failed';
 
-export interface LibraryHealthFinding {
-  id: string;
-  kind: LibraryHealthKind;
-  /** Known values are listed in `CAUSE_LABELS`; unknown strings are rendered gracefully. */
-  cause: string;
-  group_key: string;
-  path: string;
-  detail: Record<string, unknown> | null;
-  first_seen: string;
-  last_seen: string;
-}
+export type LibraryHealthFinding = Narrow<Schema<'LibraryHealthFinding'>, { kind: LibraryHealthKind; detail?: Record<string, unknown> | null }>;
 
-export interface LibraryHealthGroup {
-  group_key: string;
-  kind: LibraryHealthKind;
-  cause: string;
-  count: number;
-  sample_path: string;
-  suggestion: string;
-}
+export type LibraryHealthGroup = Narrow<Schema<'LibraryHealthGroup'>, { kind: LibraryHealthKind }>;
 
-export interface LibraryHealthRun {
-  id: string;
-  started_at: string;
-  finished_at: string | null;
-  server_kind: string | null;
-  disk_files: number | null;
-  server_files: number | null;
-  unindexed: number | null;
-  stale: number | null;
-  error: string | null;
-}
+export type LibraryHealthRun = Schema<'LibraryHealthRun'>;
 
-export interface LibraryHealthMapping {
-  server_prefix: string;
-  local_prefix: string;
-  auto: boolean;
-}
+export type LibraryHealthMapping = Schema<'LibraryHealthMapping'>;
 
-export interface LibraryHealthServer {
-  kind: string;
-  file_paths: boolean;
-}
+export type LibraryHealthServer = Schema<'LibraryHealthServer'>;
 
-export interface LibraryHealthResponse {
-  findings: LibraryHealthFinding[];
-  groups: LibraryHealthGroup[];
-  last_run: LibraryHealthRun | null;
-  running: boolean;
-  mapping: LibraryHealthMapping | null;
-  server: LibraryHealthServer | null;
-  weekly: boolean;
-  count: number;
-}
+export type LibraryHealthResponse = Narrow<Schema<'LibraryHealthResponse'>, { findings: LibraryHealthFinding[]; groups: LibraryHealthGroup[] }>;
 
-export interface LibraryHealthCountResponse {
-  count: number;
-}
+export type LibraryHealthCountResponse = Schema<'LibraryHealthCount'>;
 
-export interface LibraryHealthStarted {
-  started: boolean;
-}
+export type LibraryHealthStarted = Schema<'LibraryHealthStarted'>;
 
 export type LibraryHealthDismissScope = 'file' | 'folder';
 
@@ -83,6 +37,4 @@ export interface WeakMatchDetail {
   strength: string | null;
 }
 
-export interface LibraryHealthWeeklyResponse {
-  weekly: boolean;
-}
+export type LibraryHealthWeeklyResponse = Schema<'LibraryHealthWeekly'>;

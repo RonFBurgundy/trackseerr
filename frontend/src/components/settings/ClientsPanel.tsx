@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Trash2, Plus } from 'lucide-react';
 import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar } from '@/components/ui';
-import type { DownloadClientItem } from '@/types/models';
+import type { DownloadClientItem, DownloadDriverType } from '@/types/models';
 import { saveClientSettings, deleteClientSettings, testClientConnection } from '@/services/settingsService';
 import { compactInputClass, compactLabelClass } from './formClasses';
 
@@ -11,11 +11,16 @@ export interface ClientsPanelProps {
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
 }
 
+const DRIVER_TYPES: ReadonlyArray<DownloadDriverType> = ['slskd', 'sabnzbd', 'qbittorrent'];
+
+function toDriverType(value: string): DownloadDriverType {
+  return DRIVER_TYPES.find((t) => t === value) ?? 'slskd';
+}
+
 export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onToast }) => {
   const [name, setName] = useState<string>('');
-  const [type, setType] = useState<DownloadClientItem['client_type']>('slskd');
-  const [host, setHost] = useState<string>('localhost');
-  const [port, setPort] = useState<number>(5030);
+  const [type, setType] = useState<DownloadDriverType>('slskd');
+  const [hostUrl, setHostUrl] = useState<string>('http://localhost:5030');
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
   const handleAdd = async (e: React.FormEvent) => {
@@ -25,11 +30,9 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
     try {
       await saveClientSettings({
         name: name.trim(),
-        client_type: type,
-        host,
-        port,
-        use_ssl: false,
-        is_enabled: true,
+        driver_type: type,
+        host_url: hostUrl.trim(),
+        enabled: true,
         priority: 1,
       });
       setName('');
@@ -42,7 +45,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     try {
       await deleteClientSettings(id);
       await reload();
@@ -73,11 +76,11 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-sm text-white">{c.name}</span>
                   <span className="px-1.5 py-0.5 rounded-[2px] bg-[#1a1a1a] text-[10px] font-mono uppercase text-[#e5a00d]">
-                    {c.client_type}
+                    {c.driver_type}
                   </span>
                 </div>
                 <p className="text-xs text-neutral-400 font-mono mt-1">
-                  {c.host}:{c.port}
+                  {c.host_url}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -115,7 +118,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
               <label htmlFor="client-type" className={compactLabelClass}>Type</label>
               <select id="client-type" name="type"
                 value={type}
-                onChange={(e) => setType(e.target.value as DownloadClientItem['client_type'])}
+                onChange={(e) => setType(toDriverType(e.target.value))}
                 className={compactInputClass}
               >
                 <option value="slskd">slskd</option>
@@ -124,21 +127,9 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label htmlFor="client-host" className={compactLabelClass}>Host</label>
-              <input id="client-host" name="host" type="text" required value={host} onChange={(e) => setHost(e.target.value)} className={compactInputClass} />
-            </div>
-            <div>
-              <label htmlFor="client-port" className={compactLabelClass}>Port</label>
-              <input id="client-port" name="port"
-                type="number"
-                required
-                value={port}
-                onChange={(e) => setPort(Number(e.target.value))}
-                className={compactInputClass}
-              />
-            </div>
+          <div>
+            <label htmlFor="client-host" className={compactLabelClass}>Host URL</label>
+            <input id="client-host" name="host_url" type="url" required value={hostUrl} onChange={(e) => setHostUrl(e.target.value)} placeholder="http://localhost:5030" className={compactInputClass} />
           </div>
           <ActionBar align="end" className="pt-2">
             <TapeDeckButton

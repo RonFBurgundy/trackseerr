@@ -1,4 +1,5 @@
 import { apiRequest } from './apiClient';
+import type { Narrow, Schema } from '@/types/apiSchema';
 import type {
   GeneralSettings,
   DownloadClientItem,
@@ -20,7 +21,7 @@ export async function getGeneralSettings(): Promise<GeneralSettings> {
   return apiRequest<GeneralSettings>('/api/settings/general');
 }
 
-export async function updateGeneralSettings(settings: Partial<GeneralSettings>): Promise<GeneralSettings> {
+export async function updateGeneralSettings(settings: Schema<'GeneralSettingsUpdateModel'>): Promise<GeneralSettings> {
   return apiRequest<GeneralSettings>('/api/settings/general', {
     method: 'POST',
     body: settings,
@@ -39,21 +40,21 @@ export async function getDownloadClientRoots(refresh = false): Promise<DownloadC
   return res || [];
 }
 
-export async function saveClientSettings(client: Partial<DownloadClientItem>): Promise<DownloadClientItem> {
+export async function saveClientSettings(client: Schema<'DownloadClientPayload'>): Promise<DownloadClientItem> {
   return apiRequest<DownloadClientItem>('/api/settings/download-clients', {
     method: 'POST',
     body: client,
   });
 }
 
-export async function deleteClientSettings(clientId: number): Promise<void> {
+export async function deleteClientSettings(clientId: string): Promise<void> {
   await apiRequest<void>(`/api/settings/download-clients/${clientId}`, {
     method: 'DELETE',
   });
 }
 
-export async function testClientConnection(client: Partial<DownloadClientItem>): Promise<{ success: boolean; message: string }> {
-  return apiRequest<{ success: boolean; message: string }>('/api/settings/download-clients/test', {
+export async function testClientConnection(client: Schema<'TestConnectionPayload'>): Promise<Schema<'TestConnectionResponse'>> {
+  return apiRequest<Schema<'TestConnectionResponse'>>('/api/settings/download-clients/test', {
     method: 'POST',
     body: client,
   });
@@ -77,8 +78,8 @@ export async function deleteIndexer(indexerId: string): Promise<void> {
   });
 }
 
-export async function testIndexer(indexer: TestIndexerPayload): Promise<{ success: boolean; message: string }> {
-  return apiRequest<{ success: boolean; message: string }>('/api/settings/indexers/test', {
+export async function testIndexer(indexer: TestIndexerPayload): Promise<Schema<'TestIndexerResponse'>> {
+  return apiRequest<Schema<'TestIndexerResponse'>>('/api/settings/indexers/test', {
     method: 'POST',
     body: indexer,
   });
@@ -89,10 +90,9 @@ export async function getSystemStatus(): Promise<SystemStatusInfo> {
 }
 
 export async function getMediaManagementSettings(): Promise<MediaManagementSettings> {
-  const res = await apiRequest<{ settings: MediaManagementSettings; presets?: Record<string, unknown> }>(
-    '/api/settings/media-management'
-  );
-  return res.settings;
+  const res = await apiRequest<Narrow<Schema<'MediaManagementGetResponse'>, { settings: MediaManagementSettings }>>('/api/settings/media-management');
+  // `seed_rule_conflict` is computed server-side and sent beside `settings`, not inside it.
+  return { ...res.settings, seed_rule_conflict: res.seed_rule_conflict };
 }
 
 export async function updateMediaManagementSettings(

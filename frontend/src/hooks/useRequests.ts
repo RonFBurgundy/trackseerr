@@ -31,9 +31,9 @@ export interface UseRequestsReturn {
   error: string | null;
   setFilter: (filter: RequestFilter) => void;
   submitRequest: (item: RequestableItem) => Promise<void>;
-  approve: (id: number) => Promise<void>;
-  reject: (id: number, reason?: string) => Promise<void>;
-  remove: (id: number) => Promise<void>;
+  approve: (id: string) => Promise<void>;
+  reject: (id: string, reason?: string) => Promise<void>;
+  remove: (id: string) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -91,7 +91,7 @@ export function useRequests(): UseRequestsReturn {
   );
 
   const approve = useCallback(
-    async (id: number) => {
+    async (id: string) => {
       setError(null);
       try {
         await apiApproveRequest(id);
@@ -106,7 +106,7 @@ export function useRequests(): UseRequestsReturn {
   );
 
   const reject = useCallback(
-    async (id: number, reason?: string) => {
+    async (id: string, reason?: string) => {
       setError(null);
       try {
         await apiRejectRequest(id, reason);
@@ -121,7 +121,7 @@ export function useRequests(): UseRequestsReturn {
   );
 
   const remove = useCallback(
-    async (id: number) => {
+    async (id: string) => {
       setError(null);
       try {
         await apiDeleteRequest(id);

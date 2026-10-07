@@ -60,6 +60,43 @@ from plex_playlist_sync.api.dependencies import (
     require_user,
     track_admin_actor,
 )
+from plex_playlist_sync.api.response_models import ApiModel
+from plex_playlist_sync.api.schemas.library import (
+    AlbumsPage,
+    AlbumsUpdatedResponse,
+    ArtistRefreshResponse,
+    ArtistsPage,
+    AvailabilityResponse,
+    BulkArtistsResult,
+    CollectionAlbumResponse,
+    CollectionDeleteResponse,
+    CommandResponse,
+    FingerprintResponse,
+    IngestArtistResponse,
+    ItemHistoryResponse,
+    LibraryAlbumRecord,
+    LibraryArtistRecord,
+    LibraryCollectionRecord,
+    LibraryIndexResponse,
+    LibraryStats,
+    LibraryTrackRecord,
+    ManualImportCandidateTrack,
+    ManualImportCommitResponse,
+    ManualImportScanItem,
+    MetadataProfile,
+    MetadataProfileDeleteResponse,
+    MetadataProfilePreview,
+    MetadataProfilesResponse,
+    MigrationStatus,
+    MigrationTriggerResponse,
+    RenameApplyResponse,
+    RenamePreviewItem,
+    ScanStatus,
+    ScanTriggerResponse,
+    SuccessResponse,
+    TracksPage,
+    TracksUpdatedResponse,
+)
 from plex_playlist_sync.api.routes.activity import (
     MAX_PAGE,
     SORT_DIR_PATTERN,
@@ -218,7 +255,7 @@ class ArtistTagsRequest(BaseModel):
     tags: list[int] = Field(default_factory=list, description="Tag ids; replaces the artist's tags")
 
 
-class ArtistTagsResponse(BaseModel):
+class ArtistTagsResponse(ApiModel):
     artist_id: str
     tags: list[int]
 
@@ -373,7 +410,7 @@ def validate_media_path(path_str: str, db: Optional[Database] = None, purpose: s
 # 1. Library Statistics & Browsing Endpoints
 # -------------------------------------------------------------------------
 
-@router.get("/stats")
+@router.get("/stats", response_model=LibraryStats, response_model_exclude_unset=True)
 def get_library_stats(
     db: Database = Depends(get_db),
     client: Optional[LidarrClient] = Depends(get_lidarr_client),
@@ -742,7 +779,7 @@ def _lidarr_tracks_index(
     return {"mode": "lidarr", "sort_key": key, "sort_dir": sort_dir, "total": total, "groups": []}
 
 
-@router.get("/artists/paged", dependencies=[Depends(require_core_tier)])
+@router.get("/artists/paged", dependencies=[Depends(require_core_tier)], response_model=ArtistsPage, response_model_exclude_unset=True)
 def paged_artists(
     page: int = Query(1, ge=1, le=MAX_PAGE),
     page_size: int = Query(50, ge=1, le=200),
@@ -760,7 +797,7 @@ def paged_artists(
     return _paged("artists", page, page_size, sort_key, sort_dir, q, monitored_only, None, None, db, _enrich_artists)
 
 
-@router.get("/artists/index", dependencies=[Depends(require_core_tier)])
+@router.get("/artists/index", dependencies=[Depends(require_core_tier)], response_model=LibraryIndexResponse, response_model_exclude_unset=True)
 def artists_index(
     sort_key: Optional[str] = Query(None),
     sort_dir: str = Query("asc", pattern=_SORT_DIR),
@@ -776,7 +813,7 @@ def artists_index(
     return _index("artists", sort_key, sort_dir, q, monitored_only, None, None, db)
 
 
-@router.get("/albums/paged", dependencies=[Depends(require_core_tier)])
+@router.get("/albums/paged", dependencies=[Depends(require_core_tier)], response_model=AlbumsPage, response_model_exclude_unset=True)
 def paged_albums(
     page: int = Query(1, ge=1, le=MAX_PAGE),
     page_size: int = Query(50, ge=1, le=200),
@@ -795,7 +832,7 @@ def paged_albums(
     return _paged("albums", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, None, db, _enrich_albums)
 
 
-@router.get("/albums/index", dependencies=[Depends(require_core_tier)])
+@router.get("/albums/index", dependencies=[Depends(require_core_tier)], response_model=LibraryIndexResponse, response_model_exclude_unset=True)
 def albums_index(
     sort_key: Optional[str] = Query(None),
     sort_dir: str = Query("asc", pattern=_SORT_DIR),
@@ -812,7 +849,7 @@ def albums_index(
     return _index("albums", sort_key, sort_dir, q, monitored_only, artist_id, None, db)
 
 
-@router.get("/tracks/paged", dependencies=[Depends(require_core_tier)])
+@router.get("/tracks/paged", dependencies=[Depends(require_core_tier)], response_model=TracksPage, response_model_exclude_unset=True)
 def paged_tracks(
     page: int = Query(1, ge=1, le=MAX_PAGE),
     page_size: int = Query(50, ge=1, le=200),
@@ -843,7 +880,7 @@ def paged_tracks(
     )
 
 
-@router.get("/tracks/index", dependencies=[Depends(require_core_tier)])
+@router.get("/tracks/index", dependencies=[Depends(require_core_tier)], response_model=LibraryIndexResponse, response_model_exclude_unset=True)
 def tracks_index(
     sort_key: Optional[str] = Query(None),
     sort_dir: str = Query("asc", pattern=_SORT_DIR),
@@ -926,7 +963,7 @@ def _enrich_artists(db: Database, artists: list[dict[str, Any]]) -> list[dict[st
     return _with_discovery_ids(db, results)
 
 
-@router.get("/artists")
+@router.get("/artists", response_model=list[LibraryArtistRecord], response_model_exclude_unset=True)
 def list_artists(
     monitored_only: bool = False,
     query: Optional[str] = None,
@@ -1071,7 +1108,7 @@ def _defer_profile_recompute_after_ingest(
     )
 
 
-@router.post("/artists/ingest", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
+@router.post("/artists/ingest", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=IngestArtistResponse, response_model_exclude_unset=True)
 def ingest_artist(
     body: IngestArtistRequest,
     db: Database = Depends(get_db),
@@ -1302,7 +1339,7 @@ def ingest_artist(
     }
 
 
-@router.get("/artists/{artist_id}", dependencies=[Depends(require_core_tier)])
+@router.get("/artists/{artist_id}", dependencies=[Depends(require_core_tier)], response_model=LibraryArtistRecord, response_model_exclude_unset=True)
 def get_artist(
     artist_id: str,
     db: Database = Depends(get_db),
@@ -1454,7 +1491,7 @@ def get_artist_banner(
     return RedirectResponse(url="/placeholder.svg", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
-@router.put("/artists/{artist_id}/monitored", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
+@router.put("/artists/{artist_id}/monitored", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=LibraryArtistRecord, response_model_exclude_unset=True)
 def set_artist_monitored(
     artist_id: str,
     body: ArtistMonitoredRequest,
@@ -1525,7 +1562,9 @@ def set_artist_monitored(
         )
 
     updated = db.get_library_artist(artist_id)
-    return updated or {}
+    if updated is None:  # deleted between the write and the read
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
+    return updated
 
 
 @router.put(
@@ -1549,7 +1588,7 @@ def set_artist_tags(
     return ArtistTagsResponse(artist_id=str(artist_id), tags=result)
 
 
-@router.post("/artists/bulk-edit", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
+@router.post("/artists/bulk-edit", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=BulkArtistsResult, response_model_exclude_unset=True)
 def bulk_edit_artists(
     body: ArtistBulkEditRequest,
     db: Database = Depends(get_db),
@@ -1632,8 +1671,8 @@ _NATIVE_ADMIN = [Depends(require_core_tier), Depends(native_only)]
 
 
 # Deprecated alias (pre-v48 name), kept for one release.
-@router.get("/release-profiles", dependencies=_NATIVE_ADMIN, deprecated=True)
-@router.get("/metadata-profiles", dependencies=_NATIVE_ADMIN)
+@router.get("/release-profiles", dependencies=_NATIVE_ADMIN, deprecated=True, response_model=MetadataProfilesResponse, response_model_exclude_unset=True)
+@router.get("/metadata-profiles", dependencies=_NATIVE_ADMIN, response_model=MetadataProfilesResponse, response_model_exclude_unset=True)
 def list_metadata_profiles(db: Database = Depends(get_db)) -> dict[str, Any]:
     """Native metadata profiles with ``artist_count`` (artists using each) and the default for newly added artists."""
     return {
@@ -1645,8 +1684,8 @@ def list_metadata_profiles(db: Database = Depends(get_db)) -> dict[str, Any]:
 
 
 # Deprecated alias (pre-v48 name), kept for one release.
-@router.post("/release-profiles", dependencies=_NATIVE_ADMIN, status_code=status.HTTP_201_CREATED, deprecated=True)
-@router.post("/metadata-profiles", dependencies=_NATIVE_ADMIN, status_code=status.HTTP_201_CREATED)
+@router.post("/release-profiles", dependencies=_NATIVE_ADMIN, status_code=status.HTTP_201_CREATED, deprecated=True, response_model=MetadataProfile, response_model_exclude_unset=True)
+@router.post("/metadata-profiles", dependencies=_NATIVE_ADMIN, status_code=status.HTTP_201_CREATED, response_model=MetadataProfile, response_model_exclude_unset=True)
 def create_metadata_profile(body: MetadataProfileBody, db: Database = Depends(get_db)) -> dict[str, Any]:
     try:
         return {**db.create_metadata_profile(body.name, body.primary_types, body.secondary_types), "artist_count": 0}
@@ -1655,8 +1694,8 @@ def create_metadata_profile(body: MetadataProfileBody, db: Database = Depends(ge
 
 
 # Deprecated alias (pre-v48 name), kept for one release.
-@router.put("/release-profiles/{profile_id}", dependencies=_NATIVE_ADMIN, deprecated=True)
-@router.put("/metadata-profiles/{profile_id}", dependencies=_NATIVE_ADMIN)
+@router.put("/release-profiles/{profile_id}", dependencies=_NATIVE_ADMIN, deprecated=True, response_model=MetadataProfile, response_model_exclude_unset=True)
+@router.put("/metadata-profiles/{profile_id}", dependencies=_NATIVE_ADMIN, response_model=MetadataProfile, response_model_exclude_unset=True)
 def update_metadata_profile(profile_id: int, body: MetadataProfileBody, db: Database = Depends(get_db)) -> dict[str, Any]:
     """Edits a profile. Existing monitoring is untouched until an artist's albums are recomputed."""
     try:
@@ -1670,8 +1709,8 @@ def update_metadata_profile(profile_id: int, body: MetadataProfileBody, db: Data
 
 
 # Deprecated alias (pre-v48 name), kept for one release.
-@router.delete("/release-profiles/{profile_id}", dependencies=_NATIVE_ADMIN, deprecated=True)
-@router.delete("/metadata-profiles/{profile_id}", dependencies=_NATIVE_ADMIN)
+@router.delete("/release-profiles/{profile_id}", dependencies=_NATIVE_ADMIN, deprecated=True, response_model=MetadataProfileDeleteResponse, response_model_exclude_unset=True)
+@router.delete("/metadata-profiles/{profile_id}", dependencies=_NATIVE_ADMIN, response_model=MetadataProfileDeleteResponse, response_model_exclude_unset=True)
 def delete_metadata_profile(profile_id: int, db: Database = Depends(get_db)) -> dict[str, int]:
     """Deletes a profile; artists using it fall back to no profile (their albums keep their monitored flags)."""
     cleared = db.delete_metadata_profile(profile_id)
@@ -1681,8 +1720,8 @@ def delete_metadata_profile(profile_id: int, db: Database = Depends(get_db)) -> 
 
 
 # Deprecated alias (pre-v48 name), kept for one release.
-@router.get("/artists/{artist_id}/release-profile-preview", dependencies=_NATIVE_ADMIN, deprecated=True)
-@router.get("/artists/{artist_id}/metadata-profile-preview", dependencies=_NATIVE_ADMIN)
+@router.get("/artists/{artist_id}/release-profile-preview", dependencies=_NATIVE_ADMIN, deprecated=True, response_model=MetadataProfilePreview, response_model_exclude_unset=True)
+@router.get("/artists/{artist_id}/metadata-profile-preview", dependencies=_NATIVE_ADMIN, response_model=MetadataProfilePreview, response_model_exclude_unset=True)
 def preview_metadata_profile(
     artist_id: str, profile_id: Optional[int] = None, db: Database = Depends(get_db)
 ) -> dict[str, Any]:
@@ -2397,7 +2436,7 @@ def refresh_single_artist(
     }
 
 
-@router.post("/artists/{artist_id}/refresh", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
+@router.post("/artists/{artist_id}/refresh", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=ArtistRefreshResponse, response_model_exclude_unset=True)
 def refresh_artist(
     artist_id: str,
     db: Database = Depends(get_db),
@@ -2424,7 +2463,7 @@ def refresh_artist(
     )
 
 
-@router.post("/artists/{artist_id}/search", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
+@router.post("/artists/{artist_id}/search", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=CommandResponse, response_model_exclude_unset=True)
 def search_artist(
     artist_id: str,
     db: Database = Depends(get_db),
@@ -2457,7 +2496,7 @@ def _unlink_library_file(db: Database, file_row: dict[str, Any]) -> None:
         )
 
 
-@router.delete("/artists/{artist_id}", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
+@router.delete("/artists/{artist_id}", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=SuccessResponse, response_model_exclude_unset=True)
 def delete_artist(
     artist_id: str,
     delete_files: bool = Query(False),
@@ -2506,7 +2545,7 @@ def _enrich_albums(db: Database, albums: list[dict[str, Any]]) -> list[dict[str,
     return results
 
 
-@router.get("/albums")
+@router.get("/albums", response_model=list[LibraryAlbumRecord], response_model_exclude_unset=True)
 def list_albums(
     artist_id: Optional[str] = None,
     monitored_only: bool = False,
@@ -2525,7 +2564,7 @@ def list_albums(
     return _enrich_albums(db, albums)
 
 
-@router.get("/albums/{album_id}", dependencies=[Depends(require_core_tier)])
+@router.get("/albums/{album_id}", dependencies=[Depends(require_core_tier)], response_model=LibraryAlbumRecord, response_model_exclude_unset=True)
 def get_album(
     album_id: str,
     db: Database = Depends(get_db),
@@ -2578,7 +2617,7 @@ def get_album_cover(
     return RedirectResponse(url="/placeholder.svg", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
-@router.put("/albums/{album_id}/monitored", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
+@router.put("/albums/{album_id}/monitored", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=LibraryAlbumRecord, response_model_exclude_unset=True)
 def set_album_monitored(
     album_id: str,
     body: AlbumMonitoredRequest,
@@ -2606,10 +2645,12 @@ def set_album_monitored(
         cascade_tracks=body.cascade_tracks,
     )
     updated = db.get_library_album(album_id)
-    return updated or {}
+    if updated is None:  # deleted between the write and the read
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+    return updated
 
 
-@router.post("/albums/bulk-edit", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
+@router.post("/albums/bulk-edit", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=AlbumsUpdatedResponse, response_model_exclude_unset=True)
 def bulk_edit_albums(
     body: AlbumBulkEditRequest,
     db: Database = Depends(get_db),
@@ -2639,7 +2680,7 @@ def bulk_edit_albums(
     return {"albums_updated": db.bulk_set_albums_monitored(body.album_ids, body.monitored)}
 
 
-@router.post("/albums/{album_id}/search", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
+@router.post("/albums/{album_id}/search", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=CommandResponse, response_model_exclude_unset=True)
 def search_album(
     album_id: str,
     db: Database = Depends(get_db),
@@ -2655,7 +2696,7 @@ def search_album(
     return {"success": True, "message": "Search queued in Lidarr"}
 
 
-@router.delete("/albums/{album_id}", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
+@router.delete("/albums/{album_id}", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=SuccessResponse, response_model_exclude_unset=True)
 def delete_album(
     album_id: str,
     delete_files: bool = Query(False),
@@ -2705,7 +2746,7 @@ def _enrich_tracks(db: Database, tracks: list[dict[str, Any]]) -> list[dict[str,
     return tracks
 
 
-@router.get("/tracks")
+@router.get("/tracks", response_model=list[LibraryTrackRecord], response_model_exclude_unset=True)
 def list_tracks(
     album_id: Optional[str] = None,
     artist_id: Optional[str] = None,
@@ -2728,7 +2769,7 @@ def list_tracks(
     return _enrich_tracks(db, tracks)
 
 
-@router.put("/tracks/{track_id}/monitored", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
+@router.put("/tracks/{track_id}/monitored", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=LibraryTrackRecord, response_model_exclude_unset=True)
 def set_track_monitored(
     track_id: str,
     body: TrackMonitoredRequest,
@@ -2742,10 +2783,12 @@ def set_track_monitored(
 
     db.set_track_monitored(track_id=track_id, monitored=body.monitored)
     updated = db.get_library_track(track_id)
-    return updated or {}
+    if updated is None:  # deleted between the write and the read
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
+    return updated
 
 
-@router.post("/tracks/bulk-edit", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
+@router.post("/tracks/bulk-edit", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=TracksUpdatedResponse, response_model_exclude_unset=True)
 def bulk_edit_tracks(
     body: TrackBulkEditRequest,
     db: Database = Depends(get_db),
@@ -2757,7 +2800,7 @@ def bulk_edit_tracks(
     return {"tracks_updated": db.bulk_set_tracks_monitored(body.track_ids, body.monitored)}
 
 
-@router.delete("/tracks/{track_id}", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
+@router.delete("/tracks/{track_id}", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=SuccessResponse, response_model_exclude_unset=True)
 def delete_track(
     track_id: str,
     delete_files: bool = Query(False),
@@ -2778,7 +2821,7 @@ def delete_track(
     return {"success": success}
 
 
-@router.delete("/files/{file_id}", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
+@router.delete("/files/{file_id}", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=SuccessResponse, response_model_exclude_unset=True)
 def delete_file(
     file_id: str,
     delete_file_from_disk: bool = Query(True),
@@ -2806,6 +2849,8 @@ _HISTORY_LOOKUPS: dict[str, str] = {
     "/{entity}/{entity_id}/history",
     dependencies=[Depends(require_core_tier)],
     summary="Audit trail of an artist, album or track",
+    response_model=ItemHistoryResponse,
+    response_model_exclude_unset=True,
 )
 def get_item_history(
     entity: Literal["artist", "album", "track"],
@@ -2843,7 +2888,7 @@ def _is_admin_principal(user: dict[str, Any]) -> bool:
     return bool(user.get("is_admin") or perms & int(UserPermission.ADMIN))
 
 
-@router.get("/availability", summary="Get library availability")
+@router.get("/availability", summary="Get library availability", response_model=AvailabilityResponse, response_model_exclude_unset=True)
 def get_availability(
     artist_name: Optional[str] = Query(None),
     album_title: Optional[str] = Query(None),
@@ -2894,7 +2939,7 @@ def get_availability(
 # 2. Filesystem Scanner Controls
 # -------------------------------------------------------------------------
 
-@router.post("/scan", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
+@router.post("/scan", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=ScanTriggerResponse, response_model_exclude_unset=True)
 def trigger_scan(
     body: Optional[ScanRequest] = None,
     db: Database = Depends(get_db),
@@ -2915,7 +2960,7 @@ def trigger_scan(
     return {"success": True, "status": library_scanner.get_status()}
 
 
-@router.get("/scan/status")
+@router.get("/scan/status", response_model=ScanStatus, response_model_exclude_unset=True)
 def get_scan_status(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
@@ -2923,7 +2968,7 @@ def get_scan_status(
     return library_scanner.get_status()
 
 
-@router.post("/scan/cancel", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
+@router.post("/scan/cancel", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=ScanStatus, response_model_exclude_unset=True)
 def cancel_scan(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
@@ -2935,7 +2980,7 @@ def cancel_scan(
 # 3. Lidarr Migration Controls
 # -------------------------------------------------------------------------
 
-@router.post("/migrate-lidarr", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
+@router.post("/migrate-lidarr", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=MigrationTriggerResponse, response_model_exclude_unset=True)
 def trigger_lidarr_migration(
     body: Optional[MigrateLidarrRequest] = None,
     db: Database = Depends(get_db),
@@ -2965,7 +3010,7 @@ def trigger_lidarr_migration(
     return {"success": success, "status": lidarr_migration_job.get_status()}
 
 
-@router.get("/migrate-lidarr/status")
+@router.get("/migrate-lidarr/status", response_model=MigrationStatus, response_model_exclude_unset=True)
 def get_lidarr_migration_status(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
@@ -2973,7 +3018,7 @@ def get_lidarr_migration_status(
     return lidarr_migration_job.get_status()
 
 
-@router.post("/migrate-lidarr/cancel", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
+@router.post("/migrate-lidarr/cancel", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=MigrationStatus, response_model_exclude_unset=True)
 def cancel_lidarr_migration(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
@@ -3146,7 +3191,7 @@ def _walk_audio_files(folder: Path) -> list[Path]:
     return found
 
 
-@router.post("/manual-import/scan", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
+@router.post("/manual-import/scan", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=list[ManualImportScanItem], response_model_exclude_unset=True)
 def manual_import_scan(
     body: Optional[ManualImportScanRequest] = None,
     db: Database = Depends(get_db),
@@ -3223,7 +3268,7 @@ def manual_import_scan(
     return results
 
 
-@router.get("/manual-import/album-tracks", dependencies=[Depends(require_core_tier), Depends(native_only)])
+@router.get("/manual-import/album-tracks", dependencies=[Depends(require_core_tier), Depends(native_only)], response_model=list[ManualImportCandidateTrack], response_model_exclude_unset=True)
 def manual_import_album_tracks(
     album_id: str = Query(..., min_length=1),
     db: Database = Depends(get_db),
@@ -3235,7 +3280,7 @@ def manual_import_album_tracks(
     return _candidate_tracks(db, db.list_library_tracks(album_id=album_id, limit=1000))
 
 
-@router.post("/manual-import/commit", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
+@router.post("/manual-import/commit", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=ManualImportCommitResponse, response_model_exclude_unset=True)
 def manual_import_commit(
     body: ManualImportCommitRequest,
     db: Database = Depends(get_db),
@@ -3718,7 +3763,7 @@ def _album_total_discs(db: Database, album_id: str, *extra: Any) -> int:
     return max([1, *discs])
 
 
-@router.post("/rename/preview", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
+@router.post("/rename/preview", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=list[RenamePreviewItem], response_model_exclude_unset=True)
 def rename_preview(
     body: Optional[RenamePreviewRequest] = None,
     db: Database = Depends(get_db),
@@ -3797,7 +3842,7 @@ def rename_preview(
     return preview_diffs
 
 
-@router.post("/rename/apply", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
+@router.post("/rename/apply", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=RenameApplyResponse, response_model_exclude_unset=True)
 def rename_apply(
     body: RenameApplyRequest,
     db: Database = Depends(get_db),
@@ -3917,7 +3962,7 @@ def rename_apply(
 # AcoustID On-Demand Fingerprinting
 # -------------------------------------------------------------------------
 
-@router.post("/manual-import/fingerprint", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)])
+@router.post("/manual-import/fingerprint", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=FingerprintResponse, response_model_exclude_unset=True)
 def fingerprint_file(
     body: FingerprintRequest,
     db: Database = Depends(get_db),
@@ -3958,7 +4003,7 @@ def fingerprint_file(
 # Library Collections CRUD
 # -------------------------------------------------------------------------
 
-@router.get("/collections")
+@router.get("/collections", response_model=list[LibraryCollectionRecord], response_model_exclude_unset=True)
 def list_collections(
     query: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
@@ -3970,7 +4015,7 @@ def list_collections(
     return db.list_library_collections(limit=limit, offset=offset, query=query)
 
 
-@router.post("/collections", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
+@router.post("/collections", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=LibraryCollectionRecord, response_model_exclude_unset=True)
 def create_collection(
     body: CreateCollectionRequest,
     db: Database = Depends(get_db),
@@ -3987,7 +4032,7 @@ def create_collection(
     return db.upsert_library_collection(col)
 
 
-@router.get("/collections/{collection_id}")
+@router.get("/collections/{collection_id}", response_model=LibraryCollectionRecord, response_model_exclude_unset=True)
 def get_collection(
     collection_id: str,
     db: Database = Depends(get_db),
@@ -4005,7 +4050,7 @@ def get_collection(
     return result
 
 
-@router.delete("/collections/{collection_id}", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
+@router.delete("/collections/{collection_id}", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=CollectionDeleteResponse, response_model_exclude_unset=True)
 def delete_collection(
     collection_id: str,
     db: Database = Depends(get_db),
@@ -4022,7 +4067,7 @@ def delete_collection(
     return {"success": deleted, "id": collection_id}
 
 
-@router.post("/collections/{collection_id}/albums", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
+@router.post("/collections/{collection_id}/albums", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=CollectionAlbumResponse, response_model_exclude_unset=True)
 def add_album_to_collection(
     collection_id: str,
     body: AddAlbumToCollectionRequest,
@@ -4050,7 +4095,7 @@ def add_album_to_collection(
     return {"success": success, "collection_id": collection_id, "album_id": body.album_id}
 
 
-@router.delete("/collections/{collection_id}/albums/{album_id}", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)])
+@router.delete("/collections/{collection_id}/albums/{album_id}", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=CollectionAlbumResponse, response_model_exclude_unset=True)
 def remove_album_from_collection(
     collection_id: str,
     album_id: str,

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { AlbumItem, ArtistItem } from '@/types/models';
+import type { ArtistItem } from '@/types/models';
 import type { MonitorOption } from '@/types/monitoring';
 import { errorMessage } from '@/services/apiClient';
 import { getArtistDetail, refreshArtist, setArtistMonitoringPreset } from '@/services/libraryService';
 import type { MetadataProfileWouldChange } from '@/types/metadataProfiles';
 import { setArtistMetadataProfile } from '@/services/metadataProfileService';
 
-export type ArtistDetailData = ArtistItem & { albums?: AlbumItem[] };
+export type ArtistDetailData = ArtistItem;
 export type MonitorPreset = MonitorOption;
 
 export interface UseArtistDetailReturn {

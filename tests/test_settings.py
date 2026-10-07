@@ -8,6 +8,7 @@ from plex_playlist_sync.api.app import create_app
 from plex_playlist_sync.api.dependencies import get_config, get_db
 from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
 from plex_playlist_sync.config import Config
+from plex_playlist_sync.security import mask_secret
 from plex_playlist_sync.storage import Database
 
 
@@ -424,11 +425,55 @@ class TestLidarrSettingsAPI:
 
             resp = client.post(
                 "/api/settings/lidarr/test",
-                json={"url": "http://192.168.1.50:8686", "api_key": "••••••••"},
+                json={"url": "http://192.168.1.50:8686", "api_key": mask_secret("saved-database-secret")},
                 headers=admin_headers,
             )
             assert resp.status_code == 200
             mock_client_cls.assert_called_once_with(base_url="http://192.168.1.50:8686", api_key="saved-database-secret")
+
+    def test_lidarr_test_never_sends_saved_key_to_a_new_url(self, app_and_client, test_db, test_config, seeded_users):
+        _, client = app_and_client
+        h = _auth_headers(seeded_users["admin"], test_db, test_config)
+        test_db.update_lidarr_settings({"url": "http://192.168.1.50:8686", "api_key": "saved-database-secret"})
+        with patch("plex_playlist_sync.api.routes.settings.LidarrClient") as cls:
+            cls.return_value.test_connection.return_value = {"online": True, "version": "1"}
+            for key in ("", mask_secret("saved-database-secret")):
+                r = client.post("/api/settings/lidarr/test", json={"url": "http://192.168.1.99:8686", "api_key": key}, headers=h)
+                assert r.status_code in (200, 400)
+            assert all(c.kwargs["api_key"] != "saved-database-secret" for c in cls.call_args_list)
+            r = client.post(
+                "/api/settings/lidarr/test",
+                json={"url": "http://192.168.1.99:8686", "api_key": mask_secret("saved-database-secret")},
+                headers=h,
+            )
+            assert r.status_code == 400
+
+    def test_lidarr_update_exact_mask_kept_edited_mask_rejected(self, app_and_client, test_db, test_config, seeded_users):
+        _, client = app_and_client
+        h = _auth_headers(seeded_users["admin"], test_db, test_config)
+        test_db.update_lidarr_settings({"url": "http://192.168.1.50:8686", "api_key": "saved-database-secret"})
+        masked = mask_secret("saved-database-secret")
+        r = client.post("/api/settings/lidarr", json={"api_key": masked}, headers=h)
+        assert r.status_code == 200, r.text
+        assert test_db.get_lidarr_settings()["api_key"] == "saved-database-secret"
+        r = client.post("/api/settings/lidarr", json={"api_key": "x" + masked}, headers=h)
+        assert r.status_code == 400
+        assert test_db.get_lidarr_settings()["api_key"] == "saved-database-secret"
+        r = client.post("/api/settings/lidarr", json={"api_key": "brand-new-key"}, headers=h)
+        assert r.status_code == 200
+        assert test_db.get_lidarr_settings()["api_key"] == "brand-new-key"
+
+    def test_acoustid_key_exact_mask_kept_edited_mask_rejected(self, app_and_client, test_db, test_config, seeded_users):
+        _, client = app_and_client
+        h = _auth_headers(seeded_users["admin"], test_db, test_config)
+        test_db.update_media_management_settings({"acoustid_api_key": "acoustid-secret-1234"})
+        masked = mask_secret("acoustid-secret-1234")
+        r = client.put("/api/settings/media-management", json={"acoustid_api_key": masked}, headers=h)
+        assert r.status_code == 200, r.text
+        assert test_db.get_media_management_settings()["acoustid_api_key"] == "acoustid-secret-1234"
+        r = client.put("/api/settings/media-management", json={"acoustid_api_key": "x" + masked}, headers=h)
+        assert r.status_code == 400
+        assert test_db.get_media_management_settings()["acoustid_api_key"] == "acoustid-secret-1234"
 
 
 class TestGeneralSettingsAPI:

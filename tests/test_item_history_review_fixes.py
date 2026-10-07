@@ -309,12 +309,12 @@ def test_api_key_principal_is_not_persisted_as_actor(db, config, method, url, se
     app.dependency_overrides[require_admin] = lambda: {"id": "api_key_user", "username": "api", "is_admin": True}
     from fastapi.testclient import TestClient
 
-    with patch(f"plex_playlist_sync.activity_service.{service_fn}", return_value={"success": True}) as fn:
+    with patch(f"plex_playlist_sync.activity_service.{service_fn}", return_value={"success": True, "message": "ok"}) as fn:
         assert getattr(TestClient(app), method)(url).status_code == 200
     assert fn.call_args.args[2] is None
 
     app.dependency_overrides[require_admin] = lambda: {"id": "admin-1", "username": "admin_user", "is_admin": True}
-    with patch(f"plex_playlist_sync.activity_service.{service_fn}", return_value={"success": True}) as fn:
+    with patch(f"plex_playlist_sync.activity_service.{service_fn}", return_value={"success": True, "message": "ok"}) as fn:
         assert getattr(TestClient(app), method)(url).status_code == 200
     assert fn.call_args.args[2] == "admin-1"
 

@@ -101,7 +101,7 @@ export const AlbumsPanel: React.FC<AlbumsPanelProps> = ({
     (album: AlbumItem): React.ReactNode => (
       <AlbumTile
         album={album}
-        monitored={album.monitored}
+        monitored={album.monitored === true}
         onOpen={onOpenAlbum}
         selection={
           selecting ? { checked: isSelected(album.id), locked: false, onToggle: () => toggleSelected(album.id) } : undefined

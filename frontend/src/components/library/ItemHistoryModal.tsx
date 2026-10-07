@@ -73,7 +73,7 @@ const HistoryRow: React.FC<RowProps> = React.memo(({ event, entity }) => {
             </span>
           )}
           <time
-            dateTime={event.created_at}
+            dateTime={event.created_at ?? undefined}
             title={absoluteTime(event.created_at)}
             className="font-mono text-[11px] text-neutral-500"
           >

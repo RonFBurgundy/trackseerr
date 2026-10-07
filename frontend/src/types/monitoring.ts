@@ -1,3 +1,4 @@
+import type { Schema } from './apiSchema';
 /** Native-library monitor options (Lidarr's own set is `LidarrMonitorOption`; it is intentionally separate). */
 export type MonitorOption = 'all' | 'albums' | 'singles_eps' | 'existing' | 'future' | 'none';
 
@@ -39,14 +40,7 @@ export interface BulkArtistEditRequest {
   remove_tags?: number[];
 }
 
-export interface BulkArtistEditResult {
-  artists_updated: number;
-  /** Artist-tag links created / removed; absent from older servers. */
-  tags_added?: number;
-  tags_removed?: number;
-  albums_monitored: number;
-  albums_unmonitored: number;
-}
+export type BulkArtistEditResult = Schema<'BulkArtistsResult'>;
 
 /** Body of `POST /api/library/albums/bulk-edit`. */
 export interface BulkAlbumEditRequest {
@@ -54,9 +48,7 @@ export interface BulkAlbumEditRequest {
   monitored: boolean;
 }
 
-export interface BulkAlbumEditResult {
-  albums_updated: number;
-}
+export type BulkAlbumEditResult = Schema<'AlbumsUpdatedResponse'>;
 
 /** Body of `POST /api/library/tracks/bulk-edit` (native mode only; 409 while Lidarr manages the library). */
 export interface BulkTrackEditRequest {
@@ -64,6 +56,4 @@ export interface BulkTrackEditRequest {
   monitored: boolean;
 }
 
-export interface BulkTrackEditResult {
-  tracks_updated: number;
-}
+export type BulkTrackEditResult = Schema<'TracksUpdatedResponse'>;

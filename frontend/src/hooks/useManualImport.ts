@@ -70,7 +70,7 @@ export const rowKey = (row: ManualImportRow): string => row.item.file_path;
 
 function toRow(item: ManualImportScanItem): ManualImportRow {
   const ids = new Set(item.candidate_tracks.map((c) => c.id));
-  const preferred = [item.suggested_track_id, item.matched_track_id].find((id): id is string => id !== null && ids.has(id));
+  const preferred = [item.suggested_track_id, item.matched_track_id].find((id): id is string => id != null && ids.has(id));
   const selectedTrackId = preferred ?? null;
   return {
     item,
@@ -226,7 +226,7 @@ export function useManualImport({ scope, isOpen, onImported }: UseManualImportOp
         let selected: string | null = null;
         if (lib) {
           selected = candidates.some((c) => c.id === lib.id) ? lib.id : null;
-          if (selected === null) {
+          if (selected === null && lib.album_id) {
             const loaded = await getManualImportAlbumTracks(lib.album_id, signal);
             if (signal.aborted) return;
             if (loaded.some((c) => c.id === lib.id)) {

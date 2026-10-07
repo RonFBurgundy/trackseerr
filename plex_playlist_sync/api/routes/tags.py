@@ -9,6 +9,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
+from plex_playlist_sync.api.response_models import ApiModel
 
 from plex_playlist_sync.api.dependencies import get_db, require_admin, require_core_tier, track_admin_actor
 from plex_playlist_sync.storage import Database
@@ -28,7 +29,7 @@ class TagPayload(BaseModel):
         return normalize_label(value)
 
 
-class TagOut(BaseModel):
+class TagOut(ApiModel):
     id: int
     label: str
     created_at: str
@@ -38,12 +39,12 @@ class TagOut(BaseModel):
     import_list_count: int = 0
 
 
-class TagRef(BaseModel):
+class TagRef(ApiModel):
     id: int | str
     name: str
 
 
-class TagUsage(BaseModel):
+class TagUsage(ApiModel):
     tag: TagOut
     artist_count: int
     artists: list[TagRef] = Field(description="First 200 artists carrying the tag, by name")
@@ -52,7 +53,7 @@ class TagUsage(BaseModel):
     import_lists: list[TagRef]
 
 
-class TagDeleted(BaseModel):
+class TagDeleted(ApiModel):
     status: str = "deleted"
     id: int
 

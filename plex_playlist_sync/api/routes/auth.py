@@ -21,6 +21,15 @@ from plex_playlist_sync.api.dependencies import (
     require_service_principal,
     tier_of,
 )
+from plex_playlist_sync.api.schemas.auth import (
+    InviteAcceptedResponse,
+    InviteInfoResponse,
+    LocalLoginResponse,
+    LogoutResponse,
+    MeResponse,
+    PlexPinResponse,
+    PlexVerifyResponse,
+)
 from plex_playlist_sync.api.sessions import start_session
 from plex_playlist_sync.clients.core_client import CoreClient
 from plex_playlist_sync.local_login import (
@@ -75,7 +84,7 @@ def _plex_login_unavailable(config: Optional[Config]) -> bool:
     return config.media_server_type != MEDIA_SERVER_PLEX  # Subsonic servers have no Plex OAuth either
 
 
-@router.post("/plex/pin")
+@router.post("/plex/pin", response_model=PlexPinResponse, response_model_exclude_unset=True)
 def generate_pin(
     req: Optional[CreatePinRequest] = None,
     forward_url: Optional[str] = None,
@@ -147,7 +156,7 @@ def generate_pin(
         )
 
 
-@router.post("/plex/verify")
+@router.post("/plex/verify", response_model=PlexVerifyResponse, response_model_exclude_unset=True)
 def verify_pin(
     req: VerifyPinRequest,
     request: Request,
@@ -288,7 +297,7 @@ def verify_pin(
     return {"token": token, "user": user}
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=LogoutResponse, response_model_exclude_unset=True)
 def logout(
     request: Request,
     response: Response,
@@ -314,7 +323,7 @@ def logout(
     return {"status": "success", "message": "Successfully logged out"}
 
 
-@router.get("/me")
+@router.get("/me", response_model=MeResponse, response_model_exclude_unset=True)
 def get_me(
     current_user: dict[str, Any] = Depends(get_current_user),
     config: Config = Depends(get_config),
@@ -346,7 +355,7 @@ def _login_http_error(exc: LoginError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail=exc.detail, headers=headers)
 
 
-@router.post("/local/login")
+@router.post("/local/login", response_model=LocalLoginResponse, response_model_exclude_unset=True)
 def local_login(
     req: LocalLoginRequest,
     request: Request,
@@ -433,7 +442,7 @@ def _invite_guard(request: Request, db: Database, config: Config) -> None:
         )
 
 
-@router.get("/invite/{token}")
+@router.get("/invite/{token}", response_model=InviteInfoResponse, response_model_exclude_unset=True)
 def get_invite(
     token: str,
     request: Request,
@@ -448,7 +457,7 @@ def get_invite(
     return {"username": info["username"], "purpose": info["purpose"], "expires_at": info["expires_at"]}
 
 
-@router.post("/invite/{token}")
+@router.post("/invite/{token}", response_model=InviteAcceptedResponse, response_model_exclude_unset=True)
 def accept_invite(
     token: str,
     req: InviteAcceptRequest,

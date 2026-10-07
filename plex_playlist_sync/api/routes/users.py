@@ -18,6 +18,7 @@ from plex_playlist_sync.api.dependencies import (
     require_user,
 )
 from plex_playlist_sync.api.routes.admin_users import MAX_QUOTA, MAX_WINDOW_DAYS, apply_user_changes
+from plex_playlist_sync.api.schemas.users import CurrentUserProfile, UserRecord
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import MediaServer, as_media_server, describe_error, import_server_users
 from plex_playlist_sync.config import Config
@@ -38,7 +39,7 @@ class UpdateUserGovernanceBody(BaseModel):
     is_admin: Optional[bool] = None
 
 
-@router.get("/me")
+@router.get("/me", response_model=CurrentUserProfile, response_model_exclude_unset=True)
 def get_current_user_profile(
     current_user: dict[str, Any] = Depends(require_user),
     db: Database = Depends(get_db),
@@ -79,7 +80,7 @@ def get_current_user_profile(
     }
 
 
-@router.get("")
+@router.get("", response_model=list[UserRecord], response_model_exclude_unset=True)
 def list_users(
     _admin: dict[str, Any] = Depends(require_admin),
     db: Database = Depends(get_db),
@@ -88,7 +89,7 @@ def list_users(
     return db.list_users()
 
 
-@router.put("/{user_id}")
+@router.put("/{user_id}", response_model=UserRecord, response_model_exclude_unset=True)
 def update_user_governance_route(
     user_id: str,
     body: UpdateUserGovernanceBody,
@@ -149,7 +150,7 @@ def update_user_governance_route(
     return updated
 
 
-@router.post("/refresh", dependencies=[Depends(require_media_server)])
+@router.post("/refresh", dependencies=[Depends(require_media_server)], response_model=list[UserRecord], response_model_exclude_unset=True)
 def refresh_users(
     _admin: dict[str, Any] = Depends(require_admin),
     db: Database = Depends(get_db),

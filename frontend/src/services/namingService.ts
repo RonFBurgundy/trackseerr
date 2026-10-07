@@ -1,4 +1,5 @@
 import { apiRequest } from './apiClient';
+import type { Narrow, Schema } from '@/types/apiSchema';
 import type {
   NamingFormats,
   NamingPreset,
@@ -9,12 +10,11 @@ import type {
   NamingPreviewResponse,
 } from '@/types/naming';
 
-interface MediaManagementEnvelope {
-  presets?: Record<string, NamingPreset>;
-  preset_descriptions?: Record<string, string>;
-  token_help?: NamingTokenGroup[];
-  syntax_help?: NamingSyntaxHelp[];
-}
+/** The GET envelope with the loosely-typed help catalogues narrowed to what the UI renders. */
+type MediaManagementEnvelope = Narrow<
+  Schema<'MediaManagementGetResponse'>,
+  { presets: Record<string, NamingPreset>; token_help?: NamingTokenGroup[]; syntax_help?: NamingSyntaxHelp[] }
+>;
 
 /** Loads the built-in naming presets (Trackseerr, TRaSH Guides, Plex, ...) and token help from the server. */
 export async function getNamingPresets(): Promise<NamingPresetCatalog> {

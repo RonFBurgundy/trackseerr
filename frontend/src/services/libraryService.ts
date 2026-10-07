@@ -1,3 +1,4 @@
+import type { Schema } from '@/types/apiSchema';
 import { apiRequest } from './apiClient';
 import { buildIndexUrl, buildListUrl } from './listUrl';
 import type { GroupIndexResponse, IndexQuery, ListQuery, PagedResponse } from '@/types/activity';
@@ -33,8 +34,8 @@ export async function getArtists(query?: string, monitoredOnly: boolean = false)
   return res || [];
 }
 
-export async function getArtistDetail(artistId: number | string): Promise<ArtistItem & { albums?: AlbumItem[] }> {
-  return apiRequest<ArtistItem & { albums?: AlbumItem[] }>(`/api/library/artists/${artistId}`);
+export async function getArtistDetail(artistId: number | string): Promise<ArtistItem> {
+  return apiRequest<ArtistItem>(`/api/library/artists/${artistId}`);
 }
 
 export async function getAlbums(artistId?: number | string, query?: string, monitoredOnly: boolean = false): Promise<AlbumItem[]> {
@@ -47,8 +48,8 @@ export async function getAlbums(artistId?: number | string, query?: string, moni
   return res || [];
 }
 
-export async function getAlbumDetail(albumId: number | string): Promise<AlbumItem & { tracks?: TrackItem[] }> {
-  return apiRequest<AlbumItem & { tracks?: TrackItem[] }>(`/api/library/albums/${albumId}`);
+export async function getAlbumDetail(albumId: number | string): Promise<AlbumItem> {
+  return apiRequest<AlbumItem>(`/api/library/albums/${albumId}`);
 }
 
 export async function getTracks(albumId?: number | string, artistId?: number | string, query?: string): Promise<TrackItem[]> {
@@ -84,8 +85,8 @@ export async function toggleTrackMonitored(trackId: number | string, monitored: 
 
 export async function refreshArtist(
   artistId: number | string
-): Promise<{ success: boolean; artist_id: string; refreshed_at?: string }> {
-  return apiRequest<{ success: boolean; artist_id: string; refreshed_at?: string }>(
+): Promise<Schema<'ArtistRefreshResponse'>> {
+  return apiRequest<Schema<'ArtistRefreshResponse'>>(
     `/api/library/artists/${artistId}/refresh`,
     {
       method: 'POST',
@@ -93,10 +94,7 @@ export async function refreshArtist(
   );
 }
 
-export interface LidarrSearchResult {
-  success: boolean;
-  message?: string;
-}
+export type LidarrSearchResult = Schema<'CommandResponse'>;
 
 /** Lidarr mode only (the route is 409 while TrackSeerr manages the library): queue a search for the artist. */
 export async function searchArtist(artistId: number | string): Promise<LidarrSearchResult> {
@@ -175,7 +173,7 @@ export async function createCollection(data: {
 }
 
 export async function deleteCollection(id: string): Promise<boolean> {
-  const res = await apiRequest<{ success: boolean; id: string }>(`/api/library/collections/${id}`, {
+  const res = await apiRequest<Schema<'CollectionDeleteResponse'>>(`/api/library/collections/${id}`, {
     method: 'DELETE',
   });
   return Boolean(res?.success);
@@ -186,7 +184,7 @@ export async function addAlbumToCollection(
   albumId: string | number,
   orderIndex: number = 0
 ): Promise<boolean> {
-  const res = await apiRequest<{ success: boolean; collection_id: string; album_id: string }>(
+  const res = await apiRequest<Schema<'CollectionAlbumResponse'>>(
     `/api/library/collections/${collectionId}/albums`,
     {
       method: 'POST',
@@ -200,7 +198,7 @@ export async function removeAlbumFromCollection(
   collectionId: string,
   albumId: string | number
 ): Promise<boolean> {
-  const res = await apiRequest<{ success: boolean; collection_id: string; album_id: string }>(
+  const res = await apiRequest<Schema<'CollectionAlbumResponse'>>(
     `/api/library/collections/${collectionId}/albums/${albumId}`,
     {
       method: 'DELETE',

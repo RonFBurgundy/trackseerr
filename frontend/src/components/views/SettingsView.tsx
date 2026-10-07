@@ -103,7 +103,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     onNavigate(settingsRouteFor('general'));
   };
 
-  const lidarrUrl = data.lidarr?.url || data.general?.lidarr_url || null;
+  const lidarrUrl = data.lidarr?.url || null;
   const managedByLidarr: ManagedExternally = {
     url: lidarrUrl,
     onOpenLidarrSettings: () => onNavigate(settingsRouteFor('lidarr')),

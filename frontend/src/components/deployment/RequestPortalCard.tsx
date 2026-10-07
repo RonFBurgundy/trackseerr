@@ -23,7 +23,7 @@ const STATE_STYLE: Record<GatewayState, { label: string; cls: string }> = {
   },
 };
 
-export function formatRelativeTime(iso: string | null, now: number = Date.now()): string {
+export function formatRelativeTime(iso: string | null | undefined, now: number = Date.now()): string {
   if (!iso) return 'Never';
   const then = Date.parse(iso);
   if (Number.isNaN(then)) return 'Unknown';

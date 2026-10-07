@@ -21,10 +21,10 @@ const fmt = (n: number): string => n.toLocaleString();
 /** Builds only the stats the payload carries; every field of LibraryStats beyond the three counts is optional. */
 function buildStats(s: LibraryStats): Stat[] {
   const out: Stat[] = [{ key: 'artists', label: 'Artists', value: fmt(s.artist_count) }];
-  if (s.monitored_artist_count !== undefined) {
+  if (typeof s.monitored_artist_count === 'number') {
     out.push({ key: 'mon', label: 'Monitored', value: fmt(s.monitored_artist_count), accent: true });
   }
-  if (s.unmonitored_artist_count !== undefined) {
+  if (typeof s.unmonitored_artist_count === 'number') {
     out.push({ key: 'unmon', label: 'Unmonitored', value: fmt(s.unmonitored_artist_count) });
   }
   if (typeof s.continuing_artist_count === 'number') {
@@ -35,15 +35,15 @@ function buildStats(s: LibraryStats): Stat[] {
   }
   out.push({ key: 'albums', label: 'Albums', value: fmt(s.album_count) });
   out.push({ key: 'tracks', label: 'Tracks', value: fmt(s.track_count) });
-  if (s.total_track_count !== undefined && s.total_track_count !== s.track_count) {
+  if (typeof s.total_track_count === 'number' && s.total_track_count !== s.track_count) {
     out.push({ key: 'alltracks', label: 'All editions', value: fmt(s.total_track_count) });
   }
   const files = s.track_file_count ?? s.file_count;
-  if (files !== undefined) out.push({ key: 'files', label: 'Track files', value: fmt(files) });
-  if (s.missing_track_count !== undefined) {
+  if (typeof files === 'number') out.push({ key: 'files', label: 'Track files', value: fmt(files) });
+  if (typeof s.missing_track_count === 'number') {
     out.push({ key: 'missing', label: 'Missing', value: fmt(s.missing_track_count), accent: s.missing_track_count > 0 });
   }
-  if (s.total_size_bytes !== undefined) out.push({ key: 'size', label: 'On disk', value: formatBytes(s.total_size_bytes) });
+  if (typeof s.total_size_bytes === 'number') out.push({ key: 'size', label: 'On disk', value: formatBytes(s.total_size_bytes) });
   return out;
 }
 

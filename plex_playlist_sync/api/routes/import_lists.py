@@ -9,8 +9,10 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator, model_validator
+from plex_playlist_sync.api.response_models import ApiModel
 
 from plex_playlist_sync.api.dependencies import get_config, get_db, require_admin, require_core_tier
+from plex_playlist_sync.api.schemas.import_lists import ImportListDeleted, ImportListQueued, ProviderMeta
 from plex_playlist_sync.clients.import_lists import (
     PROVIDERS,
     SECRET_KEYS,
@@ -86,7 +88,7 @@ class ImportListInput(BaseModel):
         return self
 
 
-class ImportListItemCounts(BaseModel):
+class ImportListItemCounts(ApiModel):
     applied: int = 0
     pending: int = 0
     unresolved: int = 0
@@ -94,7 +96,7 @@ class ImportListItemCounts(BaseModel):
     skipped: int = 0
 
 
-class ImportList(ImportListInput):
+class ImportList(ImportListInput, ApiModel):
     id: str
     last_synced_at: Optional[str] = None
     last_status: Optional[str] = None
@@ -104,7 +106,7 @@ class ImportList(ImportListInput):
     updated_at: str
 
 
-class ImportListItemOut(BaseModel):
+class ImportListItemOut(ApiModel):
     id: int = 0  # 0 only for test-sample rows, which are not stored
     kind: str
     mbid: Optional[str] = None
@@ -118,12 +120,12 @@ class ImportListItemOut(BaseModel):
     last_seen_at: Optional[str] = None
 
 
-class ImportListItemsPage(BaseModel):
+class ImportListItemsPage(ApiModel):
     items: list[ImportListItemOut]
     total: int
 
 
-class ImportListTestResult(BaseModel):
+class ImportListTestResult(ApiModel):
     ok: bool
     item_count: int = 0
     sample: list[ImportListItemOut] = Field(default_factory=list)
@@ -182,7 +184,7 @@ def _payload(body: ImportListInput, stored: Optional[dict[str, Any]]) -> dict[st
     return data
 
 
-@router.get("/providers")
+@router.get("/providers", response_model=list[ProviderMeta], response_model_exclude_unset=True)
 def list_providers() -> list[dict[str, Any]]:
     """Provider metadata the UI renders its forms from."""
     return provider_metadata()
@@ -247,7 +249,7 @@ def update_import_list(list_id: str, body: ImportListInput, db: Database = Depen
     return _present(db, updated)
 
 
-@router.delete("/{list_id}")
+@router.delete("/{list_id}", response_model=ImportListDeleted, response_model_exclude_unset=True)
 def delete_import_list(list_id: str, db: Database = Depends(get_db)) -> dict[str, Any]:
     _get_or_404(db, list_id)
     db.delete_import_list(list_id)
@@ -268,7 +270,7 @@ def _background_sync(db: Database, config: Config, list_id: str, token: str) -> 
         release_sync(list_id, token)  # token-checked: a no-op once sync_import_list released this claim
 
 
-@router.post("/{list_id}/sync")
+@router.post("/{list_id}/sync", response_model=ImportListQueued, response_model_exclude_unset=True)
 def sync_now(
     list_id: str,
     background_tasks: BackgroundTasks,

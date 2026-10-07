@@ -80,7 +80,7 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
   }
 
   const { server, last_run: run, mapping } = data;
-  const supported = server !== null && server.file_paths;
+  const supported = server != null && server.file_paths;
   const serverName = server ? serverLabel(server.kind) : 'server';
   const empty = regularGroups.length === 0 && weak.length === 0 && orphans.length === 0 && failed.length === 0;
 
@@ -141,7 +141,7 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
             : `${serverName} does not expose file paths, so library checks are not available.`}
         </p>
       ) : (
-        <ReviewMappingCard mapping={mapping} busy={busy} onSave={hl.saveMapping} onRemove={hl.removeMapping} />
+        <ReviewMappingCard mapping={mapping ?? null} busy={busy} onSave={hl.saveMapping} onRemove={hl.removeMapping} />
       )}
 
       <div className="min-h-0">

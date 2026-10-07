@@ -11,6 +11,15 @@ from pydantic import BaseModel, Field
 import requests
 
 from plex_playlist_sync.api.dependencies import get_current_user, get_db, get_plex_client, require_media_server
+from plex_playlist_sync.api.schemas.playlists import PlaylistRecord
+from plex_playlist_sync.api.schemas.plex_playlists import (
+    MixSnapshot,
+    PlaylistCopyResult,
+    PlexMix,
+    PlexPlaylistItem,
+    PlexPlaylistSummary,
+    PlexUser,
+)
 from plex_playlist_sync.clients.plex import (
     MixNotFoundError,
     PlaylistProtectedError,
@@ -235,7 +244,7 @@ def _authorized_snapshot(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/users")
+@router.get("/users", response_model=list[PlexUser], response_model_exclude_unset=True)
 def list_plex_users(
     current_user: dict[str, Any] = Depends(get_current_user),
     plex: Optional[PlexClient] = Depends(get_plex_client),
@@ -261,7 +270,7 @@ def list_plex_users(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/mixes")
+@router.get("/mixes", response_model=list[PlexMix], response_model_exclude_unset=True)
 def list_mixes(
     user: Optional[str] = None,
     current_user: dict[str, Any] = Depends(get_current_user),
@@ -274,7 +283,7 @@ def list_mixes(
     return [{**m, "snapshot_id": snaps.get(m["mix_key"])} for m in mixes]
 
 
-@router.get("/mixes/snapshots")
+@router.get("/mixes/snapshots", response_model=list[MixSnapshot], response_model_exclude_unset=True)
 def list_snapshots(
     user: Optional[str] = None,
     current_user: dict[str, Any] = Depends(get_current_user),
@@ -286,7 +295,7 @@ def list_snapshots(
     return [_snapshot_out(s) for s in db.list_mix_snapshots(plex_user=username)]
 
 
-@router.post("/mixes/snapshot")
+@router.post("/mixes/snapshot", response_model=MixSnapshot, response_model_exclude_unset=True)
 def create_snapshot(
     req: MixSnapshotRequest,
     user: Optional[str] = None,
@@ -318,7 +327,7 @@ def create_snapshot(
     return _snapshot_out(snap)
 
 
-@router.put("/mixes/snapshots/{snapshot_id}")
+@router.put("/mixes/snapshots/{snapshot_id}", response_model=MixSnapshot, response_model_exclude_unset=True)
 def update_snapshot(
     snapshot_id: str,
     req: MixSnapshotUpdateRequest,
@@ -351,7 +360,7 @@ def delete_snapshot(
 # ---------------------------------------------------------------------------
 
 
-@router.get("")
+@router.get("", response_model=list[PlexPlaylistSummary], response_model_exclude_unset=True)
 def list_plex_playlists(
     user: Optional[str] = None,
     include_ignored: bool = False,
@@ -367,7 +376,7 @@ def list_plex_playlists(
     return out
 
 
-@router.get("/{rating_key}/items")
+@router.get("/{rating_key}/items", response_model=list[PlexPlaylistItem], response_model_exclude_unset=True)
 def get_playlist_items(
     rating_key: str,
     user: Optional[str] = None,
@@ -379,7 +388,7 @@ def get_playlist_items(
         return _items_response(client, server, rating_key)
 
 
-@router.patch("/{rating_key}")
+@router.patch("/{rating_key}", response_model=PlexPlaylistSummary, response_model_exclude_unset=True)
 def rename_playlist(
     rating_key: str,
     req: RenameRequest,
@@ -416,7 +425,7 @@ def delete_playlist(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{rating_key}/items")
+@router.post("/{rating_key}/items", response_model=list[PlexPlaylistItem], response_model_exclude_unset=True)
 def add_playlist_items(
     rating_key: str,
     req: AddItemsRequest,
@@ -456,7 +465,7 @@ def remove_playlist_item(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{rating_key}/items/{playlist_item_id}/move")
+@router.post("/{rating_key}/items/{playlist_item_id}/move", response_model=list[PlexPlaylistItem], response_model_exclude_unset=True)
 def move_playlist_item(
     rating_key: str,
     playlist_item_id: int,
@@ -473,7 +482,7 @@ def move_playlist_item(
         return _items_response(client, server, rating_key)
 
 
-@router.post("/{rating_key}/copy")
+@router.post("/{rating_key}/copy", response_model=list[PlaylistCopyResult], response_model_exclude_unset=True)
 def copy_playlist(
     rating_key: str,
     req: CopyRequest,
@@ -539,7 +548,7 @@ def copy_playlist(
     return results
 
 
-@router.post("/{rating_key}/adopt", status_code=status.HTTP_201_CREATED)
+@router.post("/{rating_key}/adopt", response_model=PlaylistRecord, response_model_exclude_unset=True, status_code=status.HTTP_201_CREATED)
 def adopt_playlist(
     rating_key: str,
     user: Optional[str] = None,
@@ -587,7 +596,7 @@ def adopt_playlist(
     return created
 
 
-@router.put("/{rating_key}/flags")
+@router.put("/{rating_key}/flags", response_model=PlexPlaylistSummary, response_model_exclude_unset=True)
 def set_playlist_flags(
     rating_key: str,
     req: FlagsRequest,

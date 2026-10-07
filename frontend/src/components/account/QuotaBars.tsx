@@ -17,7 +17,7 @@ export const QuotaBars: React.FC<QuotaBarsProps> = ({ account, isAdmin = false, 
   return (
     <div className={compact ? 'grid grid-cols-1 sm:grid-cols-3 gap-3' : 'space-y-4'}>
       {QUOTA_KINDS.map((kind) => {
-        const limit = quotas[kind];
+        const limit = quotas[kind] ?? null;
         const used = quotas.used[kind];
         const unlimited = limit === null;
         const remaining = limit === null ? 0 : Math.max(0, limit - used);

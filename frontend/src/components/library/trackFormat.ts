@@ -9,10 +9,9 @@ const LOSSLESS = 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/3
 const AMBER = 'bg-[#e5a00d]/10 text-[#e5a00d] border border-[#e5a00d]/30';
 const NEUTRAL = 'bg-neutral-800 text-neutral-300 border border-neutral-700';
 
-/** Track length in seconds from whichever field the backend sent (`duration_seconds`, else legacy `duration_ms`). */
+/** Track length in seconds from `duration_seconds`, the only duration field the backend sends. */
 export function trackSeconds(track: TrackItem): number | undefined {
   if (typeof track.duration_seconds === 'number' && track.duration_seconds > 0) return track.duration_seconds;
-  if (typeof track.duration_ms === 'number' && track.duration_ms > 0) return track.duration_ms / 1000;
   return undefined;
 }
 
@@ -25,30 +24,22 @@ export function formatTrackDuration(seconds?: number): string {
 }
 
 export function getQualityBadge(track: TrackItem): QualityBadge {
-  if (track.quality) {
-    return { label: track.quality, className: track.quality.toLowerCase().includes('flac') ? LOSSLESS : AMBER };
-  }
   const file = track.file;
-  if (!file && !track.has_file && !track.file_path) {
+  if (!file && !track.has_file) {
     return { label: 'Missing', className: 'bg-red-950/30 text-red-400 border border-red-800/40' };
   }
   if (file?.quality) {
     return { label: file.quality, className: file.quality.toLowerCase().includes('flac') ? LOSSLESS : AMBER };
   }
   if (file) {
-    const fmt = (file.format || '').toUpperCase();
-    const bits = file.bits_per_sample;
+    // The backend sends no `format` (only `codec`), so this stays the bitrate-only path.
     const bitrate = file.bitrate;
-    if (fmt === 'FLAC') {
-      return { label: bits === 24 ? 'FLAC 24-bit' : 'FLAC Lossless', className: LOSSLESS };
-    }
     if (bitrate) {
       const kbps = Math.round(bitrate / 1000);
-      return { label: `${fmt || 'MP3'} ${kbps}`, className: kbps >= 320 ? AMBER : NEUTRAL };
+      return { label: `MP3 ${kbps}`, className: kbps >= 320 ? AMBER : NEUTRAL };
     }
-    if (fmt) return { label: fmt, className: AMBER };
   }
-  const path = track.file_path ?? file?.file_path ?? null;
+  const path = file?.file_path ?? null;
   if (path) {
     const lower = path.toLowerCase();
     if (lower.endsWith('.flac')) return { label: 'FLAC Lossless', className: LOSSLESS };

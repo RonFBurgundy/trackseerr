@@ -29,6 +29,7 @@ import { ItemOriginCaption } from './ItemOriginCaption';
 import { AlbumBulkBar } from './AlbumBulkBar';
 import { ArtistRestOfDiscography } from './ArtistRestOfDiscography';
 import { ArtistTagsRow } from './ArtistTagsRow';
+import { genreNames } from './genres';
 
 type DiscographyTab = 'studio' | 'singles_eps' | 'live' | 'compilations';
 
@@ -173,11 +174,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
     return ok;
   };
 
-  const genreList = Array.isArray(artist?.genres)
-    ? artist.genres
-    : typeof artist?.genres === 'string'
-      ? artist.genres.split(',').map((g) => g.trim()).filter(Boolean)
-      : [];
+  const genreList = genreNames(artist?.genres);
 
   const toggleAlbum = useCallback(
     async (albumId: number | string, current: boolean): Promise<void> => {
@@ -377,7 +374,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
                     </>
                   )}
                   <TactileSwitch
-                    checked={artist.monitored}
+                    checked={artist.monitored === true}
                     onChange={(val) => void toggleArtist(val)}
                     label={artist.monitored ? 'Monitored' : 'Unmonitored'}
                     className="shrink-0 max-sm:-mx-1 max-sm:[&>span]:sr-only"

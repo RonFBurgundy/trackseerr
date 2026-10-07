@@ -19,7 +19,8 @@ export const GeneralPanel: React.FC<GeneralPanelProps> = ({ settings, onChange, 
     if (!settings) return;
     setIsSaving(true);
     try {
-      await updateGeneralSettings(settings);
+      const saved = await updateGeneralSettings({ application_url: settings.application_url });
+      onChange(saved);
       onToast('General settings saved successfully');
     } catch {
       onToast('Failed to save settings', 'error');
@@ -32,22 +33,17 @@ export const GeneralPanel: React.FC<GeneralPanelProps> = ({ settings, onChange, 
     <MachinedCard className="p-3 sm:p-6 max-w-2xl">
       <form onSubmit={handleSave} className="space-y-5">
         <div>
-          <label htmlFor="general-server-name" className={labelClass}>Server Name</label>
-          <input id="general-server-name" name="server-name"
-            type="text"
-            value={settings?.server_name || ''}
-            onChange={(e) => onChange((prev) => (prev ? { ...prev, server_name: e.target.value } : null))}
+          <label htmlFor="general-application-url" className={labelClass}>Application URL</label>
+          <input id="general-application-url" name="application_url"
+            type="url"
+            value={settings?.application_url ?? ''}
+            onChange={(e) => onChange((prev) => (prev ? { ...prev, application_url: e.target.value } : null))}
+            placeholder="https://trackseerr.example.com"
             className={inputClass}
           />
-        </div>
-        <div>
-          <label htmlFor="general-base-url" className={labelClass}>Base URL</label>
-          <input id="general-base-url" name="base-url"
-            type="text"
-            value={settings?.base_url || ''}
-            onChange={(e) => onChange((prev) => (prev ? { ...prev, base_url: e.target.value } : null))}
-            className={inputClass}
-          />
+          <p className="mt-1 text-[11px] font-mono text-neutral-500">
+            External address used in invite links, Plex sign-in redirects and notifications.
+          </p>
         </div>
         <ActionBar align="end" className="pt-3">
           <TapeDeckButton

@@ -1,3 +1,4 @@
+import type { Narrow, Schema } from './apiSchema';
 /** Custom formats (Lidarr/Servarr JSON schema compatible). */
 export type SpecImplementation =
   | 'ReleaseTitleSpecification'
@@ -40,15 +41,7 @@ export interface CustomFormatSpec {
   unsupported?: boolean;
 }
 
-export interface CustomFormat {
-  id: number;
-  name: string;
-  include_in_rename: boolean;
-  specifications: CustomFormatSpec[];
-  unsupported: boolean;
-  created_at?: string | null;
-  updated_at?: string | null;
-}
+export type CustomFormat = Narrow<Schema<'CustomFormatResponse'>, { specifications: CustomFormatSpec[] }>;
 
 export interface CustomFormatInput {
   name: string;
@@ -62,17 +55,8 @@ export interface CustomFormatInput {
   }>;
 }
 
-export interface CustomFormatImportEntry extends CustomFormat {
-  action: 'created' | 'updated';
-}
+export type CustomFormatImportEntry = Narrow<Schema<'ImportedCustomFormat'>, { action: 'created' | 'updated'; specifications: CustomFormatSpec[] }>;
 
-export interface CustomFormatImportError {
-  index: number;
-  name: string | null;
-  errors: string[];
-}
+export type CustomFormatImportError = Schema<'CustomFormatImportError'>;
 
-export interface CustomFormatImportResult {
-  imported: CustomFormatImportEntry[];
-  errors: CustomFormatImportError[];
-}
+export type CustomFormatImportResult = Narrow<Schema<'CustomFormatImportResponse'>, { imported: CustomFormatImportEntry[] }>;

@@ -63,8 +63,8 @@ export function eventCategory(event: string): HistoryCategory {
 }
 
 interface TriggerSource {
-  trigger: string | null;
-  trigger_label: string | null;
+  trigger?: string | null;
+  trigger_label?: string | null;
   actor_display: string;
 }
 
@@ -119,19 +119,22 @@ export function originCaption(origin: ItemHistoryOrigin): string | null {
   return when ? `${phrase} · ${when}` : phrase;
 }
 
-export function shortDate(iso: string): string {
+export function shortDate(iso: string | null | undefined): string {
+  if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const sameYear = d.getFullYear() === new Date().getFullYear();
   return d.toLocaleDateString(undefined, sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export function absoluteTime(iso: string): string {
+export function absoluteTime(iso: string | null | undefined): string {
+  if (!iso) return '';
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
-export function historyRelativeTime(iso: string, now: number = Date.now()): string {
+export function historyRelativeTime(iso: string | null | undefined, now: number = Date.now()): string {
+  if (!iso) return '';
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return '';
   const secs = Math.round((now - t) / 1000);

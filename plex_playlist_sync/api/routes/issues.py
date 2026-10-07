@@ -13,6 +13,7 @@ from typing import Annotated, Any, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
+from plex_playlist_sync.api.response_models import ApiModel
 
 from plex_playlist_sync.api.dependencies import (
     get_config,
@@ -24,6 +25,7 @@ from plex_playlist_sync.api.dependencies import (
     require_permission,
     require_user,
 )
+from plex_playlist_sync.api.schemas.issues import IssueCount, IssueDeleted, IssueSeen
 from plex_playlist_sync.api.routes import library as library_routes
 from plex_playlist_sync.api.routes import requests as requests_routes
 from plex_playlist_sync.api.routes import wanted as wanted_routes
@@ -147,7 +149,7 @@ class CommentBody(BaseModel):
         return _reject_control_chars(value)
 
 
-class IssueResponse(BaseModel):
+class IssueResponse(ApiModel):
     """Issue as returned to the viewer. Responses are built from a per-role whitelist and serialised with
     ``exclude_unset``, so admin-only fields are absent (not null) for requesters."""
 
@@ -175,7 +177,7 @@ class IssueResponse(BaseModel):
     available_actions: Optional[list[str]] = None
 
 
-class CommentResponse(BaseModel):
+class CommentResponse(ApiModel):
     id: str
     issue_id: str
     body: str
@@ -188,7 +190,7 @@ class CommentResponse(BaseModel):
     is_system: Optional[bool] = None
 
 
-class ActionResponse(BaseModel):
+class ActionResponse(ApiModel):
     action: str
     result: dict[str, Any]
     issue: IssueResponse
@@ -389,7 +391,7 @@ def list_issues(
     return [_present_issue(db, row, current_user, is_admin, native) for row in rows]
 
 
-@router.get("/unread-count", summary="Issues with admin activity the reporter has not seen")
+@router.get("/unread-count", response_model=IssueCount, response_model_exclude_unset=True, summary="Issues with admin activity the reporter has not seen")
 def unread_count(
     db: Database = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_user),
@@ -397,7 +399,7 @@ def unread_count(
     return {"count": db.count_unread_issues(str(current_user["id"]))}
 
 
-@router.get("/open-count", summary="Open issues awaiting an admin (nav badge)")
+@router.get("/open-count", response_model=IssueCount, response_model_exclude_unset=True, summary="Open issues awaiting an admin (nav badge)")
 def open_count(
     db: Database = Depends(get_db),
     _core: None = Depends(require_core_tier),
@@ -543,7 +545,7 @@ def set_issue_status(
     return _present_issue(db, updated, current_user, is_admin)
 
 
-@router.post("/{issue_id}/seen", summary="Mark an issue as seen by its reporter")
+@router.post("/{issue_id}/seen", response_model=IssueSeen, response_model_exclude_unset=True, summary="Mark an issue as seen by its reporter")
 def mark_seen(
     issue_id: str,
     db: Database = Depends(get_db),
@@ -643,7 +645,7 @@ def update_issue(
     return _present_issue(db, db.get_issue(issue_id) or issue, admin, True)
 
 
-@router.delete("/{issue_id}", summary="Delete media issue")
+@router.delete("/{issue_id}", response_model=IssueDeleted, response_model_exclude_unset=True, summary="Delete media issue")
 def delete_issue(
     issue_id: str,
     db: Database = Depends(get_db),

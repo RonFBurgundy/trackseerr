@@ -358,9 +358,13 @@ def test_gateway_forwards_request_creation_to_core(app_and_client, test_db: Data
 
     mock_created_response = {
         "id": "req-core-12345",
+        "user_id": "alice-1",
+        "item_type": "track",
         "title": "Time",
         "artist": "Pink Floyd",
+        "album": None,
         "status": "pending",
+        "username": "alice",
     }
 
     with patch("httpx.Client") as mock_client_cls:
@@ -406,7 +410,7 @@ def test_gateway_forwards_batch_requests_and_deletion(app_and_client, test_db: D
 
         # Test batch forwarding
         mock_batch_resp = MagicMock()
-        mock_batch_resp.json.return_value = {"created": [{"id": "req-1"}], "total": 1}
+        mock_batch_resp.json.return_value = {"created": [{"id": "req-1", "user_id": "alice-1", "item_type": "track", "title": "Song A", "artist": "Artist A", "status": "pending"}], "count": 1}
         mock_batch_resp.status_code = 201
         mock_instance.request.return_value = mock_batch_resp
 

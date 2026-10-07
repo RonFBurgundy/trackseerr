@@ -17,6 +17,14 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field, StrictBool, StrictInt, field_validator
 
 from plex_playlist_sync.api.dependencies import get_config, get_db, require_admin, tier_of
+from plex_playlist_sync.api.schemas.admin_users import (
+    AccountSettings,
+    AdminUser,
+    AdminUserAck,
+    CreatedAdminUser,
+    PermissionLabel,
+    ResetPasswordResponse,
+)
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.local_login import throttle_key
 from plex_playlist_sync.models import UserPermission
@@ -310,19 +318,19 @@ def apply_user_changes(
 # --------------------------------------------------------------------------- routes
 
 
-@router.get("/permissions")
+@router.get("/permissions", response_model=list[PermissionLabel], response_model_exclude_unset=True)
 def list_permission_labels() -> list[dict[str, Any]]:
     """The assignable permission bits with human labels."""
     return [{"bit": int(perm), "name": perm.name, "label": label} for perm, label in PERMISSION_LABELS]
 
 
-@router.get("/users")
+@router.get("/users", response_model=list[AdminUser], response_model_exclude_unset=True)
 def list_admin_users(db: Database = Depends(get_db)) -> list[dict[str, Any]]:
     defaults = db.get_account_settings()
     return [serialize_user(db, row, defaults) for row in db.list_users_admin()]
 
 
-@router.post("/users", status_code=status.HTTP_201_CREATED)
+@router.post("/users", status_code=status.HTTP_201_CREATED, response_model=CreatedAdminUser, response_model_exclude_unset=True)
 def create_admin_user(
     body: CreateAdminUserBody,
     response: Response,
@@ -346,7 +354,7 @@ def create_admin_user(
     return {"user": serialize_user(db, row), "invite_url": f"{base}/invite/{raw_token}"}
 
 
-@router.patch("/users/{user_id}")
+@router.patch("/users/{user_id}", response_model=AdminUser, response_model_exclude_unset=True)
 def update_admin_user(
     user_id: str,
     body: UpdateAdminUserBody,
@@ -369,7 +377,7 @@ def update_admin_user(
     return serialize_user(db, _require_row(db, user_id))
 
 
-@router.post("/users/{user_id}/disable")
+@router.post("/users/{user_id}/disable", response_model=AdminUser, response_model_exclude_unset=True)
 def disable_admin_user(
     user_id: str,
     actor: dict[str, Any] = Depends(admin_core_user),
@@ -384,7 +392,7 @@ def disable_admin_user(
     return serialize_user(db, _require_row(db, user_id))
 
 
-@router.post("/users/{user_id}/enable")
+@router.post("/users/{user_id}/enable", response_model=AdminUser, response_model_exclude_unset=True)
 def enable_admin_user(
     user_id: str,
     actor: dict[str, Any] = Depends(admin_core_user),
@@ -396,7 +404,7 @@ def enable_admin_user(
     return serialize_user(db, _require_row(db, user_id))
 
 
-@router.post("/users/{user_id}/reset-password")
+@router.post("/users/{user_id}/reset-password", response_model=ResetPasswordResponse, response_model_exclude_unset=True)
 def reset_admin_user_password(
     user_id: str,
     response: Response,
@@ -420,7 +428,7 @@ def reset_admin_user_password(
     return {"reset_url": f"{base}/invite/{raw_token}"}
 
 
-@router.post("/users/{user_id}/reset-mfa")
+@router.post("/users/{user_id}/reset-mfa", response_model=AdminUser, response_model_exclude_unset=True)
 def reset_admin_user_mfa(
     user_id: str,
     actor: dict[str, Any] = Depends(admin_core_user),
@@ -437,7 +445,7 @@ def reset_admin_user_mfa(
     return serialize_user(db, _require_row(db, user_id))
 
 
-@router.post("/users/{user_id}/revoke-sessions")
+@router.post("/users/{user_id}/revoke-sessions", response_model=AdminUserAck, response_model_exclude_unset=True)
 def revoke_admin_user_sessions(
     user_id: str,
     actor: dict[str, Any] = Depends(admin_core_user),
@@ -449,7 +457,7 @@ def revoke_admin_user_sessions(
     return {"status": "success", "id": user_id}
 
 
-@router.delete("/users/{user_id}")
+@router.delete("/users/{user_id}", response_model=AdminUserAck, response_model_exclude_unset=True)
 def delete_admin_user(
     user_id: str,
     body: DeleteAdminUserBody = Body(...),
@@ -471,7 +479,7 @@ def delete_admin_user(
     return {"status": "deleted", "id": user_id}
 
 
-@router.post("/users/{user_id}/restore")
+@router.post("/users/{user_id}/restore", response_model=AdminUserAck, response_model_exclude_unset=True)
 def restore_admin_user(
     user_id: str,
     actor: dict[str, Any] = Depends(admin_core_user),
@@ -489,12 +497,12 @@ def restore_admin_user(
     return {"status": "restored", "id": user_id}
 
 
-@router.get("/settings/accounts")
+@router.get("/settings/accounts", response_model=AccountSettings, response_model_exclude_unset=True)
 def get_account_settings(db: Database = Depends(get_db)) -> dict[str, Any]:
     return db.get_account_settings()
 
 
-@router.put("/settings/accounts")
+@router.put("/settings/accounts", response_model=AccountSettings, response_model_exclude_unset=True)
 def put_account_settings(
     body: AccountSettingsBody,
     actor: dict[str, Any] = Depends(admin_core_user),

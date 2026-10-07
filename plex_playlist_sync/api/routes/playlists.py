@@ -18,6 +18,16 @@ from plex_playlist_sync.api.dependencies import (
     require_media_server,
     get_spotify_client,
 )
+from plex_playlist_sync.api.schemas.playlists import (
+    FeaturedChart,
+    PlaylistDeletedResponse,
+    PlaylistEnabledResponse,
+    PlaylistImportResponse,
+    PlaylistMonitorModeResponse,
+    PlaylistRecord,
+    PlaylistTargetsResponse,
+    SmartMixPreset,
+)
 from plex_playlist_sync.clients.deezer import DeezerClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import PlaylistSyncOptions, as_media_server, describe_error, plex_extras
@@ -245,7 +255,7 @@ def _resolve_targets(
     return current if uid in current else [*current, uid]
 
 
-@router.get("")
+@router.get("", response_model=list[PlaylistRecord], response_model_exclude_unset=True)
 def list_playlists(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: Database = Depends(get_db),
@@ -262,7 +272,7 @@ def list_playlists(
     return playlists
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=PlaylistRecord, response_model_exclude_unset=True, status_code=status.HTTP_201_CREATED)
 def create_playlist(
     req: PlaylistCreateRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
@@ -348,7 +358,7 @@ def create_playlist(
     return playlist
 
 
-@router.get("/featured")
+@router.get("/featured", response_model=list[FeaturedChart], response_model_exclude_unset=True)
 def list_featured_charts(
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
@@ -356,7 +366,7 @@ def list_featured_charts(
     return FEATURED_CHARTS
 
 
-@router.get("/smart-mix/presets")
+@router.get("/smart-mix/presets", response_model=list[SmartMixPreset], response_model_exclude_unset=True)
 def get_smart_mix_presets(
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
@@ -364,7 +374,7 @@ def get_smart_mix_presets(
     return SMART_MIX_PRESETS
 
 
-@router.post("/smart-mix", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_media_server)])
+@router.post("/smart-mix", response_model=PlaylistImportResponse, response_model_exclude_unset=True, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_media_server)])
 def create_smart_mix(
     req: SmartMixRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
@@ -428,7 +438,7 @@ def create_smart_mix(
     )
 
 
-@router.put("/{playlist_id}/targets")
+@router.put("/{playlist_id}/targets", response_model=PlaylistTargetsResponse, response_model_exclude_unset=True)
 def update_playlist_targets(
     playlist_id: str,
     req: PlaylistTargetsRequest,
@@ -466,7 +476,7 @@ def update_playlist_targets(
     }
 
 
-@router.put("/{playlist_id}/enabled")
+@router.put("/{playlist_id}/enabled", response_model=PlaylistEnabledResponse, response_model_exclude_unset=True)
 def set_playlist_enabled(
     playlist_id: str,
     req: PlaylistEnabledRequest,
@@ -496,7 +506,7 @@ def set_playlist_enabled(
     }
 
 
-@router.put("/{playlist_id}/monitor-mode")
+@router.put("/{playlist_id}/monitor-mode", response_model=PlaylistMonitorModeResponse, response_model_exclude_unset=True)
 def set_playlist_monitor_mode(
     playlist_id: str,
     req: PlaylistMonitorModeRequest,
@@ -514,7 +524,7 @@ def set_playlist_monitor_mode(
     return {"id": playlist_id, "monitor_mode": req.monitor_mode}
 
 
-@router.delete("/{playlist_id}")
+@router.delete("/{playlist_id}", response_model=PlaylistDeletedResponse, response_model_exclude_unset=True)
 def delete_playlist(
     playlist_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
@@ -534,7 +544,7 @@ def delete_playlist(
     return {"status": "deleted", "id": playlist_id}
 
 
-@router.post("/import", status_code=status.HTTP_201_CREATED)
+@router.post("/import", response_model=PlaylistImportResponse, response_model_exclude_unset=True, status_code=status.HTTP_201_CREATED)
 def import_playlist_tracks(
     req: PlaylistDirectImportRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
@@ -662,7 +672,7 @@ def import_playlist_tracks(
     }
 
 
-@router.post("/import/m3u", status_code=status.HTTP_201_CREATED)
+@router.post("/import/m3u", response_model=PlaylistImportResponse, response_model_exclude_unset=True, status_code=status.HTTP_201_CREATED)
 def import_m3u_playlist(
     req: M3UImportRequest,
     current_user: dict[str, Any] = Depends(get_current_user),

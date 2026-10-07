@@ -18,6 +18,14 @@ from plex_playlist_sync.api.dependencies import (
     require_user,
 )
 from plex_playlist_sync import artist_profile, lidarr_library
+from plex_playlist_sync.api.schemas.discovery import (
+    ArtistProfileResponse,
+    DiscoveryAlbumDetail,
+    DiscoveryArtistDetail,
+    DiscoveryListResponse,
+    DiscoverySearchResponse,
+    DiscoveryTrackDetail,
+)
 from plex_playlist_sync.artist_links import normalize_artist_name
 from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient, LidarrNotFound
 from plex_playlist_sync.library_manager import MODE_LIDARR, build_lidarr_client
@@ -249,7 +257,7 @@ def annotate_item_statuses(
     return annotated
 
 
-@router.get("/trending")
+@router.get("/trending", response_model=DiscoveryListResponse, response_model_exclude_unset=True)
 def get_trending(
     limit: int = Query(default=25, ge=1, le=50),
     discovery: DiscoveryClient = Depends(get_discovery_client),
@@ -264,7 +272,7 @@ def get_trending(
     return {"items": annotated, "count": len(annotated)}
 
 
-@router.get("/new-releases")
+@router.get("/new-releases", response_model=DiscoveryListResponse, response_model_exclude_unset=True)
 def get_new_releases(
     limit: int = Query(default=25, ge=1, le=50),
     discovery: DiscoveryClient = Depends(get_discovery_client),
@@ -279,7 +287,7 @@ def get_new_releases(
     return {"items": annotated, "count": len(annotated)}
 
 
-@router.get("/search")
+@router.get("/search", response_model=DiscoverySearchResponse, response_model_exclude_unset=True)
 def search_discovery(
     q: str = Query(..., min_length=1),
     type: str = Query(default="all"),
@@ -296,7 +304,7 @@ def search_discovery(
     return {"items": annotated, "query": q, "type": type, "count": len(annotated)}
 
 
-@router.get("/album/{album_id}")
+@router.get("/album/{album_id}", response_model=DiscoveryAlbumDetail, response_model_exclude_unset=True)
 def get_album(
     album_id: str,
     discovery: DiscoveryClient = Depends(get_discovery_client),
@@ -333,7 +341,7 @@ def get_album(
     return annotated_album
 
 
-@router.get("/track/{track_id}")
+@router.get("/track/{track_id}", response_model=DiscoveryTrackDetail, response_model_exclude_unset=True)
 def get_track(
     track_id: str,
     discovery: DiscoveryClient = Depends(get_discovery_client),
@@ -359,7 +367,7 @@ def get_track(
     return annotate_item_statuses([dict(track)], db=db, plex_client=plex_client, config=config, user=_user)[0]
 
 
-@router.get("/artist/{artist_id}")
+@router.get("/artist/{artist_id}", response_model=DiscoveryArtistDetail, response_model_exclude_unset=True)
 def get_artist(
     artist_id: str,
     discovery: DiscoveryClient = Depends(get_discovery_client),
@@ -386,7 +394,7 @@ def get_artist(
     return artist_dict
 
 
-@router.get("/artist-profile")
+@router.get("/artist-profile", response_model=ArtistProfileResponse, response_model_exclude_unset=True)
 def get_artist_profile(
     discovery_id: Optional[str] = Query(default=None, min_length=1, max_length=200),
     library_artist_id: Optional[str] = Query(default=None, min_length=1, max_length=200),

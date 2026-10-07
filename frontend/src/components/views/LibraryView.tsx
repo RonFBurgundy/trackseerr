@@ -160,7 +160,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   );
 
   const openAlbumImport = useCallback(
-    (album: AlbumItem): void => setImportScope({ kind: 'album', albumId: String(album.id), title: album.title }),
+    (album: AlbumItem): void => setImportScope({ kind: 'album', albumId: String(album.id), title: album.title ?? '' }),
     []
   );
 

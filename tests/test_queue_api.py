@@ -365,3 +365,27 @@ def test_queue_api(app_and_client, test_db, test_config, seeded_users):
 
         resp_admin_cancel_alice = client.delete(f"/api/queue/{alice_dl['id']}", headers=admin_headers)
         assert resp_admin_cancel_alice.status_code == 200
+
+
+def test_download_client_masked_secret_round_trip(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    h = _auth_headers(seeded_users["admin"], test_db, test_config)
+    base = {"name": "C", "driver_type": "slskd", "host_url": "http://192.168.1.100:5030", "username": "u"}
+    created = client.post("/api/settings/download-clients", json={**base, "password": "hunter2-secret-9999"}, headers=h).json()
+    masked = created["password"]
+    assert masked and masked != "hunter2-secret-9999"
+
+    # Unchanged mask keeps the stored secret.
+    r = client.post("/api/settings/download-clients", json={**base, "id": created["id"], "password": masked}, headers=h)
+    assert r.status_code == 200, r.text
+    assert test_db.get_download_client(created["id"])["password"] == "hunter2-secret-9999"
+
+    # A half-edited placeholder is rejected, not silently reverted.
+    r = client.post("/api/settings/download-clients", json={**base, "id": created["id"], "password": "x" + masked}, headers=h)
+    assert r.status_code == 400
+    assert test_db.get_download_client(created["id"])["password"] == "hunter2-secret-9999"
+
+    # A new full value replaces it.
+    r = client.post("/api/settings/download-clients", json={**base, "id": created["id"], "password": "brand-new-pw"}, headers=h)
+    assert r.status_code == 200
+    assert test_db.get_download_client(created["id"])["password"] == "brand-new-pw"

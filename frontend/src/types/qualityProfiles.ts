@@ -1,3 +1,4 @@
+import type { Narrow, Schema } from './apiSchema';
 /** Native quality profiles (v2): an ordered list of qualities/groups (top = best) plus custom-format scoring. */
 export interface QualityEntryQuality {
   type: 'quality';
@@ -14,23 +15,9 @@ export interface QualityEntryGroup {
 
 export type QualityEntry = QualityEntryQuality | QualityEntryGroup;
 
-export interface FormatScore {
-  format_id: number;
-  score: number;
-}
+export type FormatScore = Schema<'FormatItemModel'>;
 
-export interface QualityProfile {
-  id: string;
-  name: string;
-  cutoff: string;
-  items: QualityEntry[];
-  upgrade_allowed: boolean;
-  min_format_score: number;
-  cutoff_format_score: number;
-  min_upgrade_format_score: number;
-  format_items: FormatScore[];
-  is_default: boolean;
-}
+export type QualityProfile = Narrow<Schema<'QualityProfileResponse'>, { items: QualityEntry[]; format_items: FormatScore[] }>;
 
 /** Body of POST /api/settings/quality-profiles (upsert; omit `id` to create). */
 export interface QualityProfileInput {

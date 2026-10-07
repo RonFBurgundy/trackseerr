@@ -18,7 +18,17 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+
+from plex_playlist_sync.api.response_models import ApiModel
+from plex_playlist_sync.api.schemas.system import (
+    JobQueueSnapshot,
+    LidarrHealthResponse,
+    LogEntry,
+    MediaServerStatus,
+    SuccessFlag,
+    SystemEventsPage,
+    TaskActionResult,
+)
 
 from plex_playlist_sync import art_pipeline, library_health, recycle_bin, seed_cleanup
 from plex_playlist_sync.acquisition_worker import acquisition_worker
@@ -173,7 +183,7 @@ def get_log_file_path(config: Optional[Config] = None, log_dir: Optional[str] = 
     return target_dir / "trackseerr.log"
 
 
-class DiskUsageItem(BaseModel):
+class DiskUsageItem(ApiModel):
     path: str
     label: str
     total_bytes: int
@@ -182,14 +192,14 @@ class DiskUsageItem(BaseModel):
     percent_used: float
 
 
-class DatabaseStatus(BaseModel):
+class DatabaseStatus(ApiModel):
     path: str
     size_bytes: int
     sqlite_version: str
     table_counts: dict[str, int]
 
 
-class ServicePingResult(BaseModel):
+class ServicePingResult(ApiModel):
     id: str
     name: str
     service_type: str
@@ -200,7 +210,7 @@ class ServicePingResult(BaseModel):
     message: str
 
 
-class PlexStatus(BaseModel):
+class PlexStatus(ApiModel):
     configured: bool
     url: Optional[str] = None
     music_section: Optional[str] = None
@@ -211,7 +221,7 @@ class PlexStatus(BaseModel):
     message: str
 
 
-class WorkerStatus(BaseModel):
+class WorkerStatus(ApiModel):
     acquisition_worker: dict[str, Any]
     lidarr_worker: dict[str, Any]
     sync_coordinator: dict[str, Any]
@@ -219,7 +229,7 @@ class WorkerStatus(BaseModel):
     rss_worker: Optional[dict[str, Any]] = None
 
 
-class EnvironmentStatus(BaseModel):
+class EnvironmentStatus(ApiModel):
     version: str = "1.0.0"
     python_version: str
     platform: str
@@ -227,7 +237,7 @@ class EnvironmentStatus(BaseModel):
     uptime_seconds: float
 
 
-class SystemStatusResponse(BaseModel):
+class SystemStatusResponse(ApiModel):
     environment: EnvironmentStatus
     storage: list[DiskUsageItem]
     database: DatabaseStatus
@@ -679,7 +689,7 @@ def _connected_media_client(config: Config) -> Optional[Any]:
     return get_plex_client(config)
 
 
-@router.get("/media-server", summary="Active media server and the features it enables")
+@router.get("/media-server", response_model=MediaServerStatus, response_model_exclude_unset=True, summary="Active media server and the features it enables")
 def get_media_server_status(
     config: Config = Depends(get_config),
 ) -> dict[str, Any]:
@@ -726,7 +736,7 @@ def get_system_status(
 # System Events & Logging Routes
 # -----------------------------------------------------------------------------
 
-@router.get("/events", summary="List system lifecycle events")
+@router.get("/events", response_model=SystemEventsPage, response_model_exclude_unset=True, summary="List system lifecycle events")
 def get_system_events(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
@@ -754,7 +764,7 @@ def get_system_events(
     }
 
 
-@router.delete("/events", summary="Clear system lifecycle events")
+@router.delete("/events", response_model=SuccessFlag, response_model_exclude_unset=True, summary="Clear system lifecycle events")
 def clear_system_events(
     db: Database = Depends(get_db),
     admin: dict[str, Any] = Depends(require_admin),
@@ -764,7 +774,7 @@ def clear_system_events(
     return {"success": True}
 
 
-@router.get("/logs", summary="Get recent in-memory system logs")
+@router.get("/logs", response_model=list[LogEntry], response_model_exclude_unset=True, summary="Get recent in-memory system logs")
 def get_system_logs(
     level: Optional[str] = None,
     search: Optional[str] = None,
@@ -816,7 +826,7 @@ async def stream_system_logs(
     )
 
 
-@router.delete("/logs", summary="Clear in-memory log buffer")
+@router.delete("/logs", response_model=SuccessFlag, response_model_exclude_unset=True, summary="Clear in-memory log buffer")
 def clear_system_logs(
     admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
@@ -854,7 +864,7 @@ def download_system_logs(
 # Scheduled Tasks Registry & Execution Routes
 # -----------------------------------------------------------------------------
 
-class ScheduledTaskItem(BaseModel):
+class ScheduledTaskItem(ApiModel):
     id: str
     name: str
     description: str
@@ -1114,7 +1124,7 @@ def get_scheduled_tasks(
     return get_all_scheduled_tasks(db, config)
 
 
-@router.post("/tasks/{task_id}/run", summary="Trigger a scheduled task manually")
+@router.post("/tasks/{task_id}/run", response_model=TaskActionResult, response_model_exclude_unset=True, summary="Trigger a scheduled task manually")
 def run_scheduled_task(
     task_id: str,
     db: Database = Depends(get_db),
@@ -1296,6 +1306,7 @@ def run_scheduled_task(
 
 @router.get(
     "/queue",
+    response_model=JobQueueSnapshot, response_model_exclude_unset=True,
     summary="Running, queued and recently finished background jobs",
     dependencies=[Depends(require_core_tier)],
 )
@@ -1306,6 +1317,7 @@ def get_job_queue(_admin: dict[str, Any] = Depends(require_admin)) -> dict[str, 
 
 @router.get(
     "/lidarr-health",
+    response_model=LidarrHealthResponse, response_model_exclude_unset=True,
     summary="Lidarr reachability, version and health checks",
     dependencies=[Depends(require_core_tier)],
 )
@@ -1339,7 +1351,7 @@ def get_lidarr_health(
         return unreachable
 
 
-@router.post("/tasks/{task_id}/cancel", summary="Cancel a running scheduled task")
+@router.post("/tasks/{task_id}/cancel", response_model=TaskActionResult, response_model_exclude_unset=True, summary="Cancel a running scheduled task")
 def cancel_scheduled_task(
     task_id: str,
     db: Database = Depends(get_db),

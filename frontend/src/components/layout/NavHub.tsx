@@ -252,7 +252,7 @@ const HubPanel: React.FC<NavHubProps> = ({
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-mono font-semibold text-white truncate">{user.plex_username}</span>
+                    <span className="text-xs font-mono font-semibold text-white truncate">{user.username}</span>
                     {user.is_admin && <Shield className="h-3 w-3 text-[#e5a00d] flex-shrink-0" />}
                   </div>
                   <span className="text-[10px] font-mono text-neutral-400">

@@ -6,15 +6,17 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from plex_playlist_sync.api.response_models import ApiModel
 
 from plex_playlist_sync.api.dependencies import get_db, require_admin
+from plex_playlist_sync.api.schemas.notifications import DeletedResponse
 from plex_playlist_sync.models import (
     NotificationChannel,
     NotificationChannelType,
     NotificationEvent,
 )
 from plex_playlist_sync.notifications import notification_dispatcher
-from plex_playlist_sync.security import is_safe_service_url, mask_channel_config
+from plex_playlist_sync.security import MASK_MARKER, is_safe_service_url, mask_channel_config, resolve_masked_value
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -22,7 +24,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-class NotificationChannelItem(BaseModel):
+class NotificationChannelItem(ApiModel):
     id: str
     name: str
     channel_type: str
@@ -48,7 +50,7 @@ class TestNotificationPayload(BaseModel):
     channel_id: Optional[str] = None
 
 
-class TestNotificationResponse(BaseModel):
+class TestNotificationResponse(ApiModel):
     success: bool
     message: str
 
@@ -175,13 +177,8 @@ def update_notification_channel(
         )
 
     # Merge credentials to preserve existing secrets if payload value is masked
-    new_cfg = dict(payload.config)
     existing_cfg = existing.get("config") or {}
-    for k, v in existing_cfg.items():
-        if k not in new_cfg:
-            new_cfg[k] = v
-        elif isinstance(new_cfg[k], str) and "•••" in new_cfg[k]:
-            new_cfg[k] = v
+    new_cfg = _merge_masked_config(payload.config, existing_cfg, existing.get("channel_type", ""))
 
     # Validate webhook URLs against SSRF
     if "webhook_url" in new_cfg and new_cfg["webhook_url"]:
@@ -220,6 +217,8 @@ def update_notification_channel(
 
 @router.delete(
     "/{channel_id}",
+    response_model=DeletedResponse,
+    response_model_exclude_unset=True,
     summary="Delete notification channel",
 )
 def delete_notification_channel(
@@ -235,6 +234,37 @@ def delete_notification_channel(
             detail=f"Notification channel '{channel_id}' not found",
         )
     return {"status": "deleted", "id": channel_id}
+
+
+_URL_KEYS = ("webhook_url", "url")
+
+
+def _masked(existing: dict[str, Any], key: str) -> Any:
+    return mask_channel_config(existing.get("channel_type", ""), existing.get("config") or {}).get(key)
+
+
+def _reject_placeholders(cfg: dict[str, Any]) -> None:
+    for k, v in cfg.items():
+        if isinstance(v, str) and MASK_MARKER in v:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{k}' contains a masked placeholder; enter the full value",
+            )
+
+
+def _merge_masked_config(submitted: dict[str, Any], existing_cfg: dict[str, Any], channel_type: str) -> dict[str, Any]:
+    """Fill omitted keys from the stored config; keep stored values only for an exactly-echoed mask."""
+    masked_cfg = mask_channel_config(channel_type, existing_cfg)
+    merged = dict(submitted)
+    for k, v in existing_cfg.items():
+        if k not in merged:
+            merged[k] = v
+            continue
+        try:
+            merged[k] = resolve_masked_value(merged[k], v, masked_cfg.get(k), k)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return merged
 
 
 @router.post(
@@ -255,11 +285,15 @@ def test_notification_channel(
         existing = db.get_notification_channel(payload.channel_id)
         if existing:
             existing_cfg = existing.get("config") or {}
-            for k, v in existing_cfg.items():
-                if k not in test_cfg:
-                    test_cfg[k] = v
-                elif isinstance(test_cfg[k], str) and "•••" in test_cfg[k]:
-                    test_cfg[k] = v
+            # Stored secrets are only ever sent to the stored destination: a changed URL gets none of them.
+            same_destination = all(
+                test_cfg.get(k) in (None, existing_cfg.get(k)) or test_cfg.get(k) == _masked(existing, k)
+                for k in _URL_KEYS
+            )
+            if same_destination:
+                test_cfg = _merge_masked_config(test_cfg, existing_cfg, existing.get("channel_type", ""))
+            else:
+                _reject_placeholders(test_cfg)
 
     if "webhook_url" in test_cfg and test_cfg["webhook_url"]:
         clean_url = str(test_cfg["webhook_url"]).strip()

@@ -1,14 +1,5 @@
-/** Term-based release profiles: required (OR within a profile) and ignored (any match rejects) terms. */
-export interface ReleaseProfile {
-  id: number;
-  name: string;
-  enabled: boolean;
-  required: string[];
-  ignored: string[];
-  indexer_ids: string[];
-  tags: string[];
-  quality_profile_ids: string[];
-}
+import type { Narrow, Schema } from './apiSchema';
+export type ReleaseProfile = Narrow<Schema<'ReleaseProfileResponse'>, { indexer_ids: string[]; tags: string[] }>;
 
 export interface ReleaseProfileInput {
   name: string;

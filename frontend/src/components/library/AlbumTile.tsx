@@ -76,11 +76,11 @@ export const AlbumTile: React.FC<AlbumTileProps> = React.memo(({ album, monitore
     <div className="p-1.5 space-y-0.5">
       <h4
         className="font-bold text-xs leading-4 text-white truncate group-hover:text-[var(--accent-amber)] transition-colors"
-        title={album.title}
+        title={album.title ?? undefined}
       >
         {album.title}
       </h4>
-      <p className="text-[10px] leading-[14px] text-neutral-400 font-mono truncate" title={album.artist_name}>
+      <p className="text-[10px] leading-[14px] text-neutral-400 font-mono truncate" title={album.artist_name ?? undefined}>
         {album.artist_name || 'Unknown artist'}
         {album.release_date ? ` (${album.release_date.slice(0, 4)})` : ''}
       </p>

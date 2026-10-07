@@ -5,8 +5,10 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
+from plex_playlist_sync.api.response_models import ApiModel
 
 from plex_playlist_sync.api.dependencies import get_db, require_admin
+from plex_playlist_sync.api.schemas.queue import QueueCancelResponse
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver
 from plex_playlist_sync.models import DownloadStatus
 from plex_playlist_sync.storage import Database
@@ -16,7 +18,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-class QueueItemResponse(BaseModel):
+class QueueItemResponse(ApiModel):
     id: str
     request_id: Optional[str] = None
     client_id: str
@@ -36,6 +38,23 @@ class QueueItemResponse(BaseModel):
     eta_seconds: Optional[int] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    track_id: Optional[str] = None
+    album_id: Optional[str] = None
+    progress_updated_at: Optional[str] = None
+    indexer: Optional[str] = None
+    indexer_id: Optional[str] = None
+    quality: Optional[str] = None
+    protocol: Optional[str] = None
+    unmatched_files: list[str] = []
+    placed_files: list[str] = []
+    placed_mode: Optional[str] = None
+    seed_ratio_target: Optional[float] = None
+    seed_time_target_minutes: Optional[int] = None
+    seed_rule_source: Optional[str] = None
+    seed_ratio_current: Optional[float] = None
+    seeding_seconds: Optional[int] = None
+    cleanup_attempts: int = 0
+    cleanup_error: Optional[str] = None
 
 
 @router.get("", response_model=list[QueueItemResponse], summary="List active download queue")
@@ -60,7 +79,7 @@ def get_queue(
     return items
 
 
-@router.delete("/{download_id}", summary="Cancel and remove download from queue")
+@router.delete("/{download_id}", response_model=QueueCancelResponse, response_model_exclude_unset=True, summary="Cancel and remove download from queue")
 def cancel_download(
     download_id: str,
     db: Database = Depends(get_db),

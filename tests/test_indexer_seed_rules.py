@@ -34,6 +34,7 @@ from plex_playlist_sync.seed_rules import (
     resolve_seed_targets,
     seed_rule_conflict,
 )
+from plex_playlist_sync.security import mask_secret
 from plex_playlist_sync.storage import SCHEMA_VERSION, Database
 
 
@@ -436,11 +437,34 @@ def test_indexer_test_route_uses_stored_key_for_masked_key(client: TestClient, h
     driver = MagicMock()
     driver.test_connection.return_value = (True, "ok")
     with patch("plex_playlist_sync.api.routes.indexers.get_indexer_driver", return_value=driver) as gid:
-        for key in ("abcd•••••wxyz", ""):
+        for key in (mask_secret("real-secret"), ""):
             resp = client.post("/api/settings/indexers/test", headers=headers,
                                json={"id": "ix1", "host_url": "http://192.168.1.5:9696/api", "api_key": key})
             assert resp.status_code == 200 and resp.json()["success"] is True
             assert gid.call_args.args[0]["api_key"] == "real-secret"
+
+
+def test_indexer_test_route_never_sends_stored_key_to_a_new_host(client: TestClient, headers: dict[str, str], db: Database):
+    _indexer(db, api_key="real-secret")
+    with patch("plex_playlist_sync.api.routes.indexers.get_indexer_driver") as gid:
+        resp = client.post("/api/settings/indexers/test", headers=headers,
+                           json={"id": "ix1", "host_url": "http://192.168.1.99:9696/api", "api_key": mask_secret("real-secret")})
+        assert resp.status_code == 400
+        gid.assert_not_called()
+        gid.return_value.test_connection.return_value = (True, "ok")
+        resp = client.post("/api/settings/indexers/test", headers=headers,
+                           json={"id": "ix1", "host_url": "http://192.168.1.99:9696/api", "api_key": ""})
+        assert resp.status_code == 200
+        assert gid.call_args.args[0]["api_key"] == ""
+
+
+def test_indexer_test_route_edited_mask_is_400(client: TestClient, headers: dict[str, str], db: Database):
+    _indexer(db, api_key="real-secret")
+    with patch("plex_playlist_sync.api.routes.indexers.get_indexer_driver") as gid:
+        resp = client.post("/api/settings/indexers/test", headers=headers,
+                           json={"id": "ix1", "host_url": "http://192.168.1.5:9696/api", "api_key": "abcd•••••wxyz"})
+    assert resp.status_code == 400
+    gid.assert_not_called()
 
 
 def test_indexer_test_route_unknown_id_with_masked_key_is_400(client: TestClient, headers: dict[str, str]):
