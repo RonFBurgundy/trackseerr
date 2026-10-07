@@ -55,7 +55,7 @@ NOT_IN_PROFILE_MESSAGE = "Not available with your Lidarr metadata profile"
 ALBUMS_PENDING_MESSAGE = "Lidarr has not finished loading this artist's releases yet"
 MONITOR_FAILED_MESSAGE = "Lidarr did not keep the album monitored"
 
-ALBUM_WAIT_ATTEMPTS = 6
+ALBUM_WAIT_ATTEMPTS = 10
 ALBUM_WAIT_SECONDS = 3.0
 DEFAULTS_TTL_SECONDS = 300.0
 _MAX_PER_ALBUM_TRACK_FETCHES = 200

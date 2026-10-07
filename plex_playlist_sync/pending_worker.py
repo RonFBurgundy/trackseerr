@@ -12,7 +12,7 @@ from typing import Any, Optional
 from plex_playlist_sync import delay_gate
 from plex_playlist_sync.acquisition_coordinator import _extract_info_hash, acquisition_coordinator
 from plex_playlist_sync.item_history import TRIGGER_SYSTEM, TRIGGER_UPGRADE, GrabTrigger
-from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_guard
+from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, retry_stuck_lidarr_requests, work_guard
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -235,6 +235,7 @@ class PendingReleaseWorker:
                     try:
                         stats = release_due(db)
                         self.released += stats["released"]
+                        retry_stuck_lidarr_requests(db)  # Lidarr mode only; never raises
                     except sqlite3.Error as exc:
                         self.errors += 1
                         logger.error("PendingReleaseWorker tick failed: %s", exc)

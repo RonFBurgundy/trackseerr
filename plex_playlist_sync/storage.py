@@ -76,7 +76,7 @@ def clean_library_name(text: str) -> str:
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
 SEED_COMPLETE_ACTIONS = ("keep", "remove", "remove_and_delete")
-SCHEMA_VERSION = 65  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 66  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:
@@ -162,6 +162,34 @@ def lidarr_retry_delay(status: str, attempts: int) -> Optional[timedelta]:
         index = max(1, int(attempts)) - 1
         return LIDARR_ERROR_BACKOFF[index] if index < len(LIDARR_ERROR_BACKOFF) else LIDARR_WEEKLY_RETRY
     return None
+
+
+# Retry schedule for approved requests whose Lidarr outcome left them stuck (see ``Database.set_request_outcome``).
+REQUEST_RETRY_BACKOFF: dict[str, tuple[timedelta, ...]] = {
+    "albums_pending": (timedelta(minutes=2), timedelta(minutes=5), timedelta(minutes=15), timedelta(hours=1), timedelta(hours=6)),
+    "rate_limited": (timedelta(minutes=5), timedelta(minutes=30), timedelta(hours=2)),
+    "monitor_failed": (timedelta(minutes=15), timedelta(hours=1), timedelta(hours=6)),
+}
+REQUEST_RETRY_TAIL = timedelta(hours=24)
+REQUEST_FAST_RETRY_REASONS = tuple(REQUEST_RETRY_BACKOFF)
+
+
+def request_retry_delay(reason: str, attempts: int, retry_after: Optional[float] = None) -> Optional[timedelta]:
+    """Delay before re-sending a request stuck with ``reason`` after ``attempts`` tries (``None`` = not retried).
+
+    ``not_in_metadata_profile`` is re-checked weekly like a missing track. For ``rate_limited`` a known
+    ``retry_after`` (seconds) is honoured when it is longer than the scheduled delay.
+    """
+    if reason == "not_in_metadata_profile":
+        return LIDARR_WEEKLY_RETRY
+    steps = REQUEST_RETRY_BACKOFF.get(reason)
+    if steps is None:
+        return None
+    index = max(1, int(attempts)) - 1
+    delay = steps[index] if index < len(steps) else REQUEST_RETRY_TAIL
+    if reason == "rate_limited" and retry_after and retry_after > 0:
+        delay = max(delay, timedelta(seconds=float(retry_after)))
+    return delay
 
 
 def lidarr_item_due(row: dict[str, Any], now: Optional[datetime] = None) -> bool:
@@ -364,6 +392,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                 (63, self._migration_v63),
                 (64, self._migration_v64),
                 (65, self._migration_v65),
+                (66, self._migration_v66),
             ]
 
             applied = 0
@@ -1977,6 +2006,15 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
             cur.execute("ALTER TABLE playlists ADD COLUMN source_ref TEXT;")
         if "auto_request" not in have:
             cur.execute("ALTER TABLE playlists ADD COLUMN auto_request INTEGER NOT NULL DEFAULT 0;")
+
+    def _migration_v66(self, cur: sqlite3.Cursor) -> None:
+        """Request retry schedule: attempts so far and when a stuck Lidarr request is next re-sent."""
+        cur.execute("PRAGMA table_info(music_requests);")
+        have = {row[1] for row in cur.fetchall()}
+        if "retry_attempts" not in have:
+            cur.execute("ALTER TABLE music_requests ADD COLUMN retry_attempts INTEGER NOT NULL DEFAULT 0;")
+        if "next_attempt_at" not in have:
+            cur.execute("ALTER TABLE music_requests ADD COLUMN next_attempt_at TEXT;")
 
     def _migration_v37(self, cur: sqlite3.Cursor) -> None:
         """Import lists, per-playlist monitor mode and the missing-track "already applied" marker."""
@@ -4365,7 +4403,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                        r.cover_url, r.preview_url, r.status, r.release_date, r.foreign_id,
                        r.quality_profile_id, r.current_quality, r.cutoff_met,
                        r.created_at, r.updated_at, r.batch_id, r.batch_kind, r.status_reason, r.status_message,
-                       r."trigger", r.trigger_ref, r.trigger_label, u.username
+                       r.next_attempt_at, r."trigger", r.trigger_ref, r.trigger_label, u.username
                 FROM music_requests r
                 LEFT JOIN users u ON r.user_id = u.id
                 WHERE r.id = ?
@@ -4392,7 +4430,8 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
             SELECT r.id, r.user_id, r.item_type, r.title, r.artist, r.album,
                    r.cover_url, r.preview_url, r.status, r.release_date, r.foreign_id,
                    r.quality_profile_id, r.current_quality, r.cutoff_met,
-                   r.created_at, r.updated_at, r.batch_id, r.batch_kind, r.status_reason, r.status_message, u.username
+                   r.created_at, r.updated_at, r.batch_id, r.batch_kind, r.status_reason, r.status_message,
+                   r.next_attempt_at, u.username
             FROM music_requests r
             LEFT JOIN users u ON r.user_id = u.id
             WHERE 1=1
@@ -4462,7 +4501,8 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
             cur = self.conn.execute(
                 """
                 UPDATE music_requests
-                SET status = ?, status_reason = NULL, status_message = NULL, updated_at = CURRENT_TIMESTAMP
+                SET status = ?, status_reason = NULL, status_message = NULL, retry_attempts = 0, next_attempt_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
                 (status_val, str(request_id)),
@@ -4470,19 +4510,89 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
             self.conn.commit()
             return cur.rowcount > 0
 
-    def set_request_outcome(self, request_id: str, reason: Optional[str], message: Optional[str]) -> bool:
-        """Records (or with ``None`` clears) why a request is stuck, leaving its status as it is."""
+    def set_request_outcome(
+        self,
+        request_id: str,
+        reason: Optional[str],
+        message: Optional[str],
+        retry_after: Optional[float] = None,
+        schedule: bool = True,
+    ) -> bool:
+        """Records (or with ``None`` clears) why a request is stuck, leaving its status as it is.
+
+        A reason with a retry policy also bumps ``retry_attempts`` and schedules ``next_attempt_at``; clearing
+        the reason clears the schedule. ``schedule=False`` records the reason only (native mode: the backlog sweep,
+        not this schedule, retries those requests, so no retry time is shown).
+        """
         with self._lock:
+            if reason is None or not schedule:
+                cur = self.conn.execute(
+                    """
+                    UPDATE music_requests
+                    SET status_reason = ?, status_message = ?, retry_attempts = 0, next_attempt_at = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (reason, message, str(request_id)),
+                )
+            else:
+                row = self.conn.execute(
+                    "SELECT retry_attempts FROM music_requests WHERE id = ?", (str(request_id),)
+                ).fetchone()
+                attempts = (int(row[0] or 0) if row else 0) + 1
+                delay = request_retry_delay(reason, attempts, retry_after)
+                due = (datetime.now(timezone.utc) + delay).strftime(_RETRY_TS_FORMAT) if delay else None
+                cur = self.conn.execute(
+                    """
+                    UPDATE music_requests
+                    SET status_reason = ?, status_message = ?, retry_attempts = ?, next_attempt_at = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (reason, message, attempts, due, str(request_id)),
+                )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def defer_request_retry(self, request_id: str) -> bool:
+        """Counts one more retry attempt and pushes ``next_attempt_at`` out, keeping the recorded reason and message."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT status_reason, retry_attempts FROM music_requests WHERE id = ?", (str(request_id),)
+            ).fetchone()
+            if not row or not row[0]:
+                return False
+            attempts = int(row[1] or 0) + 1
+            delay = request_retry_delay(str(row[0]), attempts)
+            due = (datetime.now(timezone.utc) + delay).strftime(_RETRY_TS_FORMAT) if delay else None
             cur = self.conn.execute(
-                """
-                UPDATE music_requests
-                SET status_reason = ?, status_message = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """,
-                (reason, message, str(request_id)),
+                "UPDATE music_requests SET retry_attempts = ?, next_attempt_at = ? WHERE id = ?",
+                (attempts, due, str(request_id)),
             )
             self.conn.commit()
             return cur.rowcount > 0
+
+    def list_requests_due_for_retry(
+        self, now: Optional[datetime] = None, limit: int = 25, ignore_schedule: bool = False
+    ) -> list[dict[str, Any]]:
+        """Approved requests stuck on a retryable Lidarr outcome whose ``next_attempt_at`` has passed.
+
+        ``ignore_schedule`` (the manual "run now") returns every such request regardless of its retry time.
+        """
+        current = (now or datetime.now(timezone.utc)).strftime(_RETRY_TS_FORMAT)
+        reasons = (*REQUEST_FAST_RETRY_REASONS, "not_in_metadata_profile")
+        with self._lock:
+            cur = self.conn.execute(
+                f"""
+                SELECT id, artist, album, title, item_type, status_reason, retry_attempts, next_attempt_at
+                FROM music_requests
+                WHERE status = 'processing' AND (? OR (next_attempt_at IS NOT NULL AND next_attempt_at <= ?))
+                  AND status_reason IN ({','.join('?' * len(reasons))})
+                ORDER BY next_attempt_at ASC LIMIT ?
+                """,
+                (1 if ignore_schedule else 0, current, *reasons, int(limit)),
+            )
+            return [dict(r) for r in cur.fetchall()]
 
     def delete_request(self, request_id: str) -> bool:
         """Deletes a request by ID."""

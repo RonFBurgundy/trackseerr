@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { RequestItem, UserQuota } from '@/types/models';
+import type { Schema } from '@/types/apiSchema';
 import {
   getRequests,
   getUserQuota,
@@ -7,6 +8,7 @@ import {
   approveRequest as apiApproveRequest,
   rejectRequest as apiRejectRequest,
   deleteRequest as apiDeleteRequest,
+  retryRequest as apiRetryRequest,
 } from '@/services/requestService';
 
 export type RequestFilter = 'all' | 'pending' | 'approved' | 'fulfilled' | 'rejected';
@@ -34,6 +36,7 @@ export interface UseRequestsReturn {
   approve: (id: string) => Promise<void>;
   reject: (id: string, reason?: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
+  retry: (id: string) => Promise<Schema<'RetryResult'>>;
   refresh: () => Promise<void>;
 }
 
@@ -135,6 +138,18 @@ export function useRequests(): UseRequestsReturn {
     [refresh]
   );
 
+  const retry = useCallback(
+    async (id: string) => {
+      setError(null);
+      try {
+        return await apiRetryRequest(id);
+      } finally {
+        await refresh();
+      }
+    },
+    [refresh]
+  );
+
   return {
     requests,
     quota,
@@ -146,6 +161,7 @@ export function useRequests(): UseRequestsReturn {
     approve,
     reject,
     remove,
+    retry,
     refresh,
   };
 }

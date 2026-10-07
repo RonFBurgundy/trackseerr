@@ -10846,6 +10846,8 @@ export interface components {
             id: string;
             /** Item Type */
             item_type: string;
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
             /** Preview Url */
             preview_url?: string | null;
             /** Quality Profile Id */

@@ -43,3 +43,14 @@ export function relativeTime(iso: string | null | undefined, now: number = Date.
   if (days < 30) return `${days}d ago`;
   return new Date(then).toLocaleDateString();
 }
+
+/** Compact future time ("in 5m", "in 2h", "in 3d") for a server timestamp; "soon" when due or invalid. */
+export function untilTime(iso: string | null | undefined, now: number = Date.now()): string {
+  const at = parseServerTimestamp(iso);
+  if (at === null) return 'soon';
+  const minutes = Math.round((at - now) / 60000);
+  if (minutes < 1) return 'soon';
+  if (minutes < 60) return `in ${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `in ${hours}h` : `in ${Math.round(hours / 24)}d`;
+}

@@ -62,6 +62,7 @@ from plex_playlist_sync.media_servers.base import MediaServer
 from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.config import MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_SUBSONIC, Config
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result, track_job
+from plex_playlist_sync import library_manager
 from plex_playlist_sync.library_manager import MODE_LIDARR, MODE_NATIVE, build_lidarr_client, get_library_mode
 from plex_playlist_sync.library_scanner import library_scanner
 from plex_playlist_sync.media_server import media_server_status
@@ -887,6 +888,7 @@ VALID_TASK_IDS = {
     "seed_cleanup",
     "library_health",
     "recycle_bin_cleanup",
+    "lidarr_request_retry",
 }
 
 _running_tasks: set[str] = set()
@@ -1111,6 +1113,21 @@ def get_all_scheduled_tasks(
         )
     )
 
+    # 12. lidarr_request_retry: re-sends approved requests Lidarr left stuck (Lidarr mode only)
+    if get_library_mode(db) == MODE_LIDARR:
+        tasks.append(
+            ScheduledTaskItem(
+                id="lidarr_request_retry",
+                name="Retry Stuck Lidarr Requests",
+                description="Re-sends approved requests Lidarr could not finish yet (releases still loading, rate limits, failed monitoring) on a backoff schedule.",
+                interval="Every 1m",
+                status="running" if "lidarr_request_retry" in _running_tasks else "idle",
+                last_run_at=library_manager.last_retry_sweep_at or _task_last_run_at.get("lidarr_request_retry"),
+                can_trigger=True,
+                can_cancel=False,
+            )
+        )
+
     return tasks
 
 
@@ -1144,6 +1161,12 @@ def run_scheduled_task(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Library manager is set to TrackSeerr; the Lidarr trickle is disabled.",
+        )
+
+    if task_id == "lidarr_request_retry" and get_library_mode(db) != MODE_LIDARR:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Library manager is set to TrackSeerr; there are no Lidarr requests to retry.",
         )
 
     if task_id == "seed_cleanup":
@@ -1255,6 +1278,18 @@ def run_scheduled_task(
                     _running_tasks.discard("lidarr_auto_trickle")
 
         threading.Thread(target=_lidarr_thread, daemon=True, name="ManualLidarrTask").start()
+
+    elif task_id == "lidarr_request_retry":
+        def _request_retry_thread():
+            with _tasks_lock:
+                _running_tasks.add("lidarr_request_retry")
+            try:
+                library_manager.retry_stuck_lidarr_requests(db, config, ignore_schedule=True)
+            finally:
+                with _tasks_lock:
+                    _running_tasks.discard("lidarr_request_retry")
+
+        threading.Thread(target=_request_retry_thread, daemon=True, name="ManualRequestRetryTask").start()
 
     elif task_id == "download_queue_monitor":
         def _acq_thread():
