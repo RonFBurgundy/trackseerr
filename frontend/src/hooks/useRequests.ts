@@ -40,7 +40,8 @@ export interface UseRequestsReturn {
   refresh: () => Promise<void>;
 }
 
-export function useRequests(): UseRequestsReturn {
+/** `enabled` must stay false until the user is signed in: every request route needs a session. */
+export function useRequests(enabled: boolean = true): UseRequestsReturn {
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [quota, setQuota] = useState<UserQuota | null>(null);
   const [filter, setFilter] = useState<RequestFilter>('all');
@@ -66,8 +67,9 @@ export function useRequests(): UseRequestsReturn {
   }, [filter]);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    if (!enabled) return;
+    void refresh();
+  }, [enabled, refresh]);
 
   const submitRequest = useCallback(
     async (item: RequestableItem) => {

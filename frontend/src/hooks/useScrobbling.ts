@@ -18,7 +18,9 @@ import {
   updateScrobbleServerConfig,
   getWebhookUrl,
   rotateWebhookSecret,
+  completeLastfm,
 } from '@/services/scrobbleService';
+import { ApiError } from '@/services/apiClient';
 
 export type ScrobbleNoticeKind = 'success' | 'error';
 
@@ -51,9 +53,37 @@ export interface UseScrobblingReturn {
 }
 
 const ERROR_MESSAGES: Record<string, string> = {
-  state: 'Last.fm connection expired or was invalid. Please try again.',
+  state_user: 'That Last.fm connection was started by a different TrackSeerr account. Start it again from your own account.',
+  state: 'This Last.fm connection link is unknown or was already used. Start the connection again.',
+  state_expired: 'The Last.fm connection took longer than 10 minutes. Start the connection again.',
+  user: 'Your account could not be found or is disabled, so Last.fm was not connected.',
   lastfm: 'Last.fm rejected the connection. Please try again.',
 };
+
+/** Reads the Last.fm return params, then strips them from the URL so the token never lingers there. */
+function consumeLastfmParams(): { state: string; token: string } | null {
+  if (typeof window === 'undefined') return null;
+  const url = new URL(window.location.href);
+  const state = url.searchParams.get('lastfm_state');
+  const token = url.searchParams.get('lastfm_token');
+  if (state === null && token === null) return null;
+  url.searchParams.delete('lastfm_state');
+  url.searchParams.delete('lastfm_token');
+  const qs = url.searchParams.toString();
+  window.history.replaceState(null, '', `${url.pathname}${qs ? `?${qs}` : ''}${url.hash}`);
+  return state && token ? { state, token } : null;
+}
+
+/** The server's machine-readable `detail.reason` of a failed completion, if present. */
+function completeReason(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null;
+  const detail = err.detail;
+  if (typeof detail === 'object' && detail !== null && 'reason' in detail) {
+    const reason = (detail as { reason?: unknown }).reason;
+    return typeof reason === 'string' ? reason : null;
+  }
+  return null;
+}
 
 function errMsg(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
@@ -98,6 +128,24 @@ export function useScrobbling(isAdmin: boolean): UseScrobblingReturn {
   }, []);
 
   useEffect(() => {
+    const pending = consumeLastfmParams();
+    if (pending) {
+      // Return trip from last.fm: finish it under THIS browser session (the server checks the state is ours).
+      void (async () => {
+        try {
+          await completeLastfm(pending.state, pending.token);
+          setConfig(await getScrobbleConfig());
+          setNotice({ kind: 'success', message: 'Last.fm connected. Your listens will now be scrobbled.' });
+        } catch (err) {
+          const reason = completeReason(err);
+          setNotice({
+            kind: 'error',
+            message: (reason !== null ? ERROR_MESSAGES[reason] : undefined) ?? errMsg(err, 'Last.fm connection failed.'),
+          });
+        }
+      })();
+      return;
+    }
     const urlNotice = consumeUrlNotice();
     if (urlNotice) setNotice(urlNotice);
   }, []);

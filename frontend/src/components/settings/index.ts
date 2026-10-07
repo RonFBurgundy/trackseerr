@@ -2,6 +2,7 @@ export * from './settingsTabs';
 export * from './SettingsNav';
 export * from './InactiveGate';
 export * from './LibraryManagerSwitch';
+export * from './ModeSwitchConfirm';
 export * from './GeneralPanel';
 export * from './MediaFoldersPanel';
 export * from './RecycleBinSection';

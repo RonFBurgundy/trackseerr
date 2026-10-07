@@ -17,6 +17,7 @@ export * from './useGatewayStatus';
 export * from './useRoleChangeNotice';
 export * from './useStartupStatus';
 export * from './useLibraryManager';
+export * from './useLibraryModeSwitch';
 export * from './useLidarrDefaults';
 export * from './useSettingsData';
 export * from './useSystemQueue';

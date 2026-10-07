@@ -65,7 +65,7 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
                   <tr key={task.id} className="hover:bg-[#141414] transition-colors max-md:flex max-md:flex-col max-md:gap-2.5 max-md:p-4">
                     <td className="py-2 px-3 md:py-3.5 md:px-4 min-w-[200px] max-md:min-w-0 max-md:p-0">
                       <span className="font-bold text-sm text-white block">{task.name}</span>
-                      <span className="text-[11px] text-neutral-400 block mt-0.5 line-clamp-2">{task.description}</span>
+                      <span className="text-[11px] text-neutral-400 block mt-0.5">{task.description}</span>
                     </td>
                     <td data-label="Interval" className="py-2 px-3 md:py-3.5 md:px-4 whitespace-nowrap max-md:flex max-md:items-center max-md:justify-between max-md:p-0 before:content-[attr(data-label)] before:text-[10px] before:uppercase before:tracking-wider before:text-neutral-500 md:before:hidden">
                       <span className="px-2 py-0.5 rounded-[2px] bg-[#181818] text-[10px] text-neutral-300 border border-[#282828]">

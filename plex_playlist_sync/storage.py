@@ -9215,26 +9215,33 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
             self.conn.commit()
         return state
 
-    def consume_lastfm_auth_state(self, state: str) -> Optional[dict[str, Any]]:
-        """Atomically delete and return ``{user_id, forward_url}``; None if unknown, reused or older than 10 minutes."""
+    def take_lastfm_auth_state(self, state: str) -> tuple[Optional[dict[str, Any]], str]:
+        """Atomically delete a state and report why it was or was not usable.
+
+        Returns ``(record, "ok")`` with ``{user_id, forward_url}``, or ``(None, "unknown")`` for a missing,
+        reused or empty state, or ``(None, "expired")`` when it is older than 10 minutes. Freshness is computed
+        in Python so any stored timestamp shape (space or ``T`` separator, ``Z`` or an offset) is understood;
+        SQLite's ``datetime()`` returns NULL for some of those, which would make every state look stale.
+        """
         if not state:
-            return None
+            return None, "unknown"
         with self._lock:
             row = self.conn.execute(
-                """
-                SELECT user_id, forward_url,
-                       datetime(created_at) >= datetime('now', '-10 minutes') AS fresh
-                FROM lastfm_auth_states WHERE state = ?
-                """,
+                "SELECT user_id, forward_url, created_at FROM lastfm_auth_states WHERE state = ?",
                 (state,),
             ).fetchone()
             if not row:
-                return None
+                return None, "unknown"
             self.conn.execute("DELETE FROM lastfm_auth_states WHERE state = ?", (state,))
             self.conn.commit()
-            if not row["fresh"]:
-                return None
-            return {"user_id": row["user_id"], "forward_url": row["forward_url"]}
+        created_us = ts_to_us(row["created_at"])
+        if created_us <= 0 or _now_us() - created_us > 10 * 60 * 1_000_000:
+            return None, "expired"
+        return {"user_id": row["user_id"], "forward_url": row["forward_url"]}, "ok"
+
+    def consume_lastfm_auth_state(self, state: str) -> Optional[dict[str, Any]]:
+        """Atomically delete and return ``{user_id, forward_url}``; None if unknown, reused or older than 10 minutes."""
+        return self.take_lastfm_auth_state(state)[0]
 
     # -------------------------------------------------------------------------
     # Scrobbling: listens

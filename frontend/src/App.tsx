@@ -95,9 +95,9 @@ const MainApp: React.FC = () => {
           !accountHook.account.mfa_enabled
       ));
   const audioPlayer = useAudioPlayer();
-  const discovery = useDiscovery();
-  const requestsHook = useRequests();
-  const issuesHook = useIssues(auth.user?.id);
+  const discovery = useDiscovery(auth.isAuthenticated);
+  const requestsHook = useRequests(auth.isAuthenticated);
+  const issuesHook = useIssues(auth.user?.id, auth.isAuthenticated);
   const issueCounts = useIssueCounts(auth.isAuthenticated && !mfaEnrollmentRequired, auth.canUseAdminUi);
   const libraryHook = useLibrary(auth.canUseAdminUi);
   const reviewHealth = useLibraryHealthCount(auth.canUseAdminUi);

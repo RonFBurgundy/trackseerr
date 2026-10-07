@@ -22,6 +22,11 @@ class AuthUrl(ApiModel):
     url: str
 
 
+class LastfmComplete(ApiModel):
+    connected: bool
+    username: str
+
+
 class ScrobbleConfig(ApiModel):
     user_id: str
     username: Optional[str] = None

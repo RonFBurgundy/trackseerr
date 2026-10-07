@@ -115,7 +115,10 @@ export async function apiRequest<T>(
   });
 
   if (response.status === 401 && !passthroughUnauthorized) {
-    if (typeof window !== 'undefined') {
+    // A request that left before the token changed (typically fired pre-login, answered after the new
+    // session was stored) describes the OLD credentials. It must not drop the fresh session.
+    const credentialsChanged = getAuthToken() !== token;
+    if (!credentialsChanged && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('trackseerr:unauthorized'));
     }
     throw new Error('Unauthorized');

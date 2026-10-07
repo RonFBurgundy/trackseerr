@@ -25,6 +25,10 @@ export interface LidarrPanelProps {
   isActive: boolean;
   activeManager: LibraryManagerMode;
   onRequestSwitch: (mode: LibraryManagerMode) => void;
+  /** Server-confirmed: a Lidarr host and API key are saved, so the switch to Lidarr will be accepted. */
+  canSwitchToLidarr: boolean;
+  /** Called after saved credentials passed a live connection test while Lidarr is inactive; offers the switch. */
+  onCredentialsVerified: () => Promise<void>;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
 }
 
@@ -34,6 +38,8 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
   isActive,
   activeManager,
   onRequestSwitch,
+  canSwitchToLidarr,
+  onCredentialsVerified,
   onToast,
 }) => {
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -66,6 +72,12 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
       if (hasSavedUrl) void defaultsHook.refresh();
       setHasSavedUrl(Boolean(updated.url));
       onToast('Lidarr settings saved');
+      if (!isActive && payload.url && payload.api_key) {
+        // Credentials are saved; if they work, offer to finish the switch right here.
+        const probe = await testLidarrConnection({ url: payload.url, api_key: payload.api_key }).catch(() => null);
+        if (probe?.online) await onCredentialsVerified();
+        else onToast(`Saved, but Lidarr did not answer: ${probe?.error || 'offline'}. Fix the connection to switch.`, 'error');
+      }
     } catch {
       onToast('Failed to save Lidarr settings', 'error');
     } finally {
@@ -101,6 +113,11 @@ export const LidarrPanel: React.FC<LidarrPanelProps> = ({
           activeManager={activeManager}
           onRequestSwitch={onRequestSwitch}
           note="Lidarr connection settings stay editable so you can switch."
+          switchDisabledReason={
+            activeManager === 'native' && !canSwitchToLidarr
+              ? 'Save a Lidarr host URL and API key to enable the switch.'
+              : null
+          }
         />
       )}
 

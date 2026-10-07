@@ -3701,6 +3701,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scrobbles/lastfm/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Finish the Last.fm connect flow for the signed-in user */
+        post: operations["lastfm_complete_api_scrobbles_lastfm_complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scrobbles/listens": {
         parameters: {
             query?: never;
@@ -7590,6 +7607,20 @@ export interface components {
             state: string;
             /** Task Id */
             task_id: string;
+        };
+        /** LastfmComplete */
+        LastfmComplete: {
+            /** Connected */
+            connected: boolean;
+            /** Username */
+            username: string;
+        };
+        /** LastfmCompleteRequest */
+        LastfmCompleteRequest: {
+            /** State */
+            state: string;
+            /** Token */
+            token: string;
         };
         /**
          * LibraryAlbumRecord
@@ -18378,6 +18409,8 @@ export interface operations {
         parameters: {
             query?: {
                 forward_url?: string | null;
+                /** @description The origin the browser is using (window.location.origin) */
+                origin?: string | null;
             };
             header?: never;
             path?: never;
@@ -18393,6 +18426,53 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AuthUrl"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lastfm_complete_api_scrobbles_lastfm_complete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LastfmCompleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LastfmComplete"];
+                };
+            };
+            /** @description Unknown, reused or expired state */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description State belongs to another user */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

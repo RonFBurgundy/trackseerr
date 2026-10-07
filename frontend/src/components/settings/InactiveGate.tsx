@@ -2,11 +2,9 @@ import React from 'react';
 import { PowerOff, ExternalLink, ArrowRightLeft } from 'lucide-react';
 import { TapeDeckButton } from '@/components/ui';
 import type { LibraryManagerMode } from '@/types/models';
+import { MODE_LABEL } from '@/hooks/useLibraryModeSwitch';
 
-export const MANAGER_LABEL: Record<LibraryManagerMode, string> = {
-  native: 'TrackSeerr',
-  lidarr: 'Lidarr',
-};
+export const MANAGER_LABEL = MODE_LABEL;
 
 /** Who is in charge, phrased for the inactive-side banner. */
 const MANAGER_STATEMENT: Record<LibraryManagerMode, string> = {
@@ -39,6 +37,8 @@ export interface InactiveBannerProps {
   managedExternally?: ManagedExternally;
   /** Extra one-line hint under the banner text. */
   note?: string;
+  /** When set, the switch key is disabled and this explains what is missing. */
+  switchDisabledReason?: string | null;
 }
 
 export const InactiveBanner: React.FC<InactiveBannerProps> = ({
@@ -46,6 +46,7 @@ export const InactiveBanner: React.FC<InactiveBannerProps> = ({
   onRequestSwitch,
   managedExternally,
   note,
+  switchDisabledReason,
 }) => {
   const target: LibraryManagerMode = activeManager === 'lidarr' ? 'native' : 'lidarr';
   return (
@@ -58,6 +59,7 @@ export const InactiveBanner: React.FC<InactiveBannerProps> = ({
         <div className="space-y-1">
           <p>Inactive &mdash; {MANAGER_STATEMENT[activeManager]}</p>
           {note && <p className="text-neutral-500">{note}</p>}
+          {switchDisabledReason && <p className="text-amber-300">{switchDisabledReason}</p>}
           {managedExternally && (
             <p className="text-neutral-400">
               Managed by Lidarr.{' '}
@@ -85,6 +87,7 @@ export const InactiveBanner: React.FC<InactiveBannerProps> = ({
       </div>
       <TapeDeckButton
         size="sm"
+        disabled={Boolean(switchDisabledReason)}
         onClick={() => onRequestSwitch(target)}
         icon={<ArrowRightLeft className="h-3.5 w-3.5" />}
       >
