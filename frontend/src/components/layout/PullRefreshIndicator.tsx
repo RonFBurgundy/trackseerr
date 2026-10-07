@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowDown, Loader2 } from 'lucide-react';
+import { CassetteGraphic } from '@/components/ui';
 import { PULL_THRESHOLD_PX } from '@/hooks/usePullToRefresh';
 import type { PullState } from '@/hooks/usePullToRefresh';
 
@@ -12,18 +12,19 @@ export const PullRefreshIndicator: React.FC<PullState> = ({ distance, phase }) =
     <div
       aria-hidden="true"
       className="pointer-events-none absolute left-1/2 top-0 z-20"
-      style={{ transform: `translate(-50%, ${distance - 36}px)`, opacity: Math.max(0.25, progress) }}
+      style={{ transform: `translate(-50%, ${distance - 40}px)`, opacity: Math.max(0.25, progress) }}
     >
       <div
-        className={`flex h-8 w-8 items-center justify-center rounded-[3px] border bg-[#121212] shadow-[0_2px_0_#050505] ${
+        className={`flex h-9 w-12 items-center justify-center rounded-[3px] border bg-[#121212] shadow-[0_2px_0_#050505] ${
           armed ? 'border-[var(--accent-amber)] text-[var(--accent-amber)]' : 'border-[#2a2a2a] text-[var(--text-secondary)]'
         }`}
       >
-        {phase === 'refreshing' ? (
-          <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
-        ) : (
-          <ArrowDown className="h-4 w-4 transition-transform" style={{ transform: `rotate(${armed ? 180 : progress * 120}deg)` }} />
-        )}
+        <CassetteGraphic
+          width={40}
+          height={26}
+          spinning={phase === 'refreshing'}
+          spoolRotationDeg={progress * 360}
+        />
       </div>
       <span className="sr-only" role="status">
         {phase === 'refreshing' ? 'Refreshing' : armed ? 'Release to refresh' : 'Pull to refresh'}

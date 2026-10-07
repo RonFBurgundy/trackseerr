@@ -487,6 +487,11 @@ body,
   animation: cassette-spool-spin 1.6s linear infinite;
 }
 
+.cassette-spool-static {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cassette-spool {
     animation: none;
