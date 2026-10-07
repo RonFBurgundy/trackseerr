@@ -55,10 +55,11 @@ def get_current_user_profile(
     # UI has always requested by default, over the same rolling window.
     quotas = quota_snapshot(db, {**user, "forwarded": bool(current_user.get("forwarded"))})
     limits = effective_quota_limits(db, user_id)
-    quota_limit = limits["albums"]
+    # An unlimited principal (admin exemption) has no finite limit: ``quotas`` carries ``None`` limits then.
+    quota_limit: Optional[int] = None if quotas["albums"] is None else limits["albums"]
     rolling_days = quotas["window_days"]
     active_requests = quotas["used"]["albums"]
-    remaining_quota = max(0, quota_limit - active_requests)
+    remaining_quota: Optional[int] = None if quota_limit is None else max(0, quota_limit - active_requests)
 
     return {
         "id": user["id"],

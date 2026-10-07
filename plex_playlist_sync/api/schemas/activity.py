@@ -53,6 +53,9 @@ class HistoryRecord(ApiModel):
     event: Optional[str] = None
     artist: Optional[str] = None
     album: Optional[str] = None
+    track: Optional[str] = None
+    artist_id: Optional[str] = None
+    album_id: Optional[str] = None
     title: Optional[str] = None
     release_title: Optional[str] = None
     quality: Optional[str] = None
@@ -67,6 +70,7 @@ class BlocklistRecord(ApiModel):
     id: str
     source: str
     artist: Optional[str] = None
+    artist_id: Optional[str] = None
     album: Optional[str] = None
     title: Optional[str] = None
     release_title: Optional[str] = None

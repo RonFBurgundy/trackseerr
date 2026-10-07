@@ -225,6 +225,10 @@ def native_history_index(db: Database, sort_dir: str, event: Optional[str]) -> d
 # ------------------------------------------------------------------------------------------- native: history etc.
 
 
+def _opt_str(value: Any) -> Optional[str]:
+    return None if value is None or value == "" else str(value)
+
+
 def native_history_record(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(row["id"]),
@@ -232,6 +236,9 @@ def native_history_record(row: dict[str, Any]) -> dict[str, Any]:
         "event": row.get("event"),
         "artist": row.get("artist"),
         "album": row.get("album"),
+        "track": row.get("title") if row.get("item_type") == "track" else None,
+        "artist_id": _opt_str(row.get("lib_artist_id")),
+        "album_id": _opt_str(row.get("lib_album_id")),
         "title": row.get("title"),
         "release_title": row.get("release_title"),
         "quality": row.get("quality"),
@@ -583,13 +590,19 @@ def lidarr_queue_record(rec: dict[str, Any]) -> dict[str, Any]:
 def lidarr_history_record(rec: dict[str, Any]) -> dict[str, Any]:
     raw_event = str(rec.get("eventType") or "").lower()
     data = rec.get("data") if isinstance(rec.get("data"), dict) else {}
+    # Only import / trackFile events carry a track (includeTrack); a grab is album-level.
+    track = _dig(rec, "track", "title")
     return {
         "id": str(rec.get("id")),
         "source": SOURCE_LIDARR,
         "event": LIDARR_EVENT_NAMES.get(raw_event, raw_event),
         "artist": _dig(rec, "artist", "artistName"),
         "album": _dig(rec, "album", "title"),
-        "title": _dig(rec, "album", "title") or rec.get("sourceTitle"),
+        "track": track,
+        "artist_id": _opt_str(rec.get("artistId")),
+        "album_id": _opt_str(rec.get("albumId")),
+        # The album is its own field; the headline is the track, else the release name, never the album twice.
+        "title": track or rec.get("sourceTitle"),
         "release_title": _clean(rec.get("sourceTitle")),
         "quality": _lidarr_quality(rec),
         "indexer": data.get("indexer"),
@@ -606,6 +619,7 @@ def lidarr_blocklist_record(rec: dict[str, Any]) -> dict[str, Any]:
         "id": str(rec.get("id")),
         "source": SOURCE_LIDARR,
         "artist": _dig(rec, "artist", "artistName"),
+        "artist_id": _opt_str(rec.get("artistId")),
         "album": None,
         "title": rec.get("sourceTitle"),
         "release_title": _clean(rec.get("sourceTitle")),

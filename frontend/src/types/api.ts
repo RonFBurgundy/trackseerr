@@ -5585,6 +5585,8 @@ export interface components {
             album?: string | null;
             /** Artist */
             artist?: string | null;
+            /** Artist Id */
+            artist_id?: string | null;
             /** Date */
             date?: string | null;
             /** Id */
@@ -5844,10 +5846,10 @@ export interface components {
             /** Permissions */
             permissions: number;
             /** Quota Limit */
-            quota_limit: number;
+            quota_limit?: number | null;
             quotas: components["schemas"]["QuotaSnapshot"];
             /** Remaining Quota */
-            remaining_quota: number;
+            remaining_quota?: number | null;
             /** Request Limit Days */
             request_limit_days: number;
             /** Request Limit Quota */
@@ -6694,8 +6696,12 @@ export interface components {
         HistoryRecord: {
             /** Album */
             album?: string | null;
+            /** Album Id */
+            album_id?: string | null;
             /** Artist */
             artist?: string | null;
+            /** Artist Id */
+            artist_id?: string | null;
             /** Can Mark Failed */
             can_mark_failed: boolean;
             /** Client */
@@ -6718,6 +6724,8 @@ export interface components {
             source: string;
             /** Title */
             title?: string | null;
+            /** Track */
+            track?: string | null;
         };
         /** ImportList */
         ImportList: {

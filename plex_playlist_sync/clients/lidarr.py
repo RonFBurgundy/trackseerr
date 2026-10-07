@@ -348,8 +348,11 @@ class LidarrClient:
 
         ``whole_artist=True`` adds the artist the way Lidarr's own add-artist screen does (``addOptions.monitor`` is
         the root folder's monitor option, ``searchForMissingAlbums`` is ``search``). ``whole_artist=False`` is for a
-        song or album request: same profiles, tags, root folder and ``monitorNewItems``, but nothing monitored and no
-        search yet, because the caller then monitors exactly the release it needs. Raises LidarrApiError.
+        song or album request: same profiles, tags and root folder, but nothing monitored, no search yet, and
+        ``monitorNewItems="none"`` (a single-track request must not monitor every future release). The artist is
+        stored unmonitored by ``monitor: none``; the caller monitors the release it needs and then the artist
+        (``ensure_artist_monitored``), because Lidarr ignores monitored albums of an unmonitored artist.
+        Raises LidarrApiError.
         """
         defaults = self.get_root_folder_defaults()
         payload = {
@@ -359,7 +362,7 @@ class LidarrClient:
             "qualityProfileId": defaults.quality_profile_id,
             "metadataProfileId": defaults.metadata_profile_id,
             "tags": list(defaults.tag_ids),
-            "monitorNewItems": defaults.new_item_monitor,
+            "monitorNewItems": defaults.new_item_monitor if whole_artist else "none",
             "addOptions": {
                 "monitor": defaults.monitor if whole_artist else "none",
                 "searchForMissingAlbums": bool(search) if whole_artist else False,
@@ -507,8 +510,10 @@ class LidarrClient:
         """Makes Lidarr fetch exactly the releases requested, leaving its own configuration alone.
 
         ``wants`` are ``{"album", "title", "item_type"}`` dicts (``album_names`` is shorthand for album wants).
-        An artist already in Lidarr is never modified; a new one is added unmonitored with the root-folder defaults
-        (see ``add_artist_with_defaults``). Each want then selects one release from Lidarr's own album list (see
+        A new artist is added with nothing monitored and ``monitorNewItems="none"`` (see
+        ``add_artist_with_defaults``). An artist already in Lidarr keeps its settings and other albums; the only
+        change is that it is set monitored when a want was monitored, since Lidarr ignores monitored albums
+        (Wanted, RSS, search) under an unmonitored artist. Each want then selects one release from Lidarr's own album list (see
         ``lidarr_release``), that album is monitored (and searched when auto-search is on) and re-read to confirm
         ``monitored`` stuck. The result carries ``outcomes``, one per want and in order, each
         ``{"status", "album_id", "message"}`` with status ``monitored``, ``not_in_metadata_profile``,
@@ -552,7 +557,7 @@ class LidarrClient:
                 if not artist_id:
                     return {"status": "error", "artist": artist_title, "message": "Lidarr did not return the new artist id"}
                 was_new = True
-                logger.info("Added artist '%s' (ID %s) to Lidarr unmonitored", artist_title, artist_id)
+                logger.info("Added artist '%s' (ID %s) to Lidarr (nothing monitored yet; monitored once its requested release is)", artist_title, artist_id)
 
             outcomes: list[dict[str, Any]] = []
             monitored_ids: list[int] = []
@@ -673,6 +678,9 @@ class LidarrClient:
         ]
         if unmonitored:
             self.set_albums_monitored(unmonitored, True)
+        # Only now, with the add options applied (``settled``): PUT /artist leaves album flags alone, and the search
+        # below needs a monitored artist to be honoured.
+        self._ensure_artist_monitored_logged(artist_id)
         if should_search:
             try:
                 self.run_command("AlbumSearch", albumIds=to_monitor)
@@ -687,6 +695,24 @@ class LidarrClient:
             if not verified[album_id]:
                 outcomes[idx] = _outcome(OUTCOME_MONITOR_FAILED, album_id, MONITOR_FAILED_MESSAGE)
         return outcomes, [i for i in to_monitor if verified[i]]
+
+    def ensure_artist_monitored(self, artist_id: int) -> bool:
+        """Sets the artist monitored when it is not (full GET/PUT, album flags untouched); True if a PUT was sent."""
+        artist = self.fetch_artist(artist_id)
+        if artist.get("monitored"):
+            return False
+        artist["monitored"] = True
+        self._send_json("PUT", f"artist/{int(artist_id)}", artist)
+        return True
+
+    def _ensure_artist_monitored_logged(self, artist_id: int) -> None:
+        try:
+            if self.ensure_artist_monitored(artist_id):
+                logger.info("Monitored Lidarr artist %s so its requested release is searched", artist_id)
+        except LidarrRateLimited:
+            raise
+        except LidarrApiError as exc:  # the albums are monitored; the artist flag can be fixed by hand
+            logger.warning("Could not monitor Lidarr artist %s: %s", artist_id, _exc_text(exc))
 
     def search_and_add_track(
         self,
@@ -889,7 +915,7 @@ class LidarrClient:
         return self._get_page(
             "history",
             self._page_params(
-                page, page_size, sort_key, sort_dir, includeArtist="true", includeAlbum="true", eventType=event_type
+                page, page_size, sort_key, sort_dir, includeArtist="true", includeAlbum="true", includeTrack="true", eventType=event_type
             ),
         )
 

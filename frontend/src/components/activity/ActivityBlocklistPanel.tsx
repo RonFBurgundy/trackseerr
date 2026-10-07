@@ -8,6 +8,7 @@ import { useListSelection } from '@/hooks/useListSelection';
 import { ConfirmDangerButton } from '@/components/ui';
 import { FlatList, ListPanel, formatDateTime, orDash, type FlatListColumn } from '@/components/lists';
 import type { ActivityPanelProps } from './ActivityQueuePanel';
+import { LibraryLink } from './LibraryLink';
 
 const fetchBlocklist = pagedFetcher(getActivityBlocklist);
 const getKey = (r: ActivityBlocklistRecord): string | number => r.id;
@@ -60,7 +61,7 @@ export const ActivityBlocklistPanel: React.FC<ActivityPanelProps> = ({ onToast }
   const columns = useMemo<FlatListColumn<ActivityBlocklistRecord>[]>(
     () => [
       { key: 'date', label: 'Date', sortable: true, width: '150px', mobile: 'meta', render: (r) => formatDateTime(r.date) },
-      { key: 'artist', label: 'Artist', sortable: true, width: 'minmax(0,1fr)', mobile: 'title', render: (r) => orDash(r.artist) },
+      { key: 'artist', label: 'Artist', sortable: true, width: 'minmax(0,1fr)', mobile: 'title', render: (r) => <LibraryLink kind="artist" id={r.artist_id} label={r.artist} /> },
       { key: 'title', label: 'Title', width: 'minmax(0,1fr)', mobile: 'sub', render: (r) => orDash(r.title) },
       { key: 'release_title', label: 'Release', width: 'minmax(0,1.4fr)', mobile: 'sub', render: (r) => orDash(r.release_title) },
       { key: 'quality', label: 'Quality', width: '80px', mobile: 'meta', render: (r) => orDash(r.quality) },

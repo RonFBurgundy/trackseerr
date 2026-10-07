@@ -474,6 +474,13 @@ def test_users_me_stays_coherent_with_per_type_quotas(env):
     assert me["quotas"] == env["client"].get("/api/account", headers=env["alice"]).json()["quotas"]
 
 
+def test_users_me_unlimited_admin_has_no_finite_legacy_limit(env):
+    _settings(env["db"], albums=4)
+    me = env["client"].get("/api/users/me", headers=env["admin"]).json()
+    assert me["quota_limit"] is None and me["remaining_quota"] is None
+    assert me["quotas"]["albums"] is None and me["quotas"]["tracks"] is None
+
+
 # --------------------------------------------------------------------------- concurrency (threaded, per type)
 
 

@@ -182,7 +182,7 @@ class TestArtistAdds:
         assert res["status"] == "success" and res["added"] is True and res["matched_album_ids"] == [2]
         sent = fake.requests("POST", "artist")[0]
         assert sent["addOptions"] == {"monitor": "none", "searchForMissingAlbums": False}
-        assert (sent["qualityProfileId"], sent["metadataProfileId"], sent["tags"], sent["monitorNewItems"]) == (4, 6, [7], "new")
+        assert (sent["qualityProfileId"], sent["metadataProfileId"], sent["tags"], sent["monitorNewItems"]) == (4, 6, [7], "none")
         assert sent["rootFolderPath"] == "/music" and sent["monitored"] is True
         assert sleep.call_count == 2  # waited for the albums to load
         assert fake.requests("PUT", "album/monitor") == [{"albumIds": [2], "monitored": True}]

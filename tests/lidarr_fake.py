@@ -94,6 +94,10 @@ class FakeLidarr:
         self.new_artist_profile_id: Optional[int] = None
         self.album_snapshots: Optional[list[list[dict[str, Any]]]] = None
         self._visible_album_ids: Optional[set[int]] = None
+        # The artist resource's own ``monitored`` flag (Lidarr stores a ``monitor: none`` add as unmonitored) and
+        # an optional pre-existing artist served at ``existing_artist_id``.
+        self.artist_monitored = False
+        self.existing_artist_id: Optional[int] = None
 
     # httpx.Client stand-in -------------------------------------------------------------------------------------
     def __call__(self, *args: Any, **kwargs: Any) -> "FakeLidarr":
@@ -147,6 +151,12 @@ class FakeLidarr:
             if path == "artist/lookup":
                 return httpx.Response(200, json=self.lookup)
             if path.startswith("artist/") and path.split("/")[1].isdigit():
+                if int(path.split("/")[1]) == self.existing_artist_id:
+                    return httpx.Response(
+                        200,
+                        json={"id": self.existing_artist_id, "artistName": "Queen", "monitored": self.artist_monitored,
+                              "monitorNewItems": "all", "qualityProfileId": 4},
+                    )
                 if int(path.split("/")[1]) != self.NEW_ARTIST_ID or not self.model_add_window:
                     return httpx.Response(404, json={})
                 if self.add_window_open and not any(c["status"] in ("queued", "started") for c in self.commands):
@@ -157,7 +167,7 @@ class FakeLidarr:
                 return httpx.Response(
                     200,
                     json={"id": self.NEW_ARTIST_ID, "metadataProfileId": self.new_artist_profile_id,
-                          "addOptions": copy.deepcopy(self.add_options)},
+                          "monitored": self.artist_monitored, "addOptions": copy.deepcopy(self.add_options)},
                 )
             if path == "album" and "artistId" in query:
                 if self.empty_album_polls > 0:
@@ -199,6 +209,7 @@ class FakeLidarr:
                     return httpx.Response(200, json=[t for t in self.tracks if t.get("albumId") == wanted])
         if method == "POST":
             if path == "artist":
+                self.artist_monitored = False  # monitor: none -> stored unmonitored (the bug this models)
                 # Lidarr v1: a RefreshArtist command resource; ``body.artistIds`` carries the id (``artistId`` is
                 # JsonIgnore'd server side), ``status`` is a lowercase CommandStatus.
                 self.commands.append(
@@ -218,6 +229,9 @@ class FakeLidarr:
             if path == "command":
                 return httpx.Response(201, json={"id": 1, "name": body.get("name")})
         if method == "PUT":
+            if path.startswith("artist/") and path.split("/")[1].isdigit():
+                self.artist_monitored = bool(body.get("monitored"))
+                return httpx.Response(202, json=body)
             if path == "album/monitor":
                 if self.monitor_sticks:
                     for album_id in body["albumIds"]:

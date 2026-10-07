@@ -1,6 +1,6 @@
 import { apiRequest } from './apiClient';
 import type { Schema } from '@/types/apiSchema';
-import type { RequestItem, UserQuota } from '@/types/models';
+import type { QuotaTypeKind, QuotaTypeStatus, RequestItem, UserQuota } from '@/types/models';
 import type { DiscographyBatchPayload } from '@/types/account';
 
 export async function getRequests(status?: string): Promise<RequestItem[]> {
@@ -49,14 +49,22 @@ export async function deleteRequest(requestId: string): Promise<void> {
   });
 }
 
-export async function getUserQuota(): Promise<UserQuota> {
-  const res = await apiRequest<Schema<'CurrentUserProfile'>>('/api/users/me');
+const QUOTA_KINDS: readonly QuotaTypeKind[] = ['tracks', 'albums', 'discographies'];
 
-  return {
-    remaining: res.remaining_quota ?? 10,
-    limit: res.quota_limit ?? 10,
-    period_days: res.rolling_days ?? 7,
-  };
+/** Per-type quota snapshot from /api/users/me. Null limits mean unlimited (admin exemption). */
+export async function getUserQuota(): Promise<UserQuota | null> {
+  const res = await apiRequest<Schema<'CurrentUserProfile'>>('/api/users/me');
+  const snap = res.quotas;
+  if (!snap) return null;
+
+  const types: QuotaTypeStatus[] = [];
+  for (const kind of QUOTA_KINDS) {
+    const limit = snap[kind];
+    if (limit === null || limit === undefined) continue;
+    const used = snap.used[kind];
+    types.push({ kind, used, limit, remaining: Math.max(0, limit - used) });
+  }
+  return { unlimited: types.length === 0, period_days: snap.window_days, types };
 }
 
 /** Maximum number of albums the backend accepts in one batch. */
