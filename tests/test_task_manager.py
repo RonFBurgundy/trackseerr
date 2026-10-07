@@ -670,3 +670,32 @@ def test_boot_starts_the_art_scheduler_and_closes_interrupted_runs(db, art_sched
     assert len(art_scheduler_calls.scheduler_start) == 1
     assert db.list_running_task_runs() == []
     assert db.get_last_finished_task_run("library_health")["message"] == "interrupted by restart"
+
+
+# ----------------------------------------------------------------------------- WAIT_SECONDS=0
+
+
+def test_playlist_sync_is_manual_when_wait_seconds_is_zero(db):
+    from plex_playlist_sync.api.routes.system import get_all_scheduled_tasks
+
+    scheduled = {t.id: t for t in get_all_scheduled_tasks(db, _cfg(wait_seconds=86400))}["playlist_sync"]
+    assert scheduled.schedule_kind == "interval" and scheduled.editable and scheduled.interval_seconds == 86400
+
+    off = {t.id: t for t in get_all_scheduled_tasks(db, _cfg(wait_seconds=0))}["playlist_sync"]
+    assert off.schedule_kind == "manual"
+    assert off.editable is False
+    assert off.next_run_at is None
+    assert off.interval_seconds is None
+    assert off.interval_presets == []
+    assert off.interval == "Manual / On Demand"
+    assert off.can_trigger is True  # an admin can still run it by hand
+
+
+def test_schedule_edit_rejected_for_playlist_sync_when_wait_seconds_is_zero(db):
+    from fastapi import HTTPException
+
+    from plex_playlist_sync.api.routes.system import TaskScheduleUpdate, set_task_schedule
+
+    with pytest.raises(HTTPException) as err:
+        set_task_schedule("playlist_sync", TaskScheduleUpdate(interval_seconds=3600), db=db, config=_cfg(wait_seconds=0), _admin={})
+    assert err.value.status_code == 400

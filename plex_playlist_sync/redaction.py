@@ -4,6 +4,7 @@ plexapi and requests exception messages routinely embed full request URLs carryi
 anything that turns such an exception into text must go through :func:`safe_exc`.
 """
 
+import logging
 import re
 from typing import Optional
 
@@ -68,3 +69,62 @@ def safe_exc(exc: BaseException, safe_types: Optional[tuple] = None) -> str:
         return name
     message = redact_text(str(exc)).strip()
     return f"{name}: {message}" if message else name
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Log-line redaction. Broader than :func:`redact_text` (which also guards API responses and stored results): it also
+# masks header/dict/JSON ``key: value`` pairs for credentials and bare ``Bearer`` tokens, which only ever matter once
+# text is about to hit disk, the ring buffer or stdout.
+# ---------------------------------------------------------------------------------------------------------------
+_AUTH_HEADER_QUOTED_RE = re.compile(r"""(?i)((?<![A-Za-z0-9])authorization['"]?\s*[:=]\s*)(['"])[^'"\r\n]*\2""")
+_AUTH_HEADER_BARE_RE = re.compile(
+    r"""(?i)((?<![A-Za-z0-9])authorization\s*[:=]\s*)(?:(?:bearer|basic|token)\s+)?[^\s,;)}\]"'\r\n]+"""
+)
+_SECRET_KEYS = (
+    r"x-api-key|x-auth-token|x-plex-token|x-emby-token|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token"
+    r"|client[_-]?secret|secret|password|passwd|token"
+)
+_SECRET_KV_QUOTED_RE = re.compile(
+    r"""(?i)((?<![A-Za-z0-9])(?:%s)['"]?\s*[:=]\s*)(['"])[^'"\r\n]*\2""" % _SECRET_KEYS
+)
+_SECRET_KV_BARE_RE = re.compile(
+    r"""(?i)((?<![A-Za-z0-9])(?:%s)\s*[:=]\s*)[^\s,;&)}\]"'\r\n]+""" % _SECRET_KEYS
+)
+_BEARER_RE = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}")
+
+
+def redact_log_text(text: str) -> str:
+    """:func:`redact_text` plus credential ``key: value`` pairs (Authorization, X-Api-Key, password, token, ...)."""
+    text = redact_text(text)
+    text = _AUTH_HEADER_QUOTED_RE.sub(r"\1\2REDACTED\2", text)
+    text = _AUTH_HEADER_BARE_RE.sub(r"\1REDACTED", text)
+    text = _SECRET_KV_QUOTED_RE.sub(r"\1\2REDACTED\2", text)
+    text = _SECRET_KV_BARE_RE.sub(r"\1REDACTED", text)
+    return _BEARER_RE.sub(r"\1REDACTED", text)
+
+
+class RedactLogFilter(logging.Filter):
+    """Handler-level filter: renders the record and redacts invite/reset tokens, secret query params and
+    credential key/value pairs, in the message, exception text and stack dump."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except (TypeError, ValueError):
+            return True
+        redacted = redact_log_text(message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = None
+        # Exception text and stack dumps are rendered later by Formatter.format; pre-render and redact
+        # them here (Formatter reuses a cached ``exc_text``) so tracebacks cannot leak tokens either.
+        if record.exc_info and not record.exc_text:
+            try:
+                record.exc_text = logging.Formatter().formatException(record.exc_info)
+            except (TypeError, ValueError, AttributeError):
+                record.exc_text = None
+        if record.exc_text:
+            record.exc_text = redact_log_text(record.exc_text)
+        if record.stack_info:
+            record.stack_info = redact_log_text(record.stack_info)
+        return True

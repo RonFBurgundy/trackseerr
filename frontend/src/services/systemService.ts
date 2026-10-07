@@ -1,9 +1,12 @@
 import type { Schema } from '@/types/apiSchema';
-import { apiRequest } from './apiClient';
+import { apiRequest, getAuthToken } from './apiClient';
 import type {
   ScheduledTaskItem,
   SystemEventsResponse,
   SystemLogItem,
+  LogFileItem,
+  LogSettings,
+  LogSettingsUpdate,
   SystemQueueResponse,
   LidarrHealth,
 } from '@/types/models';
@@ -65,6 +68,28 @@ export async function clearSystemLogs(): Promise<Schema<'SuccessFlag'>> {
 
 export function getSystemLogDownloadUrl(): string {
   return '/api/system/logs/download';
+}
+
+export async function getLogFiles(): Promise<LogFileItem[]> {
+  return (await apiRequest<LogFileItem[]>('/api/system/logs/files')) || [];
+}
+
+export async function getLogSettings(): Promise<LogSettings> {
+  return await apiRequest<LogSettings>('/api/system/logs/settings');
+}
+
+export async function updateLogSettings(update: LogSettingsUpdate): Promise<LogSettings> {
+  return await apiRequest<LogSettings>('/api/system/logs/settings', { method: 'PUT', body: update });
+}
+
+/** Fetches one log file as a Blob (the endpoint needs the auth header, so a plain link cannot be used). */
+export async function fetchLogFileBlob(name: string): Promise<Blob> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(`/api/system/logs/files/${encodeURIComponent(name)}`, { headers });
+  if (!res.ok) throw new Error(`Download failed with status ${res.status}`);
+  return await res.blob();
 }
 
 export async function getScheduledTasks(): Promise<ScheduledTaskItem[]> {

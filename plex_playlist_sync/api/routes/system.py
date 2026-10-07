@@ -5,7 +5,6 @@ import collections
 from datetime import datetime, timedelta, timezone
 import json
 import logging
-from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
 import platform
@@ -53,7 +52,21 @@ from plex_playlist_sync.api.dependencies import (
 )
 from plex_playlist_sync.api.routes.sync import sync_state
 from plex_playlist_sync.auth import get_or_create_secret_key, verify_session_token
-from plex_playlist_sync.redaction import redact_text, safe_exc
+from plex_playlist_sync.log_rotation import (
+    CURRENT_LOG_NAME,
+    LEVEL_CHOICES,
+    MAX_TOTAL_MB_PRESETS,
+    RETENTION_DAYS_RANGE,
+    ROTATION_HOURS_PRESETS,
+    LogSettingsError,
+    apply_log_settings,
+    list_log_files,
+    load_log_settings,
+    resolve_log_file,
+    save_log_settings,
+    validate_log_settings,
+)
+from plex_playlist_sync.redaction import RedactLogFilter, redact_text, safe_exc
 from plex_playlist_sync.backlog_worker import backlog_worker, rss_worker
 from plex_playlist_sync.clients.acquisition import (
     get_acquisition_driver,
@@ -86,6 +99,7 @@ from plex_playlist_sync.task_manager import (
     next_run_at,
     parse_iso,
     record_task_run,
+    schedule_disabled,
     set_interval_override,
 )
 
@@ -100,8 +114,11 @@ router = APIRouter()
 class LogRingBuffer(logging.Handler):
     """Thread-safe circular in-memory log buffer supporting SSE broadcasting."""
 
+    follows_log_level = True
+
     def __init__(self, maxlen: int = 1000) -> None:
         super().__init__()
+        self.addFilter(RedactLogFilter())  # nothing unredacted ever reaches the buffer or the SSE stream
         self._lock = threading.Lock()
         self.buffer: collections.deque[dict[str, Any]] = collections.deque(maxlen=maxlen)
         self.listeners: list[tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = []
@@ -180,7 +197,7 @@ if log_ring_buffer not in _root_logger.handlers:
 
 
 def get_log_file_path(config: Optional[Config] = None, log_dir: Optional[str] = None) -> Path:
-    """Resolves the active trackseerr.log file destination path."""
+    """Resolves the active ``trackseerr.txt`` log file destination path."""
     if log_dir:
         target_dir = Path(log_dir)
     elif config and getattr(config, "config_dir", None) and os.path.exists(config.config_dir):
@@ -199,7 +216,7 @@ def get_log_file_path(config: Optional[Config] = None, log_dir: Optional[str] = 
     except OSError:
         target_dir = Path("/tmp")
 
-    return target_dir / "trackseerr.log"
+    return target_dir / CURRENT_LOG_NAME
 
 
 class DiskUsageItem(ApiModel):
@@ -854,12 +871,13 @@ def clear_system_logs(
     return {"success": True}
 
 
-@router.get("/logs/download", summary="Download rotated disk log file")
+@router.get("/logs/download", summary="Download the current disk log file")
 def download_system_logs(
     config: Config = Depends(get_config),
     admin: dict[str, Any] = Depends(require_admin),
 ):
-    """Returns active trackseerr.log file for download (admin required)."""
+    """Returns the active ``trackseerr.txt`` for download (admin required). Kept for compatibility; the
+    log-file listing endpoints serve rotated files."""
     log_path = get_log_file_path(config)
     if not log_path.exists():
         try:
@@ -868,15 +886,118 @@ def download_system_logs(
             with open(log_path, "w", encoding="utf-8") as f:
                 for l in logs:
                     f.write(f"{l.get('timestamp')} [{l.get('level')}] {l.get('name')}: {l.get('message')}\n")
-        except Exception as ex:
-            logger.warning("Could not generate disk log file: %s", ex)
+        except OSError as ex:
+            logger.warning("Could not generate disk log file: %s", safe_exc(ex))
             raise HTTPException(status_code=404, detail="Log file not found")
 
     return FileResponse(
         path=str(log_path),
-        filename="trackseerr.log",
+        filename=CURRENT_LOG_NAME,
         media_type="text/plain",
     )
+
+
+class LogFileEntry(ApiModel):
+    name: str
+    size_bytes: int
+    start_at: Optional[str] = None
+    end_at: Optional[str] = None  # null for the file currently being written
+
+
+class LogSettingsResponse(ApiModel):
+    log_rotation_hours: int
+    log_retention_days: int
+    log_max_total_mb: int
+    log_level: str
+    rotation_hours_options: list[int]
+    retention_days_min: int
+    retention_days_max: int
+    max_total_mb_options: list[int]
+    level_options: list[str]
+
+
+class LogSettingsUpdate(BaseModel):
+    """Body of ``PUT /logs/settings``. Every field is optional; only the ones sent are changed."""
+
+    model_config = ConfigDict(extra="forbid")
+    log_rotation_hours: Optional[int] = None
+    log_retention_days: Optional[int] = None
+    log_max_total_mb: Optional[int] = None
+    log_level: Optional[str] = None
+
+
+def _log_settings_response(db: Database) -> LogSettingsResponse:
+    saved = load_log_settings(db)
+    return LogSettingsResponse(
+        log_rotation_hours=saved.log_rotation_hours,
+        log_retention_days=saved.log_retention_days,
+        log_max_total_mb=saved.log_max_total_mb,
+        log_level=saved.log_level,
+        rotation_hours_options=list(ROTATION_HOURS_PRESETS),
+        retention_days_min=RETENTION_DAYS_RANGE[0],
+        retention_days_max=RETENTION_DAYS_RANGE[1],
+        max_total_mb_options=list(MAX_TOTAL_MB_PRESETS),
+        level_options=list(LEVEL_CHOICES),
+    )
+
+
+@router.get("/logs/settings", response_model=LogSettingsResponse, summary="Get log rotation, retention and level settings")
+def get_log_settings(
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> LogSettingsResponse:
+    try:
+        return _log_settings_response(db)
+    except sqlite3.Error as exc:
+        logger.error("Could not read the log settings: %s", safe_exc(exc))
+        raise HTTPException(status_code=500, detail="Could not read the log settings")
+
+
+@router.put("/logs/settings", response_model=LogSettingsResponse, summary="Update log settings (applied live)")
+def update_log_settings(
+    body: LogSettingsUpdate,
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> LogSettingsResponse:
+    """Validates, persists and immediately applies the changed settings (admin required)."""
+    try:
+        changes = validate_log_settings(**body.model_dump())
+    except LogSettingsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        save_log_settings(db, changes)
+        response = _log_settings_response(db)
+    except sqlite3.Error as exc:
+        logger.error("Could not store the log settings: %s", safe_exc(exc))
+        raise HTTPException(status_code=500, detail="Could not store the log settings")
+    apply_log_settings(load_log_settings(db))
+    logger.info("Log settings changed: %s", ", ".join(f"{k}={v}" for k, v in sorted(changes.items())) or "none")
+    return response
+
+
+@router.get("/logs/files", response_model=list[LogFileEntry], summary="List log files, newest first")
+def list_system_log_files(
+    config: Config = Depends(get_config),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> list[LogFileEntry]:
+    log_dir = get_log_file_path(config).parent
+    return [
+        LogFileEntry(name=i.name, size_bytes=i.size_bytes, start_at=i.start_at, end_at=i.end_at)
+        for i in list_log_files(log_dir)
+    ]
+
+
+@router.get("/logs/files/{name}", summary="Download one log file")
+def download_system_log_file(
+    name: str,
+    config: Config = Depends(get_config),
+    _admin: dict[str, Any] = Depends(require_admin),
+):
+    """The name must be one of the listed log files; anything else (traversal, absolute paths) is a 404."""
+    path = resolve_log_file(get_log_file_path(config).parent, name)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Log file not found")
+    return FileResponse(path=str(path), filename=path.name, media_type="text/plain")
 
 
 # -----------------------------------------------------------------------------
@@ -1082,7 +1203,12 @@ def get_all_scheduled_tasks(
         )
         last_finished = (finished_row or {}).get("finished_at") if latest_row else worker_last
         effective = effective_interval_seconds(db, config, spec.id)
-        if spec.kind == KIND_INTERVAL:
+        unscheduled = schedule_disabled(config, spec.id)
+        if unscheduled:
+            effective = None
+        if unscheduled:
+            display = "Manual / On Demand"
+        elif spec.kind == KIND_INTERVAL:
             display = format_interval(effective)
         elif spec.id == "download_queue_monitor":
             display = f"Every {int(getattr(acquisition_worker, 'poll_interval', 5.0))}s"
@@ -1107,13 +1233,13 @@ def get_all_scheduled_tasks(
                 last_run_at=last_run,
                 can_trigger=spec.id in _MANUAL_RUNNABLE,
                 can_cancel=can_cancel,
-                schedule_kind=spec.kind,
+                schedule_kind="manual" if unscheduled else spec.kind,
                 interval_seconds=effective,
-                default_interval_seconds=default_interval_seconds(db, config, spec.id),
-                interval_presets=list(spec.presets),
-                editable=spec.editable,
+                default_interval_seconds=None if unscheduled else default_interval_seconds(db, config, spec.id),
+                interval_presets=[] if unscheduled else list(spec.presets),
+                editable=spec.editable and not unscheduled,
                 next_run_at=None
-                if status_val == "running"
+                if (status_val == "running" or unscheduled)
                 else next_run_at(spec, effective, last_finished),
                 last_run_status=(finished_row or {}).get("status"),
                 last_duration_ms=(finished_row or {}).get("duration_ms"),
@@ -1158,7 +1284,7 @@ def set_task_schedule(
     spec = TASKS.get(task_id)
     if spec is None:
         raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
-    if not spec.editable:
+    if not spec.editable or schedule_disabled(config, task_id):
         raise HTTPException(status_code=400, detail=f"Task '{task_id}' does not have an editable schedule")
     if body.interval_seconds is not None and body.interval_seconds not in spec.presets:
         raise HTTPException(

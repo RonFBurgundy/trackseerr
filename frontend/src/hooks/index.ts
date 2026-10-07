@@ -26,6 +26,8 @@ export * from './useScheduledTasks';
 export * from './useSystemOverview';
 export * from './useSystemEvents';
 export * from './useSystemLogs';
+export * from './useLogFiles';
+export * from './useLogSettings';
 export * from './useVirtualPagedList';
 export * from './useGroupIndex';
 export * from './useMediaQuery';

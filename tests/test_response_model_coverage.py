@@ -88,6 +88,7 @@ _NO_MODEL_ALLOWLIST: set[str] = {
     "scrobbles:/lastfm/callback",  # redirect
     "sync:/stream",  # SSE stream
     "system:/logs/download",  # file download
+    "system:/logs/files/{name}",  # file download
     "system:/logs/stream",  # SSE stream
     "library:/artists/{artist_id}/image",  # file or redirect
     "library:/artists/{artist_id}/banner",  # file or redirect

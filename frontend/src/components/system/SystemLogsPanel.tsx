@@ -1,18 +1,25 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
-import { Download, Trash2, Loader2, Search, AlertTriangle } from 'lucide-react';
-import { TapeDeckButton, ActionBar, TabStrip } from '@/components/ui';
+import { Download, Trash2, Loader2, Search, AlertTriangle, Settings2 } from 'lucide-react';
+import { TapeDeckButton, ActionBar, TabStrip, ToastBanner } from '@/components/ui';
 import { PageFrame } from '@/components/layout';
 import { useSystemLogs } from '@/hooks/useSystemLogs';
+import { useToast } from '@/hooks/useToast';
+import { LogFilesModal } from './LogFilesModal';
+import { LogSettingsModal } from './LogSettingsModal';
 
-const LEVELS = ['all', 'info', 'warning', 'error', 'debug'] as const;
+const LEVELS = ['all', 'info', 'warning', 'error', 'debug', 'trace'] as const;
 
 export const SystemLogsPanel: React.FC = () => {
   const logsHook = useSystemLogs();
   const { logs, filteredLogs } = logsHook;
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
+  const [filesOpen, setFilesOpen] = useState<boolean>(false);
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const { toast, showToast } = useToast();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const searchId = useId();
   const autoScrollId = useId();
+  const eventsId = useId();
 
   useEffect(() => {
     if (autoScroll && containerRef.current) {
@@ -21,6 +28,10 @@ export const SystemLogsPanel: React.FC = () => {
   }, [filteredLogs, autoScroll]);
 
   return (
+    <>
+    {toast && <ToastBanner message={toast.message} tone={toast.tone} />}
+    <LogFilesModal isOpen={filesOpen} onClose={() => setFilesOpen(false)} />
+    <LogSettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} onResult={showToast} />
     <PageFrame
       bodyRef={containerRef}
       ariaLabel="Application log entries"
@@ -35,13 +46,17 @@ export const SystemLogsPanel: React.FC = () => {
         <ActionBar bay align="end" className="p-1.5 sm:w-auto">
           <TapeDeckButton
             size="sm"
-            onClick={() => void logsHook.download()}
-            disabled={logsHook.isDownloading}
-            icon={
-              logsHook.isDownloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />
-            }
+            onClick={() => setFilesOpen(true)}
+            icon={<Download className="h-3.5 w-3.5" />}
           >
-            Download Log File
+            Download Log
+          </TapeDeckButton>
+          <TapeDeckButton
+            size="sm"
+            onClick={() => setSettingsOpen(true)}
+            icon={<Settings2 className="h-3.5 w-3.5" />}
+          >
+            Log Settings
           </TapeDeckButton>
           <TapeDeckButton
             size="sm"
@@ -107,6 +122,18 @@ export const SystemLogsPanel: React.FC = () => {
             <span>Auto-scroll</span>
           </label>
 
+          <label htmlFor={eventsId} className="flex items-center gap-1.5 min-h-[36px] sm:min-h-0 text-xs font-mono text-neutral-400 cursor-pointer select-none">
+            <input
+              id={eventsId}
+              name="log-show-events"
+              type="checkbox"
+              checked={logsHook.showEvents}
+              onChange={(e) => logsHook.setShowEvents(e.target.checked)}
+              className="accent-[#e5a00d] rounded"
+            />
+            <span>Events</span>
+          </label>
+
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-[2px] bg-[#141414] border border-[#242424] text-[10px] font-mono">
             <span className={`w-2 h-2 rounded-full ${logsHook.isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-neutral-600'}`} />
             <span className={logsHook.isConnected ? 'text-emerald-400' : 'text-neutral-500'}>
@@ -135,6 +162,7 @@ export const SystemLogsPanel: React.FC = () => {
             if (lvl === 'ERROR') lvlColor = 'text-red-400 font-bold';
             else if (lvl === 'WARN' || lvl === 'WARNING') lvlColor = 'text-amber-400 font-bold';
             else if (lvl === 'DEBUG') lvlColor = 'text-neutral-500';
+            else if (lvl === 'TRACE') lvlColor = 'text-neutral-600';
 
             return (
               <div key={log.id || idx} className="hover:bg-[#121212] px-1 py-0.5 rounded flex flex-wrap sm:flex-nowrap items-start gap-x-2">
@@ -146,5 +174,6 @@ export const SystemLogsPanel: React.FC = () => {
             );
           })}
     </PageFrame>
+    </>
   );
 };
