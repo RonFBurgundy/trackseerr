@@ -28,6 +28,7 @@ from plex_playlist_sync.clients.plex import (
     is_smart_playlist,
 )
 from plex_playlist_sync.api.routes.playlists import _guard_existing_playlist
+from plex_playlist_sync.playlist_policy import initial_monitor_mode_forced
 from plex_playlist_sync.storage import Database
 from plex_playlist_sync.redaction import redact_text, safe_exc
 
@@ -570,7 +571,7 @@ def adopt_playlist(
     ]
     title = str(getattr(pl, "title", "") or "")
     playlist_id = f"plex_{username.lower()}_{rating_key}"
-    _guard_existing_playlist(db, playlist_id, current_user)
+    previous = _guard_existing_playlist(db, playlist_id, current_user)
     row = _ensure_row(client, db, username, pl)
     db.upsert_playlist(
         playlist_id,
@@ -580,6 +581,11 @@ def adopt_playlist(
         creator_id=str(current_user["id"]),
         tracks_json=json.dumps(tracks),
     )
+    if previous is None:
+        # A user who may not auto-request adopts a list-only playlist whatever the column default is.
+        forced_mode = initial_monitor_mode_forced(current_user)
+        if forced_mode is not None:
+            db.set_playlist_monitor_mode(playlist_id, forced_mode)
     db.upsert_plex_registry(
         username,
         rating_key,

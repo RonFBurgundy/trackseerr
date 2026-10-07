@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { RefreshCw, Plus, Play, Trash2, FileText, Link as LinkIcon, Loader2 } from 'lucide-react';
+import { RefreshCw, Plus, Play, Trash2, FileText, Link as LinkIcon, Loader2, Headphones } from 'lucide-react';
 import type { Playlist, User } from '@/types/models';
 import type { ImportPlaylistPayload } from '@/services/playlistService';
 import type { MediaServerType } from '@/types/mediaServer';
@@ -17,7 +17,15 @@ import { LIST_MONITOR_MODES, type ListMonitorMode } from '@/types/importLists';
 
 /** Album and artist modes add to the library without a quota, so the server only accepts them from admins. */
 const NON_ADMIN_MONITOR_MODES: ReadonlyArray<ListMonitorMode> = ['track', 'none'];
+/** Without the auto-request permission a playlist can only list its missing tracks. */
+const LIST_ONLY_MODES: ReadonlyArray<ListMonitorMode> = ['none'];
 import { PlexPlaylistsSection } from '@/components/plex';
+import { ListeningPlaylistModal } from '@/components/listening';
+import {
+  AUTO_REQUEST_DENIED_REASON,
+  LISTENING_PROVIDER_LABELS,
+  isListeningService,
+} from '@/types/listening';
 import { TailoredMixesSection } from '@/components/mixes';
 import { NoMediaServerNote } from '@/components/mediaServer';
 
@@ -30,6 +38,11 @@ export interface PlaylistsViewProps {
   onImport: (payload: ImportPlaylistPayload) => Promise<void>;
   onToggleActive?: (playlistId: number | string, active: boolean) => Promise<void>;
   onSetMonitorMode?: (playlist: Playlist, mode: ListMonitorMode) => Promise<void>;
+  /** Admin or holder of the auto-request permission: may pick track mode and turn on auto-request. */
+  canAutoRequest?: boolean;
+  onSetAutoRequest?: (playlist: Playlist, autoRequest: boolean) => Promise<void>;
+  /** Reload the playlists after one was created from the user's listening. */
+  onListeningCreated?: () => Promise<void>;
   onDelete?: (playlistId: number | string) => Promise<void>;
   isLoading?: boolean;
   isAdmin?: boolean;
@@ -54,6 +67,9 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   onImport,
   onToggleActive,
   onSetMonitorMode,
+  canAutoRequest = false,
+  onSetAutoRequest,
+  onListeningCreated,
   onDelete,
   isLoading = false,
   isAdmin = false,
@@ -63,7 +79,8 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
 }) => {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
-  const [importTab, setImportTab] = useState<'link' | 'paste' | 'helper'>('link');
+  const [importTab, setImportTab] = useState<'link' | 'paste' | 'listening' | 'helper'>('link');
+  const [isListeningModalOpen, setIsListeningModalOpen] = useState<boolean>(false);
   const [playlistName, setPlaylistName] = useState<string>('');
   const [playlistUrl, setPlaylistUrl] = useState<string>('');
   const [pastedTracks, setPastedTracks] = useState<string>('');
@@ -181,7 +198,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
               <div>
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <span className="px-2 py-0.5 rounded-[2px] bg-[#1a1a1a] border border-[#2a2a2a] text-[10px] font-mono uppercase text-neutral-300">
-                    {pl.service}
+                    {isListeningService(pl.service) ? LISTENING_PROVIDER_LABELS[pl.service] : pl.service}
                   </span>
                   {onToggleActive && (
                     <TactileSwitch
@@ -207,22 +224,43 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                 )}
               </div>
 
-              {onSetMonitorMode && (
+              {isListeningService(pl.service) ? (
                 <div className="space-y-1.5 pt-3 border-t border-[#1f1f1f]">
-                  <label
-                    htmlFor={`pl-mode-${pl.id}`}
-                    className="text-[10px] uppercase tracking-wider text-neutral-400 font-mono"
-                  >
-                    Monitor mode
-                  </label>
-                  <MonitorModeSelect
-                    id={`pl-mode-${pl.id}`}
-                    compact
-                    allowedModes={isAdmin ? LIST_MONITOR_MODES : NON_ADMIN_MONITOR_MODES}
-                    value={pl.monitor_mode}
-                    onChange={(m) => void onSetMonitorMode(pl, m)}
-                  />
+                  {canAutoRequest && onSetAutoRequest ? (
+                    <TactileSwitch
+                      id={`pl-auto-${pl.id}`}
+                      name={`auto-request-${pl.id}`}
+                      label="Auto-request missing tracks"
+                      checked={pl.auto_request}
+                      onChange={(val) => void onSetAutoRequest(pl, val)}
+                    />
+                  ) : (
+                    <p className="text-[11px] font-mono text-neutral-500">
+                      {pl.auto_request ? 'Auto-request is on, but you no longer have permission.' : AUTO_REQUEST_DENIED_REASON}
+                    </p>
+                  )}
                 </div>
+              ) : (
+                onSetMonitorMode && (
+                  <div className="space-y-1.5 pt-3 border-t border-[#1f1f1f]">
+                    <label
+                      htmlFor={`pl-mode-${pl.id}`}
+                      className="text-[10px] uppercase tracking-wider text-neutral-400 font-mono"
+                    >
+                      Monitor mode
+                    </label>
+                    <MonitorModeSelect
+                      id={`pl-mode-${pl.id}`}
+                      compact
+                      allowedModes={isAdmin ? LIST_MONITOR_MODES : canAutoRequest ? NON_ADMIN_MONITOR_MODES : LIST_ONLY_MODES}
+                      value={pl.monitor_mode}
+                      onChange={(m) => void onSetMonitorMode(pl, m)}
+                    />
+                    {!isAdmin && !canAutoRequest && (
+                      <p className="text-[11px] font-mono text-neutral-500">{AUTO_REQUEST_DENIED_REASON}</p>
+                    )}
+                  </div>
+                )
               )}
 
               {/* Target Users Assignment: only meaningful when a media server receives the playlist */}
@@ -305,6 +343,14 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
             </TapeDeckButton>
             <TapeDeckButton
               size="sm"
+              active={importTab === 'listening'}
+              onClick={() => setImportTab('listening')}
+              icon={<Headphones className="h-3.5 w-3.5" />}
+            >
+              My Listening
+            </TapeDeckButton>
+            <TapeDeckButton
+              size="sm"
               active={importTab === 'helper'}
               onClick={() => setImportTab('helper')}
               icon={<Play className="h-3.5 w-3.5" />}
@@ -380,6 +426,27 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
               </div>
             )}
 
+            {importTab === 'listening' && (
+              <div className="p-3 bg-[#161616] border border-[#222222] rounded-[3px] space-y-3 text-xs text-neutral-300 font-mono">
+                <p>
+                  Build a playlist from your own Last.fm or ListenBrainz account: loved tracks, top tracks or
+                  generated playlists such as Weekly Jams. Missing tracks are listed only unless you opt in to
+                  requesting them.
+                </p>
+                <TapeDeckButton
+                  size="sm"
+                  variant="amber"
+                  onClick={() => {
+                    setIsImportModalOpen(false);
+                    setIsListeningModalOpen(true);
+                  }}
+                  icon={<Headphones className="h-3.5 w-3.5" />}
+                >
+                  Choose From Listening
+                </TapeDeckButton>
+              </div>
+            )}
+
             {importTab === 'helper' && (
               <div className="p-3 bg-[#161616] border border-[#222222] rounded-[3px] space-y-2 text-xs text-neutral-300 font-mono">
                 <p className="font-bold text-[#e5a00d]">1-Click Browser Bookmarklet</p>
@@ -393,7 +460,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
               </div>
             )}
 
-            {importTab !== 'helper' && (
+            {importTab !== 'helper' && importTab !== 'listening' && (
               <ActionBar align="end" className="pt-2">
                 <TapeDeckButton
                   type="submit"
@@ -415,6 +482,13 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
           </form>
         </div>
       </ObsidianModal>
+
+      <ListeningPlaylistModal
+        isOpen={isListeningModalOpen}
+        onClose={() => setIsListeningModalOpen(false)}
+        canAutoRequest={canAutoRequest}
+        onCreated={onListeningCreated ?? onSync}
+      />
     </PageFrame>
   );
 };

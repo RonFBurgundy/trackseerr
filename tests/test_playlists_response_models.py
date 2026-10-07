@@ -18,7 +18,7 @@ def api(client):
 
 def test_create_list_and_settings_flow(api, db, admin, alice):
     created = ok(api.post(P, json={"url_or_id": "3155776842", "service": "deezer"}, headers=alice), 201)
-    assert created["creator_id"] == "alice-1" and created["targets"] == ["alice-1"] and created["monitor_mode"] == "track"
+    assert created["creator_id"] == "alice-1" and created["targets"] == ["alice-1"] and created["monitor_mode"] == "none"  # no auto-request permission
     pid = created["id"]
     listed = ok(api.get(P, headers=alice))
     assert [p["id"] for p in listed] == [pid] and listed[0]["tracks_json"] is None
@@ -27,6 +27,8 @@ def test_create_list_and_settings_flow(api, db, admin, alice):
     assert ok(api.put(f"{P}/{pid}/enabled", json={"enabled": False, "monitor_mode": "none"}, headers=alice)) == {
         "id": pid, "enabled": False, "monitor_mode": "none",
     }
+    assert api.put(f"{P}/{pid}/monitor-mode", json={"monitor_mode": "track"}, headers=alice).status_code == 403
+    db.update_user_admin_fields("alice-1", {"permissions": 34 | 128})
     assert ok(api.put(f"{P}/{pid}/monitor-mode", json={"monitor_mode": "track"}, headers=alice)) == {"id": pid, "monitor_mode": "track"}
     assert ok(api.put(f"{P}/{pid}/monitor-mode", json={"monitor_mode": "artist"}, headers=admin)) == {"id": pid, "monitor_mode": "artist"}
     assert ok(api.delete(f"{P}/{pid}", headers=alice)) == {"status": "deleted", "id": pid}

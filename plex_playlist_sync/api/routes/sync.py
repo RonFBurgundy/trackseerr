@@ -28,6 +28,8 @@ from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.config import MEDIA_SERVER_NONE, Config
 from plex_playlist_sync.job_tracker import tracked
 from plex_playlist_sync.list_monitoring import apply_playlist_missing_safely
+from plex_playlist_sync.listening_playlists import fetch_listening_tracks
+from plex_playlist_sync.playlist_policy import is_listening_playlist
 from plex_playlist_sync.models import Playlist, RequestStatus, Track
 from plex_playlist_sync.native_match import match_playlist_tracks_native
 from plex_playlist_sync.storage import Database
@@ -189,7 +191,14 @@ class SyncState:
                 if service == "plex":
                     skip_rating_keys = self._refresh_adopted_playlist(db, plex_client, pl)
                 try:
-                    if pl_id.startswith("imp_") or pl.get("tracks_json"):
+                    if is_listening_playlist(pl):
+                        # Re-fetched every sync with the owner's linked account (a created-for playlist
+                        # re-resolves to its newest edition); the snapshot keeps the last good list.
+                        tracks = fetch_listening_tracks(db, config, pl)
+                        db.set_playlist_tracks_json(
+                            pl_id, json.dumps([{"title": t.title, "artist": t.artist, "album": t.album} for t in tracks])
+                        )
+                    elif pl_id.startswith("imp_") or pl.get("tracks_json"):
                         raw_tracks_json = pl.get("tracks_json")
                         if raw_tracks_json:
                             t_dicts = json.loads(raw_tracks_json)

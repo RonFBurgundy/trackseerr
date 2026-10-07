@@ -40,6 +40,7 @@ from plex_playlist_sync.library_monitoring import (
     validate_monitor_option,
 )
 from plex_playlist_sync.models import LibraryAlbum, LibraryArtist, LibraryTrack
+from plex_playlist_sync.playlist_policy import creator_may_auto_acquire, is_listening_playlist
 from plex_playlist_sync.redaction import safe_exc
 from plex_playlist_sync.request_submission import RequestRejected, submit_track_request
 from plex_playlist_sync.storage import Database, clean_library_name
@@ -605,8 +606,21 @@ def apply_playlist_missing(
     playlist = db.get_playlist(playlist_id)
     if playlist is None:
         return counts
+    if is_listening_playlist(playlist):
+        # Listening playlists never use a monitor mode; their missing tracks are only requested on an opt-in.
+        from plex_playlist_sync.listening_playlists import auto_request_missing
+
+        return auto_request_missing(db, config, playlist)
     mode = str(playlist.get("monitor_mode") or "track")
-    if mode in ("track", "none"):
+    if mode == "none":
+        return counts
+    if not creator_may_auto_acquire(db, playlist):
+        # Re-checked on every sync and the stored mode is left alone, so granting the permission again restores it.
+        logger.info(
+            "Playlist %s: creator may not auto-request playlist tracks; monitor mode %r is not applied", playlist_id, mode
+        )
+        return counts
+    if mode == "track":
         return counts
     if not _creator_may_use_mode(db, playlist):
         logger.info("Playlist %s: creator is not an admin, treating monitor mode %r as 'track'", playlist_id, mode)

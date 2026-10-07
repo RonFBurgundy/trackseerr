@@ -67,6 +67,7 @@ export const PERMISSION_FLAGS = [
   { bit: 16, key: 'MANAGE_REQUESTS', label: 'Manage requests' },
   { bit: 32, key: 'REPORT_ISSUE', label: 'Report issues' },
   { bit: 64, key: 'AUTO_APPROVE_DISCOGRAPHY', label: 'Auto-approve discographies' },
+  { bit: 128, key: 'AUTO_REQUEST_PLAYLISTS', label: 'Auto-request playlist tracks' },
 ] as const;
 
 export const PERMISSION_ADMIN = 1;

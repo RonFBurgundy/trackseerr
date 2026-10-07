@@ -42,6 +42,7 @@ from plex_playlist_sync.models import (
     RequestStatus,
 )
 from plex_playlist_sync.notifications import notification_dispatcher
+from plex_playlist_sync.playlist_policy import creator_may_auto_acquire
 from plex_playlist_sync.decision_engine import prepare_profile, upgrade_floor
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.redaction import redact_text
@@ -51,6 +52,29 @@ from plex_playlist_sync.seed_rules import apply_seed_rules_at_grab
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
+
+
+def effective_playlist_modes(db: Database) -> dict[str, str]:
+    """Playlist id -> the monitor mode the backlog should honour.
+
+    A playlist whose creator may not auto-request playlist tracks (a non-admin without ``AUTO_REQUEST_PLAYLISTS``) is
+    list-only (``none``) here. The stored mode is untouched, so granting the permission again restores it.
+    """
+    modes: dict[str, str] = {}
+    creators: dict[str, bool] = {}
+    blocked = 0
+    for p in db.list_playlists():
+        mode = str(p.get("monitor_mode") or "track")
+        if mode != "none" and not creator_may_auto_acquire(db, p, creators):
+            mode = "none"
+            blocked += 1
+        modes[str(p["id"])] = mode
+    if blocked:
+        logger.info(
+            "WantedBacklogWorker: %d playlist(s) are list-only because their creator may not auto-request playlist tracks",
+            blocked,
+        )
+    return modes
 
 
 def _cached_artist_tags(db: Database, cache: dict[str, list[str]], artist_name: Optional[str]) -> list[str]:
@@ -476,7 +500,7 @@ class WantedBacklogWorker:
         # A playlist's monitor mode decides whether its missing tracks are searched one by one: "none" never,
         # "album"/"artist" only until the list mode has taken them over (then the monitored album/artist is searched).
         try:
-            playlist_modes = {str(p["id"]): str(p.get("monitor_mode") or "track") for p in db.list_playlists()}
+            playlist_modes = effective_playlist_modes(db)
         except Exception as e:
             logger.error("WantedBacklogWorker error reading playlist monitor modes: %s", e)
             playlist_modes = {}
