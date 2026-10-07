@@ -326,6 +326,87 @@ def backfill_needed(db: Database) -> bool:
     return db.get_kv(BACKFILL_MARKER_KEY) != str(ART_PIPELINE_VERSION)
 
 
+_BACKFILL_TASK = "art_thumbnail_backfill"
+EVENT_DEBOUNCE_SECONDS = 300.0
+_backfill_lock = threading.Lock()  # held for the duration of a backfill: never two at once, whatever started them
+_event_lock = threading.Lock()
+_event_last_started: Optional[float] = None
+_event_rerun = False  # an event arrived while a backfill was running: go once more afterwards (new art may exist)
+
+
+def run_backfill_task(
+    db: Database, trigger: str, should_stop: Optional[Callable[[], bool]] = None
+) -> Optional[dict[str, int]]:
+    """Runs one recorded backfill pass (task history + job queue). Missing-only: finished items cost two stats.
+
+    Returns the stats, or None when another backfill is already running (the caller is not counted as a run). A
+    request that arrived through ``request_backfill_after_event`` while this one ran triggers one more pass.
+    Exceptions propagate after being recorded as a failed run.
+    """
+    from plex_playlist_sync.job_tracker import track_job
+    from plex_playlist_sync.task_manager import record_task_run
+
+    global _event_rerun
+    stats: Optional[dict[str, int]] = None
+    while True:
+        if not _backfill_lock.acquire(blocking=False):
+            return stats
+        try:
+            with record_task_run(db, _BACKFILL_TASK, trigger) as run, track_job(
+                _BACKFILL_TASK, "Artwork Thumbnail Backfill"
+            ) as job:
+                stats = backfill(db, should_stop=should_stop)
+                interrupted = bool(should_stop is not None and should_stop())
+                message = (
+                    "interrupted; will resume"
+                    if interrupted
+                    else f"scanned {stats['scanned']}, generated {stats['generated']}, versioned {stats['versioned']}"
+                )
+                run.message = job.message = message
+                run.cancelled = job.cancelled = interrupted
+        finally:
+            with _event_lock:
+                _backfill_lock.release()
+                again = _event_rerun
+                _event_rerun = False
+        if not again or (should_stop is not None and should_stop()):
+            return stats
+        trigger = "event"
+
+
+def request_backfill_after_event(db: Database, source: str) -> Optional[threading.Thread]:
+    """Starts a backfill (trigger ``event``) after a library scan or Lidarr import finished, so a new install gets
+    artwork without the user doing anything.
+
+    Debounced (one start per ``EVENT_DEBOUNCE_SECONDS``) and never concurrent with itself: when a backfill is already
+    running the request is folded into one extra pass after it. Returns the thread, or None when nothing was started.
+    """
+    global _event_last_started, _event_rerun
+    with _event_lock:
+        if _backfill_lock.locked():
+            _event_rerun = True
+            logger.debug("Art backfill already running; one more pass queued after %s", source)
+            return None
+        now = time.monotonic()
+        if _event_last_started is not None and now - _event_last_started < EVENT_DEBOUNCE_SECONDS:
+            logger.debug("Art backfill after %s debounced", source)
+            return None
+        _event_last_started = now
+
+    def _run() -> None:
+        try:
+            run_backfill_task(db, "event")
+        except Exception as exc:  # worker thread boundary: the failed run is recorded; log the cause
+            from plex_playlist_sync.redaction import safe_exc
+
+            logger.error("Art backfill after %s failed: %s", source, safe_exc(exc))
+            logger.debug("Art backfill traceback", exc_info=True)
+
+    thread = threading.Thread(target=_run, daemon=True, name="ArtBackfillEvent")
+    thread.start()
+    return thread
+
+
 def start_startup_backfill(db: Database) -> Optional[threading.Thread]:
     """Runs the art backfill once in the background after an upgrade; never blocks the caller.
 
@@ -342,15 +423,10 @@ def start_startup_backfill(db: Database) -> Optional[threading.Thread]:
 
     def _run() -> None:
         try:
-            from plex_playlist_sync.job_tracker import track_job
-
-            with track_job("art_thumbnail_backfill", "Artwork Thumbnail Backfill") as job:
-                stats = backfill(db, should_stop=_startup_stop.is_set)
-                if _startup_stop.is_set():
-                    job.message = "interrupted; will resume on next start"
-                    return
+            if run_backfill_task(db, "startup", should_stop=_startup_stop.is_set) is None:
+                return  # another backfill is running; the marker stays unset so the next boot retries
+            if not _startup_stop.is_set():
                 db.set_kv(BACKFILL_MARKER_KEY, str(ART_PIPELINE_VERSION))
-                job.message = f"scanned {stats['scanned']}, generated {stats['generated']}, versioned {stats['versioned']}"
         except Exception as exc:
             from plex_playlist_sync.redaction import safe_exc
 
@@ -364,6 +440,57 @@ def start_startup_backfill(db: Database) -> Optional[threading.Thread]:
 
 def stop_startup_backfill() -> None:
     _startup_stop.set()
+
+
+class ArtBackfillScheduler:
+    """Daemon loop that runs the backfill when its interval has passed since the last finished run (read from the
+    task history, so a restart does not re-run it). The interval is re-read every cycle, so schedule edits apply live."""
+
+    def __init__(self) -> None:
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        self._lock = threading.Lock()
+
+    def start(
+        self, db: Database, interval_fn: Callable[[], float], initial_delay: float = 120.0, poll_seconds: float = 30.0
+    ) -> bool:
+        from plex_playlist_sync.task_manager import seconds_until_due
+
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return False
+            self._stop_event.clear()
+
+        def _loop() -> None:
+            if self._stop_event.wait(initial_delay):
+                return
+            while not self._stop_event.is_set():
+                if seconds_until_due(db, _BACKFILL_TASK, interval_fn()) <= 0:
+                    try:
+                        run_backfill_task(db, "scheduled", should_stop=self._stop_event.is_set)
+                    except Exception as exc:  # the failed run is recorded; keep the schedule alive
+                        from plex_playlist_sync.redaction import safe_exc
+
+                        logger.error("Scheduled art backfill failed: %s", safe_exc(exc))
+                        logger.debug("Scheduled art backfill traceback", exc_info=True)
+                        if self._stop_event.wait(poll_seconds):
+                            return
+                        continue
+                if self._stop_event.wait(poll_seconds):
+                    return
+
+        self._thread = threading.Thread(target=_loop, daemon=True, name="ArtBackfillScheduler")
+        self._thread.start()
+        return True
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread() and thread.is_alive():
+            thread.join(timeout=5.0)
+
+
+art_backfill_scheduler = ArtBackfillScheduler()
 
 
 def wait_idle(timeout: float = 5.0) -> bool:

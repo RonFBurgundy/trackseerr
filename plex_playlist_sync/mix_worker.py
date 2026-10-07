@@ -12,6 +12,7 @@ from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.storage import Database
+from plex_playlist_sync.task_manager import TRIGGER_SCHEDULED, TRIGGER_STARTUP, record_task_run, wait_for_next_cycle
 from plex_playlist_sync.tailored_mixes import InsufficientHistoryError, generate_and_sync
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,7 @@ class MixWorker:
         interval_seconds: int = CHECK_INTERVAL_SECONDS,
         plex_factory: Optional[Callable[[Config], Optional[Any]]] = None,
         discovery: Optional[Any] = None,
+        interval_fn: Optional[Callable[[], float]] = None,
     ) -> bool:
         with self._lock:
             if self._is_running:
@@ -129,18 +131,25 @@ class MixWorker:
             self._stop_event.clear()
             self._is_running = True
         self._discovery = discovery or DiscoveryClient()
+        cycle_interval = interval_fn or (lambda: float(interval_seconds))
 
         def _loop() -> None:
-            logger.info("MixWorker: Loop started (interval: %ds)", interval_seconds)
+            logger.info("MixWorker: Loop started (interval: %ds)", cycle_interval())
+            trigger = TRIGGER_STARTUP
             while not self._stop_event.is_set():
                 try:
                     plex = plex_factory(config) if plex_factory else self._get_plex(config)
-                    self.run_iteration(db, config, plex, self._discovery)
+                    with record_task_run(db, "mix_generation", trigger) as run:
+                        outcome = self.run_iteration(db, config, plex, self._discovery)
+                        if isinstance(outcome, dict):
+                            run.message = f"due={outcome.get('due', 0)}, generated={outcome.get('generated', 0)}, errors={outcome.get('errors', 0)}"
                 except Exception as exc:
                     logger.error("MixWorker: Error in iteration (%s)", type(exc).__name__)  # no traceback/message: may embed Plex token URLs
                     with self._lock:
                         self.errors += 1
-                self._stop_event.wait(interval_seconds)
+                trigger = TRIGGER_SCHEDULED
+                if wait_for_next_cycle(self._stop_event, cycle_interval):
+                    break
             with self._lock:
                 self._is_running = False
             logger.info("MixWorker: Loop terminated cleanly")

@@ -14,13 +14,20 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 import mutagen
 
 from plex_playlist_sync import path_mapping
 from plex_playlist_sync.import_security import check_magic
 from plex_playlist_sync.job_tracker import track_job
+from plex_playlist_sync.task_manager import (
+    TRIGGER_MANUAL,
+    TRIGGER_SCHEDULED,
+    effective_interval_seconds,
+    record_task_run,
+    wait_for_next_cycle,
+)
 from plex_playlist_sync.library import AUDIO_EXTENSIONS, inspect_audio_file
 from plex_playlist_sync.media_servers.base import MediaServerError, MediaServerUnsupported
 from plex_playlist_sync.recycle_bin import EXCLUDED_DIRNAMES, is_system_dirname, is_system_filename
@@ -429,23 +436,32 @@ def _chain(head: list[Any], rest: Iterator[Any]) -> Iterator[Any]:
     yield from rest
 
 
-def run_check(db: Any, server: Optional[Any], *, music_root: Path | str, now: Optional[datetime] = None) -> dict[str, Any]:
+def run_check(
+    db: Any,
+    server: Optional[Any],
+    *,
+    music_root: Path | str,
+    now: Optional[datetime] = None,
+    trigger: str = TRIGGER_MANUAL,
+) -> dict[str, Any]:
     """One full check, recorded in the job tracker. Raises LibraryHealthBusy when another check is running."""
     if not _run_lock.acquire(blocking=False):
         raise LibraryHealthBusy("A library health check is already running")
     try:
-        return _run_tracked(db, server, Path(music_root), now or _now())
+        return _run_tracked(db, server, Path(music_root), now or _now(), trigger)
     finally:
         _run_lock.release()
 
 
-def _run_tracked(db: Any, server: Optional[Any], music_root: Path, now: datetime) -> dict[str, Any]:
-    with track_job("library_health", "Library health check") as handle:
+def _run_tracked(
+    db: Any, server: Optional[Any], music_root: Path, now: datetime, trigger: str = TRIGGER_MANUAL
+) -> dict[str, Any]:
+    with record_task_run(db, "library_health", trigger) as recorded, track_job("library_health", "Library health check") as handle:
         run = _execute(db, server, music_root, now)
         if run.get("error"):
-            handle.failed = str(run["error"])[:200]
+            handle.failed = recorded.failed = str(run["error"])[:200]
         else:
-            handle.message = f"unindexed={run['unindexed']}, stale={run['stale']}"
+            handle.message = recorded.message = f"unindexed={run['unindexed']}, stale={run['stale']}"
         return run
 
 
@@ -456,7 +472,7 @@ def start_check_async(db: Any, server: Optional[Any], *, music_root: Path | str)
 
     def _target() -> None:
         try:
-            _run_tracked(db, server, Path(music_root), _now())
+            _run_tracked(db, server, Path(music_root), _now(), TRIGGER_MANUAL)
         except Exception as exc:  # noqa: BLE001 - a thread must not die silently; the cause is logged
             logger.error("library health check crashed: %s", safe_exc(exc))
             logger.debug("library health traceback", exc_info=True)
@@ -519,8 +535,9 @@ def group_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(groups.values(), key=lambda g: (-g["count"], g["group_key"]))
 
 
-def weekly_due(db: Any, now: Optional[datetime] = None) -> bool:
-    """True when the weekly schedule is on and the last run finished at least a week ago (or never ran)."""
+def weekly_due(db: Any, now: Optional[datetime] = None, interval_seconds: float = 7 * 86400) -> bool:
+    """True when the schedule is on and the last run finished at least ``interval_seconds`` ago (default a week), or
+    never ran."""
     if not db.get_library_health_weekly():
         return False
     last = db.get_last_library_health_run()
@@ -532,7 +549,7 @@ def weekly_due(db: Any, now: Optional[datetime] = None) -> bool:
         return True
     if finished.tzinfo is None:
         finished = finished.replace(tzinfo=timezone.utc)
-    return ((now or _now()) - finished).days >= 7
+    return ((now or _now()) - finished).total_seconds() >= interval_seconds
 
 
 def mapping_view(db: Any) -> Optional[dict[str, Any]]:
@@ -563,7 +580,7 @@ def finding_view(f: dict[str, Any]) -> dict[str, Any]:
 # Weekly schedule
 # ---------------------------------------------------------------------------
 
-WORKER_WAKE_SECONDS = 6 * 3600
+WORKER_WAKE_SECONDS = 3600  # due check is one row read; hourly keeps a schedule edit from waiting long
 WORKER_INITIAL_DELAY_SECONDS = 300.0
 
 
@@ -587,6 +604,8 @@ class LibraryHealthWorker:
         interval_seconds: float = WORKER_WAKE_SECONDS,
         initial_delay: float = WORKER_INITIAL_DELAY_SECONDS,
     ) -> bool:
+        """``interval_seconds`` is how often the loop wakes to check whether a run is due; the run interval itself
+        is the task manager's effective ``library_health`` interval."""
         with self._lock:
             if self._is_running:
                 return False
@@ -597,7 +616,8 @@ class LibraryHealthWorker:
             if not self._stop_event.wait(initial_delay):
                 while not self._stop_event.is_set():
                     self.run_if_due(db, config)
-                    self._stop_event.wait(interval_seconds)
+                    if wait_for_next_cycle(self._stop_event, lambda: float(interval_seconds)):
+                        break
             with self._lock:
                 self._is_running = False
 
@@ -608,7 +628,8 @@ class LibraryHealthWorker:
     def run_if_due(self, db: Any, config: Any) -> bool:
         """Runs one check when due. Returns True when a check was started and finished."""
         try:
-            if not weekly_due(db):
+            interval = effective_interval_seconds(db, config, "library_health") or 7 * 86400
+            if not weekly_due(db, interval_seconds=interval):
                 return False
             from plex_playlist_sync.media_servers import get_media_server
 
@@ -616,7 +637,7 @@ class LibraryHealthWorker:
             if server is None or not server.capabilities.file_paths:
                 return False
             music_root = Path(db.get_media_management_settings().get("root_folder_path") or "/music")
-            run_check(db, server, music_root=music_root)
+            run_check(db, server, music_root=music_root, trigger=TRIGGER_SCHEDULED)
             return True
         except LibraryHealthBusy:
             return False

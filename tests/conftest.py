@@ -364,6 +364,8 @@ class _ArtSchedulerCalls:
         self.precache: list[tuple] = []
         self.pregenerate: list[tuple] = []
         self.startup_backfill: list[tuple] = []
+        self.event_backfill: list[str] = []
+        self.scheduler_start: list[tuple] = []
 
 
 @pytest.fixture(autouse=True)
@@ -386,6 +388,13 @@ def art_scheduler_calls(request, monkeypatch):
     )
     monkeypatch.setattr(
         art_pipeline, "start_startup_backfill", lambda *a, **kw: calls.startup_backfill.append((a, kw)) or None
+    )
+    # Library scans / Lidarr imports ask for a backfill, and boot starts the daily scheduler: neither may spawn threads.
+    monkeypatch.setattr(
+        art_pipeline, "request_backfill_after_event", lambda db, source: calls.event_backfill.append(source) or None
+    )
+    monkeypatch.setattr(
+        art_pipeline.art_backfill_scheduler, "start", lambda *a, **kw: calls.scheduler_start.append((a, kw)) or False
     )
     yield calls
 

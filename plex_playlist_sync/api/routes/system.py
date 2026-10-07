@@ -2,7 +2,7 @@
 
 import asyncio
 import collections
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -13,24 +13,29 @@ import shutil
 import sqlite3
 import threading
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel, ConfigDict
 
 from plex_playlist_sync.api.response_models import ApiModel
 from plex_playlist_sync.api.schemas.system import (
+    ActivityResponse,
     JobQueueSnapshot,
     LidarrHealthResponse,
     LogEntry,
     MediaServerStatus,
+    ResourcesResponse,
     SuccessFlag,
     SystemEventsPage,
     TaskActionResult,
+    TaskProgress,
+    TaskRunItem,
 )
 
-from plex_playlist_sync import art_pipeline, library_health, recycle_bin, seed_cleanup
+from plex_playlist_sync import art_pipeline, library_health, process_stats, recycle_bin, seed_cleanup
 from plex_playlist_sync.acquisition_worker import acquisition_worker
 from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
 from plex_playlist_sync.api.dependencies import (
@@ -70,6 +75,19 @@ from plex_playlist_sync.lidarr_queue import lidarr_worker
 from plex_playlist_sync.models import DownloadClientConfig, IndexerConfig, UserPermission
 from plex_playlist_sync.security import is_safe_service_url
 from plex_playlist_sync.storage import Database
+from plex_playlist_sync.task_manager import (
+    KIND_INTERVAL,
+    TASKS,
+    TRIGGER_MANUAL,
+    RunHandle,
+    default_interval_seconds,
+    effective_interval_seconds,
+    format_interval,
+    next_run_at,
+    parse_iso,
+    record_task_run,
+    set_interval_override,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -869,14 +887,27 @@ class ScheduledTaskItem(ApiModel):
     id: str
     name: str
     description: str
-    interval: str
+    interval: str  # display string, e.g. "Every 24h"
     status: str  # "idle" | "running" | "paused" | "failed"
     last_run_at: Optional[str] = None
     can_trigger: bool = True
     can_cancel: bool = False
+    schedule_kind: str = "manual"  # "interval" | "continuous" | "manual"
+    interval_seconds: Optional[int] = None  # the interval in force (override > config/env > default)
+    default_interval_seconds: Optional[int] = None  # what resetting the schedule returns to
+    interval_presets: list[int] = []  # allowed values for PUT /tasks/{id}/schedule; empty when not editable
+    editable: bool = False
+    next_run_at: Optional[str] = None  # last run end + interval, interval tasks only
+    last_run_status: Optional[str] = None  # success | failed | cancelled
+    last_duration_ms: Optional[int] = None
+    current_run_started_at: Optional[str] = None
+    progress: Optional[TaskProgress] = None
 
 
-VALID_TASK_IDS = {
+VALID_TASK_IDS = set(TASKS)
+
+# Tasks an admin can start by hand (the POST /run branches below). The rest are polling loops with nothing to "run now".
+_MANUAL_RUNNABLE = {
     "filesystem_scan",
     "playlist_sync",
     "wanted_backlog_sweep",
@@ -891,240 +922,203 @@ VALID_TASK_IDS = {
     "lidarr_request_retry",
 }
 
+# Display text of the polling loops, whose period is fixed in code.
+_CONTINUOUS_DISPLAY = {
+    "lidarr_request_retry": "Checks every 1m",
+    "pending_releases": "Checks every 1m",
+    "import_list_sync": "Checks every 5m",
+    "scrobble_sync": "Checks every 30s",
+}
+
 _running_tasks: set[str] = set()
-_task_last_run_at: dict[str, str] = {}
 _tasks_lock = threading.Lock()
+
+
+def _later_iso(*values: Optional[str]) -> Optional[str]:
+    """The most recent of several ISO timestamps (unparseable ones are ignored)."""
+    best: Optional[tuple[datetime, str]] = None
+    for value in values:
+        parsed = parse_iso(value)
+        if parsed is not None and (best is None or parsed > best[0]):
+            best = (parsed, str(value))
+    return best[1] if best else None
+
+
+def _task_progress(task_id: str, running: bool) -> Optional[TaskProgress]:
+    """Progress from in-memory worker state only (cheap, no external calls). None when the task cannot tell."""
+    if not running:
+        return None
+    if task_id == "filesystem_scan":
+        stat = library_scanner.get_status()
+        total = int(stat.get("total_files_found") or 0)
+        return TaskProgress(
+            current=int(stat.get("processed_files") or 0),
+            total=total or None,
+            message=redact_text(str(stat["current_file"])) if stat.get("current_file") else None,
+        )
+    if task_id == "lidarr_auto_trickle":
+        stat = lidarr_worker.get_status()
+        if stat.get("is_running"):
+            return TaskProgress(
+                current=int(stat.get("processed_items") or 0),
+                total=int(stat.get("total_items") or 0) or None,
+                message=str(stat.get("message")) if stat.get("message") else None,
+            )
+    message = job_tracker.running_message(task_id)
+    return TaskProgress(message=redact_text(message)) if message else None
 
 
 def get_all_scheduled_tasks(
     db: Database,
     config: Optional[Config] = None,
 ) -> list[ScheduledTaskItem]:
-    """Returns the unified registry of scheduled background tasks and worker heartbeats."""
-    tasks: list[ScheduledTaskItem] = []
+    """Returns the unified registry of background tasks: schedule, last run (from the persisted run history),
+    next run and live status."""
+    try:
+        latest = db.latest_task_runs()
+        finished = db.latest_finished_task_runs()
+    except sqlite3.Error as exc:
+        logger.warning("Could not read the task run history: %s", safe_exc(exc))
+        latest, finished = {}, {}
 
-    # 1. filesystem_scan: Media Library Disk Scanner (library_scanner)
+    # Worker-owned state, each read once. These are in-memory except the three that read the database.
     scan_stat = library_scanner.get_status()
-    if scan_stat.get("is_scanning") or scan_stat.get("status") == "scanning" or "filesystem_scan" in _running_tasks:
-        scan_status_val = "running"
-    elif scan_stat.get("status") == "failed":
-        scan_status_val = "failed"
-    else:
-        scan_status_val = "idle"
-
-    scan_last_run = scan_stat.get("completed_at") or scan_stat.get("started_at") or _task_last_run_at.get("filesystem_scan")
-    tasks.append(
-        ScheduledTaskItem(
-            id="filesystem_scan",
-            name="Media Library Disk Scanner",
-            description="Scans local audio storage, extracts Mutagen tags, and indexes media into the library catalog.",
-            interval="Manual / On Demand",
-            status=scan_status_val,
-            last_run_at=scan_last_run,
-            can_trigger=True,
-            can_cancel=True,
-        )
-    )
-
-    # 2. playlist_sync: Plex Playlist Sync (sync_state)
-    wait_sec = getattr(config, "wait_seconds", 0) if config else 0
-    if wait_sec >= 60:
-        sync_interval = f"Every {int(wait_sec // 60)}m"
-    elif wait_sec > 0:
-        sync_interval = f"Every {int(wait_sec)}s"
-    else:
-        sync_interval = "Manual / On Demand"
-
-    sync_status_val = "running" if (sync_state.is_syncing or "playlist_sync" in _running_tasks) else "idle"
-    sync_last_run = sync_state.last_run_at or _task_last_run_at.get("playlist_sync")
-    tasks.append(
-        ScheduledTaskItem(
-            id="playlist_sync",
-            name="Plex Playlist Sync",
-            description="Synchronizes enabled Spotify and Deezer playlists with Plex media server users.",
-            interval=sync_interval,
-            status=sync_status_val,
-            last_run_at=sync_last_run,
-            can_trigger=True,
-            can_cancel=False,
-        )
-    )
-
-    # 3. wanted_backlog_sweep: Monitored Missing & Upgrade Search Sweep (backlog_worker)
     backlog_stat = backlog_worker.get_status()
-    backlog_interval_min = getattr(config, "backlog_search_interval_minutes", 60) if config else 60
-    backlog_status_val = "running" if "wanted_backlog_sweep" in _running_tasks else "idle"
-    backlog_last_run = backlog_stat.get("last_run_at") or _task_last_run_at.get("wanted_backlog_sweep")
-    tasks.append(
-        ScheduledTaskItem(
-            id="wanted_backlog_sweep",
-            name="Monitored Missing & Upgrade Search Sweep",
-            description="Sweeps unfulfilled requests and missing library tracks against indexers for new releases or quality upgrades.",
-            interval=f"Every {backlog_interval_min or 60}m",
-            status=backlog_status_val,
-            last_run_at=backlog_last_run,
-            can_trigger=True,
-            can_cancel=False,
-        )
-    )
-
-    # 4. indexer_rss_sync: Torznab / Newznab RSS Sync (rss_worker)
     rss_stat = rss_worker.get_status()
-    rss_interval_min = getattr(config, "rss_sync_interval_minutes", 15) if config else 15
-    rss_status_val = "running" if "indexer_rss_sync" in _running_tasks else "idle"
-    rss_last_run = rss_stat.get("last_run_at") or _task_last_run_at.get("indexer_rss_sync")
-    tasks.append(
-        ScheduledTaskItem(
-            id="indexer_rss_sync",
-            name="Torznab / Newznab RSS Sync",
-            description="Monitors indexer recent releases for incoming tracks and albums matching pending requests.",
-            interval=f"Every {rss_interval_min or 15}m",
-            status=rss_status_val,
-            last_run_at=rss_last_run,
-            can_trigger=True,
-            can_cancel=False,
-        )
-    )
-
-    # 5. lidarr_auto_trickle: Lidarr Trickle Worker (lidarr_worker)
     lidarr_stat = lidarr_worker.get_status()
-    lidarr_interval_min = getattr(config, "lidarr_auto_trickle_interval_minutes", 30) if config else 30
-    if lidarr_stat.get("is_paused"):
-        lidarr_status_val = "paused"
-    elif lidarr_stat.get("is_running") or "lidarr_auto_trickle" in _running_tasks:
-        lidarr_status_val = "running"
-    else:
-        lidarr_status_val = "idle"
-
-    lidarr_last_run = lidarr_stat.get("last_processed_at") or lidarr_stat.get("started_at") or _task_last_run_at.get("lidarr_auto_trickle")
-    tasks.append(
-        ScheduledTaskItem(
-            id="lidarr_auto_trickle",
-            name="Lidarr Trickle Worker",
-            description="Trickles missing tracks into Lidarr with paced delays to prevent MusicBrainz rate limits.",
-            interval=f"Every {lidarr_interval_min or 30}m",
-            status=lidarr_status_val,
-            last_run_at=lidarr_last_run,
-            can_trigger=True,
-            can_cancel=True,
-        )
-    )
-
-    # 6. download_queue_monitor: Acquisition Worker (acquisition_worker)
-    acq_poll_sec = int(getattr(acquisition_worker, "poll_interval", 5.0))
-    acq_status_val = "running" if ("download_queue_monitor" in _running_tasks or (hasattr(acquisition_worker, "is_running") and acquisition_worker.is_running())) else "idle"
-    acq_last_run = _task_last_run_at.get("download_queue_monitor")
-    tasks.append(
-        ScheduledTaskItem(
-            id="download_queue_monitor",
-            name="Acquisition Worker",
-            description="Monitors active download clients, processes finished downloads, tags audio files, and moves them to the library.",
-            interval=f"Every {acq_poll_sec}s",
-            status=acq_status_val,
-            last_run_at=acq_last_run,
-            can_trigger=True,
-            can_cancel=False,
-        )
-    )
-
-    # 7. artist_metadata_refresh: Artist Metadata & Discography Refresh (artist_refresh_worker)
     ar_stat = artist_refresh_worker.get_status()
-    ar_status_val = "running" if (ar_stat.get("running") or "artist_metadata_refresh" in _running_tasks) else "idle"
-    ar_last_run = ar_stat.get("last_run_at") or _task_last_run_at.get("artist_metadata_refresh")
-    tasks.append(
-        ScheduledTaskItem(
-            id="artist_metadata_refresh",
-            name="Artist Metadata & Discography Refresh",
-            description="Refreshes artist metadata, canonical discographies, full tracklists, and artwork cache from BrainzMash / MusicBrainz and Deezer.",
-            interval="Every 24h",
-            status=ar_status_val,
-            last_run_at=ar_last_run,
-            can_trigger=True,
-            can_cancel=False,
-        )
-    )
-
-    # 8. art_thumbnail_backfill: one-off pre-generation of 250/500 thumbnails and art versions for existing art
-    backfill_running = "art_thumbnail_backfill" in _running_tasks
-    tasks.append(
-        ScheduledTaskItem(
-            id="art_thumbnail_backfill",
-            name="Artwork Thumbnail Backfill",
-            description="One-off: generates missing 250/500px thumbnails and version tokens for artwork already on disk. Safe to re-run; skips finished items.",
-            interval="Manual / On Demand",
-            status="running" if backfill_running else "idle",
-            last_run_at=_task_last_run_at.get("art_thumbnail_backfill"),
-            can_trigger=True,
-            can_cancel=False,
-        )
-    )
-
-    # 9. seed_cleanup: finished-torrent sweep (seed_cleanup)
     sc_stat = seed_cleanup.get_status(db)
-    sc_last = (sc_stat.get("last_run") or {}).get("finished_at") or _task_last_run_at.get("seed_cleanup")
-    tasks.append(
-        ScheduledTaskItem(
-            id="seed_cleanup",
-            name="Seed Cleanup",
-            description="Removes finished torrents per the 'When seeding is done' setting and flags torrents TrackSeerr no longer tracks for review.",
-            interval="Every 24h",
-            status="running" if (sc_stat.get("running") or "seed_cleanup" in _running_tasks) else "idle",
-            last_run_at=sc_last,
-            can_trigger=True,
-            can_cancel=False,
-        )
-    )
-
-    # 10. library_health: media-server vs disk reconciliation (library_health)
+    rb_stat = recycle_bin.get_status()
     try:
         lh_run = db.get_last_library_health_run() or {}
     except sqlite3.Error as exc:
         logger.warning("Could not read the last library health run: %s", safe_exc(exc))
         lh_run = {}
-    tasks.append(
-        ScheduledTaskItem(
-            id="library_health",
-            name="Library Health Check",
-            description="Compares the music folder with what the media server indexes and records what is missing, stale or weakly matched.",
-            interval="Weekly",
-            status="running" if (library_health.is_running() or "library_health" in _running_tasks) else "idle",
-            last_run_at=lh_run.get("finished_at") or lh_run.get("started_at") or _task_last_run_at.get("library_health"),
-            can_trigger=True,
-            can_cancel=False,
-        )
-    )
 
-    # 11. recycle_bin_cleanup: prunes dated recycle folders older than the configured number of days
-    rb_stat = recycle_bin.get_status()
-    rb_days = int(db.get_media_management_settings().get("recycle_bin_cleanup_days") or 0)
-    tasks.append(
-        ScheduledTaskItem(
-            id="recycle_bin_cleanup",
-            name="Recycle Bin cleanup",
-            description=(
+    lidarr_mode = get_library_mode(db) == MODE_LIDARR
+
+    # status, last run known to the worker itself (for runs from before the history existed or not recorded), cancel
+    runtime: dict[str, tuple[str, Optional[str], bool]] = {
+        "filesystem_scan": (
+            "running"
+            if (scan_stat.get("is_scanning") or scan_stat.get("status") == "scanning" or "filesystem_scan" in _running_tasks)
+            else ("failed" if scan_stat.get("status") == "failed" else "idle"),
+            scan_stat.get("completed_at") or scan_stat.get("started_at"),
+            True,
+        ),
+        "playlist_sync": (
+            "running" if (sync_state.is_syncing or "playlist_sync" in _running_tasks) else "idle",
+            sync_state.last_run_at,
+            False,
+        ),
+        "wanted_backlog_sweep": (
+            "running" if "wanted_backlog_sweep" in _running_tasks else "idle",
+            backlog_stat.get("last_run_at"),
+            False,
+        ),
+        "indexer_rss_sync": (
+            "running" if "indexer_rss_sync" in _running_tasks else "idle",
+            rss_stat.get("last_run_at"),
+            False,
+        ),
+        "lidarr_auto_trickle": (
+            "paused"
+            if lidarr_stat.get("is_paused")
+            else ("running" if (lidarr_stat.get("is_running") or "lidarr_auto_trickle" in _running_tasks) else "idle"),
+            lidarr_stat.get("last_processed_at") or lidarr_stat.get("started_at"),
+            True,
+        ),
+        "download_queue_monitor": (
+            "running"
+            if ("download_queue_monitor" in _running_tasks or (hasattr(acquisition_worker, "is_running") and acquisition_worker.is_running()))
+            else "idle",
+            None,
+            False,
+        ),
+        "artist_metadata_refresh": (
+            "running" if (ar_stat.get("running") or "artist_metadata_refresh" in _running_tasks) else "idle",
+            ar_stat.get("last_run_at"),
+            False,
+        ),
+        "art_thumbnail_backfill": ("running" if "art_thumbnail_backfill" in _running_tasks else "idle", None, False),
+        "seed_cleanup": (
+            "running" if (sc_stat.get("running") or "seed_cleanup" in _running_tasks) else "idle",
+            (sc_stat.get("last_run") or {}).get("finished_at"),
+            False,
+        ),
+        "library_health": (
+            "running" if (library_health.is_running() or "library_health" in _running_tasks) else "idle",
+            lh_run.get("finished_at") or lh_run.get("started_at"),
+            False,
+        ),
+        "recycle_bin_cleanup": (
+            "running" if (rb_stat.get("running") or "recycle_bin_cleanup" in _running_tasks) else "idle",
+            (rb_stat.get("last_run") or {}).get("finished_at"),
+            False,
+        ),
+        "lidarr_request_retry": (
+            "running" if "lidarr_request_retry" in _running_tasks else "idle",
+            library_manager.last_retry_sweep_at,
+            False,
+        ),
+    }
+
+    tasks: list[ScheduledTaskItem] = []
+    for spec in TASKS.values():
+        if spec.id == "lidarr_request_retry" and not lidarr_mode:
+            continue  # Lidarr mode only
+        status_val, worker_last, can_cancel = runtime.get(spec.id, ("idle", None, False))
+        latest_row = latest.get(spec.id)
+        finished_row = finished.get(spec.id)
+        db_running = bool(latest_row and latest_row.get("status") == "running")
+        if db_running and status_val == "idle":
+            status_val = "running"
+
+        # The persisted history is the source; the worker's own timestamp only covers a task that has no recorded run.
+        last_run = (
+            _later_iso((finished_row or {}).get("finished_at"), (latest_row or {}).get("started_at"))
+            if latest_row
+            else worker_last
+        )
+        last_finished = (finished_row or {}).get("finished_at") if latest_row else worker_last
+        effective = effective_interval_seconds(db, config, spec.id)
+        if spec.kind == KIND_INTERVAL:
+            display = format_interval(effective)
+        elif spec.id == "download_queue_monitor":
+            display = f"Every {int(getattr(acquisition_worker, 'poll_interval', 5.0))}s"
+        else:
+            display = _CONTINUOUS_DISPLAY.get(spec.id, "Manual / On Demand")
+
+        description = spec.description
+        if spec.id == "recycle_bin_cleanup":
+            rb_days = int(db.get_media_management_settings().get("recycle_bin_cleanup_days") or 0)
+            description = (
                 f"Deletes recycle bin folders older than {rb_days} days." if rb_days > 0
                 else "Automatic recycle bin cleanup is off (cleanup days is 0)."
-            ),
-            interval="Every 24h",
-            status="running" if (rb_stat.get("running") or "recycle_bin_cleanup" in _running_tasks) else "idle",
-            last_run_at=(rb_stat.get("last_run") or {}).get("finished_at") or _task_last_run_at.get("recycle_bin_cleanup"),
-            can_trigger=True,
-            can_cancel=False,
-        )
-    )
+            )
 
-    # 12. lidarr_request_retry: re-sends approved requests Lidarr left stuck (Lidarr mode only)
-    if get_library_mode(db) == MODE_LIDARR:
         tasks.append(
             ScheduledTaskItem(
-                id="lidarr_request_retry",
-                name="Retry Stuck Lidarr Requests",
-                description="Re-sends approved requests Lidarr could not finish yet (releases still loading, rate limits, failed monitoring) on a backoff schedule. Each stuck request backs off on its own schedule (2m, 5m, 15m, 1h, 6h, then daily); Lidarr is contacted only for requests that are due.",
-                interval="Checks every 1m",
-                status="running" if "lidarr_request_retry" in _running_tasks else "idle",
-                last_run_at=library_manager.last_retry_sweep_at or _task_last_run_at.get("lidarr_request_retry"),
-                can_trigger=True,
-                can_cancel=False,
+                id=spec.id,
+                name=spec.name,
+                description=description,
+                interval=display,
+                status=status_val,
+                last_run_at=last_run,
+                can_trigger=spec.id in _MANUAL_RUNNABLE,
+                can_cancel=can_cancel,
+                schedule_kind=spec.kind,
+                interval_seconds=effective,
+                default_interval_seconds=default_interval_seconds(db, config, spec.id),
+                interval_presets=list(spec.presets),
+                editable=spec.editable,
+                next_run_at=None
+                if status_val == "running"
+                else next_run_at(spec, effective, last_finished),
+                last_run_status=(finished_row or {}).get("status"),
+                last_duration_ms=(finished_row or {}).get("duration_ms"),
+                current_run_started_at=(latest_row or {}).get("started_at") if db_running else None,
+                progress=_task_progress(spec.id, status_val == "running"),
             )
         )
 
@@ -1139,6 +1133,134 @@ def get_scheduled_tasks(
 ) -> list[ScheduledTaskItem]:
     """Returns registry of background workers, intervals, statuses, and execution metadata."""
     return get_all_scheduled_tasks(db, config)
+
+
+class TaskScheduleUpdate(BaseModel):
+    """Body of ``PUT /tasks/{task_id}/schedule``. ``interval_seconds`` must be one of the task's presets; null resets."""
+
+    model_config = ConfigDict(extra="forbid")
+    interval_seconds: Optional[int] = None
+
+
+@router.put(
+    "/tasks/{task_id}/schedule",
+    response_model=ScheduledTaskItem,
+    summary="Set (or reset) a task's run interval from its presets",
+)
+def set_task_schedule(
+    task_id: str,
+    body: TaskScheduleUpdate,
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> ScheduledTaskItem:
+    """Stores an interval override for an editable task (admin required). Workers pick it up within a second."""
+    spec = TASKS.get(task_id)
+    if spec is None:
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+    if not spec.editable:
+        raise HTTPException(status_code=400, detail=f"Task '{task_id}' does not have an editable schedule")
+    if body.interval_seconds is not None and body.interval_seconds not in spec.presets:
+        raise HTTPException(
+            status_code=400,
+            detail=f"interval_seconds must be one of {list(spec.presets)} for task '{task_id}'",
+        )
+    try:
+        set_interval_override(db, task_id, body.interval_seconds)
+    except sqlite3.Error as exc:
+        logger.error("Could not store the schedule of '%s': %s", task_id, safe_exc(exc))
+        raise HTTPException(status_code=500, detail="Could not store the schedule")
+    try:
+        db.record_event(
+            "task_schedule_changed",
+            f"Schedule of '{task_id}' " + ("reset to default" if body.interval_seconds is None else f"set to {body.interval_seconds}s"),
+            source="TaskManager",
+            severity="info",
+            details={"task_id": task_id, "interval_seconds": body.interval_seconds},
+        )
+    except sqlite3.Error as ev_err:
+        logger.warning("Failed to record task_schedule_changed event: %s", safe_exc(ev_err))
+    return next(item for item in get_all_scheduled_tasks(db, config) if item.id == task_id)
+
+
+@router.get(
+    "/tasks/{task_id}/runs",
+    response_model=list[TaskRunItem],
+    summary="Run history of one task, newest first",
+)
+def get_task_runs(
+    task_id: str,
+    days: int = Query(default=7, ge=1, le=30),
+    limit: int = Query(default=200, ge=1, le=1000),
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> list[dict[str, Any]]:
+    """Persisted runs (scheduled, manual, startup and event) of a task; history is kept for 7 days."""
+    if task_id not in TASKS:
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    return db.list_task_runs(task_id, since, limit)
+
+
+@router.get(
+    "/activity",
+    response_model=ActivityResponse,
+    summary="Running tasks and the last finished runs (cheap; for the header activity indicator)",
+)
+def get_system_activity(
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Two indexed reads and in-memory progress; no external calls, so it is safe to poll every few seconds."""
+    running = []
+    for row in db.list_running_task_runs():
+        spec = TASKS.get(str(row["task_id"]))
+        running.append(
+            {
+                "task_id": row["task_id"],
+                "name": spec.name if spec else str(row["task_id"]),
+                "started_at": row["started_at"],
+                "progress": _task_progress(str(row["task_id"]), True),
+            }
+        )
+    recent = [
+        {
+            "task_id": row["task_id"],
+            "name": TASKS[row["task_id"]].name if row["task_id"] in TASKS else str(row["task_id"]),
+            "status": row["status"],
+            "finished_at": row["finished_at"],
+        }
+        for row in db.list_recent_finished_task_runs(5)
+    ]
+    return {"running": running, "recent": recent}
+
+
+@router.get(
+    "/resources",
+    response_model=ResourcesResponse,
+    summary="CPU, memory, thread count and uptime of the TrackSeerr process",
+)
+def get_system_resources(_admin: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:
+    """Process-wide numbers from /proc (null where unavailable). CPU is measured since the previous call."""
+    return dict(process_stats.sample())
+
+
+def _run_manual(db: Database, task_id: str, thread_name: str, body: Callable[[RunHandle], None]) -> None:
+    """Runs ``body`` on a thread under the task run history (trigger ``manual``) and the in-memory running set."""
+
+    def _thread() -> None:
+        with _tasks_lock:
+            _running_tasks.add(task_id)
+        try:
+            with record_task_run(db, task_id, TRIGGER_MANUAL) as run:
+                body(run)
+        except Exception as exc:  # the run is recorded as failed and logged by record_task_run; keep the thread quiet
+            logger.debug("Manual run of '%s' ended with %s", task_id, safe_exc(exc), exc_info=True)
+        finally:
+            with _tasks_lock:
+                _running_tasks.discard(task_id)
+
+    threading.Thread(target=_thread, daemon=True, name=thread_name).start()
 
 
 @router.post("/tasks/{task_id}/run", response_model=TaskActionResult, response_model_exclude_unset=True, summary="Trigger a scheduled task manually")
@@ -1157,6 +1279,9 @@ def run_scheduled_task(
     if task_id not in VALID_TASK_IDS:
         raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
 
+    if task_id not in _MANUAL_RUNNABLE:
+        raise HTTPException(status_code=400, detail=f"Task '{task_id}' runs continuously and cannot be started manually")
+
     if task_id == "lidarr_auto_trickle" and get_library_mode(db) != MODE_LIDARR:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1169,6 +1294,7 @@ def run_scheduled_task(
             detail="Library manager is set to TrackSeerr; there are no Lidarr requests to retry.",
         )
 
+    # The three tasks below record their own run (trigger manual) inside the function that starts them.
     if task_id == "seed_cleanup":
         if get_library_mode(db) == MODE_LIDARR:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Library manager is Lidarr; seed cleanup is disabled.")
@@ -1181,10 +1307,6 @@ def run_scheduled_task(
         music_root = Path(db.get_media_management_settings().get("root_folder_path") or "/music")
         if not library_health.start_check_async(db, media_server, music_root=music_root):
             return {"success": True, "message": "Task 'library_health' is already running"}
-
-    now_iso = datetime.now(timezone.utc).isoformat()
-    with _tasks_lock:
-        _task_last_run_at[task_id] = now_iso
 
     try:
         db.record_event(
@@ -1202,6 +1324,7 @@ def run_scheduled_task(
             with _tasks_lock:
                 _running_tasks.add("filesystem_scan")
             try:
+                # The scanner records its own run (trigger manual) from the scan thread it starts.
                 library_scanner.start_scan(db=db, plex_client=plex_client)
             finally:
                 with _tasks_lock:
@@ -1210,10 +1333,8 @@ def run_scheduled_task(
         threading.Thread(target=_scan_thread, daemon=True, name="ManualScanTask").start()
 
     elif task_id == "playlist_sync":
-        def _sync_thread():
-            with _tasks_lock:
-                _running_tasks.add("playlist_sync")
-            try:
+        def _sync(run: RunHandle) -> None:
+            run.apply_result(
                 sync_state.execute_sync(
                     db=db,
                     config=config,
@@ -1221,35 +1342,15 @@ def run_scheduled_task(
                     spotify_client=spotify_client,
                     deezer_client=deezer_client,
                 )
-            finally:
-                with _tasks_lock:
-                    _running_tasks.discard("playlist_sync")
+            )
 
-        threading.Thread(target=_sync_thread, daemon=True, name="ManualSyncTask").start()
+        _run_manual(db, "playlist_sync", "ManualSyncTask", _sync)
 
     elif task_id == "wanted_backlog_sweep":
-        def _backlog_thread():
-            with _tasks_lock:
-                _running_tasks.add("wanted_backlog_sweep")
-            try:
-                backlog_worker.poll_once(db=db)
-            finally:
-                with _tasks_lock:
-                    _running_tasks.discard("wanted_backlog_sweep")
-
-        threading.Thread(target=_backlog_thread, daemon=True, name="ManualBacklogTask").start()
+        _run_manual(db, task_id, "ManualBacklogTask", lambda run: run.apply_result(backlog_worker.poll_once(db=db)))
 
     elif task_id == "indexer_rss_sync":
-        def _rss_thread():
-            with _tasks_lock:
-                _running_tasks.add("indexer_rss_sync")
-            try:
-                rss_worker.poll_once(db=db)
-            finally:
-                with _tasks_lock:
-                    _running_tasks.discard("indexer_rss_sync")
-
-        threading.Thread(target=_rss_thread, daemon=True, name="ManualRSSTask").start()
+        _run_manual(db, task_id, "ManualRSSTask", lambda run: run.apply_result(rss_worker.poll_once(db=db)))
 
     elif task_id == "lidarr_auto_trickle":
         def _lidarr_thread():
@@ -1265,6 +1366,7 @@ def run_scheduled_task(
                         batch_size = int(lidarr_settings.get("trickle_batch_size") or config.lidarr_trickle_batch_size or 25)
                         delay_sec = float(lidarr_settings.get("trickle_rate_seconds") or config.lidarr_trickle_rate_seconds or 3.0)
                         auto_srch = bool(lidarr_settings.get("auto_search", config.lidarr_auto_search))
+                        # The trickle thread records its own run (trigger manual).
                         lidarr_worker.start_trickle(
                             items=items_to_push,
                             client=lidarr_client,
@@ -1272,6 +1374,7 @@ def run_scheduled_task(
                             delay_seconds=delay_sec,
                             auto_search=auto_srch,
                             batch_size=batch_size,
+                            trigger=TRIGGER_MANUAL,
                         )
             finally:
                 with _tasks_lock:
@@ -1280,43 +1383,21 @@ def run_scheduled_task(
         threading.Thread(target=_lidarr_thread, daemon=True, name="ManualLidarrTask").start()
 
     elif task_id == "lidarr_request_retry":
-        def _request_retry_thread():
-            with _tasks_lock:
-                _running_tasks.add("lidarr_request_retry")
-            try:
-                library_manager.retry_stuck_lidarr_requests(db, config, ignore_schedule=True)
-            finally:
-                with _tasks_lock:
-                    _running_tasks.discard("lidarr_request_retry")
+        def _retry(run: RunHandle) -> None:
+            resent = library_manager.retry_stuck_lidarr_requests(db, config, ignore_schedule=True)
+            run.message = f"resent={resent}"
 
-        threading.Thread(target=_request_retry_thread, daemon=True, name="ManualRequestRetryTask").start()
+        _run_manual(db, task_id, "ManualRequestRetryTask", _retry)
 
     elif task_id == "download_queue_monitor":
-        def _acq_thread():
-            with _tasks_lock:
-                _running_tasks.add("download_queue_monitor")
-            try:
-                with track_job("download_queue_monitor", "Acquisition Worker") as job:
-                    job.message = summarize_result(acquisition_worker.poll_once(db=db, plex_client=plex_client))
-            except Exception as exc:  # the job is already recorded as failed; keep the thread from dying silently
-                logger.error("Manual acquisition poll failed: %s", safe_exc(exc))
-            finally:
-                with _tasks_lock:
-                    _running_tasks.discard("download_queue_monitor")
+        def _acq(run: RunHandle) -> None:
+            with track_job("download_queue_monitor", "Acquisition Worker") as job:
+                job.message = run.message = summarize_result(acquisition_worker.poll_once(db=db, plex_client=plex_client))
 
-        threading.Thread(target=_acq_thread, daemon=True, name="ManualAcquisitionTask").start()
+        _run_manual(db, task_id, "ManualAcquisitionTask", _acq)
 
     elif task_id == "artist_metadata_refresh":
-        def _refresh_thread():
-            with _tasks_lock:
-                _running_tasks.add("artist_metadata_refresh")
-            try:
-                artist_refresh_worker.refresh_once(db=db)
-            finally:
-                with _tasks_lock:
-                    _running_tasks.discard("artist_metadata_refresh")
-
-        threading.Thread(target=_refresh_thread, daemon=True, name="ManualArtistRefreshTask").start()
+        _run_manual(db, task_id, "ManualArtistRefreshTask", lambda run: run.apply_result(artist_refresh_worker.refresh_once(db=db)))
 
     elif task_id == "art_thumbnail_backfill":
         with _tasks_lock:
@@ -1326,9 +1407,9 @@ def run_scheduled_task(
 
         def _art_backfill_thread():
             try:
-                with track_job("art_thumbnail_backfill", "Artwork Thumbnail Backfill") as job:
-                    job.message = summarize_result(art_pipeline.backfill(db))
-            except Exception as exc:  # the job is already recorded as failed; keep the thread from dying silently
+                # Records its own run (trigger manual) and refuses to overlap another backfill.
+                art_pipeline.run_backfill_task(db, TRIGGER_MANUAL)
+            except Exception as exc:  # the run is recorded as failed; keep the thread from dying silently
                 logger.error("Artwork thumbnail backfill failed: %s", safe_exc(exc))
             finally:
                 with _tasks_lock:

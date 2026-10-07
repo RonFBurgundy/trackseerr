@@ -3,6 +3,7 @@
 import logging
 import threading
 from datetime import datetime, timedelta, timezone
+import time
 from typing import Any, Callable, Optional
 
 import requests
@@ -12,6 +13,7 @@ from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.scrobbling import PLEX_ADMIN_USERNAME_KEY, forward_listen, resolve_plex_user
 from plex_playlist_sync.storage import Database
+from plex_playlist_sync.task_manager import TRIGGER_SCHEDULED, record_finished_run
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +196,16 @@ class ScrobbleWorker:
             while not self._stop_event.is_set():
                 try:
                     plex = plex_factory(config) if plex_factory else self._get_plex(config)
-                    self.run_iteration(db, config, plex)
+                    tick_started = time.monotonic()
+                    outcome = self.run_iteration(db, config, plex)
+                    if isinstance(outcome, dict) and (outcome.get("ingested") or outcome.get("retried")):
+                        record_finished_run(  # idle ticks (nothing polled or retried) are not history
+                            db,
+                            "scrobble_sync",
+                            TRIGGER_SCHEDULED,
+                            tick_started,
+                            f"ingested={outcome.get('ingested', 0)}, retried={outcome.get('retried', 0)}",
+                        )
                 except Exception as exc:
                     # No traceback/message: plexapi and requests errors can embed token-bearing URLs.
                     logger.error("ScrobbleWorker: Error in iteration: %s", type(exc).__name__)

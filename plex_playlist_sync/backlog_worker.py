@@ -13,7 +13,7 @@ import logging
 import sqlite3
 import threading
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 import uuid
 
 from plex_playlist_sync import delay_gate
@@ -47,6 +47,7 @@ from plex_playlist_sync.decision_engine import prepare_profile, upgrade_floor
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.redaction import redact_text
 from plex_playlist_sync.job_tracker import tracked
+from plex_playlist_sync.task_manager import TRIGGER_SCHEDULED, TRIGGER_STARTUP, record_task_run, wait_for_next_cycle
 from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from plex_playlist_sync.seed_rules import apply_seed_rules_at_grab
 from plex_playlist_sync.storage import Database
@@ -249,8 +250,10 @@ class WantedBacklogWorker:
         db: Database,
         interval_seconds: int = 3600,
         pace_delay: float = 2.5,
+        interval_fn: Optional[Callable[[], float]] = None,
     ) -> bool:
-        """Starts daemon thread executing periodic backlog sweeps."""
+        """Starts daemon thread executing periodic backlog sweeps. ``interval_fn`` (the task manager's effective
+        interval) is re-read every second while sleeping so a schedule edit applies without a restart."""
         with self._lock:
             if self._is_running:
                 logger.warning("WantedBacklogWorker is already running")
@@ -267,20 +270,22 @@ class WantedBacklogWorker:
                     self.interval_seconds,
                     self.pace_delay,
                 )
+                cycle_interval = interval_fn or (lambda: float(self.interval_seconds))
+                trigger = TRIGGER_STARTUP
                 while not self._stop_event.is_set():
                     try:
-                        self.poll_once(db=db)
+                        with record_task_run(db, "wanted_backlog_sweep", trigger) as run:
+                            run.apply_result(self.poll_once(db=db))
                     except Exception as e:
                         logger.exception("Unexpected error in WantedBacklogWorker poll cycle: %s", e)
                         with self._lock:
                             self.errors += 1
+                    trigger = TRIGGER_SCHEDULED
 
-                    # Responsive sleep
-                    slept = 0.0
-                    while slept < float(self.interval_seconds) and not self._stop_event.is_set():
-                        step = min(1.0, float(self.interval_seconds) - slept)
-                        self._stop_event.wait(step)
-                        slept += step
+                    # Responsive sleep; the interval is re-read every second (schedule edits apply at once)
+                    if wait_for_next_cycle(self._stop_event, cycle_interval):
+                        break
+                    self.interval_seconds = int(cycle_interval())
 
                 with self._lock:
                     self._is_running = False
@@ -778,8 +783,10 @@ class RSSSyncWorker:
                 "errors": self.errors,
             }
 
-    def start(self, db: Database, interval_seconds: int = 900) -> bool:
-        """Starts daemon thread executing periodic RSS polling."""
+    def start(
+        self, db: Database, interval_seconds: int = 900, interval_fn: Optional[Callable[[], float]] = None
+    ) -> bool:
+        """Starts daemon thread executing periodic RSS polling (``interval_fn``: see WantedBacklogWorker.start)."""
         with self._lock:
             if self._is_running:
                 logger.warning("RSSSyncWorker is already running")
@@ -791,20 +798,22 @@ class RSSSyncWorker:
 
             def _worker_loop() -> None:
                 logger.info("RSSSyncWorker loop started (interval: %ds)", self.interval_seconds)
+                cycle_interval = interval_fn or (lambda: float(self.interval_seconds))
+                trigger = TRIGGER_STARTUP
                 while not self._stop_event.is_set():
                     try:
-                        self.poll_once(db=db)
+                        with record_task_run(db, "indexer_rss_sync", trigger) as run:
+                            run.apply_result(self.poll_once(db=db))
                     except Exception as e:
                         logger.exception("Unexpected error in RSSSyncWorker poll cycle: %s", e)
                         with self._lock:
                             self.errors += 1
+                    trigger = TRIGGER_SCHEDULED
 
-                    # Responsive sleep
-                    slept = 0.0
-                    while slept < float(self.interval_seconds) and not self._stop_event.is_set():
-                        step = min(1.0, float(self.interval_seconds) - slept)
-                        self._stop_event.wait(step)
-                        slept += step
+                    # Responsive sleep; the interval is re-read every second (schedule edits apply at once)
+                    if wait_for_next_cycle(self._stop_event, cycle_interval):
+                        break
+                    self.interval_seconds = int(cycle_interval())
 
                 with self._lock:
                     self._is_running = False

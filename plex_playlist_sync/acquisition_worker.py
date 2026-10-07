@@ -30,6 +30,7 @@ from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result
+from plex_playlist_sync.task_manager import TRIGGER_SCHEDULED, record_finished_run
 from plex_playlist_sync.download_roots import AllowedRoots, allowed_roots_for_all_clients, allowed_roots_for_client
 from plex_playlist_sync.import_security import (
     clear_exec_bits,
@@ -882,6 +883,9 @@ class AcquisitionWorker:
                                 "Acquisition Worker",
                                 int((time.monotonic() - tick_started) * 1000),
                                 summarize_result(stats),
+                            )
+                            record_finished_run(
+                                db, "download_queue_monitor", TRIGGER_SCHEDULED, tick_started, summarize_result(stats)
                             )
                     except Exception as e:
                         logger.error("Unexpected error in AcquisitionWorker poll cycle: %s", e)

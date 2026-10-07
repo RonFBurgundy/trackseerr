@@ -76,7 +76,7 @@ def clean_library_name(text: str) -> str:
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
 SEED_COMPLETE_ACTIONS = ("keep", "remove", "remove_and_delete")
-SCHEMA_VERSION = 66  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 67  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:
@@ -393,6 +393,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                 (64, self._migration_v64),
                 (65, self._migration_v65),
                 (66, self._migration_v66),
+                (67, self._migration_v67),
             ]
 
             applied = 0
@@ -2015,6 +2016,24 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
             cur.execute("ALTER TABLE music_requests ADD COLUMN retry_attempts INTEGER NOT NULL DEFAULT 0;")
         if "next_attempt_at" not in have:
             cur.execute("ALTER TABLE music_requests ADD COLUMN next_attempt_at TEXT;")
+
+    def _migration_v67(self, cur: sqlite3.Cursor) -> None:
+        """Persisted background task run history (task manager): one row per execution of a registered task."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS task_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                trigger TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                status TEXT NOT NULL,
+                message TEXT,
+                duration_ms INTEGER
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_task_runs_task_started ON task_runs(task_id, started_at)")
 
     def _migration_v37(self, cur: sqlite3.Cursor) -> None:
         """Import lists, per-playlist monitor mode and the missing-track "already applied" marker."""
@@ -4961,6 +4980,95 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
         with self._lock:
             return self.conn.execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None
 
+    # -------------------------------------------------------------------------
+    # Task run history (task manager)
+    # -------------------------------------------------------------------------
+
+    def start_task_run(self, task_id: str, trigger: str, started_at: str) -> int:
+        """Inserts a ``running`` row and returns its id."""
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO task_runs (task_id, trigger, started_at, status) VALUES (?, ?, ?, 'running')",
+                (str(task_id), str(trigger), str(started_at)),
+            )
+            self.conn.commit()
+            return int(cur.lastrowid or 0)
+
+    def finish_task_run(
+        self, run_id: int, status: str, finished_at: str, message: Optional[str] = None, duration_ms: Optional[int] = None
+    ) -> None:
+        with self._lock:
+            self.conn.execute(
+                "UPDATE task_runs SET status = ?, finished_at = ?, message = ?, duration_ms = ? WHERE id = ?",
+                (str(status), str(finished_at), message, duration_ms, int(run_id)),
+            )
+            self.conn.commit()
+
+    def delete_task_run(self, run_id: int) -> None:
+        with self._lock:
+            self.conn.execute("DELETE FROM task_runs WHERE id = ?", (int(run_id),))
+            self.conn.commit()
+
+    def list_task_runs(self, task_id: str, since: str, limit: int = 200) -> list[dict[str, Any]]:
+        """Runs of one task started at or after ``since`` (ISO), newest first."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM task_runs WHERE task_id = ? AND started_at >= ? ORDER BY started_at DESC, id DESC LIMIT ?",
+                (str(task_id), str(since), int(limit)),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def latest_task_runs(self) -> dict[str, dict[str, Any]]:
+        """The newest run row of every task that has one, keyed by task id (one query)."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM task_runs WHERE id IN (SELECT MAX(id) FROM task_runs GROUP BY task_id)"
+            ).fetchall()
+        return {str(r["task_id"]): dict(r) for r in rows}
+
+    def latest_finished_task_runs(self) -> dict[str, dict[str, Any]]:
+        """The newest finished (non-running) run row of every task, keyed by task id (one query)."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM task_runs WHERE id IN "
+                "(SELECT MAX(id) FROM task_runs WHERE status != 'running' GROUP BY task_id)"
+            ).fetchall()
+        return {str(r["task_id"]): dict(r) for r in rows}
+
+    def list_running_task_runs(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM task_runs WHERE status = 'running' ORDER BY started_at ASC, id ASC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_recent_finished_task_runs(self, limit: int = 5) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM task_runs WHERE status != 'running' ORDER BY finished_at DESC, id DESC LIMIT ?",
+                (int(limit),),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def fail_interrupted_task_runs(self, finished_at: str, message: str = "interrupted by restart") -> int:
+        """Startup cleanup: any run still ``running`` belongs to a dead process. Returns how many were closed."""
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE task_runs SET status = 'failed', finished_at = ?, message = ? WHERE status = 'running'",
+                (str(finished_at), str(message)),
+            )
+            self.conn.commit()
+            return int(cur.rowcount or 0)
+
+    def prune_task_runs(self, older_than: str) -> int:
+        """Deletes finished runs that started before ``older_than`` (ISO). Returns the number removed."""
+        with self._lock:
+            cur = self.conn.execute(
+                "DELETE FROM task_runs WHERE started_at < ? AND status != 'running'", (str(older_than),)
+            )
+            self.conn.commit()
+            return int(cur.rowcount or 0)
+
     def get_kv(self, key: str) -> Optional[str]:
         with self._lock:
             row = self.conn.execute("SELECT value FROM kv_store WHERE key = ?", (str(key),)).fetchone()
@@ -4974,6 +5082,19 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                 (str(key), str(value)),
             )
             self.conn.commit()
+
+    def delete_kv(self, key: str) -> None:
+        with self._lock:
+            self.conn.execute("DELETE FROM kv_store WHERE key = ?", (str(key),))
+            self.conn.commit()
+
+    def get_last_finished_task_run(self, task_id: str) -> Optional[dict[str, Any]]:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT * FROM task_runs WHERE task_id = ? AND status != 'running' ORDER BY id DESC LIMIT 1",
+                (str(task_id),),
+            ).fetchone()
+        return dict(row) if row else None
 
     def list_kv_prefix(self, prefix: str) -> dict[str, str]:
         """All kv_store entries whose key starts with ``prefix`` (literal match, no LIKE wildcards)."""

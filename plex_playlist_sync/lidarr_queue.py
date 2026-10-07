@@ -17,6 +17,7 @@ from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.job_tracker import track_job
 from plex_playlist_sync.redaction import redact_text, safe_exc
 from plex_playlist_sync.storage import Database
+from plex_playlist_sync.task_manager import TRIGGER_EVENT, record_task_run
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class LidarrTrickleWorker:
         self._pause_event = threading.Event()
         self._is_running: bool = False
         self._is_paused: bool = False
+        self._run_trigger: str = TRIGGER_EVENT
 
         # Queue tracking stats
         self._total_items: int = 0
@@ -99,8 +101,10 @@ class LidarrTrickleWorker:
         auto_search: bool = True,
         batch_size: Optional[int] = None,
         queue_if_running: bool = False,
+        trigger: str = TRIGGER_EVENT,
     ) -> dict[str, Any]:
-        """Enqueues items and starts background trickle worker thread.
+        """Enqueues items and starts background trickle worker thread. ``trigger`` labels the run in the task
+        history: ``scheduled`` (auto-trickle loop), ``manual`` (admin) or ``event`` (a request dispatch).
 
         Refuses unless the library manager is Lidarr, so nothing can reach Lidarr from native mode. With
         ``queue_if_running`` items arriving while a trickle is active are appended to the running worker's pending
@@ -121,7 +125,9 @@ class LidarrTrickleWorker:
             }
         owns_guard = True
         try:
-            result, owns_guard = self._start_locked(items, client, db, delay_seconds, auto_search, batch_size, queue_if_running)
+            result, owns_guard = self._start_locked(
+                items, client, db, delay_seconds, auto_search, batch_size, queue_if_running, trigger
+            )
             return result
         finally:
             if owns_guard:
@@ -136,6 +142,7 @@ class LidarrTrickleWorker:
         auto_search: bool,
         batch_size: Optional[int],
         queue_if_running: bool,
+        trigger: str = TRIGGER_EVENT,
     ) -> tuple[dict[str, Any], bool]:
         """Does the start/queue work under the worker lock. Returns ``(result, caller_still_owns_guard)``: the guard
         passes to the worker thread only when one was actually started (it releases it when it exits)."""
@@ -201,6 +208,7 @@ class LidarrTrickleWorker:
 
             artist_groups = self._group_by_artist(items)
 
+            self._run_trigger = trigger
             self._thread = threading.Thread(
                 target=self._worker_loop,
                 args=(artist_groups, client, db),
@@ -280,7 +288,9 @@ class LidarrTrickleWorker:
 
         failure: Optional[str] = None
         try:
-            with track_job("lidarr_auto_trickle", "Lidarr Trickle Worker") as job:
+            with record_task_run(db, "lidarr_auto_trickle", self._run_trigger) as run, track_job(
+                "lidarr_auto_trickle", "Lidarr Trickle Worker"
+            ) as job:
                 groups = artist_groups
                 while True:
                     self._process_groups(groups, client, db)
@@ -292,8 +302,8 @@ class LidarrTrickleWorker:
                             break
                         more, self._pending = self._pending, []
                     groups = self._group_by_artist(more)
-                job.cancelled = self._stop_event.is_set()
-                job.message = (
+                job.cancelled = run.cancelled = self._stop_event.is_set()
+                job.message = run.message = (
                     f"{self._successful_items} monitored, {self._failed_items} failed/missing "
                     f"of {self._total_items}"
                 )

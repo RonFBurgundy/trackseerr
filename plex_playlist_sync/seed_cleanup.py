@@ -17,7 +17,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import httpx
 
@@ -33,6 +33,12 @@ from plex_playlist_sync.acquisition_worker import (
 )
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver, is_torrent_driver_type
 from plex_playlist_sync.job_tracker import track_job
+from plex_playlist_sync.task_manager import (
+    TRIGGER_MANUAL,
+    TRIGGER_SCHEDULED,
+    record_task_run,
+    wait_for_next_cycle,
+)
 from plex_playlist_sync.library_health import (
     CAUSE_CLEANUP_FAILED,
     CAUSE_ORPHAN_TORRENT,
@@ -329,8 +335,8 @@ def _prune_failed_findings(db: Any) -> None:
             db.delete_library_health_finding_by_path(f["path"], kind=KIND_CLEANUP_FAILED)
 
 
-def run_sweep(db: Any, *, now: Optional[datetime] = None) -> dict[str, Any]:
-    """One sweep, recorded in the job tracker. Returns ``{evaluated, removed, deleted_files, orphans, failures}``.
+def run_sweep(db: Any, *, now: Optional[datetime] = None, trigger: str = TRIGGER_MANUAL) -> dict[str, Any]:
+    """One sweep, recorded in the job tracker and the task run history. Returns ``{evaluated, removed, deleted_files, orphans, failures}``.
 
     Raises ``SeedCleanupBusy`` when another sweep is running.
     """
@@ -342,7 +348,7 @@ def run_sweep(db: Any, *, now: Optional[datetime] = None) -> dict[str, Any]:
     stats = _Stats()
     error: Optional[str] = None
     try:
-        with track_job("seed_cleanup", "Seed cleanup") as handle:
+        with record_task_run(db, "seed_cleanup", trigger) as run, track_job("seed_cleanup", "Seed cleanup") as handle:
             media_settings = db.get_media_management_settings()
             if media_settings.get("library_mode") == "lidarr":
                 handle.message = "skipped: Lidarr manages the library"
@@ -363,6 +369,7 @@ def run_sweep(db: Any, *, now: Optional[datetime] = None) -> dict[str, Any]:
                 handle.message = (
                     f"evaluated={stats.evaluated}, removed={stats.removed}, orphans={stats.orphans}, failures={stats.failures}"
                 )
+            run.message = handle.message
         return stats.as_dict()
     except Exception as exc:
         error = safe_exc(exc)
@@ -510,18 +517,21 @@ class SeedCleanupWorker:
         config: Any = None,
         interval_seconds: float = WORKER_INTERVAL_SECONDS,
         initial_delay: float = WORKER_INITIAL_DELAY_SECONDS,
+        interval_fn: Optional[Callable[[], float]] = None,
     ) -> bool:
         with self._lock:
             if self._is_running:
                 return False
             self._stop_event.clear()
             self._is_running = True
+        cycle_interval = interval_fn or (lambda: float(interval_seconds))
 
         def _loop() -> None:
             if not self._stop_event.wait(initial_delay):
                 while not self._stop_event.is_set():
                     self.run_once(db)
-                    self._stop_event.wait(interval_seconds)
+                    if wait_for_next_cycle(self._stop_event, cycle_interval):
+                        break
             with self._lock:
                 self._is_running = False
 
@@ -532,7 +542,7 @@ class SeedCleanupWorker:
     def run_once(self, db: Any) -> bool:
         """One scheduled sweep. True when it ran; False when busy or failed (the cause is logged)."""
         try:
-            run_sweep(db)
+            run_sweep(db, trigger=TRIGGER_SCHEDULED)
             return True
         except SeedCleanupBusy:
             return False
