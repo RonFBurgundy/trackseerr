@@ -3,7 +3,7 @@ import { Disc, Eye, FolderInput, Layers, Loader2, Music, RefreshCw, User } from 
 import type { UseLibraryReturn, LibraryTab } from '@/hooks/useLibrary';
 import type { AppRoute, LibraryRoute, NavigateOptions } from '@/hooks/useAppRoute';
 import { useLibraryDrilldown } from '@/hooks/useLibraryDrilldown';
-import type { AlbumItem, ArtistDiscographyAlbum, DiscoveryItem } from '@/types/models';
+import type { AlbumItem, ArtistDiscographyAlbum, AudioPreviewTrack, DiscoveryItem } from '@/types/models';
 import { useAddToCollection } from '@/hooks/useAddToCollection';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useLibraryManager } from '@/hooks/useLibraryManager';
@@ -43,6 +43,11 @@ export interface LibraryViewProps {
   onRequestDiscography: (artist: string, albums: ArtistDiscographyAlbum[]) => Promise<void>;
   /** Admin report keys on the album modal. */
   issuesHook: UseIssuesReturn;
+  /** Preview playback and request state for the release modal on the artist page. */
+  onPlayTrack: (track: AudioPreviewTrack) => void;
+  currentPreviewTrackId?: string;
+  isPreviewPlaying?: boolean;
+  requestedIds: ReadonlySet<string>;
 }
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -63,6 +68,10 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   onRequestItem,
   onRequestDiscography,
   issuesHook,
+  onPlayTrack,
+  currentPreviewTrackId,
+  isPreviewPlaying = false,
+  requestedIds,
 }) => {
   const activeTab = route.sub;
   const {
@@ -216,6 +225,11 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             onRequestItem={onRequestItem}
             onRequestDiscography={onRequestDiscography}
             onViewInDiscover={(discoveryId) => onNavigate({ tab: 'discover', artistId: discoveryId })}
+            onPlayTrack={onPlayTrack}
+            currentPreviewTrackId={currentPreviewTrackId}
+            isPreviewPlaying={isPreviewPlaying}
+            requestedIds={requestedIds}
+            issuesHook={issuesHook}
           />
         </PageFrame>
         {overlays}

@@ -20,7 +20,7 @@ export interface UseProfileRequestsReturn {
   requestMany: (artist: string, albums: ArtistDiscographyAlbum[]) => Promise<void>;
 }
 
-/** Request actions for the artist profile and the library "rest of discography": progress and server errors (quota, duplicate). */
+/** Request actions for the artist profile and the library "rest of discography" (releases the metadata profile filters out): progress and server errors (quota, duplicate). */
 export function useProfileRequests({ onRequest, onRequestDiscography, onDone }: UseProfileRequestsOptions): UseProfileRequestsReturn {
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState<boolean>(false);

@@ -476,6 +476,10 @@ const MainApp: React.FC = () => {
                 libraryHook={libraryHook}
                 issuesHook={issuesHook}
                 isAdmin={auth.canUseAdminUi}
+                onPlayTrack={audioPlayer.play}
+                currentPreviewTrackId={audioPlayer.currentTrack?.id}
+                isPreviewPlaying={audioPlayer.isPlaying}
+                requestedIds={requestedIds}
               />
             )}
 
