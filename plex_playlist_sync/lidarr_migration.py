@@ -497,6 +497,10 @@ class LidarrMigrationJob:
                 self._status["status"] = "completed"
                 self._status["is_migrating"] = False
                 self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
+            # Imported artists and albums have no thumbnails yet; generate them now instead of at the next daily pass.
+            from plex_playlist_sync import art_pipeline
+
+            art_pipeline.request_backfill_after_event(db, "Lidarr library import")
             return dict(self._status)
 
         except Exception as exc:

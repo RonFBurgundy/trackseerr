@@ -4816,6 +4816,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/system/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Running tasks and the last finished runs (cheap; for the header activity indicator)
+         * @description Two indexed reads and in-memory progress; no external calls, so it is safe to poll every few seconds.
+         */
+        get: operations["get_system_activity_api_system_activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/system/events": {
         parameters: {
             query?: never;
@@ -4965,6 +4985,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/system/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * CPU, memory, thread count and uptime of the TrackSeerr process
+         * @description Process-wide numbers from /proc (null where unavailable). CPU is measured since the previous call.
+         */
+        get: operations["get_system_resources_api_system_resources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/system/status": {
         parameters: {
             query?: never;
@@ -5039,6 +5079,46 @@ export interface paths {
          * @description Dispatches the specified background task asynchronously (admin required).
          */
         post: operations["run_scheduled_task_api_system_tasks__task_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/tasks/{task_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run history of one task, newest first
+         * @description Persisted runs (scheduled, manual, startup and event) of a task; history is kept for 7 days.
+         */
+        get: operations["get_task_runs_api_system_tasks__task_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/tasks/{task_id}/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set (or reset) a task's run interval from its presets
+         * @description Stores an interval override for an editable task (admin required). Workers pick it up within a second.
+         */
+        put: operations["set_task_schedule_api_system_tasks__task_id__schedule_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5336,6 +5416,34 @@ export interface components {
             message: string;
             /** Success */
             success: boolean;
+        };
+        /** ActivityRecentItem */
+        ActivityRecentItem: {
+            /** Finished At */
+            finished_at?: string | null;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Task Id */
+            task_id: string;
+        };
+        /** ActivityResponse */
+        ActivityResponse: {
+            /** Recent */
+            recent: components["schemas"]["ActivityRecentItem"][];
+            /** Running */
+            running: components["schemas"]["ActivityRunningItem"][];
+        };
+        /** ActivityRunningItem */
+        ActivityRunningItem: {
+            /** Name */
+            name: string;
+            progress?: components["schemas"]["TaskProgress"] | null;
+            /** Started At */
+            started_at: string;
+            /** Task Id */
+            task_id: string;
         };
         /** AddAlbumToCollectionRequest */
         AddAlbumToCollectionRequest: {
@@ -10911,6 +11019,20 @@ export interface components {
             /** Reset Url */
             reset_url: string;
         };
+        /**
+         * ResourcesResponse
+         * @description Process-wide stats; every field is null where the platform does not expose it.
+         */
+        ResourcesResponse: {
+            /** Cpu Percent */
+            cpu_percent?: number | null;
+            /** Rss Bytes */
+            rss_bytes?: number | null;
+            /** Thread Count */
+            thread_count?: number | null;
+            /** Uptime Seconds */
+            uptime_seconds?: number | null;
+        };
         /** RetryFailedResponse */
         RetryFailedResponse: {
             /** Attempts */
@@ -11026,16 +11148,44 @@ export interface components {
              * @default true
              */
             can_trigger: boolean;
+            /** Current Run Started At */
+            current_run_started_at?: string | null;
+            /** Default Interval Seconds */
+            default_interval_seconds?: number | null;
             /** Description */
             description: string;
+            /**
+             * Editable
+             * @default false
+             */
+            editable: boolean;
             /** Id */
             id: string;
             /** Interval */
             interval: string;
+            /**
+             * Interval Presets
+             * @default []
+             */
+            interval_presets: number[];
+            /** Interval Seconds */
+            interval_seconds?: number | null;
+            /** Last Duration Ms */
+            last_duration_ms?: number | null;
             /** Last Run At */
             last_run_at?: string | null;
+            /** Last Run Status */
+            last_run_status?: string | null;
             /** Name */
             name: string;
+            /** Next Run At */
+            next_run_at?: string | null;
+            progress?: components["schemas"]["TaskProgress"] | null;
+            /**
+             * Schedule Kind
+             * @default manual
+             */
+            schedule_kind: string;
             /** Status */
             status: string;
         };
@@ -11511,6 +11661,45 @@ export interface components {
             message: string;
             /** Success */
             success: boolean;
+        };
+        /**
+         * TaskProgress
+         * @description How far a running task is. Fields are null when the task cannot tell.
+         */
+        TaskProgress: {
+            /** Current */
+            current?: number | null;
+            /** Message */
+            message?: string | null;
+            /** Total */
+            total?: number | null;
+        };
+        /** TaskRunItem */
+        TaskRunItem: {
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Id */
+            id: number;
+            /** Message */
+            message?: string | null;
+            /** Started At */
+            started_at: string;
+            /** Status */
+            status: string;
+            /** Task Id */
+            task_id: string;
+            /** Trigger */
+            trigger: string;
+        };
+        /**
+         * TaskScheduleUpdate
+         * @description Body of ``PUT /tasks/{task_id}/schedule``. ``interval_seconds`` must be one of the task's presets; null resets.
+         */
+        TaskScheduleUpdate: {
+            /** Interval Seconds */
+            interval_seconds?: number | null;
         };
         /** TestConnectionPayload */
         TestConnectionPayload: {
@@ -20640,6 +20829,26 @@ export interface operations {
             };
         };
     };
+    get_system_activity_api_system_activity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityResponse"];
+                };
+            };
+        };
+    };
     get_system_events_api_system_events_get: {
         parameters: {
             query?: {
@@ -20848,6 +21057,26 @@ export interface operations {
             };
         };
     };
+    get_system_resources_api_system_resources_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResourcesResponse"];
+                };
+            };
+        };
+    };
     get_system_status_api_system_status_get: {
         parameters: {
             query?: never;
@@ -20937,6 +21166,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskActionResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_task_runs_api_system_tasks__task_id__runs_get: {
+        parameters: {
+            query?: {
+                days?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskRunItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_task_schedule_api_system_tasks__task_id__schedule_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskScheduleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduledTaskItem"];
                 };
             };
             /** @description Validation Error */

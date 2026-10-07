@@ -88,3 +88,50 @@ class LidarrHealthResponse(ApiModel):
     reachable: Optional[bool] = None  # null in native mode (Lidarr is never contacted)
     version: Optional[str] = None
     health: list[LidarrHealthCheck]
+
+
+class TaskProgress(ApiModel):
+    """How far a running task is. Fields are null when the task cannot tell."""
+
+    current: Optional[int] = None
+    total: Optional[int] = None
+    message: Optional[str] = None
+
+
+class TaskRunItem(ApiModel):
+    id: int
+    task_id: str
+    trigger: str  # scheduled | manual | startup | event
+    started_at: str
+    finished_at: Optional[str] = None
+    status: str  # running | success | failed | cancelled
+    message: Optional[str] = None
+    duration_ms: Optional[int] = None
+
+
+class ActivityRunningItem(ApiModel):
+    task_id: str
+    name: str
+    started_at: str
+    progress: Optional[TaskProgress] = None
+
+
+class ActivityRecentItem(ApiModel):
+    task_id: str
+    name: str
+    status: str
+    finished_at: Optional[str] = None
+
+
+class ActivityResponse(ApiModel):
+    running: list[ActivityRunningItem]
+    recent: list[ActivityRecentItem]
+
+
+class ResourcesResponse(ApiModel):
+    """Process-wide stats; every field is null where the platform does not expose it."""
+
+    cpu_percent: Optional[float] = None  # share of one core since the previous sample (100 = one full core)
+    rss_bytes: Optional[int] = None
+    thread_count: Optional[int] = None
+    uptime_seconds: Optional[float] = None

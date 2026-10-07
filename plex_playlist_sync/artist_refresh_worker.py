@@ -9,11 +9,12 @@ from datetime import datetime, timezone
 import logging
 import threading
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.job_tracker import tracked
+from plex_playlist_sync.task_manager import TRIGGER_SCHEDULED, record_task_run, wait_for_next_cycle
 from plex_playlist_sync.system_paths import is_system_folder_name
 from plex_playlist_sync.storage import Database
 
@@ -77,8 +78,10 @@ class ArtistRefreshWorker:
         interval_seconds: int = 86400,
         pace_delay: float = 1.5,
         initial_delay: float = DEFAULT_INITIAL_DELAY_SECONDS,
+        interval_fn: Optional[Callable[[], float]] = None,
     ) -> bool:
-        """Starts background daemon thread for periodic scheduled refreshes."""
+        """Starts background daemon thread for periodic scheduled refreshes. ``interval_fn`` (the task manager's
+        effective interval) is re-read every second while sleeping so a schedule edit applies without a restart."""
         with self._lock:
             if self._is_running:
                 logger.warning("ArtistRefreshWorker: Already running")
@@ -100,25 +103,27 @@ class ArtistRefreshWorker:
                     with self._lock:
                         self._is_running = False
                     return
+                cycle_interval = interval_fn or (lambda: float(self.interval_seconds))
                 while not self._stop_event.is_set():
                     try:
-                        self.refresh_once(
-                            db=db,
-                            discovery_client=discovery_client,
-                            enricher=enricher,
-                            only_stale=True,
-                        )
+                        with record_task_run(db, "artist_metadata_refresh", TRIGGER_SCHEDULED) as run:
+                            run.apply_result(
+                                self.refresh_once(
+                                    db=db,
+                                    discovery_client=discovery_client,
+                                    enricher=enricher,
+                                    only_stale=True,
+                                )
+                            )
                     except Exception as exc:
                         logger.exception("ArtistRefreshWorker: Error in refresh cycle: %s", exc)
                         with self._lock:
                             self.errors += 1
 
-                    # Responsive sleep
-                    slept = 0.0
-                    while slept < float(self.interval_seconds) and not self._stop_event.is_set():
-                        step = min(1.0, float(self.interval_seconds) - slept)
-                        self._stop_event.wait(step)
-                        slept += step
+                    # Responsive sleep; the interval is re-read every second (schedule edits apply at once)
+                    if wait_for_next_cycle(self._stop_event, cycle_interval):
+                        break
+                    self.interval_seconds = int(cycle_interval())
 
                 with self._lock:
                     self._is_running = False

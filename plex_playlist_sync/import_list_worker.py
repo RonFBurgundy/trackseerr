@@ -20,6 +20,7 @@ pre-existed. The item becomes ``applied`` only after the whole effect is in plac
 
 import logging
 import threading
+import time
 import uuid
 from typing import Any, Optional
 
@@ -28,6 +29,7 @@ from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.item_history import TRIGGER_IMPORT_LIST, GrabTrigger
 from plex_playlist_sync.job_tracker import tracked
+from plex_playlist_sync.task_manager import TRIGGER_SCHEDULED, record_finished_run
 from plex_playlist_sync.list_monitoring import STATUS_FAILED, apply_list_item, list_actor
 from plex_playlist_sync.redaction import safe_exc
 from plex_playlist_sync.storage import Database
@@ -200,7 +202,10 @@ class ImportListWorker:
                     self._is_running = False
                 return
             while not self._stop_event.is_set():
-                self.run_due(db, config)
+                tick_started = time.monotonic()
+                attempted = self.run_due(db, config)
+                if attempted:  # idle ticks (nothing due) are not history
+                    record_finished_run(db, "import_list_sync", TRIGGER_SCHEDULED, tick_started, f"lists={attempted}")
                 self._stop_event.wait(interval_seconds)
             with self._lock:
                 self._is_running = False

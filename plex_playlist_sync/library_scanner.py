@@ -34,6 +34,7 @@ from plex_playlist_sync.models import (
 )
 from plex_playlist_sync.quality import evaluate_release, parse_release_title
 from plex_playlist_sync.job_tracker import track_job
+from plex_playlist_sync.task_manager import TRIGGER_MANUAL, record_task_run
 from plex_playlist_sync.library_manager import ModeChanged, run_guarded
 from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.item_history import TRIGGER_SCAN, GrabTrigger, emit, provenance
@@ -216,7 +217,9 @@ class LibraryScanner:
     ) -> None:
         """Entrypoint for background scanning thread."""
         try:
-            with track_job("filesystem_scan", "Media Library Disk Scanner") as job:
+            with record_task_run(db, "filesystem_scan", TRIGGER_MANUAL) as run, track_job(
+                "filesystem_scan", "Media Library Disk Scanner"
+            ) as job:
                 result = self.scan(
                     db=db,
                     root_folder=root_folder,
@@ -225,12 +228,15 @@ class LibraryScanner:
                     _is_background=True,
                 )
                 outcome = str(result.get("status") or "")
-                job.message = outcome or None
+                job.message = run.message = outcome or None
                 if outcome == "failed":
                     err = redact_text(str(result.get("error") or ""))
-                    job.failed = f"Scan failed: {err}" if err else "Scan failed"
+                    job.failed = run.failed = f"Scan failed: {err}" if err else "Scan failed"
                 elif outcome == "cancelled":
-                    job.cancelled = True
+                    job.cancelled = run.cancelled = True
+            if outcome == "completed":
+                # A scan can add artists and albums; give them thumbnails without waiting for the daily pass.
+                art_pipeline.request_backfill_after_event(db, "library scan")
         except Exception as exc:
             logger.error("LibraryScanner: Unhandled exception in background scan thread: %s", safe_exc(exc))
             logger.debug("LibraryScanner background scan traceback", exc_info=True)

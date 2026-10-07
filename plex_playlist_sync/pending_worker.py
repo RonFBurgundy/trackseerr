@@ -14,6 +14,7 @@ from plex_playlist_sync.acquisition_coordinator import _extract_info_hash, acqui
 from plex_playlist_sync.item_history import TRIGGER_SYSTEM, TRIGGER_UPGRADE, GrabTrigger
 from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, retry_stuck_lidarr_requests, work_guard
 from plex_playlist_sync.storage import Database
+from plex_playlist_sync.task_manager import TRIGGER_SCHEDULED, record_finished_run
 
 logger = logging.getLogger(__name__)
 
@@ -233,9 +234,23 @@ class PendingReleaseWorker:
             def _loop() -> None:
                 while not self._stop_event.is_set():
                     try:
+                        tick_started = time.monotonic()
                         stats = release_due(db)
                         self.released += stats["released"]
-                        retry_stuck_lidarr_requests(db)  # Lidarr mode only; never raises
+                        if stats["released"] or stats.get("failed") or stats.get("dropped"):  # idle ticks are not history
+                            record_finished_run(
+                                db,
+                                "pending_releases",
+                                TRIGGER_SCHEDULED,
+                                tick_started,
+                                f"released={stats['released']}, failed={stats.get('failed', 0)}, dropped={stats.get('dropped', 0)}",
+                            )
+                        retry_started = time.monotonic()
+                        resent = retry_stuck_lidarr_requests(db)  # Lidarr mode only; never raises
+                        if resent:
+                            record_finished_run(
+                                db, "lidarr_request_retry", TRIGGER_SCHEDULED, retry_started, f"resent={resent}"
+                            )
                     except sqlite3.Error as exc:
                         self.errors += 1
                         logger.error("PendingReleaseWorker tick failed: %s", exc)

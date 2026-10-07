@@ -18,11 +18,17 @@ import threading
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from plex_playlist_sync.import_security import QUARANTINE_DIRNAME as LEGACY_QUARANTINE_DIRNAME
 from plex_playlist_sync.item_history import TRIGGER_RECYCLE_CLEANUP, download_trigger_kwargs, emit
 from plex_playlist_sync.redaction import safe_exc
+from plex_playlist_sync.task_manager import (
+    TRIGGER_MANUAL,
+    TRIGGER_SCHEDULED,
+    record_task_run,
+    wait_for_next_cycle,
+)
 from plex_playlist_sync.system_paths import (  # noqa: F401  (re-exported for library walkers)
     SYSTEM_DIRNAMES,
     SYSTEM_FILENAMES,
@@ -518,6 +524,16 @@ def get_status() -> dict[str, Any]:
         return {"running": _running, "last_run": dict(_last_run) or None}
 
 
+def _run_recorded(db: Any, trigger: str) -> Any:
+    """``run_cleanup`` wrapped in the task run history (failures propagate to the caller's own handling)."""
+    with record_task_run(db, "recycle_bin_cleanup", trigger) as run:
+        result = run_cleanup(db)
+        removed = getattr(result, "removed", None)
+        if isinstance(removed, (list, tuple)):
+            run.message = f"removed={len(removed)}"
+        return result
+
+
 def start_cleanup_async(db: Any) -> bool:
     """Runs one cleanup in a background thread. False when one is already running."""
     global _running
@@ -529,7 +545,7 @@ def start_cleanup_async(db: Any) -> bool:
     def _go() -> None:
         global _running
         try:
-            run_cleanup(db)
+            _run_recorded(db, TRIGGER_MANUAL)
         except (sqlite3.Error, OSError) as exc:
             logger.error("Recycle bin cleanup failed: %s", safe_exc(exc))
         finally:
@@ -559,18 +575,21 @@ class RecycleBinWorker:
         config: Any = None,
         interval_seconds: float = WORKER_INTERVAL_SECONDS,
         initial_delay: float = WORKER_INITIAL_DELAY_SECONDS,
+        interval_fn: Optional[Callable[[], float]] = None,
     ) -> bool:
         with self._lock:
             if self._is_running:
                 return False
             self._stop_event.clear()
             self._is_running = True
+        cycle_interval = interval_fn or (lambda: float(interval_seconds))
 
         def _loop() -> None:
             if not self._stop_event.wait(initial_delay):
                 while not self._stop_event.is_set():
                     self.run_once(db)
-                    self._stop_event.wait(interval_seconds)
+                    if wait_for_next_cycle(self._stop_event, cycle_interval):
+                        break
             with self._lock:
                 self._is_running = False
 
@@ -580,7 +599,7 @@ class RecycleBinWorker:
 
     def run_once(self, db: Any) -> bool:
         try:
-            run_cleanup(db)
+            _run_recorded(db, TRIGGER_SCHEDULED)
             return True
         except (sqlite3.Error, OSError) as exc:
             logger.error("RecycleBinWorker: cleanup failed: %s", safe_exc(exc))

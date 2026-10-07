@@ -94,6 +94,13 @@ class JobTracker:
         queued = [j for j in active if j["state"] == "queued"]
         return {"running": running, "queued": queued, "recent": recent}
 
+    def running_message(self, task_id: str) -> Optional[str]:
+        """Message of the oldest running job of ``task_id`` (None when none runs or it has no message yet)."""
+        with self._lock:
+            jobs = [j for j in self._active.values() if j["task_id"] == task_id and j["state"] == "running"]
+        jobs.sort(key=lambda j: j["started_at"] or "")
+        return jobs[0]["message"] if jobs else None
+
     def record_completed(
         self, task_id: str, name: str, duration_ms: int, message: Optional[str] = None, state: str = "completed"
     ) -> None:

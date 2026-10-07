@@ -28,6 +28,14 @@ from .redaction import redact_sensitive_query, redact_text, safe_exc
 from .security import safe_data_path
 from .storage import Database
 from .sync import SyncCoordinator
+from .task_manager import (
+    TRIGGER_SCHEDULED,
+    effective_interval_seconds,
+    interval_fn,
+    record_task_run,
+    startup_housekeeping,
+    wait_for_next_cycle,
+)
 
 logger = logging.getLogger("plex_playlist_sync")
 _shutdown_requested = False
@@ -343,13 +351,12 @@ def _start_sync_scheduler(
     set (the connect step sets it on success *or* failure), so a slow Plex/Spotify probe cannot make
     the first cycle silently skip services that simply were not connected yet."""
 
+    sync_interval = interval_fn(db, config, "playlist_sync")  # DB override > WAIT_SECONDS > default, re-read each second
+
     def background_sync_worker() -> None:
-        logger.info("Background sync scheduler started (interval: %d seconds)", config.wait_seconds)
+        logger.info("Background sync scheduler started (interval: %d seconds)", sync_interval())
         while not _stopping():
-            slept = 0
-            while slept < config.wait_seconds and not _stopping():
-                _shutdown_event.wait(min(1, config.wait_seconds - slept))
-                slept += 1
+            wait_for_next_cycle(_shutdown_event, sync_interval)
             if clients_ready is not None:
                 while not _stopping() and not clients_ready.wait(timeout=1.0):
                     pass
@@ -357,13 +364,16 @@ def _start_sync_scheduler(
                 break
             try:
                 logger.info("Triggering scheduled background synchronization...")
-                sync_state.execute_sync(
-                    db=db,
-                    config=config,
-                    plex_client=clients.plex,
-                    spotify_client=clients.spotify,
-                    deezer_client=clients.deezer,
-                )
+                with record_task_run(db, "playlist_sync", TRIGGER_SCHEDULED) as run:
+                    run.apply_result(
+                        sync_state.execute_sync(
+                            db=db,
+                            config=config,
+                            plex_client=clients.plex,
+                            spotify_client=clients.spotify,
+                            deezer_client=clients.deezer,
+                        )
+                    )
             except Exception as e:  # keep the scheduler alive; the root cause is logged
                 logger.error("Error in scheduled background sync: %s", safe_exc(e))
                 logger.debug("Scheduled sync traceback", exc_info=True)
@@ -397,12 +407,8 @@ def _start_lidarr_trickle(db: Database, config: Config) -> None:
                 if not (auto_trickle and url and api_key):
                     continue
 
-                interval_min = int(
-                    lidarr_settings.get("auto_trickle_interval_minutes")
-                    or config.lidarr_auto_trickle_interval_minutes
-                    or 30
-                )
-                interval_sec = max(60, interval_min * 60)
+                # DB override > Lidarr settings > env/config > 30m; read every pass so an edit applies at once.
+                interval_sec = max(60, effective_interval_seconds(db, config, "lidarr_auto_trickle") or 30 * 60)
                 now = time.time()
                 if now - last_run_time < interval_sec:
                     continue
@@ -448,6 +454,7 @@ def _start_lidarr_trickle(db: Database, config: Config) -> None:
                             delay_seconds=delay_seconds,
                             auto_search=auto_search,
                             batch_size=batch_size,
+                            trigger=TRIGGER_SCHEDULED,
                         )
             except Exception as e:  # keep the runner alive; the root cause is logged
                 logger.error("Error in scheduled Lidarr auto-trickle: %s", safe_exc(e))
@@ -462,13 +469,24 @@ def _start_local_workers(db: Database, config: Config) -> None:
     """Starts the workers that need no network at start-up (they probe their services lazily)."""
     from .backlog_worker import backlog_worker, rss_worker
 
+    # Runs left "running" by a previous process cannot still be running; close them before any worker records new ones.
+    startup_housekeeping(db)
+
     if config.enable_backlog_search:
         logger.info("Starting WantedBacklogWorker (interval: %d min)", config.backlog_search_interval_minutes)
-        backlog_worker.start(db=db, interval_seconds=config.backlog_search_interval_minutes * 60)
+        backlog_worker.start(
+            db=db,
+            interval_seconds=config.backlog_search_interval_minutes * 60,
+            interval_fn=interval_fn(db, config, "wanted_backlog_sweep"),
+        )
 
     if config.enable_rss_sync:
         logger.info("Starting RSSSyncWorker (interval: %d min)", config.rss_sync_interval_minutes)
-        rss_worker.start(db=db, interval_seconds=config.rss_sync_interval_minutes * 60)
+        rss_worker.start(
+            db=db,
+            interval_seconds=config.rss_sync_interval_minutes * 60,
+            interval_fn=interval_fn(db, config, "indexer_rss_sync"),
+        )
 
     from .pending_worker import pending_worker
 
@@ -478,7 +496,12 @@ def _start_local_workers(db: Database, config: Config) -> None:
     from .artist_refresh_worker import artist_refresh_worker
 
     logger.info("Starting ArtistRefreshWorker (interval: 24h, pace: 1.5s, first cycle in 10 min)")
-    artist_refresh_worker.start(db=db, interval_seconds=86400, pace_delay=1.5)
+    artist_refresh_worker.start(
+        db=db,
+        interval_seconds=86400,
+        pace_delay=1.5,
+        interval_fn=interval_fn(db, config, "artist_metadata_refresh"),
+    )
 
     from . import art_pipeline
 
@@ -486,6 +509,8 @@ def _start_local_workers(db: Database, config: Config) -> None:
         art_pipeline.start_startup_backfill(db)  # one-off after upgrade; background thread, marker-gated
     except Exception as exc:
         logger.error("Art backfill could not be started: %s", safe_exc(exc))
+    # Daily (editable) missing-only pass; the last run is read from the task history so a restart does not repeat it.
+    art_pipeline.art_backfill_scheduler.start(db, interval_fn(db, config, "art_thumbnail_backfill"))
 
     if config.enable_import_lists:
         from .import_list_worker import import_list_worker
@@ -501,7 +526,7 @@ def _start_local_workers(db: Database, config: Config) -> None:
     from .mix_worker import mix_worker
 
     logger.info("Starting MixWorker (hourly tailored mix regeneration)")
-    mix_worker.start(db=db, config=config)
+    mix_worker.start(db=db, config=config, interval_fn=interval_fn(db, config, "mix_generation"))
 
     from .library_health import library_health_worker
 
@@ -511,12 +536,12 @@ def _start_local_workers(db: Database, config: Config) -> None:
     from .seed_cleanup import seed_cleanup_worker
 
     logger.info("Starting SeedCleanupWorker (daily finished-torrent sweep)")
-    seed_cleanup_worker.start(db=db, config=config)
+    seed_cleanup_worker.start(db=db, config=config, interval_fn=interval_fn(db, config, "seed_cleanup"))
 
     from .recycle_bin import recycle_bin_worker
 
     logger.info("Starting RecycleBinWorker (daily recycle bin cleanup)")
-    recycle_bin_worker.start(db=db, config=config)
+    recycle_bin_worker.start(db=db, config=config, interval_fn=interval_fn(db, config, "recycle_bin_cleanup"))
 
 
 def _log_when_listening(server: uvicorn.Server, host: str, port: int, started_at: float) -> None:
@@ -882,6 +907,7 @@ def main() -> int:
             from . import art_pipeline
 
             art_pipeline.stop_startup_backfill()
+            art_pipeline.art_backfill_scheduler.stop()
             art_pipeline.shutdown()  # cancel queued pre-cache/thumbnail work so exit never drains it
             try:
                 from .backlog_worker import backlog_worker, rss_worker
