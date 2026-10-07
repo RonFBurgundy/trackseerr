@@ -6062,6 +6062,16 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                         AND g.event = 'grabbed' AND g.rowid > h.rowid)
         THEN 1 ELSE 0 END)"""
 
+    # Library album / artist ids of a history row, only while that album still exists (so the UI never links to a
+    # deleted entry). A track download carries ``track_id`` and no ``album_id``, hence the fallback.
+    _HISTORY_LIBRARY_IDS_SQL = """
+        (SELECT a.id FROM library_albums a
+          WHERE a.id = COALESCE(h.album_id, (SELECT t.album_id FROM library_tracks t WHERE t.id = h.track_id))
+        ) AS lib_album_id,
+        (SELECT a.artist_id FROM library_albums a
+          WHERE a.id = COALESCE(h.album_id, (SELECT t.album_id FROM library_tracks t WHERE t.id = h.track_id))
+        ) AS lib_artist_id"""
+
     def list_download_history(
         self, page: int, page_size: int, sort_dir: str, event: Optional[str] = None
     ) -> tuple[list[dict[str, Any]], int]:
@@ -6073,7 +6083,8 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
         with self._lock:
             total = self.conn.execute("SELECT COUNT(*) FROM download_history h" + where, params).fetchone()[0]
             cur = self.conn.execute(
-                f"SELECT h.*, {self._CAN_MARK_FAILED_SQL} AS can_mark_failed FROM download_history h"
+                f"SELECT h.*, {self._CAN_MARK_FAILED_SQL} AS can_mark_failed, {self._HISTORY_LIBRARY_IDS_SQL}"
+                " FROM download_history h"
                 + where
                 + f" {order} LIMIT ? OFFSET ?",
                 [*params, int(page_size), (int(page) - 1) * int(page_size)],

@@ -49,12 +49,12 @@ class CurrentUserProfile(ApiModel):
     is_admin: bool
     permissions: int
     request_limit_quota: Optional[int] = None
-    quota_limit: int
+    quota_limit: Optional[int] = None  # None: unlimited
     request_limit_days: int
     rolling_days: int
     active_requests: int
     active_request_count: int
-    remaining_quota: int
+    remaining_quota: Optional[int] = None  # None: unlimited
     quotas: QuotaSnapshot
     created_at: Optional[str] = None
     updated_at: Optional[str] = None

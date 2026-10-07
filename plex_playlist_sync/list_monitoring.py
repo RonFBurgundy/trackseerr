@@ -279,7 +279,10 @@ def _apply_album_native(
     _hydrate_album_tracks(db, enricher, artist_id, album_id, resolved.album_mbid)
     db.monitor_library_album_and_tracks(album_id)
     if not created and not artist.get("monitored"):
-        return "Artist is unmonitored, so the album will not appear in Wanted until the artist is monitored"
+        # Wanted requires a monitored artist. Flip only the artist flag: its monitor_option stays and no other
+        # album or track is touched (cascade_children=False).
+        db.set_artist_monitored(artist_id, True, cascade_children=False)
+        logger.info("Monitored existing native artist %s so the requested album is wanted", artist_id)
     return None
 
 
@@ -330,8 +333,8 @@ def _lidarr_artist(
 ) -> tuple[int, bool]:
     """Lidarr's id for the artist, adding it with Lidarr's own root-folder defaults if absent. Returns (id, added).
 
-    An artist already in Lidarr is returned untouched. A new one is added whole (``whole_artist``) or unmonitored
-    for a release that is monitored afterwards.
+    An artist already in Lidarr is returned untouched here. A new one is added whole (``whole_artist``) or with
+    nothing monitored for a release that is monitored afterwards (the caller then monitors the artist too).
     """
     term = f"lidarr:{resolved.artist_mbid}" if resolved.artist_mbid else resolved.artist_name
     candidate = _pick_lidarr_candidate(client.lookup_artist(term), resolved.artist_mbid)
@@ -375,6 +378,8 @@ def _apply_album_lidarr(db: Database, client: LidarrClient, resolved: _Resolved)
         client.set_albums_monitored([album_id], True)
         if not client.fetch_album(album_id).get("monitored"):
             raise LidarrApiError("Lidarr did not keep the album monitored")
+        # Lidarr ignores monitored albums under an unmonitored artist (a new request artist is added unmonitored).
+        client.ensure_artist_monitored(artist_id)
         if db.get_lidarr_settings().get("auto_search", True):
             client.run_command("AlbumSearch", albumIds=[album_id])
     finally:

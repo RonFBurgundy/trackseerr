@@ -8,6 +8,7 @@ import { useGroupIndex } from '@/hooks/useGroupIndex';
 import { ConfirmDangerButton, TapeDeckButton, TabStrip } from '@/components/ui';
 import { FlatList, ListPanel, ScrubberRail, formatDateTime, orDash, type FlatListColumn } from '@/components/lists';
 import type { ActivityPanelProps } from './ActivityQueuePanel';
+import { LibraryLink } from './LibraryLink';
 
 const fetchHistory = pagedFetcher(getActivityHistory);
 const getKey = (r: ActivityHistoryRecord): string | number => r.id;
@@ -83,9 +84,9 @@ export const ActivityHistoryPanel: React.FC<ActivityPanelProps> = ({ onToast }) 
     () => [
       { key: 'date', label: 'Date', sortable: true, width: '150px', mobile: 'meta', render: (r) => formatDateTime(r.date) },
       { key: 'event', label: 'Event', width: '120px', mobile: 'end', render: (r) => <EventBadge event={r.event} message={r.message} /> },
-      { key: 'artist', label: 'Artist', width: 'minmax(0,1fr)', mobile: 'title', render: (r) => orDash(r.artist) },
-      { key: 'album', label: 'Album', width: 'minmax(0,1fr)', mobile: 'sub', render: (r) => orDash(r.album) },
-      { key: 'title', label: 'Title', width: 'minmax(0,1.1fr)', mobile: 'sub', render: (r) => orDash(r.title) },
+      { key: 'artist', label: 'Artist', width: 'minmax(0,1fr)', mobile: 'title', render: (r) => <LibraryLink kind="artist" id={r.artist_id} label={r.artist} /> },
+      { key: 'album', label: 'Album', width: 'minmax(0,1fr)', mobile: 'sub', render: (r) => <LibraryLink kind="album" id={r.album_id} label={r.album} /> },
+      { key: 'track', label: 'Track', width: 'minmax(0,1.1fr)', mobile: 'sub', render: (r) => orDash(r.track) },
       { key: 'quality', label: 'Quality', width: '80px', mobile: 'meta', render: (r) => orDash(r.quality) },
       { key: 'indexer', label: 'Indexer', width: '100px', xlOnly: true, hideOnMobile: true, render: (r) => orDash(r.indexer) },
       { key: 'client', label: 'Client', width: '100px', xlOnly: true, hideOnMobile: true, render: (r) => orDash(r.client) },

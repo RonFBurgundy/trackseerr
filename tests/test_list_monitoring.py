@@ -212,11 +212,19 @@ def test_native_album_existing_unmonitored_album_gets_monitored_with_all_tracks(
     assert len(db.list_library_tracks(album_id="alb-1")) == 2
 
 
-def test_native_album_on_unmonitored_existing_artist_adds_note(db):
-    db.upsert_library_artist(LibraryArtist(id="art-x", name="Radiohead", mbid=ART, monitored=False, monitor_option="none"))
+def test_native_album_on_unmonitored_existing_artist_monitors_artist_only(db):
+    db.upsert_library_artist(LibraryArtist(id="art-x", name="Radiohead", mbid=ART, monitored=False, monitor_option="existing"))
+    db.upsert_library_album({"id": "alb-sib", "artist_id": "art-x", "title": "Pablo Honey", "mb_release_group_id": "rg-p", "monitored": False})
+    db.upsert_library_track({"id": "t-sib", "album_id": "alb-sib", "artist_id": "art-x", "title": "Creep", "track_number": 1, "monitored": False})
     res = apply_list_item(db, None, album_item(), "album", enricher=make_enricher())
-    assert res.status == "applied" and "unmonitored" in (res.error or "")
-    assert db.get_library_artist("art-x")["monitored"] is False  # untouched
+    assert res.status == "applied" and not res.error
+    artist = db.get_library_artist("art-x")
+    assert (artist["monitored"], artist["monitor_option"]) == (True, "existing")
+    assert albums_of(db, "art-x") == {"Pablo Honey": False, "OK Computer": True}  # sibling untouched
+    assert db.get_library_track("t-sib")["monitored"] is False
+    assert any(
+        r["album"] == "OK Computer" for r in db.list_wanted("missing", 1, 50, "artist", "asc")[0]
+    )
 
 
 def test_album_unresolved_when_musicbrainz_has_no_match(db):
@@ -341,6 +349,7 @@ def test_lidarr_album_adds_artist_unmonitored_then_monitors_and_searches_album(d
     client.add_artist_with_defaults.assert_called_once()
     assert client.add_artist_with_defaults.call_args.kwargs["whole_artist"] is False  # unmonitored add
     client.set_albums_monitored.assert_called_once_with([6], True)
+    client.ensure_artist_monitored.assert_called_once_with(77)  # Lidarr ignores monitored albums of an unmonitored artist
     client.run_command.assert_called_once_with("AlbumSearch", albumIds=[6])
     assert db.list_library_artists() == []  # nothing native in lidarr mode
 

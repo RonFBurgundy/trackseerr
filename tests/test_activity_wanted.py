@@ -449,8 +449,8 @@ class TestNativeHistory:
         assert grabbed["indexer"] == "Prowlarr" and grabbed["client"] == "qBittorrent"
         assert grabbed["quality"] and grabbed["title"] == "Nirvana - In Bloom [FLAC]"
         assert set(grabbed) == {
-            "id", "source", "event", "artist", "album", "title", "release_title", "quality", "indexer", "client",
-            "date", "message", "can_mark_failed",
+            "id", "source", "event", "artist", "album", "track", "artist_id", "album_id", "title", "release_title",
+            "quality", "indexer", "client", "date", "message", "can_mark_failed",
         }
         assert grabbed["can_mark_failed"] is True and body["records"][1]["can_mark_failed"] is False
 
@@ -870,7 +870,8 @@ class TestLidarrMode:
         assert body["total"] == 3 and body["sort_key"] == "date"
         assert body["records"][0] == {
             "id": "9", "source": "lidarr", "event": "failed", "artist": "Radiohead", "album": "OK Computer",
-            "title": "OK Computer", "release_title": "Rel", "quality": "MP3-320", "indexer": "Prowlarr",
+            "track": None, "artist_id": None, "album_id": None,
+            "title": "Rel", "release_title": "Rel", "quality": "MP3-320", "indexer": "Prowlarr",
             "client": "qBit", "date": "2026-10-04T09:00:00Z", "message": "boom", "can_mark_failed": False,
         }
 
@@ -899,7 +900,7 @@ class TestLidarrMode:
         body = api.get("/api/activity/blocklist?sort_key=artist&sort_dir=asc", headers=admin_h).json()
         assert "sortKey=artists.sortName" in lidarr_http.get.call_args.args[0]
         assert body["records"][0] == {
-            "id": "5", "source": "lidarr", "artist": "Radiohead", "album": None, "title": "Bad Rel",
+            "id": "5", "source": "lidarr", "artist": "Radiohead", "artist_id": None, "album": None, "title": "Bad Rel",
             "release_title": "Bad Rel", "quality": "MP3-128", "indexer": "NZB", "protocol": "usenet",
             "reason": "Unpack failed", "date": "2026-10-01T00:00:00Z",
         }

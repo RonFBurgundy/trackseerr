@@ -11,10 +11,20 @@ export type DeploymentTier = 'gateway' | 'core' | 'all-in-one';
 /** The session user: the backend `UserRecord`, plus the deployment tier that `/api/auth/me` returns beside it. */
 export type User = Schema<'UserRecord'> & { tier?: DeploymentTier };
 
-export interface UserQuota {
-  remaining: number;
+export type QuotaTypeKind = 'tracks' | 'albums' | 'discographies';
+
+export interface QuotaTypeStatus {
+  kind: QuotaTypeKind;
+  used: number;
   limit: number;
+  remaining: number;
+}
+
+/** Per-type rolling request quota. `unlimited` users have no `types` entries. */
+export interface UserQuota {
+  unlimited: boolean;
   period_days: number;
+  types: QuotaTypeStatus[];
 }
 
 export type AuthPinResponse = Schema<'PlexPinResponse'>;
