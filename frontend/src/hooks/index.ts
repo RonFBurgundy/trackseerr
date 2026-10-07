@@ -87,3 +87,5 @@ export * from './useItemHistory';
 export * from './useTags';
 export * from './useArtistTags';
 export * from './useTagManager';
+export * from './useNotificationChannels';
+export * from './useNotificationChannelEditor';

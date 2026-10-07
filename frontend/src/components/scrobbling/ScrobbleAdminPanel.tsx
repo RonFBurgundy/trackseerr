@@ -136,7 +136,7 @@ export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
           </div>
           {fromEnv && (
             <p className="text-xs text-neutral-400 font-mono">
-              Managed by LASTFM_API_KEY / LASTFM_API_SECRET environment variables.
+              Set by LASTFM_API_KEY / LASTFM_API_SECRET environment variables; remove them from the container template to manage the key here.
             </p>
           )}
           {showPlexOptions && (

@@ -11,6 +11,8 @@ export interface ScrobblingSettingsProps {
   hasMediaServer?: boolean;
 }
 
+const SERVER_SCROBBLING_ID = 'server-scrobbling';
+
 export const ScrobblingSettings: React.FC<ScrobblingSettingsProps> = ({ isAdmin, hasMediaServer = true }) => {
   const s = useScrobbling(isAdmin);
   const { notice, dismissNotice } = s;
@@ -51,6 +53,8 @@ export const ScrobblingSettings: React.FC<ScrobblingSettingsProps> = ({ isAdmin,
             config={s.config}
             isSaving={s.isSaving}
             lastfmUnavailable={s.lastfmUnavailable}
+            isAdmin={isAdmin}
+            serverCardId={SERVER_SCROBBLING_ID}
             onConnectLastfm={s.connectLastfm}
             onDisconnectLastfm={s.disconnectLastfm}
             onToggleEnabled={s.setScrobblingEnabled}
@@ -62,7 +66,7 @@ export const ScrobblingSettings: React.FC<ScrobblingSettingsProps> = ({ isAdmin,
       )}
 
       {!s.isLoading && isAdmin && (
-        <div className="max-w-3xl">
+        <div id={SERVER_SCROBBLING_ID} className="max-w-3xl">
           <ScrobbleAdminPanel
             serverConfig={s.serverConfig}
             webhookUrl={s.webhookUrl}

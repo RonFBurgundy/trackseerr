@@ -11,7 +11,7 @@ export type WantedSub = WantedListName;
 
 export type SettingsSection = 'general' | 'media-management' | 'lidarr' | 'requests' | 'system' | 'account';
 export type MediaManagementLeaf = 'media' | 'quality' | 'profiles' | 'custom-formats' | 'clients' | 'indexers' | 'import-lists' | 'media-server';
-export type RequestsLeaf = 'users' | 'scrobbling';
+export type RequestsLeaf = 'users' | 'scrobbling' | 'notifications';
 export type SystemLeaf = 'status' | 'queue' | 'tasks' | 'events' | 'logs';
 export type SettingsLeafId = MediaManagementLeaf | RequestsLeaf | SystemLeaf;
 
@@ -98,7 +98,7 @@ export const MEDIA_MANAGEMENT_LEAVES: readonly MediaManagementLeaf[] = [
   'import-lists',
   'media-server',
 ];
-export const REQUESTS_LEAVES: readonly RequestsLeaf[] = ['users', 'scrobbling'];
+export const REQUESTS_LEAVES: readonly RequestsLeaf[] = ['users', 'scrobbling', 'notifications'];
 export const SYSTEM_LEAVES: readonly SystemLeaf[] = ['status', 'queue', 'tasks', 'events', 'logs'];
 
 /** Narrow an untrusted string to a member of `list` without a cast. */
