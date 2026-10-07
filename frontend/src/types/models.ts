@@ -149,25 +149,27 @@ export type LidarrTagOption = Schema<'LidarrTagOption'>;
 
 export type LidarrDefaults = Schema<'LidarrDefaultsResponse'>;
 
-export type SystemJobState = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
-
-export type SystemJob = Narrow<Schema<'JobRecord'>, { state: SystemJobState }>;
-
-export type SystemQueueResponse = Narrow<Schema<'JobQueueSnapshot'>, { queued: SystemJob[]; recent: SystemJob[]; running: SystemJob[] }>;
-
 export type LidarrHealthItem = Schema<'LidarrHealthCheck'>;
 
 export type LidarrHealth = Schema<'LidarrHealthResponse'>;
 
 export type LidarrTestResult = Schema<'LidarrTestConnectionResponse'>;
 
-export type SystemEventItem = Schema<'SystemEvent'>;
-
-export type SystemEventsResponse = Schema<'SystemEventsPage'>;
-
 export type SystemLogItem = Schema<'LogEntry'>;
 
 export type ScheduledTaskItem = Schema<'ScheduledTaskItem'>;
+
+export type TaskProgress = Schema<'TaskProgress'>;
+
+export type TaskRunItem = Schema<'TaskRunItem'>;
+
+export type SystemActivity = Schema<'ActivityResponse'>;
+
+export type SystemActivityRunning = Schema<'ActivityRunningItem'>;
+
+export type SystemActivityRecent = Schema<'ActivityRecentItem'>;
+
+export type SystemResources = Schema<'ResourcesResponse'>;
 
 
 // ---------------------------------------------------------------------------

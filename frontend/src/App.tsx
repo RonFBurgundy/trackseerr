@@ -21,6 +21,7 @@ import {
   useSearchShortcut,
   useSettingHighlight,
   defaultRoute,
+  settingsRouteFor,
   RefreshContext,
   useRefreshRegistry,
   usePullToRefresh,
@@ -267,6 +268,8 @@ const MainApp: React.FC = () => {
         issuesOpenCount={issueCounts.open}
         issuesUnreadCount={issueCounts.unread}
         tier={identity.tier}
+        activityEnabled={auth.canUseAdminUi && !mfaEnrollmentRequired}
+        onOpenTasks={() => handleNavigate(settingsRouteFor('system', 'tasks'))}
         onLogin={() => {
           if (mediaServer.isPlex) setIsAuthModalOpen(true);
           else setShowLocalLogin(true);
