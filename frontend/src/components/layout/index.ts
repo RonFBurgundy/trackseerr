@@ -6,3 +6,8 @@ export * from './AudioPlayerBar';
 export * from './PageFrame';
 export * from './PageActionsPortal';
 export * from './DetailHeaderBar';
+export * from './PullRefreshIndicator';
+export * from './RefreshBinding';
+export * from './NavSearch';
+export * from './navSearch';
+export * from './navSearchIndex';

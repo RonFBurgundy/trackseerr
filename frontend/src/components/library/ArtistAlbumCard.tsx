@@ -1,7 +1,8 @@
-import React, { useCallback, useId, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { BookmarkPlus, ChevronDown, ChevronUp, Disc, FolderInput, History, Info, Loader2, Search, Sliders } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
 import { useAlbumTracks } from '@/hooks/useAlbumTracks';
+import { textMatches } from '@/hooks/useDiscographyFilter';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
 import { errorMessage } from '@/services/apiClient';
 import {
@@ -30,6 +31,8 @@ export interface ArtistAlbumCardProps {
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
   /** Present while the bulk editor is active. */
   selected?: { checked: boolean; onToggle: () => void };
+  /** Set when the discography filter matched this album through its tracks: opens it and narrows the list. */
+  trackFilter?: string;
 }
 
 /** One release in an artist's discography; expanding it loads the tracks through the paged endpoint. */
@@ -45,10 +48,21 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
   onToggleTrackMonitored,
   onToast,
   selected,
+  trackFilter,
 }) => {
   const [expanded, setExpanded] = useState<boolean>(false);
+  // An album that matched the discography filter through its tracks opens itself to show them.
+  useEffect(() => {
+    if (trackFilter !== undefined) setExpanded(true);
+  }, [trackFilter]);
   const tracksId = useId();
   const { tracks, loading, error, patchMonitored } = useAlbumTracks(expanded ? album.id : null);
+  // Narrow to the matching tracks when the filter matched through them; fall back to all if the lookup was broader.
+  const shownTracks = useMemo(() => {
+    if (trackFilter === undefined) return tracks;
+    const hits = tracks.filter((t) => textMatches(trackFilter, t.title));
+    return hits.length > 0 ? hits : tracks;
+  }, [tracks, trackFilter]);
   const lidarrSearch = useLidarrSearch(onToast);
   const searching = lidarrSearch.busyKey === `album:${album.id}`;
 
@@ -259,7 +273,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
       {expanded && (
         <div id={tracksId} className="pt-2 border-t border-[#1f1f1f]">
           <AlbumTrackList
-            tracks={tracks}
+            tracks={shownTracks}
             loading={loading}
             error={error}
             isAdmin={isAdmin}

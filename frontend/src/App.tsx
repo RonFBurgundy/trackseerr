@@ -18,13 +18,19 @@ import {
   useStartupStatus,
   useAppRoute,
   useSearchShortcut,
+  useSettingHighlight,
   defaultRoute,
+  RefreshContext,
+  useRefreshRegistry,
+  usePullToRefresh,
 } from '@/hooks';
 import type { AppRoute, MainTab, NavigateOptions } from '@/hooks';
 import {
   Header,
   NavHub,
   PageFrame,
+  PullRefreshIndicator,
+  RefreshBinding,
   gateRoute,
   routesEqual,
   AudioPlayerBar,
@@ -106,6 +112,16 @@ const MainApp: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const closeMenu = useCallback(() => setIsMenuOpen(false), []);
   const mainRef = useRef<HTMLElement | null>(null);
+  const { highlight } = useSettingHighlight();
+  const refreshRegistry = useRefreshRegistry();
+  const pull = usePullToRefresh({
+    rootRef: mainRef,
+    enabled: auth.isAuthenticated,
+    onRefresh: async () => {
+      // A view that registered nothing gets a full reload.
+      if (!(await refreshRegistry.run())) window.location.reload();
+    },
+  });
 
   // Playlists & users data
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -227,6 +243,7 @@ const MainApp: React.FC = () => {
   };
 
   return (
+    <RefreshContext.Provider value={refreshRegistry}>
     <div
       className="h-screen w-screen flex flex-col overflow-hidden bg-[#0a0a0a] text-white selection:bg-[#e5a00d] selection:text-black"
       style={{ height: '100dvh' }}
@@ -266,15 +283,17 @@ const MainApp: React.FC = () => {
         issuesUnreadCount={issueCounts.unread}
         tier={identity.tier}
         onLogout={auth.logout}
+        onHighlight={highlight}
       />
 
       {/* Main Content Area - Locked scrolling inside container */}
       <main
         ref={mainRef}
-        className="flex flex-col flex-1 min-h-0 overflow-hidden px-4 sm:px-6 pt-4"
+        className="relative flex flex-col flex-1 min-h-0 overflow-hidden px-4 sm:px-6 pt-4"
         // Bottom room: the safe-area inset, plus the audio bar while a preview is loaded. Lists size to this edge.
         style={{ paddingBottom: `calc(${audioPlayer.currentTrack ? '6.5rem' : '1rem'} + env(safe-area-inset-bottom, 0px))` }}
       >
+        <PullRefreshIndicator {...pull} />
         {auth.isLoading ? (
           <PageFrame bodyClassName="flex">
             <div className="m-auto flex flex-col items-center justify-center gap-3 py-8">
@@ -399,6 +418,16 @@ const MainApp: React.FC = () => {
         ) : (
           /* Authenticated Dashboard Views: each view is a PageFrame filling this column. */
           <div className="max-w-7xl mx-auto w-full flex flex-col flex-1 min-h-0">
+            {activeRoute.tab === 'discover' && <RefreshBinding onRefresh={discovery.refresh} />}
+            {activeRoute.tab === 'requests' && (
+              <RefreshBinding
+                onRefresh={() => Promise.all([requestsHook.refresh(), issuesHook.refresh(), issueCounts.refresh()])}
+              />
+            )}
+            {activeRoute.tab === 'library' && auth.canUseAdminUi && (
+              <RefreshBinding onRefresh={libraryHook.reloadCatalog} />
+            )}
+            {activeRoute.tab === 'playlists' && <RefreshBinding onRefresh={loadPlaylistsAndUsers} />}
             {activeRoute.tab === 'discover' && (
               <DiscoverView
                 discovery={discovery}
@@ -584,6 +613,7 @@ const MainApp: React.FC = () => {
         </div>
       </ObsidianModal>
     </div>
+    </RefreshContext.Provider>
   );
 };
 

@@ -25,7 +25,7 @@ import {
 import type { ManagedExternally } from '@/components/settings';
 import { CustomFormatsPage, ProfilesPage, QualityDefinitionsPanel } from '@/components/profiles';
 import { SystemPage, systemTabOwnsScroll } from '@/components/system';
-import { PageFrame } from '@/components/layout';
+import { PageFrame, RefreshBinding } from '@/components/layout';
 import type { UseAccountReturn } from '@/hooks/useAccount';
 import { settingsRouteFor } from '@/hooks/useAppRoute';
 import type { SettingsRoute } from '@/hooks/useAppRoute';
@@ -139,6 +139,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </>
       }
     >
+      {isAdmin && !mfaEnrollmentRequired && !isSelfServiceTab && <RefreshBinding onRefresh={data.reload} />}
+
       {/* Informational banners scroll away with the content; pages whose child owns the scroller skip them. */}
       {bodyScrolls && <RoleChangeBanner enabled={isAdmin && !mfaEnrollmentRequired} />}
 

@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Ban, ClipboardCheck, DownloadCloud, Flag, History } from 'lucide-react';
 import { PageFrame } from '@/components/layout';
 import { TabStrip, TapeDeckButton, ToastBanner } from '@/components/ui';
 import { ActivityQueuePanel, ActivityHistoryPanel, ActivityBlocklistPanel, NeedsReviewPanel } from '@/components/activity';
 import { AdminIssuesPanel } from '@/components/issues';
 import { useToast } from '@/hooks/useToast';
+import { useRefreshHandler } from '@/hooks/useRefreshHandler';
 import type { ActivitySub, NavigateOptions } from '@/hooks/useAppRoute';
 
 const noop = (): void => undefined;
@@ -44,6 +45,9 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
   onCloseIssue,
 }) => {
   const { toast, showToast } = useToast();
+  // Panels own their paged data; bumping the key remounts the active one, which reloads it from the server.
+  const [reloadKey, setReloadKey] = useState<number>(0);
+  useRefreshHandler(() => setReloadKey((k) => k + 1));
 
   return (
     <PageFrame
@@ -67,11 +71,13 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
       </>
       }
     >
+      <React.Fragment key={reloadKey}>
       {tab === 'queue' && <ActivityQueuePanel onToast={showToast} />}
       {tab === 'history' && <ActivityHistoryPanel onToast={showToast} />}
       {tab === 'blocklist' && <ActivityBlocklistPanel onToast={showToast} />}
       {tab === 'issues' && <AdminIssuesPanel issueId={issueId} onOpenIssue={onOpenIssue} onCloseIssue={onCloseIssue} onToast={showToast} />}
       {tab === 'review' && <NeedsReviewPanel onToast={showToast} onChanged={onReviewChanged ?? noop} />}
+      </React.Fragment>
     </PageFrame>
   );
 };

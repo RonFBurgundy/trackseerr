@@ -1,4 +1,4 @@
-import React, { useCallback, useId, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import {
   CheckSquare,
   Disc,
@@ -18,6 +18,7 @@ import type { MetadataProfilePreview } from '@/types/metadataProfiles';
 import { useArtistDetail, type MonitorPreset } from '@/hooks/useArtistDetail';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
 import { useMetadataProfileDryRun, useMetadataProfilePreview, useMetadataProfiles } from '@/hooks/useMetadataProfiles';
+import { useDiscographyFilter } from '@/hooks/useDiscographyFilter';
 import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { useAlbumBulkEdit } from '@/hooks/useAlbumBulkEdit';
 import { errorMessage } from '@/services/apiClient';
@@ -27,6 +28,7 @@ import { DetailHeaderBar, PageFrame } from '@/components/layout';
 import { ArtistAlbumCard } from './ArtistAlbumCard';
 import { ItemOriginCaption } from './ItemOriginCaption';
 import { AlbumBulkBar } from './AlbumBulkBar';
+import { DiscographyFilter } from './DiscographyFilter';
 import { ArtistRestOfDiscography } from './ArtistRestOfDiscography';
 import { ArtistTagsRow } from './ArtistTagsRow';
 import { genreNames } from './genres';
@@ -98,7 +100,9 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   const detail = useArtistDetail(artistId, onToast, onChanged);
   const { artist, loading, refreshing, patchAlbumMonitored, patchArtistMonitored, patchArtistTags } = detail;
   const [tab, setTab] = useState<DiscographyTab>('studio');
-  const categorized = useMemo(() => categorize(artist?.albums ?? []), [artist]);
+  const filter = useDiscographyFilter(artistId);
+  const { filterAlbums } = filter;
+  const categorized = useMemo(() => categorize(filterAlbums(artist?.albums ?? [])), [artist, filterAlbums]);
   const [hideOutside, setHideOutside] = useState<boolean>(false);
   const metadataProfiles = useMetadataProfiles(isAdmin && !lidarrMode, onToast);
   const metadataProfileId = artist?.metadata_profile_id ?? null;
@@ -155,6 +159,13 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
     () => (hideOutside && hasOutside ? categorized[tab].filter((a) => a.in_profile !== false) : categorized[tab]),
     [categorized, tab, hideOutside, hasOutside]
   );
+
+  // A filter that empties the open tab jumps to the first tab that still has matches.
+  useEffect(() => {
+    if (!filter.active || filter.searching || categorized[tab].length > 0) return;
+    const next = (['studio', 'singles_eps', 'live', 'compilations'] as const).find((id) => categorized[id].length > 0);
+    if (next) setTab(next);
+  }, [filter.active, filter.searching, categorized, tab]);
 
   const canBulkEdit = isAdmin && !lidarrMode;
   const selection = useBulkSelection();
@@ -414,6 +425,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
               </TapeDeckButton>
             ))}
           </TabStrip>
+          <DiscographyFilter value={filter.text} onChange={filter.setText} onClear={filter.clear} searching={filter.searching} />
           {hasOutside && (
             <TactileSwitch
               checked={hideOutside}
@@ -472,6 +484,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
               onToggleAlbumMonitored={(id, cur) => void toggleAlbum(id, cur)}
               onToggleTrackMonitored={onToggleTrackMonitored}
               onToast={onToast}
+              trackFilter={filter.trackFilterFor(album.id)}
               selected={
                 canBulkEdit && selection.active
                   ? { checked: selection.isSelected(album.id), onToggle: () => selection.toggle(album.id) }
@@ -481,7 +494,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
           ))}
           {albums.length === 0 && (
             <div className="text-center py-12 text-neutral-500 font-mono text-sm">
-              No releases categorized under this tab.
+              {filter.active ? 'No releases match' : 'No releases categorized under this tab.'}
             </div>
           )}
         </div>
