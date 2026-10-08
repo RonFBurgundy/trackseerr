@@ -1095,6 +1095,22 @@ def test_worker_history_poll_respects_interval_and_disable(db, config, users):
     assert plex.server.history.call_count == 2
 
 
+def test_worker_run_now_forces_poll_and_retries(db, config, users):
+    now = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
+    plex = fake_plex([], {})
+    worker = ScrobbleWorker()
+    worker.run_iteration(db, config, plex, now=now, force=True)
+    assert plex.server.history.call_count == 1
+    # 5 minutes later is not due under standard 15m polling:
+    worker.run_iteration(db, config, plex, now=now + timedelta(minutes=5))
+    assert plex.server.history.call_count == 1
+    # run_now forces poll immediately:
+    with patch.object(worker, "_get_plex", return_value=plex):
+        outcome = worker.run_now(db, config)
+    assert plex.server.history.call_count == 2
+    assert outcome == {"ingested": 0, "retried": 0}
+
+
 def test_worker_retry_pass_forwards_pending(db, config, users):
     db.upsert_scrobble_config("1001", lastfm_session_key="sk", listenbrainz_token="lb")
     lid = db.insert_listen("1001", "A", "T", rating_key="1")

@@ -52,6 +52,7 @@ class MixWorker:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._iteration_lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._is_running = False
@@ -81,12 +82,13 @@ class MixWorker:
         plex_client: Any,
         discovery: Any,
         now: Optional[datetime] = None,
+        force: bool = False,
     ) -> dict[str, int]:
-        """Generate every due mix. One mix failing never stops the others."""
+        """Generate every due mix (or all configured mixes when force=True). One mix failing never stops the others."""
         now = _as_utc(now or datetime.now(timezone.utc))
         result = {"due": 0, "generated": 0, "errors": 0}
         for row in db.list_mix_configs():
-            if not is_due(row, now):
+            if not force and not is_due(row, now):
                 continue
             result["due"] += 1
             try:
@@ -102,6 +104,14 @@ class MixWorker:
             self.generated += result["generated"]
             self.errors += result["errors"]
         return result
+
+    def run_now(self, db: Database, config: Config) -> dict[str, int]:
+        """Manually run tailored mix generation now for every configured mix."""
+        plex = self._get_plex(config)
+        if self._discovery is None:
+            self._discovery = DiscoveryClient()
+        with self._iteration_lock:
+            return self.run_iteration(db, config, plex, self._discovery, force=True)
 
     def _get_plex(self, config: Config) -> Optional[PlexClient]:
         if self._plex is not None:
@@ -144,10 +154,11 @@ class MixWorker:
             while not self._stop_event.is_set():
                 try:
                     plex = plex_factory(config) if plex_factory else self._get_plex(config)
-                    with record_task_run(db, "mix_generation", trigger) as run:
-                        outcome = self.run_iteration(db, config, plex, self._discovery)
-                        if isinstance(outcome, dict):
-                            run.message = f"due={outcome.get('due', 0)}, generated={outcome.get('generated', 0)}, errors={outcome.get('errors', 0)}"
+                    with self._iteration_lock:
+                        with record_task_run(db, "mix_generation", trigger) as run:
+                            outcome = self.run_iteration(db, config, plex, self._discovery)
+                            if isinstance(outcome, dict):
+                                run.message = f"due={outcome.get('due', 0)}, generated={outcome.get('generated', 0)}, errors={outcome.get('errors', 0)}"
                 except Exception as exc:
                     logger.error("MixWorker: Error in iteration (%s)", type(exc).__name__)  # no traceback/message: may embed Plex token URLs
                     with self._lock:

@@ -438,6 +438,27 @@ class TestWorker:
             worker.run_iteration(db, config, None, FakeDiscovery(), now=NOW + timedelta(hours=1))
         assert recent["id"] not in [c.args[3]["id"] for c in gen.call_args_list]
 
+    def test_run_iteration_force_runs_not_due(self, db, users, config):
+        uid = users["alice"]["id"]
+        recent = make_mix(db, uid, name="Recent", mix_type="daily_blend")
+        db.record_mix_result(recent["id"], "{}")
+        worker = MixWorker()
+        with patch("plex_playlist_sync.mix_worker.generate_and_sync") as gen:
+            worker.run_iteration(db, config, None, FakeDiscovery(), now=NOW + timedelta(hours=1), force=True)
+        assert recent["id"] in [c.args[3]["id"] for c in gen.call_args_list]
+
+    def test_run_now_uses_force_and_creates_discovery_if_none(self, db, users, config):
+        uid = users["alice"]["id"]
+        make_mix(db, uid, name="M")
+        worker = MixWorker()
+        assert worker._discovery is None
+        with patch.object(worker, "_get_plex", return_value=None), \
+             patch("plex_playlist_sync.mix_worker.generate_and_sync") as gen:
+            out = worker.run_now(db, config)
+        assert out["generated"] == 1
+        assert worker._discovery is not None
+        assert gen.call_count == 1
+
 
 # ---------------------------------------------------------------------------
 # API

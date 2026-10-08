@@ -85,6 +85,8 @@ from plex_playlist_sync.library_manager import MODE_LIDARR, MODE_NATIVE, build_l
 from plex_playlist_sync.library_scanner import library_scanner
 from plex_playlist_sync.media_server import media_server_status
 from plex_playlist_sync.lidarr_queue import lidarr_worker
+from plex_playlist_sync.mix_worker import mix_worker
+from plex_playlist_sync.scrobble_worker import scrobble_worker
 from plex_playlist_sync.models import DownloadClientConfig, IndexerConfig, UserPermission
 from plex_playlist_sync.security import is_safe_service_url
 from plex_playlist_sync.storage import Database
@@ -1027,7 +1029,10 @@ class ScheduledTaskItem(ApiModel):
 
 VALID_TASK_IDS = set(TASKS)
 
-# Tasks an admin can start by hand (the POST /run branches below). The rest are polling loops with nothing to "run now".
+# Tasks an admin can start by hand (the POST /run branches below).
+# pending_releases and import_list_sync stay non-runnable: pending_releases already checks every
+# minute and forcing it would bypass the delay profile; import lists have per-list Sync buttons
+# and a run-now here would only process lists that are already due.
 _MANUAL_RUNNABLE = {
     "filesystem_scan",
     "playlist_sync",
@@ -1041,6 +1046,8 @@ _MANUAL_RUNNABLE = {
     "library_health",
     "recycle_bin_cleanup",
     "lidarr_request_retry",
+    "scrobble_sync",
+    "mix_generation",
 }
 
 # Display text of the polling loops, whose period is fixed in code.
@@ -1180,6 +1187,16 @@ def get_all_scheduled_tasks(
         "lidarr_request_retry": (
             "running" if "lidarr_request_retry" in _running_tasks else "idle",
             library_manager.last_retry_sweep_at,
+            False,
+        ),
+        "scrobble_sync": (
+            "running" if "scrobble_sync" in _running_tasks else "idle",
+            scrobble_worker.get_status().get("last_poll_at"),
+            False,
+        ),
+        "mix_generation": (
+            "running" if "mix_generation" in _running_tasks else "idle",
+            mix_worker.get_status().get("last_run_at"),
             False,
         ),
     }
@@ -1542,6 +1559,20 @@ def run_scheduled_task(
                     _running_tasks.discard("art_thumbnail_backfill")
 
         threading.Thread(target=_art_backfill_thread, daemon=True, name="ArtBackfillTask").start()
+
+    elif task_id == "scrobble_sync":
+        def _scrobble(run: RunHandle) -> None:
+            outcome = scrobble_worker.run_now(db, config)
+            run.message = f"ingested={outcome.get('ingested', 0)}, retried={outcome.get('retried', 0)}"
+
+        _run_manual(db, task_id, "ManualScrobbleSyncTask", _scrobble)
+
+    elif task_id == "mix_generation":
+        def _mix(run: RunHandle) -> None:
+            outcome = mix_worker.run_now(db, config)
+            run.message = f"due={outcome.get('due', 0)}, generated={outcome.get('generated', 0)}, errors={outcome.get('errors', 0)}"
+
+        _run_manual(db, task_id, "ManualMixGenerationTask", _mix)
 
     return {"success": True, "message": f"Task '{task_id}' dispatched successfully"}
 
