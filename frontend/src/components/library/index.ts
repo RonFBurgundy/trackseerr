@@ -28,3 +28,4 @@ export * from './ItemHistoryModal';
 export * from './ItemOriginCaption';
 export * from './ArtistTagsRow';
 export * from './DiscographyFilter';
+export * from './RenameModal';

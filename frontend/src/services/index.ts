@@ -33,3 +33,6 @@ export * from './itemHistoryService';
 export * from './tagService';
 export * from './notificationsService';
 export * from './listeningService';
+export * from './bookmarkletImport';
+export * from './renameService';
+export * from './missingService';
