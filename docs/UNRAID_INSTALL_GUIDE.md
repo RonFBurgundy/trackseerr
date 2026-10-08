@@ -45,13 +45,14 @@ Keep `PUID=99` and `PGID=100`, the Unraid defaults.
    |---|---|
    | AppData Storage | `/mnt/user/appdata/trackseerr` |
    | Data Storage | `/mnt/user/data` |
-   | Plex Server URL | Your Plex LAN address, for example `http://192.168.1.100:32400`. Not `localhost`. |
-   | Plex Token | Your Plex token. See [Finding an authentication token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/). |
+   | Plex Server URL | Your Plex LAN address, for example `http://192.168.1.100:32400`. Not `localhost`. Leave empty without Plex. |
+   | Plex Token | Your Plex token. See [Finding an authentication token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/). Leave empty without Plex. |
+   | Admin Password | Only without Plex. See [Without Plex](#without-plex). |
    | Application URL | Your public URL, if you use one. Otherwise leave it empty. |
 
 4. Click **Apply**.
 5. Open the web UI from the container's icon, or go to `http://<unraid-ip>:5250`.
-6. Click **Sign in with Plex**.
+6. Click **Sign in with Plex**, or sign in as `admin` if you set an admin password.
 
 Next, follow the setup order in [Install guide: first sign-in](INSTALL.md#first-sign-in).
 
@@ -111,12 +112,14 @@ To turn an existing single container into the core, see [Install guide: move fro
 
 ## Without Plex
 
-The templates have Plex fields, but Plex is optional.
+Plex is optional. The Plex fields start empty.
 
-1. Clear both **Plex Server URL** and **Plex Token**. The template fills in an example Plex URL. If only one of the two is set, TrackSeerr will not start.
-2. Click **Add another Path, Port, Variable, Label or Device** and add a variable `ADMIN_PASSWORD` with a password of at least 12 characters.
+1. Leave **Plex Server URL** and **Plex Token** empty. Fill in both or neither; with only one set, TrackSeerr will not start.
+2. Set **Admin Password** to at least 12 characters.
 3. Apply, then sign in as `admin` with that password.
 4. Connect Jellyfin or a Subsonic server in **Settings > Media Management > Media Server**.
+
+You can also set the media server in the template instead. Set **Media Server** to `jellyfin` or `subsonic` and fill in its fields under **Show more settings**.
 
 See [Media servers](MEDIA_SERVERS.md).
 
