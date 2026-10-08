@@ -44,14 +44,20 @@ def get_media_server(config: Config, *, plex_client: Optional[Any] = None) -> Op
     """
     if config.media_server_type == MEDIA_SERVER_PLEX:
         if plex_client is not None:
-            return as_media_server(plex_client)
+            return as_media_server(plex_client, music_section=config.plex_music_section)
         from plex_playlist_sync.clients.plex import PlexClient
 
         if not config.plex_enabled:
             return None
         try:
             return PlexMediaServer(
-                PlexClient(config.plex_url, config.plex_token, verify_ssl=config.plex_verify_ssl)
+                PlexClient(
+                    config.plex_url,
+                    config.plex_token,
+                    verify_ssl=config.plex_verify_ssl,
+                    music_section=config.plex_music_section,
+                ),
+                music_section=config.plex_music_section,
             )
         except Exception as exc:  # noqa: BLE001 - PlexServer raises plexapi/requests/ssl errors; cause is logged
             logger.error("Failed to initialize media server: %s", safe_exc(exc))

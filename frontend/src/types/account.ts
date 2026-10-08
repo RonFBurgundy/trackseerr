@@ -71,6 +71,7 @@ export const PERMISSION_FLAGS = [
 ] as const;
 
 export const PERMISSION_ADMIN = 1;
+export const PERMISSION_MANAGE_REQUESTS = 16;
 export const PERMISSION_ALL_KNOWN_BITS = PERMISSION_FLAGS.reduce((acc, f) => acc | f.bit, 0);
 
 export interface PermissionPreset {

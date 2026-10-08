@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { DeploymentTier, User } from '@/types/models';
+import { PERMISSION_MANAGE_REQUESTS } from '@/types/account';
 import {
   getCurrentUser,
   startPlexAuth,
@@ -74,6 +75,7 @@ export interface UseAuthReturn {
   isAdmin: boolean;
   tier: DeploymentTier;
   canUseAdminUi: boolean;
+  canManageRequests: boolean;
   isAuthenticating: boolean;
   authError: string | null;
   loginWithPlex: () => Promise<void>;
@@ -277,6 +279,8 @@ export function useAuth(): UseAuthReturn {
 
   const tier: DeploymentTier = user?.tier ?? 'all-in-one';
   const isAdmin = Boolean(user?.is_admin);
+  const permissions = user?.permissions ?? 0;
+  const canManageRequests = (isAdmin || (permissions & PERMISSION_MANAGE_REQUESTS) !== 0) && tier !== 'gateway';
 
   return {
     user,
@@ -286,6 +290,7 @@ export function useAuth(): UseAuthReturn {
     isAdmin,
     tier,
     canUseAdminUi: isAdmin && tier !== 'gateway',
+    canManageRequests,
     isAuthenticating,
     authError,
     loginWithPlex,

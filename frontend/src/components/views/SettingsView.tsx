@@ -203,7 +203,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             mode={mode}
             onRequestSwitch={requestSwitch}
           />
-          <GeneralPanel settings={data.general} onChange={data.setGeneral} onToast={showToast} />
+          <GeneralPanel
+            settings={data.general}
+            onChange={data.setGeneral}
+            onToast={showToast}
+            isAdmin={isAdmin}
+            isGateway={Boolean(showGatewayNote)}
+          />
         </div>
       )}
 

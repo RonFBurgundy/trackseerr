@@ -464,6 +464,7 @@ const MainApp: React.FC = () => {
                 onSubChange={(sub, o) => handleNavigate({ tab: 'requests', sub }, o)}
                 requestsHook={requestsHook}
                 isAdmin={auth.canUseAdminUi}
+                canManageRequests={auth.canManageRequests}
                 issuesHook={issuesHook}
                 issuesUnreadCount={issueCounts.unread}
                 currentUserId={auth.user?.id}

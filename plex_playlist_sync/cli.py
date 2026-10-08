@@ -179,6 +179,7 @@ def _connect_clients(config: Config, clients: _Clients, *, fatal_plex: bool) -> 
                     base_url=config.plex_url,
                     token=config.plex_token,
                     verify_ssl=config.plex_verify_ssl,
+                    music_section=config.plex_music_section,
                 )
             except Exception as e:  # PlexServer raises a wide set (requests, plexapi, ssl); root cause is logged
                 if fatal_plex:
@@ -234,7 +235,10 @@ def _make_plex_provider(
             state["last_attempt"] = now
             try:
                 clients.plex = PlexClient(
-                    base_url=config.plex_url, token=config.plex_token, verify_ssl=config.plex_verify_ssl
+                    base_url=config.plex_url,
+                    token=config.plex_token,
+                    verify_ssl=config.plex_verify_ssl,
+                    music_section=config.plex_music_section,
                 )
                 logger.info("Connected to Plex Media Server after an earlier failure")
             except Exception as e:  # PlexServer raises a wide set (requests, plexapi, ssl); root cause is logged

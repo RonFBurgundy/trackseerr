@@ -210,14 +210,21 @@ class MediaServer(ABC):
         return []
 
 
-def as_media_server(server_or_client: Any) -> Optional[MediaServer]:
+def as_media_server(server_or_client: Any, music_section: Optional[str] = None) -> Optional[MediaServer]:
     """Normalise whatever a flow was handed into a :class:`MediaServer`.
 
     ``None`` stays ``None``; an existing adapter is returned as is; anything else is a Plex client (the only
     server whose raw client is still injected into flows) and is wrapped in a ``PlexMediaServer``.
     """
-    if server_or_client is None or isinstance(server_or_client, MediaServer):
+    if server_or_client is None:
+        return None
+    if isinstance(server_or_client, MediaServer):
+        from plex_playlist_sync.media_servers.plex import PlexMediaServer
+
+        if isinstance(server_or_client, PlexMediaServer) and music_section and not getattr(server_or_client, "_music_section", None):
+            server_or_client._music_section = music_section
         return server_or_client
     from plex_playlist_sync.media_servers.plex import PlexMediaServer
 
-    return PlexMediaServer(server_or_client)
+    return PlexMediaServer(server_or_client, music_section=music_section)
+

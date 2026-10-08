@@ -27,6 +27,7 @@ export interface RequestsViewProps {
   onSubChange: (sub: RequestsSub, options?: NavigateOptions) => void;
   requestsHook: UseRequestsReturn;
   isAdmin?: boolean;
+  canManageRequests?: boolean;
   issuesHook: UseIssuesReturn;
   /** Own issues with unseen admin activity; badge on the My issues key. */
   issuesUnreadCount?: number;
@@ -40,11 +41,13 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
   onSubChange,
   requestsHook,
   isAdmin = false,
+  canManageRequests = false,
   issuesHook,
   issuesUnreadCount = 0,
   currentUserId,
   account = null,
 }) => {
+  const canManage = isAdmin || canManageRequests;
   const {
     requests,
     quota,
@@ -289,7 +292,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
                       Retry now
                     </TapeDeckButton>
                   )}
-                  {isAdmin && req.status === 'pending' && (
+                  {canManage && req.status === 'pending' && (
                     <>
                       <TapeDeckButton
                         size="sm"
