@@ -11,3 +11,5 @@ export * from './TaskProgress';
 export * from './TaskScheduleSelect';
 export * from './TaskRunHistory';
 export * from './TaskRow';
+export * from './ChangelogModal';
+export * from './WhatsNewModal';

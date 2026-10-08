@@ -4836,6 +4836,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/system/changelog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get changelog releases and build metadata
+         * @description Returns the app version, commit, changelog releases, and latest release for any authenticated user.
+         */
+        get: operations["get_system_changelog_api_system_changelog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/changelog/seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge current version changelog for admin
+         * @description Stores the current version as this admin's last-seen changelog version.
+         */
+        post: operations["post_system_changelog_seen_api_system_changelog_seen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/changelog/unseen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Check unseen changelog release for admin
+         * @description Returns whether to show an upgrade changelog popup for the current admin.
+         *
+         *     show is true when the admin's stored last-seen version differs from the current version
+         *     AND the current version has a changelog entry. Fresh installs (last_seen is null) record
+         *     the current version silently and return show: false.
+         */
+        get: operations["get_system_changelog_unseen_api_system_changelog_unseen_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/system/events": {
         parameters: {
             query?: never;
@@ -5890,6 +5954,48 @@ export interface components {
             session_floor_us?: number | null;
             /** Status */
             status: string;
+        };
+        /** ChangelogRelease */
+        ChangelogRelease: {
+            /** Date Note */
+            date_note?: string | null;
+            /** Sections */
+            sections: components["schemas"]["ChangelogSection"][];
+            /** Unreleased */
+            unreleased: boolean;
+            /** Version */
+            version: string;
+        };
+        /** ChangelogResponse */
+        ChangelogResponse: {
+            /** Commit */
+            commit?: string | null;
+            latest?: components["schemas"]["ChangelogRelease"] | null;
+            /** Releases */
+            releases: components["schemas"]["ChangelogRelease"][];
+            /** Version */
+            version: string;
+        };
+        /** ChangelogSection */
+        ChangelogSection: {
+            /** Items */
+            items: string[];
+            /** Title */
+            title: string;
+        };
+        /** ChangelogSeenResponse */
+        ChangelogSeenResponse: {
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** ChangelogUnseenResponse */
+        ChangelogUnseenResponse: {
+            release?: components["schemas"]["ChangelogRelease"] | null;
+            /** Show */
+            show: boolean;
         };
         /** CodeRequest */
         CodeRequest: {
@@ -20950,6 +21056,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivityResponse"];
+                };
+            };
+        };
+    };
+    get_system_changelog_api_system_changelog_get: {
+        parameters: {
+            query?: {
+                /** @description Max releases to return */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangelogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_system_changelog_seen_api_system_changelog_seen_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangelogSeenResponse"];
+                };
+            };
+        };
+    };
+    get_system_changelog_unseen_api_system_changelog_unseen_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangelogUnseenResponse"];
                 };
             };
         };

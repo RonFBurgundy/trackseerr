@@ -1,12 +1,14 @@
-import React from 'react';
-import { Loader2, AlertTriangle, ExternalLink } from 'lucide-react';
-import { MachinedCard } from '@/components/ui';
+import React, { useState } from 'react';
+import { Loader2, AlertTriangle, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react';
+import { MachinedCard, TapeDeckButton } from '@/components/ui';
 import { RequestPortalCard } from '@/components/deployment';
 import { useSystemOverview } from '@/hooks/useSystemOverview';
 import { useMediaServer } from '@/hooks/useMediaServer';
+import { useChangelog } from '@/hooks';
 import { formatBytes } from '@/components/lists/formatters';
 import type { LibraryManagerMode, LidarrHealthItem } from '@/types/models';
 import { formatDuration } from './formatters';
+import { ChangelogModal } from './ChangelogModal';
 
 export interface SystemStatusPanelProps {
   isCore: boolean;
@@ -46,6 +48,9 @@ export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, li
   const mediaConnected = mediaServer.isPlex ? Boolean(status?.plex.online) : Boolean(mediaServer.status?.connected);
   const clientsOnline = status?.download_clients.filter((c) => c.online).length ?? 0;
   const indexersOnline = status?.indexers.filter((i) => i.online).length ?? 0;
+  const [showChangelogModal, setShowChangelogModal] = useState<boolean>(false);
+  const [whatsNewExpanded, setWhatsNewExpanded] = useState<boolean>(false);
+  const changelogHook = useChangelog();
 
   return (
     <div className="space-y-6">
@@ -66,7 +71,14 @@ export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, li
         {status && (
           <div className="divide-y divide-[#1f1f1f] text-xs font-mono">
             <StatusRow label="TrackSeerr Version:">
-              <span className="text-white">{status.environment.version}</span>
+              <span className="text-white">
+                {changelogHook.version || status.environment.version}
+                {changelogHook.commit ? (
+                  <span className="text-neutral-400 font-mono text-[11px] ml-1.5">
+                    ({changelogHook.commit})
+                  </span>
+                ) : null}
+              </span>
             </StatusRow>
             <StatusRow label="Role:">
               <span className="text-white">{status.environment.role}</span>
@@ -122,6 +134,80 @@ export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, li
           </div>
         )}
       </MachinedCard>
+
+      <MachinedCard className="p-3 sm:p-6 max-w-2xl space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-bold uppercase font-mono text-white">
+              Version {changelogHook.version || status?.environment.version || '1.0.0'}
+              {changelogHook.commit ? (
+                <span className="text-neutral-400 font-normal ml-2 text-xs">
+                  ({changelogHook.commit})
+                </span>
+              ) : null}
+            </h4>
+            {changelogHook.latestRelease?.date_note && (
+              <p className="text-xs font-mono text-neutral-400 mt-0.5">
+                {changelogHook.latestRelease.date_note}
+              </p>
+            )}
+          </div>
+          <TapeDeckButton size="sm" onClick={() => setShowChangelogModal(true)}>
+            All releases
+          </TapeDeckButton>
+        </div>
+
+        {changelogHook.latestRelease && changelogHook.latestRelease.sections && changelogHook.latestRelease.sections.length > 0 && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setWhatsNewExpanded((v) => !v)}
+              aria-expanded={whatsNewExpanded}
+              aria-controls="system-whats-new-items"
+              className="inline-flex items-center gap-1.5 min-h-[28px] text-[11px] font-mono font-bold uppercase tracking-wider text-neutral-400 hover:text-white focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--accent-amber)]"
+            >
+              {whatsNewExpanded ? (
+                <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              What's new
+            </button>
+            <div id="system-whats-new-items">
+              {whatsNewExpanded && (
+                <div className="mt-3 pt-3 border-t border-[#1f1f1f] space-y-3">
+                  {changelogHook.latestRelease.sections.map((section, sIdx) => (
+                    <div key={sIdx} className="space-y-1">
+                      <h5 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[var(--accent-amber)]">
+                        {section.title}
+                      </h5>
+                      <ul className="space-y-1 pl-1">
+                        {section.items.map((item, iIdx) => (
+                          <li
+                            key={iIdx}
+                            className="flex items-start gap-2 text-xs font-mono text-neutral-300 leading-relaxed"
+                          >
+                            <span className="text-neutral-500 select-none mt-0.5">&bull;</span>
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </MachinedCard>
+
+      <ChangelogModal
+        isOpen={showChangelogModal}
+        onClose={() => setShowChangelogModal(false)}
+        releases={changelogHook.releases}
+        currentVersion={changelogHook.version || status?.environment.version}
+        commit={changelogHook.commit}
+      />
 
       {libraryMode === 'lidarr' && (
         <MachinedCard className="p-3 sm:p-6 max-w-2xl space-y-4">

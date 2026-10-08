@@ -50,6 +50,7 @@ import {
   LocalLoginForm,
   CassetteLoader,
   StartupScreen,
+  WhatsNewModal,
 } from '@/components';
 import {
   getPlaylists,
@@ -633,6 +634,8 @@ const MainApp: React.FC = () => {
           </div>
         </div>
       </ObsidianModal>
+
+      {auth.isAdmin && <WhatsNewModal />}
     </div>
     </RefreshContext.Provider>
   );
