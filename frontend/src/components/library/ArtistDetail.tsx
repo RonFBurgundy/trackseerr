@@ -3,6 +3,7 @@ import {
   CheckSquare,
   Disc,
   ExternalLink,
+  FileText,
   Globe,
   HardDrive,
   Loader2,
@@ -48,6 +49,8 @@ export interface ArtistDetailProps {
   onOpenAlbum: (album: AlbumItem) => void;
   /** Opens Manual Import scoped to an album (native mode, admin). */
   onImportAlbum: (album: AlbumItem) => void;
+  /** Opens Batch Rename scoped to this artist (native mode, admin). */
+  onRenameFiles?: () => void;
   /** Called after a change that the paged lists should pick up. */
   onChanged: () => void;
   onToggleArtistMonitored: (artistId: number | string, monitored: boolean) => Promise<void>;
@@ -95,6 +98,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   onCollect,
   onOpenAlbum,
   onImportAlbum,
+  onRenameFiles,
   onChanged,
   onToggleArtistMonitored,
   onToggleAlbumMonitored,
@@ -291,6 +295,16 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
                       }
                       aria-label="Search for this artist"
                       title="Ask Lidarr to search for this artist's monitored missing albums"
+                    />
+                  )}
+                  {!lidarrMode && onRenameFiles && (
+                    <TapeDeckButton
+                      size="sm"
+                      className={ICON_KEY}
+                      onClick={onRenameFiles}
+                      icon={<FileText className="h-4 w-4" />}
+                      aria-label="Rename files for this artist"
+                      title="Rename files for this artist based on naming pattern"
                     />
                   )}
                   <TapeDeckButton

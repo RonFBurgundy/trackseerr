@@ -1,4 +1,4 @@
-"""Per-track import check (docs/ARR_PROFILES_SPEC.md, Phase B3), designed for ~zero false positives.
+"""Per-track import check (docs/design/ARR_PROFILES_SPEC.md, Phase B3), designed for ~zero false positives.
 
 It exists to catch fakes (upconverted lossy sold as lossless) and truncated/corrupt files, not to police encoder
 choices. Each file is probed with mutagen (container, bit depth, sample rate, channels, duration, audio bitrate) and

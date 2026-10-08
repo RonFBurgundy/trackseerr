@@ -41,7 +41,7 @@ export const QualityDefinitionsPanel: React.FC<QualityDefinitionsPanelProps> = (
               mark the shipped defaults.
             </p>
             <p>
-              Values marked derived in the research (<span className="text-neutral-200">docs/QUALITY_RESEARCH.md</span>) are suggestions, not
+              Values marked derived in the research (<span className="text-neutral-200">docs/design/QUALITY_RESEARCH.md</span>) are suggestions, not
               community standards: lossy minimums in particular are our addition, so loosen them if good releases get rejected. When album length
               is unknown only the max is enforced.
             </p>

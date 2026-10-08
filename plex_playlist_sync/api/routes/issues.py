@@ -1,6 +1,6 @@
 """Media Issues REST API: reporting, discussion, lifecycle and admin fix actions.
 
-Placement (see docs/two-tier-security.md): create / list / get / comments / unread-count / seen / status are
+Placement (see docs/design/two-tier-security.md): create / list / get / comments / unread-count / seen / status are
 user-scoped and forwarded gateway -> core as the signed-in user (never admin). ``open-count``, ``PUT``, ``DELETE`` and
 ``actions`` are core-only admin routes and are on no gateway allowlist.
 """

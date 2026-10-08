@@ -2,7 +2,7 @@
 
 No data is migrated: nothing in the database is role-specific. We only remember the last role
 (``general_settings.last_role``) so the first boot under a new role can tell the admin what to
-re-point. See ``docs/dmz-ergonomics.md`` section 6.
+re-point. See ``docs/design/dmz-ergonomics.md`` section 6.
 """
 
 from __future__ import annotations

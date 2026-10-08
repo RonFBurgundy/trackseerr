@@ -1,4 +1,4 @@
-"""Seed data and shape helpers for the Arr-style quality system (docs/ARR_PROFILES_SPEC.md, QUALITY_RESEARCH.md).
+"""Seed data and shape helpers for the Arr-style quality system (docs/design/ARR_PROFILES_SPEC.md, docs/design/QUALITY_RESEARCH.md).
 
 Pure data and pure functions: no database or engine imports, so ``storage`` (migration v49), the decision engine and
 the API can all share one definition of the defaults.
@@ -55,7 +55,7 @@ V52_OLD_DEFAULTS: dict[str, tuple[float, float, float]] = {
 DEFAULT_QUALITY_DEFINITIONS: list[tuple[str, str, Optional[float], Optional[float], Optional[float]]] = [
     ("FLAC 24bit", "FLAC 24bit", 0.0, 2000.0, 9500.0),
     ("FLAC 16bit", "FLAC 16bit", 0.0, 895.0, 1400.0),
-    # Derived (docs/QUALITY_RESEARCH.md), not community standards: ALAC compresses 16/44.1 PCM (1411 kbps) to roughly
+    # Derived (docs/design/QUALITY_RESEARCH.md), not community standards: ALAC compresses 16/44.1 PCM (1411 kbps) to roughly
     # 50-70% (~700-1000 kbps), so 900 preferred, no floor (quiet or sparse material compresses far below that) and a
     # 1600 ceiling that also admits 16/48 and light 24-bit.
     ("ALAC", "ALAC", 0.0, 900.0, 1600.0),

@@ -1,6 +1,6 @@
 # Arr-Style Profiles — Native Core Spec
 
-Status: approved for build (2026-10-05). Defaults: see `docs/QUALITY_RESEARCH.md`.
+Status: approved for build (2026-10-05). Defaults: see `docs/design/QUALITY_RESEARCH.md`.
 
 Research decisions applied here:
 - TRaSH publishes no Lidarr custom formats; import targets the **Lidarr custom-format JSON schema** (Servarr wiki / Tubifarry examples) — `implementation` = C# class name, regex case-insensitive.

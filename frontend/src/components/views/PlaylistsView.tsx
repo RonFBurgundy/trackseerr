@@ -1,5 +1,16 @@
-import React, { useState } from 'react';
-import { RefreshCw, Plus, Play, Trash2, FileText, Link as LinkIcon, Loader2, Headphones } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  RefreshCw,
+  Plus,
+  Play,
+  Trash2,
+  FileText,
+  Link as LinkIcon,
+  Loader2,
+  Headphones,
+  AlertCircle,
+  History,
+} from 'lucide-react';
 import type { Playlist, User } from '@/types/models';
 import type { ImportPlaylistPayload } from '@/services/playlistService';
 import type { MediaServerType } from '@/types/mediaServer';
@@ -23,6 +34,9 @@ const NON_ADMIN_MONITOR_MODES: ReadonlyArray<ListMonitorMode> = ['track', 'none'
 const LIST_ONLY_MODES: ReadonlyArray<ListMonitorMode> = ['none'];
 import { PlexPlaylistsSection } from '@/components/plex';
 import { ListeningPlaylistModal } from '@/components/listening';
+import { MissingTracksModal, MatchOverridesModal } from '@/components/playlists';
+import { useMissingTracks } from '@/hooks/useMissingTracks';
+import { consumePendingImport, buildBookmarkletCode } from '@/services/bookmarkletImport';
 import {
   AUTO_REQUEST_DENIED_REASON,
   LISTENING_PROVIDER_LABELS,
@@ -87,6 +101,33 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   const [playlistUrl, setPlaylistUrl] = useState<string>('');
   const [pastedTracks, setPastedTracks] = useState<string>('');
   const [isSubmittingImport, setIsSubmittingImport] = useState<boolean>(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const bookmarkletCode = buildBookmarkletCode();
+
+  const missingHook = useMissingTracks({ isAdmin });
+  const [selectedMissingPlaylistId, setSelectedMissingPlaylistId] = useState<string | null>(null);
+  const [selectedMissingPlaylistName, setSelectedMissingPlaylistName] = useState<string>('');
+  const [isOverridesModalOpen, setIsOverridesModalOpen] = useState<boolean>(false);
+
+  const selectedMissingTracks = useMemo(
+    () => (selectedMissingPlaylistId ? missingHook.missingTracks.filter((t) => t.playlist_id === selectedMissingPlaylistId) : []),
+    [missingHook.missingTracks, selectedMissingPlaylistId]
+  );
+
+  useEffect(() => {
+    const pending = consumePendingImport();
+    if (pending) {
+      setImportTab('link');
+      setIsImportModalOpen(true);
+      if (pending.url) {
+        setPlaylistUrl(pending.url);
+        setImportError(null);
+      } else if (pending.error) {
+        setPlaylistUrl('');
+        setImportError(pending.error);
+      }
+    }
+  }, []);
 
   // Non-admins may only target themselves (the server rejects other users with 403).
   const targetUsers = isAdmin ? users : users.filter((u) => u.id === currentUserId);
@@ -169,6 +210,22 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
             >
               Add Playlist
             </TapeDeckButton>
+
+            {isAdmin && (
+              <TapeDeckButton
+                size="sm"
+                onClick={() => {
+                  void missingHook.loadOverrides();
+                  setIsOverridesModalOpen(true);
+                }}
+                aria-label="Match Memory overrides"
+                title="Match Memory overrides"
+                collapseLabel
+                icon={<History className="h-3.5 w-3.5 text-[#e5a00d]" />}
+              >
+                Match Memory
+              </TapeDeckButton>
+            )}
           </div>
 
           <div className="text-xs text-neutral-400 font-mono truncate">{playlists.length} Configured Playlists</div>
@@ -300,7 +357,23 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
               )}
 
               {/* Actions */}
-              <div className="flex items-center justify-end pt-2 border-t border-[#1f1f1f]">
+              <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
+                {isAdmin && (missingHook.missingCountByPlaylist[pl.id] || 0) > 0 ? (
+                  <TapeDeckButton
+                    size="sm"
+                    variant="amber"
+                    onClick={() => {
+                      setSelectedMissingPlaylistId(pl.id);
+                      setSelectedMissingPlaylistName(pl.name);
+                    }}
+                    icon={<AlertCircle className="h-3.5 w-3.5" />}
+                    title={`View ${missingHook.missingCountByPlaylist[pl.id]} missing track${missingHook.missingCountByPlaylist[pl.id] === 1 ? '' : 's'}`}
+                  >
+                    Missing ({missingHook.missingCountByPlaylist[pl.id]})
+                  </TapeDeckButton>
+                ) : (
+                  <span />
+                )}
                 {isAdmin && onDelete && (
                   <ConfirmDangerButton
                     onConfirm={() => onDelete(pl.id)}
@@ -381,26 +454,39 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
             )}
 
             {importTab === 'link' && (
-              <div>
-                <label
-                  htmlFor="import-playlist-url"
-                  className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1"
-                >
-                  Playlist URL (Spotify or Deezer)
-                </label>
-                <input
-                  id="import-playlist-url"
-                  name="playlist-url"
-                  type="url"
-                  required
-                  value={playlistUrl}
-                  onChange={(e) => setPlaylistUrl(e.target.value)}
-                  placeholder="https://open.spotify.com/playlist/... or https://www.deezer.com/playlist/..."
-                  className="w-full bg-[#0d0d0d] border border-[#2a2a2a] rounded-[3px] px-3 py-2 text-sm text-white focus:outline-none focus:border-[#e5a00d]"
-                />
-                <p className="text-[11px] text-neutral-500 font-mono mt-1">
-                  Keyless Spotify: No Spotify API Key Needed!
-                </p>
+              <div className="space-y-2">
+                {importError && (
+                  <div
+                    role="alert"
+                    className="p-2.5 bg-red-950/40 border border-red-800/50 rounded-[3px] text-xs font-mono text-red-300"
+                  >
+                    {importError}
+                  </div>
+                )}
+                <div>
+                  <label
+                    htmlFor="import-playlist-url"
+                    className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1"
+                  >
+                    Playlist URL (Spotify or Deezer)
+                  </label>
+                  <input
+                    id="import-playlist-url"
+                    name="playlist-url"
+                    type="url"
+                    required
+                    value={playlistUrl}
+                    onChange={(e) => {
+                      setPlaylistUrl(e.target.value);
+                      if (importError) setImportError(null);
+                    }}
+                    placeholder="https://open.spotify.com/playlist/... or https://www.deezer.com/playlist/..."
+                    className="w-full bg-[#0d0d0d] border border-[#2a2a2a] rounded-[3px] px-3 py-2 text-sm text-white focus:outline-none focus:border-[#e5a00d]"
+                  />
+                  <p className="text-[11px] text-neutral-500 font-mono mt-1">
+                    Keyless Spotify: No Spotify API Key Needed!
+                  </p>
+                </div>
               </div>
             )}
 
@@ -447,14 +533,33 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
             )}
 
             {importTab === 'helper' && (
-              <div className="p-3 bg-[#161616] border border-[#222222] rounded-[3px] space-y-2 text-xs text-neutral-300 font-mono">
-                <p className="font-bold text-[#e5a00d]">1-Click Browser Bookmarklet</p>
-                <p>
-                  Drag this helper to your bookmarks toolbar to instantly export any playlist
-                  from Spotify Web Player directly into TrackSeerr with 1 click.
-                </p>
-                <div className="p-2 bg-[#0d0d0d] border border-[#2a2a2a] rounded text-[11px] select-all break-all">
-                  {"javascript:(function(){window.open('" + (typeof window !== 'undefined' ? window.location.origin : '') + "/#import?url='+encodeURIComponent(location.href));})();"}
+              <div className="p-3 bg-[#161616] border border-[#222222] rounded-[3px] space-y-3 text-xs text-neutral-300 font-mono">
+                <div>
+                  <p className="font-bold text-[#e5a00d]">1-Click Browser Bookmarklet</p>
+                  <p className="mt-1 text-neutral-400">
+                    Drag this helper to your bookmarks toolbar to instantly export any playlist
+                    from Spotify Web Player or Deezer directly into TrackSeerr with 1 click.
+                  </p>
+                </div>
+                <div className="pt-1 pb-1">
+                  <a
+                    href={bookmarkletCode}
+                    draggable
+                    onClick={(e) => e.preventDefault()}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-[3px] bg-[#1f1f1f] border border-[#383838] border-b-[#111111] text-xs font-semibold uppercase tracking-wider text-white hover:text-[#e5a00d] cursor-grab active:cursor-grabbing shadow-[0_2px_0_#050505] transition-colors"
+                    title="Drag this button to your browser bookmarks toolbar"
+                  >
+                    <Play className="h-3.5 w-3.5 text-[#e5a00d]" />
+                    Send to TrackSeerr
+                  </a>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">
+                    Or copy bookmarklet URL:
+                  </p>
+                  <div className="p-2 bg-[#0d0d0d] border border-[#2a2a2a] rounded-[3px] text-[11px] select-all break-all text-neutral-300">
+                    {bookmarkletCode}
+                  </div>
                 </div>
               </div>
             )}
@@ -487,6 +592,29 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
         onClose={() => setIsListeningModalOpen(false)}
         canAutoRequest={canAutoRequest}
         onCreated={onListeningCreated ?? onSync}
+      />
+
+      <MissingTracksModal
+        isOpen={selectedMissingPlaylistId !== null}
+        onClose={() => setSelectedMissingPlaylistId(null)}
+        playlistName={selectedMissingPlaylistName}
+        tracks={selectedMissingTracks}
+        onSearch={missingHook.searchTracks}
+        onMatch={missingHook.matchTrack}
+        onOpenOverrides={() => {
+          void missingHook.loadOverrides();
+          setIsOverridesModalOpen(true);
+        }}
+        overridesCount={missingHook.overrides.length}
+      />
+
+      <MatchOverridesModal
+        isOpen={isOverridesModalOpen}
+        onClose={() => setIsOverridesModalOpen(false)}
+        overrides={missingHook.overrides}
+        loading={missingHook.loadingOverrides}
+        onDelete={missingHook.deleteOverride}
+        onReload={missingHook.loadOverrides}
       />
     </PageFrame>
   );

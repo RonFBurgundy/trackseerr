@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { WantedListName } from '@/types/activity';
 import type { LibraryTab } from './useLibrary';
 import type { RequestFilter } from './useRequests';
+import { parseImportHash, storePendingImport, peekPendingImport } from '@/services/bookmarkletImport';
 
 export type MainTab = 'discover' | 'requests' | 'library' | 'playlists' | 'activity' | 'wanted' | 'settings';
 
@@ -200,6 +201,15 @@ const LEGACY_PROFILE_LEAVES: readonly string[] = ['release-profiles', 'metadata-
 
 /** Parse and validate a hash; anything unknown falls back (per segment) to the nearest valid default. */
 export function parseRouteHash(hash: string): AppRoute | null {
+  const trimmed = hash.trim();
+  if (trimmed.startsWith('#import') || trimmed.startsWith('#/import')) {
+    const pending = parseImportHash(trimmed);
+    if (pending) {
+      storePendingImport(pending);
+    }
+    return { tab: 'playlists' };
+  }
+
   const segments = hash.replace(/^#\/?/, '').split('/').filter((s) => s.length > 0);
   const tab = pick(MAIN_TABS, segments[0]);
   if (!tab) return null;
@@ -244,6 +254,13 @@ function readRoute(initial: boolean): AppRoute {
   // Only the first load can be an OAuth return trip; later popstate/hashchange must not re-route.
   // The params are left in place: useScrobbling reads and strips them when the scrobbling page mounts.
   if (initial) {
+    if (peekPendingImport()) {
+      const canonical = routeToHash({ tab: 'playlists' });
+      if (window.location.hash !== canonical) {
+        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${canonical}`);
+      }
+      return { tab: 'playlists' };
+    }
     const q = new URLSearchParams(window.location.search);
     if (q.has('connected') || q.has('scrobble_error') || q.has('lastfm_state')) return settingsRouteFor('requests', 'scrobbling');
   }

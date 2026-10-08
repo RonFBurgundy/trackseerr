@@ -1,86 +1,103 @@
-# Contributing to Plex Playlist Hub
+# Contributing to TrackSeerr
 
-Thank you for your interest in contributing to Plex Playlist Hub! We welcome community contributions, bug reports, feature suggestions, and documentation improvements.
+Bug reports, fixes, and documentation changes are welcome. For a large feature, open an issue first so we can agree on the approach.
 
----
+## Layout
 
-## Code of Conduct
+| Path | Contents |
+|---|---|
+| `plex_playlist_sync/` | Python backend (FastAPI). Run with `python -m plex_playlist_sync`. |
+| `frontend/` | Web app (React, TypeScript, Vite). |
+| `tests/` | pytest suite. |
+| `unraid/` | Unraid templates and icons. |
+| `docs/` | User guides. `docs/design/` holds design notes for maintainers. |
 
-Please treat everyone with respect, kindness, and empathy. Be constructive, open to feedback, and collaborative.
+## Set up
 
----
+Backend, Python 3.12:
 
-## Development Workflow
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+python -m plex_playlist_sync
+```
 
-1. **Fork the Repository**:
-   - Fork `RonFBurgundy/plex-playlist-hub` to your personal GitHub account.
-   - Clone your fork locally:
-     ```bash
-     git clone https://github.com/<your-username>/plex-playlist-hub.git
-     cd plex-playlist-hub
-     ```
+Frontend, in a second terminal:
 
-2. **Create a Feature Branch**:
-   - Create a descriptive branch branching off `main`:
-     ```bash
-     git checkout -b feature/your-feature-name
-     # or
-     git checkout -b fix/issue-description
-     ```
+```bash
+cd frontend
+npm ci
+npm run dev
+```
 
-3. **Set Up the Development Environment**:
-   - Python 3.12 is recommended.
-   - Install dependencies:
-     ```bash
-     python3 -m venv .venv
-     source .venv/bin/activate
-     pip install -r requirements-dev.txt
-     ```
+The Vite dev server proxies API calls to the backend on `localhost:5250`.
 
-4. **Run the Test Suite**:
-   - Run tests directly:
-     ```bash
-     pytest -v
-     ```
-   - Or run tests inside an isolated Docker container (matching CI):
-     ```bash
-     docker run --rm -v "$PWD":/app -w /app -e PYTHONPATH=/app python:3.12-slim bash -c "pip install -q -r requirements-dev.txt && pytest -v"
-     ```
+## Run the checks
 
-5. **Verify Docker Build**:
-   - Ensure the container builds cleanly:
-     ```bash
-     docker build -t plex-playlist-hub:dev .
-     ```
+Run all four before you open a pull request. CI runs the same.
 
----
+```bash
+# 1. Frontend type check and build
+cd frontend && npx tsc --noEmit && npm run build && cd ..
 
-## Coding & Security Standards
+# 2. Python syntax
+python3 -m py_compile plex_playlist_sync/**/*.py tests/**/*.py
 
-To keep Plex Playlist Hub secure, maintainable, and robust, all pull requests must follow these rules:
+# 3. Test suite, in the test image
+docker build -f Dockerfile.test -t trackseerr:test .
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 \
+  -v "$PWD":/app -w /app -e PYTHONPATH=/app trackseerr:test \
+  pytest -q -n 2 -p no:cacheprovider
 
-- **Security First**:
-  - Never execute dynamic SQL strings. Always use parameterized queries (`?`) in SQLite.
-  - Validate and sanitize external input (URLs, track titles, image URLs).
-  - Do not use shell execution (`subprocess`, `os.system`).
-  - Never commit real API keys, tokens, or credentials.
-- **Type Annotations**:
-  - Use Python type hints on all new functions and endpoints.
-- **Tests Required**:
-  - Every new feature or bug fix must include corresponding tests in `tests/`.
-  - 100% of existing and new tests must pass before merging.
-- **Commit Messages**:
-  - Follow standard conventional commits format (e.g. `feat: add deezer user mixes`, `fix: handle edge case in track matching`, `docs: update setup guide`).
+# 4. Image build
+docker build -t trackseerr:dev .
+```
 
----
+The full suite takes about 15 minutes with two workers. While you work, run only the tests you touch, for example `pytest tests/test_api.py -q`.
 
-## Submitting a Pull Request
+Two optional suites are not part of the normal run:
 
-1. Push your branch to your GitHub fork:
-   ```bash
-   git push -u origin feature/your-feature-name
-   ```
-2. Open a Pull Request against the `main` branch of `RonFBurgundy/plex-playlist-hub`.
-3. Complete the PR template checklist.
-4. GitHub Actions CI will automatically run the test suite and CodeQL security analysis against your PR.
-5. Maintainers will review your PR and provide constructive feedback!
+- [Integration tests](docs/INTEGRATION_TESTS.md) against real Lidarr, Navidrome, and Jellyfin containers.
+- [Local media tests](docs/LOCAL_MEDIA_TESTS.md) against a real music folder.
+
+## API types
+
+`frontend/src/types/api.ts` is generated from the backend's OpenAPI schema. Do not edit it by hand. After you change a backend route or a Pydantic model, run from `frontend/`:
+
+```bash
+npm run gen:api     # regenerate src/types/api.ts
+npm run check:api   # fail if the file is out of date (CI runs this)
+```
+
+The generator runs `python3` and needs the backend dependencies. To use another interpreter, such as the test image, set `OPENAPI_PYTHON` to a command that reads the repo at `/app`. The script exports `REPO`, the repo root:
+
+```bash
+OPENAPI_PYTHON='docker run --rm -i --user 1000:1000 -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -v "$REPO:/app" -w /app -e PYTHONPATH=/app trackseerr:test python' npm run gen:api
+```
+
+In frontend code, take backend types from the contract with `Schema<'Name'>` (from `src/types`) instead of writing your own interfaces.
+
+## Rules
+
+- **No silent failures.** No bare `except:`. Catch specific exceptions. If you must catch `Exception`, log the cause.
+- **SQL.** Parameterized queries only. Never build SQL from strings.
+- **No shell.** No `subprocess`, `os.system`, or shell calls.
+- **Outbound URLs.** Validate every address before connecting. Use the helpers in `plex_playlist_sync/security.py`.
+- **Secrets.** Never commit tokens or keys. New secrets come from environment variables or the database, are never returned by the API, and are redacted from logs. If a secret must not reach the gateway, add it to the list in `plex_playlist_sync/role_guard.py`.
+- **Types.** Type hints on all new Python functions. No `any` in TypeScript.
+- **Tests.** Every fix and feature comes with tests that exercise it, with outside APIs mocked.
+- **Docs.** If you add an environment variable, add it to [docs/CONFIGURATION.md](docs/CONFIGURATION.md). If you change how a feature is used, update its guide.
+
+## Pull requests
+
+1. Fork the repository and create a branch from `main`, for example `fix/playlist-match` or `feat/new-client`.
+2. Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages: `feat:`, `fix:`, `docs:`, and so on.
+3. Push your branch and open a pull request against `main` in `RonFBurgundy/trackseerr`.
+4. Fill in the pull request template.
+
+CI runs the checks above and a CodeQL scan.
+
+## Conduct
+
+Be respectful and constructive.

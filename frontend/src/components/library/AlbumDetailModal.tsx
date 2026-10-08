@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { BookmarkPlus, Disc, FolderInput, Loader2, Search, User } from 'lucide-react';
+import { BookmarkPlus, Disc, FileText, FolderInput, Loader2, Search, User } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
 import { useAlbumTracks } from '@/hooks/useAlbumTracks';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
@@ -24,6 +24,8 @@ export interface AlbumDetailModalProps {
   onGoToArtist: (artistId: number | string) => void;
   /** Opens Manual Import scoped to this album (native mode, admin). */
   onImportFiles: (album: AlbumItem) => void;
+  /** Opens Batch Rename scoped to this album (native mode, admin). */
+  onRenameFiles?: (album: AlbumItem) => void;
   onToggleTrackMonitored: (trackId: number | string, monitored: boolean) => Promise<void>;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
 }
@@ -38,6 +40,7 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
   onCollect,
   onGoToArtist,
   onImportFiles,
+  onRenameFiles,
   onToggleTrackMonitored,
   onToast,
 }) => {
@@ -94,6 +97,17 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
                 icon={<FolderInput className="h-3.5 w-3.5" />}
               >
                 Import files&hellip;
+              </TapeDeckButton>
+            )}
+            {isAdmin && !lidarrMode && onRenameFiles && (
+              <TapeDeckButton
+                size="sm"
+                disabled={album === null}
+                onClick={() => album && onRenameFiles(album)}
+                icon={<FileText className="h-3.5 w-3.5" />}
+                title="Rename files for this album based on naming pattern"
+              >
+                Rename files&hellip;
               </TapeDeckButton>
             )}
             {isAdmin && album && (

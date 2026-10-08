@@ -1,4 +1,4 @@
-"""Per-indexer seed rules: grab-time resolution, snapshotting and client push (see docs/indexer-seed-rules.md).
+"""Per-indexer seed rules: grab-time resolution, snapshotting and client push (see docs/design/indexer-seed-rules.md).
 
 Effective targets are resolved once when a release is grabbed and snapshotted onto the download row, so editing an
 indexer later never changes a torrent that is already seeding. ``None`` on an indexer field means "inherit the

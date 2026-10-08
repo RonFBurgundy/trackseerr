@@ -1,6 +1,6 @@
 # DMZ Setup Ergonomics — design contract
 
-Status: in implementation on branch `feat/dmz-ergonomics`. Builds on `docs/two-tier-security.md`. Owner decisions (2026-10-03):
+Status: in implementation on branch `feat/dmz-ergonomics`. Builds on `docs/design/two-tier-security.md`. Owner decisions (2026-10-03):
 - one codebase and one image
 - two roles that are impossible to confuse
 - three Unraid templates

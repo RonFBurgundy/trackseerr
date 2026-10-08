@@ -3,7 +3,7 @@
 ``run_check`` walks the music root, lists the server's files (mapped to local paths), and records two findings kinds:
 ``server_unindexed`` (on disk, not on the server; each classified into one cause) and ``server_stale`` (on the server,
 gone from disk). ``weak_match`` findings are written by the importer (``record_weak_match``). See
-``docs/library-server-reconciliation.md`` for the design contract.
+``docs/design/library-server-reconciliation.md`` for the design contract.
 """
 
 import fnmatch

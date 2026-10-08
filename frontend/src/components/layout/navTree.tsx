@@ -119,7 +119,7 @@ export function buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount = 0, 
   tree.push({
     key: 'playlists',
     label: 'Playlists',
-    description: 'Auto-syncing Spotify & Tidal lists',
+    description: 'Synced playlists from Spotify, Deezer & more',
     icon: <ListMusic className={ico} />,
     route: defaultRoute('playlists'),
   });

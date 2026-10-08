@@ -3,7 +3,7 @@
 The gateway signs every call to core with an HMAC-SHA256 over the request line,
 the asserted user identity, a timestamp, a single-use nonce and the body hash.
 Core verifies the signature, the clock window and nonce freshness. See
-``docs/two-tier-security.md`` for the contract. This module is the only place
+``docs/design/two-tier-security.md`` for the contract. This module is the only place
 that signs or verifies; it never logs the secret or a signature.
 """
 

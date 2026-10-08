@@ -10,9 +10,9 @@
   <Support>https://github.com/RonFBurgundy/trackseerr/issues</Support>
   <Project>https://github.com/RonFBurgundy/trackseerr</Project>
   <Overview>
-TrackSeerr Core: the internal half of the two-tier setup. Pair with TrackSeerr Requests, the public request portal.
+TrackSeerr Core: the internal half of the two-tier setup. Pair with TrackSeerr Requests, the public request portal. Works with Plex, Jellyfin, Subsonic servers (Navidrome, Gonic, Airsonic), or no media server.
 
-Core holds your database, Plex token, Last.fm keys, download clients, indexers and media library. Admins use its WebUI on the LAN. Never expose this container's port to the internet; point your reverse proxy or Cloudflare Tunnel at TrackSeerr Requests instead. Requests signs every call to Core with INTERNAL_CORE_SECRET and can only perform requester actions, never admin ones.
+Core holds your database, media server credentials, Last.fm keys, download clients, indexers and media library. Admins use its WebUI on the LAN. Never expose this container's port to the internet; point your reverse proxy or Cloudflare Tunnel at TrackSeerr Requests instead. Requests signs every call to Core with INTERNAL_CORE_SECRET and can only perform requester actions, never admin ones.
 
 Set APPLICATION_URL to the PUBLIC URL of TrackSeerr Requests (e.g. https://requests.yourdomain.com).
 
@@ -57,15 +57,29 @@ Migrating from all-in-one: edit your existing TrackSeerr container, set ROLE to 
   <Config Name="Execution Role" Target="ROLE" Default="core" Mode="" Description="DO NOT CHANGE. This template must run as ROLE=core." Type="Variable" Display="advanced-hide" Required="true" Mask="false">core</Config>
   <Config Name="Internal Core Secret" Target="INTERNAL_CORE_SECRET" Default="" Mode="" Description="REQUIRED. 32+ characters, identical on TrackSeerr Requests. Signs gateway-to-core requests. Generate with: openssl rand -hex 32" Type="Variable" Display="always" Required="true" Mask="true"></Config>
 
-  <Config Name="Plex Server URL" Target="PLEX_URL" Default="http://192.168.1.100:32400" Mode="" Description="Base URL of your Plex Media Server, using your server's LAN IP and port 32400. IMPORTANT: Do NOT use localhost on bridge networking." Type="Variable" Display="always" Required="true" Mask="false">http://192.168.1.100:32400</Config>
+  <Config Name="Media Server" Target="MEDIA_SERVER" Default="" Mode="" Description="plex, jellyfin, subsonic or none. Leave empty to use Plex when Plex URL and token are set, or to choose in Settings &gt; Media Management &gt; Media Server." Type="Variable" Display="always" Required="false" Mask="false"></Config>
 
-  <Config Name="Plex Token" Target="PLEX_TOKEN" Default="" Mode="" Description="Plex Admin X-Plex-Token. Optional initially if using the Web Dashboard Plex OAuth PIN login, but required for background daemon sync." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Admin Password" Target="ADMIN_PASSWORD" Default="" Mode="" Description="Creates the first local admin (user 'admin') when there is no Plex server to sign in with. At least 12 characters. Only used on first start." Type="Variable" Display="always" Required="false" Mask="true"></Config>
 
-  <Config Name="Plex Music Library Section" Target="PLEX_MUSIC_SECTION" Default="Music" Mode="" Description="Name of your Plex music library section." Type="Variable" Display="always" Required="false" Mask="false">Music</Config>
+  <Config Name="Plex Server URL" Target="PLEX_URL" Default="" Mode="" Description="Plex only. Set together with Plex Token, or leave both empty. Use the LAN IP, not localhost." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+
+  <Config Name="Plex Token" Target="PLEX_TOKEN" Default="" Mode="" Description="Plex only. Set together with Plex Server URL, or leave both empty." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+
+  <Config Name="Plex Music Library Section" Target="PLEX_MUSIC_SECTION" Default="" Mode="" Description="Name of the Plex music library to use. Leave empty to use the first music library." Type="Variable" Display="always" Required="false" Mask="false"></Config>
 
   <Config Name="Plex Machine Identifier" Target="PLEX_MACHINE_IDENTIFIER" Default="" Mode="" Description="Plex server machine identifier for multi-user access pinning. Leave blank to auto-detect." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
 
   <Config Name="Plex SSL Verification" Target="PLEX_VERIFY_SSL" Default="1" Mode="" Description="Set to 0 if your Plex Media Server uses a self-signed certificate without valid chain." Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+
+  <Config Name="Jellyfin Server URL" Target="JELLYFIN_URL" Default="" Mode="" Description="Jellyfin base URL. Requires MEDIA_SERVER=jellyfin. Can be configured in the web UI instead." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <Config Name="Jellyfin API Key" Target="JELLYFIN_API_KEY" Default="" Mode="" Description="Jellyfin API key. Requires MEDIA_SERVER=jellyfin. Can be configured in the web UI instead." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+
+  <Config Name="Subsonic Server URL" Target="SUBSONIC_URL" Default="" Mode="" Description="Subsonic base URL. Requires MEDIA_SERVER=subsonic. Can be configured in the web UI instead." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <Config Name="Subsonic Username" Target="SUBSONIC_USER" Default="" Mode="" Description="Subsonic username. Requires MEDIA_SERVER=subsonic. Can be configured in the web UI instead." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <Config Name="Subsonic Password" Target="SUBSONIC_PASSWORD" Default="" Mode="" Description="Subsonic password. Requires MEDIA_SERVER=subsonic. Can be configured in the web UI instead." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
 
   <Config Name="Feed Access Token" Target="FEED_TOKEN" Default="" Mode="" Description="Optional: Secret token to protect RSS feeds, plain text lists, and webhook endpoints if exposed to untrusted networks." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
 

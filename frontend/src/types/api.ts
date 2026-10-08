@@ -3543,7 +3543,7 @@ export interface paths {
         };
         /**
          * List Requests
-         * @description Lists requests. Non-admins see only their own requests; admins see all.
+         * @description Lists requests. Non-admins see only their own requests; admins and request managers see all.
          */
         get: operations["list_requests_api_requests_get"];
         put?: never;
@@ -3617,7 +3617,7 @@ export interface paths {
         put?: never;
         /**
          * Approve Request
-         * @description Admin-only endpoint to approve a request, updating status to processing and dispatching to Lidarr.
+         * @description Endpoint to approve a request, updating status to processing and dispatching to Lidarr or native acquisition.
          */
         post: operations["approve_request_api_requests__request_id__approve_post"];
         delete?: never;
@@ -3637,7 +3637,7 @@ export interface paths {
         put?: never;
         /**
          * Reject Request
-         * @description Admin-only endpoint to reject a request.
+         * @description Endpoint to reject a request.
          */
         post: operations["reject_request_api_requests__request_id__reject_post"];
         delete?: never;

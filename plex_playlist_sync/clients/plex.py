@@ -103,13 +103,64 @@ def classify_playlist_owner(
     return "trackseerr"
 
 
+_WARNED_MISSING_SECTIONS: set[str] = set()
+
+
+def music_sections(server: Any, preferred: Optional[str] = None) -> list[Any]:
+    """Return all artist sections from server.
+
+    If ``preferred`` is set and matches a music section title (case-insensitive),
+    return it first (or only it, where callers use one section). If ``preferred`` is set
+    but not found, log a WARNING once naming the available music section titles and fall back
+    to the first music section.
+    """
+    if server is None or not hasattr(server, "library"):
+        return []
+    sections = [s for s in server.library.sections() if getattr(s, "type", "") == "artist"]
+    if not sections:
+        return []
+    pref = (preferred or "").strip()
+    if not pref:
+        return sections
+    target = pref.lower()
+    matching: list[Any] = []
+    others: list[Any] = []
+    for s in sections:
+        title = str(getattr(s, "title", "") or "").strip().lower()
+        if title == target:
+            matching.append(s)
+        else:
+            others.append(s)
+    if matching:
+        return matching + others
+
+    if target not in _WARNED_MISSING_SECTIONS:
+        _WARNED_MISSING_SECTIONS.add(target)
+        available = [str(getattr(s, "title", "") or "") for s in sections]
+        logger.warning(
+            "Configured Plex music section '%s' not found. Available music sections: %s. Falling back to '%s'.",
+            pref,
+            ", ".join(repr(t) for t in available) if available else "none",
+            getattr(sections[0], "title", "") if sections else "none",
+        )
+    return sections
+
+
 class PlexClient:
     """Manages interactions with the Plex Media Server."""
 
-    def __init__(self, base_url: str, token: str, verify_ssl: bool = True, timeout: int = 30):
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        verify_ssl: bool = True,
+        timeout: int = 30,
+        music_section: Optional[str] = None,
+    ):
         self.base_url = base_url
         self.token = token
         self.verify_ssl = verify_ssl
+        self.music_section = music_section
 
         session = requests.Session()
         if not verify_ssl:
@@ -790,7 +841,7 @@ class PlexClient:
         """Return [(hub, hub_item)] for every 'mix' hub across music sections. Never raises on Plex errors."""
         pairs: List[Tuple[Any, Any]] = []
         try:
-            sections = [s for s in server.library.sections() if getattr(s, "type", "") == "artist"]
+            sections = music_sections(server, getattr(self, "music_section", None))
         except PLEX_ERRORS as e:
             logger.warning("Could not list Plex library sections for mixes: %s", safe_exc(e))
             return pairs
@@ -948,12 +999,11 @@ class PlexClient:
         - 'deep_cuts': Unplayed tracks from your top artists
         """
         try:
-            sections = getattr(self.server.library, "sections", lambda: [])()
-            music_sections = [s for s in sections if getattr(s, "type", "") == "artist"]
-            if music_sections:
-                music_section = music_sections[0]
-            else:
-                music_section = self.server.library.section("Music")
+            music_sections_list = music_sections(self.server, getattr(self, "music_section", None))
+            if not music_sections_list:
+                logger.warning("No music library section found on Plex server")
+                return []
+            music_section = music_sections_list[0]
         except Exception as e:
             logger.warning("Could not access music library section: %s", safe_exc(e))
             return []
@@ -1034,20 +1084,27 @@ class PlexClient:
 
     def refresh_music_library(self, section_name: Optional[str] = None) -> bool:
         """Triggers a library section refresh on Plex Media Server."""
-        sec_name = section_name or getattr(self, "music_section", "Music") or "Music"
+        sec_name = section_name or getattr(self, "music_section", None)
         try:
             if hasattr(self.server, "library"):
-                try:
-                    sec = self.server.library.section(sec_name)
-                    sec.update()
-                    logger.info("Triggered Plex section update for '%s'", sec_name)
+                secs = music_sections(self.server, sec_name)
+                if secs:
+                    secs[0].update()
+                    logger.info("Triggered Plex section update for '%s'", getattr(secs[0], "title", ""))
                     return True
-                except Exception:
-                    self.server.library.update()
-                    logger.info("Triggered general Plex library update")
-                    return True
+                if sec_name:
+                    try:
+                        sec = self.server.library.section(sec_name)
+                        sec.update()
+                        logger.info("Triggered Plex section update for '%s'", sec_name)
+                        return True
+                    except Exception:
+                        pass
+                self.server.library.update()
+                logger.info("Triggered general Plex library update")
+                return True
         except Exception as e:
-            logger.warning("Could not refresh Plex library '%s': %s", sec_name, safe_exc(e))
+            logger.warning("Could not refresh Plex library '%s': %s", sec_name or "default", safe_exc(e))
         return False
 
     def test_connection(self) -> tuple[bool, str]:

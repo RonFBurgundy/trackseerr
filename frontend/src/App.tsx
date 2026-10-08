@@ -64,6 +64,7 @@ import {
 import { apiRequest } from '@/services/apiClient';
 import { setPlaylistAutoRequest } from '@/services/listeningService';
 import { createDiscographyRequest, MAX_BATCH_ITEMS } from '@/services/requestService';
+import { peekPendingImport } from '@/services/bookmarkletImport';
 
 /** Manual path routing: only /invite/:token is a distinct page; everything else is the SPA shell. */
 export function parseInviteToken(pathname: string): string | null {
@@ -153,13 +154,6 @@ const MainApp: React.FC = () => {
     }
   }, [auth.canUseAdminUi, auth.user]);
 
-  useEffect(() => {
-    if (auth.isAuthenticated) {
-      setIsAuthModalOpen(false);
-      loadPlaylistsAndUsers();
-    }
-  }, [auth.isAuthenticated, loadPlaylistsAndUsers]);
-
   const handleNavigate = useCallback(
     (next: AppRoute, options?: NavigateOptions) => {
       navigate(next, options);
@@ -170,6 +164,16 @@ const MainApp: React.FC = () => {
     },
     [navigate]
   );
+
+  useEffect(() => {
+    if (auth.isAuthenticated) {
+      setIsAuthModalOpen(false);
+      loadPlaylistsAndUsers();
+      if (peekPendingImport()) {
+        handleNavigate({ tab: 'playlists' }, { replace: true });
+      }
+    }
+  }, [auth.isAuthenticated, loadPlaylistsAndUsers, handleNavigate]);
 
   // Header keys jump to a tab's landing page; the tab already open keeps its sub-page.
   const handleTabChange = (tab: MainTab) => {
@@ -460,6 +464,7 @@ const MainApp: React.FC = () => {
                 onSubChange={(sub, o) => handleNavigate({ tab: 'requests', sub }, o)}
                 requestsHook={requestsHook}
                 isAdmin={auth.canUseAdminUi}
+                canManageRequests={auth.canManageRequests}
                 issuesHook={issuesHook}
                 issuesUnreadCount={issueCounts.unread}
                 currentUserId={auth.user?.id}

@@ -18,6 +18,7 @@ from plex_playlist_sync.api.dependencies import (
     get_lidarr_client,
     has_permission,
     require_admin,
+    require_admin_or_permission,
     require_user,
 )
 from plex_playlist_sync.api.schemas.requests import (
@@ -77,8 +78,9 @@ def list_requests(
     db: Database = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
-    """Lists requests. Non-admins see only their own requests; admins see all."""
-    user_id = None if current_user.get("is_admin") else current_user["id"]
+    """Lists requests. Non-admins see only their own requests; admins and request managers see all."""
+    can_manage = bool(current_user.get("is_admin")) or has_permission(current_user, UserPermission.MANAGE_REQUESTS)
+    user_id = None if can_manage else current_user["id"]
     requests = db.list_requests(user_id=user_id, status=status_filter)
     return {"requests": requests, "count": len(requests)}
 
@@ -290,10 +292,10 @@ def approve_request(
     request_id: str,
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
-    _admin: dict[str, Any] = Depends(require_admin),
+    current_user: dict[str, Any] = Depends(require_admin_or_permission(UserPermission.MANAGE_REQUESTS)),
     lidarr_client: Optional[LidarrClient] = Depends(get_lidarr_client),
 ) -> dict[str, Any]:
-    """Admin-only endpoint to approve a request, updating status to processing and dispatching to Lidarr."""
+    """Endpoint to approve a request, updating status to processing and dispatching to Lidarr or native acquisition."""
     req = db.get_request(request_id)
     if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
@@ -302,7 +304,7 @@ def approve_request(
     updated = db.get_request(request_id)
     record_request_event(
         db, "request_approved", req, message="Approved",
-        actor_user_id=_actor_id(_admin),
+        actor_user_id=_actor_id(current_user),
     )
 
     def _lidarr_approve() -> None:
@@ -333,7 +335,7 @@ def approve_request(
                 item_type=req.get("item_type", "track"),
                 request_id=request_id,
                 db=db,
-                trigger=request_trigger(db, req, kind=TRIGGER_REQUEST_APPROVED, actor_user_id=_actor_id(_admin)),
+                trigger=request_trigger(db, req, kind=TRIGGER_REQUEST_APPROVED, actor_user_id=_actor_id(current_user)),
             )
             if grab_res.get("success"):
                 logger.info("Native acquisition grabbed approved request %s (%s - %s)", request_id, req["artist"], req["title"])
@@ -356,9 +358,9 @@ def approve_request(
 def reject_request(
     request_id: str,
     db: Database = Depends(get_db),
-    _admin: dict[str, Any] = Depends(require_admin),
+    current_user: dict[str, Any] = Depends(require_admin_or_permission(UserPermission.MANAGE_REQUESTS)),
 ) -> dict[str, Any]:
-    """Admin-only endpoint to reject a request."""
+    """Endpoint to reject a request."""
     req = db.get_request(request_id)
     if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
@@ -367,7 +369,7 @@ def reject_request(
     updated = db.get_request(request_id)
     record_request_event(
         db, "request_declined", req, message="Declined",
-        actor_user_id=_actor_id(_admin),
+        actor_user_id=_actor_id(current_user),
     )
     res_req = updated or req
     notification_dispatcher.dispatch(NotificationEvent.REQUEST_REJECTED, data=res_req, db=db)

@@ -93,6 +93,7 @@ class Config:
     plex_url: str
     plex_token: str
     plex_verify_ssl: bool = True
+    plex_music_section: Optional[str] = None
     # Raw MEDIA_SERVER value ("" = unset: derived from the Plex credentials). Read ``media_server_type``.
     media_server: str = ""
     subsonic_url: str = ""
@@ -162,6 +163,7 @@ class Config:
     def from_env(cls) -> "Config":
         plex_url = os.getenv("PLEX_URL", "").strip()
         plex_token = os.getenv("PLEX_TOKEN", "").strip()
+        plex_music_section = os.getenv("PLEX_MUSIC_SECTION", "").strip() or None
 
         # SSL verification toggle (check PLEX_VERIFY_SSL or IGNORE_SSL / IGNORE_SSC)
         verify_ssl = True
@@ -208,6 +210,7 @@ class Config:
             plex_url=plex_url,
             plex_token=plex_token,
             plex_verify_ssl=verify_ssl,
+            plex_music_section=plex_music_section,
             media_server=os.getenv("MEDIA_SERVER", "").strip().lower(),
             subsonic_url=os.getenv("SUBSONIC_URL", "").strip(),
             subsonic_user=os.getenv("SUBSONIC_USER", "").strip(),

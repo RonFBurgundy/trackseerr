@@ -126,6 +126,7 @@ def get_plex_client(config: Config = Depends(get_config)) -> Optional[PlexClient
             base_url=config.plex_url,
             token=config.plex_token,
             verify_ssl=config.plex_verify_ssl,
+            music_section=config.plex_music_section,
         )
     except Exception as e:
         logger.error("Failed to initialize PlexClient: %s", e)
@@ -214,11 +215,11 @@ def tier_of(config: Config) -> str:
 
 
 def _forwarded_principal(user: dict[str, Any]) -> dict[str, Any]:
-    """Returns a copy of ``user`` that can never be admin: flag forced off, ADMIN bit stripped."""
+    """Returns a copy of ``user`` that can never be admin: flag forced off, ADMIN and MANAGE_REQUESTS bits stripped."""
     principal = dict(user)
     perms = principal.get("permissions")
     perms = int(UserPermission.DEFAULT) if perms is None else int(perms)
-    principal["permissions"] = perms & ~int(UserPermission.ADMIN)
+    principal["permissions"] = perms & ~int(UserPermission.ADMIN) & ~int(UserPermission.MANAGE_REQUESTS)
     principal["is_admin"] = False
     principal["forwarded"] = True
     return principal
@@ -554,7 +555,7 @@ def has_permission(user: dict[str, Any], permission: UserPermission) -> bool:
         # Gateway-asserted principals never hold admin, nor any permission implied by it.
         user_perms = user.get("permissions")
         user_perms = 0 if user_perms is None else int(user_perms)
-        return bool(user_perms & ~int(UserPermission.ADMIN) & int(permission))
+        return bool(user_perms & ~int(UserPermission.ADMIN) & ~int(UserPermission.MANAGE_REQUESTS) & int(permission))
     if user.get("is_admin"):
         return True
     user_perms = user.get("permissions")
@@ -576,6 +577,28 @@ def require_permission(permission: UserPermission):
                 detail=f"Permission denied: requires {permission.name}",
             )
         return current_user
+    return _dependency
+
+
+def require_admin_or_permission(permission: UserPermission):
+    """FastAPI dependency factory enforcing admin access or a specific permission bit.
+
+    Gateway-forwarded principals are always refused (never hold admin or elevated permissions).
+    """
+    def _dependency(current_user: dict[str, Any] = Depends(get_current_user_or_api_key)) -> dict[str, Any]:
+        if current_user.get("forwarded"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied: requires {permission.name} or admin access",
+            )
+        user_perms = int(current_user.get("permissions") if current_user.get("permissions") is not None else 0)
+        is_adm = bool(current_user.get("is_admin")) or bool(user_perms & int(UserPermission.ADMIN))
+        if is_adm or has_permission(current_user, permission):
+            return current_user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission denied: requires {permission.name} or admin access",
+        )
     return _dependency
 
 
