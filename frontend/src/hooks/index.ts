@@ -102,3 +102,5 @@ export * from './useDiscographyFilter';
 export * from './useHasDownloadClients';
 export * from './useListeningSources';
 export * from './useCanAutoRequestPlaylists';
+export * from './useRenamePreview';
+export * from './useMissingTracks';
