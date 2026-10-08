@@ -497,6 +497,7 @@ def test_system_scheduled_task_artist_metadata_refresh(
 # Test 7: LibraryScanner triggers auto-hydration for newly created artists
 # =========================================================================
 
+@pytest.mark.real_scanner_hydration
 def test_library_scanner_triggers_auto_hydration_for_new_artists(test_db: Database, tmp_path: Path):
     """Validates that LibraryScanner.scan() launches a background auto-hydration thread
 
@@ -545,6 +546,29 @@ def test_library_scanner_triggers_auto_hydration_for_new_artists(test_db: Databa
         mock_refresh.assert_called_once()
         call_kwargs = mock_refresh.call_args.kwargs
         assert call_kwargs.get("artist_ids") == [queen["id"]]
+
+
+def test_artist_refresh_worker_refresh_once_not_stubbed_by_default():
+    """Regression test"""
+    from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
+    assert artist_refresh_worker.refresh_once.__name__ == "refresh_once"
+
+
+def test_library_scanner_auto_hydration_neutralized_without_marker(test_db: Database, tmp_path: Path):
+    scanner = LibraryScanner()
+    root = tmp_path / "music"
+    artist_dir = root / "Queen" / "A Night at the Opera"
+    artist_dir.mkdir(parents=True, exist_ok=True)
+    audio_file = artist_dir / "01 - Bohemian Rhapsody.flac"
+    audio_file.write_bytes(b"\x00" * 100)
+    mock_meta = {"title": "Bohemian Rhapsody", "artist": "Queen", "album": "A Night at the Opera", "track_number": 1, "disc_number": 1, "codec": "FLAC", "duration": 354.0, "quality_full": "FLAC", "file_path": str(audio_file), "musicbrainz_artistid": "mbid-queen-123", "musicbrainz_albumid": None, "musicbrainz_releasegroupid": None, "musicbrainz_trackid": None, "isrc": None}
+    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", return_value=mock_meta), \
+         patch("plex_playlist_sync.artist_refresh_worker.artist_refresh_worker.refresh_once") as mock_refresh:
+        res = scanner.scan(db=test_db, root_folder=str(root))
+        assert res["status"] == "completed"
+        assert res["artists_created"] == 1
+        time.sleep(0.15)
+        mock_refresh.assert_not_called()
 
 
 # =========================================================================

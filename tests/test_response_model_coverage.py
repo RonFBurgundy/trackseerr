@@ -93,6 +93,7 @@ _NO_MODEL_ALLOWLIST: set[str] = {
     "library:/artists/{artist_id}/image",  # file or redirect
     "library:/artists/{artist_id}/banner",  # file or redirect
     "library:/albums/{album_id}/cover",  # file or redirect
+    "backups:/{name}/download",  # file download
 }
 
 
@@ -106,3 +107,4 @@ def test_every_json_route_has_response_model(tmp_path):
         if key not in _NO_MODEL_ALLOWLIST:
             missing.add(key)
     assert not missing, sorted(missing)
+

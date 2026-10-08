@@ -39,6 +39,11 @@ def pytest_configure(config):
         "real_core_client: opt out of the autouse CoreClient.session_status mock so the real signed "
         "gateway->core call path runs (see tests/test_gateway_core_e2e.py)",
     )
+    config.addinivalue_line(
+        "markers",
+        "real_scanner_hydration: opt out of autouse scanner hydration suppression so AutoArtistHydrationThread "
+        "runs in tests that specifically test it",
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -149,13 +154,34 @@ def _stop_worker_singletons_started_since(before: set) -> None:
 @pytest.fixture(autouse=True)
 def _no_background_scanner_hydration(request, monkeypatch):
     """The scanner launches a daemon thread that hydrates new artists from MusicBrainz/Deezer. Never in tests,
-    unless explicitly testing the trigger."""
-    if request.node.name == "test_library_scanner_triggers_auto_hydration_for_new_artists":
+    unless explicitly opted in with @pytest.mark.real_scanner_hydration."""
+    if request.node.get_closest_marker("real_scanner_hydration") is not None:
         yield
         return
-    from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
 
-    monkeypatch.setattr(artist_refresh_worker, "refresh_once", lambda *a, **k: {})
+    import threading
+
+    orig_thread = threading.Thread
+
+    class _NoOpHydrationThread(orig_thread):
+        def start(self):
+            pass
+
+        def join(self, timeout=None):
+            pass
+
+        def is_alive(self):
+            return False
+
+    def _guarded_thread(*args, **kwargs):
+        name = kwargs.get("name")
+        if not name and len(args) >= 3:
+            name = args[2]
+        if name == "AutoArtistHydrationThread":
+            return _NoOpHydrationThread(target=lambda: None, daemon=True, name="AutoArtistHydrationThread")
+        return orig_thread(*args, **kwargs)
+
+    monkeypatch.setattr(threading, "Thread", _guarded_thread)
     yield
 
 
