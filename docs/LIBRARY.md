@@ -124,7 +124,7 @@ Presets:
 | Clean Minimal | Drops a leading The, A, or An from names. |
 | Audiophile / Detailed | Adds codec, bit depth, and sample rate to every file name. |
 
-New imports use the current format. To rename files already in the library, use the API: `POST /api/library/rename/preview`, then `POST /api/library/rename/apply`.
+New imports use the current format. To rename files already in the library, click **Rename files** on the **Library** page, an artist page, or an album. TrackSeerr shows each current path next to its new path. Pick the files to rename and apply.
 
 ## Deleted and rejected files
 

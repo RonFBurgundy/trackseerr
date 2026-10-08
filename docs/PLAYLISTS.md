@@ -13,7 +13,7 @@ TrackSeerr imports playlists from outside sources, matches each track to your li
 
 ## Add a playlist
 
-Open **Playlists** and click **Add Playlist**. There are three ways to add one.
+Open **Playlists** and click **Add Playlist**. There are four ways to add one.
 
 ### By Link
 
@@ -37,6 +37,10 @@ Carpenter Brut - Turbo Killer
 ```
 
 This works for any source you can copy text from.
+
+### 1-Click Helper
+
+On the **1-Click Helper** tab, drag **Send to TrackSeerr** to your browser's bookmarks bar. Then, on any Spotify or Deezer playlist page, click the bookmark. TrackSeerr opens with the **By Link** tab filled in. Check it and click **Add Playlist**. If you are not signed in, TrackSeerr keeps the link through sign-in.
 
 ### My Listening
 
@@ -65,6 +69,8 @@ A track that is not in your library is listed as missing. Each playlist has a mo
 Regular users can choose **Track only** or **None**. Requests made this way count against the user's quota and need approval unless the user has the **Auto-request playlist tracks** permission. See [Users and requests](USERS_AND_REQUESTS.md#permissions).
 
 When a missing track arrives in the library, the next sync adds it to the playlist.
+
+**Fix a wrong miss.** Sometimes a track is in your library but TrackSeerr did not match it, for example because the titles differ. Admins can click **Missing (N)** on a playlist card, then **Match** on the track. Search your library, pick the right track, and TrackSeerr remembers the match for every playlist. **Match Memory** on the Playlists page lists saved matches; undo any of them there.
 
 Admins see every missing and below-quality item in **Wanted**. Missing playlist tracks can also be read from these addresses:
 
