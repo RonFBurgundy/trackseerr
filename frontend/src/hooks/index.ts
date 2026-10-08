@@ -105,3 +105,4 @@ export * from './useCanAutoRequestPlaylists';
 export * from './useRenamePreview';
 export * from './useMissingTracks';
 export * from './useChangelog';
+export * from './useBackups';

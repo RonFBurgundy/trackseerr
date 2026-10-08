@@ -4,6 +4,7 @@ import type { SystemLeaf } from '@/hooks/useAppRoute';
 import { SystemStatusPanel } from './SystemStatusPanel';
 import { SystemTasksPanel } from './SystemTasksPanel';
 import { SystemLogsPanel } from './SystemLogsPanel';
+import { BackupPanel } from './BackupPanel';
 
 export type SystemTab = SystemLeaf;
 
@@ -24,6 +25,7 @@ export const SystemPage: React.FC<SystemPageProps> = ({ tab, isCore, libraryMode
     <div className="space-y-6">
       {tab === 'status' && <SystemStatusPanel isCore={isCore} libraryMode={libraryMode} />}
       {tab === 'tasks' && <SystemTasksPanel onToast={onToast} />}
+      {tab === 'backups' && <BackupPanel onToast={onToast} />}
     </div>
   );
 };

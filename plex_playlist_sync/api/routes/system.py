@@ -1048,6 +1048,7 @@ _MANUAL_RUNNABLE = {
     "lidarr_request_retry",
     "scrobble_sync",
     "mix_generation",
+    "backup",
 }
 
 # Display text of the polling loops, whose period is fixed in code.
@@ -1574,6 +1575,17 @@ def run_scheduled_task(
 
         _run_manual(db, task_id, "ManualMixGenerationTask", _mix)
 
+    elif task_id == "backup":
+        from plex_playlist_sync.backup import create_backup, get_backup_retention, prune_scheduled
+
+        def _backup(run: RunHandle) -> None:
+            retention = get_backup_retention(db)
+            path = create_backup(db, kind="manual")
+            pruned = prune_scheduled(retention=retention, backup_dir=path.parent)
+            run.message = f"created={path.name}, pruned={len(pruned)}"
+
+        _run_manual(db, task_id, "ManualBackupTask", _backup)
+
     return {"success": True, "message": f"Task '{task_id}' dispatched successfully"}
 
 
@@ -1661,6 +1673,22 @@ def cancel_scheduled_task(
         except Exception as ev_err:
             logger.warning("Failed to record task_cancelled event: %s", ev_err)
         return {"success": True, "message": "Lidarr trickle worker cancelled"}
+
+    elif task_id == "backup":
+        from plex_playlist_sync.backup import cancel_backup
+
+        cancel_backup()
+        try:
+            db.record_event(
+                "task_cancelled",
+                "Scheduled task 'backup' cancelled by admin",
+                source="TaskManager",
+                severity="info",
+                details={"task_id": "backup"},
+            )
+        except Exception as ev_err:
+            logger.warning("Failed to record task_cancelled event: %s", ev_err)
+        return {"success": True, "message": "Backup task cancelled"}
 
     else:
         raise HTTPException(

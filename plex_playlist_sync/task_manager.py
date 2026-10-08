@@ -46,8 +46,8 @@ OVERRIDE_KEY_PREFIX = "task_schedule_override:"
 _MIN = 60
 _HOUR = 3600
 _DAY = 86400
-# The only intervals an admin may pick from: 5m, 15m, 30m, 1h, 2h, 6h, 12h, 24h, 7d.
-ALL_PRESETS: tuple[int, ...] = (5 * _MIN, 15 * _MIN, 30 * _MIN, _HOUR, 2 * _HOUR, 6 * _HOUR, 12 * _HOUR, _DAY, 7 * _DAY)
+# The only intervals an admin may pick from: 5m, 15m, 30m, 1h, 2h, 6h, 12h, 24h, 3d, 7d, 14d.
+ALL_PRESETS: tuple[int, ...] = (5 * _MIN, 15 * _MIN, 30 * _MIN, _HOUR, 2 * _HOUR, 6 * _HOUR, 12 * _HOUR, _DAY, 3 * _DAY, 7 * _DAY, 14 * _DAY)
 
 
 def _presets(minimum: int, maximum: Optional[int] = None) -> tuple[int, ...]:
@@ -209,6 +209,15 @@ TASKS: dict[str, TaskSpec] = {
             "Polls the media server play history and forwards scrobbles to Last.fm and ListenBrainz, retrying failures.",
             KIND_CONTINUOUS,
         ),
+        # Database snapshot and retention pruning: weekly default, editable presets (1d, 3d, 7d, 14d).
+        TaskSpec(
+            "backup",
+            "Database Backup & Retention",
+            "Snapshots the SQLite database with WAL safety, creates compressed backup archives, and prunes old scheduled backups per retention policy.",
+            KIND_INTERVAL,
+            7 * _DAY,
+            _presets(_DAY),
+        ),
     )
 }
 
@@ -296,6 +305,8 @@ WORKER_THREAD_TASKS: dict[str, str] = {
     "ArtBackfillTask": "art_thumbnail_backfill",
     "ManualScrobbleSyncTask": "scrobble_sync",
     "ManualMixGenerationTask": "mix_generation",
+    "BackupWorkerThread": "backup",
+    "ManualBackupTask": "backup",
 }
 
 NON_TASK_THREADS: dict[str, str] = {
@@ -307,6 +318,7 @@ NON_TASK_THREADS: dict[str, str] = {
     "BootInit": "one-shot post-bind startup sequence (starts the real workers), not a recurring job",
     "BootListenLog": "one-shot boot log line once the server socket is bound",
     "media-server-user-discovery": "one-shot user import when a media server connects, not a recurring job",
+    "BackupRestartThread": "one-shot delay thread before sending SIGTERM after database restore, not a recurring job",
 }
 
 
