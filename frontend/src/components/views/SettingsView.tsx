@@ -29,6 +29,7 @@ import { CustomFormatsPage, ProfilesPage, QualityDefinitionsPanel } from '@/comp
 import { SystemPage, systemTabOwnsScroll } from '@/components/system';
 import { PageFrame, RefreshBinding } from '@/components/layout';
 import type { UseAccountReturn } from '@/hooks/useAccount';
+import type { UseUpdateCheckReturn } from '@/hooks';
 import { settingsRouteFor } from '@/hooks/useAppRoute';
 import type { SettingsRoute } from '@/hooks/useAppRoute';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
@@ -52,6 +53,7 @@ export interface SettingsViewProps {
   mfaEnrollmentRequired?: boolean;
   /** False unless Plex is the media server: Plex-only settings are hidden. */
   hasMediaServer?: boolean;
+  updateCheck?: UseUpdateCheckReturn;
 }
 
 interface ToastState {
@@ -69,6 +71,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   currentUserId,
   mfaEnrollmentRequired = false,
   hasMediaServer = true,
+  updateCheck,
 }) => {
   const activeTab = settingsPanel(route);
   const adminUsersHook = useAdminUsers(isAdmin && activeTab === 'users' && !mfaEnrollmentRequired);
@@ -141,7 +144,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       )}
 
-      <SettingsNav sections={sections} route={route} onNavigate={onNavigate} inactiveIds={inactiveIds} />
+      <SettingsNav
+        sections={sections}
+        route={route}
+        onNavigate={onNavigate}
+        inactiveIds={inactiveIds}
+        updateAvailable={updateCheck?.updateAvailable}
+      />
       </>
       }
     >
@@ -187,7 +196,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {activeTab === 'media-server' && isAdmin && !mfaEnrollmentRequired && <MediaServerPanel onToast={showToast} />}
 
       {activeTab === 'system' && isAdmin && !mfaEnrollmentRequired && (
-        <SystemPage tab={systemLeaf} isCore={isCore} libraryMode={mode} onToast={showToast} />
+        <SystemPage tab={systemLeaf} isCore={isCore} libraryMode={mode} onToast={showToast} updateCheck={updateCheck} />
       )}
 
       {data.isLoading && !isSelfServiceTab && (

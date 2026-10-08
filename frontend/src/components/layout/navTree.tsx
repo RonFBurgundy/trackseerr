@@ -25,6 +25,8 @@ export interface RouteAccess {
   issuesOpenCount?: number;
   /** The user's own issues with unseen admin activity. */
   issuesUnreadCount?: number;
+  /** Admin only: software update available. */
+  updateAvailable?: boolean;
 }
 
 /** Nav entries match a page, not the issue open on top of it. */
@@ -47,13 +49,15 @@ const ico = 'h-4 w-4';
 const leaf = (key: string, label: string, route: AppRoute): NavNode => ({ key, label, route });
 
 /** Every main section the user may see, with its pages as children where it has any. */
-export function buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount = 0, issuesOpenCount = 0, issuesUnreadCount = 0 }: RouteAccess): NavNode[] {
+export function buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount = 0, issuesOpenCount = 0, issuesUnreadCount = 0, updateAvailable = false }: RouteAccess): NavNode[] {
   const settingsChildren: NavNode[] = buildSettingsTree(isAdmin, mfaEnrollmentRequired).map((section) => {
+    const isSystem = section.id === 'system';
     if (!hasChildRow(section)) {
       return {
         key: `settings/${section.id}`,
         label: section.label,
         icon: section.icon,
+        badge: isSystem && updateAvailable ? 1 : undefined,
         route: settingsRouteFor(section.id, section.leaves[0]?.id),
       };
     }
@@ -61,10 +65,12 @@ export function buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount = 0, 
       key: `settings/${section.id}`,
       label: section.label,
       icon: section.icon,
+      badge: isSystem && updateAvailable ? 1 : undefined,
       children: section.leaves.map((l) => ({
         key: `settings/${section.id}/${l.id}`,
         label: l.label,
         icon: l.icon,
+        badge: isSystem && l.id === 'status' && updateAvailable ? 1 : undefined,
         route: settingsRouteFor(section.id, l.id),
       })),
     };

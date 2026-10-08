@@ -14,3 +14,4 @@ export * from './TaskRow';
 export * from './ChangelogModal';
 export * from './WhatsNewModal';
 export * from './BackupPanel';
+export * from './UpdatesCard';

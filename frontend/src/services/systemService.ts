@@ -132,3 +132,15 @@ export async function getSystemActivity(): Promise<SystemActivity> {
 export async function getSystemResources(): Promise<SystemResources> {
   return await apiRequest<SystemResources>('/api/system/resources');
 }
+
+export async function getSystemUpdate(): Promise<Schema<'SystemUpdateResponse'>> {
+  return await apiRequest<Schema<'SystemUpdateResponse'>>('/api/system/update');
+}
+
+export async function updateSystemUpdateSettings(enabled: boolean): Promise<Schema<'SystemUpdateResponse'>> {
+  return await apiRequest<Schema<'SystemUpdateResponse'>>('/api/system/update', {
+    method: 'PUT',
+    body: { enabled },
+  });
+}
+

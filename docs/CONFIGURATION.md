@@ -116,6 +116,7 @@ Quotas are set in **Settings > Requests > Users**. See [Users and requests](USER
 | `ENABLE_BACKLOG_SEARCH` | `1` | Search for missing and below-cutoff music on a schedule. |
 | `BACKLOG_SEARCH_INTERVAL_MINUTES` | `60` | Minutes between backlog searches. |
 | `ENABLE_IMPORT_LISTS` | `1` | Sync import lists (Last.fm, ListenBrainz, MusicBrainz collections) when they are due. `0` syncs them only when you click sync. |
+| `UPDATE_CHECK` | `1` | Check for new TrackSeerr releases. Setting this to 0 turns off automatic update checks. The check sends only a GET request to GitHub with a User-Agent header and no install details. |
 
 You can see and run every background job in **Settings > System > Tasks**.
 

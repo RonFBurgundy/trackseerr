@@ -218,6 +218,15 @@ TASKS: dict[str, TaskSpec] = {
             7 * _DAY,
             _presets(_DAY),
         ),
+        # Software update check against GitHub releases: 12h default interval, editable presets.
+        TaskSpec(
+            "update_check",
+            "Software Update Check",
+            "Checks GitHub releases for new TrackSeerr versions.",
+            KIND_INTERVAL,
+            12 * _HOUR,
+            _presets(6 * _HOUR),
+        ),
     )
 }
 
@@ -307,6 +316,8 @@ WORKER_THREAD_TASKS: dict[str, str] = {
     "ManualMixGenerationTask": "mix_generation",
     "BackupWorkerThread": "backup",
     "ManualBackupTask": "backup",
+    "UpdateCheckWorkerThread": "update_check",
+    "ManualUpdateCheckTask": "update_check",
 }
 
 NON_TASK_THREADS: dict[str, str] = {

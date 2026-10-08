@@ -46,6 +46,8 @@ export interface HeaderProps {
   activityEnabled?: boolean;
   /** Popover link target: Settings > System > Tasks. */
   onOpenTasks?: () => void;
+  /** Admin only: small badge on the logo when a newer release is available. */
+  updateAvailable?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -66,6 +68,7 @@ export const Header: React.FC<HeaderProps> = ({
   tier = 'all-in-one',
   activityEnabled = false,
   onOpenTasks,
+  updateAvailable = false,
 }) => {
   // One poll shared by the desktop and mobile logos.
   const activity = useSystemActivity(activityEnabled && user !== null);
@@ -101,31 +104,40 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Brand / Logo */}
         {/* Desktop Brand */}
         <div className="hidden md:flex items-center gap-3 select-none flex-shrink-0">
-          {showActivity ? (
-            <BrandActivity
-              activity={activity}
-              onOpenTasks={onOpenTasks}
-              className="flex items-center justify-center h-8 w-8 rounded-[3px] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--accent-amber)]"
-            >
+          <div className="relative inline-flex items-center">
+            {showActivity ? (
+              <BrandActivity
+                activity={activity}
+                onOpenTasks={onOpenTasks}
+                className="flex items-center justify-center h-8 w-8 rounded-[3px] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--accent-amber)]"
+              >
+                <img
+                  src="/trackseerr-logo.svg"
+                  alt=""
+                  className="h-8 w-8 object-contain"
+                  onError={(e) => {
+                    e.currentTarget.src = '/static/trackseerr-logo.svg';
+                  }}
+                />
+              </BrandActivity>
+            ) : (
               <img
                 src="/trackseerr-logo.svg"
-                alt=""
+                alt="TrackSeerr"
                 className="h-8 w-8 object-contain"
                 onError={(e) => {
                   e.currentTarget.src = '/static/trackseerr-logo.svg';
                 }}
               />
-            </BrandActivity>
-          ) : (
-            <img
-              src="/trackseerr-logo.svg"
-              alt="TrackSeerr"
-              className="h-8 w-8 object-contain"
-              onError={(e) => {
-                e.currentTarget.src = '/static/trackseerr-logo.svg';
-              }}
-            />
-          )}
+            )}
+            {isAdmin && updateAvailable && (
+              <span
+                className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[var(--accent-amber)] ring-2 ring-[#0a0a0a]"
+                title="TrackSeerr update available"
+                aria-label="Software update available"
+              />
+            )}
+          </div>
           <span className="hidden lg:inline text-base sm:text-lg font-black tracking-wider uppercase text-white font-mono leading-none">
             Track<span className="text-[#e5a00d]">Seerr</span>
             {brandSuffix}
@@ -138,7 +150,7 @@ export const Header: React.FC<HeaderProps> = ({
           <BrandActivity
             activity={activity}
             onOpenTasks={onOpenTasks}
-            className="md:hidden flex items-center justify-center w-9 h-9 rounded-[3px] border border-[#222222] bg-[#121212] hover:border-[#383838] active:translate-y-[1px] transition-all flex-shrink-0 after:absolute after:content-[''] after:-inset-[2px]"
+            className="md:hidden relative flex items-center justify-center w-9 h-9 rounded-[3px] border border-[#222222] bg-[#121212] hover:border-[#383838] active:translate-y-[1px] transition-all flex-shrink-0 after:absolute after:content-[''] after:-inset-[2px]"
           >
             <img
               src="/trackseerr-logo.svg"
@@ -150,6 +162,13 @@ export const Header: React.FC<HeaderProps> = ({
                 e.currentTarget.src = '/static/trackseerr-logo.svg';
               }}
             />
+            {isAdmin && updateAvailable && (
+              <span
+                className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[var(--accent-amber)] ring-2 ring-[#0a0a0a]"
+                title="TrackSeerr update available"
+                aria-label="Software update available"
+              />
+            )}
           </BrandActivity>
         ) : (
           <button
@@ -169,6 +188,13 @@ export const Header: React.FC<HeaderProps> = ({
               e.currentTarget.src = '/static/trackseerr-logo.svg';
             }}
           />
+          {isAdmin && updateAvailable && (
+            <span
+              className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[var(--accent-amber)] ring-2 ring-[#0a0a0a]"
+              title="TrackSeerr update available"
+              aria-label="Software update available"
+            />
+          )}
           </button>
         )}
 

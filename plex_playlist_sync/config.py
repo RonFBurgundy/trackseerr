@@ -153,6 +153,7 @@ class Config:
     trusted_proxies: Optional[str] = None
     lastfm_api_key: Optional[str] = None
     lastfm_api_secret: Optional[str] = None
+    update_check: bool = True
 
     # The Settings-page media-server values, swapped as ONE reference (see ``MediaServerView``); None while the fields
     # above (the environment) are authoritative.
@@ -262,6 +263,7 @@ class Config:
             trusted_proxies=os.getenv("TRUSTED_PROXIES", "").strip() or None,
             lastfm_api_key=os.getenv("LASTFM_API_KEY", "").strip() or None,
             lastfm_api_secret=os.getenv("LASTFM_API_SECRET", "").strip() or None,
+            update_check=_parse_bool(os.getenv("UPDATE_CHECK"), True),
         )
         config.apply_media_server_overlay()
         return config

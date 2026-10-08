@@ -26,6 +26,7 @@ import {
   RefreshContext,
   useRefreshRegistry,
   usePullToRefresh,
+  useUpdateCheck,
 } from '@/hooks';
 import type { AppRoute, MainTab, NavigateOptions } from '@/hooks';
 import {
@@ -108,6 +109,7 @@ const MainApp: React.FC = () => {
   const userNotifications = useUserNotifications(auth.isAuthenticated && !mfaEnrollmentRequired);
   const libraryHook = useLibrary(auth.canUseAdminUi);
   const reviewHealth = useLibraryHealthCount(auth.canUseAdminUi);
+  const updateCheck = useUpdateCheck(auth.canUseAdminUi && !mfaEnrollmentRequired);
 
   const { route, navigate, navigateUp } = useAppRoute();
   useSearchShortcut();
@@ -289,6 +291,7 @@ const MainApp: React.FC = () => {
         onLogout={auth.logout}
         isMenuOpen={isMenuOpen}
         onToggleMenu={() => setIsMenuOpen((prev) => !prev)}
+        updateAvailable={updateCheck.updateAvailable}
       />
 
       {/* Hub navigator: full-screen drawer on phones, side panel on desktop */}
@@ -307,6 +310,7 @@ const MainApp: React.FC = () => {
         tier={identity.tier}
         onLogout={auth.logout}
         onHighlight={highlight}
+        updateAvailable={updateCheck.updateAvailable}
       />
 
       {/* Main Content Area - Locked scrolling inside container */}
@@ -551,6 +555,7 @@ const MainApp: React.FC = () => {
                 currentUserId={auth.user?.id}
                 mfaEnrollmentRequired={mfaEnrollmentRequired}
                 hasMediaServer={mediaServer.isPlex}
+                updateCheck={updateCheck}
               />
             )}
             {identity.isGateway && (

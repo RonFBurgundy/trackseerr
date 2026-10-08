@@ -76,7 +76,7 @@ def clean_library_name(text: str) -> str:
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
 SEED_COMPLETE_ACTIONS = ("keep", "remove", "remove_and_delete")
-SCHEMA_VERSION = 69  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 70  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:
@@ -396,6 +396,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                 (67, self._migration_v67),
                 (68, self._migration_v68),
                 (69, self._migration_v69),
+                (70, self._migration_v70),
             ]
 
             applied = 0
@@ -2114,6 +2115,22 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
             cur.execute("ALTER TABLE general_settings ADD COLUMN vapid_private_key TEXT;")
         if "vapid_sub" not in have_general:
             cur.execute("ALTER TABLE general_settings ADD COLUMN vapid_sub TEXT;")
+
+    def _migration_v70(self, cur: sqlite3.Cursor) -> None:
+        """Update check: enable toggle and cached latest GitHub release result."""
+        cur.execute("PRAGMA table_info(general_settings);")
+        have_general = {row[1] for row in cur.fetchall()}
+        columns = (
+            ("update_check_enabled", "INTEGER NOT NULL DEFAULT 1"),
+            ("update_latest_version", "TEXT"),
+            ("update_release_url", "TEXT"),
+            ("update_published_at", "TEXT"),
+            ("update_checked_at", "TEXT"),
+            ("update_error", "TEXT"),
+        )
+        for name, decl in columns:
+            if name not in have_general:
+                cur.execute(f"ALTER TABLE general_settings ADD COLUMN {name} {decl};")
 
     def _migration_v37(self, cur: sqlite3.Cursor) -> None:
         """Import lists, per-playlist monitor mode and the missing-track "already applied" marker."""
@@ -5023,6 +5040,79 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                 self.conn.commit()
 
         return self.get_general_settings()
+
+    def get_update_check_state(self) -> dict[str, Any]:
+        """Returns the current update check configuration and cached result."""
+        with self._lock:
+            self._ensure_general_row()
+            cur = self.conn.execute(
+                "SELECT update_check_enabled, update_latest_version, update_release_url, "
+                "update_published_at, update_checked_at, update_error "
+                "FROM general_settings WHERE id = 1"
+            )
+            row = cur.fetchone()
+            if not row:
+                return {
+                    "enabled": True,
+                    "latest_version": None,
+                    "release_url": None,
+                    "published_at": None,
+                    "checked_at": None,
+                    "error": None,
+                }
+            enabled_val = row["update_check_enabled"]
+            return {
+                "enabled": bool(enabled_val if enabled_val is not None else 1),
+                "latest_version": row["update_latest_version"],
+                "release_url": row["update_release_url"],
+                "published_at": row["update_published_at"],
+                "checked_at": row["update_checked_at"],
+                "error": row["update_error"],
+            }
+
+    def set_update_check_enabled(self, enabled: bool) -> None:
+        """Updates the update_check_enabled flag in general_settings."""
+        val = 1 if enabled else 0
+        with self._lock:
+            self._ensure_general_row()
+            self.conn.execute(
+                "UPDATE general_settings SET update_check_enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+                (val,),
+            )
+            self.conn.commit()
+
+    def save_update_check_result(
+        self,
+        *,
+        latest_version: Optional[str],
+        release_url: Optional[str],
+        published_at: Optional[str],
+        checked_at: Optional[str],
+        error: Optional[str] = None,
+    ) -> None:
+        """Persists the outcome of an update check."""
+        with self._lock:
+            self._ensure_general_row()
+            if latest_version is not None:
+                self.conn.execute(
+                    "UPDATE general_settings SET "
+                    "update_latest_version = ?, "
+                    "update_release_url = ?, "
+                    "update_published_at = ?, "
+                    "update_checked_at = ?, "
+                    "update_error = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+                    (latest_version, release_url, published_at, checked_at, error),
+                )
+            else:
+                self.conn.execute(
+                    "UPDATE general_settings SET "
+                    "update_checked_at = ?, "
+                    "update_error = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+                    (checked_at, error),
+                )
+            self.conn.commit()
 
     # -------------------------------------------------------------------------
     # Deployment role / instance identity / key-value (migration v30)

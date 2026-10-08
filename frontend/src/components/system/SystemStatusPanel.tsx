@@ -9,10 +9,13 @@ import { formatBytes } from '@/components/lists/formatters';
 import type { LibraryManagerMode, LidarrHealthItem } from '@/types/models';
 import { formatDuration } from './formatters';
 import { ChangelogModal } from './ChangelogModal';
+import { UpdatesCard } from './UpdatesCard';
+import { useUpdateCheck, type UseUpdateCheckReturn } from '@/hooks';
 
 export interface SystemStatusPanelProps {
   isCore: boolean;
   libraryMode: LibraryManagerMode;
+  updateCheck?: UseUpdateCheckReturn;
 }
 
 const HEALTH_STYLE: Record<LidarrHealthItem['type'], string> = {
@@ -42,7 +45,9 @@ const WorkerState: React.FC<{ running: boolean; runningLabel?: string; idleLabel
   <span className={running ? 'text-green-400' : 'text-neutral-500'}>{running ? runningLabel : idleLabel}</span>
 );
 
-export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, libraryMode }) => {
+export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, libraryMode, updateCheck }) => {
+  const fallbackUpdateCheck = useUpdateCheck();
+  const updateHook = updateCheck ?? fallbackUpdateCheck;
   const { status, statusError, lidarrHealth, healthError, isLoading } = useSystemOverview(libraryMode === 'lidarr');
   const mediaServer = useMediaServer();
   const mediaConnected = mediaServer.isPlex ? Boolean(status?.plex.online) : Boolean(mediaServer.status?.connected);
@@ -134,6 +139,8 @@ export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, li
           </div>
         )}
       </MachinedCard>
+
+      <UpdatesCard updateCheck={updateHook} />
 
       <MachinedCard className="p-3 sm:p-6 max-w-2xl space-y-4">
         <div className="flex items-center justify-between gap-3">

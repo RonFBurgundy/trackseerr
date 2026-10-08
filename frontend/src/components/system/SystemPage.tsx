@@ -1,6 +1,7 @@
 import React from 'react';
 import type { LibraryManagerMode } from '@/types/models';
 import type { SystemLeaf } from '@/hooks/useAppRoute';
+import type { UseUpdateCheckReturn } from '@/hooks';
 import { SystemStatusPanel } from './SystemStatusPanel';
 import { SystemTasksPanel } from './SystemTasksPanel';
 import { SystemLogsPanel } from './SystemLogsPanel';
@@ -15,15 +16,16 @@ export interface SystemPageProps {
   isCore: boolean;
   libraryMode: LibraryManagerMode;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
+  updateCheck?: UseUpdateCheckReturn;
 }
 
 /** Settings > System. Only the active panel is mounted, so polling and the log stream stop when it is left. */
-export const SystemPage: React.FC<SystemPageProps> = ({ tab, isCore, libraryMode, onToast }) => {
+export const SystemPage: React.FC<SystemPageProps> = ({ tab, isCore, libraryMode, onToast, updateCheck }) => {
   // Logs own their scroller (a nested PageFrame filling the settings body); the rest flow in the body.
   if (tab === 'logs') return <SystemLogsPanel />;
   return (
     <div className="space-y-6">
-      {tab === 'status' && <SystemStatusPanel isCore={isCore} libraryMode={libraryMode} />}
+      {tab === 'status' && <SystemStatusPanel isCore={isCore} libraryMode={libraryMode} updateCheck={updateCheck} />}
       {tab === 'tasks' && <SystemTasksPanel onToast={onToast} />}
       {tab === 'backups' && <BackupPanel onToast={onToast} />}
     </div>
