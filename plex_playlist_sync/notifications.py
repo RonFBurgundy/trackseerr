@@ -7,6 +7,7 @@ dispatched asynchronously via background threads to prevent blocking API respons
 from datetime import datetime, timezone
 from email.message import EmailMessage
 import html
+import json
 import logging
 import smtplib
 import ssl
@@ -20,6 +21,16 @@ from plex_playlist_sync.security import is_safe_service_url
 from plex_playlist_sync.storage import Database
 
 logger = logging.getLogger(__name__)
+
+USER_FACING_EVENTS: frozenset[str] = frozenset({
+    NotificationEvent.REQUEST_APPROVED.value,
+    NotificationEvent.REQUEST_REJECTED.value,
+    NotificationEvent.DOWNLOAD_STARTED.value,
+    NotificationEvent.ITEM_AVAILABLE.value,
+    NotificationEvent.DOWNLOAD_FAILED.value,
+    NotificationEvent.ISSUE_UPDATED.value,
+    NotificationEvent.ISSUE_RESOLVED.value,
+})
 
 
 def format_notification(event: str, data: dict[str, Any]) -> tuple[str, str]:
@@ -93,9 +104,10 @@ class NotificationDispatcher:
         message: str,
         data: dict[str, Any],
         event: Optional[str] = None,
+        allow_lan: bool = True,
     ) -> None:
         """Dispatches an embedded notification payload to a Discord webhook."""
-        if not is_safe_service_url(webhook_url, allow_lan=True):
+        if not is_safe_service_url(webhook_url, allow_lan=allow_lan):
             raise ValueError(f"Prohibited Discord webhook URL (SSRF protection): '{webhook_url}'")
 
         # Color: green for available, blue for requested/approved/download_started, red for failed/rejected/issue
@@ -218,9 +230,10 @@ class NotificationDispatcher:
         event: str,
         data: dict[str, Any],
         secret_header: Optional[str] = None,
+        allow_lan: bool = True,
     ) -> None:
         """Dispatches an HTTP POST webhook containing the complete event payload."""
-        if not is_safe_service_url(webhook_url, allow_lan=True):
+        if not is_safe_service_url(webhook_url, allow_lan=allow_lan):
             raise ValueError(f"Prohibited webhook URL (SSRF protection): '{webhook_url}'")
 
         headers = {"Content-Type": "application/json"}
@@ -293,11 +306,15 @@ class NotificationDispatcher:
         channel: dict[str, Any],
         event: str,
         data: dict[str, Any],
+        allow_lan: Optional[bool] = None,
     ) -> None:
         """Routes notification payload to the matching driver for a configured channel."""
         channel_type = str(channel.get("channel_type", "")).lower().strip()
         config = channel.get("config") or {}
         title, message = self.format_notification(event, data)
+        effective_allow_lan = (
+            allow_lan if allow_lan is not None else (channel.get("owner_user_id") is None)
+        )
 
         if channel_type == NotificationChannelType.DISCORD.value:
             webhook_url = config.get("webhook_url")
@@ -309,6 +326,7 @@ class NotificationDispatcher:
                 message=message,
                 data=data,
                 event=event,
+                allow_lan=effective_allow_lan,
             )
         elif channel_type == NotificationChannelType.TELEGRAM.value:
             bot_token = config.get("bot_token")
@@ -344,8 +362,11 @@ class NotificationDispatcher:
                 event=event,
                 data=data,
                 secret_header=secret_header,
+                allow_lan=effective_allow_lan,
             )
         elif channel_type == NotificationChannelType.EMAIL.value:
+            if channel.get("owner_user_id") is not None:
+                raise ValueError("Email channels are not supported for user channels")
             smtp_host = config.get("smtp_host")
             smtp_port = int(config.get("smtp_port") or 587)
             username = config.get("username")
@@ -369,6 +390,151 @@ class NotificationDispatcher:
             )
         else:
             raise ValueError(f"Unsupported notification channel type '{channel_type}'")
+
+    def _send_web_push(
+        self,
+        db: Database,
+        user_id: str,
+        event: str,
+        data: dict[str, Any],
+    ) -> None:
+        """Sends Web Push notification to all active subscriptions for the given user."""
+        try:
+            subs = db.get_user_web_push_subscriptions(user_id)
+        except Exception as e:
+            logger.warning("Failed to fetch Web Push subscriptions for user '%s': %s", user_id, e)
+            return
+
+        if not subs:
+            return
+
+        title, message = self.format_notification(event, data)
+        link = data.get("link")
+        if not link:
+            if "issue" in event or data.get("issue_id"):
+                iid = data.get("issue_id") or data.get("id")
+                link = f"#/activity/issues/{iid}" if iid else "#/requests"
+            else:
+                link = "#/requests"
+
+        payload = json.dumps({
+            "title": title,
+            "body": message,
+            "url": link,
+            "tag": f"ts-{event}",
+        })
+
+        try:
+            pub_key, priv_key, vapid_sub = db.get_or_create_vapid_keys()
+        except Exception as e:
+            logger.warning("Failed to obtain VAPID keys for Web Push: %s", e)
+            return
+
+        import pywebpush
+        from pywebpush import WebPushException
+
+        vapid_claims = {"sub": vapid_sub}
+
+        for sub in subs:
+            sub_id = sub["id"]
+            endpoint = sub["endpoint"]
+            sub_info = {
+                "endpoint": endpoint,
+                "keys": {
+                    "p256dh": sub["p256dh"],
+                    "auth": sub["auth"],
+                },
+            }
+            try:
+                pywebpush.webpush(
+                    subscription_info=sub_info,
+                    data=payload,
+                    vapid_private_key=priv_key,
+                    vapid_claims=vapid_claims,
+                )
+                db.record_web_push_success(sub_id)
+                logger.info("Successfully delivered Web Push to user '%s' (subscription %s)", user_id, sub_id)
+            except WebPushException as e:
+                status_code = getattr(e, "status_code", None)
+                if status_code in (404, 410):
+                    logger.info("Web Push subscription %s returned %s, deleting subscription", sub_id, status_code)
+                    db.delete_web_push_subscription_by_id(sub_id)
+                else:
+                    failures = db.increment_web_push_failure(sub_id)
+                    logger.warning("Web Push delivery failed for %s (%s consecutive failures): %s", sub_id, failures, e)
+                    if failures >= 5:
+                        logger.info("Deleting Web Push subscription %s after 5 consecutive failures", sub_id)
+                        db.delete_web_push_subscription_by_id(sub_id)
+            except Exception as e:
+                failures = db.increment_web_push_failure(sub_id)
+                logger.warning("Unexpected error during Web Push for %s (%s consecutive failures): %s", sub_id, failures, e)
+                if failures >= 5:
+                    logger.info("Deleting Web Push subscription %s after 5 consecutive failures", sub_id)
+                    db.delete_web_push_subscription_by_id(sub_id)
+
+    def send_push_test(
+        self,
+        db: Database,
+        user_id: str,
+    ) -> tuple[bool, str]:
+        """Synchronously sends a test Web Push notification to user_id."""
+        subs = db.get_user_web_push_subscriptions(user_id)
+        if not subs:
+            return False, "No push subscriptions found for this device or account"
+
+        payload = json.dumps({
+            "title": "TrackSeerr Test Notification",
+            "body": "Web Push notifications are working!",
+            "url": "#/settings/account",
+            "tag": "test-push",
+        })
+
+        try:
+            pub_key, priv_key, vapid_sub = db.get_or_create_vapid_keys()
+        except Exception as e:
+            logger.warning("Failed to obtain VAPID keys for test Web Push: %s", e)
+            return False, f"VAPID key error: {e}"
+
+        import pywebpush
+        from pywebpush import WebPushException
+
+        vapid_claims = {"sub": vapid_sub}
+        delivered = 0
+        last_error = ""
+
+        for sub in subs:
+            sub_id = sub["id"]
+            endpoint = sub["endpoint"]
+            sub_info = {
+                "endpoint": endpoint,
+                "keys": {
+                    "p256dh": sub["p256dh"],
+                    "auth": sub["auth"],
+                },
+            }
+            try:
+                pywebpush.webpush(
+                    subscription_info=sub_info,
+                    data=payload,
+                    vapid_private_key=priv_key,
+                    vapid_claims=vapid_claims,
+                )
+                db.record_web_push_success(sub_id)
+                delivered += 1
+            except WebPushException as e:
+                status_code = getattr(e, "status_code", None)
+                if status_code in (404, 410):
+                    db.delete_web_push_subscription_by_id(sub_id)
+                else:
+                    db.increment_web_push_failure(sub_id)
+                last_error = str(e)
+            except Exception as e:
+                db.increment_web_push_failure(sub_id)
+                last_error = str(e)
+
+        if delivered > 0:
+            return True, f"Test notification sent to {delivered} active subscription(s)"
+        return False, last_error or "Failed to deliver push notification"
 
     def _run_dispatch(
         self,
@@ -402,7 +568,7 @@ class NotificationDispatcher:
                 if env_url:
                     data["application_url"] = env_url
 
-            channels = database.list_notification_channels(enabled_only=True)
+            channels = database.list_notification_channels(enabled_only=True, global_only=True)
         except Exception as e:
             logger.warning("Failed to query notification channels for event '%s': %s", event, e)
             return
@@ -435,6 +601,101 @@ class NotificationDispatcher:
                     e,
                 )
 
+        # Resolve owning user id
+        owner_user_id = data.get("user_id") or data.get("requested_by") or data.get("reporter_id")
+        if not owner_user_id and database is not None:
+            if data.get("request_id"):
+                try:
+                    req_row = database.get_request(data["request_id"])
+                    if req_row:
+                        owner_user_id = req_row.get("user_id")
+                except Exception as e:
+                    logger.debug("Could not lookup request owner for notification dispatch: %s", e)
+            elif data.get("issue_id"):
+                try:
+                    issue_row = database.get_issue(data["issue_id"])
+                    if issue_row:
+                        owner_user_id = issue_row.get("user_id")
+                except Exception as e:
+                    logger.debug("Could not lookup issue owner for notification dispatch: %s", e)
+
+        # Skip per-user delivery if the actor who caused the event is the owner
+        actor_user_id = data.get("actor_user_id")
+        if actor_user_id and owner_user_id and str(actor_user_id) == str(owner_user_id):
+            logger.debug(
+                "Skipping per-user notification for event '%s': actor '%s' is owner",
+                event,
+                actor_user_id,
+            )
+            return
+
+        # User-facing events delivery (isolated strictly to owning user)
+        if event in USER_FACING_EVENTS and owner_user_id and database is not None:
+            in_app, push = database.get_user_notification_pref(owner_user_id, event)
+
+            # In-app inbox
+            if in_app:
+                title, message = self.format_notification(event, data)
+                link = data.get("link")
+                if not link:
+                    if "issue" in event or data.get("issue_id"):
+                        iid = data.get("issue_id") or data.get("id")
+                        link = f"#/activity/issues/{iid}" if iid else "#/requests"
+                    else:
+                        link = "#/requests"
+                try:
+                    database.create_user_notification(
+                        user_id=owner_user_id,
+                        event=event,
+                        title=title,
+                        message=message,
+                        link=link,
+                    )
+                    logger.info("Created in-app notification '%s' for user '%s'", event, owner_user_id)
+                except Exception as e:
+                    logger.warning("Failed to create in-app notification for user '%s' on '%s': %s", owner_user_id, event, e)
+
+            # User's own notification channels
+            try:
+                user_channels = database.list_notification_channels(
+                    enabled_only=True, owner_user_id=owner_user_id
+                )
+            except Exception as e:
+                logger.warning("Failed to query user channels for '%s': %s", owner_user_id, e)
+                user_channels = []
+
+            for uch in user_channels:
+                try:
+                    ch_events = uch.get("events") or []
+                    if event not in ch_events:
+                        continue
+                    self._send_to_channel(uch, event, data, allow_lan=False)
+                    logger.info(
+                        "Delivered user notification '%s' to user channel '%s' for user '%s'",
+                        event,
+                        uch.get("name"),
+                        owner_user_id,
+                    )
+                except (httpx.HTTPError, httpx.TimeoutException, smtplib.SMTPException, ValueError) as e:
+                    logger.warning(
+                        "Delivery failed for user channel '%s' (%s) on event '%s': %s",
+                        uch.get("name"),
+                        uch.get("channel_type"),
+                        event,
+                        e,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Unexpected error delivering to user channel '%s' on event '%s': %s",
+                        uch.get("name"),
+                        event,
+                        e,
+                    )
+
+            # Web Push
+            if push:
+                self._send_web_push(database, owner_user_id, event, data)
+
     def dispatch(
         self,
         event: Union[str, NotificationEvent],
@@ -452,13 +713,19 @@ class NotificationDispatcher:
         )
         t.start()
 
-    def test_channel(self, channel_type: str, config: dict[str, Any]) -> tuple[bool, str]:
+    def test_channel(
+        self,
+        channel_type: str,
+        config: dict[str, Any],
+        allow_lan: bool = True,
+        owner_user_id: Optional[str] = None,
+    ) -> tuple[bool, str]:
         """Synchronously tests a channel configuration with a synthetic test event."""
         synthetic_data = {
             "artist": "TrackSeerr Test Artist",
             "title": "Notification Test Track",
             "album": "Test Album",
-            "username": "admin",
+            "username": "admin" if owner_user_id is None else "user",
             "item_type": "track",
         }
         import os
@@ -472,9 +739,10 @@ class NotificationDispatcher:
             "name": "Live Test Channel",
             "channel_type": channel_type,
             "config": config,
+            "owner_user_id": owner_user_id,
         }
         try:
-            self._send_to_channel(dummy_channel, "test", synthetic_data)
+            self._send_to_channel(dummy_channel, "test", synthetic_data, allow_lan=allow_lan)
             return True, "Notification sent successfully"
         except (httpx.HTTPError, httpx.TimeoutException, smtplib.SMTPException, ValueError) as e:
             logger.warning("Live test delivery failed for channel type '%s': %s", channel_type, e)
@@ -491,4 +759,6 @@ __all__ = [
     "NotificationDispatcher",
     "notification_dispatcher",
     "format_notification",
+    "USER_FACING_EVENTS",
 ]
+

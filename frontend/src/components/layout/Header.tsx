@@ -12,6 +12,7 @@ import {
   Shield,
   Menu,
   X,
+  Bell,
 } from 'lucide-react';
 import type { DeploymentTier, User, UserQuota } from '@/types/models';
 import type { MainTab } from '@/hooks/useAppRoute';
@@ -36,6 +37,10 @@ export interface HeaderProps {
   issuesOpenCount?: number;
   /** The user's own issues with unseen admin activity, shown on the Requests key. */
   issuesUnreadCount?: number;
+  /** User notifications unread count for the bell badge. */
+  unreadNotificationsCount?: number;
+  /** Handler to open user notification inbox. */
+  onOpenInbox?: () => void;
   tier?: DeploymentTier;
   /** Admin with a usable session: the logo shows task activity and opens the activity popover (polls /api/system/activity). */
   activityEnabled?: boolean;
@@ -56,6 +61,8 @@ export const Header: React.FC<HeaderProps> = ({
   reviewCount = 0,
   issuesOpenCount = 0,
   issuesUnreadCount = 0,
+  unreadNotificationsCount = 0,
+  onOpenInbox,
   tier = 'all-in-one',
   activityEnabled = false,
   onOpenTasks,
@@ -248,6 +255,23 @@ export const Header: React.FC<HeaderProps> = ({
                   {user.username}
                 </span>
               </div>
+              {onOpenInbox && (
+                <TapeDeckButton
+                  size="sm"
+                  variant="default"
+                  onClick={onOpenInbox}
+                  title="Notifications"
+                  aria-label={`Notifications${unreadNotificationsCount > 0 ? ` (${unreadNotificationsCount} unread)` : ''}`}
+                  icon={<Bell className="h-4 w-4 text-neutral-300" />}
+                  className="relative"
+                >
+                  {unreadNotificationsCount > 0 && (
+                    <span className="ml-1 px-1 rounded-[3px] bg-[var(--accent-amber)] text-[10px] font-mono font-bold text-black">
+                      {unreadNotificationsCount}
+                    </span>
+                  )}
+                </TapeDeckButton>
+              )}
               <TapeDeckButton
                 size="sm"
                 variant="default"
@@ -272,9 +296,29 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* Hub key (every viewport): right edge on phones, left edge on desktop. Sign In stands in when signed out. */}
+        {/* Hub key & Bell button (every viewport): right edge on phones, left edge on desktop. Sign In stands in when signed out. */}
         {user ? (
-          <div className="order-last md:order-first ml-auto md:ml-0 flex items-center flex-shrink-0">
+          <div className="order-last md:order-first ml-auto md:ml-0 flex items-center gap-1.5 flex-shrink-0">
+            {onOpenInbox && (
+              <TapeDeckButton
+                size="sm"
+                variant="default"
+                onClick={onOpenInbox}
+                title="Notifications"
+                aria-label={`Notifications${unreadNotificationsCount > 0 ? ` (${unreadNotificationsCount} unread)` : ''}`}
+                icon={<Bell className="h-4 w-4 text-neutral-300" />}
+                className="md:hidden relative w-9 h-9 !min-h-0 p-0 rounded-[3px] shrink-0"
+              >
+                {unreadNotificationsCount > 0 && (
+                  <span
+                    className="absolute -top-1 -right-1 min-w-[14px] px-0.5 rounded-[3px] bg-[var(--accent-amber)] text-[9px] leading-[14px] font-mono font-bold text-black text-center"
+                    aria-hidden="true"
+                  >
+                    {unreadNotificationsCount}
+                  </span>
+                )}
+              </TapeDeckButton>
+            )}
             <TapeDeckButton
               size="sm"
               variant="default"

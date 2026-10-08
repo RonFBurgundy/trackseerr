@@ -300,6 +300,20 @@ class TestIsSafeServiceUrl:
         assert is_safe_service_url("http://127.0.0.1:8080", allow_lan=False) is False
         assert is_safe_service_url("http://localhost:8080", allow_lan=False) is False
 
+    def test_dns_resolution_and_allow_lan(self, monkeypatch):
+        # literal 10.0.0.5 rejected with allow_lan=False
+        assert is_safe_service_url("http://10.0.0.5:5030", allow_lan=False) is False
+
+        # hostname->127.0.0.1 rejected with allow_lan=True and False
+        monkeypatch.setattr("plex_playlist_sync.security._resolve_host", lambda host: ["127.0.0.1"])
+        assert is_safe_service_url("http://custom-host.local:8080", allow_lan=True) is False
+        assert is_safe_service_url("http://custom-host.local:8080", allow_lan=False) is False
+
+        # hostname->192.168.1.5 allowed with allow_lan=True, rejected with allow_lan=False
+        monkeypatch.setattr("plex_playlist_sync.security._resolve_host", lambda host: ["192.168.1.5"])
+        assert is_safe_service_url("http://custom-host.local:8080", allow_lan=True) is True
+        assert is_safe_service_url("http://custom-host.local:8080", allow_lan=False) is False
+
     def test_unspecified_ip_rejected(self):
         assert is_safe_service_url("http://0.0.0.0:8080") is False
         assert is_safe_service_url("http://[::]:8080") is False

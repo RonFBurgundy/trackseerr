@@ -53,6 +53,7 @@ from plex_playlist_sync.api.routes import (
     settings,
     sync,
     system,
+    user_notifications,
     users,
     wanted,
 )
@@ -234,6 +235,9 @@ def create_app(
     api_router = APIRouter(prefix="/api")
     api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
     api_router.include_router(account.router, prefix="/account", tags=["account"])
+    api_router.include_router(
+        user_notifications.router, prefix="/account/notifications", tags=["account-notifications"]
+    )
     api_router.include_router(internal.router, prefix="/internal", tags=["internal"])
     api_router.include_router(users.router, prefix="/users", tags=["users"])
     api_router.include_router(admin_users.router, prefix="/admin", tags=["admin-users"])

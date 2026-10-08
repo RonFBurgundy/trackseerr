@@ -1165,6 +1165,7 @@ class AcquisitionWorker:
                 except Exception as ev_err:
                     logger.warning("Failed to record download_failed event: %s", ev_err)
                 try:
+                    req_info = db.get_request(item["request_id"]) if item.get("request_id") else None
                     notification_dispatcher.dispatch(
                         NotificationEvent.DOWNLOAD_FAILED,
                         data={
@@ -1172,6 +1173,7 @@ class AcquisitionWorker:
                             "title": item.get("title"),
                             "download_id": download_id,
                             "request_id": item.get("request_id"),
+                            "user_id": req_info.get("user_id") if req_info else None,
                             "error_message": err_text,
                         },
                         db=db,
@@ -1321,6 +1323,7 @@ class AcquisitionWorker:
                                 "download_id": download_id,
                                 "cover_url": req_row.get("cover_url") if req_row else None,
                                 "username": req_row.get("username") if req_row else None,
+                                "user_id": req_row.get("user_id") if req_row else None,
                             },
                             db=db,
                         )
@@ -2142,6 +2145,7 @@ class AcquisitionWorker:
                             "target_path": target_summary,
                             "cover_url": req.get("cover_url") if req else None,
                             "username": req.get("username") if req else None,
+                            "user_id": req.get("user_id") if req else None,
                         },
                         db=db,
                     )

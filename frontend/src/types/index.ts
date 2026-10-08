@@ -21,5 +21,6 @@ export * from './seedCleanup';
 export * from './itemHistory';
 export * from './tags';
 export * from './notifications';
+export * from './userNotifications';
 export * from './listening';
 export * from './backup';

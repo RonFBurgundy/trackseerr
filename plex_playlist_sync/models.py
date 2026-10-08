@@ -642,6 +642,7 @@ class NotificationChannel:
     )
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    owner_user_id: Optional[str] = None
 
     def to_dict(self, mask_secrets: bool = False) -> dict[str, Any]:
         cfg = dict(self.config) if isinstance(self.config, dict) else {}
@@ -664,6 +665,7 @@ class NotificationChannel:
             ],
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "owner_user_id": self.owner_user_id,
         }
 
 

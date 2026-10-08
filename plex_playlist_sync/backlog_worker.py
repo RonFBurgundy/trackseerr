@@ -1116,6 +1116,7 @@ class RSSSyncWorker:
                                 "release": candidate.title,
                                 "client": client.get("name"),
                                 "request_id": matched_req["id"],
+                                "user_id": matched_req.get("user_id") or matched_req.get("requested_by"),
                                 "download_id": download_id,
                                 "size_bytes": candidate.size_bytes,
                             },

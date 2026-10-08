@@ -616,6 +616,7 @@ class AcquisitionCoordinator:
         except sqlite3.Error as hist_err:
             logger.warning("Failed to record grab history for %s: %s", download_id, type(hist_err).__name__)
 
+        req_row = db.get_request(request_id) if request_id else None
         try:
             notification_dispatcher.dispatch(
                 NotificationEvent.DOWNLOAD_STARTED,
@@ -625,6 +626,7 @@ class AcquisitionCoordinator:
                     "album": album,
                     "item_type": item_type,
                     "request_id": request_id,
+                    "user_id": req_row.get("user_id") if req_row else None,
                     "client": client.get("name"),
                     "release": top_candidate.title,
                     "download_id": download_id,

@@ -276,22 +276,45 @@ def _visible_issue(db: Database, issue_id: str, user: dict[str, Any]) -> dict[st
 
 
 def _notify(
-    db: Database, event: NotificationEvent, issue: dict[str, Any], actor_name: Optional[str], update: str
+    db: Database,
+    event: NotificationEvent,
+    issue: dict[str, Any],
+    actor_name: Optional[str],
+    update: str,
+    actor_user_id: Optional[str] = None,
 ) -> None:
     """Sends an issue event to the notification agents (admin-facing; carries no library ids or paths)."""
     data: dict[str, Any] = {
-        key: issue.get(key) for key in ("id", "media_title", "artist", "issue_type", "status", "username", "request_id")
+        key: issue.get(key)
+        for key in (
+            "id",
+            "media_title",
+            "artist",
+            "issue_type",
+            "status",
+            "username",
+            "request_id",
+            "user_id",
+        )
     }
+    data["issue_id"] = issue.get("id")
     data["title"] = issue.get("media_title")
     data["problem_details"] = str(issue.get("problem_details") or "")[:ISSUE_NOTIFICATION_DETAILS_MAX]
     data["update"] = f"{update} by {actor_name}" if actor_name else update
+    if actor_user_id is not None:
+        data["actor_user_id"] = str(actor_user_id)
     notification_dispatcher.dispatch(event, data, db)
 
 
-def _notify_status(db: Database, issue: dict[str, Any], actor_name: Optional[str]) -> None:
+def _notify_status(
+    db: Database,
+    issue: dict[str, Any],
+    actor_name: Optional[str],
+    actor_user_id: Optional[str] = None,
+) -> None:
     final = issue["status"] in FINAL_STATUSES
     event = NotificationEvent.ISSUE_RESOLVED if final else NotificationEvent.ISSUE_UPDATED
-    _notify(db, event, issue, actor_name, f"Status changed to {issue['status']}")
+    _notify(db, event, issue, actor_name, f"Status changed to {issue['status']}", actor_user_id=actor_user_id)
 
 
 def _conflict_response(detail: str, existing_issue_id: str) -> JSONResponse:
@@ -358,7 +381,7 @@ def _apply_status(
     updated = db.get_issue(issue["id"])
     if updated is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media issue not found")
-    _notify_status(db, updated, user.get("username"))
+    _notify_status(db, updated, user.get("username"), actor_user_id=str(user["id"]) if user.get("id") else None)
     if new_status in FINAL_STATUSES:
         _record_issue_event(db, "issue_resolved", updated, user, f"Issue {new_status}", status=new_status)
     return updated
@@ -507,6 +530,8 @@ def create_issue(
     if not notification_data.get("username"):
         notification_data["username"] = current_user.get("username")
     notification_data.setdefault("title", created.get("media_title"))
+    if current_user.get("id"):
+        notification_data["actor_user_id"] = str(current_user["id"])
     notification_dispatcher.dispatch(NotificationEvent.ISSUE_REPORTED, notification_data, db)
     _record_issue_event(db, "issue_opened", created, current_user, f"Issue opened: {issue_type}")
 
@@ -605,7 +630,14 @@ def add_comment(
             expected_status=IssueStatus.OPEN.value,
         )
     refreshed = db.get_issue(issue_id) or issue
-    _notify(db, NotificationEvent.ISSUE_UPDATED, refreshed, current_user.get("username"), "New comment")
+    _notify(
+        db,
+        NotificationEvent.ISSUE_UPDATED,
+        refreshed,
+        current_user.get("username"),
+        "New comment",
+        actor_user_id=str(current_user["id"]) if current_user.get("id") else None,
+    )
     return _present_comment(comment, current_user, is_admin)
 
 
@@ -776,5 +808,12 @@ def run_issue_action(
             issue_id, IssueStatus.IN_PROGRESS.value, str(admin["id"]), True, expected_status=issue["status"]
         )
     updated = db.get_issue(issue_id) or issue
-    _notify(db, NotificationEvent.ISSUE_UPDATED, updated, admin.get("username"), f"Ran {ACTION_LABELS[action]}")
+    _notify(
+        db,
+        NotificationEvent.ISSUE_UPDATED,
+        updated,
+        admin.get("username"),
+        f"Ran {ACTION_LABELS[action]}",
+        actor_user_id=str(admin["id"]) if admin.get("id") else None,
+    )
     return {"action": action, "result": result, "issue": _present_issue(db, updated, admin, True, native)}
