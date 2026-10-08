@@ -217,18 +217,16 @@ def run_update_check(db: Database, config: Optional[Config] = None) -> dict[str,
             published_at=None,
             checked_at=checked_at,
             error=None,
+            clear_release=True,
         )
-        state = db.get_update_check_state()
-        latest = state.get("latest_version")
-        update_available = bool(latest and is_newer_version(latest, current_version))
         return {
             "current_version": current_version,
             "current_commit": current_commit,
-            "latest_version": latest,
-            "release_url": state.get("release_url"),
-            "published_at": state.get("published_at"),
+            "latest_version": None,
+            "release_url": None,
+            "published_at": None,
             "checked_at": checked_at,
-            "update_available": update_available,
+            "update_available": False,
             "enabled": True,
             "error": None,
         }

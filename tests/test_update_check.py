@@ -300,6 +300,23 @@ class TestRunUpdateCheck:
             assert state["latest_version"] is None
             assert state["error"] is None
 
+    def test_run_404_clears_previous_release(self, test_db, test_config):
+        test_db.save_update_check_result(
+            latest_version="1.5.0",
+            release_url="https://github.com/RonFBurgundy/trackseerr/releases/tag/v1.5.0",
+            published_at="2026-09-01T00:00:00Z",
+            checked_at="2026-09-01T00:00:00Z",
+            error=None,
+        )
+        with patch("plex_playlist_sync.update_check.fetch_latest_release", return_value=(None, None)):
+            res = run_update_check(test_db, test_config)
+            assert res["latest_version"] is None
+            assert res["update_available"] is False
+            state = test_db.get_update_check_state()
+            assert state["latest_version"] is None
+            assert state["release_url"] is None
+            assert state["published_at"] is None
+
     def test_run_403_rate_limit_keeps_last_good_result(self, test_db, test_config):
         # 1. Seed DB with last good result
         test_db.save_update_check_result(
@@ -413,6 +430,18 @@ class TestUpdateApiEndpoints:
             require_core_tier(gateway_cfg)
         assert exc_info.value.status_code == 403
 
+    def test_not_on_gateway_allowlists(self):
+        """Endpoints under /api/system/update must never be present on any gateway allowlist."""
+        from plex_playlist_sync.api import tier_middleware
+
+        for table in (
+            tier_middleware.GATEWAY_LOCAL_ALLOWLIST,
+            tier_middleware.GATEWAY_FORWARD_ALLOWLIST,
+            tier_middleware.GATEWAY_FORWARD_SERVICE_ALLOWLIST,
+        ):
+            assert not tier_middleware._allowed(table, "GET", "/api/system/update")
+            assert not tier_middleware._allowed(table, "PUT", "/api/system/update")
+
 
 # =============================================================================
 # 5. Schema v70 Migration Tests
@@ -504,14 +533,30 @@ class TestTaskRegistration:
     def test_update_check_task_registered(self):
         assert "update_check" in TASKS
         spec = TASKS["update_check"]
-        assert spec.name == "update_check"
-        assert spec.label == "Software Update Check"
-        assert spec.interval == 12 * 3600  # 12 hours
+        assert spec.id == "update_check"
+        assert spec.name == "Software Update Check"
+        assert spec.default_interval_seconds == 12 * 3600  # 12 hours
         assert spec.kind == "interval"
-        assert spec.manual_runnable is True
+        assert 6 * 3600 in spec.presets
+        assert spec.editable is True
 
     def test_worker_thread_tasks_mapping(self):
         assert "UpdateCheckWorkerThread" in WORKER_THREAD_TASKS
         assert WORKER_THREAD_TASKS["UpdateCheckWorkerThread"] == "update_check"
         assert "ManualUpdateCheckTask" in WORKER_THREAD_TASKS
         assert WORKER_THREAD_TASKS["ManualUpdateCheckTask"] == "update_check"
+
+    def test_manual_run_via_tasks_api(self, app_and_client, seeded_users, secret_key, test_db):
+        _, client = app_and_client
+        admin_cookies = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
+        with patch("plex_playlist_sync.update_check.run_update_check") as mock_run:
+            mock_run.return_value = {
+                "current_version": "1.0.0",
+                "latest_version": "1.1.0",
+                "update_available": True,
+                "enabled": True,
+                "error": None,
+            }
+            resp = client.post("/api/system/tasks/update_check/run", cookies=admin_cookies)
+            assert resp.status_code == 200
+            assert resp.json()["success"] is True

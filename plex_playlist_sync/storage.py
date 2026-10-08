@@ -5089,11 +5089,23 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
         published_at: Optional[str],
         checked_at: Optional[str],
         error: Optional[str] = None,
+        clear_release: bool = False,
     ) -> None:
         """Persists the outcome of an update check."""
         with self._lock:
             self._ensure_general_row()
-            if latest_version is not None:
+            if clear_release:
+                self.conn.execute(
+                    "UPDATE general_settings SET "
+                    "update_latest_version = NULL, "
+                    "update_release_url = NULL, "
+                    "update_published_at = NULL, "
+                    "update_checked_at = ?, "
+                    "update_error = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+                    (checked_at, error),
+                )
+            elif latest_version is not None:
                 self.conn.execute(
                     "UPDATE general_settings SET "
                     "update_latest_version = ?, "
