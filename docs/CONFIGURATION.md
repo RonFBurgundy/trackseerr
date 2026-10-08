@@ -104,6 +104,7 @@ None of these are required. Public Spotify playlists import without any keys.
 | Variable | Default | Description |
 |---|---|---|
 | `AUTO_APPROVE_REQUESTS` | `0` | `1` approves every request on submit. To do this per user instead, give them the auto-approve permission. |
+| `USER_REQUEST_QUOTA` | unset | Legacy. Read once, when the database is upgraded from an older version, to seed the default track and album quotas. Has no effect after that. |
 
 Quotas are set in **Settings > Requests > Users**. See [Users and requests](USERS_AND_REQUESTS.md).
 

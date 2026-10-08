@@ -118,6 +118,7 @@ Using TrackSeerr:
 Reference:
 
 - [Architecture and security](docs/ARCHITECTURE_AND_SECURITY.md)
+- [Roadmap](docs/ROADMAP.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 
