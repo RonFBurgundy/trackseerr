@@ -1,4 +1,4 @@
-"""Server-side enforcement of the user access policy (docs/two-tier-security.md, "Access policy")."""
+"""Server-side enforcement of the user access policy (docs/design/two-tier-security.md, "Access policy")."""
 
 import json
 from pathlib import Path

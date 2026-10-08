@@ -4,7 +4,7 @@ Writes ``docker-compose.dmz.yml`` and ``.env`` (mode 0600) and prints the Unraid
 network calls, never overwrites an existing file (it writes ``<name>.new`` instead), and keeps every
 secret out of stdout except the freshly generated ``INTERNAL_CORE_SECRET``, shown once. Secrets from an
 existing all-in-one container are carried by reference (``${NAME}`` in compose, value only in ``.env``).
-See ``docs/dmz-ergonomics.md`` section 5.
+See ``docs/design/dmz-ergonomics.md`` section 5.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """Arr-style decision engine: custom formats, release profiles, quality definitions, ranking and upgrades.
 
-Semantics follow Lidarr (docs/QUALITY_RESEARCH.md) with the deliberate deviations listed in docs/ARR_PROFILES_SPEC.md:
+Semantics follow Lidarr (docs/design/QUALITY_RESEARCH.md) with the deliberate deviations listed in docs/design/ARR_PROFILES_SPEC.md:
 
 * Quality order beats format score; format score breaks ties inside a quality tier (spec section 6).
 * A custom format matches when, for **each implementation type present**, every ``required`` spec passes and, if the

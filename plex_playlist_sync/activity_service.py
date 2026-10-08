@@ -1,7 +1,7 @@
 """Activity (queue / history / blocklist) and Wanted (missing / cutoff unmet), served from either manager.
 
 ``native`` mode reads TrackSeerr's own tables; ``lidarr`` mode proxies Lidarr API v1 live with Lidarr's own paging and
-sort. Both produce the same normalised record shapes (see docs/system-activity-redesign.md, "Phase 3 API contract").
+sort. Both produce the same normalised record shapes (see docs/design/system-activity-redesign.md, "Phase 3 API contract").
 
 Lidarr records are normalised defensively: a field that is missing or of an unexpected type becomes ``None`` rather
 than failing the whole page. Free text that originates in a client (Lidarr/download-client messages) passes through

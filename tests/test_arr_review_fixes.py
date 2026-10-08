@@ -1,4 +1,4 @@
-"""Regression tests for the ARR profiles review findings (docs/ARR_PROFILES_SPEC.md)."""
+"""Regression tests for the ARR profiles review findings (docs/design/ARR_PROFILES_SPEC.md)."""
 
 import json
 import sqlite3
