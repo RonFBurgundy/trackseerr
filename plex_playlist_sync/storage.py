@@ -5773,6 +5773,57 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
             self.conn.commit()
             return cur.rowcount > 0
 
+    # Using SQLite rowid as integer ID for Lidarr compatibility
+    # (stable: the app never VACUUMs and backups use the sqlite backup API)
+    def get_indexer_by_rowid(self, rowid: int) -> Optional[dict[str, Any]]:
+        """Retrieves a single indexer by SQLite rowid."""
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT rowid, * FROM indexers WHERE rowid = ?", (int(rowid),)
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            res = dict(row)
+            res["enabled"] = bool(res.get("enabled", 1))
+            res["priority"] = int(res.get("priority", 1))
+            return res
+
+    def get_indexer_rowid(self, indexer_id: str) -> Optional[int]:
+        """Returns the SQLite rowid for an indexer by its UUID id."""
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT rowid FROM indexers WHERE id = ?", (str(indexer_id),)
+            )
+            row = cur.fetchone()
+            return int(row[0]) if row else None
+
+    def list_indexers_with_rowid(self, enabled_only: bool = False) -> list[dict[str, Any]]:
+        """Lists indexers with rowid included, ordered by priority ASC, created_at ASC."""
+        with self._lock:
+            if enabled_only:
+                cur = self.conn.execute(
+                    "SELECT rowid, * FROM indexers WHERE enabled = 1 ORDER BY priority ASC, created_at ASC"
+                )
+            else:
+                cur = self.conn.execute(
+                    "SELECT rowid, * FROM indexers ORDER BY priority ASC, created_at ASC"
+                )
+            rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            r["enabled"] = bool(r.get("enabled", 1))
+            r["priority"] = int(r.get("priority", 1))
+        return rows
+
+    def delete_indexer_by_rowid(self, rowid: int) -> bool:
+        """Deletes an indexer by SQLite rowid."""
+        with self._lock:
+            cur = self.conn.execute(
+                "DELETE FROM indexers WHERE rowid = ?", (int(rowid),)
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
     # -------------------------------------------------------------------------
     # Active Downloads CRUD
     # -------------------------------------------------------------------------

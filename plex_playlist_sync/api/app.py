@@ -34,6 +34,7 @@ from plex_playlist_sync.api.routes import (
     internal,
     issues,
     itunes_import,
+    lidarr_compat,
     library,
     library_health,
     seed_cleanup,
@@ -281,6 +282,9 @@ def create_app(
     api_router.include_router(backups.router, prefix="/system/backups", tags=["backups"])
     api_router.include_router(activity.router, prefix="/activity", tags=["activity"])
     api_router.include_router(wanted.router, prefix="/wanted", tags=["wanted"])
+    api_router.include_router(
+        lidarr_compat.router, prefix="/v1", tags=["lidarr-compat"], include_in_schema=False
+    )
 
     @api_router.api_route("/health", methods=["HEAD"], include_in_schema=False)
     @api_router.get("/health", tags=["health"])

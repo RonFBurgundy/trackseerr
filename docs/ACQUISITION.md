@@ -6,6 +6,7 @@ TrackSeerr can find and download music on its own, or pass the work to Lidarr. T
 - [Before you start](#before-you-start)
 - [Download clients](#download-clients)
 - [Indexers](#indexers)
+- [Sync indexers from Prowlarr](#sync-indexers-from-prowlarr)
 - [Quality and profiles](#quality-and-profiles)
 - [How searching works](#how-searching-works)
 - [How importing works](#how-importing-works)
@@ -67,6 +68,18 @@ Torrent indexers have seeding rules. Leave a field empty to use the global value
 | Minimum seeders | Skip releases with fewer seeders. |
 
 A torrent has met its goal when it reaches either the ratio or the seed time. The rules are also sent to qBittorrent, so they hold even while TrackSeerr is stopped. Changing a rule later does not affect torrents already seeding.
+
+## Sync indexers from Prowlarr
+
+You can sync indexers from Prowlarr automatically. TrackSeerr provides a Lidarr-compatible API for this sync.
+
+1. In Prowlarr, open **Settings > Apps** and click **Add**.
+2. Choose **Lidarr**.
+3. Set **Lidarr Server** to your TrackSeerr core URL, such as `http://trackseerr:5250`. You must use the core URL. The public gateway does not allow indexer sync routes.
+4. Set **API Key** to your TrackSeerr API key. You can find it in **Settings > General > Security**.
+5. Test the connection and save.
+
+Prowlarr will now add, update, and remove indexers in TrackSeerr. Any seed rules set on indexers in Prowlarr land as per-indexer seed rules in TrackSeerr.
 
 ## Quality and profiles
 
