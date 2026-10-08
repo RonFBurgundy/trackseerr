@@ -14,7 +14,7 @@ The *arrs remove a finished torrent only while they are still tracking it. After
 | `remove` | Remove the torrent from the client and keep its files. This is today's behaviour. |
 | `remove_and_delete` | Remove the torrent **and its files**, reclaiming the space a copy-and-tag import used while seeding. |
 
-The seed goal is the download's snapshotted indexer rule (`docs/indexer-seed-rules.md`), falling back to the global ratio and time limits. An indexer rule that hasn't been met always blocks removal.
+The seed goal is the download's snapshotted indexer rule (`docs/design/indexer-seed-rules.md`), falling back to the global ratio and time limits. An indexer rule that hasn't been met always blocks removal.
 
 ### File-deletion safety gate (`remove_and_delete` only)
 `delete_files=True` is sent only when **all** of these hold. Otherwise the action falls back to `remove` and logs why:

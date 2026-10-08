@@ -1,6 +1,6 @@
 # Users, Local Accounts, MFA & Request Quotas — design contract
 
-Status: in implementation on branch `feat/users-and-accounts`. This builds on `docs/two-tier-security.md`; read that first. Security is the top priority.
+Status: in implementation on branch `feat/users-and-accounts`. This builds on `docs/design/two-tier-security.md`; read that first. Security is the top priority.
 
 Owner decisions (2026-10-03):
 - Local (non-Plex) accounts are **admin-created with a one-time invite link**. The user sets their own password, and there is no public signup.
