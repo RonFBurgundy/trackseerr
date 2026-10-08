@@ -13,7 +13,7 @@ export type WantedSub = WantedListName;
 export type SettingsSection = 'general' | 'media-management' | 'lidarr' | 'requests' | 'system' | 'account';
 export type MediaManagementLeaf = 'media' | 'quality' | 'profiles' | 'custom-formats' | 'clients' | 'indexers' | 'import-lists' | 'media-server';
 export type RequestsLeaf = 'users' | 'scrobbling' | 'notifications';
-export type SystemLeaf = 'status' | 'tasks' | 'logs';
+export type SystemLeaf = 'status' | 'tasks' | 'backups' | 'logs';
 export type SettingsLeafId = MediaManagementLeaf | RequestsLeaf | SystemLeaf;
 
 export type SettingsRoute =
@@ -100,7 +100,7 @@ export const MEDIA_MANAGEMENT_LEAVES: readonly MediaManagementLeaf[] = [
   'media-server',
 ];
 export const REQUESTS_LEAVES: readonly RequestsLeaf[] = ['users', 'scrobbling', 'notifications'];
-export const SYSTEM_LEAVES: readonly SystemLeaf[] = ['status', 'tasks', 'logs'];
+export const SYSTEM_LEAVES: readonly SystemLeaf[] = ['status', 'tasks', 'backups', 'logs'];
 /** Retired System leaves folded into the Tasks page; old bookmarks land there instead of on Status. */
 const LEGACY_SYSTEM_LEAVES: readonly string[] = ['queue', 'events'];
 

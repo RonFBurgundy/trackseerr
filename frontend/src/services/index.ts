@@ -36,3 +36,4 @@ export * from './listeningService';
 export * from './bookmarkletImport';
 export * from './renameService';
 export * from './missingService';
+export * from './backupService';

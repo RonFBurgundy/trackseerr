@@ -518,6 +518,11 @@ def _start_local_workers(db: Database, config: Config) -> None:
     logger.info("Starting RecycleBinWorker (daily recycle bin cleanup)")
     recycle_bin_worker.start(db=db, config=config, interval_fn=interval_fn(db, config, "recycle_bin_cleanup"))
 
+    from .backup import backup_worker
+
+    logger.info("Starting BackupWorker (database backup & retention pruning)")
+    backup_worker.start(db=db, config=config, interval_fn=interval_fn(db, config, "backup"))
+
 
 def _log_when_listening(server: uvicorn.Server, host: str, port: int, started_at: float) -> None:
     """Logs a ``[boot]`` line, with time since process start, once uvicorn has bound its socket."""
@@ -684,6 +689,16 @@ def main() -> int:
             logger.info(NO_MEDIA_SERVER_BOOT_MESSAGE)
 
     clients = _Clients()
+
+    if role != "gateway":
+        from plex_playlist_sync.backup import apply_pending_restore
+
+        db_base_dir = _db_base_dir(config)
+        db_path = str(safe_data_path("sync_db.sqlite", base_dir=db_base_dir))
+        try:
+            apply_pending_restore(db_path)
+        except Exception as exc:
+            logger.critical("Error applying pending restore: %s", safe_exc(exc))
 
     # Run-once and headless modes have no web server, so the connection checks stay synchronous.
     if role != "gateway" and (config.run_once or config.headless):

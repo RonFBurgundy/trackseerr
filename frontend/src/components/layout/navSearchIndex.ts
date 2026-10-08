@@ -130,6 +130,7 @@ const SETTINGS: readonly SettingDef[] = [
   { label: 'System Diagnostics', section: 'system', leaf: 'status', keywords: 'version uptime database health workers' },
   { label: 'Lidarr Health', section: 'system', leaf: 'status', keywords: 'lidarr connection health status' },
   { label: 'Tasks & Background Workers', section: 'system', leaf: 'tasks', anchor: 'Scheduled Tasks', keywords: 'cron run now cancel interval scan sync schedule history job queue events resources cpu memory' },
+  { label: 'Database Backups & Restore', section: 'system', leaf: 'backups', keywords: 'backup restore database snapshot download upload retention' },
   { label: 'Application Logs', section: 'system', leaf: 'logs', keywords: 'log stream debug console output' },
   // Account
   { label: 'Change password', section: 'account', keywords: 'password credentials security' },

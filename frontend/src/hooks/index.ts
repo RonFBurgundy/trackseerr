@@ -104,3 +104,4 @@ export * from './useListeningSources';
 export * from './useCanAutoRequestPlaylists';
 export * from './useRenamePreview';
 export * from './useMissingTracks';
+export * from './useBackups';
