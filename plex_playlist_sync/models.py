@@ -203,6 +203,9 @@ class DownloadDriverType(str, Enum):
     SABNZBD = "sabnzbd"
     QBITTORRENT = "qbittorrent"
     LIDARR = "lidarr"
+    TRANSMISSION = "transmission"
+    DELUGE = "deluge"
+    NZBGET = "nzbget"
 
 
 class DownloadStatus(str, Enum):

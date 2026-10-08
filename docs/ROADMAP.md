@@ -11,7 +11,6 @@ To ask for something, [open a feature request](https://github.com/RonFBurgundy/t
 
 ## Being considered
 
-- **More download clients.** NZBGet, Transmission, and Deluge.
 - **Tidal playlists.** Import Tidal playlists by link, like Spotify and Deezer.
 - **More playlist sources.** Apple Music and YouTube Music playlist links.
 
@@ -21,6 +20,7 @@ To ask for something, [open a feature request](https://github.com/RonFBurgundy/t
 
 ## Recently done
 
+- More download clients (Transmission, Deluge, NZBGet).
 - Jellyfin and Subsonic servers (Navidrome, Gonic, Airsonic), and running with no media server.
 - Local accounts with invites and two-factor authentication.
 - Two-container setup for internet exposure.

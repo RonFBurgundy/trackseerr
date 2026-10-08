@@ -11,7 +11,11 @@ import sqlite3
 from typing import Any, Optional, Union
 import uuid
 
-from plex_playlist_sync.clients.acquisition import get_acquisition_driver, get_indexer_driver
+from plex_playlist_sync.clients.acquisition import (
+    get_acquisition_driver,
+    get_indexer_driver,
+    is_torrent_driver_type,
+)
 from plex_playlist_sync.clients.acquisition.base import AcquisitionRetryableError, AcquisitionUnavailableError
 from plex_playlist_sync.item_history import GrabTrigger, emit, emit_named, trigger_kwargs
 from plex_playlist_sync.library_manager import MODE_NATIVE, ModeChanged, work_guard
@@ -288,22 +292,12 @@ class AcquisitionCoordinator:
     ) -> Optional[dict[str, Any]]:
         """Finds the enabled download client with the highest priority for the requested protocol.
 
-        - "torrent": driver_type == "qbittorrent"
-        - "usenet": driver_type == "sabnzbd"
-        - "slskd": driver_type == "slskd"
+        - "torrent" / "torznab": driver_type in ("qbittorrent", "transmission", "deluge")
+        - "usenet" / "newznab": driver_type in ("sabnzbd", "nzbget")
+        - "slskd" / "soulseek" / "p2p": driver_type == "slskd"
         """
         proto = str(protocol).lower().strip()
-        target_driver: Optional[str] = None
-
-        if proto in ("torrent", "torznab"):
-            target_driver = "qbittorrent"
-        elif proto in ("usenet", "newznab"):
-            target_driver = "sabnzbd"
-        elif proto in ("slskd", "soulseek", "p2p"):
-            target_driver = "slskd"
-
-        if not target_driver:
-            return None
+        matching: list[dict[str, Any]] = []
 
         try:
             enabled_clients = db.list_download_clients(enabled_only=True)
@@ -311,10 +305,24 @@ class AcquisitionCoordinator:
             logger.error("Failed to list download clients from database: %s", e)
             return None
 
-        matching = [
-            c for c in enabled_clients
-            if str(c.get("driver_type", "")).lower() == target_driver
-        ]
+        if proto in ("torrent", "torznab"):
+            matching = [
+                c for c in enabled_clients
+                if is_torrent_driver_type(c.get("driver_type"))
+            ]
+        elif proto in ("usenet", "newznab"):
+            matching = [
+                c for c in enabled_clients
+                if str(c.get("driver_type", "")).lower() in ("sabnzbd", "nzbget")
+            ]
+        elif proto in ("slskd", "soulseek", "p2p"):
+            matching = [
+                c for c in enabled_clients
+                if str(c.get("driver_type", "")).lower() == "slskd"
+            ]
+        else:
+            return None
+
         if not matching:
             return None
 

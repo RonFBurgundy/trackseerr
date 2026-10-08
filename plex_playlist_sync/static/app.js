@@ -2525,12 +2525,18 @@ document.addEventListener('alpine:init', () => {
         slskd: 'slskd',
         sabnzbd: 'SABnzbd',
         qbittorrent: 'qBittorrent',
+        transmission: 'Transmission',
+        deluge: 'Deluge',
+        nzbget: 'NZBGet',
         lidarr: 'Lidarr'
       };
       const defaultUrls = {
         slskd: 'http://localhost:5030',
         sabnzbd: 'http://localhost:8080',
         qbittorrent: 'http://localhost:8080',
+        transmission: 'http://localhost:9091',
+        deluge: 'http://localhost:8112',
+        nzbget: 'http://localhost:6789',
         lidarr: 'http://localhost:8686'
       };
       this.clientForm = {
