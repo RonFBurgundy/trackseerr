@@ -151,3 +151,13 @@ export async function setLibraryManager(mode: LibraryManagerMode): Promise<Libra
 export async function getLidarrDefaults(): Promise<LidarrDefaults> {
   return apiRequest<LidarrDefaults>('/api/settings/lidarr/defaults');
 }
+
+export async function getApiKey(): Promise<Schema<'ApiKeyResponse'>> {
+  return apiRequest<Schema<'ApiKeyResponse'>>('/api/settings/api-key');
+}
+
+export async function regenerateApiKey(): Promise<Schema<'ApiKeyRegenerateResponse'>> {
+  return apiRequest<Schema<'ApiKeyRegenerateResponse'>>('/api/settings/api-key/regenerate', {
+    method: 'POST',
+  });
+}

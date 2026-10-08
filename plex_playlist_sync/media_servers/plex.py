@@ -14,7 +14,7 @@ from typing import Any, Iterator, Optional, Sequence
 import requests
 from plexapi.exceptions import NotFound, PlexApiException, Unauthorized
 
-from plex_playlist_sync.clients.plex import PlexClient
+from plex_playlist_sync.clients.plex import PlexClient, music_sections
 from plex_playlist_sync.media_servers.base import (
     ConnectionTest,
     MediaServer,
@@ -80,8 +80,9 @@ def _ref(item: Any) -> ServerTrackRef:
 class PlexMediaServer(MediaServer):
     kind = "plex"
 
-    def __init__(self, client: PlexClient) -> None:
+    def __init__(self, client: PlexClient, music_section: Optional[str] = None) -> None:
         self._client = client
+        self._music_section = music_section or getattr(client, "music_section", None)
 
     @property
     def capabilities(self) -> ServerCapabilities:
@@ -174,8 +175,7 @@ class PlexMediaServer(MediaServer):
 
     def _music_sections(self) -> list[Any]:
         with _translated():
-            sections = self._client.server.library.sections()
-        return [s for s in sections if getattr(s, "type", "") == "artist"]
+            return music_sections(self._client.server, self._music_section)
 
     def iter_library_files(self) -> Iterator[ServerFileRef]:
         """Every part of every track in every music section; sections are searched in pages of 500."""

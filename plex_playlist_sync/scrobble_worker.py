@@ -171,7 +171,12 @@ class ScrobbleWorker:
         if not config.plex_enabled:
             return None
         try:
-            self._plex = PlexClient(config.plex_url, config.plex_token, verify_ssl=config.plex_verify_ssl)
+            self._plex = PlexClient(
+                config.plex_url,
+                config.plex_token,
+                verify_ssl=config.plex_verify_ssl,
+                music_section=config.plex_music_section,
+            )
         except (PlexApiException, requests.RequestException) as exc:
             logger.warning("ScrobbleWorker: could not connect to Plex: %s", type(exc).__name__)
             self._plex = None

@@ -45,6 +45,7 @@ const SETTINGS: readonly SettingDef[] = [
   // General
   { label: 'Application URL', section: 'general', elementId: 'general-application-url', keywords: 'base url public address host domain link invite external' },
   { label: 'Library manager', section: 'general', keywords: 'native lidarr mode switch backend manager' },
+  { label: 'API Key', section: 'general', elementId: 'general-api-key', keywords: 'api key token regenerate secret auth credentials external integration' },
   // Media Management > Root Folders & Naming
   { label: 'Root Music Folder', section: 'media-management', leaf: 'media', keywords: 'library path directory music folder storage location' },
   { label: 'Download folders', section: 'media-management', leaf: 'media', anchor: 'Download folders', keywords: 'client roots download path read from clients' },

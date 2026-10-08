@@ -5,11 +5,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from plex_playlist_sync import internal_auth
 from plex_playlist_sync.api.app import create_app
 from plex_playlist_sync.api.dependencies import get_config, get_db, get_lidarr_client
 from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
 from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import MusicRequest, RequestStatus
+from plex_playlist_sync.models import MusicRequest, RequestStatus, UserPermission
 from plex_playlist_sync.storage import Database
 
 
@@ -542,3 +543,200 @@ class TestMusicRequestsAPI:
         # Verify request is now AVAILABLE
         req_row = test_db.get_request(req_id)
         assert req_row["status"] == "available"
+
+    def test_manager_can_list_all_requests(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
+        _, client = app_and_client
+        alice = seeded_users["alice"]
+        bob = seeded_users["bob"]
+        admin = seeded_users["admin"]
+
+        test_db.upsert_user("user-mgr", "mgr", "mgr@plex.tv", is_admin=False)
+        test_db.update_user_governance("user-mgr", permissions=int(UserPermission.REQUEST | UserPermission.MANAGE_REQUESTS))
+        manager = test_db.get_user("user-mgr")
+
+        alice_headers = _auth_headers(alice, test_db, test_config)
+        bob_headers = _auth_headers(bob, test_db, test_config)
+        mgr_headers = _auth_headers(manager, test_db, test_config)
+        admin_headers = _auth_headers(admin, test_db, test_config)
+
+        # Alice creates a request
+        client.post(
+            "/api/requests",
+            json={"item_type": "album", "title": "Alice Track", "artist": "Artist A"},
+            headers=alice_headers,
+        )
+        # Bob creates a request
+        client.post(
+            "/api/requests",
+            json={"item_type": "album", "title": "Bob Track", "artist": "Artist B"},
+            headers=bob_headers,
+        )
+
+        # Alice sees only her own (1)
+        res_alice = client.get("/api/requests", headers=alice_headers)
+        assert res_alice.status_code == 200
+        assert res_alice.json()["count"] == 1
+
+        # Manager sees all requests (2)
+        res_mgr = client.get("/api/requests", headers=mgr_headers)
+        assert res_mgr.status_code == 200
+        assert res_mgr.json()["count"] == 2
+
+        # Admin sees all requests (2)
+        res_admin = client.get("/api/requests", headers=admin_headers)
+        assert res_admin.status_code == 200
+        assert res_admin.json()["count"] == 2
+
+    def test_manager_can_approve_and_reject_and_sets_actor(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
+        _, client = app_and_client
+        alice = seeded_users["alice"]
+        test_db.upsert_user("user-mgr2", "mgr2", "mgr2@plex.tv", is_admin=False)
+        test_db.update_user_governance("user-mgr2", permissions=int(UserPermission.REQUEST | UserPermission.MANAGE_REQUESTS))
+        manager = test_db.get_user("user-mgr2")
+
+        alice_headers = _auth_headers(alice, test_db, test_config)
+        mgr_headers = _auth_headers(manager, test_db, test_config)
+
+        # Alice creates request 1
+        res1 = client.post(
+            "/api/requests",
+            json={"item_type": "album", "title": "To Approve", "artist": "Artist 1"},
+            headers=alice_headers,
+        )
+        req1_id = res1.json()["id"]
+
+        # Manager approves
+        appr_res = client.post(f"/api/requests/{req1_id}/approve", headers=mgr_headers)
+        assert appr_res.status_code == 200
+        assert appr_res.json()["status"] == "processing"
+
+        # Check item history / event actor
+        events = test_db.conn.execute(
+            "SELECT event, actor_user_id FROM item_events WHERE request_id = ? ORDER BY id",
+            (req1_id,),
+        ).fetchall()
+        approve_event = next((e for e in events if e["event"] == "request_approved"), None)
+        assert approve_event is not None
+        assert approve_event["actor_user_id"] == "user-mgr2"
+
+        # Alice creates request 2
+        res2 = client.post(
+            "/api/requests",
+            json={"item_type": "album", "title": "To Reject", "artist": "Artist 2"},
+            headers=alice_headers,
+        )
+        req2_id = res2.json()["id"]
+
+        # Manager rejects
+        rej_res = client.post(f"/api/requests/{req2_id}/reject", headers=mgr_headers)
+        assert rej_res.status_code == 200
+        assert rej_res.json()["status"] == "rejected"
+
+        events2 = test_db.conn.execute(
+            "SELECT event, actor_user_id FROM item_events WHERE request_id = ? ORDER BY id",
+            (req2_id,),
+        ).fetchall()
+        reject_event = next((e for e in events2 if e["event"] == "request_declined"), None)
+        assert reject_event is not None
+        assert reject_event["actor_user_id"] == "user-mgr2"
+
+    def test_manager_cannot_retry_or_delete_others(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
+        _, client = app_and_client
+        alice = seeded_users["alice"]
+        admin = seeded_users["admin"]
+        test_db.upsert_user("user-mgr3", "mgr3", "mgr3@plex.tv", is_admin=False)
+        test_db.update_user_governance("user-mgr3", permissions=int(UserPermission.REQUEST | UserPermission.MANAGE_REQUESTS))
+        manager = test_db.get_user("user-mgr3")
+
+        alice_headers = _auth_headers(alice, test_db, test_config)
+        mgr_headers = _auth_headers(manager, test_db, test_config)
+        admin_headers = _auth_headers(admin, test_db, test_config)
+
+        res = client.post(
+            "/api/requests",
+            json={"item_type": "album", "title": "Retry Album", "artist": "Artist"},
+            headers=alice_headers,
+        )
+        req_id = res.json()["id"]
+
+        # Manager cannot delete Alice's request (404 to avoid leaking existence)
+        del_mgr = client.delete(f"/api/requests/{req_id}", headers=mgr_headers)
+        assert del_mgr.status_code == 404
+
+        # Manager cannot retry
+        retry_mgr = client.post(f"/api/requests/{req_id}/retry", headers=mgr_headers)
+        assert retry_mgr.status_code == 403
+
+        # Admin CAN retry (admin only)
+        retry_admin = client.post(f"/api/requests/{req_id}/retry", headers=admin_headers)
+        assert retry_admin.status_code == 200
+
+        # Admin CAN delete
+        del_admin = client.delete(f"/api/requests/{req_id}", headers=admin_headers)
+        assert del_admin.status_code == 200
+
+    def test_forwarded_principal_with_manage_requests_bit_is_403(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
+        _, client = app_and_client
+        alice = seeded_users["alice"]
+        alice_headers = _auth_headers(alice, test_db, test_config)
+
+        # Alice creates a pending request
+        res = client.post(
+            "/api/requests",
+            json={"item_type": "album", "title": "Signed Album", "artist": "Artist"},
+            headers=alice_headers,
+        )
+        req_id = res.json()["id"]
+
+        secret = "s" * 40
+        test_config.role = "core"
+        test_config.internal_core_secret = secret
+
+        # Create a user in DB who has MANAGE_REQUESTS permission
+        test_db.upsert_user("99901", "fwd_manager", "fwd@example.com", is_admin=False)
+        test_db.update_user_governance("99901", permissions=int(UserPermission.REQUEST | UserPermission.MANAGE_REQUESTS))
+
+        # Sign request as forwarded from gateway
+        signed_headers = internal_auth.sign_assertion(
+            secret,
+            "POST",
+            f"/api/requests/{req_id}/approve",
+            user_id="99901",
+            user_name="fwd_manager",
+        )
+
+        # Gateway-signed assertion must be refused on approve (403)
+        res_approve = client.post(f"/api/requests/{req_id}/approve", headers=signed_headers)
+        assert res_approve.status_code == 403
+
+        # And reject must also be refused (403)
+        signed_reject_headers = internal_auth.sign_assertion(
+            secret,
+            "POST",
+            f"/api/requests/{req_id}/reject",
+            user_id="99901",
+            user_name="fwd_manager",
+        )
+        res_reject = client.post(f"/api/requests/{req_id}/reject", headers=signed_reject_headers)
+        assert res_reject.status_code == 403
+
+        # And forwarded user cannot list other users' requests (scoped to own)
+        signed_list_headers = internal_auth.sign_assertion(
+            secret,
+            "GET",
+            "/api/requests",
+            user_id="99901",
+            user_name="fwd_manager",
+        )
+        res_list = client.get("/api/requests", headers=signed_list_headers)
+        assert res_list.status_code == 200
+        # 99901 has no requests of their own, so count is 0
+        assert res_list.json()["count"] == 0
