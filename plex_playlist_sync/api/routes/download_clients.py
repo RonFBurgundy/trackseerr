@@ -194,6 +194,19 @@ def create_or_update_download_client(
     elif (api_key and "•••" in api_key) or (password and "•••" in password):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Masked placeholder submitted for a new client; enter the full value")
 
+    # Validate per-type required credentials
+    effective_username = payload.username.strip() if payload.username else (existing.get("username") if existing else None)
+    if clean_type == "deluge" and not password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password is required for Deluge",
+        )
+    if clean_type == "nzbget" and (not effective_username or not password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username and password are required for NZBGet",
+        )
+
     extra_settings = _normalize_extra_settings(
         payload.extra_settings_json,
         category=payload.category,
@@ -231,6 +244,25 @@ def test_download_client_connection(
             message="Prohibited or invalid host URL (SSRF defense)",
         )
 
+    clean_type = payload.driver_type.strip().lower()
+    valid_types = {t.value for t in DownloadDriverType}
+    if clean_type not in valid_types:
+        return TestConnectionResponse(
+            success=False,
+            message=f"Invalid driver type '{payload.driver_type}'",
+        )
+
+    if clean_type == "deluge" and not payload.password:
+        return TestConnectionResponse(
+            success=False,
+            message="Password is required for Deluge",
+        )
+    if clean_type == "nzbget" and (not payload.username or not payload.password):
+        return TestConnectionResponse(
+            success=False,
+            message="Username and password are required for NZBGet",
+        )
+
     extra_settings = _normalize_extra_settings(
         payload.extra_settings_json,
         category=payload.category,
@@ -240,7 +272,7 @@ def test_download_client_connection(
     try:
         driver = get_acquisition_driver(
             {
-                "driver_type": payload.driver_type,
+                "driver_type": clean_type,
                 "host_url": clean_host,
                 "api_key": payload.api_key,
                 "username": payload.username,

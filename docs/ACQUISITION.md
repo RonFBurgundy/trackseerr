@@ -42,14 +42,24 @@ Add clients in **Settings > Media Management > Clients**.
 | Client | Network | What you need |
 |---|---|---|
 | qBittorrent | BitTorrent | Web UI address, username, password |
+| Transmission | BitTorrent | RPC address, RPC path, username (optional), password (optional) |
+| Deluge | BitTorrent | Web UI address, password |
 | SABnzbd | Usenet | Address, API key |
+| NZBGet | Usenet | Address, username, password |
 | slskd | Soulseek | Address, API key |
 
 Use the client's LAN IP or container name in the address, never `localhost`. Click test before you save.
 
 TrackSeerr asks each client where it saves files. If TrackSeerr cannot see that folder, **Root Folders & Naming** shows a warning under **Download folders**.
 
-slskd is good for single tracks, rare releases, and B-sides. It does not use indexers.
+### Client setup notes
+
+- **Transmission:** Enable RPC in Transmission preferences. The default RPC path is `/transmission/rpc`. Basic authentication is optional. TrackSeerr passes its category as torrent labels.
+- **Deluge:** Enable the Deluge Web UI. TrackSeerr connects with the Web UI password and attaches to the Deluge daemon. Enable the Label plugin in Deluge preferences if you want category labels.
+- **NZBGet:** Enter the NZBGet web address and your ControlUsername and ControlPassword. Category defaults to `music`.
+- **qBittorrent:** Enable the Web UI. Enter the address, username, and password. Category defaults to `trackseerr`.
+- **SABnzbd:** Enter the address and API key from SABnzbd General settings.
+- **slskd:** slskd is good for single tracks, rare releases, and B-sides. It does not use indexers.
 
 ## Indexers
 

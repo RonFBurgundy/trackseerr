@@ -4,11 +4,14 @@ import json
 from typing import Any, Union
 
 from plex_playlist_sync.clients.acquisition.base import AcquisitionDriver
+from plex_playlist_sync.clients.acquisition.deluge import DelugeDriver
 from plex_playlist_sync.clients.acquisition.lidarr_adapter import LidarrAdapter
+from plex_playlist_sync.clients.acquisition.nzbget import NzbgetDriver
 from plex_playlist_sync.clients.acquisition.qbittorrent import QbittorrentDriver
 from plex_playlist_sync.clients.acquisition.sabnzbd import SabnzbdDriver
 from plex_playlist_sync.clients.acquisition.slskd import SlskdDriver
 from plex_playlist_sync.clients.acquisition.torznab import TorznabDriver
+from plex_playlist_sync.clients.acquisition.transmission import TransmissionDriver
 from plex_playlist_sync.models import DownloadClientConfig, DownloadDriverType, IndexerConfig
 
 
@@ -17,12 +20,16 @@ DRIVER_CLASSES: dict[str, type[AcquisitionDriver]] = {
     DownloadDriverType.SABNZBD.value: SabnzbdDriver,
     DownloadDriverType.QBITTORRENT.value: QbittorrentDriver,
     DownloadDriverType.LIDARR.value: LidarrAdapter,
+    DownloadDriverType.TRANSMISSION.value: TransmissionDriver,
+    DownloadDriverType.DELUGE.value: DelugeDriver,
+    DownloadDriverType.NZBGET.value: NzbgetDriver,
 }
 
 
-def is_torrent_driver_type(driver_type: str | None) -> bool:
+def is_torrent_driver_type(driver_type: str | DownloadDriverType | None) -> bool:
     """True when the download-client driver type is a torrent client (derived from the driver's ``is_torrent``)."""
-    cls = DRIVER_CLASSES.get(str(driver_type or "").strip().lower())
+    val = getattr(driver_type, "value", driver_type)
+    cls = DRIVER_CLASSES.get(str(val or "").strip().lower())
     return bool(cls is not None and cls.is_torrent)
 
 
@@ -70,6 +77,29 @@ def get_acquisition_driver(
             password=password,
             category=extra.get("category", "trackseerr"),
         )
+    elif driver_type in (DownloadDriverType.TRANSMISSION.value, "transmission"):
+        return TransmissionDriver(
+            host_url=host_url,
+            rpc_path=str(extra.get("rpc_path") or "/transmission/rpc"),
+            username=username,
+            password=password,
+            category=extra.get("category", "trackseerr"),
+            download_dir=extra.get("download_dir"),
+        )
+    elif driver_type in (DownloadDriverType.DELUGE.value, "deluge"):
+        return DelugeDriver(
+            host_url=host_url,
+            password=password,
+            label=extra.get("label") or extra.get("category", "trackseerr"),
+            download_location=extra.get("download_location") or extra.get("download_dir"),
+        )
+    elif driver_type in (DownloadDriverType.NZBGET.value, "nzbget"):
+        return NzbgetDriver(
+            host_url=host_url,
+            username=username,
+            password=password,
+            category=extra.get("category", "music"),
+        )
     elif driver_type in (DownloadDriverType.LIDARR.value, "lidarr"):
         return LidarrAdapter(
             host_url=host_url,
@@ -107,6 +137,9 @@ __all__ = [
     "SlskdDriver",
     "SabnzbdDriver",
     "QbittorrentDriver",
+    "TransmissionDriver",
+    "DelugeDriver",
+    "NzbgetDriver",
     "TorznabDriver",
     "LidarrAdapter",
     "get_acquisition_driver",

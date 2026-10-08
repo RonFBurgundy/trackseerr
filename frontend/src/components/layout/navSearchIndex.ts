@@ -81,9 +81,12 @@ const SETTINGS: readonly SettingDef[] = [
   // Custom formats
   { label: 'Custom Formats', section: 'media-management', leaf: 'custom-formats', keywords: 'score specification regex release format import export' },
   // Clients
-  { label: 'Add Download Client', section: 'media-management', leaf: 'clients', keywords: 'sabnzbd qbittorrent slskd soulseek usenet torrent nzb client host url' },
+  { label: 'Add Download Client', section: 'media-management', leaf: 'clients', keywords: 'sabnzbd qbittorrent slskd soulseek usenet torrent nzb transmission deluge nzbget client host url' },
   { label: 'qBittorrent', section: 'media-management', leaf: 'clients', anchor: 'Add Download Client', keywords: 'torrent client' },
+  { label: 'Transmission', section: 'media-management', leaf: 'clients', anchor: 'Add Download Client', keywords: 'torrent client transmission' },
+  { label: 'Deluge', section: 'media-management', leaf: 'clients', anchor: 'Add Download Client', keywords: 'torrent client deluge' },
   { label: 'SABnzbd', section: 'media-management', leaf: 'clients', anchor: 'Add Download Client', keywords: 'usenet nzb client' },
+  { label: 'NZBGet', section: 'media-management', leaf: 'clients', anchor: 'Add Download Client', keywords: 'usenet nzb client nzbget' },
   { label: 'slskd', section: 'media-management', leaf: 'clients', anchor: 'Add Download Client', keywords: 'soulseek client' },
   // Indexers
   { label: 'Indexer API Key', section: 'media-management', leaf: 'indexers', anchor: 'API Key', keywords: 'newznab torznab prowlarr jackett indexer key' },

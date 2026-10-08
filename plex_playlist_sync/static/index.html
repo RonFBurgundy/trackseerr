@@ -4100,6 +4100,9 @@
               <option value="slskd">slskd (Soulseek P2P)</option>
               <option value="sabnzbd">SABnzbd (Usenet)</option>
               <option value="qbittorrent">qBittorrent (BitTorrent)</option>
+              <option value="transmission">Transmission (BitTorrent)</option>
+              <option value="deluge">Deluge (BitTorrent)</option>
+              <option value="nzbget">NZBGet (Usenet)</option>
               <option value="lidarr">Lidarr (Music Automation)</option>
             </select>
           </div>
@@ -4124,8 +4127,8 @@
                    class="w-full px-3 py-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-[#e5a00d] transition">
           </div>
 
-          <!-- Username & Password (for slskd, qBittorrent) -->
-          <div class="grid grid-cols-2 gap-3" x-show="clientForm.driver_type === 'slskd' || clientForm.driver_type === 'qbittorrent'">
+          <!-- Username & Password -->
+          <div class="grid grid-cols-2 gap-3" x-show="['slskd', 'qbittorrent', 'transmission', 'nzbget'].includes(clientForm.driver_type)">
             <div class="space-y-1">
               <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400">Username</label>
               <input type="text" 
@@ -4140,6 +4143,15 @@
                      placeholder="••••••••" 
                      class="w-full px-3 py-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#e5a00d] transition">
             </div>
+          </div>
+
+          <!-- Password only (for Deluge) -->
+          <div class="space-y-1" x-show="clientForm.driver_type === 'deluge'">
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400">Password</label>
+            <input type="password" 
+                   x-model="clientForm.password" 
+                   placeholder="Deluge Web UI password" 
+                   class="w-full px-3 py-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#e5a00d] transition">
           </div>
 
           <!-- Priority & Enabled -->

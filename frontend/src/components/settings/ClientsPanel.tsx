@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Trash2, Plus } from 'lucide-react';
 import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar } from '@/components/ui';
 import type { DownloadClientItem, DownloadDriverType } from '@/types/models';
+import type { Schema } from '@/types/apiSchema';
 import { saveClientSettings, deleteClientSettings, testClientConnection } from '@/services/settingsService';
 import { compactInputClass, compactLabelClass } from './formClasses';
 
@@ -11,7 +12,32 @@ export interface ClientsPanelProps {
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
 }
 
-const DRIVER_TYPES: ReadonlyArray<DownloadDriverType> = ['slskd', 'sabnzbd', 'qbittorrent'];
+const DRIVER_TYPES: ReadonlyArray<DownloadDriverType> = [
+  'slskd',
+  'sabnzbd',
+  'qbittorrent',
+  'transmission',
+  'deluge',
+  'nzbget',
+];
+
+const DEFAULT_URLS: Record<DownloadDriverType, string> = {
+  slskd: 'http://localhost:5030',
+  sabnzbd: 'http://localhost:8080',
+  qbittorrent: 'http://localhost:8080',
+  transmission: 'http://localhost:9091',
+  deluge: 'http://localhost:8112',
+  nzbget: 'http://localhost:6789',
+  lidarr: 'http://localhost:8686',
+};
+
+const DEFAULT_CATEGORIES: Partial<Record<DownloadDriverType, string>> = {
+  sabnzbd: 'music',
+  qbittorrent: 'trackseerr',
+  transmission: 'trackseerr',
+  deluge: 'trackseerr',
+  nzbget: 'music',
+};
 
 function toDriverType(value: string): DownloadDriverType {
   return DRIVER_TYPES.find((t) => t === value) ?? 'slskd';
@@ -20,22 +46,64 @@ function toDriverType(value: string): DownloadDriverType {
 export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onToast }) => {
   const [name, setName] = useState<string>('');
   const [type, setType] = useState<DownloadDriverType>('slskd');
-  const [hostUrl, setHostUrl] = useState<string>('http://localhost:5030');
+  const [hostUrl, setHostUrl] = useState<string>(DEFAULT_URLS.slskd);
+  const [rpcPath, setRpcPath] = useState<string>('/transmission/rpc');
+  const [username, setUsername] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
+  const [apiKey, setApiKey] = useState<string>('');
+  const [category, setCategory] = useState<string>('');
   const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  const handleTypeChange = (newType: DownloadDriverType) => {
+    setType(newType);
+    setHostUrl(DEFAULT_URLS[newType]);
+    setCategory(DEFAULT_CATEGORIES[newType] ?? '');
+  };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
     setIsSaving(true);
     try {
-      await saveClientSettings({
+      const extraSettings: Record<string, string> = {};
+      if (type === 'transmission' && rpcPath.trim()) {
+        extraSettings.rpc_path = rpcPath.trim();
+      }
+      if (category.trim()) {
+        extraSettings.category = category.trim();
+      }
+
+      const payload: Schema<'DownloadClientPayload'> = {
         name: name.trim(),
         driver_type: type,
         host_url: hostUrl.trim(),
         enabled: true,
         priority: 1,
-      });
+        username:
+          (type === 'transmission' || type === 'nzbget' || type === 'qbittorrent' || type === 'slskd') &&
+          username.trim()
+            ? username.trim()
+            : undefined,
+        password:
+          (type === 'deluge' ||
+            type === 'transmission' ||
+            type === 'nzbget' ||
+            type === 'qbittorrent' ||
+            type === 'slskd') &&
+          password.trim()
+            ? password.trim()
+            : undefined,
+        api_key: type === 'sabnzbd' && apiKey.trim() ? apiKey.trim() : undefined,
+        category: category.trim() || undefined,
+        extra_settings_json: Object.keys(extraSettings).length > 0 ? JSON.stringify(extraSettings) : undefined,
+      };
+
+      await saveClientSettings(payload);
       setName('');
+      setUsername('');
+      setPassword('');
+      setApiKey('');
+      setCategory(DEFAULT_CATEGORIES[type] ?? '');
       await reload();
       onToast('Download client added');
     } catch {
@@ -105,32 +173,144 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label htmlFor="client-name" className={compactLabelClass}>Name</label>
-              <input id="client-name" name="name"
+              <input
+                id="client-name"
+                name="name"
                 type="text"
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Local Soulseek"
+                placeholder="e.g. Local BitTorrent"
                 className={compactInputClass}
               />
             </div>
             <div>
               <label htmlFor="client-type" className={compactLabelClass}>Type</label>
-              <select id="client-type" name="type"
+              <select
+                id="client-type"
+                name="type"
                 value={type}
-                onChange={(e) => setType(toDriverType(e.target.value))}
+                onChange={(e) => handleTypeChange(toDriverType(e.target.value))}
                 className={compactInputClass}
               >
                 <option value="slskd">slskd</option>
                 <option value="sabnzbd">SABnzbd</option>
                 <option value="qbittorrent">qBittorrent</option>
+                <option value="transmission">Transmission</option>
+                <option value="deluge">Deluge</option>
+                <option value="nzbget">NZBGet</option>
               </select>
             </div>
           </div>
+
           <div>
             <label htmlFor="client-host" className={compactLabelClass}>Host URL</label>
-            <input id="client-host" name="host_url" type="url" required value={hostUrl} onChange={(e) => setHostUrl(e.target.value)} placeholder="http://localhost:5030" className={compactInputClass} />
+            <input
+              id="client-host"
+              name="host_url"
+              type="url"
+              required
+              value={hostUrl}
+              onChange={(e) => setHostUrl(e.target.value)}
+              placeholder="http://localhost:8080"
+              className={compactInputClass}
+            />
           </div>
+
+          {type === 'transmission' && (
+            <div>
+              <label htmlFor="client-rpc-path" className={compactLabelClass}>RPC Path</label>
+              <input
+                id="client-rpc-path"
+                name="rpc_path"
+                type="text"
+                value={rpcPath}
+                onChange={(e) => setRpcPath(e.target.value)}
+                placeholder="/transmission/rpc"
+                className={compactInputClass}
+              />
+            </div>
+          )}
+
+          {type === 'sabnzbd' && (
+            <div>
+              <label htmlFor="client-api-key" className={compactLabelClass}>API Key</label>
+              <input
+                id="client-api-key"
+                name="api_key"
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="SABnzbd API key"
+                autoComplete="new-password"
+                className={compactInputClass}
+              />
+            </div>
+          )}
+
+          {(type === 'slskd' || type === 'qbittorrent' || type === 'transmission' || type === 'nzbget') && (
+            <div>
+              <label htmlFor="client-username" className={compactLabelClass}>
+                Username {type === 'nzbget' && <span className="text-[#e5a00d]">*</span>}
+              </label>
+              <input
+                id="client-username"
+                name="username"
+                type="text"
+                required={type === 'nzbget'}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Username"
+                autoComplete="username"
+                className={compactInputClass}
+              />
+            </div>
+          )}
+
+          {(type === 'slskd' ||
+            type === 'qbittorrent' ||
+            type === 'transmission' ||
+            type === 'deluge' ||
+            type === 'nzbget') && (
+            <div>
+              <label htmlFor="client-password" className={compactLabelClass}>
+                Password {(type === 'deluge' || type === 'nzbget') && <span className="text-[#e5a00d]">*</span>}
+              </label>
+              <input
+                id="client-password"
+                name="password"
+                type="password"
+                required={type === 'deluge' || type === 'nzbget'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
+                autoComplete="current-password"
+                className={compactInputClass}
+              />
+            </div>
+          )}
+
+          {(type === 'sabnzbd' ||
+            type === 'qbittorrent' ||
+            type === 'transmission' ||
+            type === 'deluge' ||
+            type === 'nzbget') && (
+            <div>
+              <label htmlFor="client-category" className={compactLabelClass}>
+                {type === 'deluge' ? 'Label' : type === 'transmission' ? 'Category / Label' : 'Category'}
+              </label>
+              <input
+                id="client-category"
+                name="category"
+                type="text"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                placeholder="e.g. trackseerr"
+                className={compactInputClass}
+              />
+            </div>
+          )}
+
           <ActionBar align="end" className="pt-2">
             <TapeDeckButton
               type="submit"
