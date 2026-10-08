@@ -58,6 +58,7 @@ from plex_playlist_sync.library_monitoring import NATIVE_MONITOR_OPTIONS
 from plex_playlist_sync.library_manager import ModeChanged, run_guarded
 from plex_playlist_sync.library import (
     AUDIO_EXTENSIONS,
+    build_tags_to_write,
     embed_album_artwork,
     ArchiveLimitError,
     extract_archive,
@@ -1692,16 +1693,11 @@ class AcquisitionWorker:
                         logger.warning("Failed to record item_available event: %s", ev_err)
 
                     # Tag writing and artwork embedding
-                    tags_to_write: dict[str, Any] = {
-                        "artist": (req.get("artist") if req else None) or metadata.get("artist"),
-                        "album": (req.get("album") or req.get("title") if req else None) or metadata.get("album"),
-                        "title": metadata.get("title") if len(audio_files) > 1 else ((req.get("title") if req else None) or metadata.get("title")),
-                        "date": (req.get("release_date") if req else None) or metadata.get("year"),
-                        "tracknumber": metadata.get("track_number"),
-                        "totaltracks": metadata.get("total_tracks"),
-                        "discnumber": metadata.get("disc_number"),
-                        "totaldiscs": metadata.get("total_discs"),
-                    }
+                    tags_to_write: dict[str, Any] = build_tags_to_write(
+                        metadata,
+                        req=req,
+                        audio_files_count=len(audio_files),
+                    )
 
                     # Asynchronously enrich with MBIDs if enabled
                     if media_settings.get("enrich_mbids", True):

@@ -2637,6 +2637,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/retag/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retag Apply
+         * @description Applies bulk tag changes to specified library files, recomputing proposed tags server-side.
+         */
+        post: operations["retag_apply_api_library_retag_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/retag/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retag Preview
+         * @description Previews proposed tag changes per library file (current vs. new for each differing field).
+         */
+        post: operations["retag_preview_api_library_retag_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/scan": {
         parameters: {
             query?: never;
@@ -11814,6 +11854,98 @@ export interface components {
             /** Success */
             success: boolean;
         };
+        /** RetagApplyRequest */
+        RetagApplyRequest: {
+            /**
+             * Embed Art
+             * @default false
+             */
+            embed_art: boolean;
+            /** File Ids */
+            file_ids?: string[];
+        };
+        /** RetagApplyResponse */
+        RetagApplyResponse: {
+            /**
+             * Applied Count
+             * @default 0
+             */
+            applied_count: number;
+            /**
+             * Error Count
+             * @default 0
+             */
+            error_count: number;
+            /** Errors */
+            errors?: string[];
+            /** Results */
+            results?: components["schemas"]["RetagFileResult"][];
+            /**
+             * Retagged Count
+             * @default 0
+             */
+            retagged_count: number;
+            /**
+             * Skipped Count
+             * @default 0
+             */
+            skipped_count: number;
+        };
+        /** RetagFieldDiff */
+        RetagFieldDiff: {
+            /** Current */
+            current?: string | null;
+            /** Field */
+            field: string;
+            /** Proposed */
+            proposed?: string | null;
+        };
+        /** RetagFileResult */
+        RetagFileResult: {
+            /** File Id */
+            file_id: string;
+            /** Message */
+            message?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "skipped" | "error";
+        };
+        /** RetagPreviewItem */
+        RetagPreviewItem: {
+            /** Changes */
+            changes?: components["schemas"]["RetagFieldDiff"][];
+            /** Diffs */
+            diffs?: components["schemas"]["RetagFieldDiff"][];
+            /** File Id */
+            file_id: string;
+            /** Path */
+            path: string;
+            /** Skipped Reason */
+            skipped_reason?: string | null;
+            /** Track Id */
+            track_id?: string | null;
+        };
+        /** RetagPreviewRequest */
+        RetagPreviewRequest: {
+            /** Album Id */
+            album_id?: string | null;
+            /** Artist Id */
+            artist_id?: string | null;
+            /**
+             * Limit
+             * @default 200
+             */
+            limit: number;
+            /**
+             * Offset
+             * @default 0
+             */
+            offset: number;
+        };
         /** RetryFailedResponse */
         RetryFailedResponse: {
             /** Attempts */
@@ -17679,6 +17811,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RenamePreviewItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retag_apply_api_library_retag_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetagApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetagApplyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retag_preview_api_library_retag_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RetagPreviewRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetagPreviewItem"][];
                 };
             };
             /** @description Validation Error */

@@ -11,6 +11,7 @@ import {
   Radio,
   RefreshCw,
   Search,
+  Tag,
   User,
 } from 'lucide-react';
 import type { AlbumItem, ArtistDiscographyAlbum, AudioPreviewTrack, DiscoveryItem } from '@/types/models';
@@ -51,6 +52,8 @@ export interface ArtistDetailProps {
   onImportAlbum: (album: AlbumItem) => void;
   /** Opens Batch Rename scoped to this artist (native mode, admin). */
   onRenameFiles?: () => void;
+  /** Opens Bulk Retag scoped to this artist (native mode, admin). */
+  onRetagFiles?: () => void;
   /** Called after a change that the paged lists should pick up. */
   onChanged: () => void;
   onToggleArtistMonitored: (artistId: number | string, monitored: boolean) => Promise<void>;
@@ -99,6 +102,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   onOpenAlbum,
   onImportAlbum,
   onRenameFiles,
+  onRetagFiles,
   onChanged,
   onToggleArtistMonitored,
   onToggleAlbumMonitored,
@@ -305,6 +309,16 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
                       icon={<FileText className="h-4 w-4" />}
                       aria-label="Rename files for this artist"
                       title="Rename files for this artist based on naming pattern"
+                    />
+                  )}
+                  {!lidarrMode && onRetagFiles && (
+                    <TapeDeckButton
+                      size="sm"
+                      className={ICON_KEY}
+                      onClick={onRetagFiles}
+                      icon={<Tag className="h-4 w-4" />}
+                      aria-label="Retag files for this artist"
+                      title="Retag library files for this artist"
                     />
                   )}
                   <TapeDeckButton

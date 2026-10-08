@@ -221,6 +221,7 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
     album: str | None = None
     album_artist: str | None = None
     year: int | None = None
+    raw_date: str | None = None
     track_number: int | None = None
     total_tracks: int | None = None
     disc_number: int | None = None
@@ -255,7 +256,8 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
             artist = tags.get("artist", [None])[0]
             album = tags.get("album", [None])[0]
             album_artist = tags.get("albumartist", [None])[0] or tags.get("album_artist", [None])[0]
-            year = _extract_year(tags.get("date", [None])[0])
+            raw_date = tags.get("date", [None])[0]
+            year = _extract_year(raw_date)
             track_number, total_tracks = _parse_num_total(tags.get("tracknumber", [None])[0])
             if total_tracks is None:
                 total_tracks = _parse_int(tags.get("tracktotal", [None])[0] or tags.get("totaltracks", [None])[0])
@@ -286,7 +288,8 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
             artist = id3_val("TPE1")
             album = id3_val("TALB")
             album_artist = id3_val("TPE2")
-            year = _extract_year(id3_val("TDRC") or id3_val("TYER"))
+            raw_date = id3_val("TDRC") or id3_val("TYER")
+            year = _extract_year(raw_date)
             track_number, total_tracks = _parse_num_total(id3_val("TRCK"))
             disc_number, total_discs = _parse_num_total(id3_val("TPOS"))
             musicbrainz_artistid = id3_val("TXXX:MusicBrainz Artist Id")
@@ -322,7 +325,8 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
             artist = mp4_val("\xa9ART")
             album = mp4_val("\xa9alb")
             album_artist = mp4_val("aART")
-            year = _extract_year(mp4_val("\xa9day"))
+            raw_date = mp4_val("\xa9day")
+            year = _extract_year(raw_date)
 
             trkn = tags.get("trkn")
             if trkn and isinstance(trkn, list) and trkn:
@@ -348,7 +352,8 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
             artist = tags.get("artist", [None])[0]
             album = tags.get("album", [None])[0]
             album_artist = tags.get("albumartist", [None])[0] or tags.get("album_artist", [None])[0]
-            year = _extract_year(tags.get("date", [None])[0])
+            raw_date = tags.get("date", [None])[0]
+            year = _extract_year(raw_date)
             track_number, total_tracks = _parse_num_total(tags.get("tracknumber", [None])[0])
             disc_number, total_discs = _parse_num_total(tags.get("discnumber", [None])[0])
             musicbrainz_artistid = tags.get("musicbrainz_artistid", [None])[0]
@@ -380,7 +385,8 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
             artist = str(tags.get("artist", [""])[0]) or None
             album = str(tags.get("album", [""])[0]) or None
             album_artist = str(tags.get("albumartist", [""])[0]) or None
-            year = _extract_year(tags.get("date", [""])[0])
+            raw_date = str(tags.get("date", [""])[0]) or None
+            year = _extract_year(raw_date)
             track_number, total_tracks = _parse_num_total(tags.get("tracknumber", [""])[0])
             disc_number, total_discs = _parse_num_total(tags.get("discnumber", [""])[0])
             musicbrainz_artistid = str(tags.get("musicbrainz_artistid", [""])[0]) or None
@@ -396,6 +402,7 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
         "artist": artist,
         "album": album,
         "album_artist": album_artist,
+        "date": raw_date or (str(year) if year is not None else None),
         "year": year,
         "release_year": year,
         "track_number": track_number or None,
@@ -455,6 +462,68 @@ def resolve_collision(
         if not detect_path_collision(candidate, existing_paths):
             return candidate
         counter += 1
+
+
+def build_tags_to_write(
+    metadata: Optional[dict[str, Any]] = None,
+    req: Optional[dict[str, Any]] = None,
+    audio_files_count: int = 1,
+    *,
+    artist: Optional[str] = None,
+    album: Optional[str] = None,
+    title: Optional[str] = None,
+    date: Optional[str | int] = None,
+    track_number: Optional[str | int] = None,
+    total_tracks: Optional[str | int] = None,
+    disc_number: Optional[str | int] = None,
+    total_discs: Optional[str | int] = None,
+    musicbrainz_artistid: Optional[str] = None,
+    musicbrainz_albumid: Optional[str] = None,
+    musicbrainz_releasegroupid: Optional[str] = None,
+    musicbrainz_trackid: Optional[str] = None,
+    isrc: Optional[str] = None,
+) -> dict[str, Any]:
+    """Constructs the canonical tag dictionary for writing audio tags.
+
+    Shared by both the importer (acquisition_worker) and bulk library retag.
+    """
+    meta = metadata or {}
+    tags: dict[str, Any] = {
+        "artist": artist if artist is not None else ((req.get("artist") if req else None) or meta.get("artist")),
+        "album": album if album is not None else ((req.get("album") or req.get("title") if req else None) or meta.get("album")),
+        "title": title if title is not None else (meta.get("title") if audio_files_count > 1 else ((req.get("title") if req else None) or meta.get("title"))),
+        "date": date if date is not None else ((req.get("release_date") if req else None) or meta.get("year")),
+        "tracknumber": track_number if track_number is not None else meta.get("track_number"),
+        "totaltracks": total_tracks if total_tracks is not None else meta.get("total_tracks"),
+        "discnumber": disc_number if disc_number is not None else meta.get("disc_number"),
+        "totaldiscs": total_discs if total_discs is not None else meta.get("total_discs"),
+    }
+    if musicbrainz_artistid is not None:
+        tags["musicbrainz_artistid"] = musicbrainz_artistid
+    elif meta.get("musicbrainz_artistid"):
+        tags["musicbrainz_artistid"] = meta.get("musicbrainz_artistid")
+
+    if musicbrainz_albumid is not None:
+        tags["musicbrainz_albumid"] = musicbrainz_albumid
+    elif meta.get("musicbrainz_albumid"):
+        tags["musicbrainz_albumid"] = meta.get("musicbrainz_albumid")
+
+    if musicbrainz_releasegroupid is not None:
+        tags["musicbrainz_releasegroupid"] = musicbrainz_releasegroupid
+    elif meta.get("musicbrainz_releasegroupid"):
+        tags["musicbrainz_releasegroupid"] = meta.get("musicbrainz_releasegroupid")
+
+    if musicbrainz_trackid is not None:
+        tags["musicbrainz_trackid"] = musicbrainz_trackid
+    elif meta.get("musicbrainz_trackid"):
+        tags["musicbrainz_trackid"] = meta.get("musicbrainz_trackid")
+
+    if isrc is not None:
+        tags["isrc"] = isrc
+    elif meta.get("isrc"):
+        tags["isrc"] = meta.get("isrc")
+
+    return tags
 
 
 def write_audio_tags(

@@ -8,6 +8,8 @@ as before (it is not turned into ``null``).
 
 from typing import Any, Literal, Optional
 
+from pydantic import Field
+
 from plex_playlist_sync.api.response_models import ApiModel
 
 Number = int | float
@@ -487,6 +489,40 @@ class RenamePreviewItem(ApiModel):
 class RenameApplyResponse(ApiModel):
     renamed_count: int
     errors: list[str]
+
+
+# -------------------------------------------------------------------------------------------------------- retag
+
+
+class RetagFieldDiff(ApiModel):
+    field: str
+    current: Optional[str] = None
+    proposed: Optional[str] = None
+
+
+class RetagPreviewItem(ApiModel):
+    file_id: str
+    track_id: Optional[str] = None
+    path: str
+    changes: list[RetagFieldDiff] = Field(default_factory=list)
+    diffs: list[RetagFieldDiff] = Field(default_factory=list)
+    skipped_reason: Optional[str] = None
+
+
+class RetagFileResult(ApiModel):
+    file_id: str
+    status: Literal["ok", "skipped", "error"]
+    message: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class RetagApplyResponse(ApiModel):
+    results: list[RetagFileResult] = Field(default_factory=list)
+    retagged_count: int = 0
+    applied_count: int = 0
+    skipped_count: int = 0
+    error_count: int = 0
+    errors: list[str] = Field(default_factory=list)
 
 
 # ------------------------------------------------------------------------------------------------ collections

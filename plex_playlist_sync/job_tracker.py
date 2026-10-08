@@ -32,6 +32,10 @@ class JobHandle:
         self.failed: Optional[str] = None  # set to a message when the run ended badly without raising
         self.discard = False  # the run turned out to be a no-op that should not appear in the queue view
 
+    def update_message(self, message: str) -> None:
+        self.message = message
+        job_tracker.update_message(self.job_id, message)
+
 
 class JobTracker:
     def __init__(self, recent_limit: int = RECENT_LIMIT) -> None:
@@ -42,6 +46,12 @@ class JobTracker:
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    def update_message(self, job_id: str, message: Optional[str]) -> None:
+        with self._lock:
+            job = self._active.get(job_id)
+            if job is not None:
+                job["message"] = message
 
     def start(self, task_id: str, name: str, state: str = "running", message: Optional[str] = None) -> str:
         job_id = f"job-{uuid.uuid4().hex[:12]}"
