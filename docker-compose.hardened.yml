@@ -67,10 +67,22 @@ services:
       - PGID=1000
       - UMASK=022
       - TZ=Etc/UTC
-      - PLEX_URL=http://192.168.1.100:32400
-      - PLEX_TOKEN=your_plex_token_here
-      - PLEX_MUSIC_SECTION=Music
-      - PLEX_VERIFY_SSL=1
+      # Non-Plex setups: uncomment to create the initial admin user ("admin") on first start
+      # - ADMIN_PASSWORD=change-me-to-12-or-more-characters
+      # Plex: connect to Plex Media Server (use LAN IP, not localhost)
+      # - PLEX_URL=http://192.168.1.100:32400
+      # - PLEX_TOKEN=your_plex_token_here
+      # - PLEX_MUSIC_SECTION=Music
+      # - PLEX_VERIFY_SSL=1
+      # Jellyfin: connect to Jellyfin media server
+      # - MEDIA_SERVER=jellyfin
+      # - JELLYFIN_URL=http://192.168.1.100:8096
+      # - JELLYFIN_API_KEY=your_jellyfin_api_key
+      # Subsonic: connect to Navidrome, Gonic, Airsonic, or Subsonic server
+      # - MEDIA_SERVER=subsonic
+      # - SUBSONIC_URL=http://192.168.1.100:4533
+      # - SUBSONIC_USER=your_subsonic_username
+      # - SUBSONIC_PASSWORD=your_subsonic_password
       - SECONDS_TO_WAIT=14400
       - SEARCH_SIMILARITY_THRESHOLD=0.9
       - LOG_LEVEL=INFO

@@ -10,22 +10,22 @@
   <Support>https://github.com/RonFBurgundy/trackseerr/issues</Support>
   <Project>https://github.com/RonFBurgundy/trackseerr</Project>
   <Overview>
-TrackSeerr is a self-hosted, multi-user music request, discovery, and library management suite combining an Overseerr-style frontend with an Arr-style media management and acquisition backend for Plex Media Server and Plexamp.
+TrackSeerr is a self-hosted, multi-user music request, discovery, and library management suite combining an Overseerr-style frontend with an Arr-style media management and acquisition backend. Works with Plex, Jellyfin, Subsonic servers (Navidrome, Gonic, Airsonic), or no media server.
 
 Key Capabilities:
 - Music Discovery &amp; Audio Previews: Zero-key discovery of trending charts, new releases, and deep search via public Apple Music and Deezer APIs with 30-second audio previews.
 - Multi-User Request Engine: Plex Home user integration, per-user request quotas, and administrative approval queues.
 - Dual Acquisition Engine: Fulfill requests using your existing Lidarr server via batched trickle automation, or use native acquisition drivers (slskd / Soulseek P2P for single-track and album surgical matching, SABnzbd for Usenet, qBittorrent for torrents, Torznab/Newznab indexers).
 - Real-Time Activity Queue: Live transfer progress, speed monitoring, cancellation, and retry controls.
-- Arr-Grade Media Management: Mutagen audio inspection, token template naming engine ({Artist Name}/{Album Title} ({Release Year})/{track:00} - {Track Title}), collision protection, and automated Plex library refresh pings.
-- Playlist Synchronization: Import and synchronize Spotify and Deezer playlists directly into personal Plexamp profiles with keyless scraping and 1-click browser bookmarklets.
+- Arr-Grade Media Management: Mutagen audio inspection, token template naming engine ({Artist Name}/{Album Title} ({Release Year})/{track:00} - {Track Title}), collision protection, and automated media server library refresh pings.
+- Playlist Synchronization: Import and synchronize Spotify and Deezer playlists directly into personal profiles with keyless scraping and 1-click browser bookmarklets.
 - Two-Tier DMZ Option: split into TrackSeerr Requests (public, stateless) and TrackSeerr Core (internal) for exposure behind reverse proxies and Cloudflare Tunnels.
 
 Exposing to the internet? Use TrackSeerr Core + TrackSeerr Requests instead (two separate templates). The public container then holds no Plex token, no downloader credentials and no volumes.
 
 This all-in-one template is intended for LAN, VPN and Tailscale use. Moving to the split setup later only means changing this container to ROLE=core (same appdata, no data migration) and adding TrackSeerr Requests.
 
-Note: Lidarr automation, Plex settings, download clients, indexers, media management paths, quotas, and Application URL are configured dynamically in the WebUI Settings.
+Note: Lidarr automation, media server settings, download clients, indexers, media management paths, quotas, and Application URL are configured dynamically in the WebUI Settings.
   </Overview>
   <Category>MediaApp:Music MediaServer:Music Tools:Utilities</Category>
   <WebUI>http://[IP]:[PORT:5250]</WebUI>
@@ -51,15 +51,29 @@ Note: Lidarr automation, Plex settings, download clients, indexers, media manage
   <Config Name="Execution Role" Target="ROLE" Default="all-in-one" Mode="" Description="Leave as all-in-one for LAN/VPN use. To split for internet exposure, use the TrackSeerr Core and TrackSeerr Requests templates (core/gateway); do not hand-edit unless migrating." Type="Variable" Display="advanced" Required="false" Mask="false">all-in-one</Config>
   <Config Name="Internal Core Secret" Target="INTERNAL_CORE_SECRET" Default="" Mode="" Description="Only used in split mode (ROLE=core). Leave blank for all-in-one." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
 
-  <Config Name="Plex Server URL" Target="PLEX_URL" Default="http://192.168.1.100:32400" Mode="" Description="Base URL of your Plex Media Server, using your server's LAN IP and port 32400. IMPORTANT: Do NOT use localhost on bridge networking." Type="Variable" Display="always" Required="true" Mask="false">http://192.168.1.100:32400</Config>
+  <Config Name="Media Server" Target="MEDIA_SERVER" Default="" Mode="" Description="plex, jellyfin, subsonic or none. Leave empty to use Plex when Plex URL and token are set, or to choose in Settings &gt; Media Management &gt; Media Server." Type="Variable" Display="always" Required="false" Mask="false"></Config>
 
-  <Config Name="Plex Token" Target="PLEX_TOKEN" Default="" Mode="" Description="Plex Admin X-Plex-Token. Optional initially if using the Web Dashboard Plex OAuth PIN login, but required for background daemon sync." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Admin Password" Target="ADMIN_PASSWORD" Default="" Mode="" Description="Creates the first local admin (user 'admin') when there is no Plex server to sign in with. At least 12 characters. Only used on first start." Type="Variable" Display="always" Required="false" Mask="true"></Config>
 
-  <Config Name="Plex Music Library Section" Target="PLEX_MUSIC_SECTION" Default="Music" Mode="" Description="Name of your Plex music library section." Type="Variable" Display="always" Required="false" Mask="false">Music</Config>
+  <Config Name="Plex Server URL" Target="PLEX_URL" Default="" Mode="" Description="Plex only. Set together with Plex Token, or leave both empty. Use the LAN IP, not localhost." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+
+  <Config Name="Plex Token" Target="PLEX_TOKEN" Default="" Mode="" Description="Plex only. Set together with Plex Server URL, or leave both empty." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+
+  <Config Name="Plex Music Library Section" Target="PLEX_MUSIC_SECTION" Default="" Mode="" Description="Name of the Plex music library to use. Leave empty to use the first music library." Type="Variable" Display="always" Required="false" Mask="false"></Config>
 
   <Config Name="Plex Machine Identifier" Target="PLEX_MACHINE_IDENTIFIER" Default="" Mode="" Description="Plex server machine identifier for multi-user access pinning. Leave blank to auto-detect." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
 
   <Config Name="Plex SSL Verification" Target="PLEX_VERIFY_SSL" Default="1" Mode="" Description="Set to 0 if your Plex Media Server uses a self-signed certificate without valid chain." Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+
+  <Config Name="Jellyfin Server URL" Target="JELLYFIN_URL" Default="" Mode="" Description="Jellyfin base URL. Requires MEDIA_SERVER=jellyfin. Can be configured in the web UI instead." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <Config Name="Jellyfin API Key" Target="JELLYFIN_API_KEY" Default="" Mode="" Description="Jellyfin API key. Requires MEDIA_SERVER=jellyfin. Can be configured in the web UI instead." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+
+  <Config Name="Subsonic Server URL" Target="SUBSONIC_URL" Default="" Mode="" Description="Subsonic base URL. Requires MEDIA_SERVER=subsonic. Can be configured in the web UI instead." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <Config Name="Subsonic Username" Target="SUBSONIC_USER" Default="" Mode="" Description="Subsonic username. Requires MEDIA_SERVER=subsonic. Can be configured in the web UI instead." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <Config Name="Subsonic Password" Target="SUBSONIC_PASSWORD" Default="" Mode="" Description="Subsonic password. Requires MEDIA_SERVER=subsonic. Can be configured in the web UI instead." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
 
   <Config Name="Feed Access Token" Target="FEED_TOKEN" Default="" Mode="" Description="Optional: Secret token to protect RSS feeds, plain text lists, and webhook endpoints if exposed to untrusted networks." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
 
