@@ -294,6 +294,8 @@ WORKER_THREAD_TASKS: dict[str, str] = {
     "ManualAcquisitionTask": "download_queue_monitor",
     "ManualArtistRefreshTask": "artist_metadata_refresh",
     "ArtBackfillTask": "art_thumbnail_backfill",
+    "ManualScrobbleSyncTask": "scrobble_sync",
+    "ManualMixGenerationTask": "mix_generation",
 }
 
 NON_TASK_THREADS: dict[str, str] = {

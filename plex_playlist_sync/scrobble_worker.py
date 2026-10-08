@@ -33,6 +33,7 @@ class ScrobbleWorker:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._iteration_lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._is_running = False
@@ -163,6 +164,12 @@ class ScrobbleWorker:
             result["retried"] = self.retry_forwards_once(db, config)
         return result
 
+    def run_now(self, db: Database, config: Config) -> dict[str, int]:
+        """Run an iteration immediately, bypassing the history poll gate and retry intervals."""
+        plex = self._get_plex(config)
+        with self._iteration_lock:
+            return self.run_iteration(db, config, plex, force=True)
+
     # -- lifecycle ----------------------------------------------------------------
 
     def _get_plex(self, config: Config) -> Optional[PlexClient]:
@@ -202,7 +209,8 @@ class ScrobbleWorker:
                 try:
                     plex = plex_factory(config) if plex_factory else self._get_plex(config)
                     tick_started = time.monotonic()
-                    outcome = self.run_iteration(db, config, plex)
+                    with self._iteration_lock:
+                        outcome = self.run_iteration(db, config, plex)
                     if isinstance(outcome, dict) and (outcome.get("ingested") or outcome.get("retried")):
                         record_finished_run(  # idle ticks (nothing polled or retried) are not history
                             db,

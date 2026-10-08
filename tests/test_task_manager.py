@@ -449,7 +449,139 @@ def test_manual_run_records_failure(app_and_client, seeded_users, secret_key, te
 def test_continuous_task_cannot_be_run_manually(app_and_client, seeded_users, secret_key, test_db):
     _, client = app_and_client
     admin = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
-    assert client.post("/api/system/tasks/scrobble_sync/run", cookies=admin).status_code == 400
+    assert client.post("/api/system/tasks/pending_releases/run", cookies=admin).status_code == 400
+    assert client.post("/api/system/tasks/import_list_sync/run", cookies=admin).status_code == 400
+
+
+def test_task_list_can_trigger_flags(app_and_client, seeded_users, secret_key, test_db):
+    _, client = app_and_client
+    cookies = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
+    resp = client.get("/api/system/tasks", cookies=cookies)
+    assert resp.status_code == 200
+    tasks = {t["id"]: t for t in resp.json()}
+    assert tasks["scrobble_sync"]["can_trigger"] is True
+    assert tasks["mix_generation"]["can_trigger"] is True
+    assert tasks["pending_releases"]["can_trigger"] is False
+    assert tasks["import_list_sync"]["can_trigger"] is False
+
+
+def test_manual_run_scrobble_sync(app_and_client, seeded_users, secret_key, test_db):
+    from plex_playlist_sync.scrobble_worker import scrobble_worker
+
+    _, client = app_and_client
+    admin = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
+
+    with patch.object(scrobble_worker, "_get_plex", return_value=None), \
+         patch.object(scrobble_worker, "run_iteration", return_value={"ingested": 3, "retried": 1}) as mock_iter:
+        resp = client.post("/api/system/tasks/scrobble_sync/run", cookies=admin)
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+        deadline = time.monotonic() + 5
+        rows = []
+        while time.monotonic() < deadline:
+            rows = test_db.list_task_runs("scrobble_sync", _iso(timedelta(days=-1)))
+            if rows and rows[0]["status"] != "running":
+                break
+            time.sleep(0.05)
+
+    assert rows and rows[0]["trigger"] == "manual" and rows[0]["status"] == "success"
+    assert rows[0]["message"] == "ingested=3, retried=1"
+    mock_iter.assert_called_once()
+    assert mock_iter.call_args.kwargs.get("force") is True
+
+
+def test_manual_run_mix_generation_regenerates_non_due(app_and_client, seeded_users, secret_key, test_db, test_config):
+    from plex_playlist_sync.mix_worker import mix_worker
+
+    _, client = app_and_client
+    admin = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
+    uid = seeded_users["admin"]["id"]
+
+    mix_row = test_db.create_mix_config(
+        user_id=uid,
+        mix_type="daily_blend",
+        name="Test Daily Blend",
+    )
+    test_db.record_mix_result(mix_row["id"], "{}")
+
+    # 1. Normal non-forced run_iteration skips the non-due mix
+    with patch("plex_playlist_sync.mix_worker.generate_and_sync") as mock_gen:
+        outcome = mix_worker.run_iteration(test_db, test_config, plex_client=None, discovery=MagicMock(), force=False)
+        assert outcome["due"] == 0
+        assert outcome["generated"] == 0
+        mock_gen.assert_not_called()
+
+    # 2. Manual run via API regenerates the non-due mix (force=True)
+    with patch.object(mix_worker, "_get_plex", return_value=None), \
+         patch("plex_playlist_sync.mix_worker.generate_and_sync") as mock_gen:
+        resp = client.post("/api/system/tasks/mix_generation/run", cookies=admin)
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+        deadline = time.monotonic() + 5
+        rows = []
+        while time.monotonic() < deadline:
+            rows = test_db.list_task_runs("mix_generation", _iso(timedelta(days=-1)))
+            if rows and rows[0]["status"] != "running":
+                break
+            time.sleep(0.05)
+
+        mock_gen.assert_called_once()
+        assert mock_gen.call_args[0][3]["id"] == mix_row["id"]
+
+    assert rows and rows[0]["trigger"] == "manual" and rows[0]["status"] == "success"
+    assert rows[0]["message"] == "due=1, generated=1, errors=0"
+
+
+def test_manual_run_non_admin_forbidden(app_and_client, seeded_users, secret_key, test_db):
+    _, client = app_and_client
+    alice = create_auth_cookies(test_db, seeded_users["alice"], secret_key)
+    assert client.post("/api/system/tasks/scrobble_sync/run", cookies=alice).status_code == 403
+    assert client.post("/api/system/tasks/mix_generation/run", cookies=alice).status_code == 403
+    assert client.post("/api/system/tasks/scrobble_sync/run").status_code == 401
+    assert client.post("/api/system/tasks/mix_generation/run").status_code == 401
+
+
+def test_worker_iteration_locks_serialize(test_db, test_config):
+    from plex_playlist_sync.scrobble_worker import ScrobbleWorker
+    from plex_playlist_sync.mix_worker import MixWorker
+
+    sw = ScrobbleWorker()
+    mw = MixWorker()
+
+    with patch.object(sw, "run_iteration", return_value={"ingested": 0, "retried": 0}), \
+         patch.object(sw, "_get_plex", return_value=None):
+        with sw._iteration_lock:
+            t_sw = threading.Thread(target=sw.run_now, args=(test_db, test_config))
+            t_sw.start()
+            time.sleep(0.05)
+            assert t_sw.is_alive()
+        t_sw.join(timeout=2.0)
+        assert not t_sw.is_alive()
+
+    with patch.object(mw, "run_iteration", return_value={"due": 0, "generated": 0, "errors": 0}), \
+         patch.object(mw, "_get_plex", return_value=None):
+        with mw._iteration_lock:
+            t_mw = threading.Thread(target=mw.run_now, args=(test_db, test_config))
+            t_mw.start()
+            time.sleep(0.05)
+            assert t_mw.is_alive()
+        t_mw.join(timeout=2.0)
+        assert not t_mw.is_alive()
+
+
+def test_mix_worker_run_now_instantiates_discovery_if_none(test_db, test_config):
+    from plex_playlist_sync.mix_worker import MixWorker
+
+    worker = MixWorker()
+    assert worker._discovery is None
+    with patch.object(worker, "_get_plex", return_value=None), \
+         patch("plex_playlist_sync.mix_worker.DiscoveryClient") as mock_disc_cls, \
+         patch.object(worker, "run_iteration", return_value={"due": 0, "generated": 0, "errors": 0}):
+        worker.run_now(test_db, test_config)
+        mock_disc_cls.assert_called_once()
+        assert worker._discovery == mock_disc_cls.return_value
 
 
 # ----------------------------------------------------------------------------- scheduled paths record
