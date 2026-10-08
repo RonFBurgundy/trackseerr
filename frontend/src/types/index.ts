@@ -24,3 +24,4 @@ export * from './notifications';
 export * from './userNotifications';
 export * from './listening';
 export * from './backup';
+export * from './calendar';

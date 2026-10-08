@@ -1063,6 +1063,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/calendar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Release calendar
+         * @description Retrieves album releases within the given date range for library artists.
+         */
+        get: operations["get_calendar_api_calendar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/calendar/feed.ics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Release calendar iCal feed
+         * @description Generates an RFC 5545 VCALENDAR iCal feed with upcoming and recent releases.
+         */
+        get: operations["calendar_feed_ics_api_calendar_feed_ics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/discovery/album/{album_id}": {
         parameters: {
             query?: never;
@@ -6397,6 +6437,36 @@ export interface components {
             tags_added?: number | null;
             /** Tags Removed */
             tags_removed?: number | null;
+        };
+        /**
+         * CalendarItem
+         * @description A release calendar item representing an album.
+         */
+        CalendarItem: {
+            /**
+             * Album Type
+             * @default album
+             */
+            album_type: string | null;
+            /** Artist Id */
+            artist_id: string;
+            /** Artist Name */
+            artist_name: string;
+            /** Cover Url */
+            cover_url?: string | null;
+            /** Id */
+            id: string;
+            /** Monitored */
+            monitored: boolean;
+            /** Release Date */
+            release_date: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "downloaded" | "partial" | "missing" | "upcoming";
+            /** Title */
+            title: string;
         };
         /** ChangePasswordRequest */
         ChangePasswordRequest: {
@@ -14814,6 +14884,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlexVerifyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_calendar_api_calendar_get: {
+        parameters: {
+            query?: {
+                /** @description Start date (YYYY-MM-DD), defaults to today-7 */
+                start?: string | null;
+                /** @description End date (YYYY-MM-DD), defaults to today+30 */
+                end?: string | null;
+                /** @description Include unmonitored albums and artists */
+                unmonitored?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    calendar_feed_ics_api_calendar_feed_ics_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+                /** @description Include unmonitored albums in feed */
+                unmonitored?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

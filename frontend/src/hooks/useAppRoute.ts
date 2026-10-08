@@ -4,7 +4,7 @@ import type { LibraryTab } from './useLibrary';
 import type { RequestFilter } from './useRequests';
 import { parseImportHash, storePendingImport, peekPendingImport } from '@/services/bookmarkletImport';
 
-export type MainTab = 'discover' | 'requests' | 'library' | 'playlists' | 'activity' | 'wanted' | 'settings';
+export type MainTab = 'discover' | 'requests' | 'library' | 'playlists' | 'activity' | 'wanted' | 'calendar' | 'settings';
 
 export type RequestsSub = RequestFilter | 'issues';
 export type ActivitySub = 'queue' | 'history' | 'blocklist' | 'review' | 'issues';
@@ -56,6 +56,7 @@ export type AppRoute =
   | LibraryRoute
   | ActivityRoute
   | { tab: 'wanted'; sub: WantedSub }
+  | { tab: 'calendar' }
   | SettingsRoute;
 
 export interface NavigateOptions {
@@ -76,7 +77,7 @@ function prevHashOf(state: unknown): string | undefined {
   return undefined;
 }
 
-export const MAIN_TABS: readonly MainTab[] = ['discover', 'requests', 'library', 'playlists', 'activity', 'wanted', 'settings'];
+export const MAIN_TABS: readonly MainTab[] = ['discover', 'requests', 'library', 'playlists', 'activity', 'wanted', 'calendar', 'settings'];
 export const REQUESTS_SUBS: readonly RequestsSub[] = ['all', 'pending', 'approved', 'fulfilled', 'rejected', 'issues'];
 export const LIBRARY_SUBS: readonly LibraryTab[] = ['artists', 'albums', 'tracks', 'collections'];
 export const ACTIVITY_SUBS: readonly ActivitySub[] = ['queue', 'history', 'blocklist', 'review', 'issues'];

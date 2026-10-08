@@ -7,6 +7,7 @@ This page covers TrackSeerr's own library manager. If Lidarr manages your librar
 - [Adding artists](#adding-artists)
 - [Monitoring](#monitoring)
 - [Wanted](#wanted)
+- [Calendar](#calendar)
 - [Importing files by hand](#importing-files-by-hand)
 - [File naming](#file-naming)
 - [Deleted and rejected files](#deleted-and-rejected-files)
@@ -78,6 +79,22 @@ The defaults are set in **Settings > Media Management > Root Folders & Naming**.
 | Cutoff Unmet | Tracks you have, but below the cutoff in their quality profile. TrackSeerr keeps looking for a better copy. |
 
 You can search for any item by hand from here. TrackSeerr also searches on a schedule. See [How searching works](ACQUISITION.md#how-searching-works).
+
+## Calendar
+
+The **Calendar** page shows album releases across the month for monitored artists. On desktop, it displays a standard month grid. On mobile, it displays a chronological agenda list.
+
+Each release displays a status chip:
+- **Downloaded**: Every track file is present.
+- **Partial**: Some track files are present, but not all.
+- **Missing**: The album is released, but no track files are present.
+- **Upcoming**: The release date is in the future.
+
+Use the unmonitored toggle to show or hide releases from artists that are not monitored.
+
+### Subscribing to the iCal feed
+
+Click **Subscribe** on the Calendar page to get an RFC 5545 iCal feed URL. You can paste this feed URL into Apple Calendar, Google Calendar, Outlook, or Thunderbird to view your music releases alongside your personal schedule. The feed uses your TrackSeerr feed token or API key for secure read-only access.
 
 ## Importing files by hand
 
