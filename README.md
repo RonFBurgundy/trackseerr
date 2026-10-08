@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="unraid/trackseerr.png" alt="TrackSeerr logo" width="180">
+  <img src="unraid/trackseerr.png" alt="TrackSeerr Logo" width="180">
 </p>
 
 # TrackSeerr
