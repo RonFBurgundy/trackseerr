@@ -12,7 +12,12 @@ To ask for something, [open a feature request](https://github.com/RonFBurgundy/t
 ## Being considered
 
 - **More download clients.** NZBGet, Transmission, and Deluge.
+- **Tidal playlists.** Import Tidal playlists by link, like Spotify and Deezer.
 - **More playlist sources.** Apple Music and YouTube Music playlist links.
+
+## Not planned
+
+- **Downloading from streaming services** (Tidal, Spotify, Deezer, and others). This breaks their terms of service. TrackSeerr downloads only through the download clients and indexers you set up.
 
 ## Recently done
 
