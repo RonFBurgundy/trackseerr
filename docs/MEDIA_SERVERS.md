@@ -34,7 +34,7 @@ environment:
 ```
 
 - Use the token of the Plex server owner. Plex explains how to find it: [Finding an authentication token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
-- TrackSeerr uses the first music library on the server.
+- TrackSeerr uses the first music library on the server. To pick another one, set `PLEX_MUSIC_SECTION` to its name.
 - The server owner signs in with **Sign in with Plex** and is the TrackSeerr admin. Anyone else with access to your Plex server can sign in the same way. Plex accounts without access are refused.
 - For a self-signed certificate, set `PLEX_VERIFY_SSL=0`.
 

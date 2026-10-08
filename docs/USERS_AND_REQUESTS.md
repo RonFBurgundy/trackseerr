@@ -58,7 +58,7 @@ You cannot remove your own admin permission or delete the last admin.
 | Auto-approve discographies | Discography requests skip approval. |
 | Report issues | Report problems with music in the library. |
 | Auto-request playlist tracks | Missing tracks from this user's playlists are requested on their behalf. |
-| Manage requests | Reserved. It has no effect yet. |
+| Manage requests | See every user's requests and approve or reject them. Works on the core or a single container only, never through the gateway. |
 
 New users get **Request music** and **Report issues**. Set different defaults in **Settings > Requests > Users > Account defaults**.
 
@@ -97,7 +97,7 @@ Follow requests in **Requests**. Each request moves through these states:
 
 ## Approving requests
 
-Admins see pending requests in **Requests > Pending**. Approve or reject each one. When you approve a request, TrackSeerr sends it to the library manager: its own downloader, or Lidarr.
+Admins, and users with **Manage requests**, see pending requests in **Requests > Pending**. Approve or reject each one. In the two-container setup this only works on the core. When you approve a request, TrackSeerr sends it to the library manager: its own downloader, or Lidarr.
 
 Set up notifications in **Settings > Requests > Notifications** to hear about new requests. Supported channels are Discord, Telegram, Pushover, email, and webhooks.
 

@@ -62,6 +62,7 @@ See [Media servers](MEDIA_SERVERS.md) for what each server supports.
 | `PLEX_URL` | unset | Plex address, for example `http://192.168.1.100:32400`. |
 | `PLEX_TOKEN` | unset | Plex token of the server owner. |
 | `PLEX_MACHINE_IDENTIFIER` | automatic | Plex server ID. Only needed if your account can reach more than one server and the wrong one is picked. |
+| `PLEX_MUSIC_SECTION` | first music library | Name of the Plex music library to use, for example `Music`. Not case-sensitive. If no music library has that name, TrackSeerr logs a warning and uses the first one. |
 | `PLEX_VERIFY_SSL` | `1` | `0` turns off certificate checks for a self-signed Plex certificate. `IGNORE_SSL=1` does the same. |
 | `JELLYFIN_URL` | unset | Jellyfin address, including any base path, for example `http://jellyfin:8096`. |
 | `JELLYFIN_API_KEY` | unset | Jellyfin API key, from **Dashboard > API Keys** in Jellyfin. |
@@ -71,8 +72,6 @@ See [Media servers](MEDIA_SERVERS.md) for what each server supports.
 | `SUBSONIC_API_KEY` | unset | OpenSubsonic API key, used instead of user and password if the server supports it. |
 
 Set both `PLEX_URL` and `PLEX_TOKEN`, or neither. With only one set, TrackSeerr stops at startup and logs which one is missing. The same goes for `JELLYFIN_*` or `SUBSONIC_*` variables without `MEDIA_SERVER`.
-
-TrackSeerr uses the first music library on Plex.
 
 ## Playlist sync
 

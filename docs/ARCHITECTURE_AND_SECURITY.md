@@ -113,7 +113,7 @@ TrackSeerr checks every address before it connects to it.
 
 ### API access
 
-Scripts can call the API with an API key in the `X-Api-Key` header. Admins can read the key at `GET /api/settings/api-key` and replace it with `POST /api/settings/api-key/regenerate`. The interactive API docs are off unless you set `ENABLE_API_DOCS=1`.
+Scripts can call the API with an API key in the `X-Api-Key` header. Admins can view, copy, and regenerate the key in **Settings > General**. Regenerating it breaks any script that uses the old key. The interactive API docs are off unless you set `ENABLE_API_DOCS=1`.
 
 `FEED_TOKEN` protects the missing-track feeds and the sync webhook.
 
