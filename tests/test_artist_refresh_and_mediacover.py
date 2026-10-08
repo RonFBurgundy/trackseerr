@@ -570,6 +570,14 @@ def test_library_scanner_auto_hydration_neutralized_without_marker(test_db: Data
         time.sleep(0.15)
         mock_refresh.assert_not_called()
 
+    # Regression check: threading.Thread is no longer replaced globally.
+    # Subclasses and Thread.start work as expected without RuntimeError: thread.__init__() not called.
+    timer = threading.Timer(0.01, lambda: None)
+    timer.start()
+    timer.join()
+    assert issubclass(threading.Timer, threading.Thread)
+    assert callable(threading.Thread.start)
+
 
 # =========================================================================
 # Test 8: Lidarr migration maps artist and album artwork

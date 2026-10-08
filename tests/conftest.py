@@ -159,29 +159,9 @@ def _no_background_scanner_hydration(request, monkeypatch):
         yield
         return
 
-    import threading
+    from plex_playlist_sync.library_scanner import LibraryScanner
 
-    orig_thread = threading.Thread
-
-    class _NoOpHydrationThread(orig_thread):
-        def start(self):
-            pass
-
-        def join(self, timeout=None):
-            pass
-
-        def is_alive(self):
-            return False
-
-    def _guarded_thread(*args, **kwargs):
-        name = kwargs.get("name")
-        if not name and len(args) >= 3:
-            name = args[2]
-        if name == "AutoArtistHydrationThread":
-            return _NoOpHydrationThread(target=lambda: None, daemon=True, name="AutoArtistHydrationThread")
-        return orig_thread(*args, **kwargs)
-
-    monkeypatch.setattr(threading, "Thread", _guarded_thread)
+    monkeypatch.setattr(LibraryScanner, "_launch_auto_hydration", lambda self, db, artist_ids: None)
     yield
 
 
