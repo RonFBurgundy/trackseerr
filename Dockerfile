@@ -19,13 +19,15 @@ RUN apt-get update && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY plex_playlist_sync ./plex_playlist_sync
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md CHANGELOG.md ./
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 COPY --from=frontend-builder /build/dist ./frontend/dist
 RUN useradd --create-home --uid 1000 appuser && \
     mkdir -p /config /data /data/media/music /data/downloads /music /downloads && \
     chown -R appuser:appuser /app /config /data /music /downloads
+ARG TRACKSEERR_COMMIT=""
+ENV TRACKSEERR_COMMIT=$TRACKSEERR_COMMIT
 EXPOSE 5250
 VOLUME ["/config", "/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

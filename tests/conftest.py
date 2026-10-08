@@ -138,6 +138,26 @@ def _stop_worker_singletons_started_since(before: set) -> None:
         workers[thread.name].stop()
         thread.join(timeout=10)
 
+    hydration_threads = [t for t in threading.enumerate() if t not in before and t.name == "AutoArtistHydrationThread"]
+    if hydration_threads:
+        artist_refresh_worker.artist_refresh_worker._stop_event.set()
+        for thread in hydration_threads:
+            thread.join(timeout=5)
+        artist_refresh_worker.artist_refresh_worker._stop_event.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_background_scanner_hydration(request, monkeypatch):
+    """The scanner launches a daemon thread that hydrates new artists from MusicBrainz/Deezer. Never in tests,
+    unless explicitly testing the trigger."""
+    if request.node.name == "test_library_scanner_triggers_auto_hydration_for_new_artists":
+        yield
+        return
+    from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
+
+    monkeypatch.setattr(artist_refresh_worker, "refresh_once", lambda *a, **k: {})
+    yield
+
 
 @pytest.fixture(autouse=True)
 def _stop_scheduler_threads_started_by_the_test():

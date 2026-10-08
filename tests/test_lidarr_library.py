@@ -1011,6 +1011,7 @@ class TestInvalidationTriggers:
         self._client_with_entry()
         mock_client = MagicMock()
         mock_client.add_artist_and_albums.return_value = {"status": "error", "message": "nope"}
+        lidarr_worker._stop_event.clear()
         lidarr_worker._process_groups({"x": [{"artist": "X", "album": "Y", "id": "r1"}]}, mock_client, test_db)
         assert lidarr_library._entries == {}
 
