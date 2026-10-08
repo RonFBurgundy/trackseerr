@@ -438,9 +438,9 @@ def is_safe_service_url(url: Optional[str], allow_lan: bool = True) -> bool:
             resolved = ipaddress.ip_address(address)
         except ValueError:
             return False
-        if _is_forbidden_address(resolved):
+        if _is_forbidden_address(resolved) or resolved.is_loopback:
             return False
-        if (resolved.is_loopback or resolved.is_private) and not allow_lan:
+        if resolved.is_private and not allow_lan:
             return False
 
     return True

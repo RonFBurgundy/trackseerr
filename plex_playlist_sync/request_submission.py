@@ -394,6 +394,8 @@ def run_submission_followups(
         notification_data["username"] = user.get("username")
     if not notification_data.get("requested_by") and notification_data.get("user_id"):
         notification_data["requested_by"] = notification_data["user_id"]
+    if user.get("id"):
+        notification_data["actor_user_id"] = str(user["id"])
     notification_dispatcher.dispatch(NotificationEvent.REQUEST_CREATED, data=notification_data, db=db)
     if initial_status == RequestStatus.PROCESSING:
         notification_dispatcher.dispatch(NotificationEvent.REQUEST_APPROVED, data=notification_data, db=db)

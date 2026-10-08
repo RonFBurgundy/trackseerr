@@ -734,3 +734,127 @@ class TestCallSitesIncludeOwnerId:
             args, kwargs = mock_run.call_args
             assert args[0] == "item_available"
             assert args[1]["requested_by"] == alice_id
+
+
+# =============================================================================
+# 6. Self-Action Suppression Tests
+# =============================================================================
+
+
+class TestSelfActionNotificationSuppression:
+    def test_reporter_own_comment_skips_inbox_admin_comment_creates_inbox_row(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
+        """Reporter's own comment creates no inbox row for reporter; admin's comment creates inbox row."""
+        _, client = app_and_client
+        admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+        alice_headers = _auth_headers(seeded_users["alice"], test_db, test_config)
+        alice_id = seeded_users["alice"]["id"]
+
+        issue = test_db.create_issue(
+            {
+                "id": "iss-suppress-1",
+                "user_id": alice_id,
+                "media_title": "OK Computer",
+                "artist": "Radiohead",
+                "issue_type": "audio_quality",
+                "problem_details": "Crackling noise on track 1",
+            }
+        )
+
+        def sync_dispatch(event, data, db=None):
+            event_str = event.value if isinstance(event, NotificationEvent) else str(event)
+            notification_dispatcher._run_dispatch(event_str, dict(data), db)
+
+        with patch.object(notification_dispatcher, "dispatch", side_effect=sync_dispatch):
+            # 1. Reporter (Alice) comments on her own issue
+            r_alice = client.post(
+                f"/api/issues/{issue['id']}/comments",
+                json={"body": "Also happens on track 2"},
+                headers=alice_headers,
+            )
+            assert r_alice.status_code == status.HTTP_201_CREATED
+
+            # Alice has no inbox row
+            alice_inbox, _, _ = test_db.list_user_notifications(alice_id)
+            assert len(alice_inbox) == 0
+
+            # 2. Admin comments on the same issue
+            r_admin = client.post(
+                f"/api/issues/{issue['id']}/comments",
+                json={"body": "We have replaced the release"},
+                headers=admin_headers,
+            )
+            assert r_admin.status_code == status.HTTP_201_CREATED
+
+            # Alice now has an inbox row
+            alice_inbox, _, _ = test_db.list_user_notifications(alice_id)
+            assert len(alice_inbox) == 1
+            assert "OK Computer" in alice_inbox[0]["title"] or "OK Computer" in alice_inbox[0]["message"]
+
+    def test_run_dispatch_skips_user_channels_and_push_when_actor_is_owner(self, test_db, seeded_users):
+        """_run_dispatch skips inbox, personal channels, and web push when actor_user_id == owner_user_id."""
+        alice_id = seeded_users["alice"]["id"]
+
+        test_db.create_notification_channel(
+            NotificationChannel(
+                id="ch-alice-own",
+                name="Alice Discord",
+                channel_type="discord",
+                config={"webhook_url": "https://discord.com/api/webhooks/alice/token"},
+                events=["issue_updated"],
+                owner_user_id=alice_id,
+            )
+        )
+        test_db.create_or_update_web_push_subscription(
+            user_id=alice_id,
+            endpoint="https://push.example.com/alice",
+            p256dh="alice_p256dh",
+            auth="alice_auth",
+        )
+
+        dispatcher = NotificationDispatcher()
+        notified_channels = []
+        sent_pushes = []
+
+        def fake_send_ch(ch, *a, **kw):
+            notified_channels.append(ch.get("id") if isinstance(ch, dict) else ch.id)
+
+        with patch.object(dispatcher, "_send_to_channel", side_effect=fake_send_ch), \
+             patch.object(dispatcher, "_send_web_push", side_effect=lambda db, uid, *a, **kw: sent_pushes.append(uid)):
+            # Self-action: actor == owner
+            dispatcher._run_dispatch(
+                "issue_updated",
+                {
+                    "issue_id": "iss-1",
+                    "user_id": alice_id,
+                    "actor_user_id": alice_id,
+                    "media_title": "OK Computer",
+                },
+                db=test_db,
+            )
+
+        assert "ch-alice-own" not in notified_channels
+        assert len(sent_pushes) == 0
+        alice_inbox, _, _ = test_db.list_user_notifications(alice_id)
+        assert len(alice_inbox) == 0
+
+        # Non-self action: actor != owner
+        with patch.object(dispatcher, "_send_to_channel", side_effect=fake_send_ch), \
+             patch.object(dispatcher, "_send_web_push", side_effect=lambda db, uid, *a, **kw: sent_pushes.append(uid)):
+            dispatcher._run_dispatch(
+                "issue_updated",
+                {
+                    "issue_id": "iss-1",
+                    "user_id": alice_id,
+                    "actor_user_id": "admin-1",
+                    "media_title": "OK Computer",
+                },
+                db=test_db,
+            )
+
+        assert "ch-alice-own" in notified_channels
+        assert alice_id in sent_pushes
+        alice_inbox, _, _ = test_db.list_user_notifications(alice_id)
+        assert len(alice_inbox) == 1
+

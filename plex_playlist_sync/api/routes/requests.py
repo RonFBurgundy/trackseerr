@@ -218,6 +218,8 @@ def create_batch_requests(
             notification_data["username"] = current_user.get("username")
         if not notification_data.get("requested_by") and notification_data.get("user_id"):
             notification_data["requested_by"] = notification_data["user_id"]
+        if current_user.get("id"):
+            notification_data["actor_user_id"] = str(current_user["id"])
         notification_dispatcher.dispatch(NotificationEvent.REQUEST_CREATED, data=notification_data, db=db)
         if created.get("status") in (RequestStatus.PROCESSING.value, "processing"):
             notification_dispatcher.dispatch(NotificationEvent.REQUEST_APPROVED, data=notification_data, db=db)
@@ -355,6 +357,8 @@ def approve_request(
     dispatch_data = dict(res_req)
     if not dispatch_data.get("requested_by") and dispatch_data.get("user_id"):
         dispatch_data["requested_by"] = dispatch_data["user_id"]
+    if current_user.get("id"):
+        dispatch_data["actor_user_id"] = str(current_user["id"])
     notification_dispatcher.dispatch(NotificationEvent.REQUEST_APPROVED, data=dispatch_data, db=db)
     return res_req
 
@@ -380,6 +384,8 @@ def reject_request(
     dispatch_data = dict(res_req)
     if not dispatch_data.get("requested_by") and dispatch_data.get("user_id"):
         dispatch_data["requested_by"] = dispatch_data["user_id"]
+    if current_user.get("id"):
+        dispatch_data["actor_user_id"] = str(current_user["id"])
     notification_dispatcher.dispatch(NotificationEvent.REQUEST_REJECTED, data=dispatch_data, db=db)
     return res_req
 

@@ -619,6 +619,16 @@ class NotificationDispatcher:
                 except Exception as e:
                     logger.debug("Could not lookup issue owner for notification dispatch: %s", e)
 
+        # Skip per-user delivery if the actor who caused the event is the owner
+        actor_user_id = data.get("actor_user_id")
+        if actor_user_id and owner_user_id and str(actor_user_id) == str(owner_user_id):
+            logger.debug(
+                "Skipping per-user notification for event '%s': actor '%s' is owner",
+                event,
+                actor_user_id,
+            )
+            return
+
         # User-facing events delivery (isolated strictly to owning user)
         if event in USER_FACING_EVENTS and owner_user_id and database is not None:
             in_app, push = database.get_user_notification_pref(owner_user_id, event)
