@@ -160,7 +160,11 @@ class DelugeDriver(AcquisitionDriver):
                 # Query version from daemon or web
                 try:
                     version = self._rpc(client, "daemon.get_version", [], retry_auth=False)
-                except Exception:
+                except (RuntimeError, httpx.HTTPError) as exc:
+                    logger.debug(
+                        "Deluge daemon.get_version failed (%s), falling back to web.get_version",
+                        exc,
+                    )
                     version = self._rpc(client, "web.get_version", [], retry_auth=False)
                 return True, f"Deluge {version or 'connected'}"
         except httpx.TimeoutException:
@@ -220,8 +224,8 @@ class DelugeDriver(AcquisitionDriver):
                         if isinstance(plugins, list) and any(str(p).lower() == "label" for p in plugins):
                             try:
                                 self._rpc(client, "label.add", [self.label])
-                            except Exception:
-                                pass  # label may already exist
+                            except (RuntimeError, httpx.HTTPError) as exc:
+                                logger.debug("Deluge label.add: label may already exist: %s", exc)
                             try:
                                 self._rpc(client, "label.set_torrent", [torrent_hash, self.label])
                             except Exception as e:

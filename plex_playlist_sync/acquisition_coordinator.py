@@ -292,9 +292,9 @@ class AcquisitionCoordinator:
     ) -> Optional[dict[str, Any]]:
         """Finds the enabled download client with the highest priority for the requested protocol.
 
-        - "torrent": driver_type == "qbittorrent"
-        - "usenet": driver_type == "sabnzbd"
-        - "slskd": driver_type == "slskd"
+        - "torrent" / "torznab": driver_type in ("qbittorrent", "transmission", "deluge")
+        - "usenet" / "newznab": driver_type in ("sabnzbd", "nzbget")
+        - "slskd" / "soulseek" / "p2p": driver_type == "slskd"
         """
         proto = str(protocol).lower().strip()
         matching: list[dict[str, Any]] = []

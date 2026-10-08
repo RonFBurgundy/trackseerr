@@ -251,23 +251,53 @@ class NzbgetDriver(AcquisitionDriver):
         if nzb_id <= 0:
             return False
 
+        group_deleted = False
+        history_deleted = False
+
         try:
             with httpx.Client(timeout=self.timeout, auth=self._auth) as client:
                 try:
-                    self._rpc(client, "editqueue", ["GroupDelete", 0, "", [nzb_id]])
-                except Exception:
-                    pass
+                    group_deleted = bool(
+                        self._rpc(client, "editqueue", ["GroupDelete", 0, "", [nzb_id]])
+                    )
+                    if not group_deleted:
+                        logger.debug(
+                            "NZBGet GroupDelete returned False for %s (item may not be in active queue)",
+                            download_id,
+                        )
+                except (httpx.HTTPError, RuntimeError, PermissionError, ValueError) as exc:
+                    logger.debug("NZBGet GroupDelete failed for %s: %s", download_id, exc)
+
                 try:
-                    self._rpc(client, "editqueue", ["HistoryDelete", 0, "", [nzb_id]])
-                except Exception:
-                    pass
-                return True
+                    history_deleted = bool(
+                        self._rpc(client, "editqueue", ["HistoryDelete", 0, "", [nzb_id]])
+                    )
+                    if not history_deleted:
+                        logger.debug(
+                            "NZBGet HistoryDelete returned False for %s (item may not be in history)",
+                            download_id,
+                        )
+                except (httpx.HTTPError, RuntimeError, PermissionError, ValueError) as exc:
+                    logger.debug("NZBGet HistoryDelete failed for %s: %s", download_id, exc)
+
+                if group_deleted or history_deleted:
+                    return True
+
+                logger.warning(
+                    "NZBGet cancel failed for %s: neither GroupDelete nor HistoryDelete succeeded",
+                    download_id,
+                )
+                return False
         except Exception as e:
             logger.error("Failed to cancel NZBGet download %s: %s", download_id, e)
             return False
 
     def cleanup_completed(self, download_id: str, delete_files: bool = False) -> bool:
-        """Removes a completed download from NZBGet history."""
+        """Removes a completed download from NZBGet history.
+
+        Note: NZBGet does not delete completed download files from disk via RPC;
+        files remain on disk and are moved by TrackSeerr's import step.
+        """
         if not is_safe_service_url(self.host_url):
             return False
 
@@ -275,16 +305,29 @@ class NzbgetDriver(AcquisitionDriver):
         if nzb_id <= 0:
             return False
 
-        cmd = "HistoryFinalDelete" if delete_files else "HistoryDelete"
+        if delete_files:
+            logger.info(
+                "NZBGet leaves files on disk for %s (TrackSeerr's import step moves them)",
+                download_id,
+            )
+
         try:
             with httpx.Client(timeout=self.timeout, auth=self._auth) as client:
                 try:
-                    self._rpc(client, "editqueue", [cmd, 0, "", [nzb_id]])
+                    res = self._rpc(client, "editqueue", ["HistoryDelete", 0, "", [nzb_id]])
+                    if not res:
+                        logger.warning(
+                            "NZBGet HistoryDelete returned False for %s",
+                            download_id,
+                        )
+                        return False
                     return True
-                except Exception:
-                    if delete_files:
-                        self._rpc(client, "editqueue", ["HistoryDelete", 0, "", [nzb_id]])
-                        return True
+                except (httpx.HTTPError, RuntimeError, PermissionError, ValueError) as exc:
+                    logger.warning(
+                        "NZBGet HistoryDelete failed for %s: %s",
+                        download_id,
+                        exc,
+                    )
                     return False
         except Exception as e:
             logger.error("Failed to cleanup completed NZBGet download %s: %s", download_id, e)

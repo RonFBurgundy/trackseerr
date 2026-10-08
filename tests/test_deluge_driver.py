@@ -121,6 +121,31 @@ def test_deluge_test_connection_connects_to_daemon():
         assert "web.connect" in calls
 
 
+def test_deluge_test_connection_daemon_version_fallback():
+    driver = DelugeDriver("http://deluge.local:8112", password="pwd")
+    calls = []
+
+    def _rpc_handler(url, json=None, **kwargs):
+        method = json.get("method") if json else ""
+        calls.append(method)
+        if method == "auth.login":
+            return _mock_response(200, {"result": True, "error": None})
+        elif method == "web.connected":
+            return _mock_response(200, {"result": True, "error": None})
+        elif method == "daemon.get_version":
+            return _mock_response(200, {"result": None, "error": {"message": "Unknown method", "code": 1}})
+        elif method == "web.get_version":
+            return _mock_response(200, {"result": "2.1.1-web", "error": None})
+        return _mock_response(200, {"result": None, "error": None})
+
+    with patch("httpx.Client.post", side_effect=_rpc_handler):
+        ok, msg = driver.test_connection()
+        assert ok is True
+        assert "2.1.1-web" in msg
+        assert "daemon.get_version" in calls
+        assert "web.get_version" in calls
+
+
 def test_deluge_ssrf_rejection():
     driver = DelugeDriver("http://169.254.169.254/latest/meta-data")
     ok, msg = driver.test_connection()
@@ -180,6 +205,46 @@ def test_deluge_download_url_and_label_plugin():
         # Verify add_torrent_url received download_location
         add_call = [c for c in calls if c[0] == "core.add_torrent_url"][0]
         assert add_call[1][1] == {"download_location": "/data/torrents"}
+
+
+def test_deluge_download_label_add_raises_still_sets_torrent_label():
+    driver = DelugeDriver("http://deluge.local:8112", password="pwd", label="trackseerr")
+    calls = []
+
+    def _rpc_handler(url, json=None, **kwargs):
+        method = json.get("method") if json else ""
+        params = json.get("params", []) if json else []
+        calls.append((method, params))
+        if method == "auth.login":
+            return _mock_response(200, {"result": True, "error": None}, {"set-cookie": "sess=1"})
+        elif method == "web.connected":
+            return _mock_response(200, {"result": True, "error": None})
+        elif method == "core.add_torrent_url":
+            return _mock_response(200, {"result": "fedcba9876543210fedcba9876543210fedcba98", "error": None})
+        elif method == "core.get_enabled_plugins":
+            return _mock_response(200, {"result": ["Label"], "error": None})
+        elif method == "label.add":
+            return _mock_response(200, {"result": None, "error": {"message": "Label already exists", "code": 1}})
+        elif method == "label.set_torrent":
+            return _mock_response(200, {"result": True, "error": None})
+        return _mock_response(200, {"result": None, "error": None})
+
+    item = AcquisitionSearchResult(
+        download_id="placeholder",
+        title="Album",
+        artist="Artist",
+        download_url="https://tracker.org/album.torrent",
+    )
+
+    with patch("httpx.Client.post", side_effect=_rpc_handler):
+        thash = driver.download(item)
+        assert thash == "fedcba9876543210fedcba9876543210fedcba98"
+
+        methods = [c[0] for c in calls]
+        assert "label.add" in methods
+        assert "label.set_torrent" in methods
+        set_call = [c for c in calls if c[0] == "label.set_torrent"][0]
+        assert set_call[1] == ["fedcba9876543210fedcba9876543210fedcba98", "trackseerr"]
 
 
 def test_deluge_download_magnet():

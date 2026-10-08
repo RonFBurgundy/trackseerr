@@ -316,9 +316,53 @@ def test_nzbget_cleanup_completed():
         assert driver.cleanup_completed("42", delete_files=False) is True
         assert calls[-1][1][0] == "HistoryDelete"
 
-        # Delete files
+        # Delete files (NZBGet leaves files on disk, still issues HistoryDelete)
         assert driver.cleanup_completed("42", delete_files=True) is True
-        assert calls[-1][1][0] == "HistoryFinalDelete"
+        assert calls[-1][1][0] == "HistoryDelete"
+
+
+def test_nzbget_cancel_both_deletes_fail():
+    driver = NzbgetDriver("http://nzbget.local:6789", username="user", password="pwd")
+
+    def _rpc_handler(url, json=None, **kwargs):
+        return _mock_response(200, {"result": False, "error": None})
+
+    with patch("httpx.Client.post", side_effect=_rpc_handler):
+        assert driver.cancel("42") is False
+
+
+def test_nzbget_cancel_only_history_delete_succeeds():
+    driver = NzbgetDriver("http://nzbget.local:6789", username="user", password="pwd")
+
+    def _rpc_handler(url, json=None, **kwargs):
+        params = json.get("params", []) if json else []
+        cmd = params[0] if params else ""
+        if cmd == "GroupDelete":
+            return _mock_response(200, {"result": False, "error": None})
+        elif cmd == "HistoryDelete":
+            return _mock_response(200, {"result": True, "error": None})
+        return _mock_response(200, {"result": False, "error": None})
+
+    with patch("httpx.Client.post", side_effect=_rpc_handler):
+        assert driver.cancel("42") is True
+
+
+def test_nzbget_cleanup_completed_delete_files_issues_history_delete():
+    driver = NzbgetDriver("http://nzbget.local:6789", username="user", password="pwd")
+    calls = []
+
+    def _rpc_handler(url, json=None, **kwargs):
+        method = json.get("method") if json else ""
+        params = json.get("params", []) if json else []
+        calls.append((method, params))
+        return _mock_response(200, {"result": True, "error": None})
+
+    with patch("httpx.Client.post", side_effect=_rpc_handler):
+        assert driver.cleanup_completed("42", delete_files=True) is True
+        assert len(calls) == 1
+        assert calls[0][0] == "editqueue"
+        assert calls[0][1][0] == "HistoryDelete"
+        assert calls[0][1][3] == [42]
 
 
 # ---------------------------------------------------------------------------

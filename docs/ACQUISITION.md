@@ -56,7 +56,7 @@ TrackSeerr asks each client where it saves files. If TrackSeerr cannot see that 
 
 - **Transmission:** Enable RPC in Transmission preferences. The default RPC path is `/transmission/rpc`. Basic authentication is optional. TrackSeerr passes its category as torrent labels.
 - **Deluge:** Enable the Deluge Web UI. TrackSeerr connects with the Web UI password and attaches to the Deluge daemon. Enable the Label plugin in Deluge preferences if you want category labels.
-- **NZBGet:** Enter the NZBGet web address and your ControlUsername and ControlPassword. Category defaults to `music`.
+- **NZBGet:** Enter the NZBGet web address and your ControlUsername and ControlPassword. Category defaults to `music`. NZBGet leaves files on disk (TrackSeerr's import step moves them).
 - **qBittorrent:** Enable the Web UI. Enter the address, username, and password. Category defaults to `trackseerr`.
 - **SABnzbd:** Enter the address and API key from SABnzbd General settings.
 - **slskd:** slskd is good for single tracks, rare releases, and B-sides. It does not use indexers.
