@@ -94,6 +94,7 @@ _NO_MODEL_ALLOWLIST: set[str] = {
     "library:/artists/{artist_id}/banner",  # file or redirect
     "library:/albums/{album_id}/cover",  # file or redirect
     "backups:/{name}/download",  # file download
+    "lidarr_compat:/indexer/test",  # Lidarr wire contract, body varies by status
 }
 
 
