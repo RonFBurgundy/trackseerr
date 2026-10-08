@@ -151,8 +151,12 @@ export function draftFromChannel(channel: NotificationChannel): NotificationChan
   };
 }
 
+export interface StoredNotificationChannelLike {
+  config?: Record<string, unknown>;
+}
+
 /** True when the stored channel already holds a (masked) value for this secret key. */
-export function hasStoredSecret(channel: NotificationChannel | null, key: string): boolean {
+export function hasStoredSecret(channel: StoredNotificationChannelLike | null, key: string): boolean {
   const v = channel?.config?.[key];
   return typeof v === 'string' && v !== '';
 }
@@ -191,7 +195,7 @@ export function buildNotificationConfig(
 /** Returns an error message, or null. A required secret may be blank only when a stored value exists. */
 export function validateNotificationDraft(
   draft: NotificationChannelDraft,
-  existing: NotificationChannel | null
+  existing: StoredNotificationChannelLike | null
 ): string | null {
   if (!draft.name.trim()) return 'Name is required';
   for (const f of NOTIFICATION_FIELDS[draft.channelType]) {

@@ -8,6 +8,7 @@
 - [Approving requests](#approving-requests)
 - [Issues](#issues)
 - [Account security](#account-security)
+- [User notifications](#user-notifications)
 
 ## Signing in
 
@@ -124,3 +125,25 @@ Each user manages their own account in **Settings > Account**.
 - **Lockout.** Five failed sign-ins in 15 minutes lock the account for 15 minutes. Twenty failures from one IP in 15 minutes block that IP for a while.
 
 Plex accounts use Plex's own sign-in and security.
+
+## User notifications
+
+Every user can receive updates for their requests and issues.
+
+Users get notifications when:
+
+- a request is approved or rejected
+- a download starts or finishes
+- an item becomes available in the library
+- an issue report receives an update or is resolved
+
+Users access these updates through:
+
+- **In-app inbox.** The bell icon in the header shows unread updates and opens the notification inbox.
+- **Web Push.** Browser push alerts delivered to your phone or desktop. Web Push requires a secure HTTPS connection.
+- **Personal channels.** Forward updates to up to 5 personal Discord, Telegram, Pushover, or webhook endpoints.
+
+Configure notifications in **Settings > Account**.
+
+In the two-container setup, user notifications work through the gateway. Requests and settings forward to the core automatically.
+

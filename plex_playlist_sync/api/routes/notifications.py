@@ -33,6 +33,7 @@ class NotificationChannelItem(ApiModel):
     events: list[str] = Field(default_factory=list)
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    owner_user_id: Optional[str] = None
 
 
 class NotificationChannelPayload(BaseModel):
@@ -75,8 +76,8 @@ def list_notification_channels(
     db: Database = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_admin),
 ) -> list[dict[str, Any]]:
-    """Admin-only endpoint listing all notification channels with masked secrets."""
-    channels = db.list_notification_channels()
+    """Admin-only endpoint listing all global notification channels with masked secrets."""
+    channels = db.list_notification_channels(global_only=True)
     return [_mask_channel_dict(c) for c in channels]
 
 
@@ -162,7 +163,7 @@ def update_notification_channel(
 ) -> dict[str, Any]:
     """Admin-only endpoint to update an existing channel, preserving masked secrets."""
     existing = db.get_notification_channel(channel_id)
-    if not existing:
+    if not existing or existing.get("owner_user_id") is not None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Notification channel '{channel_id}' not found",
@@ -227,6 +228,12 @@ def delete_notification_channel(
     current_user: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Admin-only endpoint to delete a notification channel."""
+    existing = db.get_notification_channel(channel_id)
+    if not existing or existing.get("owner_user_id") is not None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Notification channel '{channel_id}' not found",
+        )
     deleted = db.delete_notification_channel(channel_id)
     if not deleted:
         raise HTTPException(

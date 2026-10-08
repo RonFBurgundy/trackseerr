@@ -173,7 +173,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {activeTab === 'scrobbling' && !mfaEnrollmentRequired && <ScrobblingSettings isAdmin={isAdmin} hasMediaServer={hasMediaServer} />}
 
       {activeTab === 'account' && (
-        <AccountPanel accountHook={accountHook} isAdmin={isAdmin} enrollmentBlocking={mfaEnrollmentRequired} />
+        <AccountPanel accountHook={accountHook} isAdmin={isAdmin} enrollmentBlocking={mfaEnrollmentRequired} onToast={showToast} />
       )}
 
       {activeTab === 'users' && isAdmin && !mfaEnrollmentRequired && (

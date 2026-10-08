@@ -280,8 +280,19 @@ def _notify(
 ) -> None:
     """Sends an issue event to the notification agents (admin-facing; carries no library ids or paths)."""
     data: dict[str, Any] = {
-        key: issue.get(key) for key in ("id", "media_title", "artist", "issue_type", "status", "username", "request_id")
+        key: issue.get(key)
+        for key in (
+            "id",
+            "media_title",
+            "artist",
+            "issue_type",
+            "status",
+            "username",
+            "request_id",
+            "user_id",
+        )
     }
+    data["issue_id"] = issue.get("id")
     data["title"] = issue.get("media_title")
     data["problem_details"] = str(issue.get("problem_details") or "")[:ISSUE_NOTIFICATION_DETAILS_MAX]
     data["update"] = f"{update} by {actor_name}" if actor_name else update

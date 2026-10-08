@@ -4,3 +4,4 @@ export * from './RecoveryCodesModal';
 export * from './MfaCredentialModal';
 export * from './MfaPanel';
 export * from './AccountPanel';
+export * from './UserNotificationsSection';

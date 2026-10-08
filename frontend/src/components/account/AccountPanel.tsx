@@ -4,17 +4,20 @@ import type { UseAccountReturn } from '@/hooks/useAccount';
 import { QuotaBars } from './QuotaBars';
 import { ChangePasswordForm } from './ChangePasswordForm';
 import { MfaPanel } from './MfaPanel';
+import { UserNotificationsSection } from './UserNotificationsSection';
 
 export interface AccountPanelProps {
   accountHook: UseAccountReturn;
   isAdmin?: boolean;
   enrollmentBlocking?: boolean;
+  onToast?: (msg: string, tone?: 'ok' | 'error') => void;
 }
 
 export const AccountPanel: React.FC<AccountPanelProps> = ({
   accountHook,
   isAdmin = false,
   enrollmentBlocking = false,
+  onToast,
 }) => {
   const { account, isLoading, error } = accountHook;
 
@@ -60,6 +63,8 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
           </p>
         </MachinedCard>
       )}
+
+      {!enrollmentBlocking && <UserNotificationsSection onToast={onToast ?? (() => {})} />}
     </div>
   );
 };

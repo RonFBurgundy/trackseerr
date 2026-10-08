@@ -98,6 +98,306 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/account/notifications/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List user notification channels
+         * @description Lists notification channels owned by current user with masked credentials.
+         */
+        get: operations["list_user_channels_api_account_notifications_channels_get"];
+        put?: never;
+        /**
+         * Create user notification channel
+         * @description Creates a user notification channel (max 5 per user).
+         */
+        post: operations["create_user_channel_api_account_notifications_channels_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/notifications/channels/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test user notification channel
+         * @description Tests a user channel configuration with SSRF enforcement (allow_lan=False for non-admins).
+         */
+        post: operations["test_user_channel_api_account_notifications_channels_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/notifications/channels/{channel_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get user notification channel
+         * @description Retrieves an owned notification channel by ID.
+         */
+        get: operations["get_user_channel_api_account_notifications_channels__channel_id__get"];
+        /**
+         * Update user notification channel
+         * @description Updates an owned notification channel, preserving masked credentials.
+         */
+        put: operations["update_user_channel_api_account_notifications_channels__channel_id__put"];
+        post?: never;
+        /**
+         * Delete user notification channel
+         * @description Deletes an owned notification channel.
+         */
+        delete: operations["delete_user_channel_api_account_notifications_channels__channel_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/notifications/inbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List user notifications
+         * @description Lists paged notifications for current user, newest first.
+         */
+        get: operations["list_inbox_notifications_api_account_notifications_inbox_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/notifications/inbox/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark all notifications as read
+         * @description Marks all notifications for the current user as read.
+         */
+        post: operations["mark_all_read_api_account_notifications_inbox_read_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/notifications/inbox/unread-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get unread notification count
+         * @description Returns the unread notifications count for the current user.
+         */
+        get: operations["get_unread_count_api_account_notifications_inbox_unread_count_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/notifications/inbox/{notification_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a notification
+         * @description Deletes a single notification owned by current user.
+         */
+        delete: operations["delete_notification_api_account_notifications_inbox__notification_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/notifications/inbox/{notification_id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark notification as read
+         * @description Marks a single notification as read if owned by the current user.
+         */
+        post: operations["mark_notification_read_api_account_notifications_inbox__notification_id__read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/notifications/prefs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get user notification preferences
+         * @description Returns notification delivery preferences for all user-facing events.
+         */
+        get: operations["get_user_prefs_api_account_notifications_prefs_get"];
+        /**
+         * Bulk update user notification preferences
+         * @description Updates multiple notification preferences at once.
+         */
+        put: operations["update_user_prefs_bulk_api_account_notifications_prefs_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/notifications/prefs/{event}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get user notification preference for event
+         * @description Returns notification preference for a specific user-facing event.
+         */
+        get: operations["get_user_pref_for_event_api_account_notifications_prefs__event__get"];
+        /**
+         * Update user notification preference for event
+         * @description Updates notification preference for a specific user-facing event.
+         */
+        put: operations["update_user_pref_for_event_api_account_notifications_prefs__event__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/notifications/push": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Web Push configuration
+         * @description Returns server VAPID public key and enabled status (private key never exposed).
+         */
+        get: operations["get_push_config_api_account_notifications_push_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/notifications/push/subscribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Subscribe to Web Push
+         * @description Registers a browser Web Push subscription (max 10 per user).
+         */
+        post: operations["subscribe_push_api_account_notifications_push_subscribe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/notifications/push/subscription": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unsubscribe from Web Push
+         * @description Unsubscribes an endpoint from Web Push.
+         */
+        delete: operations["unsubscribe_push_api_account_notifications_push_subscription_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/notifications/push/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send test Web Push to caller
+         * @description Sends a synthetic Web Push test notification strictly to the caller's devices.
+         */
+        post: operations["test_push_notification_api_account_notifications_push_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/account/password": {
         parameters: {
             query?: never;
@@ -4463,7 +4763,7 @@ export interface paths {
         };
         /**
          * List notification channels
-         * @description Admin-only endpoint listing all notification channels with masked secrets.
+         * @description Admin-only endpoint listing all global notification channels with masked secrets.
          */
         get: operations["list_notification_channels_api_settings_notifications_get"];
         put?: never;
@@ -9328,6 +9628,13 @@ export interface components {
             /** Server Prefix */
             server_prefix: string;
         };
+        /** MarkAllReadResponse */
+        MarkAllReadResponse: {
+            /** Marked Read */
+            marked_read: number;
+            /** Status */
+            status: string;
+        };
         /** MatchCreatedResponse */
         MatchCreatedResponse: {
             override: components["schemas"]["MatchOverride"];
@@ -10188,6 +10495,13 @@ export interface components {
             /** After Playlist Item Id */
             after_playlist_item_id?: number | null;
         };
+        /** NotificationActionResponse */
+        NotificationActionResponse: {
+            /** Id */
+            id?: string | null;
+            /** Status */
+            status: string;
+        };
         /** NotificationChannelItem */
         NotificationChannelItem: {
             /** Channel Type */
@@ -10209,6 +10523,8 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+            /** Owner User Id */
+            owner_user_id?: string | null;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -10231,6 +10547,40 @@ export interface components {
             id?: string | null;
             /** Name */
             name: string;
+        };
+        /** NotificationInboxResponse */
+        NotificationInboxResponse: {
+            /** Items */
+            items: components["schemas"]["UserNotificationItem"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Total */
+            total: number;
+            /** Unread Count */
+            unread_count: number;
+        };
+        /** NotificationPrefBulkUpdatePayload */
+        NotificationPrefBulkUpdatePayload: {
+            /** Prefs */
+            prefs: components["schemas"]["NotificationPrefItem"][];
+        };
+        /** NotificationPrefItem */
+        NotificationPrefItem: {
+            /** Event */
+            event: string;
+            /** In App */
+            in_app: boolean;
+            /** Push */
+            push: boolean;
+        };
+        /** NotificationPrefUpdatePayload */
+        NotificationPrefUpdatePayload: {
+            /** In App */
+            in_app: boolean;
+            /** Push */
+            push: boolean;
         };
         /** PasswordAndCodeRequest */
         PasswordAndCodeRequest: {
@@ -10798,6 +11148,60 @@ export interface components {
             provider: string;
             /** Sources */
             sources: string[];
+        };
+        /** PushConfigResponse */
+        PushConfigResponse: {
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Public Key */
+            public_key: string;
+        };
+        /** PushSubscribePayload */
+        PushSubscribePayload: {
+            /** Endpoint */
+            endpoint: string;
+            keys: components["schemas"]["PushSubscriptionKeys"];
+            /** User Agent */
+            user_agent?: string | null;
+        };
+        /** PushSubscriptionKeys */
+        PushSubscriptionKeys: {
+            /** Auth */
+            auth: string;
+            /** P256Dh */
+            p256dh: string;
+        };
+        /** PushSubscriptionResponse */
+        PushSubscriptionResponse: {
+            /** Auth */
+            auth: string;
+            /** Created At */
+            created_at: string;
+            /** Endpoint */
+            endpoint: string;
+            /**
+             * Failure Count
+             * @default 0
+             */
+            failure_count: number;
+            /** Id */
+            id: string;
+            /** Last Success At */
+            last_success_at?: string | null;
+            /** P256Dh */
+            p256dh: string;
+            /** User Agent */
+            user_agent?: string | null;
+            /** User Id */
+            user_id: string;
+        };
+        /** PushUnsubscribePayload */
+        PushUnsubscribePayload: {
+            /** Endpoint */
+            endpoint: string;
         };
         /** QualityDefinitionPayload */
         QualityDefinitionPayload: {
@@ -12217,6 +12621,11 @@ export interface components {
             /** Tracks Updated */
             tracks_updated: number;
         };
+        /** UnreadCountResponse */
+        UnreadCountResponse: {
+            /** Unread Count */
+            unread_count: number;
+        };
         /** UpdateAdminUserBody */
         UpdateAdminUserBody: {
             /** Email */
@@ -12256,6 +12665,71 @@ export interface components {
             /** Request Limit Quota */
             request_limit_quota?: number | null;
         };
+        /** UserNotificationChannelItem */
+        UserNotificationChannelItem: {
+            /** Channel Type */
+            channel_type: string;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            };
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Events */
+            events?: string[];
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Owner User Id */
+            owner_user_id?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** UserNotificationChannelPayload */
+        UserNotificationChannelPayload: {
+            /** Channel Type */
+            channel_type: string;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Events */
+            events?: string[] | null;
+            /** Id */
+            id?: string | null;
+            /** Name */
+            name: string;
+        };
+        /** UserNotificationItem */
+        UserNotificationItem: {
+            /** Created At */
+            created_at: string;
+            /** Event */
+            event: string;
+            /** Id */
+            id: string;
+            /** Link */
+            link?: string | null;
+            /** Message */
+            message: string;
+            /** Read At */
+            read_at?: string | null;
+            /** Title */
+            title: string;
+            /** User Id */
+            user_id: string;
+        };
         /** UserRecord */
         UserRecord: {
             /** Auth Type */
@@ -12282,6 +12756,17 @@ export interface components {
             updated_at?: string | null;
             /** Username */
             username: string;
+        };
+        /** UserTestNotificationPayload */
+        UserTestNotificationPayload: {
+            /** Channel Id */
+            channel_id?: string | null;
+            /** Channel Type */
+            channel_type: string;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            };
         };
         /** ValidationError */
         ValidationError: {
@@ -12638,6 +13123,550 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_user_channels_api_account_notifications_channels_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserNotificationChannelItem"][];
+                };
+            };
+        };
+    };
+    create_user_channel_api_account_notifications_channels_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserNotificationChannelPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserNotificationChannelItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_user_channel_api_account_notifications_channels_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserTestNotificationPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestNotificationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_user_channel_api_account_notifications_channels__channel_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channel_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserNotificationChannelItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_user_channel_api_account_notifications_channels__channel_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channel_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserNotificationChannelPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserNotificationChannelItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_user_channel_api_account_notifications_channels__channel_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channel_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["plex_playlist_sync__api__schemas__notifications__DeletedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_inbox_notifications_api_account_notifications_inbox_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationInboxResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_all_read_api_account_notifications_inbox_read_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarkAllReadResponse"];
+                };
+            };
+        };
+    };
+    get_unread_count_api_account_notifications_inbox_unread_count_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnreadCountResponse"];
+                };
+            };
+        };
+    };
+    delete_notification_api_account_notifications_inbox__notification_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_notification_read_api_account_notifications_inbox__notification_id__read_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserNotificationItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_user_prefs_api_account_notifications_prefs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPrefItem"][];
+                };
+            };
+        };
+    };
+    update_user_prefs_bulk_api_account_notifications_prefs_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationPrefBulkUpdatePayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPrefItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_user_pref_for_event_api_account_notifications_prefs__event__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPrefItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_user_pref_for_event_api_account_notifications_prefs__event__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationPrefUpdatePayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPrefItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_push_config_api_account_notifications_push_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushConfigResponse"];
+                };
+            };
+        };
+    };
+    subscribe_push_api_account_notifications_push_subscribe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PushSubscribePayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushSubscriptionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unsubscribe_push_api_account_notifications_push_subscription_delete: {
+        parameters: {
+            query?: {
+                endpoint?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PushUnsubscribePayload"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_push_notification_api_account_notifications_push_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestNotificationResponse"];
                 };
             };
         };

@@ -9,6 +9,7 @@ import {
   useRequests,
   useIssues,
   useIssueCounts,
+  useUserNotifications,
   useLibrary,
   useLibraryHealthCount,
   useAccount,
@@ -51,6 +52,7 @@ import {
   CassetteLoader,
   StartupScreen,
   WhatsNewModal,
+  NotificationInboxModal,
 } from '@/components';
 import {
   getPlaylists,
@@ -103,6 +105,7 @@ const MainApp: React.FC = () => {
   const requestsHook = useRequests(auth.isAuthenticated);
   const issuesHook = useIssues(auth.user?.id, auth.isAuthenticated);
   const issueCounts = useIssueCounts(auth.isAuthenticated && !mfaEnrollmentRequired, auth.canUseAdminUi);
+  const userNotifications = useUserNotifications(auth.isAuthenticated && !mfaEnrollmentRequired);
   const libraryHook = useLibrary(auth.canUseAdminUi);
   const reviewHealth = useLibraryHealthCount(auth.canUseAdminUi);
 
@@ -116,6 +119,7 @@ const MainApp: React.FC = () => {
   );
   const activeTab: MainTab = activeRoute.tab;
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [isInboxOpen, setIsInboxOpen] = useState<boolean>(false);
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const closeMenu = useCallback(() => setIsMenuOpen(false), []);
   const mainRef = useRef<HTMLElement | null>(null);
@@ -273,6 +277,8 @@ const MainApp: React.FC = () => {
         reviewCount={reviewHealth.count}
         issuesOpenCount={issueCounts.open}
         issuesUnreadCount={issueCounts.unread}
+        unreadNotificationsCount={userNotifications.unreadCount}
+        onOpenInbox={() => setIsInboxOpen(true)}
         tier={identity.tier}
         activityEnabled={auth.canUseAdminUi && !mfaEnrollmentRequired}
         onOpenTasks={() => handleNavigate(settingsRouteFor('system', 'tasks'))}
@@ -636,6 +642,12 @@ const MainApp: React.FC = () => {
       </ObsidianModal>
 
       {auth.isAdmin && <WhatsNewModal />}
+
+      <NotificationInboxModal
+        isOpen={isInboxOpen}
+        onClose={() => setIsInboxOpen(false)}
+        inboxHook={userNotifications}
+      />
     </div>
     </RefreshContext.Provider>
   );
