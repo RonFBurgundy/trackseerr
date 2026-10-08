@@ -79,6 +79,7 @@ def _clean_singletons():
         lidarr_worker._is_running = False
         lidarr_worker._is_paused = False
         lidarr_worker._pending = []
+        lidarr_worker._stop_event.clear()
     job_tracker.clear()
 
 

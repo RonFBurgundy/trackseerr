@@ -76,7 +76,7 @@ def clean_library_name(text: str) -> str:
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
 SEED_COMPLETE_ACTIONS = ("keep", "remove", "remove_and_delete")
-SCHEMA_VERSION = 67  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 68  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:
@@ -394,6 +394,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                 (65, self._migration_v65),
                 (66, self._migration_v66),
                 (67, self._migration_v67),
+                (68, self._migration_v68),
             ]
 
             applied = 0
@@ -2035,6 +2036,13 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_task_runs_task_started ON task_runs(task_id, started_at)")
 
+    def _migration_v68(self, cur: sqlite3.Cursor) -> None:
+        """Track last seen changelog version per user."""
+        cur.execute("PRAGMA table_info(users);")
+        have = {row[1] for row in cur.fetchall()}
+        if "last_seen_changelog_version" not in have:
+            cur.execute("ALTER TABLE users ADD COLUMN last_seen_changelog_version TEXT;")
+
     def _migration_v37(self, cur: sqlite3.Cursor) -> None:
         """Import lists, per-playlist monitor mode and the missing-track "already applied" marker."""
         cur.execute("PRAGMA table_info(playlists);")
@@ -2606,6 +2614,27 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                 if cur.rowcount == 0:
                     return None
         return self.get_user(user_id)
+
+    def get_last_seen_changelog_version(self, user_id: str) -> Optional[str]:
+        """Returns the changelog version last seen by this user, or None if never recorded."""
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT last_seen_changelog_version FROM users WHERE id = ?",
+                (str(user_id),),
+            )
+            row = cur.fetchone()
+            if not row or row[0] is None:
+                return None
+            return str(row[0])
+
+    def set_last_seen_changelog_version(self, user_id: str, version: str) -> None:
+        """Stores the changelog version last seen by this user."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE users SET last_seen_changelog_version = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (str(version), str(user_id)),
+            )
+            self.conn.commit()
 
     def count_active_admins(self, exclude_user_id: Optional[str] = None) -> int:
         """Admins that are not disabled, optionally excluding one user id."""

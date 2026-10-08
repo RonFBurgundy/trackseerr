@@ -23,6 +23,8 @@ from plex_playlist_sync.api.routes import (
     activity,
     admin_users,
     auth,
+    changelog,
+    backups,
     deployment,
     discovery,
     download_clients,
@@ -275,6 +277,8 @@ def create_app(
     api_router.include_router(scrobbles.router, prefix="/scrobbles", tags=["scrobbles"])
     api_router.include_router(mixes.router, prefix="/mixes", tags=["mixes"])
     api_router.include_router(system.router, prefix="/system", tags=["system"])
+    api_router.include_router(changelog.router, prefix="/system/changelog", tags=["changelog"])
+    api_router.include_router(backups.router, prefix="/system/backups", tags=["backups"])
     api_router.include_router(activity.router, prefix="/activity", tags=["activity"])
     api_router.include_router(wanted.router, prefix="/wanted", tags=["wanted"])
 

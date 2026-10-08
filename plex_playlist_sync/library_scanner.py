@@ -825,20 +825,7 @@ class LibraryScanner:
 
             # Auto-hydrate newly created artists in the background
             if newly_created_artist_ids and not self._stop_event.is_set():
-                try:
-                    from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
-                    refresh_ids = list(newly_created_artist_ids)
-                    # Threads start with an empty context: carry the scan provenance so library writes stay labelled.
-                    hydration_context = contextvars.copy_context()
-                    threading.Thread(
-                        target=lambda: hydration_context.run(
-                            lambda: artist_refresh_worker.refresh_once(db=db, artist_ids=refresh_ids)
-                        ),
-                        daemon=True,
-                        name="AutoArtistHydrationThread",
-                    ).start()
-                except Exception as exc:
-                    logger.warning("LibraryScanner: Failed to launch background artist auto-hydration: %s", exc)
+                self._launch_auto_hydration(db, newly_created_artist_ids)
 
             with self._lock:
                 self._status["current_file"] = None
@@ -867,6 +854,23 @@ class LibraryScanner:
                     self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
                 if self._stop_event.is_set() and self._status.get("status") not in ("failed", "skipped"):
                     self._status["status"] = "cancelled"
+
+
+    def _launch_auto_hydration(self, db: Database, artist_ids: Any) -> None:
+        try:
+            from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
+            refresh_ids = list(artist_ids)
+            # Threads start with an empty context: carry the scan provenance so library writes stay labelled.
+            hydration_context = contextvars.copy_context()
+            threading.Thread(
+                target=lambda: hydration_context.run(
+                    lambda: artist_refresh_worker.refresh_once(db=db, artist_ids=refresh_ids)
+                ),
+                daemon=True,
+                name="AutoArtistHydrationThread",
+            ).start()
+        except Exception as exc:
+            logger.warning("LibraryScanner: Failed to launch background artist auto-hydration: %s", exc)
 
 
 # Expose module singleton instance

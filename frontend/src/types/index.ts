@@ -22,3 +22,4 @@ export * from './itemHistory';
 export * from './tags';
 export * from './notifications';
 export * from './listening';
+export * from './backup';

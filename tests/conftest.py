@@ -39,6 +39,11 @@ def pytest_configure(config):
         "real_core_client: opt out of the autouse CoreClient.session_status mock so the real signed "
         "gateway->core call path runs (see tests/test_gateway_core_e2e.py)",
     )
+    config.addinivalue_line(
+        "markers",
+        "real_scanner_hydration: opt out of autouse scanner hydration suppression so AutoArtistHydrationThread "
+        "runs in tests that specifically test it",
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -137,6 +142,27 @@ def _stop_worker_singletons_started_since(before: set) -> None:
     for thread in [t for t in threading.enumerate() if t not in before and t.name in workers]:
         workers[thread.name].stop()
         thread.join(timeout=10)
+
+    hydration_threads = [t for t in threading.enumerate() if t not in before and t.name == "AutoArtistHydrationThread"]
+    if hydration_threads:
+        artist_refresh_worker.artist_refresh_worker._stop_event.set()
+        for thread in hydration_threads:
+            thread.join(timeout=5)
+        artist_refresh_worker.artist_refresh_worker._stop_event.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_background_scanner_hydration(request, monkeypatch):
+    """The scanner launches a daemon thread that hydrates new artists from MusicBrainz/Deezer. Never in tests,
+    unless explicitly opted in with @pytest.mark.real_scanner_hydration."""
+    if request.node.get_closest_marker("real_scanner_hydration") is not None:
+        yield
+        return
+
+    from plex_playlist_sync.library_scanner import LibraryScanner
+
+    monkeypatch.setattr(LibraryScanner, "_launch_auto_hydration", lambda self, db, artist_ids: None)
+    yield
 
 
 @pytest.fixture(autouse=True)

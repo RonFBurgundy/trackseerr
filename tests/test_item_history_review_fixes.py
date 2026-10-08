@@ -341,6 +341,7 @@ def test_scan_added_album_event_carries_the_scan_trigger(db, tmp_path):  # noqa:
     assert ev["trigger"] == "scan" and ev["trigger_label"] == "Library scan"
 
 
+@pytest.mark.real_scanner_hydration
 def test_background_scan_thread_and_hydration_thread_keep_the_scan_provenance(db, tmp_path):  # noqa: F811
     song = tmp_path / "music" / "Nirvana" / "Bleach" / "01 - Come As You Are.flac"
     song.parent.mkdir(parents=True)

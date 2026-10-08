@@ -100,6 +100,32 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
 
+      - name: Release version guard
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          python3 -c '
+          import os, sys, pathlib
+          try:
+              import tomllib
+              version = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+          except Exception:
+              import re
+              version = re.search(r"version\s*=\s*\"([^\"]+)\"", pathlib.Path("pyproject.toml").read_text(encoding="utf-8")).group(1)
+
+          ref = os.environ.get("GITHUB_REF", "")
+          tag = ref.removeprefix("refs/tags/").removeprefix("v")
+          if not tag or tag != version:
+              sys.exit(f"Release guard failed: tag {tag!r} does not match pyproject.toml version {version!r}")
+
+          changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          if f"## [{version}]" not in changelog:
+              sys.exit(f"Release guard failed: CHANGELOG.md missing heading ## [{version}]")
+
+          print(f"Release guard passed: {tag} matches pyproject.toml and CHANGELOG.md")
+          '
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
@@ -108,5 +134,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: TRACKSEERR_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

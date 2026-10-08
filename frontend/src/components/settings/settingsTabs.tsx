@@ -19,6 +19,7 @@ import {
   Cpu,
   Tags,
   Bell,
+  Database,
 } from 'lucide-react';
 import { settingsRouteFor } from '@/hooks/useAppRoute';
 import type { SettingsLeafId, SettingsRoute, SettingsSection } from '@/hooks/useAppRoute';
@@ -120,6 +121,7 @@ export function buildSettingsTree(isAdmin: boolean, mfaEnrollmentRequired: boole
       leaves: [
         leaf('status', 'Status', <Activity className={ico} />),
         leaf('tasks', 'Tasks', <Cpu className={ico} />),
+        leaf('backups', 'Backups', <Database className={ico} />),
         leaf('logs', 'Logs', <Terminal className={ico} />),
       ],
     },

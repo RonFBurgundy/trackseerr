@@ -4836,6 +4836,198 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/system/backups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List database backups
+         * @description Lists all available database backups in order of newest first.
+         */
+        get: operations["get_backups_api_system_backups_get"];
+        put?: never;
+        /**
+         * Create manual database backup
+         * @description Snapshots the live database on-demand and creates a manual backup zip archive.
+         */
+        post: operations["create_manual_backup_api_system_backups_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/backups/restore-upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload backup archive, stage for restore, and trigger restart
+         * @description Accepts an uploaded backup zip archive, streams it safely to disk, validates, stages it, and restarts.
+         */
+        post: operations["restore_upload_api_system_backups_restore_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/backups/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get backup retention and schedule settings
+         * @description Retrieves current scheduled backup retention count and effective interval.
+         */
+        get: operations["get_settings_api_system_backups_settings_get"];
+        /**
+         * Update backup retention and schedule settings
+         * @description Updates scheduled backup retention count and/or interval schedule.
+         */
+        put: operations["update_settings_api_system_backups_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/backups/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete backup archive
+         * @description Deletes a backup archive by name (admin only).
+         */
+        delete: operations["delete_backup_route_api_system_backups__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/backups/{name}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download backup archive
+         * @description Downloads a backup archive by name (admin only).
+         */
+        get: operations["download_backup_api_system_backups__name__download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/backups/{name}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stage backup for restore and trigger restart
+         * @description Stages an existing backup archive for restore and triggers a graceful application restart.
+         */
+        post: operations["restore_backup_api_system_backups__name__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/changelog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get changelog releases and build metadata
+         * @description Returns the app version, commit, changelog releases, and latest release for any authenticated user.
+         */
+        get: operations["get_system_changelog_api_system_changelog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/changelog/seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge current version changelog for admin
+         * @description Stores the current version as this admin's last-seen changelog version.
+         */
+        post: operations["post_system_changelog_seen_api_system_changelog_seen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/changelog/unseen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Check unseen changelog release for admin
+         * @description Returns whether to show an upgrade changelog popup for the current admin.
+         *
+         *     show is true when the admin's stored last-seen version differs from the current version
+         *     AND the current version has a changelog entry. Fresh installs (last_seen is null) record
+         *     the current version silently and return show: false.
+         */
+        get: operations["get_system_changelog_unseen_api_system_changelog_unseen_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/system/events": {
         parameters: {
             query?: never;
@@ -5769,6 +5961,37 @@ export interface components {
             /** Track Count */
             track_count: number;
         };
+        /** BackupItem */
+        BackupItem: {
+            /** App Version */
+            app_version?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Kind */
+            kind?: string | null;
+            /** Name */
+            name: string;
+            /** Schema Version */
+            schema_version?: number | null;
+            /** Size */
+            size: number;
+        };
+        /** BackupSettingsResponse */
+        BackupSettingsResponse: {
+            /** Interval Seconds */
+            interval_seconds?: number | null;
+            /** Retention */
+            retention: number;
+        };
+        /** BackupSettingsUpdate */
+        BackupSettingsUpdate: {
+            /** Interval Seconds */
+            interval_seconds?: number | null;
+            /** Retention */
+            retention?: number | null;
+        };
         /**
          * BatchCreateMusicRequestBody
          * @description Up to 50 requests. ``kind="discography"`` (with ``artist``) makes it one discography request.
@@ -5890,6 +6113,48 @@ export interface components {
             session_floor_us?: number | null;
             /** Status */
             status: string;
+        };
+        /** ChangelogRelease */
+        ChangelogRelease: {
+            /** Date Note */
+            date_note?: string | null;
+            /** Sections */
+            sections: components["schemas"]["ChangelogSection"][];
+            /** Unreleased */
+            unreleased: boolean;
+            /** Version */
+            version: string;
+        };
+        /** ChangelogResponse */
+        ChangelogResponse: {
+            /** Commit */
+            commit?: string | null;
+            latest?: components["schemas"]["ChangelogRelease"] | null;
+            /** Releases */
+            releases: components["schemas"]["ChangelogRelease"][];
+            /** Version */
+            version: string;
+        };
+        /** ChangelogSection */
+        ChangelogSection: {
+            /** Items */
+            items: string[];
+            /** Title */
+            title: string;
+        };
+        /** ChangelogSeenResponse */
+        ChangelogSeenResponse: {
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** ChangelogUnseenResponse */
+        ChangelogUnseenResponse: {
+            release?: components["schemas"]["ChangelogRelease"] | null;
+            /** Show */
+            show: boolean;
         };
         /** CodeRequest */
         CodeRequest: {
@@ -11137,6 +11402,13 @@ export interface components {
             thread_count?: number | null;
             /** Uptime Seconds */
             uptime_seconds?: number | null;
+        };
+        /** RestoreResponse */
+        RestoreResponse: {
+            /** Message */
+            message: string;
+            /** Success */
+            success: boolean;
         };
         /** RetryFailedResponse */
         RetryFailedResponse: {
@@ -20950,6 +21222,284 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivityResponse"];
+                };
+            };
+        };
+    };
+    get_backups_api_system_backups_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupItem"][];
+                };
+            };
+        };
+    };
+    create_manual_backup_api_system_backups_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupItem"];
+                };
+            };
+        };
+    };
+    restore_upload_api_system_backups_restore_upload_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreResponse"];
+                };
+            };
+        };
+    };
+    get_settings_api_system_backups_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupSettingsResponse"];
+                };
+            };
+        };
+    };
+    update_settings_api_system_backups_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackupSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_backup_route_api_system_backups__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessFlag"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_backup_api_system_backups__name__download_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_backup_api_system_backups__name__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_system_changelog_api_system_changelog_get: {
+        parameters: {
+            query?: {
+                /** @description Max releases to return */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangelogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_system_changelog_seen_api_system_changelog_seen_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangelogSeenResponse"];
+                };
+            };
+        };
+    };
+    get_system_changelog_unseen_api_system_changelog_unseen_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangelogUnseenResponse"];
                 };
             };
         };
