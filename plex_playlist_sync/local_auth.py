@@ -2,7 +2,7 @@
 
 Stdlib only. Nothing in this module logs a password, code, token, secret or hash, and every
 comparison of secret material uses ``hmac.compare_digest`` on bytes. See
-``docs/users-and-accounts.md`` for the contract.
+``docs/design/users-and-accounts.md`` for the contract.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """Seed cleanup: removes finished torrents the app has lost track of and surfaces the ones it must not touch.
 
-``run_sweep`` is the scheduled/manual task (see ``docs/seed-cleanup.md``):
+``run_sweep`` is the scheduled/manual task (see ``docs/design/seed-cleanup.md``):
 
 1. Tracked downloads held for seeding are re-evaluated with the shared ``evaluate_seed_cleanup`` function (same seed
    goal and ``deletion_safe`` gate as the import path). A failed removal is counted per download; after

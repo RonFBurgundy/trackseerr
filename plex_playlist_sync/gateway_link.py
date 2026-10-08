@@ -1,6 +1,6 @@
 """Gateway-side link to core: startup handshake and periodic heartbeat; core-side heartbeat store.
 
-See ``docs/dmz-ergonomics.md`` section 2. Nothing here logs or sends the shared secret; every call is
+See ``docs/design/dmz-ergonomics.md`` section 2. Nothing here logs or sends the shared secret; every call is
 signed by ``CoreClient`` as the service principal.
 """
 

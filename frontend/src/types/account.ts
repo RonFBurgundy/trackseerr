@@ -1,7 +1,7 @@
 import type { Narrow, Schema } from './apiSchema';
 /**
  * Types for local accounts, MFA, request quotas and admin user management.
- * Mirrors docs/users-and-accounts.md.
+ * Mirrors docs/design/users-and-accounts.md.
  */
 
 export type AuthType = 'plex' | 'local' | 'jellyfin';

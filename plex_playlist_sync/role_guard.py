@@ -2,7 +2,7 @@
 
 ``check_role_environment`` is a pure function over an env mapping and an injectable filesystem
 probe, so every rule is unit-testable. It never reads or returns a secret value: problems name
-variables, never their contents. See ``docs/dmz-ergonomics.md`` section 1.
+variables, never their contents. See ``docs/design/dmz-ergonomics.md`` section 1.
 """
 
 from __future__ import annotations
