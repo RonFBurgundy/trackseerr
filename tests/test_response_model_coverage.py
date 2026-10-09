@@ -95,6 +95,7 @@ _NO_MODEL_ALLOWLIST: set[str] = {
     "library:/albums/{album_id}/cover",  # file or redirect
     "backups:/{name}/download",  # file download
     "lidarr_compat:/indexer/test",  # Lidarr wire contract, body varies by status
+    "calendar:/feed.ics",  # iCal feed (RFC 5545 text/calendar)
 }
 
 

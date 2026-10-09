@@ -22,3 +22,4 @@ export * from './profiles';
 export * from './manualImport';
 export * from './notifications';
 export * from './playlists';
+export * from './calendar';

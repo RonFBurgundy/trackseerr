@@ -44,6 +44,7 @@ import {
   PlaylistsView,
   ActivityView,
   WantedView,
+  CalendarView,
   SettingsView,
   ObsidianModal,
   TapeDeckButton,
@@ -541,6 +542,12 @@ const MainApp: React.FC = () => {
               <WantedView
                 sub={activeRoute.sub}
                 onSubChange={(sub, o) => handleNavigate({ tab: 'wanted', sub }, o)}
+              />
+            )}
+
+            {activeRoute.tab === 'calendar' && auth.canUseAdminUi && (
+              <CalendarView
+                onNavigate={handleNavigate}
               />
             )}
 

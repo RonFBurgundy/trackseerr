@@ -39,3 +39,4 @@ export * from './renameService';
 export * from './missingService';
 export * from './changelogService';
 export * from './backupService';
+export * from './calendarService';

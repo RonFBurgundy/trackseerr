@@ -166,6 +166,7 @@ const DESCRIPTION_WORDS: Record<string, string> = {
   playlists: 'spotify tidal sync lists',
   activity: 'downloads queue lidarr',
   wanted: 'missing cutoff upgrade',
+  calendar: 'releases schedule upcoming albums ical feed',
 };
 
 /**

@@ -6,6 +6,7 @@ import {
   ListMusic,
   Activity,
   ListTodo,
+  Calendar,
   Settings,
   LogIn,
   LogOut,
@@ -94,6 +95,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'playlists', label: 'Playlists', icon: <ListMusic className="h-4 w-4" /> },
     { id: 'activity', label: 'Activity', icon: <Activity className="h-4 w-4" />, adminOnly: true },
     { id: 'wanted', label: 'Wanted', icon: <ListTodo className="h-4 w-4" />, adminOnly: true },
+    { id: 'calendar', label: 'Calendar', icon: <Calendar className="h-4 w-4" />, adminOnly: true },
     { id: 'settings', label: 'Settings', icon: <Settings className="h-4 w-4" /> },
   ];
   const mobileNavItems = navItems.filter((item) => item.id !== 'settings');
