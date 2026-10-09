@@ -8,6 +8,8 @@ import pytest
 
 from trackseerr.acquisition_worker import (
     AcquisitionWorker,
+)
+from trackseerr.import_files import (
     place_audio_file,
     safe_atomic_move,
 )

@@ -112,7 +112,7 @@ def _run_worker(db: Database, dl: Path, staging: Path, metas: dict[str, dict[str
 
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.acquisition_worker.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
         stats = AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
     return stats, driver
 
@@ -648,7 +648,7 @@ def test_worker_source_preserving_mode_respects_seed_limits(tmp_path, db, mode, 
 
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.acquisition_worker.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
     assert (dl / "good.flac").exists()
     if cleaned:

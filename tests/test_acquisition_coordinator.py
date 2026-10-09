@@ -22,7 +22,7 @@ from trackseerr.acquisition_coordinator import (
     AcquisitionCoordinator,
     acquisition_coordinator,
 )
-from trackseerr.acquisition_worker import translate_remote_path
+from trackseerr.import_files import translate_remote_path
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db, get_lidarr_client
 from trackseerr.auth import create_session_token, get_or_create_secret_key

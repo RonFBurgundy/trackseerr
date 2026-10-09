@@ -11,7 +11,7 @@ import httpx
 from trackseerr import art_pipeline
 from trackseerr.item_history import emit
 from trackseerr.redaction import redact_text, safe_exc
-from trackseerr.acquisition_worker import (
+from trackseerr.import_files import (
     prepare_file_for_tagging,
     safe_atomic_move,
     _is_safe_cover_url,

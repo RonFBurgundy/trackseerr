@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from trackseerr import seed_cleanup as sc
-from trackseerr.acquisition_worker import deletion_safe, settle_transfer_after_import
+from trackseerr.seed_safety import deletion_safe, settle_transfer_after_import
 from trackseerr.activity_service import native_seeding
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db

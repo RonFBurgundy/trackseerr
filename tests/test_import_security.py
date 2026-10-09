@@ -11,7 +11,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from trackseerr import library
-from trackseerr.acquisition_worker import AcquisitionWorker, place_audio_file
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.import_files import place_audio_file
 from trackseerr.import_security import check_magic, quarantine_files, verify_files
 from trackseerr.library import ArchiveLimitError, extract_archive
 from trackseerr.models import ActiveDownload, DownloadClientConfig, DownloadDriverType, DownloadStatus
@@ -288,7 +289,7 @@ def test_place_copy_fallback_clears_exec_bits(tmp_path):
     src = tmp_path / "s.flac"
     src.write_bytes(b"fLaC")
     os.chmod(src, 0o755)
-    with patch("trackseerr.acquisition_worker.os.link", side_effect=OSError("EXDEV")):
+    with patch("trackseerr.import_files.os.link", side_effect=OSError("EXDEV")):
         dst = place_audio_file(src, tmp_path / "lib" / "d.flac", mode="hardlink")
     assert dst.stat().st_ino != src.stat().st_ino  # a real copy
     assert stat.S_IMODE(dst.stat().st_mode) == 0o644

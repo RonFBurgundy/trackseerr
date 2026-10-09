@@ -21,15 +21,17 @@ from typing import Any, Callable, Optional
 
 import httpx
 
-from trackseerr.acquisition_worker import (
+from trackseerr.import_files import (
+    effective_import_mode,
+    translate_remote_path,
+)
+from trackseerr.seed_safety import (
     SeedOutcome,
     _client_path_mappings,
     _under_path,
     deletion_safe,
-    effective_import_mode,
     evaluate_seed_cleanup,
     seed_action,
-    translate_remote_path,
 )
 from trackseerr.clients.acquisition import get_acquisition_driver, is_torrent_driver_type
 from trackseerr.job_tracker import track_job

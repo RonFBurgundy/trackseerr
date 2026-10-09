@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from trackseerr import activity_service as svc
 from trackseerr.acquisition_coordinator import _to_quality_profile
-from trackseerr.acquisition_worker import settle_transfer_after_import
+from trackseerr.seed_safety import settle_transfer_after_import
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db
 from trackseerr.auth import create_session_token, get_or_create_secret_key

@@ -79,7 +79,7 @@ def fetch_client_roots(
     Results are cached per client id (``ROOTS_TTL_SECONDS``; failures ``ROOTS_ERROR_TTL_SECONDS``), keyed to the
     client's connection settings so an edited client is re-read immediately.
     """
-    from trackseerr.acquisition_worker import translate_remote_path
+    from trackseerr.import_files import translate_remote_path
 
     client_id = str(cfg.get("id") or cfg.get("name") or "")
     fp = _fingerprint(cfg)
