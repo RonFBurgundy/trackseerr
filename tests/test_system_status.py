@@ -6,16 +6,16 @@ from fastapi.testclient import TestClient
 
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db, get_plex_client
-from trackseerr.api.routes.system import (
+from trackseerr.api.routes.system.logs import log_ring_buffer
+from trackseerr.api.routes.system.status import (
     _get_db_metrics,
     _get_disk_metrics,
     _get_worker_statuses,
     _ping_download_clients,
     _ping_indexers,
     _ping_plex,
-    get_all_scheduled_tasks,
-    log_ring_buffer,
 )
+from trackseerr.api.routes.system.tasks import get_all_scheduled_tasks
 from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.config import Config
 from trackseerr.storage import Database
@@ -275,7 +275,7 @@ def test_client_and_indexer_pings(test_db):
     mock_driver.test_connection.return_value = (True, "Connected to SABnzbd")
 
     with patch(
-        "trackseerr.api.routes.system.get_acquisition_driver",
+        "trackseerr.api.routes.system.status.get_acquisition_driver",
         return_value=mock_driver,
     ) as mock_get_driver:
         client_results = _ping_download_clients(test_db)
@@ -337,7 +337,7 @@ def test_client_and_indexer_pings(test_db):
     mock_idx_driver.test_connection.return_value = (True, "Torznab caps OK")
 
     with patch(
-        "trackseerr.api.routes.system.get_indexer_driver",
+        "trackseerr.api.routes.system.status.get_indexer_driver",
         return_value=mock_idx_driver,
     ) as mock_get_idx:
         indexer_results = _ping_indexers(test_db)

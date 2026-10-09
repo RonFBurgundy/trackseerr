@@ -14,7 +14,7 @@ from . import __version__
 from .boot import boot_state
 from .api.app import create_app
 from .api.routes.sync import sync_state
-from .api.routes.system import get_log_file_path, log_ring_buffer
+from .api.routes.system.logs import get_log_file_path, log_ring_buffer
 from .clients.deezer import DeezerClient
 from .clients.plex import PlexClient
 from .media_server import NO_MEDIA_SERVER_BOOT_MESSAGE
@@ -103,7 +103,7 @@ def setup_logging(level_name: str, config: Optional[Config] = None) -> None:
         pass
     root_logger = logging.getLogger()
     root_logger.setLevel(level_value)
-    # Importing ``api.routes.system`` already attached the ring buffer to the root logger, which made
+    # Importing ``api.routes.system.logs`` already attached the ring buffer to the root logger, which made
     # ``logging.basicConfig`` a silent no-op (it does nothing when the root has any handler) and left
     # the container with no stdout handler at all. Add one explicitly, identified by name so a second
     # call reuses it (re-pointed at the current ``sys.stdout``) instead of stacking another.

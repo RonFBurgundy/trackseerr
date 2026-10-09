@@ -491,7 +491,7 @@ class TestLogStreamAuth:
         assert client.get("/api/system/logs/stream").status_code == 403
 
     def test_admin_session_cookie_is_accepted(self, test_db, test_config, seeded_users):
-        from trackseerr.api.routes.system import stream_system_logs
+        from trackseerr.api.routes.system.logs import stream_system_logs
 
         token = _token(seeded_users["admin"], test_db, test_config)
         scope = {

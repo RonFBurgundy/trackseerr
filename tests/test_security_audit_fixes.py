@@ -17,7 +17,7 @@ from trackseerr import internal_auth, local_auth, local_login
 from trackseerr.api import dependencies
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db
-from trackseerr.api.routes.system import log_ring_buffer
+from trackseerr.api.routes.system.logs import log_ring_buffer
 from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.clients.core_client import CoreClient
 from trackseerr.config import Config

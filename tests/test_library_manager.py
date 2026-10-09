@@ -670,7 +670,7 @@ class TestSystemQueue:
         _, client = app_and_client
         headers = _headers(seeded_users["admin"], test_db, test_config)
         with patch(
-            "trackseerr.api.routes.system.acquisition_worker.poll_once", return_value={"polled": 2, "failed": 0}
+            "trackseerr.api.routes.system.tasks.acquisition_worker.poll_once", return_value={"polled": 2, "failed": 0}
         ):
             assert client.post("/api/system/tasks/download_queue_monitor/run", headers=headers).status_code == 200
             assert _wait_for(lambda: bool(job_tracker.snapshot()["recent"]))
@@ -681,7 +681,7 @@ class TestSystemQueue:
 
         job_tracker.clear()
         with patch(
-            "trackseerr.api.routes.system.acquisition_worker.poll_once", side_effect=RuntimeError("kaput")
+            "trackseerr.api.routes.system.tasks.acquisition_worker.poll_once", side_effect=RuntimeError("kaput")
         ):
             assert client.post("/api/system/tasks/download_queue_monitor/run", headers=headers).status_code == 200
             assert _wait_for(lambda: bool(job_tracker.snapshot()["recent"]))

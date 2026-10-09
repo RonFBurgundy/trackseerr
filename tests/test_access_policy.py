@@ -193,7 +193,7 @@ def stream_ok():
     from fastapi.responses import PlainTextResponse
 
     with patch(
-        "trackseerr.api.routes.system.StreamingResponse",
+        "trackseerr.api.routes.system.logs.StreamingResponse",
         lambda *a, **k: PlainTextResponse("ok"),
     ):
         yield
