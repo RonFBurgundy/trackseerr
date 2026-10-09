@@ -24,6 +24,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- The app now runs as `python -m trackseerr` (was `python -m plex_playlist_sync`), including the `init-dmz` command.
 - Artist and album metadata from MusicBrainz and Deezer is now stored locally and refreshed on a schedule, so artist refreshes make far fewer requests to those services. Refreshing an artist by hand always fetches fresh data.
 - When the MusicBrainz mirror is down, TrackSeerr switches to musicbrainz.org without waiting on the mirror for every request. When both are down, scheduled refreshes pause and retry the skipped artists on the next run.
 - Deezer requests are paced to stay under Deezer's rate limit, and a "quota exceeded" reply is retried instead of being treated as missing data.
