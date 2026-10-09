@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import uvicorn
 
@@ -642,21 +642,7 @@ def _background_init(
     logger.info("[boot] complete after %.2fs", boot_state.elapsed())
 
 
-def main() -> int:  # noqa: C901, PLR0915
-    process_started = time.monotonic()
-    signal.signal(signal.SIGINT, _signal_handler)
-    signal.signal(signal.SIGTERM, _signal_handler)
-
-    # Logging first, before anything slow, so even a crash during boot leaves a trail in `docker logs`.
-    setup_logging(os.getenv("LOG_LEVEL", "INFO"))
-    role = os.getenv("ROLE", "all-in-one").lower().strip()
-    logger.info("Initializing TrackSeerr v%s (role=%s, tier=%s)", __version__, role, role)
-
-    with boot_state.step_timer("config load", publish=False):
-        config = Config.from_env()
-    setup_logging(config.log_level, config=config)
-    logger.info("[boot] log level %s, config dir %s", config.log_level.upper(), config.config_dir)
-
+def _validate_role_and_restore(config: Config, role: str) -> int | None:
     if role in ("gateway", "core"):
         from trackseerr.internal_auth import MIN_SECRET_LENGTH, validate_secret_strength
 
@@ -693,8 +679,6 @@ def main() -> int:  # noqa: C901, PLR0915
         if config.media_server_type == MEDIA_SERVER_NONE:
             logger.info(NO_MEDIA_SERVER_BOOT_MESSAGE)
 
-    clients = _Clients()
-
     if role != "gateway":
         from trackseerr.backup import apply_pending_restore
 
@@ -705,47 +689,51 @@ def main() -> int:  # noqa: C901, PLR0915
         except Exception as exc:
             logger.critical("Error applying pending restore: %s", safe_exc(exc))
 
-    # Run-once and headless modes have no web server, so the connection checks stay synchronous.
-    if role != "gateway" and (config.run_once or config.headless):
-        _apply_saved_media_server_settings(config)
-        if not _connect_clients(config, clients, fatal_plex=True):
-            return 1
-        coordinator = SyncCoordinator(
-            config=config,
-            plex_client=clients.plex,
-            spotify_client=clients.spotify,
-            deezer_client=clients.deezer,
-        )
+    return None
 
-        # 1. Run-once / CLI mode
-        if config.run_once:
-            logger.info("RUN_ONCE enabled; running single sync cycle and exiting.")
-            coordinator.run_sync_cycle()
-            logger.info("TrackSeerr run-once completed cleanly.")
-            return 0
 
-        # 2. Headless mode (no web UI)
-        logger.info("Running in HEADLESS loop mode.")
-        while not _shutdown_requested:
-            try:
-                coordinator.run_sync_cycle()
-            except Exception as e:  # keep the loop alive; the root cause is logged
-                logger.error("Unexpected error occurred during sync cycle: %s", safe_exc(e))
-                logger.debug("Sync cycle traceback", exc_info=True)
-            slept = 0
-            while slept < config.wait_seconds and not _shutdown_requested:
-                time.sleep(min(1, config.wait_seconds - slept))
-                slept += 1
-        logger.info("TrackSeerr terminated cleanly.")
+def _run_without_web(config: Config, clients: _Clients) -> int:
+    _apply_saved_media_server_settings(config)
+    if not _connect_clients(config, clients, fatal_plex=True):
+        return 1
+    coordinator = SyncCoordinator(
+        config=config,
+        plex_client=clients.plex,
+        spotify_client=clients.spotify,
+        deezer_client=clients.deezer,
+    )
+
+    # 1. Run-once / CLI mode
+    if config.run_once:
+        logger.info("RUN_ONCE enabled; running single sync cycle and exiting.")
+        coordinator.run_sync_cycle()
+        logger.info("TrackSeerr run-once completed cleanly.")
         return 0
 
-    # 3. Web UI & REST Server Mode (Default)
-    db_base_dir = _db_base_dir(config)
+    # 2. Headless mode (no web UI)
+    logger.info("Running in HEADLESS loop mode.")
+    while not _shutdown_requested:
+        try:
+            coordinator.run_sync_cycle()
+        except Exception as e:  # keep the loop alive; the root cause is logged
+            logger.error("Unexpected error occurred during sync cycle: %s", safe_exc(e))
+            logger.debug("Sync cycle traceback", exc_info=True)
+        slept = 0
+        while slept < config.wait_seconds and not _shutdown_requested:
+            time.sleep(min(1, config.wait_seconds - slept))
+            slept += 1
+    logger.info("TrackSeerr terminated cleanly.")
+    return 0
+
+
+def _open_database(config: Config, role: str, db_base_dir: str | None = None) -> Database | None:
+    if db_base_dir is None:
+        db_base_dir = _db_base_dir(config)
     with boot_state.step_timer("database open + migrations", publish=False):
         if role == "gateway":
             try:
                 db_path = str(safe_data_path("sync_db.sqlite", base_dir=db_base_dir))
-                db = Database(db_path)
+                return Database(db_path)
             except (PermissionError, sqlite3.OperationalError, OSError, ValueError) as e:
                 fallback_db_path = "/tmp/trackseerr_gateway.sqlite"
                 logger.warning(
@@ -756,11 +744,11 @@ def main() -> int:  # noqa: C901, PLR0915
                     fallback_db_path,
                 )
                 os.environ["DATABASE_PATH"] = fallback_db_path
-                db = Database(fallback_db_path)
+                return Database(fallback_db_path)
         else:
             db_path = str(safe_data_path("sync_db.sqlite", base_dir=db_base_dir))
             try:
-                db = Database(db_path)
+                return Database(db_path)
             except (PermissionError, sqlite3.OperationalError) as e:
                 logger.critical(
                     "Failed to initialize SQLite database at '%s': %s. "
@@ -769,10 +757,10 @@ def main() -> int:  # noqa: C901, PLR0915
                     e,
                     db_base_dir,
                 )
-                return 1
+                return None
 
-    apply_saved_log_settings(db)  # saved level/rotation settings override the LOG_LEVEL env default
 
+def _prepare_core(db: Database, config: Config, clients: _Clients, role: str) -> None:
     # Remember the role this database last ran as; on a flip (all-in-one <-> core) log the one-time checklist.
     try:
         from .role_change import record_boot_role
@@ -823,25 +811,33 @@ def main() -> int:  # noqa: C901, PLR0915
             if not db.get_playlist(dz_id):
                 db.upsert_playlist(dz_id, f"Deezer Playlist {dz_id}", service="deezer")
 
-    # A protocol mismatch must refuse to start before anything is served. One quick attempt (bounded by the
-    # client timeout) runs here; if core is merely unreachable the full 60s retry loop continues after bind.
-    prehandshake = None
-    if role == "gateway":
-        from .clients.core_client import CoreClient
-        from .gateway_link import ProtocolMismatch, perform_handshake
 
-        try:
-            with boot_state.step_timer("core protocol check", publish=False):
-                prehandshake = perform_handshake(
-                    CoreClient(config.trackseerr_core_url or "", config.internal_core_secret),
-                    deadline_seconds=0,
-                )
-        except ProtocolMismatch as e:
-            logger.error("%s", e)
-            print(f"ERROR: {e}", file=sys.stderr)
-            db.close()
-            return 1
+def _gateway_prehandshake(config: Config, db: Database) -> tuple[bool, Any]:
+    from .clients.core_client import CoreClient
+    from .gateway_link import ProtocolMismatch, perform_handshake
 
+    try:
+        with boot_state.step_timer("core protocol check", publish=False):
+            prehandshake = perform_handshake(
+                CoreClient(config.trackseerr_core_url or "", config.internal_core_secret),
+                deadline_seconds=0,
+            )
+        return True, prehandshake
+    except ProtocolMismatch as e:
+        logger.error("%s", e)
+        print(f"ERROR: {e}", file=sys.stderr)
+        db.close()
+        return False, None
+
+
+def _serve(
+    config: Config,
+    db: Database,
+    role: str,
+    clients: _Clients,
+    process_started: float,
+    prehandshake: Any = None,
+) -> int:
     with boot_state.step_timer("building web application", publish=False):
         app = create_app(db=db, config=config)
 
@@ -922,6 +918,48 @@ def main() -> int:  # noqa: C901, PLR0915
         return exit_code or failure["code"]
     logger.info("TrackSeerr server terminated cleanly.")
     return 0
+
+
+def main() -> int:
+    process_started = time.monotonic()
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+
+    # Logging first, before anything slow, so even a crash during boot leaves a trail in `docker logs`.
+    setup_logging(os.getenv("LOG_LEVEL", "INFO"))
+    role = os.getenv("ROLE", "all-in-one").lower().strip()
+    logger.info("Initializing TrackSeerr v%s (role=%s, tier=%s)", __version__, role, role)
+
+    with boot_state.step_timer("config load", publish=False):
+        config = Config.from_env()
+    setup_logging(config.log_level, config=config)
+    logger.info("[boot] log level %s, config dir %s", config.log_level.upper(), config.config_dir)
+
+    if (rc := _validate_role_and_restore(config, role)) is not None:
+        return rc
+
+    clients = _Clients()
+
+    # Run-once and headless modes have no web server, so the connection checks stay synchronous.
+    if role != "gateway" and (config.run_once or config.headless):
+        return _run_without_web(config, clients)
+
+    # 3. Web UI & REST Server Mode (Default)
+    db = _open_database(config, role)
+    if db is None:
+        return 1
+
+    apply_saved_log_settings(db)  # saved level/rotation settings override the LOG_LEVEL env default
+
+    _prepare_core(db, config, clients, role)
+
+    prehandshake = None
+    if role == "gateway":
+        ok, prehandshake = _gateway_prehandshake(config, db)
+        if not ok:
+            return 1
+
+    return _serve(config, db, role, clients, process_started, prehandshake)
 
 
 def run(argv: Optional[list[str]] = None) -> int:
