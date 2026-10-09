@@ -1,5 +1,6 @@
 """Service for background artist metadata refresh and filesystem reconciliation."""
 
+from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import logging
@@ -190,6 +191,388 @@ def reconcile_artist_files(db: Database, artist_id: str) -> int:
 
     return reconciled_count
 
+
+@dataclass
+class _RefreshState:
+    """Encapsulates cross-phase state during single artist metadata refresh."""
+
+    artist_id: str
+    db: Database
+    enricher: MbidEnricherClient
+    discovery_client: DiscoveryClient
+    force: bool
+    artist: dict[str, Any]
+    artist_name: str
+    metadata_profile: Optional[dict[str, Any]]
+    foreign_artist_id: Optional[str]
+    mbid: Optional[str]
+    source_unavailable: bool = False
+    discography_fetched: bool = False
+    mb_discography_found: bool = False
+    discography_complete: bool = False
+    fresh_rg_ids: set[str] = field(default_factory=set)
+    relinked_by_title_ids: set[str] = field(default_factory=set)
+
+
+def _lookup_and_store_mbid(st: _RefreshState, *, check_breaker: bool) -> None:
+    """Look up the artist MBID if available and persist it to the database."""
+    try:
+        mbid = st.enricher.lookup_artist_mbid(st.artist_name)
+        if check_breaker and not st.enricher.source_available():
+            st.source_unavailable = True
+        if mbid:
+            with st.db._lock:
+                st.db.conn.execute(
+                    "UPDATE library_artists SET mbid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (mbid, st.artist_id),
+                )
+                st.db.conn.commit()
+            st.artist["mbid"] = mbid
+            st.mbid = mbid
+    except Exception as exc:
+        logger.warning("Error looking up artist MBID for %s: %s", st.artist_name, exc)
+
+
+def _apply_mb_artist_details(st: _RefreshState) -> None:
+    """Enrich artist details (country, genres, bio, canonical MBID) from MusicBrainz."""
+    if not st.mbid:
+        return
+    mb_details = st.enricher.get_artist_details(st.mbid, force=st.force)
+    if not st.enricher.source_available():
+        st.source_unavailable = True
+    if mb_details:
+        new_artist_mbid = mb_details.get("id")
+        if new_artist_mbid and str(new_artist_mbid).strip().lower() != str(st.mbid).strip().lower():
+            st.mbid = str(new_artist_mbid).strip()
+            st.artist["mbid"] = st.mbid
+            with st.db._lock:
+                st.db.conn.execute(
+                    "UPDATE library_artists SET mbid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (st.mbid, st.artist_id),
+                )
+                st.db.conn.commit()
+
+        country = mb_details.get("country")
+        genres_raw = mb_details.get("genres")
+        genres_str = (
+            ", ".join(genres_raw)
+            if isinstance(genres_raw, (list, tuple))
+            else (str(genres_raw) if genres_raw else None)
+        )
+        bio = mb_details.get("bio") or mb_details.get("disambiguation")
+
+        art_updates: list[str] = []
+        art_params: list[Any] = []
+        if country and not st.artist.get("country"):
+            art_updates.append("country = ?")
+            art_params.append(country)
+            st.artist["country"] = country
+
+        if genres_str and not st.artist.get("genres"):
+            art_updates.append("genres = ?")
+            art_params.append(genres_str)
+            st.artist["genres"] = genres_str
+
+        if bio and not st.artist.get("bio"):
+            art_updates.append("bio = ?")
+            art_params.append(bio)
+            st.artist["bio"] = bio
+
+        if art_updates:
+            art_updates.append("updated_at = CURRENT_TIMESTAMP")
+            sql = f"UPDATE library_artists SET {', '.join(art_updates)} WHERE id = ?"
+            art_params.append(st.artist_id)
+            with st.db._lock:
+                st.db.conn.execute(sql, art_params)
+                st.db.conn.commit()
+
+
+def _update_album_from_release_group(
+    db: Database, existing_alb: dict[str, Any], rg: dict[str, Any], rg_id: Optional[str]
+) -> None:
+    """Update existing library album with MusicBrainz release group attributes."""
+    upd_album: list[str] = []
+    upd_params: list[Any] = []
+    if rg_id and existing_alb.get("mb_release_group_id") != rg_id:
+        upd_album.append("mb_release_group_id = ?")
+        upd_params.append(rg_id)
+    if not existing_alb.get("cover_url") and rg.get("cover_url"):
+        upd_album.append("cover_url = ?")
+        upd_params.append(rg["cover_url"])
+    _queue_release_date_update(existing_alb, rg, upd_album, upd_params)
+    norm_sec = normalize_secondary_types(rg.get("secondary_types"))
+    if norm_sec is not None and norm_sec != existing_alb.get("secondary_types"):
+        upd_album.append("secondary_types = ?")
+        upd_params.append(json.dumps(norm_sec))
+    if upd_album:
+        upd_album.append("updated_at = CURRENT_TIMESTAMP")
+        alb_sql = f"UPDATE library_albums SET {', '.join(upd_album)} WHERE id = ?"
+        upd_params.append(existing_alb["id"])
+        with db._lock:
+            db.conn.execute(alb_sql, upd_params)
+            db.conn.commit()
+
+
+def _upsert_album_for_release_group(st: _RefreshState, rg: dict[str, Any]) -> tuple[Optional[str], bool]:
+    """Find or create a library album for a MusicBrainz release group."""
+    rg_id = rg.get("id")
+    if rg_id:
+        st.fresh_rg_ids.add(str(rg_id))
+    title = rg.get("title") or "Unknown Album"
+    album_type = rg.get("album_type", "album")
+
+    monitor_opt = st.artist.get("monitor_option", "all")
+    alb_monitored = album_monitored_for_option(
+        monitor_opt,
+        artist_monitored=bool(st.artist.get("monitored", True)),
+        album_type=album_type,
+        has_files=False,
+        release_date=_rg_release_date(rg),
+        year=rg.get("year"),
+        artist_added_at=st.artist.get("created_at"),
+        profile=st.metadata_profile,
+        secondary_types=rg.get("secondary_types"),
+    )
+
+    existing_alb = None
+    if rg_id:
+        existing_alb = st.db.get_library_album_by_release_group_id(rg_id)
+    if not existing_alb:
+        existing_alb = st.db.get_library_album_by_title(st.artist_id, title)
+        if existing_alb and existing_alb.get("mb_release_group_id"):
+            st.relinked_by_title_ids.add(str(existing_alb["mb_release_group_id"]))
+
+    if existing_alb:
+        album_id = existing_alb["id"]
+        alb_monitored = bool(existing_alb["monitored"])
+        _update_album_from_release_group(st.db, existing_alb, rg, rg_id)
+    else:
+        album_id = str(uuid.uuid4())
+        artist_path = st.artist.get("path")
+        alb_path = str(Path(artist_path) / title) if artist_path else None
+        st.db.upsert_library_album(
+            LibraryAlbum(
+                id=album_id,
+                artist_id=st.artist_id,
+                title=title,
+                clean_title=clean_library_name(title),
+                mb_release_group_id=rg_id,
+                album_type=album_type,
+                release_date=_rg_release_date(rg),
+                year=rg.get("year"),
+                cover_url=rg.get("cover_url"),
+                secondary_types=rg.get("secondary_types"),
+                monitored=alb_monitored,
+                path=alb_path,
+                total_tracks=_positive_int(rg.get("track_count")),
+            )
+        )
+    return album_id, alb_monitored
+
+
+def _deezer_fallback_tracks(
+    st: _RefreshState, rg: dict[str, Any], title: str, album_id: Optional[str] = None
+) -> list[dict[str, Any]]:
+    """Query Deezer discovery client as fallback for release group tracks."""
+    if not st.discovery_client:
+        return []
+    tracks: list[dict[str, Any]] = []
+    try:
+        dz_results = st.discovery_client.search(f"{st.artist_name} {title}", item_type="album", limit=3)
+        if isinstance(dz_results, list):
+            for dz_item in dz_results:
+                if clean_library_name(dz_item.get("title") or "") == clean_library_name(title):
+                    dz_alb_details = st.discovery_client.get_album_details(dz_item["id"], force=st.force)
+                    if dz_alb_details and dz_alb_details.get("tracks"):
+                        tracks = [
+                            {
+                                "track_number": int(t.get("track_number") or 1),
+                                "disc_number": int(t.get("disc_number") or 1),
+                                "title": t.get("title") or "Unknown Track",
+                                "duration_seconds": float(t["duration_seconds"])
+                                if t.get("duration_seconds") is not None
+                                else None,
+                                "mb_recording_id": None,
+                            }
+                            for t in dz_alb_details["tracks"]
+                        ]
+                        if dz_alb_details.get("cover_url") and not rg.get("cover_url") and album_id:
+                            mediacover_service.ensure_artwork("album_cover", album_id, dz_alb_details["cover_url"])
+                        break
+    except Exception as dz_err:
+        logger.debug("Deezer track fallback failed for %s - %s: %s", st.artist_name, title, dz_err)
+    return tracks
+
+
+def _hydrate_release_group_tracks(
+    st: _RefreshState, rg: dict[str, Any], album_id: str, title: str
+) -> None:
+    """Hydrate canonical tracks for a monitored MusicBrainz release group."""
+    rg_id = rg.get("id")
+    if not rg_id:
+        return
+    tracks = None
+    if not st.source_unavailable:
+        tracks = st.enricher.get_release_group_tracks(rg_id, force=st.force)
+        if not st.enricher.source_available():
+            st.source_unavailable = True
+    if not tracks and st.discovery_client:
+        tracks = _deezer_fallback_tracks(st, rg, title, album_id=album_id)
+
+    if tracks:
+        _store_total_tracks(st.db, album_id, len(tracks))
+        monitor_opt = st.artist.get("monitor_option", "all")
+        with album_hydration_lock(album_id):
+            for trk in tracks:
+                trk_title = trk.get("title") or "Unknown Track"
+                trk_num = int(trk.get("track_number") or 1)
+                disc_num = int(trk.get("disc_number") or 1)
+                dur = trk.get("duration_seconds")
+                mb_rec_id = trk.get("mb_recording_id")
+
+                existing_trk = st.db.get_library_track_by_title(
+                    album_id,
+                    trk_title,
+                    track_number=trk_num,
+                )
+                if existing_trk:
+                    trk_id = existing_trk["id"]
+                    t_monitored = bool(existing_trk["monitored"])
+                else:
+                    trk_id = str(uuid.uuid4())
+                    t_monitored = hydrated_track_monitored(monitor_opt)
+
+                st.db.upsert_library_track(
+                    LibraryTrack(
+                        id=trk_id,
+                        album_id=album_id,
+                        artist_id=st.artist_id,
+                        title=trk_title,
+                        clean_title=clean_library_name(trk_title),
+                        track_number=trk_num,
+                        disc_number=disc_num,
+                        duration_seconds=dur,
+                        monitored=t_monitored,
+                        mb_recording_id=mb_rec_id,
+                    )
+                )
+
+
+def _sync_mb_discography(st: _RefreshState) -> None:
+    """Fetch MusicBrainz discography and upsert albums, cover art, and tracks."""
+    if not st.mbid:
+        return
+    discography, discography_complete = st.enricher.get_artist_discography_result(st.mbid, force=st.force)
+    st.discography_fetched = True
+    st.discography_complete = discography_complete
+    if not st.enricher.source_available():
+        st.source_unavailable = True
+    if discography and len(discography) > 0:
+        st.mb_discography_found = True
+        for rg in discography:
+            album_id, alb_monitored = _upsert_album_for_release_group(st, rg)
+            if not album_id:
+                continue
+
+            # Cache cover artwork via mediacover
+            cov_url = rg.get("cover_url")
+            if cov_url:
+                try:
+                    mediacover_service.ensure_artwork("album_cover", album_id, cov_url)
+                except Exception as c_err:
+                    logger.debug("Error caching cover for album %s: %s", album_id, c_err)
+
+            rg_id = rg.get("id")
+            title = rg.get("title") or "Unknown Album"
+            if alb_monitored and rg_id:
+                _hydrate_release_group_tracks(st, rg, album_id, title)
+
+
+def _apply_release_group_redirects(st: _RefreshState) -> None:
+    """Resolve release group redirects for candidate albums when discography is complete."""
+    try:
+        candidate_albums: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            page = st.db.list_library_albums(artist_id=st.artist_id, limit=500, offset=offset)
+            candidate_albums.extend(page)
+            if len(page) < 500:
+                break
+            offset += 500
+
+        rg_lookup_count = 0
+        for alb in candidate_albums:
+            if rg_lookup_count >= 50:
+                break
+            old_rg_id = alb.get("mb_release_group_id")
+            if not old_rg_id:
+                continue
+            str_old_rg = str(old_rg_id).strip()
+            if str_old_rg in st.fresh_rg_ids or str_old_rg in st.relinked_by_title_ids:
+                continue
+
+            rg_lookup_count += 1
+            new_rg_id = st.enricher.resolve_release_group(str_old_rg)
+            if not st.enricher.source_available():
+                st.source_unavailable = True
+                break
+            if new_rg_id:
+                clean_new_rg = str(new_rg_id).strip()
+                if clean_new_rg.lower() != str_old_rg.lower():
+                    collision = False
+                    for other_alb in candidate_albums:
+                        if other_alb["id"] != alb["id"] and other_alb.get("mb_release_group_id"):
+                            if str(other_alb["mb_release_group_id"]).strip().lower() == clean_new_rg.lower():
+                                collision = True
+                                break
+                    if collision:
+                        logger.info(
+                            "Release group redirect %s -> %s for album %s skipped: target ID already on another album for artist %s",
+                            str_old_rg,
+                            clean_new_rg,
+                            alb["id"],
+                            st.artist_id,
+                        )
+                    else:
+                        with st.db._lock:
+                            st.db.conn.execute(
+                                "UPDATE library_albums SET mb_release_group_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                (clean_new_rg, alb["id"]),
+                            )
+                            st.db.conn.commit()
+                        alb["mb_release_group_id"] = clean_new_rg
+            else:
+                logger.info(
+                    "Release group lookup for %s returned None; leaving album %s untouched",
+                    str_old_rg,
+                    alb["id"],
+                )
+    except Exception as rg_exc:
+        logger.warning("Error during release group redirect check for artist %s: %s", st.artist_id, rg_exc)
+
+
+def _link_mb_release_groups(st: _RefreshState) -> None:
+    """Link MusicBrainz release groups to existing albums in the post-Deezer pass."""
+    if not st.mbid:
+        return
+    discography, _ = st.enricher.get_artist_discography_result(
+        st.mbid, force=st.force and not st.discography_fetched
+    )
+    if not st.enricher.source_available():
+        st.source_unavailable = True
+    if discography:
+        for rg in discography:
+            rg_id = rg.get("id")
+            title = rg.get("title") or "Unknown Album"
+            existing_alb = None
+            if rg_id:
+                existing_alb = st.db.get_library_album_by_release_group_id(rg_id)
+            if not existing_alb:
+                existing_alb = st.db.get_library_album_by_title(st.artist_id, title)
+            if existing_alb:
+                _update_album_from_release_group(st.db, existing_alb, rg, rg_id)
+
+
 def refresh_single_artist(
     artist_id: str,
     db: Database,
@@ -221,320 +604,52 @@ def refresh_single_artist(
     metadata_profile = db.get_metadata_profile(artist["metadata_profile_id"]) if artist.get("metadata_profile_id") else None
 
     # Check circuit breaker before MusicBrainz operations
-    if not enricher.source_available():
-        source_unavailable = True
+    source_unavailable = not enricher.source_available()
+
+    st = _RefreshState(
+        artist_id=artist_id,
+        db=db,
+        enricher=enricher,
+        discovery_client=discovery_client,
+        force=force,
+        artist=artist,
+        artist_name=artist_name,
+        metadata_profile=metadata_profile,
+        foreign_artist_id=foreign_artist_id,
+        mbid=artist.get("mbid"),
+        source_unavailable=source_unavailable,
+    )
 
     # 1. Enrich with MusicBrainz metadata and discography
-    mbid = artist.get("mbid")
-    if not source_unavailable and not mbid and not foreign_artist_id and artist_name:
+    if not st.source_unavailable and not st.mbid and not st.foreign_artist_id and st.artist_name:
+        _lookup_and_store_mbid(st, check_breaker=False)
+
+    if not st.source_unavailable and st.mbid:
         try:
-            mbid = enricher.lookup_artist_mbid(artist_name)
-            if mbid:
-                with db._lock:
-                    db.conn.execute(
-                        "UPDATE library_artists SET mbid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (mbid, artist_id),
-                    )
-                    db.conn.commit()
-                artist["mbid"] = mbid
+            _apply_mb_artist_details(st)
+            if not st.source_unavailable:
+                _sync_mb_discography(st)
+            if st.discography_complete and not st.source_unavailable:
+                _apply_release_group_redirects(st)
         except Exception as exc:
-            logger.warning("Error looking up artist MBID for %s: %s", artist_name, exc)
-
-    mb_discography_found = False
-    discography_complete = False
-    fresh_rg_ids: set[str] = set()
-    relinked_by_title_ids: set[str] = set()
-
-    if not source_unavailable and mbid:
-        try:
-            mb_details = enricher.get_artist_details(mbid, force=force)
-            if not enricher.source_available():
-                source_unavailable = True
-            if mb_details:
-                new_artist_mbid = mb_details.get("id")
-                if new_artist_mbid and str(new_artist_mbid).strip().lower() != str(mbid).strip().lower():
-                    mbid = str(new_artist_mbid).strip()
-                    artist["mbid"] = mbid
-                    with db._lock:
-                        db.conn.execute(
-                            "UPDATE library_artists SET mbid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                            (mbid, artist_id),
-                        )
-                        db.conn.commit()
-
-                country = mb_details.get("country")
-                genres_raw = mb_details.get("genres")
-                genres_str = (
-                    ", ".join(genres_raw)
-                    if isinstance(genres_raw, (list, tuple))
-                    else (str(genres_raw) if genres_raw else None)
-                )
-                bio = mb_details.get("bio") or mb_details.get("disambiguation")
-
-                art_updates: list[str] = []
-                art_params: list[Any] = []
-                if country and not artist.get("country"):
-                    art_updates.append("country = ?")
-                    art_params.append(country)
-                    artist["country"] = country
-
-                if genres_str and not artist.get("genres"):
-                    art_updates.append("genres = ?")
-                    art_params.append(genres_str)
-                    artist["genres"] = genres_str
-
-                if bio and not artist.get("bio"):
-                    art_updates.append("bio = ?")
-                    art_params.append(bio)
-                    artist["bio"] = bio
-
-                if art_updates:
-                    art_updates.append("updated_at = CURRENT_TIMESTAMP")
-                    sql = f"UPDATE library_artists SET {', '.join(art_updates)} WHERE id = ?"
-                    art_params.append(artist_id)
-                    with db._lock:
-                        db.conn.execute(sql, art_params)
-                        db.conn.commit()
-
-            if not source_unavailable:
-                discography, discography_complete = enricher.get_artist_discography_result(mbid, force=force)
-                discography_fetched = True
-                if not enricher.source_available():
-                    source_unavailable = True
-                if discography and len(discography) > 0:
-                    mb_discography_found = True
-                    artist_path = artist.get("path")
-                    monitor_opt = artist.get("monitor_option", "all")
-                    for rg in discography:
-                        rg_id = rg.get("id")
-                        if rg_id:
-                            fresh_rg_ids.add(str(rg_id))
-                        title = rg.get("title") or "Unknown Album"
-                        album_type = rg.get("album_type", "album")
-
-                        alb_monitored = album_monitored_for_option(
-                            monitor_opt,
-                            artist_monitored=bool(artist.get("monitored", True)),
-                            album_type=album_type,
-                            has_files=False,
-                            release_date=_rg_release_date(rg),
-                            year=rg.get("year"),
-                            artist_added_at=artist.get("created_at"),
-                            profile=metadata_profile,
-                            secondary_types=rg.get("secondary_types"),
-                        )
-
-                        existing_alb = None
-                        if rg_id:
-                            existing_alb = db.get_library_album_by_release_group_id(rg_id)
-                        if not existing_alb:
-                            existing_alb = db.get_library_album_by_title(artist_id, title)
-                            if existing_alb and existing_alb.get("mb_release_group_id"):
-                                relinked_by_title_ids.add(str(existing_alb["mb_release_group_id"]))
-
-                        if existing_alb:
-                            album_id = existing_alb["id"]
-                            alb_monitored = bool(existing_alb["monitored"])
-                            upd_album: list[str] = []
-                            upd_params: list[Any] = []
-                            if rg_id and existing_alb.get("mb_release_group_id") != rg_id:
-                                upd_album.append("mb_release_group_id = ?")
-                                upd_params.append(rg_id)
-                            if not existing_alb.get("cover_url") and rg.get("cover_url"):
-                                upd_album.append("cover_url = ?")
-                                upd_params.append(rg["cover_url"])
-                            _queue_release_date_update(existing_alb, rg, upd_album, upd_params)
-                            # Backfill/refresh the MusicBrainz secondary types; never touches the monitored flag.
-                            if normalize_secondary_types(rg.get("secondary_types")) is not None and normalize_secondary_types(
-                                rg["secondary_types"]
-                            ) != existing_alb.get("secondary_types"):
-                                upd_album.append("secondary_types = ?")
-                                upd_params.append(json.dumps(normalize_secondary_types(rg["secondary_types"])))
-                            if upd_album:
-                                upd_album.append("updated_at = CURRENT_TIMESTAMP")
-                                alb_sql = f"UPDATE library_albums SET {', '.join(upd_album)} WHERE id = ?"
-                                upd_params.append(album_id)
-                                with db._lock:
-                                    db.conn.execute(alb_sql, upd_params)
-                                    db.conn.commit()
-                        else:
-                            album_id = str(uuid.uuid4())
-                            alb_path = str(Path(artist_path) / title) if artist_path else None
-                            db.upsert_library_album(
-                                LibraryAlbum(
-                                    id=album_id,
-                                    artist_id=artist_id,
-                                    title=title,
-                                    clean_title=clean_library_name(title),
-                                    mb_release_group_id=rg_id,
-                                    album_type=album_type,
-                                    release_date=_rg_release_date(rg),
-                                    year=rg.get("year"),
-                                    cover_url=rg.get("cover_url"),
-                                    secondary_types=rg.get("secondary_types"),
-                                    monitored=alb_monitored,
-                                    path=alb_path,
-                                    total_tracks=_positive_int(rg.get("track_count")),
-                                )
-                            )
-
-                        # Cache cover artwork via mediacover
-                        cov_url = rg.get("cover_url") or (existing_alb.get("cover_url") if existing_alb else None)
-                        if cov_url:
-                            try:
-                                mediacover_service.ensure_artwork("album_cover", album_id, cov_url)
-                            except Exception as c_err:
-                                logger.debug("Error caching cover for album %s: %s", album_id, c_err)
-
-                        # Track hydration: If album is monitored, hydrate canonical tracks
-                        if alb_monitored and rg_id:
-                            tracks = None
-                            if not source_unavailable:
-                                tracks = enricher.get_release_group_tracks(rg_id, force=force)
-                                if not enricher.source_available():
-                                    source_unavailable = True
-                            if not tracks and discovery_client:
-                                # Fallback to Deezer album search/details for that album title
-                                try:
-                                    dz_results = discovery_client.search(f"{artist_name} {title}", item_type="album", limit=3)
-                                    if isinstance(dz_results, list):
-                                        for dz_item in dz_results:
-                                            if clean_library_name(dz_item.get("title") or "") == clean_library_name(title):
-                                                dz_alb_details = discovery_client.get_album_details(dz_item["id"], force=force)
-                                                if dz_alb_details and dz_alb_details.get("tracks"):
-                                                    tracks = [
-                                                        {
-                                                            "track_number": int(t.get("track_number") or 1),
-                                                            "disc_number": int(t.get("disc_number") or 1),
-                                                            "title": t.get("title") or "Unknown Track",
-                                                            "duration_seconds": float(t["duration_seconds"]) if t.get("duration_seconds") is not None else None,
-                                                            "mb_recording_id": None,
-                                                        }
-                                                        for t in dz_alb_details["tracks"]
-                                                    ]
-                                                    if dz_alb_details.get("cover_url") and not rg.get("cover_url"):
-                                                        mediacover_service.ensure_artwork("album_cover", album_id, dz_alb_details["cover_url"])
-                                                    break
-                                except Exception as dz_err:
-                                    logger.debug("Deezer track fallback failed for %s - %s: %s", artist_name, title, dz_err)
-
-                            if tracks:
-                                _store_total_tracks(db, album_id, len(tracks))
-                                with album_hydration_lock(album_id):
-                                    for trk in tracks:
-                                        trk_title = trk.get("title") or "Unknown Track"
-                                        trk_num = int(trk.get("track_number") or 1)
-                                        disc_num = int(trk.get("disc_number") or 1)
-                                        dur = trk.get("duration_seconds")
-                                        mb_rec_id = trk.get("mb_recording_id")
-
-                                        existing_trk = db.get_library_track_by_title(
-                                            album_id,
-                                            trk_title,
-                                            track_number=trk_num,
-                                        )
-                                        if existing_trk:
-                                            trk_id = existing_trk["id"]
-                                            t_monitored = bool(existing_trk["monitored"])
-                                        else:
-                                            trk_id = str(uuid.uuid4())
-                                            t_monitored = hydrated_track_monitored(monitor_opt)
-
-                                        db.upsert_library_track(
-                                            LibraryTrack(
-                                                id=trk_id,
-                                                album_id=album_id,
-                                                artist_id=artist_id,
-                                                title=trk_title,
-                                                clean_title=clean_library_name(trk_title),
-                                                track_number=trk_num,
-                                                disc_number=disc_num,
-                                                duration_seconds=dur,
-                                                monitored=t_monitored,
-                                                mb_recording_id=mb_rec_id,
-                                            )
-                                        )
-
-            # Release-group redirect check (only when discography_complete is true)
-            if discography_complete and not source_unavailable:
-                try:
-                    candidate_albums: list[dict[str, Any]] = []
-                    offset = 0
-                    while True:
-                        page = db.list_library_albums(artist_id=artist_id, limit=500, offset=offset)
-                        candidate_albums.extend(page)
-                        if len(page) < 500:
-                            break
-                        offset += 500
-
-                    rg_lookup_count = 0
-                    for alb in candidate_albums:
-                        if rg_lookup_count >= 50:
-                            break
-                        old_rg_id = alb.get("mb_release_group_id")
-                        if not old_rg_id:
-                            continue
-                        str_old_rg = str(old_rg_id).strip()
-                        if str_old_rg in fresh_rg_ids or str_old_rg in relinked_by_title_ids:
-                            continue
-
-                        rg_lookup_count += 1
-                        new_rg_id = enricher.resolve_release_group(str_old_rg)
-                        if not enricher.source_available():
-                            source_unavailable = True
-                            break
-                        if new_rg_id:
-                            clean_new_rg = str(new_rg_id).strip()
-                            if clean_new_rg.lower() != str_old_rg.lower():
-                                collision = False
-                                for other_alb in candidate_albums:
-                                    if other_alb["id"] != alb["id"] and other_alb.get("mb_release_group_id"):
-                                        if str(other_alb["mb_release_group_id"]).strip().lower() == clean_new_rg.lower():
-                                            collision = True
-                                            break
-                                if collision:
-                                    logger.info(
-                                        "Release group redirect %s -> %s for album %s skipped: target ID already on another album for artist %s",
-                                        str_old_rg,
-                                        clean_new_rg,
-                                        alb["id"],
-                                        artist_id,
-                                    )
-                                else:
-                                    with db._lock:
-                                        db.conn.execute(
-                                            "UPDATE library_albums SET mb_release_group_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                            (clean_new_rg, alb["id"]),
-                                        )
-                                        db.conn.commit()
-                                    alb["mb_release_group_id"] = clean_new_rg
-                        else:
-                            logger.info(
-                                "Release group lookup for %s returned None; leaving album %s untouched",
-                                str_old_rg,
-                                alb["id"],
-                            )
-                except Exception as rg_exc:
-                    logger.warning("Error during release group redirect check for artist %s: %s", artist_id, rg_exc)
-        except Exception as exc:
-            logger.warning("Error enriching artist %s via MusicBrainz: %s", artist_id, exc)
+            logger.warning("Error enriching artist %s via MusicBrainz: %s", st.artist_id, exc)
         else:
-            db.finish_pending_profile_recompute(artist_id)
+            st.db.finish_pending_profile_recompute(st.artist_id)
 
     # 2. Retrieve discography and artwork from Deezer only if MusicBrainz discography was not found
-    if not mb_discography_found:
-        if not foreign_artist_id and artist_name:
+    if not st.mb_discography_found:
+        if not st.foreign_artist_id and st.artist_name:
             try:
-                d_art = discovery_client.search_artist(artist_name)
+                d_art = discovery_client.search_artist(st.artist_name)
                 if not isinstance(d_art, dict):
                     d_art = None
                 if not d_art:
-                    search_results = discovery_client.search(artist_name, item_type="all", limit=5)
+                    search_results = discovery_client.search(st.artist_name, item_type="all", limit=5)
                     if isinstance(search_results, list):
                         for item in search_results:
                             if isinstance(item, dict):
                                 item_art = (item.get("artist") or "").lower().strip()
-                                if item.get("item_type") == "artist" or item_art == artist_name.lower():
+                                if item.get("item_type") == "artist" or item_art == st.artist_name.lower():
                                     item_id = item.get("id")
                                     if item_id and isinstance(item_id, (str, int)):
                                         d_art = {
@@ -544,18 +659,18 @@ def refresh_single_artist(
                                         }
                                         break
                 if isinstance(d_art, dict) and d_art.get("id") and isinstance(d_art["id"], (str, int)):
-                    foreign_artist_id = str(d_art["id"])
-                    artist["foreign_artist_id"] = foreign_artist_id
+                    st.foreign_artist_id = str(d_art["id"])
+                    st.artist["foreign_artist_id"] = st.foreign_artist_id
                     art_upd = ["foreign_artist_id = ?"]
-                    art_params = [foreign_artist_id]
-                    if d_art.get("image_url") and not artist.get("image_url") and isinstance(d_art["image_url"], str):
+                    art_params = [st.foreign_artist_id]
+                    if d_art.get("image_url") and not st.artist.get("image_url") and isinstance(d_art["image_url"], str):
                         art_upd.append("image_url = ?")
                         art_params.append(d_art["image_url"])
-                        artist["image_url"] = d_art["image_url"]
-                    if d_art.get("banner_url") and not artist.get("banner_url") and isinstance(d_art["banner_url"], str):
+                        st.artist["image_url"] = d_art["image_url"]
+                    if d_art.get("banner_url") and not st.artist.get("banner_url") and isinstance(d_art["banner_url"], str):
                         art_upd.append("banner_url = ?")
                         art_params.append(d_art["banner_url"])
-                        artist["banner_url"] = d_art["banner_url"]
+                        st.artist["banner_url"] = d_art["banner_url"]
                     art_upd.append("updated_at = CURRENT_TIMESTAMP")
                     art_params.append(artist_id)
                     with db._lock:
@@ -565,11 +680,11 @@ def refresh_single_artist(
                         )
                         db.conn.commit()
             except Exception as exc:
-                logger.warning("Error resolving Deezer artist ID for '%s': %s", artist_name, exc)
+                logger.warning("Error resolving Deezer artist ID for '%s': %s", st.artist_name, exc)
 
-        if foreign_artist_id:
+        if st.foreign_artist_id:
             try:
-                artist_details = discovery_client.get_artist_details(foreign_artist_id, force=force)
+                artist_details = discovery_client.get_artist_details(st.foreign_artist_id, force=force)
                 if artist_details:
                     d_img = (
                         artist_details.get("image_url")
@@ -582,14 +697,14 @@ def refresh_single_artist(
                     )
                     art_upd = []
                     art_params = []
-                    if d_img and not artist.get("image_url"):
+                    if d_img and not st.artist.get("image_url"):
                         art_upd.append("image_url = ?")
                         art_params.append(d_img)
-                        artist["image_url"] = d_img
-                    if d_banner and not artist.get("banner_url"):
+                        st.artist["image_url"] = d_img
+                    if d_banner and not st.artist.get("banner_url"):
                         art_upd.append("banner_url = ?")
                         art_params.append(d_banner)
-                        artist["banner_url"] = d_banner
+                        st.artist["banner_url"] = d_banner
                     if art_upd:
                         art_upd.append("updated_at = CURRENT_TIMESTAMP")
                         art_params.append(artist_id)
@@ -605,7 +720,7 @@ def refresh_single_artist(
                         ("singles_eps", artist_details.get("singles_eps") or []),
                         ("compilations", artist_details.get("compilations") or []),
                     ]
-                    artist_path = artist.get("path")
+                    artist_path = st.artist.get("path")
                     seen_album_ids: set[str] = set()
 
                     for section_name, album_list in sections:
@@ -667,16 +782,16 @@ def refresh_single_artist(
                                 )
                             else:
                                 album_id = str(uuid.uuid4())
-                                monitor_opt = artist.get("monitor_option", "all")
+                                monitor_opt = st.artist.get("monitor_option", "all")
                                 alb_monitored = album_monitored_for_option(
                                     monitor_opt,
-                                    artist_monitored=bool(artist.get("monitored", True)),
+                                    artist_monitored=bool(st.artist.get("monitored", True)),
                                     album_type=section_to_album_type(section_name),
                                     has_files=False,
                                     release_date=album.get("release_date"),
                                     year=year_val,
-                                    artist_added_at=artist.get("created_at"),
-                                    profile=metadata_profile,
+                                    artist_added_at=st.artist.get("created_at"),
+                                    profile=st.metadata_profile,
                                 )
 
                                 alb_path = str(Path(artist_path) / album_title) if artist_path else None
@@ -739,7 +854,7 @@ def refresh_single_artist(
                                                 trk_monitored = bool(existing_trk["monitored"])
                                             else:
                                                 track_id = str(uuid.uuid4())
-                                                trk_monitored = hydrated_track_monitored(artist.get("monitor_option", "all"))
+                                                trk_monitored = hydrated_track_monitored(st.artist.get("monitor_option", "all"))
 
                                             trk_title = trk.get("title") or "Unknown Track"
                                             trk_num = int(trk.get("track_number") or 1)
@@ -765,124 +880,31 @@ def refresh_single_artist(
                                                 )
                                             )
             except Exception as exc:
-                logger.warning("Discovery client get_artist_details failed for refresh of %s: %s", foreign_artist_id, exc)
+                logger.warning("Discovery client get_artist_details failed for refresh of %s: %s", st.foreign_artist_id, exc)
 
         # 3. Post-Deezer MusicBrainz metadata enrichment (bio, country, genres, and album release groups)
-        if not source_unavailable and not mbid and artist_name:
+        if not st.source_unavailable and not st.mbid and st.artist_name:
+            _lookup_and_store_mbid(st, check_breaker=True)
+
+        if not st.source_unavailable and st.mbid:
             try:
-                mbid = enricher.lookup_artist_mbid(artist_name)
-                if not enricher.source_available():
-                    source_unavailable = True
-                if mbid:
-                    with db._lock:
-                        db.conn.execute(
-                            "UPDATE library_artists SET mbid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                            (mbid, artist_id),
-                        )
-                        db.conn.commit()
-                    artist["mbid"] = mbid
+                _apply_mb_artist_details(st)
+                if not st.source_unavailable:
+                    _link_mb_release_groups(st)
             except Exception as exc:
-                logger.warning("Error looking up artist MBID for %s: %s", artist_name, exc)
-
-        if not source_unavailable and mbid:
-            try:
-                mb_details = enricher.get_artist_details(mbid, force=force)
-                if not enricher.source_available():
-                    source_unavailable = True
-                if mb_details:
-                    new_artist_mbid = mb_details.get("id")
-                    if new_artist_mbid and str(new_artist_mbid).strip().lower() != str(mbid).strip().lower():
-                        mbid = str(new_artist_mbid).strip()
-                        artist["mbid"] = mbid
-                        with db._lock:
-                            db.conn.execute(
-                                "UPDATE library_artists SET mbid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                (mbid, artist_id),
-                            )
-                            db.conn.commit()
-
-                    country = mb_details.get("country")
-                    genres_raw = mb_details.get("genres")
-                    genres_str = (
-                        ", ".join(genres_raw)
-                        if isinstance(genres_raw, (list, tuple))
-                        else (str(genres_raw) if genres_raw else None)
-                    )
-                    bio = mb_details.get("bio") or mb_details.get("disambiguation")
-
-                    art_updates = []
-                    art_params = []
-                    if country and not artist.get("country"):
-                        art_updates.append("country = ?")
-                        art_params.append(country)
-                        artist["country"] = country
-                    if genres_str and not artist.get("genres"):
-                        art_updates.append("genres = ?")
-                        art_params.append(genres_str)
-                        artist["genres"] = genres_str
-                    if bio and not artist.get("bio"):
-                        art_updates.append("bio = ?")
-                        art_params.append(bio)
-                        artist["bio"] = bio
-                    if art_updates:
-                        art_updates.append("updated_at = CURRENT_TIMESTAMP")
-                        sql = f"UPDATE library_artists SET {', '.join(art_updates)} WHERE id = ?"
-                        art_params.append(artist_id)
-                        with db._lock:
-                            db.conn.execute(sql, art_params)
-                            db.conn.commit()
-
-                if not source_unavailable:
-                    discography, _ = enricher.get_artist_discography_result(
-                        mbid, force=force and not discography_fetched
-                    )
-                    if not enricher.source_available():
-                        source_unavailable = True
-                    if discography:
-                        for rg in discography:
-                            rg_id = rg.get("id")
-                            title = rg.get("title") or "Unknown Album"
-                            existing_alb = None
-                            if rg_id:
-                                existing_alb = db.get_library_album_by_release_group_id(rg_id)
-                            if not existing_alb:
-                                existing_alb = db.get_library_album_by_title(artist_id, title)
-                            if existing_alb:
-                                upd_album = []
-                                upd_params = []
-                                if rg_id and existing_alb.get("mb_release_group_id") != rg_id:
-                                    upd_album.append("mb_release_group_id = ?")
-                                    upd_params.append(rg_id)
-                                if not existing_alb.get("cover_url") and rg.get("cover_url"):
-                                    upd_album.append("cover_url = ?")
-                                    upd_params.append(rg["cover_url"])
-                                _queue_release_date_update(existing_alb, rg, upd_album, upd_params)
-                                if normalize_secondary_types(rg.get("secondary_types")) is not None and normalize_secondary_types(
-                                    rg["secondary_types"]
-                                ) != existing_alb.get("secondary_types"):
-                                    upd_album.append("secondary_types = ?")
-                                    upd_params.append(json.dumps(normalize_secondary_types(rg["secondary_types"])))
-                                if upd_album:
-                                    upd_album.append("updated_at = CURRENT_TIMESTAMP")
-                                    alb_sql = f"UPDATE library_albums SET {', '.join(upd_album)} WHERE id = ?"
-                                    upd_params.append(existing_alb["id"])
-                                    with db._lock:
-                                        db.conn.execute(alb_sql, upd_params)
-                                        db.conn.commit()
-            except Exception as exc:
-                logger.warning("Error enriching artist %s via MusicBrainz: %s", artist_id, exc)
+                logger.warning("Error enriching artist %s via MusicBrainz: %s", st.artist_id, exc)
             else:
-                db.finish_pending_profile_recompute(artist_id)
+                st.db.finish_pending_profile_recompute(st.artist_id)
 
     # Cache artist poster & banner
-    if artist.get("image_url"):
+    if st.artist.get("image_url"):
         try:
-            mediacover_service.ensure_artwork("artist_poster", artist_id, artist["image_url"])
+            mediacover_service.ensure_artwork("artist_poster", artist_id, st.artist["image_url"])
         except Exception:
             pass
-    if artist.get("banner_url"):
+    if st.artist.get("banner_url"):
         try:
-            mediacover_service.ensure_artwork("artist_banner", artist_id, artist["banner_url"])
+            mediacover_service.ensure_artwork("artist_banner", artist_id, st.artist["banner_url"])
         except Exception:
             pass
 
@@ -902,7 +924,7 @@ def refresh_single_artist(
     dz_reqs = discovery_stats_after.get("network_requests", 0) - discovery_stats_before.get("network_requests", 0)
     dz_hits = discovery_stats_after.get("cache_hits", 0) - discovery_stats_before.get("cache_hits", 0)
 
-    if not foreign_artist_id and not mbid:
+    if not st.foreign_artist_id and not st.mbid:
         res_dict = {
             "success": False,
             "message": "Artist has no linked discovery foreign ID or MusicBrainz ID",
@@ -911,7 +933,7 @@ def refresh_single_artist(
             "deezer_requests": dz_reqs,
             "deezer_cache_hits": dz_hits,
         }
-        if source_unavailable:
+        if st.source_unavailable:
             res_dict["source_unavailable"] = True
         return res_dict
 
@@ -924,7 +946,6 @@ def refresh_single_artist(
         "deezer_requests": dz_reqs,
         "deezer_cache_hits": dz_hits,
     }
-    if source_unavailable:
+    if st.source_unavailable:
         res_dict["source_unavailable"] = True
     return res_dict
-
