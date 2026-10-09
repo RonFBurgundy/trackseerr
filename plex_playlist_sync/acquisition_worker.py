@@ -27,6 +27,7 @@ from plex_playlist_sync import delay_gate
 from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
 from plex_playlist_sync.clients.acquisition import get_acquisition_driver, is_torrent_driver_type
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
+from plex_playlist_sync.mb_metadata_store import get_shared_enricher
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.media_servers import as_media_server
 from plex_playlist_sync.job_tracker import job_tracker, summarize_result
@@ -1702,9 +1703,7 @@ class AcquisitionWorker:
                     # Asynchronously enrich with MBIDs if enabled
                     if media_settings.get("enrich_mbids", True):
                         try:
-                            enricher = MbidEnricherClient(
-                                base_url=media_settings.get("mb_mirror_url", "https://api.brainzmash.cc")
-                            )
+                            enricher = get_shared_enricher(db)
                             artist_query = str(tags_to_write.get("artist") or "")
                             album_query = str(tags_to_write.get("album") or "")
                             title_query = str(tags_to_write.get("title") or "")

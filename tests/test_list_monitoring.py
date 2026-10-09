@@ -71,11 +71,15 @@ def make_enricher() -> MagicMock:
         "musicbrainz_trackid": "rec",
     }
     enr.get_artist_details.return_value = {"id": ART}
-    enr.get_artist_discography.return_value = [
+    discography = [
         {"id": RG, "title": "OK Computer", "album_type": "album", "year": 1997},
         {"id": RG2, "title": "The Bends", "album_type": "album", "year": 1995},
         {"id": "dddddddd-0000-0000-0000-00000000000d", "title": "Creep", "album_type": "single", "year": 1992},
     ]
+    enr.get_artist_discography.return_value = discography
+    enr.get_artist_discography_result.return_value = (discography, True)
+    enr.source_available.return_value = True
+    enr.stats.return_value = {"network_requests": 0, "cache_hits": 0}
     enr.get_release_group_tracks.return_value = [
         {"track_number": 1, "disc_number": 1, "title": "Airbag", "duration_seconds": 284.0, "mb_recording_id": "r1"},
         {"track_number": 2, "disc_number": 1, "title": "Paranoid Android", "duration_seconds": 383.0, "mb_recording_id": "r2"},

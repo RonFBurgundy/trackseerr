@@ -1,12 +1,13 @@
 """Zero-key music discovery client wrapping iTunes and Deezer public APIs with TTL caching."""
 
+from collections import deque
 import concurrent.futures
 import copy
 import logging
 import threading
 import time
+from typing import TYPE_CHECKING, Any, Optional
 import urllib.parse
-from typing import Any, Optional
 
 import requests
 
@@ -14,7 +15,57 @@ from plex_playlist_sync.models import DiscoveryItem
 from plex_playlist_sync.track_counts import positive_int
 from plex_playlist_sync.system_paths import is_system_folder_name
 
+if TYPE_CHECKING:
+    from plex_playlist_sync.mb_metadata_store import MbMetadataStore
+
 logger = logging.getLogger(__name__)
+
+_DEEZER_PACER_LOCK = threading.Lock()
+_DEEZER_REQUEST_TIMESTAMPS: deque[float] = deque()
+_DEEZER_MAX_REQUESTS_PER_WINDOW = 40
+_DEEZER_WINDOW_SECONDS = 5.0
+
+
+def _reset_deezer_pacer() -> None:
+    """Resets process-wide sliding-window pacer timestamps (for testing)."""
+    with _DEEZER_PACER_LOCK:
+        _DEEZER_REQUEST_TIMESTAMPS.clear()
+
+
+def _pace_deezer_request() -> None:
+    """Enforces process-wide limit of at most 40 requests per 5-second sliding window."""
+    while True:
+        with _DEEZER_PACER_LOCK:
+            now = time.monotonic()
+            cutoff = now - _DEEZER_WINDOW_SECONDS
+            while _DEEZER_REQUEST_TIMESTAMPS and _DEEZER_REQUEST_TIMESTAMPS[0] <= cutoff:
+                _DEEZER_REQUEST_TIMESTAMPS.popleft()
+
+            if len(_DEEZER_REQUEST_TIMESTAMPS) < _DEEZER_MAX_REQUESTS_PER_WINDOW:
+                _DEEZER_REQUEST_TIMESTAMPS.append(now)
+                return
+
+            oldest = _DEEZER_REQUEST_TIMESTAMPS[0]
+            sleep_duration = (oldest + _DEEZER_WINDOW_SECONDS) - now
+
+        if sleep_duration > 0:
+            time.sleep(sleep_duration)
+
+
+def _is_deezer_quota(resp: requests.Response) -> bool:
+    """Detects Deezer quota limit (HTTP 429 or 200 with error code 4)."""
+    if resp.status_code == 429:
+        return True
+    if resp.status_code == 200:
+        try:
+            body = resp.json()
+            if isinstance(body, dict):
+                err = body.get("error")
+                if isinstance(err, dict) and err.get("code") == 4:
+                    return True
+        except (ValueError, TypeError):
+            pass
+    return False
 
 
 def _deezer_artist_ref(artist_obj: Any) -> Optional[str]:
@@ -38,11 +89,19 @@ def _deezer_album_ref(album_obj: Any) -> Optional[str]:
 class DiscoveryClient:
     """Thread-safe zero-key client for querying public trending, new release, and search APIs."""
 
-    def __init__(self, ttl_seconds: float = 900.0, timeout: float = 5.0) -> None:
+    def __init__(
+        self,
+        ttl_seconds: float = 900.0,
+        timeout: float = 5.0,
+        store: Optional["MbMetadataStore"] = None,
+    ) -> None:
         self.ttl_seconds = float(ttl_seconds)
         self.timeout = float(timeout)
+        self._store = store
         self._cache: dict[str, tuple[float, Any]] = {}
         self._lock = threading.Lock()
+        self._network_requests: int = 0
+        self._cache_hits: int = 0
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -51,12 +110,21 @@ class DiscoveryClient:
             }
         )
 
+    def stats(self) -> dict[str, int]:
+        """Returns thread-safe network request and cache hit counters."""
+        with self._lock:
+            return {
+                "network_requests": self._network_requests,
+                "cache_hits": self._cache_hits,
+            }
+
     def _get_cached(self, key: str) -> Optional[Any]:
         with self._lock:
             entry = self._cache.get(key)
             if entry:
                 timestamp, data = entry
                 if time.time() - timestamp < self.ttl_seconds:
+                    self._cache_hits += 1
                     return copy.deepcopy(data)
                 del self._cache[key]
         return None
@@ -64,6 +132,57 @@ class DiscoveryClient:
     def _set_cached(self, key: str, data: Any) -> None:
         with self._lock:
             self._cache[key] = (time.time(), copy.deepcopy(data))
+
+    def _lookup_l2(self, cache_key: str) -> tuple[bool, Any]:
+        """Looks up in persistent L2 store. Increments cache_hits on hit."""
+        if self._store is None:
+            return False, None
+        l2_key = f"dz:{cache_key}"
+        hit, data = self._store.get(l2_key)
+        if hit and data is not None:
+            self._set_cached(cache_key, data)
+            with self._lock:
+                self._cache_hits += 1
+            return True, copy.deepcopy(data)
+        return False, None
+
+    def _persist_l2(self, cache_key: str, kind: str, data: Any, ttl_seconds: float) -> None:
+        """Persists successful data to L2 store with jittered TTL."""
+        if self._store is None or data is None:
+            return
+        if isinstance(data, dict) and "error" in data:
+            return
+        from plex_playlist_sync.mb_metadata_store import ttl_with_jitter
+        l2_key = f"dz:{cache_key}"
+        self._store.put(l2_key, kind, data, ttl_with_jitter(ttl_seconds))
+
+    def _deezer_get(self, url: str, **kwargs: Any) -> Optional[requests.Response]:
+        """Paced, quota-aware GET request to Deezer API with one retry on rate limit."""
+        kwargs.setdefault("timeout", self.timeout)
+
+        for attempt in range(2):
+            _pace_deezer_request()
+            try:
+                with self._lock:
+                    self._network_requests += 1
+                resp = self.session.get(url, **kwargs)
+            except requests.RequestException as exc:
+                logger.warning("Deezer GET failed for %s (attempt %d/2): %s", url, attempt + 1, exc)
+                return None
+            except Exception as exc:
+                logger.warning("Deezer GET unexpected error for %s: %s", url, exc)
+                return None
+
+            if _is_deezer_quota(resp):
+                if attempt == 0:
+                    time.sleep(5.0)
+                    continue
+                logger.warning("Deezer quota still exceeded for %s after retry (status=%s)", url, resp.status_code)
+                return resp
+
+            return resp
+
+        return None
 
     def clear_cache(self) -> None:
         with self._lock:
@@ -86,8 +205,8 @@ class DiscoveryClient:
         try:
             # Query trending tracks
             track_url = f"https://api.deezer.com/chart/0/tracks?limit={max(10, limit)}"
-            resp = self.session.get(track_url, timeout=self.timeout)
-            if resp.status_code == 200:
+            resp = self._deezer_get(track_url)
+            if resp is not None and resp.status_code == 200:
                 data = resp.json()
                 for t in data.get("data", []):
                     art = t.get("artist", {}) if isinstance(t.get("artist"), dict) else {}
@@ -110,8 +229,8 @@ class DiscoveryClient:
 
             # Query trending albums
             album_url = f"https://api.deezer.com/chart/0/albums?limit={max(10, limit)}"
-            resp_alb = self.session.get(album_url, timeout=self.timeout)
-            if resp_alb.status_code == 200:
+            resp_alb = self._deezer_get(album_url)
+            if resp_alb is not None and resp_alb.status_code == 200:
                 data_alb = resp_alb.json()
                 for a in data_alb.get("data", []):
                     art = a.get("artist", {}) if isinstance(a.get("artist"), dict) else {}
@@ -154,8 +273,8 @@ class DiscoveryClient:
         if not items:
             try:
                 album_url = f"https://api.deezer.com/chart/0/albums?limit={limit}"
-                resp = self.session.get(album_url, timeout=self.timeout)
-                if resp.status_code == 200:
+                resp = self._deezer_get(album_url)
+                if resp is not None and resp.status_code == 200:
                     data = resp.json()
                     for a in data.get("data", []):
                         art = a.get("artist", {}) if isinstance(a.get("artist"), dict) else {}
@@ -231,40 +350,48 @@ class DiscoveryClient:
         cached = self._get_cached(cache_key)
         if cached is not None:
             return cached
+        hit, l2_data = self._lookup_l2(cache_key)
+        if hit:
+            return l2_data
 
         try:
             encoded_q = urllib.parse.quote(clean_name)
             url = f"https://api.deezer.com/search/artist?q={encoded_q}&limit=5"
-            resp = self.session.get(url, timeout=self.timeout)
-            if resp.status_code == 200:
+            resp = self._deezer_get(url)
+            if resp is not None and resp.status_code == 200:
                 data = resp.json()
-                artists = data.get("data", []) if isinstance(data, dict) else []
-                for art in artists:
-                    if not isinstance(art, dict):
-                        continue
-                    art_id = art.get("id")
-                    name = str(art.get("name", "")).strip()
-                    if art_id and (name.lower() == clean_name.lower() or clean_name.lower() in name.lower()):
-                        result = {
-                            "id": f"deezer:artist:{art_id}",
-                            "name": name,
-                            "image_url": art.get("picture_xl") or art.get("picture_big") or art.get("picture_medium") or art.get("picture"),
-                            "banner_url": art.get("picture_xl") or art.get("picture_big"),
-                        }
-                        self._set_cached(cache_key, result)
-                        return result
-                if artists and isinstance(artists[0], dict):
-                    first = artists[0]
-                    art_id = first.get("id")
-                    if art_id:
-                        result = {
-                            "id": f"deezer:artist:{art_id}",
-                            "name": str(first.get("name", "")).strip(),
-                            "image_url": first.get("picture_xl") or first.get("picture_big") or first.get("picture_medium") or first.get("picture"),
-                            "banner_url": first.get("picture_xl") or first.get("picture_big"),
-                        }
-                        self._set_cached(cache_key, result)
-                        return result
+                if not (isinstance(data, dict) and "error" in data):
+                    artists = data.get("data", []) if isinstance(data, dict) else []
+                    for art in artists:
+                        if not isinstance(art, dict):
+                            continue
+                        art_id = art.get("id")
+                        name = str(art.get("name", "")).strip()
+                        if art_id and (name.lower() == clean_name.lower() or clean_name.lower() in name.lower()):
+                            result = {
+                                "id": f"deezer:artist:{art_id}",
+                                "name": name,
+                                "image_url": art.get("picture_xl") or art.get("picture_big") or art.get("picture_medium") or art.get("picture"),
+                                "banner_url": art.get("picture_xl") or art.get("picture_big"),
+                            }
+                            self._set_cached(cache_key, result)
+                            from plex_playlist_sync.mb_metadata_store import TTL_DEEZER_ARTIST
+                            self._persist_l2(cache_key, "deezer_artist_search", result, TTL_DEEZER_ARTIST)
+                            return result
+                    if artists and isinstance(artists[0], dict):
+                        first = artists[0]
+                        art_id = first.get("id")
+                        if art_id:
+                            result = {
+                                "id": f"deezer:artist:{art_id}",
+                                "name": str(first.get("name", "")).strip(),
+                                "image_url": first.get("picture_xl") or first.get("picture_big") or first.get("picture_medium") or first.get("picture"),
+                                "banner_url": first.get("picture_xl") or first.get("picture_big"),
+                            }
+                            self._set_cached(cache_key, result)
+                            from plex_playlist_sync.mb_metadata_store import TTL_DEEZER_ARTIST
+                            self._persist_l2(cache_key, "deezer_artist_search", result, TTL_DEEZER_ARTIST)
+                            return result
         except Exception as exc:
             logger.warning("DiscoveryClient search_artist error for '%s': %s", clean_name, exc)
 
@@ -286,15 +413,20 @@ class DiscoveryClient:
         cached = self._get_cached(cache_key)
         if cached is not None:
             return cached
+        hit, l2_data = self._lookup_l2(cache_key)
+        if hit:
+            return l2_data
 
         try:
-            resp = self.session.get(
-                f"https://api.deezer.com/artist/{num_id}/related?limit={int(limit)}", timeout=self.timeout
+            resp = self._deezer_get(
+                f"https://api.deezer.com/artist/{num_id}/related?limit={int(limit)}"
             )
-            if resp.status_code != 200:
-                logger.warning("Deezer related artists for %s returned HTTP %s", num_id, resp.status_code)
+            if resp is None or resp.status_code != 200:
+                logger.warning("Deezer related artists for %s returned HTTP %s", num_id, resp.status_code if resp is not None else "None")
                 return []
             data = resp.json()
+            if isinstance(data, dict) and "error" in data:
+                return []
         except (requests.RequestException, ValueError) as exc:
             logger.warning("Deezer related artists query failed for %s: %s", num_id, exc)
             return []
@@ -308,6 +440,8 @@ class DiscoveryClient:
                 results.append({"id": str(art["id"]), "name": name})
         results = results[: max(0, int(limit))]
         self._set_cached(cache_key, results)
+        from plex_playlist_sync.mb_metadata_store import TTL_DEEZER_TOP
+        self._persist_l2(cache_key, "deezer_artist_top", results, TTL_DEEZER_TOP)
         return results
 
     def get_artist_top_tracks(self, deezer_artist_id: Any, limit: int = 10) -> list[dict[str, Any]]:
@@ -319,15 +453,20 @@ class DiscoveryClient:
         cached = self._get_cached(cache_key)
         if cached is not None:
             return cached
+        hit, l2_data = self._lookup_l2(cache_key)
+        if hit:
+            return l2_data
 
         try:
-            resp = self.session.get(
-                f"https://api.deezer.com/artist/{num_id}/top?limit={int(limit)}", timeout=self.timeout
+            resp = self._deezer_get(
+                f"https://api.deezer.com/artist/{num_id}/top?limit={int(limit)}"
             )
-            if resp.status_code != 200:
-                logger.warning("Deezer artist top for %s returned HTTP %s", num_id, resp.status_code)
+            if resp is None or resp.status_code != 200:
+                logger.warning("Deezer artist top for %s returned HTTP %s", num_id, resp.status_code if resp is not None else "None")
                 return []
             data = resp.json()
+            if isinstance(data, dict) and "error" in data:
+                return []
         except (requests.RequestException, ValueError) as exc:
             logger.warning("Deezer artist top tracks query failed for %s: %s", num_id, exc)
             return []
@@ -350,6 +489,8 @@ class DiscoveryClient:
             )
         results = results[: max(0, int(limit))]
         self._set_cached(cache_key, results)
+        from plex_playlist_sync.mb_metadata_store import TTL_DEEZER_TOP
+        self._persist_l2(cache_key, "deezer_artist_top", results, TTL_DEEZER_TOP)
         return results
 
     def search_artists(self, query: str, limit: int = 10) -> Optional[list[dict[str, Any]]]:
@@ -365,12 +506,11 @@ class DiscoveryClient:
         if cached is not None:
             return cached
         try:
-            resp = self.session.get(
-                f"https://api.deezer.com/search/artist?q={urllib.parse.quote(clean_q)}&limit={int(limit)}",
-                timeout=self.timeout,
+            resp = self._deezer_get(
+                f"https://api.deezer.com/search/artist?q={urllib.parse.quote(clean_q)}&limit={int(limit)}"
             )
-            if resp.status_code != 200:
-                logger.warning("Deezer artist search for '%s' returned HTTP %s", clean_q, resp.status_code)
+            if resp is None or resp.status_code != 200:
+                logger.warning("Deezer artist search for '%s' returned HTTP %s", clean_q, resp.status_code if resp is not None else "None")
                 return None
             data = resp.json()
         except (requests.RequestException, ValueError) as exc:
@@ -408,14 +548,20 @@ class DiscoveryClient:
         cached = self._get_cached(cache_key)
         if cached is not None:
             return cached
+        hit, l2_data = self._lookup_l2(cache_key)
+        if hit:
+            return l2_data
+
         try:
-            resp = self.session.get(
-                f"https://api.deezer.com/artist/{num_id}/top?limit={int(limit)}", timeout=self.timeout
+            resp = self._deezer_get(
+                f"https://api.deezer.com/artist/{num_id}/top?limit={int(limit)}"
             )
-            if resp.status_code != 200:
-                logger.warning("Deezer artist top for %s returned HTTP %s", num_id, resp.status_code)
+            if resp is None or resp.status_code != 200:
+                logger.warning("Deezer artist top for %s returned HTTP %s", num_id, resp.status_code if resp is not None else "None")
                 return []
             data = resp.json()
+            if isinstance(data, dict) and "error" in data:
+                return []
         except (requests.RequestException, ValueError) as exc:
             logger.warning("Deezer artist top tracks query failed for %s: %s", num_id, exc)
             return []
@@ -446,18 +592,24 @@ class DiscoveryClient:
             )
         results = results[: max(0, int(limit))]
         self._set_cached(cache_key, results)
+        from plex_playlist_sync.mb_metadata_store import TTL_DEEZER_TOP
+        self._persist_l2(cache_key, "deezer_artist_top", results, TTL_DEEZER_TOP)
         return results
 
-    def get_album_details(self, album_id: str) -> Optional[dict[str, Any]]:
+    def get_album_details(self, album_id: str, force: bool = False) -> Optional[dict[str, Any]]:
         """Fetches full album details, tracklist, and audio previews from Deezer or iTunes with TTL caching."""
         clean_id = (album_id or "").strip()
         if not clean_id:
             return None
 
         cache_key = f"album:{clean_id}"
-        cached = self._get_cached(cache_key)
-        if cached is not None:
-            return cached
+        if not force:
+            cached = self._get_cached(cache_key)
+            if cached is not None:
+                return cached
+            hit, l2_data = self._lookup_l2(cache_key)
+            if hit:
+                return l2_data
 
         result: Optional[dict[str, Any]] = None
         if clean_id.startswith("deezer:album:"):
@@ -477,8 +629,10 @@ class DiscoveryClient:
             num_id = clean_id.split(":")[-1]
             result = self._get_itunes_album_details(num_id)
 
-        if result is not None:
+        if result is not None and not (isinstance(result, dict) and "error" in result):
             self._set_cached(cache_key, result)
+            from plex_playlist_sync.mb_metadata_store import TTL_DEEZER_ALBUM
+            self._persist_l2(cache_key, "deezer_album", result, TTL_DEEZER_ALBUM)
 
         return result
 
@@ -508,9 +662,11 @@ class DiscoveryClient:
         if not num_id.isdigit():
             return None
         try:
-            resp = self.session.get(f"https://api.deezer.com/track/{num_id}", timeout=self.timeout)
-            if resp.status_code != 200:
-                logger.warning("Deezer track query returned status %d for id %s", resp.status_code, num_id)
+            resp = self._deezer_get(f"https://api.deezer.com/track/{num_id}")
+            if resp is None or resp.status_code != 200:
+                logger.warning("Deezer track query returned status %s for id %s", resp.status_code if resp is not None else "None", num_id)
+                if resp is None:
+                    raise DiscoveryUpstreamError(f"Deezer track lookup failed for {num_id}")
                 return None
             data = resp.json()
         except (requests.RequestException, ValueError) as exc:
@@ -576,6 +732,8 @@ class DiscoveryClient:
         if not num_id.isdigit():
             return None
         try:
+            with self._lock:
+                self._network_requests += 1
             resp = self.session.get(f"https://itunes.apple.com/lookup?id={num_id}&entity=song", timeout=self.timeout)
             if resp.status_code != 200:
                 logger.warning("iTunes track query returned status %d for id %s", resp.status_code, num_id)
@@ -622,16 +780,20 @@ class DiscoveryClient:
             result["genres"] = [str(genre).strip()]
         return result
 
-    def get_artist_details(self, artist_id: str) -> Optional[dict[str, Any]]:
+    def get_artist_details(self, artist_id: str, force: bool = False) -> Optional[dict[str, Any]]:
         """Fetches artist profile and discography grouped into albums, singles_eps, and compilations."""
         clean_id = (artist_id or "").strip()
         if not clean_id:
             return None
 
         cache_key = f"artist:{clean_id}"
-        cached = self._get_cached(cache_key)
-        if cached is not None:
-            return cached
+        if not force:
+            cached = self._get_cached(cache_key)
+            if cached is not None:
+                return cached
+            hit, l2_data = self._lookup_l2(cache_key)
+            if hit:
+                return l2_data
 
         result: Optional[dict[str, Any]] = None
         if clean_id.startswith("deezer:artist:"):
@@ -651,8 +813,10 @@ class DiscoveryClient:
             num_id = clean_id.split(":")[-1]
             result = self._get_itunes_artist_details(num_id)
 
-        if result is not None:
+        if result is not None and not (isinstance(result, dict) and "error" in result):
             self._set_cached(cache_key, result)
+            from plex_playlist_sync.mb_metadata_store import TTL_DEEZER_ARTIST
+            self._persist_l2(cache_key, "deezer_artist", result, TTL_DEEZER_ARTIST)
 
         return result
 
@@ -664,6 +828,8 @@ class DiscoveryClient:
         """Fetches top albums from iTunes RSS JSON feed."""
         url = f"https://itunes.apple.com/us/rss/topalbums/limit={limit}/json"
         try:
+            with self._lock:
+                self._network_requests += 1
             resp = self.session.get(url, timeout=self.timeout)
             if resp.status_code != 200:
                 logger.warning("iTunes RSS returned status %d", resp.status_code)
@@ -722,8 +888,8 @@ class DiscoveryClient:
         try:
             if item_type in ("track", "all"):
                 url = f"https://api.deezer.com/search/track?q={encoded_q}&limit={limit}"
-                resp = self.session.get(url, timeout=self.timeout)
-                if resp.status_code == 200:
+                resp = self._deezer_get(url)
+                if resp is not None and resp.status_code == 200:
                     for t in resp.json().get("data", []):
                         art = t.get("artist", {}) if isinstance(t.get("artist"), dict) else {}
                         alb = t.get("album", {}) if isinstance(t.get("album"), dict) else {}
@@ -745,8 +911,8 @@ class DiscoveryClient:
 
             if item_type in ("album", "all"):
                 url = f"https://api.deezer.com/search/album?q={encoded_q}&limit={limit}"
-                resp = self.session.get(url, timeout=self.timeout)
-                if resp.status_code == 200:
+                resp = self._deezer_get(url)
+                if resp is not None and resp.status_code == 200:
                     for a in resp.json().get("data", []):
                         art = a.get("artist", {}) if isinstance(a.get("artist"), dict) else {}
                         cover = a.get("cover_big") or a.get("cover_medium") or ""
@@ -782,6 +948,8 @@ class DiscoveryClient:
         for entity_param, mapped_type in entities:
             try:
                 url = f"https://itunes.apple.com/search?term={encoded_q}&entity={entity_param}&limit={limit}"
+                with self._lock:
+                    self._network_requests += 1
                 resp = self.session.get(url, timeout=self.timeout)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -844,9 +1012,10 @@ class DiscoveryClient:
         """Queries Deezer album details API endpoint."""
         url = f"https://api.deezer.com/album/{num_id}"
         try:
-            resp = self.session.get(url, timeout=self.timeout)
-            if resp.status_code != 200:
-                logger.warning("Deezer album query returned status %d for id %s", resp.status_code, num_id)
+            resp = self._deezer_get(url)
+            if resp is None or resp.status_code != 200:
+                status = resp.status_code if resp is not None else 0
+                logger.warning("Deezer album query returned status %d for id %s", status, num_id)
                 return None
             data = resp.json()
             if not isinstance(data, dict) or "error" in data:
@@ -938,6 +1107,8 @@ class DiscoveryClient:
         """Queries iTunes lookup API endpoint for album details and songs."""
         url = f"https://itunes.apple.com/lookup?id={num_id}&entity=song"
         try:
+            with self._lock:
+                self._network_requests += 1
             resp = self.session.get(url, timeout=self.timeout)
             if resp.status_code != 200:
                 logger.warning("iTunes album query returned status %d for id %s", resp.status_code, num_id)
@@ -1024,9 +1195,10 @@ class DiscoveryClient:
         """Queries Deezer artist and discography endpoints."""
         url = f"https://api.deezer.com/artist/{num_id}"
         try:
-            resp = self.session.get(url, timeout=self.timeout)
-            if resp.status_code != 200:
-                logger.warning("Deezer artist query returned status %d for id %s", resp.status_code, num_id)
+            resp = self._deezer_get(url)
+            if resp is None or resp.status_code != 200:
+                status = resp.status_code if resp is not None else 0
+                logger.warning("Deezer artist query returned status %d for id %s", status, num_id)
                 return None
             data = resp.json()
             if not isinstance(data, dict) or "error" in data:
@@ -1049,8 +1221,8 @@ class DiscoveryClient:
 
             # Query albums
             albums_url = f"https://api.deezer.com/artist/{num_id}/albums?limit=100"
-            resp_albs = self.session.get(albums_url, timeout=self.timeout)
-            albs_data = resp_albs.json() if resp_albs.status_code == 200 else {}
+            resp_albs = self._deezer_get(albums_url)
+            albs_data = resp_albs.json() if (resp_albs is not None and resp_albs.status_code == 200) else {}
             raw_albs = albs_data.get("data", []) if isinstance(albs_data, dict) else []
 
             albums: list[dict[str, Any]] = []
@@ -1118,6 +1290,8 @@ class DiscoveryClient:
         """Queries iTunes lookup API endpoint for artist and discography."""
         url = f"https://itunes.apple.com/lookup?id={num_id}&entity=album&limit=100"
         try:
+            with self._lock:
+                self._network_requests += 1
             resp = self.session.get(url, timeout=self.timeout)
             if resp.status_code != 200:
                 logger.warning("iTunes artist query returned status %d for id %s", resp.status_code, num_id)

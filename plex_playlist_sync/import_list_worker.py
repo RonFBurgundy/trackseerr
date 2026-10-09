@@ -27,6 +27,7 @@ from typing import Any, Optional
 from plex_playlist_sync.clients.import_lists import ImportListError, fetch_items
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
+from plex_playlist_sync.mb_metadata_store import get_shared_enricher
 from plex_playlist_sync.item_history import TRIGGER_IMPORT_LIST, GrabTrigger
 from plex_playlist_sync.job_tracker import tracked
 from plex_playlist_sync.task_manager import TRIGGER_SCHEDULED, record_finished_run
@@ -105,7 +106,7 @@ def _run_sync(
     pending = db.list_pending_import_items(list_id)
     actor = list_actor(db)
     if enricher is None:
-        enricher = MbidEnricherClient(base_url=_mirror_url(db), timeout=10.0)
+        enricher = get_shared_enricher(db)
 
     outcome: dict[str, int] = {}
     for row in pending:

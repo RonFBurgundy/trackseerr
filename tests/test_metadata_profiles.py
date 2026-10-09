@@ -198,6 +198,7 @@ def _mb_refresh(db: Database, discography: list[dict[str, Any]], aid: str = "ar"
     enricher = MagicMock(spec=MbidEnricherClient)
     enricher.get_artist_details.return_value = {"id": "mb-" + aid}
     enricher.get_artist_discography.return_value = discography
+    enricher.get_artist_discography_result.return_value = (discography, True)
     enricher.get_release_group_tracks.return_value = []
     with patch.object(mediacover_service, "ensure_artwork", return_value=Path("/tmp/c.jpg")):
         assert refresh_single_artist(artist_id=aid, db=db, enricher=enricher, discovery_client=MagicMock())["success"]

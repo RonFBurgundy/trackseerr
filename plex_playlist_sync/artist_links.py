@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import re
-import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional, Protocol
@@ -21,6 +20,7 @@ from typing import Any, Iterable, Optional, Protocol
 import requests
 
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
+from plex_playlist_sync.mb_metadata_store import get_shared_enricher
 from plex_playlist_sync.storage import Database, clean_library_name
 
 logger = logging.getLogger(__name__)
@@ -124,17 +124,9 @@ class LidarrLibraryIndex:
 
 # ---------------------------------------------------------------------------------------------------- cache helpers
 
-_enricher: Optional[MbidEnricherClient] = None
-_enricher_lock = threading.Lock()
-
-
-def get_enricher() -> MbidEnricherClient:
+def get_enricher(db: Database) -> MbidEnricherClient:
     """Process-wide MusicBrainz client so its 1 req/s rate limit is shared across requests."""
-    global _enricher
-    with _enricher_lock:
-        if _enricher is None:
-            _enricher = MbidEnricherClient()
-        return _enricher
+    return get_shared_enricher(db)
 
 
 def _parse_stamp(raw: Any) -> Optional[datetime]:
@@ -170,12 +162,12 @@ def _deezer_url(discovery_id: Optional[str]) -> Optional[str]:
     return None
 
 
-def _lookup_mbid_for_discovery(discovery_id: str, enricher: Optional[MbidEnricherClient]) -> Optional[str]:
+def _lookup_mbid_for_discovery(db: Database, discovery_id: str, enricher: Optional[MbidEnricherClient]) -> Optional[str]:
     url = _deezer_url(discovery_id)
     if url is None:
         return None
     try:
-        return (enricher or get_enricher()).lookup_artist_mbid_by_url(url)
+        return (enricher or get_enricher(db)).lookup_artist_mbid_by_url(url)
     except (requests.RequestException, ValueError) as exc:
         logger.warning("MusicBrainz URL lookup failed for %s: %s", url, exc)
         return None
@@ -214,7 +206,7 @@ def resolve_from_discovery(
         return ArtistLink(name="", discovery_id=discovery_artist_id)
 
     name = str(details.get("name") or "").strip()
-    mbid = _lookup_mbid_for_discovery(discovery_artist_id, enricher)
+    mbid = _lookup_mbid_for_discovery(db, discovery_artist_id, enricher)
 
     found: Optional[dict[str, Any]] = None
     confidence = "none"
@@ -279,7 +271,7 @@ def resolve_from_library(
 
     best = max(exact, key=lambda c: int(c.get("nb_fan") or 0))
     confidence = "name"
-    if lib_mbid and _lookup_mbid_for_discovery(best["id"], enricher) == lib_mbid:
+    if lib_mbid and _lookup_mbid_for_discovery(db, best["id"], enricher) == lib_mbid:
         confidence = "mbid"
     link = ArtistLink(
         name=name,

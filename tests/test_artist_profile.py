@@ -361,7 +361,7 @@ def test_unresolvable_ids_404(api):
 def test_profile_from_discovery_merges_library(api, db, monkeypatch):
     app, client, headers = api
     _seed_radiohead(db)
-    monkeypatch.setattr(artist_links, "get_enricher", lambda: _enricher(MBID))
+    monkeypatch.setattr(artist_links, "get_enricher", lambda db: _enricher(MBID))
     details = _details(albums=[_dalb("1", "OK Computer (Deluxe Edition)", "1997-05-21"), _dalb("2", "Kid A")])
     top = [{"id": "deezer:track:5", "title": "Creep", "artist": "Radiohead", "album": "Pablo Honey",
             "duration": 238, "preview_url": "http://p/5.mp3"}]
@@ -386,7 +386,7 @@ def test_request_status_shows_for_unmatched_album(api, db, monkeypatch):
     from plex_playlist_sync.models import MusicRequest, RequestStatus
 
     app, client, headers = api
-    monkeypatch.setattr(artist_links, "get_enricher", lambda: _enricher(None))
+    monkeypatch.setattr(artist_links, "get_enricher", lambda db: _enricher(None))
     db.upsert_user("u1", "u1", "u1@x.tv", is_admin=False)
     db.create_request(MusicRequest(id="r1", user_id="u1", artist="Radiohead", title="Kid A", item_type="album",
                                    status=RequestStatus.PENDING, foreign_id="deezer:album:2"))
@@ -413,7 +413,7 @@ def test_library_only_artist_without_discovery_match(api, db):
 def test_library_artist_with_discovery_match_gets_discography(api, db, monkeypatch):
     app, client, headers = api
     _seed_radiohead(db)
-    monkeypatch.setattr(artist_links, "get_enricher", lambda: _enricher(MBID))
+    monkeypatch.setattr(artist_links, "get_enricher", lambda db: _enricher(MBID))
     search = [{"id": "deezer:artist:399", "name": "Radiohead", "nb_fan": 1}]
     disc = _discovery(_details(albums=[_dalb("2", "Kid A")]), search=search)
     app.dependency_overrides[get_discovery_client] = lambda: disc
@@ -577,7 +577,7 @@ def _keys(node: Any) -> set:
 def _requester_setup(api, db, monkeypatch):
     app, client, _admin = api
     _seed_radiohead(db)
-    monkeypatch.setattr(artist_links, "get_enricher", lambda: _enricher(MBID))
+    monkeypatch.setattr(artist_links, "get_enricher", lambda db: _enricher(MBID))
     details = _details(albums=[_dalb("1", "OK Computer", "1997-05-21"), _dalb("2", "Kid A")])
     app.dependency_overrides[get_discovery_client] = lambda: _discovery(details)
     return client
@@ -636,7 +636,7 @@ def test_gateway_resolves_availability_on_core_and_has_no_local_library(db, tmp_
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_config] = lambda: cfg
     app.dependency_overrides[get_lidarr_client] = lambda: None
-    monkeypatch.setattr(artist_links, "get_enricher", lambda: _enricher(None))
+    monkeypatch.setattr(artist_links, "get_enricher", lambda db: _enricher(None))
     _seed_radiohead(db)  # must be ignored: a gateway has no library
     app.dependency_overrides[get_discovery_client] = lambda: _discovery(_details(albums=[_dalb("2", "Kid A")]))
     headers = _headers(db, cfg, "alice", False)

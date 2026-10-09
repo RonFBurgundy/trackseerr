@@ -141,12 +141,14 @@ def test_refresh_musicbrainz_backfills_release_date_and_track_count(db: Database
 
     enricher = MagicMock(spec=MbidEnricherClient)
     enricher.get_artist_details.return_value = {"id": "mb-ar"}
-    enricher.get_artist_discography.return_value = [
+    disco = [
         {"id": "rg1", "title": "Monomyth", "album_type": "album", "first_release_date": "2014-06-24", "year": 2014,
          "track_count": 12},
         {"id": "rg2", "title": "New One", "album_type": "single", "first_release_date": "2016-01-02", "year": 2016,
          "track_count": 2},
     ]
+    enricher.get_artist_discography.return_value = disco
+    enricher.get_artist_discography_result.return_value = (disco, True)
     refresh_single_artist("ar", db, discovery_client=MagicMock(spec=DiscoveryClient), enricher=enricher)
 
     albums = {a["title"]: a for a in get_artist("ar", db=db, client=None, _admin={})["albums"]}

@@ -30,6 +30,7 @@ import httpx
 from plex_playlist_sync import lidarr_library
 from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
+from plex_playlist_sync.mb_metadata_store import get_shared_enricher
 from plex_playlist_sync.item_history import TRIGGER_PLAYLIST, GrabTrigger, provenance
 from plex_playlist_sync.library_manager import MODE_LIDARR, ModeChanged, build_lidarr_client, run_for_mode
 from plex_playlist_sync.library_monitoring import (
@@ -519,7 +520,7 @@ def _apply_list_item(
             return ApplyResult(STATUS_APPLIED, "track", error=note, mbid=list_item.mbid)
 
         if enricher is None:
-            enricher = MbidEnricherClient(base_url=db.get_media_management_settings().get("mb_mirror_url"), timeout=10.0)
+            enricher = get_shared_enricher(db)
         resolved = _resolve(list_item, level, enricher)
         item_mbid = resolved.artist_mbid if level == "artist" else resolved.album_mbid
         notes: list[str] = []

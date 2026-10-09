@@ -19,6 +19,7 @@ from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.item_history import TRIGGER_USER, GrabTrigger, set_provenance
 from plex_playlist_sync.library_manager import build_lidarr_client
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
+from plex_playlist_sync.mb_metadata_store import get_shared_discovery_client, get_shared_enricher
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.clients.spotify import SpotifyClient
 from plex_playlist_sync.clients.spotify_scraper import SpotifyWebScraper
@@ -40,10 +41,6 @@ logger = logging.getLogger(__name__)
 
 _db_lock = threading.Lock()
 _db_instances: dict[str, Database] = {}
-_discovery_lock = threading.Lock()
-_discovery_client_instance: Optional[DiscoveryClient] = None
-_mbid_enricher_lock = threading.Lock()
-_mbid_enricher_instance: Optional[MbidEnricherClient] = None
 
 
 def _db_key(db_path: Union[str, Path]) -> str:
@@ -187,22 +184,14 @@ def get_deezer_client() -> Optional[DeezerClient]:
         return None
 
 
-def get_discovery_client() -> DiscoveryClient:
-    """Dependency providing singleton DiscoveryClient instance."""
-    global _discovery_client_instance
-    with _discovery_lock:
-        if _discovery_client_instance is None:
-            _discovery_client_instance = DiscoveryClient()
-        return _discovery_client_instance
+def get_discovery_client(db: Database = Depends(get_db)) -> DiscoveryClient:
+    """Dependency providing the shared DiscoveryClient instance."""
+    return get_shared_discovery_client(db)
 
 
-def get_mbid_enricher() -> MbidEnricherClient:
-    """Dependency providing singleton MbidEnricherClient instance."""
-    global _mbid_enricher_instance
-    with _mbid_enricher_lock:
-        if _mbid_enricher_instance is None:
-            _mbid_enricher_instance = MbidEnricherClient()
-        return _mbid_enricher_instance
+def get_mbid_enricher(db: Database = Depends(get_db)) -> MbidEnricherClient:
+    """Dependency providing the shared MbidEnricherClient instance."""
+    return get_shared_enricher(db)
 
 
 GATEWAY_SERVICE_ID = "gateway_service"

@@ -7,13 +7,16 @@ cache artist poster/banner and album cover artwork locally, and reconcile media 
 
 from datetime import datetime, timezone
 import logging
+import sqlite3
 import threading
 import time
 from typing import Any, Callable, Optional
 
 from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
+from plex_playlist_sync.mb_metadata_store import get_shared_discovery_client, get_shared_enricher
 from plex_playlist_sync.job_tracker import tracked
+from plex_playlist_sync.mb_metadata_store import MbMetadataStore
 from plex_playlist_sync.task_manager import TRIGGER_SCHEDULED, record_task_run, wait_for_next_cycle
 from plex_playlist_sync.system_paths import is_system_folder_name
 from plex_playlist_sync.storage import Database
@@ -107,14 +110,25 @@ class ArtistRefreshWorker:
                 while not self._stop_event.is_set():
                     try:
                         with record_task_run(db, "artist_metadata_refresh", TRIGGER_SCHEDULED) as run:
-                            run.apply_result(
-                                self.refresh_once(
-                                    db=db,
-                                    discovery_client=discovery_client,
-                                    enricher=enricher,
-                                    only_stale=True,
-                                )
+                            res = self.refresh_once(
+                                db=db,
+                                discovery_client=discovery_client,
+                                enricher=enricher,
+                                only_stale=True,
                             )
+                            run.apply_result(res)
+                            msg_parts = [
+                                f"checked {res.get('artists_checked', 0)} artists",
+                                f"{res.get('network_requests', 0)} MB requests",
+                                f"{res.get('cache_hits', 0)} cache hits",
+                            ]
+                            if res.get("cache_pruned", 0) > 0:
+                                msg_parts.append(f"{res['cache_pruned']} pruned")
+                            if res.get("deezer_requests", 0) > 0 or res.get("deezer_cache_hits", 0) > 0:
+                                msg_parts.append(f"{res.get('deezer_requests', 0)} Deezer reqs, {res.get('deezer_cache_hits', 0)} Deezer hits")
+                            if res.get("aborted_source_unavailable"):
+                                msg_parts.append(f"aborted due to source unavailable ({res.get('remaining_artists', 0)} remaining)")
+                            run.message = f"Artist refresh: {', '.join(msg_parts)}"
                     except Exception as exc:
                         logger.exception("ArtistRefreshWorker: Error in refresh cycle: %s", exc)
                         with self._lock:
@@ -176,8 +190,11 @@ class ArtistRefreshWorker:
         from plex_playlist_sync.api.routes.library import refresh_single_artist
 
         with self._run_lock:
-            dc = discovery_client or DiscoveryClient()
-            enr = enricher or MbidEnricherClient()
+            dc = discovery_client or get_shared_discovery_client(db)
+            enr = enricher or get_shared_enricher(db)
+
+            enr_stats_before = enr.stats()
+            dc_stats_before = dc.stats()
 
             if artist_ids:
                 target_artists: list[dict[str, Any]] = []
@@ -194,6 +211,8 @@ class ArtistRefreshWorker:
             start_iso = datetime.now(timezone.utc).isoformat()
             checked = 0
             errs = 0
+            aborted_source_unavailable = False
+            remaining_artists = 0
 
             initial_stats = db.get_library_stats()
             prev_albums = initial_stats.get("album_count", 0)
@@ -204,18 +223,33 @@ class ArtistRefreshWorker:
                     logger.info("ArtistRefreshWorker: Stop event received, aborting cycle")
                     break
 
+                if not enr.source_available():
+                    remaining_artists = len(target_artists) - idx
+                    aborted_source_unavailable = True
+                    logger.warning(
+                        "ArtistRefreshWorker: Enricher source unavailable before artist %s (%d artists remaining); aborting sweep early",
+                        art.get("id"),
+                        remaining_artists,
+                    )
+                    break
+
                 art_id = str(art["id"])
                 art_name = str(art.get("name") or "Unknown Artist")
                 if is_system_folder_name(art_name):
                     logger.info("ArtistRefreshWorker: skipping %r (%s): OS/NAS system or trash folder name", art_name, art_id)
                     continue
+
+                source_unavail_artist = False
                 try:
                     res = refresh_single_artist(
                         artist_id=art_id,
                         db=db,
                         discovery_client=dc,
                         enricher=enr,
+                        force=False,
                     )
+                    if res.get("source_unavailable"):
+                        source_unavail_artist = True
                     if not res.get("success"):
                         errs += 1
                         logger.warning("ArtistRefreshWorker: Refresh unsuccessful for %s: %s", art_name, res.get("message"))
@@ -224,10 +258,11 @@ class ArtistRefreshWorker:
                     logger.warning("ArtistRefreshWorker: Exception refreshing artist %s (%s): %s", art_name, art_id, exc)
 
                 checked += 1
-                try:
-                    db.set_kv(_LAST_REFRESH_PREFIX + art_id, datetime.now(timezone.utc).isoformat())
-                except Exception as exc:
-                    logger.warning("ArtistRefreshWorker: could not persist refresh time for %s: %s", art_id, exc)
+                if not source_unavail_artist:
+                    try:
+                        db.set_kv(_LAST_REFRESH_PREFIX + art_id, datetime.now(timezone.utc).isoformat())
+                    except Exception as exc:
+                        logger.warning("ArtistRefreshWorker: could not persist refresh time for %s: %s", art_id, exc)
 
                 # Pacing delay between artists
                 if idx < len(target_artists) - 1 and not self._stop_event.is_set():
@@ -237,6 +272,20 @@ class ArtistRefreshWorker:
                         step = min(0.2, p_delay - slept)
                         self._stop_event.wait(step)
                         slept += step
+
+            cache_pruned = 0
+            try:
+                cache_pruned = MbMetadataStore(db).prune_expired()
+            except sqlite3.Error as p_exc:
+                logger.warning("ArtistRefreshWorker: Failed pruning expired metadata cache: %s", p_exc)
+
+            enr_stats_after = enr.stats()
+            dc_stats_after = dc.stats()
+
+            net_reqs = enr_stats_after.get("network_requests", 0) - enr_stats_before.get("network_requests", 0)
+            c_hits = enr_stats_after.get("cache_hits", 0) - enr_stats_before.get("cache_hits", 0)
+            dz_reqs = dc_stats_after.get("network_requests", 0) - dc_stats_before.get("network_requests", 0)
+            dz_hits = dc_stats_after.get("cache_hits", 0) - dc_stats_before.get("cache_hits", 0)
 
             final_stats = db.get_library_stats()
             new_albums = max(0, final_stats.get("album_count", 0) - prev_albums)
@@ -250,21 +299,36 @@ class ArtistRefreshWorker:
                 self.errors += errs
 
             logger.info(
-                "ArtistRefreshWorker: Cycle complete. Checked %d artists, added %d albums, %d tracks, errors=%d",
+                "ArtistRefreshWorker: Cycle complete. Checked %d artists, added %d albums, %d tracks, errors=%d, network_requests=%d, cache_hits=%d, cache_pruned=%d, deezer_requests=%d, deezer_cache_hits=%d",
                 checked,
                 new_albums,
                 new_tracks,
                 errs,
+                net_reqs,
+                c_hits,
+                cache_pruned,
+                dz_reqs,
+                dz_hits,
             )
 
-            return {
+            result_dict: dict[str, Any] = {
                 "success": True,
                 "last_run_at": start_iso,
                 "artists_checked": checked,
                 "albums_added": new_albums,
                 "tracks_added": new_tracks,
                 "errors": errs,
+                "network_requests": net_reqs,
+                "cache_hits": c_hits,
+                "cache_pruned": cache_pruned,
+                "deezer_requests": dz_reqs,
+                "deezer_cache_hits": dz_hits,
             }
+            if aborted_source_unavailable:
+                result_dict["aborted_source_unavailable"] = True
+                result_dict["remaining_artists"] = remaining_artists
+
+            return result_dict
 
 
 # Singleton instance

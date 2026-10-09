@@ -572,13 +572,13 @@ class TestMigrationV70:
         assert "update_check_enabled" in cols
         conn.close()
 
-    def test_database_schema_version_is_70(self, test_db):
-        """Full Database initialization reaches SCHEMA_VERSION 70."""
-        assert SCHEMA_VERSION == 70
+    def test_database_reaches_schema_head(self, test_db):
+        """Full Database initialization reaches SCHEMA_VERSION (>= 70)."""
+        assert SCHEMA_VERSION >= 70
         cur = test_db.conn.cursor()
         cur.execute("SELECT MAX(version) FROM schema_migrations")
         max_ver = cur.fetchone()[0]
-        assert max_ver == 70
+        assert max_ver == SCHEMA_VERSION
 
         state = test_db.get_update_check_state()
         assert state["enabled"] is True
