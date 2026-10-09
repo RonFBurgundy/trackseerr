@@ -3,11 +3,11 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 
-from plex_playlist_sync.clients.acquisition.lidarr_adapter import LidarrAdapter
-from plex_playlist_sync.clients.acquisition.qbittorrent import QbittorrentDriver
-from plex_playlist_sync.clients.acquisition.sabnzbd import SabnzbdDriver
-from plex_playlist_sync.clients.acquisition.slskd import SlskdDriver
-from plex_playlist_sync.clients.acquisition.torznab import TorznabDriver
+from trackseerr.clients.acquisition.lidarr_adapter import LidarrAdapter
+from trackseerr.clients.acquisition.qbittorrent import QbittorrentDriver
+from trackseerr.clients.acquisition.sabnzbd import SabnzbdDriver
+from trackseerr.clients.acquisition.slskd import SlskdDriver
+from trackseerr.clients.acquisition.torznab import TorznabDriver
 
 
 def _resp(payload, status=200):

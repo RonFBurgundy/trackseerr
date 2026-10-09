@@ -1,8 +1,8 @@
 import os
 from unittest.mock import MagicMock, patch
 
-from plex_playlist_sync.cli import main
-from plex_playlist_sync.gateway_link import HANDSHAKE_OK, HandshakeResult
+from trackseerr.cli import main
+from trackseerr.gateway_link import HANDSHAKE_OK, HandshakeResult
 
 
 def test_cli_explicit_plex_without_credentials_fails():
@@ -12,8 +12,8 @@ def test_cli_explicit_plex_without_credentials_fails():
         assert code == 1
 
 
-@patch("plex_playlist_sync.cli.PlexClient")
-@patch("plex_playlist_sync.cli.SyncCoordinator")
+@patch("trackseerr.cli.PlexClient")
+@patch("trackseerr.cli.SyncCoordinator")
 def test_cli_run_once_success(mock_coord_class, mock_plex_class):
     mock_coord = MagicMock()
     mock_coord_class.return_value = mock_coord
@@ -29,8 +29,8 @@ def test_cli_run_once_success(mock_coord_class, mock_plex_class):
         mock_coord.run_sync_cycle.assert_called_once()
 
 
-@patch("plex_playlist_sync.cli.PlexClient")
-@patch("plex_playlist_sync.cli.SyncCoordinator")
+@patch("trackseerr.cli.PlexClient")
+@patch("trackseerr.cli.SyncCoordinator")
 def test_cli_headless_mode(mock_coord_class, mock_plex_class):
     mock_coord = MagicMock()
     mock_coord_class.return_value = mock_coord
@@ -43,14 +43,14 @@ def test_cli_headless_mode(mock_coord_class, mock_plex_class):
     }
     # Simulate a shutdown request after first cycle
     with patch.dict(os.environ, env, clear=True):
-        with patch("plex_playlist_sync.cli._shutdown_requested", True):
+        with patch("trackseerr.cli._shutdown_requested", True):
             code = main()
             assert code == 0
 
 
-@patch("plex_playlist_sync.cli.uvicorn.Server")
-@patch("plex_playlist_sync.cli.Database")
-@patch("plex_playlist_sync.cli.PlexClient")
+@patch("trackseerr.cli.uvicorn.Server")
+@patch("trackseerr.cli.Database")
+@patch("trackseerr.cli.PlexClient")
 def test_cli_web_mode_default(mock_plex_class, mock_db_class, mock_server_class, tmp_path):
     mock_plex = MagicMock()
     mock_plex.get_home_users.return_value = [
@@ -83,9 +83,9 @@ def test_cli_web_mode_default(mock_plex_class, mock_db_class, mock_server_class,
         mock_server.run.assert_called_once()
 
 
-@patch("plex_playlist_sync.cli.uvicorn.Server")
-@patch("plex_playlist_sync.cli.Database")
-@patch("plex_playlist_sync.cli.PlexClient")
+@patch("trackseerr.cli.uvicorn.Server")
+@patch("trackseerr.cli.Database")
+@patch("trackseerr.cli.PlexClient")
 def test_cli_web_mode_custom_port(mock_plex_class, mock_db_class, mock_server_class, tmp_path):
     mock_plex = MagicMock()
     mock_plex.get_home_users.return_value = []
@@ -108,8 +108,8 @@ def test_cli_web_mode_custom_port(mock_plex_class, mock_db_class, mock_server_cl
         mock_server.run.assert_called_once()
 
 
-@patch("plex_playlist_sync.cli.Database")
-@patch("plex_playlist_sync.cli.PlexClient")
+@patch("trackseerr.cli.Database")
+@patch("trackseerr.cli.PlexClient")
 def test_cli_web_mode_database_permission_error(mock_plex_class, mock_db_class, tmp_path):
     mock_db_class.side_effect = PermissionError("Permission denied: /data/sync_db.sqlite")
 
@@ -123,14 +123,14 @@ def test_cli_web_mode_database_permission_error(mock_plex_class, mock_db_class, 
         assert code == 1
 
 
-@patch("plex_playlist_sync.gateway_link.GatewayLinkWorker.start")
+@patch("trackseerr.gateway_link.GatewayLinkWorker.start")
 @patch(
-    "plex_playlist_sync.gateway_link.perform_handshake",
+    "trackseerr.gateway_link.perform_handshake",
     return_value=HandshakeResult(HANDSHAKE_OK, "1.0.0"),
 )
-@patch("plex_playlist_sync.cli.uvicorn.Server")
-@patch("plex_playlist_sync.cli.SyncCoordinator")
-@patch("plex_playlist_sync.cli.PlexClient")
+@patch("trackseerr.cli.uvicorn.Server")
+@patch("trackseerr.cli.SyncCoordinator")
+@patch("trackseerr.cli.PlexClient")
 def test_cli_gateway_role_starts_without_plex_vars(
     mock_plex_class, mock_coord_class, mock_server_class, _hs, _worker, tmp_path
 ):
@@ -154,15 +154,15 @@ def test_cli_gateway_role_starts_without_plex_vars(
         mock_server.run.assert_called_once()
 
 
-@patch("plex_playlist_sync.gateway_link.GatewayLinkWorker.start")
+@patch("trackseerr.gateway_link.GatewayLinkWorker.start")
 @patch(
-    "plex_playlist_sync.gateway_link.perform_handshake",
+    "trackseerr.gateway_link.perform_handshake",
     return_value=HandshakeResult(HANDSHAKE_OK, "1.0.0"),
 )
-@patch("plex_playlist_sync.cli.uvicorn.Server")
-@patch("plex_playlist_sync.cli.Database")
-@patch("plex_playlist_sync.cli.SyncCoordinator")
-@patch("plex_playlist_sync.cli.PlexClient")
+@patch("trackseerr.cli.uvicorn.Server")
+@patch("trackseerr.cli.Database")
+@patch("trackseerr.cli.SyncCoordinator")
+@patch("trackseerr.cli.PlexClient")
 def test_cli_gateway_role_fallback_to_ephemeral_db(
     mock_plex_class, mock_coord_class, mock_db_class, mock_server_class, _hs, _worker
 ):

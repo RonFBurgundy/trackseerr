@@ -9,15 +9,15 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.backlog_worker import backlog_worker, rss_worker
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.job_tracker import job_tracker, track_job
-from plex_playlist_sync.lidarr_queue import lidarr_worker
-from plex_playlist_sync.library_scanner import library_scanner
-from plex_playlist_sync.models import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.backlog_worker import backlog_worker, rss_worker
+from trackseerr.config import Config
+from trackseerr.job_tracker import job_tracker, track_job
+from trackseerr.lidarr_queue import lidarr_worker
+from trackseerr.library_scanner import library_scanner
+from trackseerr.models import (
     ActiveDownload,
     DownloadClientConfig,
     DownloadStatus,
@@ -25,8 +25,8 @@ from plex_playlist_sync.models import (
     MusicRequest,
     RequestStatus,
 )
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker
-from plex_playlist_sync.storage import Database
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.storage import Database
 
 API_KEY = "lidarr-secret-key-abcdef123456"
 
@@ -228,7 +228,7 @@ class TestLibraryManagerMode:
         assert test_db.get_media_management_settings()["library_mode"] == "native"
 
     def test_importer_path_goes_through_switch_guard(self, test_db):
-        from plex_playlist_sync.lidarr_migration import LidarrMigrationJob
+        from trackseerr.lidarr_migration import LidarrMigrationJob
 
         _set_mode(test_db, "lidarr")
         LidarrMigrationJob._switch_to_native(test_db)
@@ -252,10 +252,10 @@ class TestRequestRouting:
         _set_mode(test_db, "lidarr")
         test_db.update_lidarr_settings({"auto_search": False, "trickle_rate_seconds": 1.5})
         headers = _headers(seeded_users["admin"], test_db, test_config)
-        with patch("plex_playlist_sync.request_submission.acquisition_coordinator") as coord, patch(
-            "plex_playlist_sync.api.routes.requests.acquisition_coordinator"
+        with patch("trackseerr.request_submission.acquisition_coordinator") as coord, patch(
+            "trackseerr.api.routes.requests.acquisition_coordinator"
         ) as coord_route, patch(
-            "plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle", return_value={"status": "started"}
+            "trackseerr.lidarr_queue.lidarr_worker.start_trickle", return_value={"status": "started"}
         ) as trickle:
             resp = _post_request(client, headers)
         assert resp.status_code == 201
@@ -273,10 +273,10 @@ class TestRequestRouting:
         _configure_lidarr(test_db)  # configured, but the mode is native
         headers = _headers(seeded_users["admin"], test_db, test_config)
         with patch(
-            "plex_playlist_sync.request_submission.acquisition_coordinator.search_and_grab",
+            "trackseerr.request_submission.acquisition_coordinator.search_and_grab",
             return_value={"success": False, "message": "none"},
-        ) as grab, patch("plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle") as trickle, patch(
-            "plex_playlist_sync.clients.lidarr.httpx.Client"
+        ) as grab, patch("trackseerr.lidarr_queue.lidarr_worker.start_trickle") as trickle, patch(
+            "trackseerr.clients.lidarr.httpx.Client"
         ) as http:
             resp = _post_request(client, headers)
         assert resp.status_code == 201
@@ -296,10 +296,10 @@ class TestRequestRouting:
                 {"item_type": "album", "title": "B", "artist": "X"},
             ]
         }
-        with patch("plex_playlist_sync.api.routes.requests.acquisition_coordinator") as coord, patch(
-            "plex_playlist_sync.request_submission.acquisition_coordinator"
+        with patch("trackseerr.api.routes.requests.acquisition_coordinator") as coord, patch(
+            "trackseerr.request_submission.acquisition_coordinator"
         ) as coord2, patch(
-            "plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle", return_value={"status": "started"}
+            "trackseerr.lidarr_queue.lidarr_worker.start_trickle", return_value={"status": "started"}
         ) as trickle:
             resp = client.post("/api/requests/batch", headers=headers, json=body)
         assert resp.status_code == 201
@@ -315,9 +315,9 @@ class TestRequestRouting:
         headers = _headers(seeded_users["admin"], test_db, test_config)
         body = {"requests": [{"item_type": "album", "title": "A", "artist": "X"}]}
         with patch(
-            "plex_playlist_sync.api.routes.requests.acquisition_coordinator.search_and_grab",
+            "trackseerr.api.routes.requests.acquisition_coordinator.search_and_grab",
             return_value={"success": False, "message": "none"},
-        ) as grab, patch("plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle") as trickle:
+        ) as grab, patch("trackseerr.lidarr_queue.lidarr_worker.start_trickle") as trickle:
             resp = client.post("/api/requests/batch", headers=headers, json=body)
         assert resp.status_code == 201
         grab.assert_called_once()
@@ -342,10 +342,10 @@ class TestRequestRouting:
                 )
             )
         with patch(
-            "plex_playlist_sync.api.routes.requests.acquisition_coordinator.search_and_grab",
+            "trackseerr.api.routes.requests.acquisition_coordinator.search_and_grab",
             return_value={"success": False, "message": "none"},
         ) as grab, patch(
-            "plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle", return_value={"status": "started"}
+            "trackseerr.lidarr_queue.lidarr_worker.start_trickle", return_value={"status": "started"}
         ) as trickle:
             assert client.post("/api/requests/req-a/approve", headers=headers).status_code == 200
             assert client.post("/api/requests/req-b/retry", headers=headers).status_code == 200
@@ -362,7 +362,7 @@ class TestRequestRouting:
         _, client = app_and_client
         _set_mode(test_db, "lidarr")  # forced directly; not configured
         headers = _headers(seeded_users["admin"], test_db, test_config)
-        with patch("plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle") as trickle:
+        with patch("trackseerr.lidarr_queue.lidarr_worker.start_trickle") as trickle:
             resp = _post_request(client, headers)
         assert resp.status_code == 201
         trickle.assert_not_called()
@@ -389,7 +389,7 @@ class TestRequestRouting:
 class TestWorkersFollowMode:
     def test_backlog_and_rss_skip_in_lidarr_mode(self, test_db):
         _set_mode(test_db, "lidarr")
-        with patch("plex_playlist_sync.backlog_worker.acquisition_coordinator.search_and_grab") as grab:
+        with patch("trackseerr.backlog_worker.acquisition_coordinator.search_and_grab") as grab:
             res = backlog_worker.poll_once(db=test_db)
             rss = rss_worker.poll_once(db=test_db)
         grab.assert_not_called()
@@ -409,7 +409,7 @@ class TestWorkersFollowMode:
             ActiveDownload(id="dl-n", client_id="cli-qbit", title="T", artist="A", status=DownloadStatus.DOWNLOADING.value)
         )
         driver = MagicMock()
-        with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=driver):
+        with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver):
             stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(tmp_path))
         assert stats["polled"] == 0
         driver.get_status.assert_not_called()
@@ -423,7 +423,7 @@ class TestWorkersFollowMode:
             ActiveDownload(id="dl-l", client_id="cli-l", title="T", artist="A", status=DownloadStatus.COMPLETED.value)
         )
         driver = MagicMock()
-        with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=driver):
+        with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver):
             stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(tmp_path))
         assert stats["polled"] == 0
         driver.get_status.assert_not_called()
@@ -471,7 +471,7 @@ class TestLidarrOptions:
     def test_options_success(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client
         _configure_lidarr(test_db)
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as cls:
+        with patch("trackseerr.clients.lidarr.httpx.Client") as cls:
             http = cls.return_value.__enter__.return_value
             http.get.side_effect = [
                 _resp(payload=[{"path": "/music", "freeSpace": 12345, "id": 1}]),
@@ -495,7 +495,7 @@ class TestLidarrOptions:
     def test_options_failure_is_502_and_redacted(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client
         _configure_lidarr(test_db)
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as cls:
+        with patch("trackseerr.clients.lidarr.httpx.Client") as cls:
             http = cls.return_value.__enter__.return_value
             http.get.side_effect = httpx.ConnectError(f"boom http://lidarr.test:8686/?apikey={API_KEY}")
             resp = client.get(
@@ -508,7 +508,7 @@ class TestLidarrOptions:
     def test_options_bad_key_is_502_without_key(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client
         _configure_lidarr(test_db)
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as cls:
+        with patch("trackseerr.clients.lidarr.httpx.Client") as cls:
             cls.return_value.__enter__.return_value.get.return_value = _resp(status=401)
             resp = client.get(
                 "/api/settings/lidarr/options", headers=_headers(seeded_users["admin"], test_db, test_config)
@@ -565,13 +565,13 @@ class TestLidarrSettingsFields:
         assert row["monitor_option"] == "all" and row["quality_profile_id"] is None and row["tag_ids"] == "[]"
 
     def test_client_adds_artist_with_root_folder_defaults_not_settings(self):
-        from plex_playlist_sync.clients.lidarr import LidarrClient
+        from trackseerr.clients.lidarr import LidarrClient
         from tests.lidarr_fake import FakeLidarr
 
         fake = FakeLidarr()
         fake.albums = [{"id": 1, "title": "A Night at the Opera", "albumType": "Album", "monitored": False}]
         lc = LidarrClient("http://lidarr.test", API_KEY, root_folder="/music")
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client", fake):
+        with patch("trackseerr.clients.lidarr.httpx.Client", fake):
             res = lc.add_artist_and_albums("Queen", ["A Night at the Opera"], auto_search=False)
         assert res["status"] == "success"
         sent = fake.requests("POST", "artist")[0]
@@ -583,7 +583,7 @@ class TestLidarrHealth:
     def test_native_mode_does_not_contact_lidarr(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client
         _configure_lidarr(test_db)
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as cls:
+        with patch("trackseerr.clients.lidarr.httpx.Client") as cls:
             resp = client.get("/api/system/lidarr-health", headers=_headers(seeded_users["admin"], test_db, test_config))
         assert resp.status_code == 200
         assert resp.json()["mode"] == "native" and resp.json()["reachable"] is None and resp.json()["health"] == []
@@ -593,7 +593,7 @@ class TestLidarrHealth:
         _, client = app_and_client
         _configure_lidarr(test_db)
         _set_mode(test_db, "lidarr")
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as cls:
+        with patch("trackseerr.clients.lidarr.httpx.Client") as cls:
             http = cls.return_value.__enter__.return_value
             http.get.side_effect = [
                 _resp(payload={"version": "2.4.3", "appName": "Lidarr"}),
@@ -617,7 +617,7 @@ class TestLidarrHealth:
         _, client = app_and_client
         _configure_lidarr(test_db)
         _set_mode(test_db, "lidarr")
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as cls:
+        with patch("trackseerr.clients.lidarr.httpx.Client") as cls:
             cls.return_value.__enter__.return_value.get.side_effect = httpx.ConnectError("down")
             resp = client.get("/api/system/lidarr-health", headers=_headers(seeded_users["admin"], test_db, test_config))
         assert resp.status_code == 200
@@ -670,7 +670,7 @@ class TestSystemQueue:
         _, client = app_and_client
         headers = _headers(seeded_users["admin"], test_db, test_config)
         with patch(
-            "plex_playlist_sync.api.routes.system.acquisition_worker.poll_once", return_value={"polled": 2, "failed": 0}
+            "trackseerr.api.routes.system.acquisition_worker.poll_once", return_value={"polled": 2, "failed": 0}
         ):
             assert client.post("/api/system/tasks/download_queue_monitor/run", headers=headers).status_code == 200
             assert _wait_for(lambda: bool(job_tracker.snapshot()["recent"]))
@@ -681,7 +681,7 @@ class TestSystemQueue:
 
         job_tracker.clear()
         with patch(
-            "plex_playlist_sync.api.routes.system.acquisition_worker.poll_once", side_effect=RuntimeError("kaput")
+            "trackseerr.api.routes.system.acquisition_worker.poll_once", side_effect=RuntimeError("kaput")
         ):
             assert client.post("/api/system/tasks/download_queue_monitor/run", headers=headers).status_code == 200
             assert _wait_for(lambda: bool(job_tracker.snapshot()["recent"]))
@@ -738,7 +738,7 @@ class TestAccessControl:
 
 class TestLibraryModeMigration:
     def _run(self, db, config=None):
-        from plex_playlist_sync.library_manager import migrate_library_mode
+        from trackseerr.library_manager import migrate_library_mode
 
         return migrate_library_mode(db, config)
 
@@ -780,7 +780,7 @@ class TestLibraryModeMigration:
     def test_both_configured_stays_native_with_warning_event(self, test_db, caplog):
         _seed_native(test_db)
         _configure_lidarr(test_db)
-        with caplog.at_level("WARNING", logger="plex_playlist_sync.library_manager"):
+        with caplog.at_level("WARNING", logger="trackseerr.library_manager"):
             assert self._run(test_db) == "native"
         assert self._mode(test_db) == "native"
         assert "library_mode_choice_needed" in self._event_types(test_db)
@@ -810,7 +810,7 @@ class TestLibraryModeMigration:
 
 class TestTrickleQueuesWhileRunning:
     def test_dispatch_while_running_is_queued_and_delivered(self, test_db):
-        from plex_playlist_sync.library_manager import dispatch_to_lidarr
+        from trackseerr.library_manager import dispatch_to_lidarr
 
         _set_mode(test_db, "lidarr")
         _configure_lidarr(test_db)
@@ -860,7 +860,7 @@ class TestTrickleQueuesWhileRunning:
                 artist="Portishead", status=RequestStatus.PROCESSING,
             )
         )
-        with patch("plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle", return_value={"status": "queued"}):
+        with patch("trackseerr.lidarr_queue.lidarr_worker.start_trickle", return_value={"status": "queued"}):
             resp = client.post(
                 "/api/requests/req-q/retry", headers=_headers(seeded_users["admin"], test_db, test_config)
             )
@@ -873,21 +873,21 @@ class TestTrickleQueuesWhileRunning:
 
 class TestLidarrClientRedaction:
     def test_add_artist_error_message_redacts_apikey(self):
-        from plex_playlist_sync.clients.lidarr import LidarrClient
+        from trackseerr.clients.lidarr import LidarrClient
 
         lc = LidarrClient("http://lidarr.test", API_KEY, root_folder="/music")
         leaky = httpx.ConnectError("failed http://lidarr.test/api/v1/artist?apikey=SECRETKEY123&x=1")
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as cls:
+        with patch("trackseerr.clients.lidarr.httpx.Client") as cls:
             cls.return_value.__enter__.return_value.get.side_effect = leaky
             res = lc.add_artist_and_albums("Queen", [], auto_search=False)
         assert res["status"] == "error"
         assert "SECRETKEY123" not in res["message"]
 
     def test_generic_exception_text_is_type_only_and_logs_are_redacted(self, caplog):
-        from plex_playlist_sync.clients.lidarr import LidarrClient
+        from trackseerr.clients.lidarr import LidarrClient
 
         lc = LidarrClient("http://lidarr.test", API_KEY, root_folder="/music")
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as cls, caplog.at_level("WARNING"):
+        with patch("trackseerr.clients.lidarr.httpx.Client") as cls, caplog.at_level("WARNING"):
             cls.return_value.__enter__.return_value.get.side_effect = RuntimeError("boom ?apikey=SECRETKEY123")
             res = lc.add_artist_and_albums("Queen", [], auto_search=False)
             assert lc.get_all_artists() == []

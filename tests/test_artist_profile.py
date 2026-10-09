@@ -9,23 +9,23 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import artist_links
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_discovery_client, get_lidarr_client
-from plex_playlist_sync.api.routes.discovery import annotate_item_statuses
-from plex_playlist_sync.artist_links import (
+from trackseerr import artist_links
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_discovery_client, get_lidarr_client
+from trackseerr.api.routes.discovery import annotate_item_statuses
+from trackseerr.artist_links import (
     LidarrLibraryIndex,
     extract_mbid,
     normalize_artist_name,
     resolve_from_discovery,
     resolve_from_library,
 )
-from plex_playlist_sync.artist_profile import match_discography, normalize_album_title, ownership_status
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.discovery import DiscoveryClient
-from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr.artist_profile import match_discography, normalize_album_title, ownership_status
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.discovery import DiscoveryClient
+from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.config import Config
+from trackseerr.storage import SCHEMA_VERSION, Database
 
 MBID = "11111111-2222-3333-4444-555555555555"
 OTHER_MBID = "99999999-8888-7777-6666-555555555555"
@@ -383,7 +383,7 @@ def test_profile_from_discovery_merges_library(api, db, monkeypatch):
 
 
 def test_request_status_shows_for_unmatched_album(api, db, monkeypatch):
-    from plex_playlist_sync.models import MusicRequest, RequestStatus
+    from trackseerr.models import MusicRequest, RequestStatus
 
     app, client, headers = api
     monkeypatch.setattr(artist_links, "get_enricher", lambda db: _enricher(None))
@@ -495,7 +495,7 @@ def test_discovery_client_emits_artist_discovery_id():
 
 
 def test_discovery_item_omits_hint_when_unknown():
-    from plex_playlist_sync.models import DiscoveryItem
+    from trackseerr.models import DiscoveryItem
 
     assert "artist_discovery_id" not in DiscoveryItem(id="x", item_type="album", title="t", artist="a").to_dict()
 
@@ -504,7 +504,7 @@ def test_discovery_item_omits_hint_when_unknown():
 
 
 def test_library_artist_list_and_detail_carry_cached_discovery_id(db, config):
-    from plex_playlist_sync.api.dependencies import require_admin
+    from trackseerr.api.dependencies import require_admin
 
     _seed_radiohead(db)
     _artist(db, "a2", "Unlinked")
@@ -596,7 +596,7 @@ def test_non_admin_profile_has_no_library_management_data(api, db, user_headers,
     assert kid["status"] == "none"
     assert body["discography"]["library_only"] == [{"title": "Bootleg", "year": 2001, "status": "in_library"}]
     for it in (ok, kid):
-        assert set(it) <= set(__import__("plex_playlist_sync.artist_profile", fromlist=["x"])._REQUESTER_ITEM_KEYS)
+        assert set(it) <= set(__import__("trackseerr.artist_profile", fromlist=["x"])._REQUESTER_ITEM_KEYS)
 
 
 def test_non_admin_cannot_address_by_library_artist_id(api, db, user_headers):
@@ -616,7 +616,7 @@ def test_admin_profile_keeps_full_shape(api, db, monkeypatch):
 
 
 def test_forwarded_admin_flag_is_never_trusted(api, db, monkeypatch):
-    from plex_playlist_sync.api.dependencies import require_user
+    from trackseerr.api.dependencies import require_user
 
     app, client, _admin = api
     client = _requester_setup(api, db, monkeypatch)
@@ -628,7 +628,7 @@ def test_forwarded_admin_flag_is_never_trusted(api, db, monkeypatch):
 def test_gateway_resolves_availability_on_core_and_has_no_local_library(db, tmp_path, monkeypatch):
     from unittest.mock import patch
 
-    from plex_playlist_sync.clients.core_client import CoreClient
+    from trackseerr.clients.core_client import CoreClient
 
     cfg = Config(plex_url="http://p", plex_token="t", data_dir=str(tmp_path), role="gateway",
                  trackseerr_core_url="http://core:5251", internal_core_secret="x" * 40)
@@ -650,7 +650,7 @@ def test_gateway_resolves_availability_on_core_and_has_no_local_library(db, tmp_
 
 
 def test_artist_profile_route_is_on_the_gateway_local_allowlist():
-    from plex_playlist_sync.api import tier_middleware as tm
+    from trackseerr.api import tier_middleware as tm
 
     assert tm._allowed(tm.GATEWAY_LOCAL_ALLOWLIST, "GET", "/api/discovery/artist-profile")
     assert not tm._allowed(tm.GATEWAY_LOCAL_ALLOWLIST, "POST", "/api/discovery/artist-profile")

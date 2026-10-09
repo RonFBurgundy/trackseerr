@@ -4,8 +4,8 @@ import time
 
 import pytest
 
-from plex_playlist_sync.acquisition_coordinator import AcquisitionCoordinator, _to_quality_profile
-from plex_playlist_sync.decision_engine import (
+from trackseerr.acquisition_coordinator import AcquisitionCoordinator, _to_quality_profile
+from trackseerr.decision_engine import (
     DurationInfo,
     PROTOCOL_PREFERENCE,
     evaluate_upgrade,
@@ -18,10 +18,10 @@ from plex_playlist_sync.decision_engine import (
     upgrade_floor,
     validate_format,
 )
-from plex_playlist_sync.models import AcquisitionSearchResult
-from plex_playlist_sync.quality import evaluate_release, extract_release_group, parse_release_title
-from plex_playlist_sync.safe_regex import Budget, BudgetExceeded, UnsafeRegexError, safe_search, validate_pattern
-from plex_playlist_sync.storage import Database
+from trackseerr.models import AcquisitionSearchResult
+from trackseerr.quality import evaluate_release, extract_release_group, parse_release_title
+from trackseerr.safe_regex import Budget, BudgetExceeded, UnsafeRegexError, safe_search, validate_pattern
+from trackseerr.storage import Database
 
 MB = 1024 * 1024
 

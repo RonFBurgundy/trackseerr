@@ -6,7 +6,7 @@ import type {
   LocalLoginResponse,
 } from '@/types/account';
 
-// Exact 401 details from plex_playlist_sync/local_login.py.
+// Exact 401 details from trackseerr/local_login.py.
 const DETAIL_MFA_REQUIRED = 'mfa_required';
 const DETAIL_INVALID_CODE = 'Invalid authentication code';
 

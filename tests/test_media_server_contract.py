@@ -17,7 +17,7 @@ import pytest
 import requests
 from plexapi.exceptions import BadRequest, NotFound, Unauthorized
 
-from plex_playlist_sync.media_servers import (
+from trackseerr.media_servers import (
     ConnectionTest,
     MediaServer,
     MediaServerAuthError,
@@ -33,10 +33,10 @@ from plex_playlist_sync.media_servers import (
     describe_error,
     plex_extras,
 )
-from plex_playlist_sync.media_servers.plex import refresh_mix_snapshots
-from plex_playlist_sync.media_servers.jellyfin import JellyfinMediaServer
-from plex_playlist_sync.media_servers.subsonic import SubsonicMediaServer
-from plex_playlist_sync.models import Playlist, SyncResult, Track
+from trackseerr.media_servers.plex import refresh_mix_snapshots
+from trackseerr.media_servers.jellyfin import JellyfinMediaServer
+from trackseerr.media_servers.subsonic import SubsonicMediaServer
+from trackseerr.models import Playlist, SyncResult, Track
 from tests.jellyfin_fake import API_KEY as JELLYFIN_KEY
 from tests.jellyfin_fake import FakeJellyfin
 from tests.jellyfin_fake import default_state as jellyfin_state
@@ -147,7 +147,7 @@ class FakeMediaServer(MediaServer):
         return [{"title": t.title, "artist": t.artist, "album": t.album} for t in hits][:limit]
 
     def list_users(self):  # type: ignore[no-untyped-def]
-        from plex_playlist_sync.media_servers import ServerUser
+        from trackseerr.media_servers import ServerUser
 
         self.b.check()
         return [ServerUser(id=u["id"], name=u["username"], is_admin=u["is_admin"]) for u in self.b.users]
@@ -551,7 +551,7 @@ class TestPlexSpecific:
     """Plex-only behaviour of the adapter: translation detail, extras gating, option mapping."""
 
     def test_translation_table(self) -> None:
-        from plex_playlist_sync.media_servers.plex import translate_plex_error
+        from trackseerr.media_servers.plex import translate_plex_error
 
         assert type(translate_plex_error(Unauthorized("x"))) is MediaServerAuthError
         assert type(translate_plex_error(NotFound("x"))) is MediaServerNotFound
@@ -559,7 +559,7 @@ class TestPlexSpecific:
         assert type(translate_plex_error(requests.ReadTimeout("x"))) is MediaServerConnectionError
 
     def test_requests_error_detail_keeps_type_name_only(self) -> None:
-        from plex_playlist_sync.media_servers.plex import translate_plex_error
+        from trackseerr.media_servers.plex import translate_plex_error
 
         assert translate_plex_error(requests.ReadTimeout("http://p/?X-Plex-Token=SECRET")).safe_detail == "ReadTimeout"
 

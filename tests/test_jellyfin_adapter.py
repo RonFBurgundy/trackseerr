@@ -6,18 +6,18 @@ import random
 import httpx
 import pytest
 
-from plex_playlist_sync.media_servers import (
+from trackseerr.media_servers import (
     MediaServerAuthError,
     MediaServerConnectionError,
     MediaServerError,
     PlaylistSyncOptions,
 )
-from plex_playlist_sync.media_servers.jellyfin import (
+from trackseerr.media_servers.jellyfin import (
     JellyfinMediaServer,
     plan_entry_changes,
 )
-from plex_playlist_sync.models import Playlist, Track
-from plex_playlist_sync.redaction import redact_text
+from trackseerr.models import Playlist, Track
+from trackseerr.redaction import redact_text
 from tests.jellyfin_fake import API_KEY, FakeAudio, FakeEntry, FakeJellyfin, FakePlaylist, FakeUser, default_state
 
 SONGS = [
@@ -467,7 +467,7 @@ def test_listing_stops_when_the_server_ignores_start_index():
 
 
 def test_listing_has_a_page_cap(monkeypatch):
-    import plex_playlist_sync.media_servers.jellyfin as jf
+    import trackseerr.media_servers.jellyfin as jf
 
     monkeypatch.setattr(jf, "_MAX_PAGES", 3)
     server, fake, _ = make()

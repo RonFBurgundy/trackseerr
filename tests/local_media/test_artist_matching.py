@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 from mutagen import id3
 
-from plex_playlist_sync.library import inspect_audio_file
-from plex_playlist_sync.storage import clean_library_name
+from trackseerr.library import inspect_audio_file
+from trackseerr.storage import clean_library_name
 
 from .conftest import run_scan, snapshot
 

@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 import requests
 
-import plex_playlist_sync.mediacover as mc
-from plex_playlist_sync.mediacover import mediacover_service
+import trackseerr.mediacover as mc
+from trackseerr.mediacover import mediacover_service
 
 URL = "https://coverartarchive.org/release-group/isolation-check/front-500"
 

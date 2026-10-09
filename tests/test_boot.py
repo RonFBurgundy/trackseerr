@@ -11,14 +11,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import cli
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_db
-from plex_playlist_sync.boot import BootState, boot_state
-from plex_playlist_sync.cli import main, setup_logging
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.gateway_link import HANDSHAKE_OK, HANDSHAKE_UNREACHABLE, HandshakeResult, ProtocolMismatch
-from plex_playlist_sync.storage import Database
+from trackseerr import cli
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_db
+from trackseerr.boot import BootState, boot_state
+from trackseerr.cli import main, setup_logging
+from trackseerr.config import Config
+from trackseerr.gateway_link import HANDSHAKE_OK, HANDSHAKE_UNREACHABLE, HandshakeResult, ProtocolMismatch
+from trackseerr.storage import Database
 
 SECRET = "s" * 40
 
@@ -65,7 +65,7 @@ def test_starting_then_ready_transitions():
 def test_step_timer_logs_start_and_elapsed(caplog):
     state = BootState()
     state.begin("x")
-    with caplog.at_level(logging.INFO, logger="plex_playlist_sync.boot"):
+    with caplog.at_level(logging.INFO, logger="trackseerr.boot"):
         with state.step_timer("config load"):
             assert state.step == "config load"
     messages = [r.getMessage() for r in caplog.records]
@@ -75,7 +75,7 @@ def test_step_timer_logs_start_and_elapsed(caplog):
 
 def test_step_timer_logs_failure_and_reraises(caplog):
     state = BootState()
-    with caplog.at_level(logging.INFO, logger="plex_playlist_sync.boot"):
+    with caplog.at_level(logging.INFO, logger="trackseerr.boot"):
         with pytest.raises(RuntimeError):
             with state.step_timer("boom"):
                 raise RuntimeError("nope")
@@ -158,7 +158,7 @@ def test_setup_logging_adds_stdout_handler_even_when_root_already_has_handlers(c
         # Reproduces the original bug: something attached a handler before setup (basicConfig then no-ops).
         root.addHandler(logging.NullHandler())
         setup_logging("INFO")
-        logging.getLogger("plex_playlist_sync.boot").info("[boot] hello visible")
+        logging.getLogger("trackseerr.boot").info("[boot] hello visible")
         assert "[boot] hello visible" in capsys.readouterr().out
     finally:
         for h in list(root.handlers):
@@ -175,7 +175,7 @@ def test_boot_logs_redact_secrets(capsys):
         for h in list(root.handlers):
             root.removeHandler(h)
         setup_logging("INFO")
-        logging.getLogger("plex_playlist_sync.boot").info("[boot] url http://x/api?X-Plex-Token=SUPERSECRET123")
+        logging.getLogger("trackseerr.boot").info("[boot] url http://x/api?X-Plex-Token=SUPERSECRET123")
         assert "SUPERSECRET123" not in capsys.readouterr().out
     finally:
         for h in list(root.handlers):
@@ -201,13 +201,13 @@ def _web_env(tmp_path, **extra):
 def _stub_workers():
     """Patches every background worker start so main() can run in-process."""
     return [
-        patch("plex_playlist_sync.acquisition_worker.acquisition_worker.start"),
-        patch("plex_playlist_sync.backlog_worker.backlog_worker.start"),
-        patch("plex_playlist_sync.backlog_worker.rss_worker.start"),
-        patch("plex_playlist_sync.artist_refresh_worker.artist_refresh_worker.start"),
-        patch("plex_playlist_sync.scrobble_worker.scrobble_worker.start"),
-        patch("plex_playlist_sync.mix_worker.mix_worker.start"),
-        patch("plex_playlist_sync.cli._start_lidarr_trickle"),
+        patch("trackseerr.acquisition_worker.acquisition_worker.start"),
+        patch("trackseerr.backlog_worker.backlog_worker.start"),
+        patch("trackseerr.backlog_worker.rss_worker.start"),
+        patch("trackseerr.artist_refresh_worker.artist_refresh_worker.start"),
+        patch("trackseerr.scrobble_worker.scrobble_worker.start"),
+        patch("trackseerr.mix_worker.mix_worker.start"),
+        patch("trackseerr.cli._start_lidarr_trickle"),
     ]
 
 
@@ -225,8 +225,8 @@ def _run_main(env, *extra_patches):
 
 def test_main_emits_boot_banner_and_timed_steps(tmp_path, caplog):
     with caplog.at_level(logging.INFO):
-        with patch("plex_playlist_sync.cli.uvicorn.Server") as server_cls, patch(
-            "plex_playlist_sync.cli.PlexClient"
+        with patch("trackseerr.cli.uvicorn.Server") as server_cls, patch(
+            "trackseerr.cli.PlexClient"
         ) as plex_cls:
             plex_cls.return_value.get_home_users.return_value = []
             server_cls.return_value = MagicMock()
@@ -249,7 +249,7 @@ def test_main_emits_boot_banner_and_timed_steps(tmp_path, caplog):
 def test_main_logs_schema_up_to_date_on_second_boot(tmp_path, caplog):
     Database(str(tmp_path / "sync_db.sqlite")).close()
     with caplog.at_level(logging.INFO):
-        with patch("plex_playlist_sync.cli.uvicorn.Server"), patch("plex_playlist_sync.cli.PlexClient"):
+        with patch("trackseerr.cli.uvicorn.Server"), patch("trackseerr.cli.PlexClient"):
             _run_main(_web_env(tmp_path))
     assert any("[boot] migrations: schema up to date" in r.getMessage() for r in caplog.records)
 
@@ -272,8 +272,8 @@ def test_slow_plex_probe_does_not_delay_readiness(tmp_path):
         ready_at["ready"] = time.monotonic()
         release_plex.set()
 
-    with patch("plex_playlist_sync.cli.uvicorn.Server") as server_cls, patch(
-        "plex_playlist_sync.cli.PlexClient", side_effect=slow_plex
+    with patch("trackseerr.cli.uvicorn.Server") as server_cls, patch(
+        "trackseerr.cli.PlexClient", side_effect=slow_plex
     ):
         server_cls.return_value.run.side_effect = run_server
         t0 = time.monotonic()
@@ -300,10 +300,10 @@ def test_background_init_sets_ready_before_plex_returns(tmp_path):
 
     boot_state.begin("starting")
     failure = {"code": 0}
-    with patch("plex_playlist_sync.cli._connect_clients", side_effect=slow_connect), patch(
-        "plex_playlist_sync.cli._start_lidarr_trickle"
-    ), patch("plex_playlist_sync.cli._start_local_workers"), patch(
-        "plex_playlist_sync.acquisition_worker.acquisition_worker.start"
+    with patch("trackseerr.cli._connect_clients", side_effect=slow_connect), patch(
+        "trackseerr.cli._start_lidarr_trickle"
+    ), patch("trackseerr.cli._start_local_workers"), patch(
+        "trackseerr.acquisition_worker.acquisition_worker.start"
     ):
         thread = threading.Thread(
             target=cli._background_init,
@@ -352,9 +352,9 @@ def test_gateway_stays_starting_until_handshake_resolves(tmp_path):
         "DATA_DIR": str(tmp_path),
         "CONFIG_DIR": str(tmp_path),
     }
-    with patch("plex_playlist_sync.gateway_link.perform_handshake", side_effect=slow_handshake), patch(
-        "plex_playlist_sync.gateway_link.GatewayLinkWorker.start"
-    ), patch("plex_playlist_sync.cli.uvicorn.Server") as server_cls:
+    with patch("trackseerr.gateway_link.perform_handshake", side_effect=slow_handshake), patch(
+        "trackseerr.gateway_link.GatewayLinkWorker.start"
+    ), patch("trackseerr.cli.uvicorn.Server") as server_cls:
         server_cls.return_value.run.side_effect = run_server
         with patch.dict(os.environ, env, clear=True):
             code = main()
@@ -373,9 +373,9 @@ def test_gateway_protocol_mismatch_refuses_before_binding(tmp_path):
         "CONFIG_DIR": str(tmp_path),
     }
     with patch(
-        "plex_playlist_sync.gateway_link.perform_handshake", side_effect=ProtocolMismatch("protocol differs")
-    ), patch("plex_playlist_sync.gateway_link.GatewayLinkWorker.start") as link_start, patch(
-        "plex_playlist_sync.cli.uvicorn.Server"
+        "trackseerr.gateway_link.perform_handshake", side_effect=ProtocolMismatch("protocol differs")
+    ), patch("trackseerr.gateway_link.GatewayLinkWorker.start") as link_start, patch(
+        "trackseerr.cli.uvicorn.Server"
     ) as server_cls:
         with patch.dict(os.environ, env, clear=True):
             code = main()
@@ -399,9 +399,9 @@ def test_gateway_protocol_mismatch_after_bind_stops_server_with_exit_1(tmp_path)
         "DATA_DIR": str(tmp_path),
         "CONFIG_DIR": str(tmp_path),
     }
-    with patch("plex_playlist_sync.gateway_link.perform_handshake", side_effect=handshake), patch(
-        "plex_playlist_sync.gateway_link.GatewayLinkWorker.start"
-    ) as link_start, patch("plex_playlist_sync.cli.uvicorn.Server") as server_cls:
+    with patch("trackseerr.gateway_link.perform_handshake", side_effect=handshake), patch(
+        "trackseerr.gateway_link.GatewayLinkWorker.start"
+    ) as link_start, patch("trackseerr.cli.uvicorn.Server") as server_cls:
         with patch.dict(os.environ, env, clear=True):
             code = main()
     assert code == 1

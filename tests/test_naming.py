@@ -2,7 +2,7 @@
 
 import pytest
 
-from plex_playlist_sync.naming import (
+from trackseerr.naming import (
     build_track_path,
     format_quality,
     render_template,

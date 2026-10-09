@@ -7,15 +7,15 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import internal_auth
-from plex_playlist_sync.api import dependencies
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.core_client import CoreClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import MusicRequest, RequestStatus
-from plex_playlist_sync.storage import Database
+from trackseerr import internal_auth
+from trackseerr.api import dependencies
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.core_client import CoreClient
+from trackseerr.config import Config
+from trackseerr.models import MusicRequest, RequestStatus
+from trackseerr.storage import Database
 
 SECRET = "s" * 40
 
@@ -125,10 +125,10 @@ def _last_login(db: Database, user_id: str):
 
 
 def _plex_login(client: TestClient, user_id: str = "5005"):
-    with patch("plex_playlist_sync.api.routes.auth.check_plex_pin", return_value="tok"), patch(
-        "plex_playlist_sync.api.routes.auth.verify_server_access", return_value=(True, False)
+    with patch("trackseerr.api.routes.auth.check_plex_pin", return_value="tok"), patch(
+        "trackseerr.api.routes.auth.verify_server_access", return_value=(True, False)
     ), patch(
-        "plex_playlist_sync.api.routes.auth.get_plex_user",
+        "trackseerr.api.routes.auth.get_plex_user",
         return_value={"id": user_id, "username": "plexuser", "email": "p@x.tv"},
     ):
         return client.post("/api/auth/plex/verify", json={"pin_id": 1, "target_machine_id": "m1"})

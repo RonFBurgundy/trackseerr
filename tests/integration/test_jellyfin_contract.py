@@ -11,12 +11,12 @@ from typing import Any, Iterator
 import httpx
 import pytest
 
-from plex_playlist_sync.media_servers import (
+from trackseerr.media_servers import (
     JellyfinMediaServer,
     MediaServerAuthError,
     PlaylistSyncOptions,
 )
-from plex_playlist_sync.models import Playlist, Track
+from trackseerr.models import Playlist, Track
 from tests.integration.conftest import JellyfinTarget
 from tests.integration.navidrome.make_music import TRACKS
 

@@ -6,17 +6,17 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from plex_playlist_sync.media_servers import MediaServerUnsupported
-from plex_playlist_sync.media_servers import jellyfin as jf_mod
-from plex_playlist_sync.media_servers import subsonic as sub_mod
-from plex_playlist_sync.media_servers.base import (
+from trackseerr.media_servers import MediaServerUnsupported
+from trackseerr.media_servers import jellyfin as jf_mod
+from trackseerr.media_servers import subsonic as sub_mod
+from trackseerr.media_servers.base import (
     MediaServer,
     ServerCapabilities,
     ServerFileRef,
 )
-from plex_playlist_sync.media_servers.jellyfin import JellyfinMediaServer
-from plex_playlist_sync.media_servers.plex import PlexMediaServer
-from plex_playlist_sync.media_servers.subsonic import SubsonicMediaServer
+from trackseerr.media_servers.jellyfin import JellyfinMediaServer
+from trackseerr.media_servers.plex import PlexMediaServer
+from trackseerr.media_servers.subsonic import SubsonicMediaServer
 
 
 def test_capabilities_to_dict_includes_file_paths():
@@ -99,7 +99,7 @@ def test_plex_only_music_sections_and_roots():
 
 
 def test_plex_pages_sections(monkeypatch):
-    from plex_playlist_sync.media_servers import plex as plex_mod
+    from trackseerr.media_servers import plex as plex_mod
 
     monkeypatch.setattr(plex_mod, "_FILE_PAGE", 2)
     tracks = [_track(i, f"T{i}", [("flac", [(f"/m/{i}.flac", "flac")])]) for i in range(5)]

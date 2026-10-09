@@ -8,18 +8,18 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import activity_service as svc
-from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
-from plex_playlist_sync.acquisition_worker import settle_transfer_after_import
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.acquisition import base as acq_base
-from plex_playlist_sync.clients.acquisition.base import AcquisitionDriver
-from plex_playlist_sync.clients.acquisition.qbittorrent import QbittorrentDriver
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.decision_engine import candidate_context, evaluate_prepared, prepare_profile
-from plex_playlist_sync.models import (
+from trackseerr import activity_service as svc
+from trackseerr.acquisition_coordinator import _to_quality_profile
+from trackseerr.acquisition_worker import settle_transfer_after_import
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.acquisition import base as acq_base
+from trackseerr.clients.acquisition.base import AcquisitionDriver
+from trackseerr.clients.acquisition.qbittorrent import QbittorrentDriver
+from trackseerr.config import Config
+from trackseerr.decision_engine import candidate_context, evaluate_prepared, prepare_profile
+from trackseerr.models import (
     AcquisitionSearchResult,
     ActiveDownload,
     DownloadClientConfig,
@@ -27,15 +27,15 @@ from plex_playlist_sync.models import (
     DownloadStatus,
     IndexerConfig,
 )
-from plex_playlist_sync.quality import parse_release_title
-from plex_playlist_sync.seed_rules import (
+from trackseerr.quality import parse_release_title
+from trackseerr.seed_rules import (
     apply_seed_rules_at_grab,
     is_discography_release,
     resolve_seed_targets,
     seed_rule_conflict,
 )
-from plex_playlist_sync.security import mask_secret
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr.security import mask_secret
+from trackseerr.storage import SCHEMA_VERSION, Database
 
 
 @pytest.fixture
@@ -217,7 +217,7 @@ def _mock_http(status: int = 200):
 def _push(ratio, minutes, status: int = 200):
     http = _mock_http(status)
     drv = QbittorrentDriver("http://192.168.1.9:8080")
-    with patch("plex_playlist_sync.clients.acquisition.qbittorrent.httpx.Client", return_value=http):
+    with patch("trackseerr.clients.acquisition.qbittorrent.httpx.Client", return_value=http):
         ok = drv.set_share_limits("ABCDEF", ratio, minutes)
     return ok, http
 
@@ -243,7 +243,7 @@ def test_qbittorrent_share_limits_failures_return_false():
     assert _push(1.0, 10, status=500)[0] is False
     http = _mock_http()
     http.post.side_effect = httpx.ConnectError("down")
-    with patch("plex_playlist_sync.clients.acquisition.qbittorrent.httpx.Client", return_value=http):
+    with patch("trackseerr.clients.acquisition.qbittorrent.httpx.Client", return_value=http):
         assert QbittorrentDriver("http://192.168.1.9:8080").set_share_limits("a", 1.0, 1) is False
 
 
@@ -436,7 +436,7 @@ def test_indexer_test_route_uses_stored_key_for_masked_key(client: TestClient, h
     _indexer(db, api_key="real-secret")
     driver = MagicMock()
     driver.test_connection.return_value = (True, "ok")
-    with patch("plex_playlist_sync.api.routes.indexers.get_indexer_driver", return_value=driver) as gid:
+    with patch("trackseerr.api.routes.indexers.get_indexer_driver", return_value=driver) as gid:
         for key in (mask_secret("real-secret"), ""):
             resp = client.post("/api/settings/indexers/test", headers=headers,
                                json={"id": "ix1", "host_url": "http://192.168.1.5:9696/api", "api_key": key})
@@ -446,7 +446,7 @@ def test_indexer_test_route_uses_stored_key_for_masked_key(client: TestClient, h
 
 def test_indexer_test_route_never_sends_stored_key_to_a_new_host(client: TestClient, headers: dict[str, str], db: Database):
     _indexer(db, api_key="real-secret")
-    with patch("plex_playlist_sync.api.routes.indexers.get_indexer_driver") as gid:
+    with patch("trackseerr.api.routes.indexers.get_indexer_driver") as gid:
         resp = client.post("/api/settings/indexers/test", headers=headers,
                            json={"id": "ix1", "host_url": "http://192.168.1.99:9696/api", "api_key": mask_secret("real-secret")})
         assert resp.status_code == 400
@@ -460,7 +460,7 @@ def test_indexer_test_route_never_sends_stored_key_to_a_new_host(client: TestCli
 
 def test_indexer_test_route_edited_mask_is_400(client: TestClient, headers: dict[str, str], db: Database):
     _indexer(db, api_key="real-secret")
-    with patch("plex_playlist_sync.api.routes.indexers.get_indexer_driver") as gid:
+    with patch("trackseerr.api.routes.indexers.get_indexer_driver") as gid:
         resp = client.post("/api/settings/indexers/test", headers=headers,
                            json={"id": "ix1", "host_url": "http://192.168.1.5:9696/api", "api_key": "abcd•••••wxyz"})
     assert resp.status_code == 400
@@ -468,7 +468,7 @@ def test_indexer_test_route_edited_mask_is_400(client: TestClient, headers: dict
 
 
 def test_indexer_test_route_unknown_id_with_masked_key_is_400(client: TestClient, headers: dict[str, str]):
-    with patch("plex_playlist_sync.api.routes.indexers.get_indexer_driver") as gid:
+    with patch("trackseerr.api.routes.indexers.get_indexer_driver") as gid:
         resp = client.post("/api/settings/indexers/test", headers=headers,
                            json={"id": "nope", "host_url": "http://192.168.1.5:9696/api", "api_key": "ab•••yz"})
     assert resp.status_code == 400
@@ -478,7 +478,7 @@ def test_indexer_test_route_unknown_id_with_masked_key_is_400(client: TestClient
 def test_indexer_test_route_plain_key_passes_through(client: TestClient, headers: dict[str, str]):
     driver = MagicMock()
     driver.test_connection.return_value = (True, "ok")
-    with patch("plex_playlist_sync.api.routes.indexers.get_indexer_driver", return_value=driver) as gid:
+    with patch("trackseerr.api.routes.indexers.get_indexer_driver", return_value=driver) as gid:
         client.post("/api/settings/indexers/test", headers=headers,
                     json={"host_url": "http://192.168.1.5:9696/api", "api_key": "typed"})
     assert gid.call_args.args[0]["api_key"] == "typed"

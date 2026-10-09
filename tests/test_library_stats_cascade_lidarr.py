@@ -95,7 +95,7 @@ def test_bulk_unmonitor_cascades_by_default_and_flag_false_opts_out(api, admin_h
 
 
 def test_bulk_unmonitor_all_batches_album_calls(api, admin_h, lidarr, monkeypatch):
-    monkeypatch.setattr("plex_playlist_sync.lidarr_library._ALBUM_BATCH", 5)
+    monkeypatch.setattr("trackseerr.lidarr_library._ALBUM_BATCH", 5)
     r = api.post("/api/library/artists/bulk-edit", json={"all": True, "monitored": False}, headers=admin_h)
     assert r.status_code == 200, r.text
     puts = _album_puts(lidarr)

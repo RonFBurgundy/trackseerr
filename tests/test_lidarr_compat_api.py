@@ -9,13 +9,13 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import __version__
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.api.routes.lidarr_compat import LIDARR_COMPAT_VERSION
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr import __version__
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.api.routes.lidarr_compat import LIDARR_COMPAT_VERSION
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -291,14 +291,14 @@ def test_test_endpoint_paths(client: TestClient, api_key: str):
     }
 
     # 1. Success path
-    with patch("plex_playlist_sync.clients.acquisition.torznab.TorznabDriver.test_connection") as mock_test:
+    with patch("trackseerr.clients.acquisition.torznab.TorznabDriver.test_connection") as mock_test:
         mock_test.return_value = (True, "Torznab Indexer Online")
         resp = client.post("/api/v1/indexer/test?forceTest=true", json=payload, headers={"X-Api-Key": api_key})
         assert resp.status_code == 200
         assert resp.headers.get("X-Application-Version") == LIDARR_COMPAT_VERSION
 
     # 2. Failure path (returns 400 with Lidarr validation failure array)
-    with patch("plex_playlist_sync.clients.acquisition.torznab.TorznabDriver.test_connection") as mock_test:
+    with patch("trackseerr.clients.acquisition.torznab.TorznabDriver.test_connection") as mock_test:
         mock_test.return_value = (False, "HTTP 401 Unauthorized")
         resp = client.post("/api/v1/indexer/test?forceTest=true", json=payload, headers={"X-Api-Key": api_key})
         assert resp.status_code == 400
@@ -310,7 +310,7 @@ def test_test_endpoint_paths(client: TestClient, api_key: str):
         assert errors[0]["severity"] == "error"
 
     # 3. Exception path
-    with patch("plex_playlist_sync.clients.acquisition.torznab.TorznabDriver.test_connection") as mock_test:
+    with patch("trackseerr.clients.acquisition.torznab.TorznabDriver.test_connection") as mock_test:
         mock_test.side_effect = RuntimeError("Network timeout connecting to indexer")
         resp = client.post("/api/v1/indexer/test?forceTest=true", json=payload, headers={"X-Api-Key": api_key})
         assert resp.status_code == 400

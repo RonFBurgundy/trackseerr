@@ -1,11 +1,11 @@
 """The extra import folder (staging_folder_path) is empty by default and empty means no extra import root."""
 from pathlib import Path
 
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker
-from plex_playlist_sync.api.routes.library._shared import validate_media_path
-from plex_playlist_sync.download_roots import build_allowed_roots
-from plex_playlist_sync.models import DownloadStatus, MediaManagementSettings
-from plex_playlist_sync.storage import Database
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.api.routes.library._shared import validate_media_path
+from trackseerr.download_roots import build_allowed_roots
+from trackseerr.models import DownloadStatus, MediaManagementSettings
+from trackseerr.storage import Database
 from tests.test_import_security import PAD, _run
 
 import pytest

@@ -7,20 +7,20 @@ from typing import Any, Optional
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import internal_auth, local_auth
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.api.routes import admin_users
-from plex_playlist_sync.api.tier_middleware import (
+from trackseerr import internal_auth, local_auth
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.api.routes import admin_users
+from trackseerr.api.tier_middleware import (
     GATEWAY_FORWARD_ALLOWLIST,
     GATEWAY_FORWARD_SERVICE_ALLOWLIST,
     GATEWAY_LOCAL_ALLOWLIST,
     _allowed,
 )
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import MusicRequest, RequestStatus, UserPermission
-from plex_playlist_sync.storage import Database
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.models import MusicRequest, RequestStatus, UserPermission
+from trackseerr.storage import Database
 
 SECRET = "s" * 40
 PW = "correct horse battery staple"
@@ -576,7 +576,7 @@ def test_refresh_does_not_resurrect_deleted_plex_users(env, db):
     # The refresh route skips tombstoned ids instead of re-creating them.
     fake_plex = type("P", (), {"get_home_users": lambda self: [{"id": 1002, "username": "bob"},
                                                                 {"id": 1001, "username": "alice"}]})()
-    from plex_playlist_sync.api.dependencies import get_plex_client
+    from trackseerr.api.dependencies import get_plex_client
 
     client.app.dependency_overrides[get_plex_client] = lambda: fake_plex
     res = client.post("/api/users/refresh", headers=admin)
@@ -705,7 +705,7 @@ def test_legacy_list_and_refresh_remain_admin_only(env):
 
 
 def test_refresh_does_not_demote_admins_granted_in_the_ui(env, db):
-    from plex_playlist_sync.api.dependencies import get_plex_client
+    from trackseerr.api.dependencies import get_plex_client
 
     db.update_user_admin_fields("1001", {"permissions": 3})
     fake_plex = type("P", (), {"get_home_users": lambda self: [{"id": 1001, "username": "alice", "is_admin": False}]})()

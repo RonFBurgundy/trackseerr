@@ -23,22 +23,22 @@ from fastapi.testclient import TestClient
 import pytest
 import requests
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.artist_refresh import refresh_single_artist
-from plex_playlist_sync.artist_refresh_worker import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.artist_refresh import refresh_single_artist
+from trackseerr.artist_refresh_worker import (
     ArtistRefreshWorker,
     artist_refresh_worker,
 )
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.lidarr import LidarrClient
-from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.library_scanner import LibraryScanner
-from plex_playlist_sync.lidarr_migration import LidarrMigrationJob
-from plex_playlist_sync.mediacover import MediaCoverService, mediacover_service
-from plex_playlist_sync.models import LibraryAlbum, LibraryArtist
-from plex_playlist_sync.storage import Database
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.lidarr import LidarrClient
+from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.config import Config
+from trackseerr.library_scanner import LibraryScanner
+from trackseerr.lidarr_migration import LidarrMigrationJob
+from trackseerr.mediacover import MediaCoverService, mediacover_service
+from trackseerr.models import LibraryAlbum, LibraryArtist
+from trackseerr.storage import Database
 
 pytestmark = pytest.mark.real_mbid_enricher
 
@@ -536,8 +536,8 @@ def test_library_scanner_triggers_auto_hydration_for_new_artists(test_db: Databa
         "isrc": None,
     }
 
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", return_value=mock_meta), \
-         patch("plex_playlist_sync.artist_refresh_worker.artist_refresh_worker.refresh_once") as mock_refresh:
+    with patch("trackseerr.library_scanner.inspect_audio_file", return_value=mock_meta), \
+         patch("trackseerr.artist_refresh_worker.artist_refresh_worker.refresh_once") as mock_refresh:
 
         res = scanner.scan(db=test_db, root_folder=str(root))
         assert res["status"] == "completed"
@@ -556,7 +556,7 @@ def test_library_scanner_triggers_auto_hydration_for_new_artists(test_db: Databa
 
 def test_artist_refresh_worker_refresh_once_not_stubbed_by_default():
     """Regression test"""
-    from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
+    from trackseerr.artist_refresh_worker import artist_refresh_worker
     assert artist_refresh_worker.refresh_once.__name__ == "refresh_once"
 
 
@@ -568,8 +568,8 @@ def test_library_scanner_auto_hydration_neutralized_without_marker(test_db: Data
     audio_file = artist_dir / "01 - Bohemian Rhapsody.flac"
     audio_file.write_bytes(b"\x00" * 100)
     mock_meta = {"title": "Bohemian Rhapsody", "artist": "Queen", "album": "A Night at the Opera", "track_number": 1, "disc_number": 1, "codec": "FLAC", "duration": 354.0, "quality_full": "FLAC", "file_path": str(audio_file), "musicbrainz_artistid": "mbid-queen-123", "musicbrainz_albumid": None, "musicbrainz_releasegroupid": None, "musicbrainz_trackid": None, "isrc": None}
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", return_value=mock_meta), \
-         patch("plex_playlist_sync.artist_refresh_worker.artist_refresh_worker.refresh_once") as mock_refresh:
+    with patch("trackseerr.library_scanner.inspect_audio_file", return_value=mock_meta), \
+         patch("trackseerr.artist_refresh_worker.artist_refresh_worker.refresh_once") as mock_refresh:
         res = scanner.scan(db=test_db, root_folder=str(root))
         assert res["status"] == "completed"
         assert res["artists_created"] == 1

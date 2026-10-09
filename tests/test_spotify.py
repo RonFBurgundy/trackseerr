@@ -1,10 +1,10 @@
 from unittest.mock import MagicMock, patch
 
-from plex_playlist_sync.clients.spotify import SpotifyClient
+from trackseerr.clients.spotify import SpotifyClient
 
 
-@patch("plex_playlist_sync.clients.spotify.SpotifyClientCredentials")
-@patch("plex_playlist_sync.clients.spotify.spotipy.Spotify")
+@patch("trackseerr.clients.spotify.SpotifyClientCredentials")
+@patch("trackseerr.clients.spotify.spotipy.Spotify")
 def test_spotify_user_playlists_pagination(mock_sp_class, mock_creds):
     mock_sp = MagicMock()
     mock_sp_class.return_value = mock_sp
@@ -31,8 +31,8 @@ def test_spotify_user_playlists_pagination(mock_sp_class, mock_creds):
     mock_sp.next.assert_called_once_with(page1)
 
 
-@patch("plex_playlist_sync.clients.spotify.SpotifyClientCredentials")
-@patch("plex_playlist_sync.clients.spotify.spotipy.Spotify")
+@patch("trackseerr.clients.spotify.SpotifyClientCredentials")
+@patch("trackseerr.clients.spotify.spotipy.Spotify")
 def test_spotify_playlist_by_id(mock_sp_class, mock_creds):
     mock_sp = MagicMock()
     mock_sp_class.return_value = mock_sp
@@ -53,8 +53,8 @@ def test_spotify_playlist_by_id(mock_sp_class, mock_creds):
     assert pl.poster == "http://img.com/tth.jpg"
 
 
-@patch("plex_playlist_sync.clients.spotify.SpotifyClientCredentials")
-@patch("plex_playlist_sync.clients.spotify.spotipy.Spotify")
+@patch("trackseerr.clients.spotify.SpotifyClientCredentials")
+@patch("trackseerr.clients.spotify.spotipy.Spotify")
 def test_spotify_playlist_tracks_pagination(mock_sp_class, mock_creds):
     mock_sp = MagicMock()
     mock_sp_class.return_value = mock_sp

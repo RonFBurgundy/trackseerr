@@ -1,4 +1,4 @@
-from plex_playlist_sync.path_mapping import apply_mapping, normalize_key, suggest_mapping
+from trackseerr.path_mapping import apply_mapping, normalize_key, suggest_mapping
 
 
 def _lib(root, n=10):

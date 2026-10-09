@@ -11,11 +11,11 @@ from unittest.mock import MagicMock, patch
 from PIL import Image
 import pytest
 
-from plex_playlist_sync.api.dependencies import get_discovery_client, get_mbid_enricher
-from plex_playlist_sync import art_pipeline, art_thumbs, lidarr_library
-from plex_playlist_sync.library_scanner import library_scanner
-from plex_playlist_sync.mediacover import mediacover_service
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr.api.dependencies import get_discovery_client, get_mbid_enricher
+from trackseerr import art_pipeline, art_thumbs, lidarr_library
+from trackseerr.library_scanner import library_scanner
+from trackseerr.mediacover import mediacover_service
+from trackseerr.storage import SCHEMA_VERSION, Database
 from tests.test_library_api import (  # noqa: F401  (fixtures + helpers shared with the library API suite)
     _auth_headers,
     app_and_client,
@@ -123,7 +123,7 @@ def test_derivatives_generated_when_remote_art_is_cached_and_no_lazy_resize_afte
         _jpeg(target)
         return True
 
-    with patch("plex_playlist_sync.mediacover.MediaCoverService.cache_image", fake_cache):
+    with patch("trackseerr.mediacover.MediaCoverService.cache_image", fake_cache):
         art_pipeline.cache_remote_art(
             test_db, "album", test_db.get_library_album("alb-r"), test_db.get_media_management_settings()
         )
@@ -210,7 +210,7 @@ def test_precache_downloads_artist_image_and_every_album_cover(test_db, tmp_path
         _jpeg(target)
         return True
 
-    with patch("plex_playlist_sync.mediacover.MediaCoverService.cache_image", fake_cache):
+    with patch("trackseerr.mediacover.MediaCoverService.cache_image", fake_cache):
         fut = art_pipeline.schedule_precache(test_db, "pa", delay=0)
         assert fut is not None and fut.result(timeout=10) == 4
     ours = [u for u in seen if u.startswith("https://img.example/")]  # assert only on this test's own downloads
@@ -399,7 +399,7 @@ def test_resolver_follows_prefer_local_artwork_and_version_follows_the_served_fi
 def test_resolver_rejects_unapproved_paths(test_db, album):
     alb, _ = album
     with patch(
-        "plex_playlist_sync.api.routes.library._shared.validate_media_path",
+        "trackseerr.api.routes.library._shared.validate_media_path",
         side_effect=__import__("fastapi").HTTPException(status_code=403, detail="no"),
     ):
         assert art_pipeline.resolve_served_art("album", alb, {"prefer_local_artwork": True}, test_db) is None
@@ -486,7 +486,7 @@ def test_shutdown_returns_promptly_with_a_long_queue(test_db):
         return False
 
     test_db.upsert_library_album({"id": "qa", "artist_id": "q0", "title": "T", "cover_url": "https://img.example/x.jpg"})
-    with patch("plex_playlist_sync.mediacover.MediaCoverService.cache_image", slow_cache):
+    with patch("trackseerr.mediacover.MediaCoverService.cache_image", slow_cache):
         for i in range(300):
             art_pipeline.schedule_precache(test_db, f"q{i}", delay=0.5)
         assert len(art_pipeline._precache_pending) <= art_pipeline._PRECACHE_MAX_PENDING
@@ -531,7 +531,7 @@ def test_stop_event_ends_a_running_precache_between_items(test_db):
         _jpeg(target)
         return True
 
-    with patch("plex_playlist_sync.mediacover.MediaCoverService.cache_image", fake_cache):
+    with patch("trackseerr.mediacover.MediaCoverService.cache_image", fake_cache):
         assert art_pipeline._precache_artist(test_db, "sa", 0, stop) == 1
     assert len(calls) == 1
 
@@ -540,7 +540,7 @@ def test_stop_event_ends_a_running_precache_between_items(test_db):
 
 
 def test_second_schedule_with_callback_fires_while_first_is_queued(tmp_path):
-    from plex_playlist_sync.mediacover import MediaCoverService
+    from trackseerr.mediacover import MediaCoverService
 
     svc = MediaCoverService(base_dir=tmp_path / "mc")
     gate = threading.Event()

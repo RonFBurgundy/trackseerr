@@ -12,8 +12,8 @@ from mutagen.mp4 import MP4
 from mutagen.oggopus import OggOpus
 from mutagen.wave import WAVE
 
-from plex_playlist_sync.import_quality_check import check_files, probe_audio_file
-from plex_playlist_sync.quality_defaults import DEFAULT_QUALITY_DEFINITIONS
+from trackseerr.import_quality_check import check_files, probe_audio_file
+from trackseerr.quality_defaults import DEFAULT_QUALITY_DEFINITIONS
 
 DEFS = {q: {"min_kbps": lo, "max_kbps": hi} for q, _t, lo, _p, hi in DEFAULT_QUALITY_DEFINITIONS}
 
@@ -33,7 +33,7 @@ def _fake(cls, length=200.0, bitrate=None, **attrs):
 def _run(tmp_path, audio, mode="reject", name="t.bin", size=1000, defs=None):
     p = tmp_path / name
     p.write_bytes(b"x" * size)
-    with patch("plex_playlist_sync.import_quality_check.mutagen.File", return_value=audio):
+    with patch("trackseerr.import_quality_check.mutagen.File", return_value=audio):
         return check_files([p], mode, DEFS if defs is None else defs)
 
 
@@ -116,10 +116,10 @@ def test_zero_duration_error_only_with_readable_siblings(tmp_path):
     good, bad = tmp_path / "a.flac", tmp_path / "b.flac"
     good.write_bytes(b"x"), bad.write_bytes(b"x")
     results = {"a.flac": _flac(900), "b.flac": _flac(900, length=0.0)}
-    with patch("plex_playlist_sync.import_quality_check.mutagen.File", side_effect=lambda p: results[Path(p).name]):
+    with patch("trackseerr.import_quality_check.mutagen.File", side_effect=lambda p: results[Path(p).name]):
         res = check_files([good, bad], "reject", DEFS)
     assert res.failed and res.errors[0].path == str(bad)
-    with patch("plex_playlist_sync.import_quality_check.mutagen.File", side_effect=lambda p: results[Path(p).name]):
+    with patch("trackseerr.import_quality_check.mutagen.File", side_effect=lambda p: results[Path(p).name]):
         alone = check_files([bad], "reject", DEFS)
     assert not alone.failed and alone.skipped
 
@@ -130,7 +130,7 @@ def test_embedded_art_subtracted_from_derived_bitrate(tmp_path):
     audio.tags = {"metadata_block_picture": [base64.b64encode(b"a" * 1_000_000).decode()]}
     p = tmp_path / "x.opus"
     p.write_bytes(b"x" * 1_500_000)
-    with patch("plex_playlist_sync.import_quality_check.mutagen.File", return_value=audio):
+    with patch("trackseerr.import_quality_check.mutagen.File", return_value=audio):
         probed = probe_audio_file(p)
     assert round(probed.kbps) == 40
 
@@ -140,7 +140,7 @@ def test_embedded_art_flac_pictures_subtracted(tmp_path):
     audio.pictures = [MagicMock(data=b"a" * 500_000)]
     p = tmp_path / "x.flac"
     p.write_bytes(b"x" * 1_000_000)
-    with patch("plex_playlist_sync.import_quality_check.mutagen.File", return_value=audio):
+    with patch("trackseerr.import_quality_check.mutagen.File", return_value=audio):
         probed = probe_audio_file(p)
     assert round(probed.kbps) == 400  # 500 kB * 8 / 10 s
 
@@ -149,7 +149,7 @@ def test_embedded_art_flac_pictures_subtracted(tmp_path):
 def test_probe_swallows_every_exception_class(tmp_path, exc, caplog):
     p = tmp_path / "bad.mp3"
     p.write_bytes(b"x")
-    with patch("plex_playlist_sync.import_quality_check.mutagen.File", side_effect=exc):
+    with patch("trackseerr.import_quality_check.mutagen.File", side_effect=exc):
         probed = probe_audio_file(p)
         res = check_files([p], "reject", DEFS)
     assert probed.skipped_reason and type(exc).__name__ in probed.skipped_reason
@@ -161,8 +161,8 @@ def test_check_files_survives_post_parse_failure(tmp_path):
     audio = _fake(MP3, bitrate=320000, bitrate_mode=BitrateMode.CBR)
     p = tmp_path / "a.mp3"
     p.write_bytes(b"x")
-    with patch("plex_playlist_sync.import_quality_check.mutagen.File", return_value=audio), patch(
-        "plex_playlist_sync.import_quality_check._check_lossy", side_effect=KeyError("boom")
+    with patch("trackseerr.import_quality_check.mutagen.File", return_value=audio), patch(
+        "trackseerr.import_quality_check._check_lossy", side_effect=KeyError("boom")
     ):
         res = check_files([p], "reject", DEFS)
     assert res.skipped and "KeyError" in res.skipped[0][1] and not res.failed

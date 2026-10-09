@@ -72,7 +72,7 @@ Local usernames must be unique, case-insensitive, across ALL users including Ple
   - Verify with `hmac.compare_digest`.
   - On a parameter mismatch, re-hash on the next successful login.
   - Unknown usernames still run one dummy scrypt, so response timing doesn't reveal which accounts exist.
-- **Password policy:** 12–128 characters. It must not contain the username (case-insensitive). It is rejected if it is in a bundled list of the 1000 most common passwords: add `plex_playlist_sync/data/common_passwords.txt` (lowercase, one per line) and ship it in the package.
+- **Password policy:** 12–128 characters. It must not contain the username (case-insensitive). It is rejected if it is in a bundled list of the 1000 most common passwords: add `trackseerr/data/common_passwords.txt` (lowercase, one per line) and ship it in the package.
 - **TOTP:** RFC 6238 with SHA-1, 30 s steps, 6 digits, a 20-byte secret, and a window of ±1 step.
   - Reject a counter ≤ `totp_last_counter` (replay).
   - Store the base32 secret. It lives on core only and is never returned after enrollment.

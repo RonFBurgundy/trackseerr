@@ -19,20 +19,20 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 import pytest
 
-from plex_playlist_sync.acquisition_worker import (
+from trackseerr.acquisition_worker import (
     AcquisitionWorker,
     reconcile_audio_file_to_track,
 )
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import (
     get_config,
     get_db,
     get_discovery_client,
 )
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.discovery import DiscoveryClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import (
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.discovery import DiscoveryClient
+from trackseerr.config import Config
+from trackseerr.models import (
     ActiveDownload,
     DownloadClientConfig,
     DownloadDriverType,
@@ -42,7 +42,7 @@ from plex_playlist_sync.models import (
     LibraryFile,
     LibraryTrack,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 
 def _create_minimal_flac(path: Path) -> None:
@@ -629,8 +629,8 @@ def test_acquisition_worker_reconciles_multitrack_album_with_unacquired_remainin
         "error_message": None,
     }
 
-    with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver), \
-         patch("plex_playlist_sync.acquisition_worker.inspect_audio_file", side_effect=mock_inspect):
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver), \
+         patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=mock_inspect):
         worker.poll_once(db=test_db, staging_dir=str(staging_dir))
 
     # 4. Verify reconciliation results:

@@ -10,19 +10,19 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import delay_gate
-from plex_playlist_sync.acquisition_coordinator import AcquisitionCoordinator
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.import_lists import ImportListItem
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.item_history import GrabTrigger
-from plex_playlist_sync.import_list_worker import sync_import_list
-from plex_playlist_sync.models import AcquisitionSearchResult
-from plex_playlist_sync.quality import parse_release_title
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
-from plex_playlist_sync.tag_store import DuplicateTag, InvalidTagLabel, UnknownTag, normalize_label
+from trackseerr import delay_gate
+from trackseerr.acquisition_coordinator import AcquisitionCoordinator
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.import_lists import ImportListItem
+from trackseerr.config import Config
+from trackseerr.item_history import GrabTrigger
+from trackseerr.import_list_worker import sync_import_list
+from trackseerr.models import AcquisitionSearchResult
+from trackseerr.quality import parse_release_title
+from trackseerr.storage import SCHEMA_VERSION, Database
+from trackseerr.tag_store import DuplicateTag, InvalidTagLabel, UnknownTag, normalize_label
 from tests.test_list_monitoring import ART, make_enricher
 
 
@@ -35,7 +35,7 @@ def db():
 
 @pytest.fixture(autouse=True)
 def _offline(monkeypatch):
-    monkeypatch.setattr("plex_playlist_sync.mediacover.mediacover_service.ensure_artwork", lambda *a, **k: Path("/tmp/c.jpg"))
+    monkeypatch.setattr("trackseerr.mediacover.mediacover_service.ensure_artwork", lambda *a, **k: Path("/tmp/c.jpg"))
 
 
 def artist(db: Database, aid: str, name: str = "") -> str:
@@ -318,7 +318,7 @@ def test_import_list_tags_applied_to_artist_it_adds_only(db):
         "monitor_mode": "artist", "tags": ["discovered"],
     })
     item = ImportListItem(kind="artist", external_key=ART, artist_name="Radiohead", mbid=ART, artist_mbid=ART)
-    with patch("plex_playlist_sync.import_list_worker.fetch_items", return_value=[item]):
+    with patch("trackseerr.import_list_worker.fetch_items", return_value=[item]):
         summary = sync_import_list(db, lst["id"], None, enricher=make_enricher())
     assert summary["applied"] == 1
     created = db.get_library_artist_by_mbid(ART)
@@ -328,7 +328,7 @@ def test_import_list_tags_applied_to_artist_it_adds_only(db):
     db.set_artist_tags(created["id"], [])
     other = db.create_import_list({"name": "L2", "provider": "lastfm", "config": {"username": "u", "api_key": "k", "source": "loved_tracks"},
                                    "monitor_mode": "artist", "tags": ["again"]})
-    with patch("plex_playlist_sync.import_list_worker.fetch_items", return_value=[item]):
+    with patch("trackseerr.import_list_worker.fetch_items", return_value=[item]):
         sync_import_list(db, other["id"], None, enricher=make_enricher())
     assert db.get_artist_tag_labels(artist_id=created["id"]) == []
 
@@ -376,7 +376,7 @@ def test_tag_routes_require_admin(api, method, path, payload):
 ])
 def test_tag_routes_blocked_on_gateway(db, tmp_path, method, path, payload):
     """A real gateway-role app hides the tag routes exactly like every other core-only route: 404, never forwarded."""
-    from plex_playlist_sync.clients.core_client import CoreClient
+    from trackseerr.clients.core_client import CoreClient
 
     cfg = Config(
         plex_url="http://127.0.0.1:32400", plex_token="t", data_dir=str(tmp_path), role="gateway",
@@ -477,7 +477,7 @@ def test_interactive_search_passes_artist_tags_to_release_profiles(api, db):
     cands = [_cand("Sepultura - Roots Deluxe [FLAC]")]
 
     def search(artist_name):
-        with patch("plex_playlist_sync.api.routes.acquisition.acquisition_coordinator.search_all_indexers", return_value=cands):
+        with patch("trackseerr.api.routes.acquisition.acquisition_coordinator.search_all_indexers", return_value=cands):
             res = client.post("/api/acquisition/search", headers=admin, json={"artist": artist_name, "album": "Roots", "item_type": "album"})
         assert res.status_code == 200
         return res.json()["results"][0]
@@ -560,13 +560,13 @@ def test_failed_import_list_write_leaves_no_new_tags(db):
 
 
 def test_backlog_artist_tag_lookup_is_cached_per_artist(db):
-    from plex_playlist_sync.backlog_worker import _cached_artist_tags
+    from trackseerr.backlog_worker import _cached_artist_tags
 
     db.create_tag("metal")
     artist(db, "a1", "Sepultura")
     db.set_artist_tags("a1", [db.get_tag_by_label("metal")["id"]])
     cache: dict[str, list[str]] = {}
-    with patch("plex_playlist_sync.backlog_worker.delay_gate.artist_tags", wraps=delay_gate.artist_tags) as spy:
+    with patch("trackseerr.backlog_worker.delay_gate.artist_tags", wraps=delay_gate.artist_tags) as spy:
         assert _cached_artist_tags(db, cache, "Sepultura") == ["metal"]
         assert _cached_artist_tags(db, cache, " sepultura ") == ["metal"]
         assert _cached_artist_tags(db, cache, "") == []
@@ -574,18 +574,18 @@ def test_backlog_artist_tag_lookup_is_cached_per_artist(db):
 
 
 def test_current_floor_passes_tags_to_evaluate_release(db):
-    from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
-    from plex_playlist_sync import quality
-    from plex_playlist_sync.backlog_worker import _current_floor
+    from trackseerr.acquisition_coordinator import _to_quality_profile
+    from trackseerr import quality
+    from trackseerr.backlog_worker import _current_floor
 
     prof = _to_quality_profile(db.get_default_quality_profile())
-    with patch("plex_playlist_sync.backlog_worker.evaluate_release", wraps=quality.evaluate_release) as ev:
+    with patch("trackseerr.backlog_worker.evaluate_release", wraps=quality.evaluate_release) as ev:
         _current_floor(db, prof, "FLAC", request_id="r1", artist_tags=["metal"])
     assert ev.call_args.kwargs["artist_tags"] == ["metal"]
 
 
 def test_library_scanner_evaluates_with_artist_tags_once_per_artist(db, tmp_path):
-    from plex_playlist_sync.library_scanner import LibraryScanner
+    from trackseerr.library_scanner import LibraryScanner
 
     album_dir = tmp_path / "music" / "Sepultura" / "Roots"
     album_dir.mkdir(parents=True)
@@ -600,11 +600,11 @@ def test_library_scanner_evaluates_with_artist_tags_once_per_artist(db, tmp_path
         }
     artist(db, "a1", "Sepultura")
     db.set_artist_tags("a1", [db.create_tag("metal")["id"]])
-    from plex_playlist_sync import quality
+    from trackseerr import quality
 
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", side_effect=lambda p: meta[str(Path(p).resolve())]), \
-         patch("plex_playlist_sync.library_scanner.evaluate_release", wraps=quality.evaluate_release) as ev, \
-         patch("plex_playlist_sync.library_scanner.delay_gate.artist_tags", wraps=delay_gate.artist_tags) as lookup:
+    with patch("trackseerr.library_scanner.inspect_audio_file", side_effect=lambda p: meta[str(Path(p).resolve())]), \
+         patch("trackseerr.library_scanner.evaluate_release", wraps=quality.evaluate_release) as ev, \
+         patch("trackseerr.library_scanner.delay_gate.artist_tags", wraps=delay_gate.artist_tags) as lookup:
         res = LibraryScanner().scan(db, root_folder=str(tmp_path / "music"))
     assert res["status"] == "completed"
     assert ev.call_count == 2

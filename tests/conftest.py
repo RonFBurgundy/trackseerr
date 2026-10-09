@@ -5,7 +5,7 @@ from pathlib import Path
 import socket
 
 # Response models reject undeclared keys under test (see api/response_models.py). Must precede any
-# plex_playlist_sync import because ApiModel reads it at import time.
+# trackseerr import because ApiModel reads it at import time.
 os.environ.setdefault("TRACKSEERR_STRICT_RESPONSES", "1")
 
 # Default to legacy UI for backwards compatibility with existing frontend tests.
@@ -53,8 +53,8 @@ def _gateway_session_status_allows_by_default(request, monkeypatch):
     Opt out with ``@pytest.mark.real_core_client`` (module-level ``pytestmark`` works too); the real
     ``CoreClient.session_status`` then runs. The session-status cache is still cleared around the test.
     """
-    from plex_playlist_sync.api import dependencies
-    from plex_playlist_sync.clients.core_client import CoreClient
+    from trackseerr.api import dependencies
+    from trackseerr.clients.core_client import CoreClient
 
     dependencies.clear_session_status_cache()
     if request.node.get_closest_marker("real_core_client") is None:
@@ -67,9 +67,9 @@ def _gateway_session_status_allows_by_default(request, monkeypatch):
 def _reset_media_server_process_state():
     """The Settings-page media-server overlay, its change listeners and the shared Subsonic adapter are process-wide:
     never let one test's saved settings reach the next."""
-    from plex_playlist_sync import media_servers
-    from plex_playlist_sync.config import set_media_server_overlay
-    from plex_playlist_sync.media_servers import settings as media_server_settings
+    from trackseerr import media_servers
+    from trackseerr.config import set_media_server_overlay
+    from trackseerr.media_servers import settings as media_server_settings
 
     def _reset() -> None:
         set_media_server_overlay(None)
@@ -103,7 +103,7 @@ def _restore_root_logging():
 @pytest.fixture(autouse=True)
 def _reset_shared_metadata_clients():
     """Drop the process-wide MusicBrainz/Deezer clients so no test inherits another's db or mirror."""
-    from plex_playlist_sync.mb_metadata_store import reset_shared_clients
+    from trackseerr.mb_metadata_store import reset_shared_clients
 
     reset_shared_clients()
     yield
@@ -119,7 +119,7 @@ def _stub_mbid_enricher(request, monkeypatch):
     """
     if request.node.get_closest_marker("real_mbid_enricher") is None:
         from unittest.mock import MagicMock
-        from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
+        from trackseerr.clients.mbid_enricher import MbidEnricherClient
         mock_method = MagicMock(return_value=None)
         monkeypatch.setattr(MbidEnricherClient, "lookup_track_mbids", mock_method)
         monkeypatch.setattr(MbidEnricherClient, "lookup_artist_mbid_by_url", MagicMock(return_value=None))
@@ -131,7 +131,7 @@ def _stop_worker_singletons_started_since(before: set) -> None:
     whose thread a test started and left running, so they cannot outlive their test's DB."""
     import threading
 
-    from plex_playlist_sync import (
+    from trackseerr import (
         acquisition_worker,
         artist_refresh_worker,
         backlog_worker,
@@ -169,7 +169,7 @@ def _no_background_scanner_hydration(request, monkeypatch):
         yield
         return
 
-    from plex_playlist_sync.library_scanner import LibraryScanner
+    from trackseerr.library_scanner import LibraryScanner
 
     monkeypatch.setattr(LibraryScanner, "_launch_auto_hydration", lambda self, db, artist_ids: None)
     yield
@@ -183,7 +183,7 @@ def _stop_scheduler_threads_started_by_the_test():
     join whatever the test started."""
     import threading
 
-    from plex_playlist_sync import cli
+    from trackseerr import cli
 
     names = {"ScheduledSyncWorker", "ScheduledLidarrTrickleWorker"}
     before = set(threading.enumerate())
@@ -203,7 +203,7 @@ def _stop_scheduler_threads_started_by_the_test():
 @pytest.fixture(autouse=True)
 def _reset_library_manager_guard():
     """The work-guard counters are module state; a test that dies mid-work must not leave later tests unable to switch."""
-    from plex_playlist_sync import library_manager
+    from trackseerr import library_manager
 
     with library_manager._guard_lock:
         for mode in library_manager._in_flight:
@@ -214,7 +214,7 @@ def _reset_library_manager_guard():
 @pytest.fixture(autouse=True)
 def _reset_lidarr_add_defaults_cache():
     """Root-folder defaults are cached per process (keyed by URL and key); tests reusing a URL must not share them."""
-    from plex_playlist_sync.clients.lidarr import invalidate_add_defaults
+    from trackseerr.clients.lidarr import invalidate_add_defaults
 
     invalidate_add_defaults()
     yield
@@ -224,7 +224,7 @@ def _reset_lidarr_add_defaults_cache():
 @pytest.fixture(autouse=True)
 def _isolated_lidarr_cover_cache(tmp_path, monkeypatch):
     """Fetched Lidarr covers are cached on disk under the mediacover base dir: keep that per-test, never shared."""
-    from plex_playlist_sync.mediacover import mediacover_service
+    from trackseerr.mediacover import mediacover_service
 
     base = tmp_path / "mediacover-base"
     monkeypatch.setattr(mediacover_service, "base_dir", base)
@@ -262,7 +262,7 @@ def _isolated_mediacover_service(request, monkeypatch):
     circuit-breaker state. Without this, one test's queued downloads (real coverartarchive/Deezer fetches) run during a
     later test and starve its waits. Real HTTP is blocked by default (opt in with ``@pytest.mark.real_mediacover_http``),
     and the pool and failure memory are reset after every test."""
-    import plex_playlist_sync.mediacover as mc
+    import trackseerr.mediacover as mc
 
     svc = mc.mediacover_service
 
@@ -341,7 +341,7 @@ def _offline_cover_art_archive(monkeypatch):
 def _reset_art_executors():
     """The art pre-cache and thumbnail pre-generation pools are module singletons that outlive a test. Cancel what is
     queued and drop the pools (a fresh one is built, with a fresh stop event, on next use) at setup and teardown."""
-    from plex_playlist_sync import art_pipeline
+    from trackseerr import art_pipeline
 
     art_pipeline.shutdown()
     yield
@@ -351,7 +351,7 @@ def _reset_art_executors():
 @pytest.fixture(autouse=True)
 def _fresh_album_hydration_state():
     """The hydration negative cache is process-global; a failed attempt in one test must not skip the next."""
-    from plex_playlist_sync.album_track_hydration import clear_negative_cache
+    from trackseerr.album_track_hydration import clear_negative_cache
 
     clear_negative_cache()
     yield
@@ -374,7 +374,7 @@ class _BackgroundJobs:
 def background_jobs(monkeypatch):
     """Route-layer background jobs (``library._run_in_background``) are queued, not threaded: drive them with
     ``background_jobs.run()`` so tests stay deterministic and offline."""
-    from plex_playlist_sync.api.routes.library import artists
+    from trackseerr.api.routes.library import artists
  
     jobs = _BackgroundJobs()
     monkeypatch.setattr(artists, "_run_in_background", lambda target, name: jobs.pending.append((name, target)))
@@ -386,7 +386,7 @@ def _reset_artist_refresh_worker_stop_event():
     """``cli.main`` shutdown calls ``artist_refresh_worker.stop()`` on the process-wide singleton, which sets its stop
     event for good (only ``start()`` clears it, and tests stub ``start``). A later ``refresh_once`` would then abort
     its cycle immediately and refresh nothing, so clear it around every test."""
-    from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
+    from trackseerr.artist_refresh_worker import artist_refresh_worker
 
     artist_refresh_worker._stop_event.clear()
     yield
@@ -409,7 +409,7 @@ def art_scheduler_calls(request, monkeypatch):
     """Art pre-cache, thumbnail pre-generation and the startup backfill start threads/pools that outlive a test, so
     every test gets recording no-ops. Opt back in to the real ones with ``@pytest.mark.real_art_pipeline`` (or the
     ``real_art_pipeline`` fixture); the recorder is still returned but stays empty."""
-    from plex_playlist_sync import art_pipeline, art_thumbs
+    from trackseerr import art_pipeline, art_thumbs
 
     calls = _ArtSchedulerCalls()
     if request.node.get_closest_marker("real_art_pipeline") or "real_art_pipeline" in request.fixturenames:
@@ -438,7 +438,7 @@ def art_scheduler_calls(request, monkeypatch):
 @pytest.fixture
 def real_art_pipeline(art_scheduler_calls):
     """Opt-in marker fixture: keeps the real art schedulers for this test and drains their pools afterwards."""
-    from plex_playlist_sync import art_pipeline
+    from trackseerr import art_pipeline
 
     yield
     art_pipeline.wait_idle(5)
@@ -447,7 +447,7 @@ def real_art_pipeline(art_scheduler_calls):
 @pytest.fixture(autouse=True)
 def _clear_download_roots_cache():
     """The per-client download-roots cache is process-global; keep tests independent of each other."""
-    from plex_playlist_sync.download_roots import clear_roots_cache
+    from trackseerr.download_roots import clear_roots_cache
 
     clear_roots_cache()
     yield

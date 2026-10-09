@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
-from plex_playlist_sync import art_pipeline, art_thumbs
-from plex_playlist_sync.cli import _start_local_workers
-from plex_playlist_sync.config import Config
+from trackseerr import art_pipeline, art_thumbs
+from trackseerr.cli import _start_local_workers
+from trackseerr.config import Config
 from tests.test_library_api import test_db  # noqa: F401
 
 
@@ -90,7 +90,7 @@ def test_local_workers_start_backfill_and_gateway_tier_does_not(test_db, art_sch
     """_start_local_workers is the non-gateway boot path; the gateway branch of cli.main never calls it."""
     import inspect
 
-    from plex_playlist_sync import cli
+    from trackseerr import cli
 
     src = inspect.getsource(cli._background_init)
     gateway_branch, _, rest = src.partition('if role == "gateway":')
@@ -102,12 +102,12 @@ def test_local_workers_start_backfill_and_gateway_tier_does_not(test_db, art_sch
 
 def test_start_local_workers_invokes_backfill_for_core(test_db, art_scheduler_calls):
     cfg = Config.from_env()
-    with patch("plex_playlist_sync.backlog_worker.backlog_worker"), patch(
-        "plex_playlist_sync.backlog_worker.rss_worker"
-    ), patch("plex_playlist_sync.artist_refresh_worker.artist_refresh_worker"), patch(
-        "plex_playlist_sync.scrobble_worker.scrobble_worker"
-    ), patch("plex_playlist_sync.mix_worker.mix_worker"), patch(
-        "plex_playlist_sync.import_list_worker.import_list_worker"
+    with patch("trackseerr.backlog_worker.backlog_worker"), patch(
+        "trackseerr.backlog_worker.rss_worker"
+    ), patch("trackseerr.artist_refresh_worker.artist_refresh_worker"), patch(
+        "trackseerr.scrobble_worker.scrobble_worker"
+    ), patch("trackseerr.mix_worker.mix_worker"), patch(
+        "trackseerr.import_list_worker.import_list_worker"
     ):
         _start_local_workers(test_db, cfg)
     assert len(art_scheduler_calls.startup_backfill) == 1

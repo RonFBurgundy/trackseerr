@@ -15,26 +15,26 @@ from mutagen.oggopus import OggOpus
 from mutagen.oggvorbis import OggVorbis
 from mutagen.wave import WAVE
 
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker, _quality_from_codec
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.import_quality_check import (
+from trackseerr.acquisition_worker import AcquisitionWorker, _quality_from_codec
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.import_quality_check import (
     check_files,
     detect_audio_quality,
     normalize_check_mode,
     probe_audio_file,
 )
-from plex_playlist_sync.models import (
+from trackseerr.models import (
     ActiveDownload,
     DownloadClientConfig,
     DownloadDriverType,
     DownloadStatus,
 )
-from plex_playlist_sync.quality import parse_release_title
-from plex_playlist_sync.quality_defaults import DEFAULT_QUALITY_DEFINITIONS, QUALITY_ORDER, V51_NEW_QUALITIES
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr.quality import parse_release_title
+from trackseerr.quality_defaults import DEFAULT_QUALITY_DEFINITIONS, QUALITY_ORDER, V51_NEW_QUALITIES
+from trackseerr.storage import SCHEMA_VERSION, Database
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -243,12 +243,12 @@ def _files(tmp_path, names):
 
 def _patched(results):
     """mutagen.File returns the next synthetic object keyed by file name."""
-    return patch("plex_playlist_sync.import_quality_check.mutagen.File", side_effect=lambda path: results[Path(path).name])
+    return patch("trackseerr.import_quality_check.mutagen.File", side_effect=lambda path: results[Path(path).name])
 
 
 def test_check_off_does_not_touch_files(tmp_path):
     files = _files(tmp_path, ["a.flac"])
-    with patch("plex_playlist_sync.import_quality_check.mutagen.File") as mf:
+    with patch("trackseerr.import_quality_check.mutagen.File") as mf:
         res = check_files(files, "off", DEFS)
     mf.assert_not_called()
     assert res.checked == 0 and not res.out_of_range and not res.failed
@@ -297,7 +297,7 @@ def test_check_skips_unreadable_duration_and_unknown(tmp_path):
             raise mutagen.MutagenError("corrupt")
         return _fake(MP3, length=0.0, bitrate=320000, bitrate_mode=BitrateMode.CBR)
 
-    with patch("plex_playlist_sync.import_quality_check.mutagen.File", side_effect=fake_file):
+    with patch("trackseerr.import_quality_check.mutagen.File", side_effect=fake_file):
         res = check_files(files, "reject", DEFS)
     assert res.checked == 0 and not res.out_of_range and not res.failed
     assert len(res.skipped) == 3
@@ -361,9 +361,9 @@ def _run_import(tmp_path, mode, mutagen_result):
         "artist": "Artist X", "title": "Song", "album": "Album X", "file_path": str(audio), "extension": ".mp3",
         "track_number": 1, "year": 2020, "disc_number": 1, "total_discs": 1,
     }
-    with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=driver), patch(
-        "plex_playlist_sync.acquisition_worker.inspect_audio_file", return_value=meta
-    ), patch("plex_playlist_sync.import_quality_check.mutagen.File", return_value=mutagen_result):
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), patch(
+        "trackseerr.acquisition_worker.inspect_audio_file", return_value=meta
+    ), patch("trackseerr.import_quality_check.mutagen.File", return_value=mutagen_result):
         stats = AcquisitionWorker().poll_once(db=db, plex_client=MagicMock(), staging_dir=str(downloads))
     return db, stats, audio
 

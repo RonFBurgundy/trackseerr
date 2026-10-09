@@ -12,13 +12,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import library_health as lh
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_active_media_server, get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.media_servers.base import MediaServerError, MediaServerUnsupported, ServerCapabilities, ServerFileRef
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr import library_health as lh
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_active_media_server, get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.media_servers.base import MediaServerError, MediaServerUnsupported, ServerCapabilities, ServerFileRef
+from trackseerr.storage import SCHEMA_VERSION, Database
 
 SERVER_ROOT = "/data/music"
 FULL_TAGS = {"artist": "A", "album": "B", "title": "C"}
@@ -408,7 +408,7 @@ def test_concurrent_check_is_rejected(db, music):
 
 
 def test_check_appears_in_job_tracker(db, music):
-    from plex_playlist_sync.job_tracker import job_tracker
+    from trackseerr.job_tracker import job_tracker
 
     job_tracker.clear()
     base_library(db, music)
@@ -444,12 +444,12 @@ def test_weekly_due_logic(db):
 def test_worker_runs_only_with_a_file_path_server(db, music):
     db.update_media_management_settings({"root_folder_path": str(music)})
     worker = lh.LibraryHealthWorker()
-    with patch("plex_playlist_sync.media_servers.get_media_server", return_value=None):
+    with patch("trackseerr.media_servers.get_media_server", return_value=None):
         assert worker.run_if_due(db, MagicMock()) is False
-    with patch("plex_playlist_sync.media_servers.get_media_server", return_value=FakeServer([], file_paths=False)):
+    with patch("trackseerr.media_servers.get_media_server", return_value=FakeServer([], file_paths=False)):
         assert worker.run_if_due(db, MagicMock()) is False
     assert db.get_last_library_health_run() is None
-    with patch("plex_playlist_sync.media_servers.get_media_server", return_value=FakeServer([])):
+    with patch("trackseerr.media_servers.get_media_server", return_value=FakeServer([])):
         assert worker.run_if_due(db, MagicMock()) is True
         assert worker.run_if_due(db, MagicMock()) is False  # ran just now: not due again
     assert db.get_last_library_health_run() is not None

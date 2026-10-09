@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from plex_playlist_sync.clients.spotify_scraper import SpotifyWebScraper
-from plex_playlist_sync.models import Playlist, Track
+from trackseerr.clients.spotify_scraper import SpotifyWebScraper
+from trackseerr.models import Playlist, Track
 
 
 @pytest.fixture

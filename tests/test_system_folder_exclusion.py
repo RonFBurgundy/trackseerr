@@ -5,14 +5,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from plex_playlist_sync.api.routes.library.manual_import import _walk_audio_files
-from plex_playlist_sync.artist_refresh import refresh_single_artist
-from plex_playlist_sync.clients.discovery import DiscoveryClient
-from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
-from plex_playlist_sync.library_health import _walk_audio
-from plex_playlist_sync.library_scanner import LibraryScanner
-from plex_playlist_sync.recycle_bin import is_system_dirname, is_system_filename, is_system_folder_name
-from plex_playlist_sync.storage import Database
+from trackseerr.api.routes.library.manual_import import _walk_audio_files
+from trackseerr.artist_refresh import refresh_single_artist
+from trackseerr.clients.discovery import DiscoveryClient
+from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.library_health import _walk_audio
+from trackseerr.library_scanner import LibraryScanner
+from trackseerr.recycle_bin import is_system_dirname, is_system_filename, is_system_folder_name
+from trackseerr.storage import Database
 
 JUNK = [
     "$RECYCLE.BIN/S-1-5-21-111-222-333-1001/$I123ABC.mp3",
@@ -87,8 +87,8 @@ def test_scanner_indexes_dotted_and_dollar_artists(tmp_path: Path):
         }
 
     try:
-        with patch("plex_playlist_sync.library_scanner.inspect_audio_file", side_effect=fake_inspect), patch(
-            "plex_playlist_sync.artist_refresh_worker.artist_refresh_worker.refresh_once"
+        with patch("trackseerr.library_scanner.inspect_audio_file", side_effect=fake_inspect), patch(
+            "trackseerr.artist_refresh_worker.artist_refresh_worker.refresh_once"
         ):
             status = LibraryScanner().scan(db, root_folder=str(music))
         assert status["files_indexed"] == 3
@@ -139,8 +139,8 @@ def test_scanner_indexes_only_the_real_band(tmp_path: Path):
         }
 
     try:
-        with patch("plex_playlist_sync.library_scanner.inspect_audio_file", side_effect=fake_inspect), patch(
-            "plex_playlist_sync.artist_refresh_worker.artist_refresh_worker.refresh_once"
+        with patch("trackseerr.library_scanner.inspect_audio_file", side_effect=fake_inspect), patch(
+            "trackseerr.artist_refresh_worker.artist_refresh_worker.refresh_once"
         ):
             status = LibraryScanner().scan(db, root_folder=str(music))
         assert status["total_files_found"] == 1
@@ -163,7 +163,7 @@ def test_no_lookup_for_system_folder_names():
     enricher = MbidEnricherClient()
     discovery = DiscoveryClient()
     with patch.object(MbidEnricherClient, "_request") as req, patch(
-        "plex_playlist_sync.clients.discovery.requests.get"
+        "trackseerr.clients.discovery.requests.get"
     ) as rget:
         assert enricher.lookup_artist_mbid("$RECYCLE.BIN") is None
         assert enricher.lookup_album_mbids("$RECYCLE.BIN", "S-1-5-21-1") is None

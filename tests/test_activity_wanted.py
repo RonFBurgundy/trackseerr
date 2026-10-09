@@ -1,7 +1,7 @@
 """Phase 3 backend: Activity (queue / history / blocklist) and Wanted (missing / cutoff), native and Lidarr mode."""
 
-from plex_playlist_sync.item_history import GrabTrigger
-from plex_playlist_sync.storage import SCHEMA_VERSION
+from trackseerr.item_history import GrabTrigger
+from trackseerr.storage import SCHEMA_VERSION
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -9,16 +9,16 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import activity_service
-from plex_playlist_sync.acquisition_coordinator import AcquisitionCoordinator
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.backlog_worker import backlog_worker
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.library_manager import ModeChanged
-from plex_playlist_sync.models import (
+from trackseerr import activity_service
+from trackseerr.acquisition_coordinator import AcquisitionCoordinator
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.backlog_worker import backlog_worker
+from trackseerr.config import Config
+from trackseerr.library_manager import ModeChanged
+from trackseerr.models import (
     AcquisitionSearchResult,
     ActiveDownload,
     DownloadClientConfig,
@@ -26,7 +26,7 @@ from plex_playlist_sync.models import (
     IndexerConfig,
     MusicRequest,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 API_KEY = "lidarr-secret-key-abcdef123456"
 NOW = datetime(2026, 10, 4, 12, 0, 0, tzinfo=timezone.utc)
@@ -368,7 +368,7 @@ class TestNativeQueue:
         )
         _dl(test_db, "dl-r", artist="Nirvana", title="Nirvana - In Bloom [MP3]", request_id="req-1")
         with patch.object(activity_service, "get_acquisition_driver", return_value=MagicMock()), patch(
-            "plex_playlist_sync.acquisition_coordinator.acquisition_coordinator.search_and_grab",
+            "trackseerr.acquisition_coordinator.acquisition_coordinator.search_and_grab",
             return_value={"success": True, "release": "Nirvana - In Bloom [FLAC]", "download_id": "dl-new", "download_hash": "h2"},
         ) as search:
             res = api.post("/api/activity/queue/dl-r/retry", headers=admin_h)
@@ -382,7 +382,7 @@ class TestNativeQueue:
         _dl(test_db, "dl-same", artist="A", title="A - T", download_hash="samehash")
         driver = MagicMock()
         with patch.object(activity_service, "get_acquisition_driver", return_value=driver), patch(
-            "plex_playlist_sync.acquisition_coordinator.acquisition_coordinator.search_and_grab",
+            "trackseerr.acquisition_coordinator.acquisition_coordinator.search_and_grab",
             return_value={"success": True, "release": "r", "download_id": "dl-new", "download_hash": "samehash"},
         ):
             res = api.post("/api/activity/queue/dl-same/retry", headers=admin_h)
@@ -393,7 +393,7 @@ class TestNativeQueue:
     def test_retry_reports_no_result_without_failing(self, api, test_db, admin_h):
         _dl(test_db, "dl-r2", artist="A", title="A - T")
         with patch.object(activity_service, "get_acquisition_driver", return_value=MagicMock()), patch(
-            "plex_playlist_sync.acquisition_coordinator.acquisition_coordinator.search_and_grab",
+            "trackseerr.acquisition_coordinator.acquisition_coordinator.search_and_grab",
             return_value={"success": False, "message": "No acceptable releases found"},
         ):
             res = api.post("/api/activity/queue/dl-r2/retry", headers=admin_h)
@@ -428,7 +428,7 @@ def _grab(db, release="Nirvana - In Bloom [FLAC]", min_score=None):
     driver = MagicMock()
     driver.download.return_value = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     with patch.object(coordinator, "search_all_indexers", return_value=[candidate]), patch(
-        "plex_playlist_sync.acquisition_coordinator.get_acquisition_driver", return_value=driver
+        "trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=driver
     ):
         return coordinator.search_and_grab(
             artist="Nirvana", title="In Bloom", db=db, min_score=min_score, trigger=GrabTrigger("wanted")
@@ -459,7 +459,7 @@ class TestNativeHistory:
         driver = MagicMock()
         driver.get_status.return_value = {"status": "failed", "error_message": "Unpack failed"}
         test_db.update_media_management_settings({"staging_folder_path": str(tmp_path)})
-        with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=driver):
+        with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver):
             stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(tmp_path))
         assert stats["failed"] == 1
         events = [r["event"] for r in api.get("/api/activity/history?sort_dir=asc", headers=admin_h).json()["records"]]
@@ -494,7 +494,7 @@ class TestNativeHistory:
         grabbed = api.get("/api/activity/history", headers=admin_h).json()["records"][0]
         driver = MagicMock()
         with patch.object(activity_service, "get_acquisition_driver", return_value=driver), patch(
-            "plex_playlist_sync.acquisition_coordinator.acquisition_coordinator.search_and_grab",
+            "trackseerr.acquisition_coordinator.acquisition_coordinator.search_and_grab",
             return_value={"success": False, "message": "No acceptable releases found"},
         ) as search:
             out = api.post(f"/api/activity/history/{grabbed['id']}/failed", headers=admin_h)
@@ -511,7 +511,7 @@ class TestNativeHistory:
         _grab(test_db)
         grabbed = api.get("/api/activity/history", headers=admin_h).json()["records"][0]
         with patch.object(activity_service, "get_acquisition_driver", return_value=MagicMock()), patch(
-            "plex_playlist_sync.acquisition_coordinator.acquisition_coordinator.search_and_grab",
+            "trackseerr.acquisition_coordinator.acquisition_coordinator.search_and_grab",
             return_value={"success": True, "release": "Better Release"},
         ):
             out = api.post(f"/api/activity/history/{grabbed['id']}/failed", headers=admin_h).json()
@@ -522,7 +522,7 @@ class TestNativeHistory:
         grabbed = api.get("/api/activity/history", headers=admin_h).json()["records"][0]
         assert grabbed["can_mark_failed"] is True
         with patch.object(activity_service, "get_acquisition_driver", return_value=MagicMock()), patch(
-            "plex_playlist_sync.acquisition_coordinator.acquisition_coordinator.search_and_grab",
+            "trackseerr.acquisition_coordinator.acquisition_coordinator.search_and_grab",
             return_value={"success": False, "message": "none"},
         ):
             assert api.post(f"/api/activity/history/{grabbed['id']}/failed", headers=admin_h).status_code == 200
@@ -551,7 +551,7 @@ class TestNativeHistory:
         driver = MagicMock()
         driver.get_status.return_value = {"status": "failed", "error_message": "Unpack failed"}
         test_db.update_media_management_settings({"staging_folder_path": str(tmp_path)})
-        with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=driver):
+        with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver):
             AcquisitionWorker().poll_once(db=test_db, staging_dir=str(tmp_path))
         grabbed = api.get("/api/activity/history?event=grabbed", headers=admin_h).json()["records"][0]
         assert grabbed["can_mark_failed"] is False
@@ -667,7 +667,7 @@ class TestNativeWanted:
         _library(test_db)
         backlog_worker.pace_delay = 0
         with patch(
-            "plex_playlist_sync.acquisition_coordinator.acquisition_coordinator.search_and_grab",
+            "trackseerr.acquisition_coordinator.acquisition_coordinator.search_and_grab",
             return_value={"success": False, "message": "none"},
         ) as search:
             res = api.post("/api/wanted/search", json={"ids": ["t-missing", "t-low"]}, headers=admin_h)
@@ -683,7 +683,7 @@ class TestNativeWanted:
         _library(test_db)
         backlog_worker.pace_delay = 0
         with patch(
-            "plex_playlist_sync.acquisition_coordinator.acquisition_coordinator.search_and_grab",
+            "trackseerr.acquisition_coordinator.acquisition_coordinator.search_and_grab",
             return_value={"success": True, "release": "r"},
         ) as search:
             res = api.post("/api/wanted/search", json={"all": True, "list": "missing"}, headers=admin_h)
@@ -695,7 +695,7 @@ class TestNativeWanted:
         _library(test_db)
         backlog_worker.pace_delay = 0
         with patch(
-            "plex_playlist_sync.acquisition_coordinator.acquisition_coordinator.search_and_grab",
+            "trackseerr.acquisition_coordinator.acquisition_coordinator.search_and_grab",
             return_value={"success": False, "message": "none"},
         ) as search:
             first = api.post("/api/wanted/search", json={"ids": ["t-missing"]}, headers=admin_h)
@@ -715,7 +715,7 @@ class TestNativeWanted:
         test_db.conn.execute("UPDATE library_tracks SET last_searched_at = '2020-01-01 00:00:00' WHERE id='t-missing'")
         test_db.conn.commit()
         with patch(
-            "plex_playlist_sync.acquisition_coordinator.acquisition_coordinator.search_and_grab",
+            "trackseerr.acquisition_coordinator.acquisition_coordinator.search_and_grab",
             return_value={"success": False, "message": "none"},
         ):
             res = api.post("/api/wanted/search", json={"ids": ["t-missing"]}, headers=admin_h)
@@ -735,7 +735,7 @@ class TestNativeWanted:
             release.wait(timeout=5)
             return {"success": False, "message": "none"}
 
-        with patch("plex_playlist_sync.acquisition_coordinator.acquisition_coordinator.search_and_grab", side_effect=slow):
+        with patch("trackseerr.acquisition_coordinator.acquisition_coordinator.search_and_grab", side_effect=slow):
             first = api.post("/api/wanted/search", json={"ids": ["t-missing"]}, headers=admin_h)
             assert first.json() == {"queued": 1}
             assert entered.wait(timeout=5)
@@ -768,7 +768,7 @@ QUEUE_REC = {
 
 
 def _mock_http():
-    patcher = patch("plex_playlist_sync.clients.lidarr.httpx.Client")
+    patcher = patch("trackseerr.clients.lidarr.httpx.Client")
     cls = patcher.start()
     return patcher, cls.return_value.__enter__.return_value
 
@@ -982,7 +982,7 @@ class TestLidarrMode:
 
     def test_native_mode_never_contacts_lidarr(self, api, test_db, admin_h):
         test_db.update_lidarr_settings({"url": "http://lidarr.test:8686", "api_key": API_KEY})
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as cls:
+        with patch("trackseerr.clients.lidarr.httpx.Client") as cls:
             for path in ("/api/activity/queue", "/api/activity/history", "/api/activity/blocklist",
                          "/api/wanted/missing", "/api/wanted/cutoff"):
                 assert api.get(path, headers=admin_h).status_code == 200
@@ -1004,15 +1004,15 @@ MUTATIONS = [
 class TestGuardAndAccess:
     @pytest.mark.parametrize("method,path,body", MUTATIONS)
     def test_mode_changed_is_409(self, api, admin_h, method, path, body):
-        module = "plex_playlist_sync.api.routes.wanted" if "/wanted" in path else "plex_playlist_sync.api.routes.activity"
+        module = "trackseerr.api.routes.wanted" if "/wanted" in path else "trackseerr.api.routes.activity"
         # Both routes share run_mutation, which lives in the activity module.
-        with patch("plex_playlist_sync.api.routes.activity.run_for_mode", side_effect=ModeChanged("native", "lidarr")):
+        with patch("trackseerr.api.routes.activity.run_for_mode", side_effect=ModeChanged("native", "lidarr")):
             kwargs = {"json": body} if body is not None else {}
             res = getattr(api, method)(path, headers=admin_h, **kwargs)
         assert res.status_code == 409, module
 
     def test_mutations_run_under_the_active_mode_guard(self, api, test_db, admin_h):
-        from plex_playlist_sync import library_manager
+        from trackseerr import library_manager
 
         _dl(test_db, "dl-g")
         seen = {}
@@ -1027,7 +1027,7 @@ class TestGuardAndAccess:
         assert library_manager.in_flight_count() == 0  # released afterwards
 
     def test_lidarr_mutation_runs_under_lidarr_guard(self, api, test_db, admin_h, lidarr_http):
-        from plex_playlist_sync import library_manager
+        from trackseerr import library_manager
 
         seen = {}
 
@@ -1043,7 +1043,7 @@ class TestGuardAndAccess:
     def test_search_is_refused_when_mode_flips_to_lidarr_for_native_work(self, api, test_db, admin_h):
         _library(test_db)
         # Real guard: a native search that was routed natively but whose guard finds Lidarr active is a 409.
-        with patch("plex_playlist_sync.library_manager.get_library_mode", side_effect=["native", "lidarr"] * 3):
+        with patch("trackseerr.library_manager.get_library_mode", side_effect=["native", "lidarr"] * 3):
             res = api.post("/api/wanted/search", json={"ids": ["t-missing"]}, headers=admin_h)
         assert res.status_code == 409
 
@@ -1084,7 +1084,7 @@ class TestGuardAndAccess:
     def test_core_tier_dependency_blocks_gateway_role_even_if_reached(self, test_db, tmp_path, users):
         from fastapi import HTTPException
 
-        from plex_playlist_sync.api.dependencies import require_core_tier
+        from trackseerr.api.dependencies import require_core_tier
 
         cfg = Config(plex_url="http://p", plex_token="t", data_dir=str(tmp_path), role="gateway",
                      internal_core_secret="s" * 40, trackseerr_core_url="http://core.internal:5251")

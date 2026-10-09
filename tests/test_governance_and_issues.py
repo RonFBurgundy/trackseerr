@@ -8,16 +8,16 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import (
     get_config,
     get_db,
     has_permission,
     require_permission,
 )
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import (
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.models import (
     IssueStatus,
     IssueType,
     MediaIssue,
@@ -26,7 +26,7 @@ from plex_playlist_sync.models import (
     RequestStatus,
     UserPermission,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -653,7 +653,7 @@ class TestUserGovernanceAPI:
 
 
 class TestMediaIssuesAPI:
-    @patch("plex_playlist_sync.api.routes.issues.notification_dispatcher.dispatch")
+    @patch("trackseerr.api.routes.issues.notification_dispatcher.dispatch")
     def test_create_issue_success_and_notification(
         self, mock_dispatch, app_and_client, test_db, test_config, seeded_users
     ):

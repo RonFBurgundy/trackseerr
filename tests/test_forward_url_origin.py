@@ -6,11 +6,11 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.local_auth import parse_trusted_proxies, resolve_request_origin
-from plex_playlist_sync.security import safe_forward_url
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.config import Config
+from trackseerr.local_auth import parse_trusted_proxies, resolve_request_origin
+from trackseerr.security import safe_forward_url
 
 REQ = "https://app.example.com"
 
@@ -118,7 +118,7 @@ def test_forwarded_host_garbage_rejected_from_trusted_peer():
 
 @pytest.fixture
 def make_client(tmp_path):
-    from plex_playlist_sync.storage import Database
+    from trackseerr.storage import Database
 
     db = Database(":memory:")
 
@@ -142,7 +142,7 @@ def make_client(tmp_path):
 
 def _post_pin(client, forward_url, headers=None):
     pin = {"id": 77, "code": "ABCD"}
-    with patch("plex_playlist_sync.auth.requests.post") as post:
+    with patch("trackseerr.auth.requests.post") as post:
         post.return_value.json.return_value = pin
         post.return_value.raise_for_status.return_value = None
         resp = client.post("/api/auth/plex/pin", json={"forward_url": forward_url}, headers=headers or {})

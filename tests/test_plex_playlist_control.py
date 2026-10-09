@@ -9,18 +9,18 @@ import pytest
 from fastapi.testclient import TestClient
 from plexapi.exceptions import BadRequest, NotFound
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_plex_client
-from plex_playlist_sync.api.routes.sync import sync_state
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.plex import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_plex_client
+from trackseerr.api.routes.sync import sync_state
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.plex import (
     PlaylistProtectedError,
     PlexClient,
     classify_playlist_owner,
 )
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import Playlist, Track
-from plex_playlist_sync.storage import Database
+from trackseerr.config import Config
+from trackseerr.models import Playlist, Track
+from trackseerr.storage import Database
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +93,7 @@ class FakeServer:
 def make_client(admin_server, users=None, admin_name="admin"):
     """Build a PlexClient whose server is a fake. ``users`` maps username -> FakeServer for switchUser."""
     users = users or {}
-    with patch("plex_playlist_sync.clients.plex.PlexServer"):
+    with patch("trackseerr.clients.plex.PlexServer"):
         client = PlexClient("http://plex", "tok")
     account = SimpleNamespace(
         username=admin_name,

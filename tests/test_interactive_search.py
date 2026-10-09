@@ -18,11 +18,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.models import (
     AcquisitionSearchResult,
     DownloadClientConfig,
     DownloadDriverType,
@@ -32,7 +32,7 @@ from plex_playlist_sync.models import (
     QualityProfileItem,
     RequestStatus,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -199,7 +199,7 @@ def test_interactive_search_with_quality_ranking(app_and_client, test_db, test_c
     ]
 
     with patch(
-        "plex_playlist_sync.api.routes.acquisition.acquisition_coordinator.search_all_indexers",
+        "trackseerr.api.routes.acquisition.acquisition_coordinator.search_all_indexers",
         return_value=mock_candidates,
     ):
         resp = client.post(
@@ -281,7 +281,7 @@ def test_interactive_search_custom_profile(app_and_client, test_db, test_config,
     ]
 
     with patch(
-        "plex_playlist_sync.api.routes.acquisition.acquisition_coordinator.search_all_indexers",
+        "trackseerr.api.routes.acquisition.acquisition_coordinator.search_all_indexers",
         return_value=mock_candidates,
     ):
         resp = client.post(
@@ -313,7 +313,7 @@ def test_interactive_search_empty_and_error_resilience(app_and_client, test_db, 
 
     # Empty candidate list
     with patch(
-        "plex_playlist_sync.api.routes.acquisition.acquisition_coordinator.search_all_indexers",
+        "trackseerr.api.routes.acquisition.acquisition_coordinator.search_all_indexers",
         return_value=[],
     ):
         resp = client.post(
@@ -327,7 +327,7 @@ def test_interactive_search_empty_and_error_resilience(app_and_client, test_db, 
 
     # Search raises exception
     with patch(
-        "plex_playlist_sync.api.routes.acquisition.acquisition_coordinator.search_all_indexers",
+        "trackseerr.api.routes.acquisition.acquisition_coordinator.search_all_indexers",
         side_effect=RuntimeError("Indexers network down"),
     ):
         resp_err = client.post(
@@ -398,7 +398,7 @@ def test_manual_grab_torrent_success(app_and_client, test_db, test_config, seede
     mock_driver.download.return_value = "daftpunkram1234567890abcdef"
 
     with patch(
-        "plex_playlist_sync.api.routes.acquisition.get_acquisition_driver",
+        "trackseerr.api.routes.acquisition.get_acquisition_driver",
         return_value=mock_driver,
     ):
         resp = client.post(
@@ -472,7 +472,7 @@ def test_manual_grab_slskd_p2p_success(app_and_client, test_db, test_config, see
     mock_driver.download.return_value = "slskd-dl-987"
 
     with patch(
-        "plex_playlist_sync.api.routes.acquisition.get_acquisition_driver",
+        "trackseerr.api.routes.acquisition.get_acquisition_driver",
         return_value=mock_driver,
     ):
         resp = client.post(
@@ -567,7 +567,7 @@ def test_manual_grab_explicit_client_id(app_and_client, test_db, test_config, se
     mock_driver.download.return_value = "sec-hash-123"
 
     with patch(
-        "plex_playlist_sync.api.routes.acquisition.get_acquisition_driver",
+        "trackseerr.api.routes.acquisition.get_acquisition_driver",
         return_value=mock_driver,
     ):
         resp = client.post(
@@ -617,7 +617,7 @@ def test_manual_grab_driver_error_handling(app_and_client, test_db, test_config,
     mock_val_err = MagicMock()
     mock_val_err.download.side_effect = ValueError("Corrupt torrent file")
     with patch(
-        "plex_playlist_sync.api.routes.acquisition.get_acquisition_driver",
+        "trackseerr.api.routes.acquisition.get_acquisition_driver",
         return_value=mock_val_err,
     ):
         resp_400 = client.post("/api/acquisition/grab", headers=admin_headers, json=grab_payload)
@@ -628,7 +628,7 @@ def test_manual_grab_driver_error_handling(app_and_client, test_db, test_config,
     mock_gen_err = MagicMock()
     mock_gen_err.download.side_effect = RuntimeError("qBittorrent connection refused")
     with patch(
-        "plex_playlist_sync.api.routes.acquisition.get_acquisition_driver",
+        "trackseerr.api.routes.acquisition.get_acquisition_driver",
         return_value=mock_gen_err,
     ):
         resp_500 = client.post("/api/acquisition/grab", headers=admin_headers, json=grab_payload)

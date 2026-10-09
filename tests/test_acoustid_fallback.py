@@ -8,17 +8,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import library as library_mod
-from plex_playlist_sync.acquisition_worker import (
+from trackseerr import library as library_mod
+from trackseerr.acquisition_worker import (
     AcquisitionWorker,
     reconcile_audio_file_to_track,
     reconcile_audio_file_to_track_scored,
 )
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.models import (
     ActiveDownload,
     DownloadClientConfig,
     DownloadDriverType,
@@ -27,7 +27,7 @@ from plex_playlist_sync.models import (
     LibraryArtist,
     LibraryTrack,
 )
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr.storage import SCHEMA_VERSION, Database
 
 REC_1 = "11111111-1111-1111-1111-111111111111"
 REC_2 = "22222222-2222-2222-2222-222222222222"
@@ -264,9 +264,9 @@ def _run_import(db: Database, dl: Path, staging_dir: Path, meta: dict[str, Any],
     full_meta = {"artist": "Daft Punk", "album": "Discovery", "disc_number": 1, "codec": "FLAC",
                  "bits_per_sample": 16, "bitrate": 900, "sample_rate": 44100, "extension": ".flac", **meta}
     fp_mock = MagicMock(return_value=fp_result)
-    with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=driver), \
-         patch("plex_playlist_sync.acquisition_worker.inspect_audio_file", return_value=full_meta), \
-         patch("plex_playlist_sync.acquisition_worker.fingerprint_audio_file", fp_mock):
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_worker.inspect_audio_file", return_value=full_meta), \
+         patch("trackseerr.acquisition_worker.fingerprint_audio_file", fp_mock):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging_dir))
     return fp_mock
 
@@ -328,9 +328,9 @@ def test_worker_fingerprint_failure_holds_unmatched_file_for_manual_import(tmp_p
 
 
 def _fallback(settings, tracks, tag_track, strength, fp_result, caplog=None):
-    from plex_playlist_sync.acquisition_worker import _fingerprint_fallback_match
+    from trackseerr.acquisition_worker import _fingerprint_fallback_match
 
-    with patch("plex_playlist_sync.acquisition_worker.fingerprint_audio_file", return_value=fp_result) as m:
+    with patch("trackseerr.acquisition_worker.fingerprint_audio_file", return_value=fp_result) as m:
         return _fingerprint_fallback_match(Path("f.flac"), settings, tracks, tag_track, strength), m
 
 
@@ -368,7 +368,7 @@ def test_manual_fingerprint_route_returns_library_track(client, test_db, test_co
     audio = tmp_path / "x.flac"
     _create_minimal_flac(audio)
     fp = {"score": 0.97, "recording_id": REC_1, "title": "Karma Police", "artist": "Radiohead"}
-    with patch("plex_playlist_sync.api.routes.library.manual_import.fingerprint_audio_file", return_value=fp):
+    with patch("trackseerr.api.routes.library.manual_import.fingerprint_audio_file", return_value=fp):
         resp = client.post("/api/library/manual-import/fingerprint", json={"file_path": str(audio)}, headers=headers)
     assert resp.status_code == 200
     assert resp.json() == {
@@ -378,6 +378,6 @@ def test_manual_fingerprint_route_returns_library_track(client, test_db, test_co
     }
 
     fp2 = {**fp, "recording_id": "33333333-3333-3333-3333-333333333333"}
-    with patch("plex_playlist_sync.api.routes.library.manual_import.fingerprint_audio_file", return_value=fp2):
+    with patch("trackseerr.api.routes.library.manual_import.fingerprint_audio_file", return_value=fp2):
         resp = client.post("/api/library/manual-import/fingerprint", json={"file_path": str(audio)}, headers=headers)
     assert resp.json()["library_track"] is None

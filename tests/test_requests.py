@@ -5,13 +5,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import internal_auth
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_lidarr_client
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import MusicRequest, RequestStatus, UserPermission
-from plex_playlist_sync.storage import Database
+from trackseerr import internal_auth
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_lidarr_client
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.models import MusicRequest, RequestStatus, UserPermission
+from trackseerr.storage import Database
 
 
 @pytest.fixture

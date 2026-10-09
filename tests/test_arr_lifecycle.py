@@ -26,23 +26,23 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.acquisition_coordinator import (
+from trackseerr.acquisition_coordinator import (
     acquisition_coordinator,
     _to_quality_profile,
 )
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.backlog_worker import WantedBacklogWorker, RSSSyncWorker
-from plex_playlist_sync.clients.acquisition.base import AcquisitionDriver
-from plex_playlist_sync.clients.acquisition.qbittorrent import QbittorrentDriver
-from plex_playlist_sync.clients.acquisition.sabnzbd import SabnzbdDriver
-from plex_playlist_sync.clients.acquisition.slskd import SlskdDriver
-from plex_playlist_sync.config import Config
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.backlog_worker import WantedBacklogWorker, RSSSyncWorker
+from trackseerr.clients.acquisition.base import AcquisitionDriver
+from trackseerr.clients.acquisition.qbittorrent import QbittorrentDriver
+from trackseerr.clients.acquisition.sabnzbd import SabnzbdDriver
+from trackseerr.clients.acquisition.slskd import SlskdDriver
+from trackseerr.config import Config
 from tests.audio_fixtures import write_flac, write_mp3
-from plex_playlist_sync.library import extract_archive, is_archive_file
-from plex_playlist_sync.models import (
+from trackseerr.library import extract_archive, is_archive_file
+from trackseerr.models import (
     AcquisitionSearchResult,
     ActiveDownload,
     DownloadClientConfig,
@@ -51,7 +51,7 @@ from plex_playlist_sync.models import (
     MusicRequest,
     RequestStatus,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 
 # ---------------------------------------------------------------------------
@@ -651,7 +651,7 @@ class TestAcquisitionWorkerCutoffAndCleanup:
         }
 
         worker = AcquisitionWorker()
-        with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+        with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
             stats = worker.poll_once(db=test_db, staging_dir=str(staging))
 
             assert stats["imported"] == 1
@@ -720,7 +720,7 @@ class TestAcquisitionWorkerCutoffAndCleanup:
         }
 
         worker = AcquisitionWorker()
-        with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+        with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
             stats = worker.poll_once(db=test_db, staging_dir=str(staging))
             assert stats["imported"] == 1
 
@@ -779,7 +779,7 @@ class TestAcquisitionWorkerCutoffAndCleanup:
         mock_driver.cleanup_completed.return_value = True
 
         worker = AcquisitionWorker()
-        with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+        with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
             stats = worker.poll_once(db=test_db, staging_dir=str(staging))
             assert stats["imported"] == 1
 
@@ -824,7 +824,7 @@ class TestAcquisitionWorkerCutoffAndCleanup:
             "content_path": str(audio_file), "error_message": None,
         }
         mock_driver.cleanup_completed.return_value = True
-        with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+        with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
             stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(staging))
         assert stats["imported"] == 1
         mock_driver.cleanup_completed.assert_called_once_with("hash-del", delete_files=expected_delete)
@@ -878,7 +878,7 @@ class TestAcquisitionWorkerCutoffAndCleanup:
         }
 
         worker = AcquisitionWorker()
-        with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+        with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
             stats = worker.poll_once(db=test_db, staging_dir=str(staging))
             assert stats["imported"] == 1
             mock_driver.cleanup_completed.assert_not_called()
@@ -931,7 +931,7 @@ class TestAcquisitionWorkerCutoffAndCleanup:
         }
 
         worker = AcquisitionWorker()
-        with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+        with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
             stats = worker.poll_once(db=test_db, staging_dir=str(staging))
             assert stats["imported"] == 1
 
@@ -1138,8 +1138,8 @@ class TestBacklogAndRSSQualityUpgrades:
         mock_client = MagicMock()
         mock_client.download.return_value = "grabbed_hash_1"
 
-        with patch("plex_playlist_sync.backlog_worker.get_indexer_driver", return_value=mock_idx), \
-             patch("plex_playlist_sync.backlog_worker.get_acquisition_driver", return_value=mock_client):
+        with patch("trackseerr.backlog_worker.get_indexer_driver", return_value=mock_idx), \
+             patch("trackseerr.backlog_worker.get_acquisition_driver", return_value=mock_client):
 
             stats = worker.poll_once(test_db)
             assert stats["releases_scanned"] == 1
@@ -1158,8 +1158,8 @@ class TestBacklogAndRSSQualityUpgrades:
         )
         mock_idx.fetch_recent.return_value = [cand_higher]
 
-        with patch("plex_playlist_sync.backlog_worker.get_indexer_driver", return_value=mock_idx), \
-             patch("plex_playlist_sync.backlog_worker.get_acquisition_driver", return_value=mock_client):
+        with patch("trackseerr.backlog_worker.get_indexer_driver", return_value=mock_idx), \
+             patch("trackseerr.backlog_worker.get_acquisition_driver", return_value=mock_client):
 
             stats = worker.poll_once(test_db)
             assert stats["releases_scanned"] == 1
@@ -1214,7 +1214,7 @@ class TestBacklogAndRSSQualityUpgrades:
         mock_idx = MagicMock()
         mock_idx.fetch_recent.return_value = [cand_higher]
 
-        with patch("plex_playlist_sync.backlog_worker.get_indexer_driver", return_value=mock_idx):
+        with patch("trackseerr.backlog_worker.get_indexer_driver", return_value=mock_idx):
             stats = worker.poll_once(test_db)
             # When enable_quality_upgrades is False, wanted_requests is empty so no scan needed
             assert stats["releases_scanned"] == 0

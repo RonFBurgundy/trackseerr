@@ -4,10 +4,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from plex_playlist_sync.acquisition_coordinator import acquisition_coordinator
-from plex_playlist_sync.backlog_worker import ReplacementSpec, backlog_worker
-from plex_playlist_sync.models import AcquisitionSearchResult, DownloadClientConfig, IndexerConfig
-from plex_playlist_sync.storage import Database
+from trackseerr.acquisition_coordinator import acquisition_coordinator
+from trackseerr.backlog_worker import ReplacementSpec, backlog_worker
+from trackseerr.models import AcquisitionSearchResult, DownloadClientConfig, IndexerConfig
+from trackseerr.storage import Database
 
 SAME_QUALITY_RELEASE = "Beta - Low Quality [FLAC]"
 
@@ -114,7 +114,7 @@ class TestReplacementEndToEnd:
         driver.download.return_value = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         with patch.object(
             acquisition_coordinator, "search_all_indexers", return_value=[candidate or self._candidate()]
-        ), patch("plex_playlist_sync.acquisition_coordinator.get_acquisition_driver", return_value=driver):
+        ), patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=driver):
             _run(db, replacement)
         return driver
 

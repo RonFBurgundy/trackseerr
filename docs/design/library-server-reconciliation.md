@@ -9,7 +9,7 @@ Users with large libraries can't see that their media server silently skipped fi
 Totals are shown for context only. The finding unit is a **file**: every audio file under the music root that the selected media server does not index, and every server entry whose file no longer exists.
 
 ### Adapter capability
-`MediaServer` (`plex_playlist_sync/media_servers/base.py`) gains one optional method and a capability flag:
+`MediaServer` (`trackseerr/media_servers/base.py`) gains one optional method and a capability flag:
 
 - `iter_library_files() -> Iterator[ServerFileRef]` — `ServerFileRef(server_id, path, title, artist, album, container)`. Paged, generator-based, so a 50k-track library never sits in memory twice.
 - `ServerCapabilities.file_paths: bool` — false when the server can't expose paths. The feature then shows a one-line notice instead of a blank page (no dead pages).

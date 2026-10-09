@@ -39,7 +39,7 @@ def main(argv: list[str]) -> int:
         os.environ["CONFIG_DIR"] = tmp
         os.environ["ROLE"] = "all-in-one"
         os.environ.pop("ENABLE_API_DOCS", None)
-        from plex_playlist_sync.api.app import create_app
+        from trackseerr.api.app import create_app
 
         schema = _dedupe_operation_ids(create_app().openapi())
     text = json.dumps(schema, sort_keys=True, indent=2, ensure_ascii=False) + "\n"

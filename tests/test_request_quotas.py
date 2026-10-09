@@ -1,6 +1,6 @@
 """Per-type request quotas, discography batches, per-type auto-approve and the v28 migration."""
 
-from plex_playlist_sync.storage import SCHEMA_VERSION
+from trackseerr.storage import SCHEMA_VERSION
 import json
 import threading
 import time
@@ -12,19 +12,19 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.core_client import CoreClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import MusicRequest, RequestStatus, UserPermission
-from plex_playlist_sync.request_submission import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.core_client import CoreClient
+from trackseerr.config import Config
+from trackseerr.models import MusicRequest, RequestStatus, UserPermission
+from trackseerr.request_submission import (
     RequestRejected,
     effective_quota_limits,
     submit_batch_requests,
     submit_track_request,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 SECRET = "s" * 40
 REQ = int(UserPermission.REQUEST)
@@ -614,7 +614,7 @@ def test_gateway_relays_core_quota_refusal_and_validation(db, tmp_path):
 
 
 def test_forwarded_request_to_core_uses_core_quotas_and_bits(db, tmp_path):
-    from plex_playlist_sync import internal_auth
+    from trackseerr import internal_auth
 
     internal_auth._nonce_cache.clear()
     cfg = Config(

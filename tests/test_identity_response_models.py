@@ -12,12 +12,12 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import internal_auth, local_auth
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_media_client, require_media_server
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr import internal_auth, local_auth
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_media_client, require_media_server
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 SECRET = "s" * 40
 PW = "correct horse battery staple"
@@ -95,12 +95,12 @@ def _local_user(db: Database, username: str = "bob") -> dict[str, Any]:
 
 def test_plex_pin_and_verify(client, db):
     pin = {"id": 99, "code": "ABCD", "auth_url": "https://app.plex.tv/auth#?code=ABCD"}
-    with patch("plex_playlist_sync.api.routes.auth.create_plex_pin", return_value=pin):
+    with patch("trackseerr.api.routes.auth.create_plex_pin", return_value=pin):
         assert _ok(client.post("/api/auth/plex/pin", json={})) == pin
     with (
-        patch("plex_playlist_sync.api.routes.auth.check_plex_pin", return_value="plex-tok"),
-        patch("plex_playlist_sync.api.routes.auth.verify_server_access", return_value=(True, False)),
-        patch("plex_playlist_sync.api.routes.auth.get_plex_user", return_value={"id": "2002", "username": "carol", "email": "c@x.tv"}),
+        patch("trackseerr.api.routes.auth.check_plex_pin", return_value="plex-tok"),
+        patch("trackseerr.api.routes.auth.verify_server_access", return_value=(True, False)),
+        patch("trackseerr.api.routes.auth.get_plex_user", return_value={"id": "2002", "username": "carol", "email": "c@x.tv"}),
     ):
         body = _ok(client.post("/api/auth/plex/verify", json={"pin_id": 99, "target_machine_id": "m1"}))
     assert body["token"] and body["user"]["username"] == "carol" and body["user"]["is_admin"] is False
@@ -140,11 +140,11 @@ def test_account_profile_password_and_mfa(client, db, config):
     # a fresh TOTP counter is required for each re-auth: step forward one period
     import time
     nxt = local_auth.totp_code(setup["secret"], for_time=time.time() + 30)
-    with patch("plex_playlist_sync.local_auth.time.time", return_value=time.time() + 30):
+    with patch("trackseerr.local_auth.time.time", return_value=time.time() + 30):
         regen = _ok(client.post("/api/account/mfa/recovery-codes", json={"password": PW, "code": nxt}, headers=h))
     assert regen["recovery_codes"]
     nxt2 = local_auth.totp_code(setup["secret"], for_time=time.time() + 60)
-    with patch("plex_playlist_sync.local_auth.time.time", return_value=time.time() + 60):
+    with patch("trackseerr.local_auth.time.time", return_value=time.time() + 60):
         assert _ok(client.post("/api/account/mfa/disable", json={"password": PW, "code": nxt2}, headers=h)) == {"status": "success"}
     changed = _ok(client.post("/api/account/password", json={"current_password": PW, "new_password": PW + " again"}, headers=h))
     assert changed == {"status": "success"}
@@ -175,8 +175,8 @@ def test_users_me_list_update_refresh(client, db, admin, alice):
     app.dependency_overrides[get_media_client] = lambda: object()
     app.dependency_overrides[require_media_server] = lambda: None
     try:
-        with patch("plex_playlist_sync.api.routes.users.as_media_server", return_value=FakeServer()), patch(
-            "plex_playlist_sync.api.routes.users.import_server_users", return_value=(0, 0)
+        with patch("trackseerr.api.routes.users.as_media_server", return_value=FakeServer()), patch(
+            "trackseerr.api.routes.users.import_server_users", return_value=(0, 0)
         ):
             assert len(_ok(client.post("/api/users/refresh", headers=admin))) == 2
     finally:

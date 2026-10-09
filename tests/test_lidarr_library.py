@@ -8,14 +8,14 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import lidarr_library
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.library_manager import ModeChanged
-from plex_playlist_sync.list_index import NULL_LABEL, group_label_for_name
-from plex_playlist_sync.storage import Database
+from trackseerr import lidarr_library
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.library_manager import ModeChanged
+from trackseerr.list_index import NULL_LABEL, group_label_for_name
+from trackseerr.storage import Database
 
 API_KEY = "lidarr-secret-key-abcdef123456"
 NATIVE_ONLY = "Not available while Lidarr manages the library"
@@ -132,7 +132,7 @@ class Lidarr:
     def __init__(self, test_db):
         test_db.update_lidarr_settings({"url": "http://lidarr.test:8686", "api_key": API_KEY})
         test_db.update_media_management_settings({"library_mode": "lidarr"})
-        self.patcher = patch("plex_playlist_sync.clients.lidarr.httpx.Client")
+        self.patcher = patch("trackseerr.clients.lidarr.httpx.Client")
         self.http = self.patcher.start().return_value.__enter__.return_value
         self.calls: list[tuple[str, str]] = []
         self.artists = [dict(a) for a in ARTISTS]
@@ -316,7 +316,7 @@ class TestPagedAndIndex:
         assert api.get("/api/library/albums/index?sort_dir=sideways", headers=admin_h).status_code == 422
 
     def test_native_mode_never_contacts_lidarr(self, api, admin_h, test_db):
-        patcher = patch("plex_playlist_sync.clients.lidarr.httpx.Client")
+        patcher = patch("trackseerr.clients.lidarr.httpx.Client")
         cls = patcher.start()
         try:
             test_db.update_lidarr_settings({"url": "http://lidarr.test:8686", "api_key": API_KEY})
@@ -490,7 +490,7 @@ class TestImages:
         assert api.get("/api/library/artists/99999/image", headers=admin_h).status_code == 404
 
     def test_client_rejects_unsafe_file_names(self):
-        from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient
+        from trackseerr.clients.lidarr import LidarrApiError, LidarrClient
 
         client = LidarrClient("http://lidarr.test:8686", API_KEY)
         for name in ("../x.jpg", "a/b.jpg", "x.svg", "x.jpg?y=1", ""):
@@ -606,14 +606,14 @@ class TestDetailAndActions:
         assert lidarr.calls == []
 
     def test_mutations_run_under_lidarr_work_guard(self, api, admin_h, lidarr):
-        with patch("plex_playlist_sync.api.routes.library._shared.work_guard") as guard:
+        with patch("trackseerr.api.routes.library._shared.work_guard") as guard:
             guard.return_value.__enter__.return_value = None
             guard.return_value.__exit__.return_value = False
             assert api.post("/api/library/albums/105/search", headers=admin_h).status_code == 200
             assert guard.call_args.args[1] == "lidarr"
 
     def test_mode_change_is_409_and_sends_nothing(self, api, admin_h, lidarr):
-        with patch("plex_playlist_sync.api.routes.library._shared.work_guard", side_effect=ModeChanged("lidarr", "native")):
+        with patch("trackseerr.api.routes.library._shared.work_guard", side_effect=ModeChanged("lidarr", "native")):
             for method, path, kw in (
                 ("put", "/api/library/artists/2/monitored", {"json": {"monitored": True}}),
                 ("put", "/api/library/albums/101/monitored", {"json": {"monitored": True}}),
@@ -767,7 +767,7 @@ class TestAuthAndFailures:
 # ------------------------------------------------------------------------------- security hardening (audit)
 
 
-from plex_playlist_sync.clients.lidarr import COVER_CONTENT_TYPES, LidarrApiError, LidarrClient  # noqa: E402
+from trackseerr.clients.lidarr import COVER_CONTENT_TYPES, LidarrApiError, LidarrClient  # noqa: E402
 
 
 def _img(api, h, path="/api/library/artists/1/image", headers=None):
@@ -819,7 +819,7 @@ class TestCoverProxyHardening:
     def test_deadline_exceeded(self, api, admin_h, lidarr):
         lidarr.stream_image()
         ticks = iter([0.0, 6.0, 12.0, 18.0, 24.0])
-        with patch("plex_playlist_sync.clients.lidarr._monotonic", lambda: next(ticks)):
+        with patch("trackseerr.clients.lidarr._monotonic", lambda: next(ticks)):
             res = _img(api, admin_h)
         assert res.status_code == 502 and "timed out" in res.json()["detail"]
 
@@ -879,7 +879,7 @@ class TestCoverProxyHardening:
 
     def test_client_fetch_returns_validator(self):
         client = LidarrClient("http://lidarr.test:8686", API_KEY)
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as cls:
+        with patch("trackseerr.clients.lidarr.httpx.Client") as cls:
             resp = MagicMock(status_code=200, headers={"content-type": "image/png", "last-modified": "Mon"})
             resp.iter_bytes.return_value = iter([b"abc"])
             cls.return_value.__enter__.return_value.stream.return_value.__enter__.return_value = resp
@@ -894,7 +894,7 @@ class TestCoverProxyHardening:
         (folder / "artist.png").write_bytes(b"\x89PNG")
         artist = {"id": "n1", "name": "Nat", "path": str(folder)}
         with patch.object(Database, "get_library_artist", return_value=artist), patch(
-            "plex_playlist_sync.api.routes.library._shared.validate_media_path", return_value=folder
+            "trackseerr.api.routes.library._shared.validate_media_path", return_value=folder
         ):
             res = _img(api, admin_h, "/api/library/artists/n1/image")
         assert res.status_code == 200 and res.headers["content-type"] == "image/png"
@@ -986,27 +986,27 @@ class TestInvalidationTriggers:
         assert lidarr.count("/api/v1/artist") == 2
 
     def test_mode_switch(self, api, admin_h, lidarr, test_db):
-        from plex_playlist_sync import library_manager
+        from trackseerr import library_manager
 
         self._warm(api, admin_h, lidarr)
         library_manager.switch_mode(test_db, "native", "test")
         assert lidarr_library._entries == {}
 
     def test_acquisition_adapter_add(self):
-        from plex_playlist_sync.clients.acquisition.lidarr_adapter import LidarrAdapter
-        from plex_playlist_sync.models import AcquisitionSearchResult
+        from trackseerr.clients.acquisition.lidarr_adapter import LidarrAdapter
+        from trackseerr.models import AcquisitionSearchResult
 
         client = self._client_with_entry()
         adapter = LidarrAdapter("http://lidarr.test:8686", API_KEY)
         adapter.client = MagicMock()
         adapter.client.add_artist_and_albums.return_value = {"status": "success"}
         result = MagicMock(spec=AcquisitionSearchResult, artist="X", album="Y", title="Y", item_type="album")
-        with patch("plex_playlist_sync.clients.acquisition.lidarr_adapter.is_safe_service_url", return_value=True):
+        with patch("trackseerr.clients.acquisition.lidarr_adapter.is_safe_service_url", return_value=True):
             adapter.download(result)
         assert lidarr_library._entries == {} and client
 
     def test_trickle_worker_add(self, test_db):
-        from plex_playlist_sync.lidarr_queue import lidarr_worker
+        from trackseerr.lidarr_queue import lidarr_worker
 
         self._client_with_entry()
         mock_client = MagicMock()
@@ -1062,8 +1062,8 @@ class TestGatewayDenial:
     @pytest.mark.parametrize("pattern", ["/artists/{artist_id}", "/albums/{album_id}", "/artists/{artist_id}/image",
                                          "/artists/{artist_id}/banner", "/albums/{album_id}/cover"])
     def test_route_depends_on_require_core_tier(self, pattern):
-        from plex_playlist_sync.api.dependencies import require_core_tier
-        from plex_playlist_sync.api.routes.library import router
+        from trackseerr.api.dependencies import require_core_tier
+        from trackseerr.api.routes.library import router
 
         def _walk(r_list):
             for r in r_list:
@@ -1084,7 +1084,7 @@ class TestGatewayDenial:
     def test_dependency_denies_gateway_role_directly(self, tmp_path):
         from fastapi import HTTPException
 
-        from plex_playlist_sync.api.dependencies import require_core_tier
+        from trackseerr.api.dependencies import require_core_tier
 
         cfg = Config(plex_url="http://p", plex_token="t", data_dir=str(tmp_path), role="gateway",
                      internal_core_secret="s" * 40, trackseerr_core_url="http://core.internal:5251")

@@ -6,10 +6,10 @@ client that settles in that window and trusts the flag skips the PUT and ends wi
 
 from unittest.mock import patch
 
-from plex_playlist_sync.clients.lidarr import LidarrClient
+from trackseerr.clients.lidarr import LidarrClient
 from tests.lidarr_fake import FakeLidarr, metadata_profile
 
-HTTPX = "plex_playlist_sync.clients.lidarr.httpx.Client"
+HTTPX = "trackseerr.clients.lidarr.httpx.Client"
 SONG = "Bohemian Rhapsody"
 WANT = [{"album": "", "title": SONG, "item_type": "track"}]
 
@@ -36,7 +36,7 @@ def new_artist_fake() -> FakeLidarr:
 
 
 def add(fake: FakeLidarr, attempts: int):
-    with patch(HTTPX, fake), patch("plex_playlist_sync.clients.lidarr.time.sleep"):
+    with patch(HTTPX, fake), patch("trackseerr.clients.lidarr.time.sleep"):
         return client_for().add_artist_and_albums("Queen", wants=WANT, album_wait_attempts=attempts)
 
 
@@ -90,7 +90,7 @@ class TestZeroTypesProfile:
             item["allowed"] = False
         fake.metadata_profiles = [metadata_profile(1, "Standard"), none_profile]
         fake.albums = []
-        with patch(HTTPX, fake), patch("plex_playlist_sync.clients.lidarr.time.sleep") as sleep:
+        with patch(HTTPX, fake), patch("trackseerr.clients.lidarr.time.sleep") as sleep:
             res = client_for().add_artist_and_albums("Queen", wants=WANT, album_wait_attempts=6)
         assert res["status"] == "not_in_metadata_profile"
         assert res["added"] is True

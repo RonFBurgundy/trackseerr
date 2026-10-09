@@ -109,14 +109,14 @@ def library_copy(pristine_root: Path, tmp_path: Path) -> Path:
 @contextmanager
 def no_background_hydration() -> Iterator[None]:
     """The scanner launches a daemon thread that hydrates new artists from MusicBrainz/Deezer. Never in tests."""
-    from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
+    from trackseerr.artist_refresh_worker import artist_refresh_worker
 
     with patch.object(artist_refresh_worker, "refresh_once", lambda *a, **k: {}):
         yield
 
 
 def run_scan(db, root: Path, **kwargs) -> dict:
-    from plex_playlist_sync.library_scanner import LibraryScanner
+    from trackseerr.library_scanner import LibraryScanner
 
     with no_background_hydration():
         return LibraryScanner().scan(db, root_folder=str(root), **kwargs)
@@ -136,7 +136,7 @@ def snapshot(db) -> dict:
 
 @pytest.fixture
 def db(tmp_path: Path):
-    from plex_playlist_sync.storage import Database
+    from trackseerr.storage import Database
 
     database = Database(str(tmp_path / "local_media.db"))
     yield database
@@ -146,7 +146,7 @@ def db(tmp_path: Path):
 @pytest.fixture(scope="session")
 def scanned_pristine(pristine_root: Path, tmp_path_factory: pytest.TempPathFactory):
     """Database + scan status from ONE scan of the shared mini library. Read-only for tests."""
-    from plex_playlist_sync.storage import Database
+    from trackseerr.storage import Database
 
     database = Database(str(tmp_path_factory.mktemp("pristine_db") / "scan.db"))
     status = run_scan(database, pristine_root)
@@ -180,10 +180,10 @@ def api(db, tmp_path: Path):
 
     from fastapi.testclient import TestClient
 
-    from plex_playlist_sync.api.app import create_app
-    from plex_playlist_sync.api.dependencies import get_config, get_db, get_plex_client
-    from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-    from plex_playlist_sync.config import Config
+    from trackseerr.api.app import create_app
+    from trackseerr.api.dependencies import get_config, get_db, get_plex_client
+    from trackseerr.auth import create_session_token, get_or_create_secret_key
+    from trackseerr.config import Config
 
     config = Config(plex_url="http://127.0.0.1:32400", plex_token="test-token", data_dir=str(tmp_path / "cfg"))
     (tmp_path / "cfg").mkdir(exist_ok=True)

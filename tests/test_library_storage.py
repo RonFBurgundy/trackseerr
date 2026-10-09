@@ -5,14 +5,14 @@ from typing import Any
 
 import pytest
 
-from plex_playlist_sync.models import (
+from trackseerr.models import (
     LibraryAlbum,
     LibraryArtist,
     LibraryFile,
     LibraryMode,
     LibraryTrack,
 )
-from plex_playlist_sync.storage import Database, clean_library_name
+from trackseerr.storage import Database, clean_library_name
 
 
 @pytest.fixture

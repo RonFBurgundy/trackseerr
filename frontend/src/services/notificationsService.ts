@@ -28,8 +28,8 @@ export async function updateNotificationChannel(
 
 export async function deleteNotificationChannel(
   id: string
-): Promise<Schema<'plex_playlist_sync__api__schemas__notifications__DeletedResponse'>> {
-  return apiRequest<Schema<'plex_playlist_sync__api__schemas__notifications__DeletedResponse'>>(
+): Promise<Schema<'trackseerr__api__schemas__notifications__DeletedResponse'>> {
+  return apiRequest<Schema<'trackseerr__api__schemas__notifications__DeletedResponse'>>(
     `${BASE}/${encodeURIComponent(id)}`,
     { method: 'DELETE' }
   );

@@ -242,7 +242,7 @@ To go back, set `ROLE=all-in-one` on the core and remove the gateway.
 To build the files from your current single container, run it inside that container:
 
 ```bash
-docker exec -it trackseerr python -m plex_playlist_sync init-dmz \
+docker exec -it trackseerr python -m trackseerr init-dmz \
   --from-existing --public-url https://music.example.com --out /config/dmz
 ```
 

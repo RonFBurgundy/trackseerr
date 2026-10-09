@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from plex_playlist_sync.auth import (
+from trackseerr.auth import (
     PlexAuthError,
     check_plex_pin,
     create_plex_pin,
@@ -23,7 +23,7 @@ from plex_playlist_sync.auth import (
 class TestPlexPinCreation:
     """Tests for create_plex_pin."""
 
-    @patch("plex_playlist_sync.auth.requests.post")
+    @patch("trackseerr.auth.requests.post")
     def test_create_plex_pin_success(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 201
@@ -48,7 +48,7 @@ class TestPlexPinCreation:
         assert call_headers["X-Plex-Client-Identifier"] == "trackseerr"
         assert call_headers["Accept"] == "application/json"
 
-    @patch("plex_playlist_sync.auth.requests.post")
+    @patch("trackseerr.auth.requests.post")
     def test_create_plex_pin_custom_client(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -63,7 +63,7 @@ class TestPlexPinCreation:
         call_headers = mock_post.call_args[1]["headers"]
         assert call_headers["X-Plex-Client-Identifier"] == "custom-app"
 
-    @patch("plex_playlist_sync.auth.requests.post")
+    @patch("trackseerr.auth.requests.post")
     def test_create_plex_pin_with_forward_url(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -76,7 +76,7 @@ class TestPlexPinCreation:
         assert result["code"] == "ABCD"
         assert "forwardUrl=https%3A%2F%2Ftrackseerr.local%2Fcallback%3Fpin_id%3D12345" in result["auth_url"]
 
-    @patch("plex_playlist_sync.auth.requests.post")
+    @patch("trackseerr.auth.requests.post")
     def test_create_plex_pin_missing_fields_raises(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -86,7 +86,7 @@ class TestPlexPinCreation:
         with pytest.raises(PlexAuthError, match="missing 'id' or 'code'"):
             create_plex_pin()
 
-    @patch("plex_playlist_sync.auth.requests.post")
+    @patch("trackseerr.auth.requests.post")
     def test_create_plex_pin_http_error_raises(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 500
@@ -100,7 +100,7 @@ class TestPlexPinCreation:
 class TestCheckPlexPin:
     """Tests for check_plex_pin."""
 
-    @patch("plex_playlist_sync.auth.requests.get")
+    @patch("trackseerr.auth.requests.get")
     def test_check_plex_pin_claimed_returns_token(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -114,7 +114,7 @@ class TestCheckPlexPin:
         token = check_plex_pin(12345)
         assert token == "test-plex-auth-token-12345"
 
-    @patch("plex_playlist_sync.auth.requests.get")
+    @patch("trackseerr.auth.requests.get")
     def test_check_plex_pin_pending_returns_none(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -128,7 +128,7 @@ class TestCheckPlexPin:
         token = check_plex_pin(12345)
         assert token is None
 
-    @patch("plex_playlist_sync.auth.requests.get")
+    @patch("trackseerr.auth.requests.get")
     def test_check_plex_pin_not_found_returns_none(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 404
@@ -141,7 +141,7 @@ class TestCheckPlexPin:
         with pytest.raises(ValueError, match="Invalid pin_id"):
             check_plex_pin("not-an-int")  # type: ignore[arg-type]
 
-    @patch("plex_playlist_sync.auth.requests.get")
+    @patch("trackseerr.auth.requests.get")
     def test_check_plex_pin_http_error_raises(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 500
@@ -155,7 +155,7 @@ class TestCheckPlexPin:
 class TestGetPlexUser:
     """Tests for get_plex_user."""
 
-    @patch("plex_playlist_sync.auth.requests.get")
+    @patch("trackseerr.auth.requests.get")
     def test_get_plex_user_success(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -176,7 +176,7 @@ class TestGetPlexUser:
         call_headers = mock_get.call_args[1]["headers"]
         assert call_headers["X-Plex-Token"] == "valid-token"
 
-    @patch("plex_playlist_sync.auth.requests.get")
+    @patch("trackseerr.auth.requests.get")
     def test_get_plex_user_unauthorized_raises(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 401
@@ -194,7 +194,7 @@ class TestGetPlexUser:
 class TestVerifyServerAccess:
     """Tests for verify_server_access."""
 
-    @patch("plex_playlist_sync.auth.requests.get")
+    @patch("trackseerr.auth.requests.get")
     def test_verify_server_access_owner(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -216,7 +216,7 @@ class TestVerifyServerAccess:
         assert has_access is True
         assert is_owner is True
 
-    @patch("plex_playlist_sync.auth.requests.get")
+    @patch("trackseerr.auth.requests.get")
     def test_verify_server_access_shared_user(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -233,7 +233,7 @@ class TestVerifyServerAccess:
         assert has_access is True
         assert is_owner is False
 
-    @patch("plex_playlist_sync.auth.requests.get")
+    @patch("trackseerr.auth.requests.get")
     def test_verify_server_access_unauthorized_outsider(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -250,7 +250,7 @@ class TestVerifyServerAccess:
         assert has_access is False
         assert is_owner is False
 
-    @patch("plex_playlist_sync.auth.requests.get")
+    @patch("trackseerr.auth.requests.get")
     def test_verify_server_access_dict_resources_format(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -269,7 +269,7 @@ class TestVerifyServerAccess:
         assert has_access is True
         assert is_owner is True
 
-    @patch("plex_playlist_sync.auth.requests.get")
+    @patch("trackseerr.auth.requests.get")
     def test_verify_server_access_http_error_returns_false(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 401
@@ -468,7 +468,7 @@ class TestAuthEdgeCases:
     """Tests for edge cases and input validation in auth module."""
 
     def test_sanitize_header_value_invalid_inputs(self):
-        from plex_playlist_sync.auth import _sanitize_header_value
+        from trackseerr.auth import _sanitize_header_value
 
         with pytest.raises(ValueError, match="Header value must be a string"):
             _sanitize_header_value(123)  # type: ignore[arg-type]
@@ -476,13 +476,13 @@ class TestAuthEdgeCases:
         with pytest.raises(ValueError, match="Header value cannot be empty"):
             _sanitize_header_value("   \r\n\t  ")
 
-    @patch("plex_playlist_sync.auth.requests.get")
+    @patch("trackseerr.auth.requests.get")
     def test_check_plex_pin_network_error(self, mock_get):
         mock_get.side_effect = requests.ConnectionError("Connection failed")
         with pytest.raises(PlexAuthError, match="Network error querying Plex PIN"):
             check_plex_pin(12345)
 
-    @patch("plex_playlist_sync.auth.requests.get")
+    @patch("trackseerr.auth.requests.get")
     def test_verify_server_access_network_error(self, mock_get):
         mock_get.side_effect = requests.ConnectionError("Connection timeout")
         assert verify_server_access("token", "machine-id") == (False, False)
@@ -492,7 +492,7 @@ class TestAuthEdgeCases:
             with pytest.raises(OSError, match="Disk write error"):
                 get_or_create_secret_key(data_dir=str(tmp_path))
 
-    @patch("plex_playlist_sync.auth.requests.get")
+    @patch("trackseerr.auth.requests.get")
     def test_check_plex_pin_http_404_error(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 404

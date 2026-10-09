@@ -9,20 +9,20 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import (
     get_config,
     get_db,
     get_discovery_client,
     get_plex_client,
 )
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.discovery import DiscoveryClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.mix_worker import MixWorker, is_due
-from plex_playlist_sync.models import RequestStatus, SyncResult, UserPermission
-from plex_playlist_sync.storage import Database
-from plex_playlist_sync.tailored_mixes import (
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.discovery import DiscoveryClient
+from trackseerr.config import Config
+from trackseerr.mix_worker import MixWorker, is_due
+from trackseerr.models import RequestStatus, SyncResult, UserPermission
+from trackseerr.storage import Database
+from trackseerr.tailored_mixes import (
     InsufficientHistoryError,
     compile_user_mix,
     generate_and_sync,
@@ -294,8 +294,8 @@ def gen_env(db, users, config):
 
 
 def run_generate(env, mix, plex, missing=()):
-    with patch("plex_playlist_sync.tailored_mixes.get_item_availability", side_effect=avail_fn(missing)), patch(
-        "plex_playlist_sync.request_submission.acquisition_coordinator"
+    with patch("trackseerr.tailored_mixes.get_item_availability", side_effect=avail_fn(missing)), patch(
+        "trackseerr.request_submission.acquisition_coordinator"
     ) as coord:
         coord.search_and_grab.return_value = {"success": False}
         res = generate_and_sync(env.db, plex, env.disc, mix, env.config)
@@ -421,7 +421,7 @@ class TestWorker:
                 raise RuntimeError("boom")
 
         worker = MixWorker()
-        with patch("plex_playlist_sync.mix_worker.generate_and_sync", side_effect=fake_gen):
+        with patch("trackseerr.mix_worker.generate_and_sync", side_effect=fake_gen):
             out = worker.run_iteration(db, config, None, FakeDiscovery())
         assert set(calls) == {bad["id"], good["id"]}
         assert out == {"due": 2, "generated": 1, "errors": 1}
@@ -434,7 +434,7 @@ class TestWorker:
         assert out == {"due": 1, "generated": 0, "errors": 0}
         recent = make_mix(db, uid, name="Recent", mix_type="daily_blend")
         db.record_mix_result(recent["id"], "{}")
-        with patch("plex_playlist_sync.mix_worker.generate_and_sync") as gen:
+        with patch("trackseerr.mix_worker.generate_and_sync") as gen:
             worker.run_iteration(db, config, None, FakeDiscovery(), now=NOW + timedelta(hours=1))
         assert recent["id"] not in [c.args[3]["id"] for c in gen.call_args_list]
 
@@ -443,7 +443,7 @@ class TestWorker:
         recent = make_mix(db, uid, name="Recent", mix_type="daily_blend")
         db.record_mix_result(recent["id"], "{}")
         worker = MixWorker()
-        with patch("plex_playlist_sync.mix_worker.generate_and_sync") as gen:
+        with patch("trackseerr.mix_worker.generate_and_sync") as gen:
             worker.run_iteration(db, config, None, FakeDiscovery(), now=NOW + timedelta(hours=1), force=True)
         assert recent["id"] in [c.args[3]["id"] for c in gen.call_args_list]
 
@@ -453,7 +453,7 @@ class TestWorker:
         worker = MixWorker()
         assert worker._discovery is None
         with patch.object(worker, "_get_plex", return_value=None), \
-             patch("plex_playlist_sync.mix_worker.generate_and_sync") as gen:
+             patch("trackseerr.mix_worker.generate_and_sync") as gen:
             out = worker.run_now(db, config)
         assert out["generated"] == 1
         assert worker._discovery is not None
@@ -551,7 +551,7 @@ class TestApi:
         assert api.delete(f"/api/mixes/{mix['id']}", headers=h).status_code == 204
 
     def test_forwarded_principal_is_not_admin(self, db, users):
-        from plex_playlist_sync.api.routes.mixes import _is_admin
+        from trackseerr.api.routes.mixes import _is_admin
 
         assert _is_admin({"is_admin": True}) is True
         assert _is_admin({"is_admin": True, "forwarded": True}) is False
@@ -575,7 +575,7 @@ class TestApi:
         mix = make_mix(db, users["alice"]["id"], track_count=10)
         h = api.h["alice"]
         assert api.get(f"/api/mixes/{mix['id']}/result", headers=h).status_code == 404
-        with patch("plex_playlist_sync.tailored_mixes.get_item_availability", side_effect=avail_fn()):
+        with patch("trackseerr.tailored_mixes.get_item_availability", side_effect=avail_fn()):
             r = api.post(f"/api/mixes/{mix['id']}/generate", headers=h)
         assert r.status_code == 202 and r.json() == {"status": "queued"}
         res = api.get(f"/api/mixes/{mix['id']}/result", headers=h)
@@ -621,7 +621,7 @@ class TestMixRequestPolicy:
     def test_existing_active_requests_count_against_quota(self, gen_env):
         db = gen_env.db
         db.update_user_governance(gen_env.uid, request_limit_quota=1)
-        from plex_playlist_sync.models import MusicRequest
+        from trackseerr.models import MusicRequest
 
         db.create_request(MusicRequest(id="req-pre", user_id=gen_env.uid, item_type="track", title="Z",
                                        artist="Z", status=RequestStatus.PENDING))
@@ -654,8 +654,8 @@ class TestMixRequestPolicy:
             except Exception as exc:  # surface thread failures to the assertion below
                 errors.append(exc)
 
-        with patch("plex_playlist_sync.tailored_mixes.get_item_availability", side_effect=avail_fn(_missing(gen_env))), \
-                patch("plex_playlist_sync.request_submission.acquisition_coordinator"):
+        with patch("trackseerr.tailored_mixes.get_item_availability", side_effect=avail_fn(_missing(gen_env))), \
+                patch("trackseerr.request_submission.acquisition_coordinator"):
             threads = [threading.Thread(target=work, args=(m,)) for m in mixes]
             for t in threads:
                 t.start()
@@ -692,7 +692,7 @@ class TestMixApiLimits:
         assert r.json()["max_weekly_acquisitions"] == 4
 
     def test_generate_rate_limit_and_in_flight(self, api, db, users):
-        from plex_playlist_sync.api.routes import mixes as mixes_route
+        from trackseerr.api.routes import mixes as mixes_route
 
         seed_history(db, users["alice"]["id"])
         h = api.h["alice"]
@@ -708,7 +708,7 @@ class TestMixApiLimits:
             assert api.post(f"/api/mixes/{mid}/generate", headers=api.h["admin"]).status_code == 202
 
     def test_generate_rate_limit_uses_last_generated_at(self, api, db, users):
-        from plex_playlist_sync.api.routes import mixes as mixes_route
+        from trackseerr.api.routes import mixes as mixes_route
 
         seed_history(db, users["alice"]["id"])
         h = api.h["alice"]
@@ -741,7 +741,7 @@ class TestNoTokenLeaks:
 
     def test_worker_iteration_failure_not_logged(self, db, users, config, caplog):
         make_mix(db, users["alice"]["id"])
-        with patch("plex_playlist_sync.mix_worker.generate_and_sync", side_effect=requests.ReadTimeout(SECRET_URL)):
+        with patch("trackseerr.mix_worker.generate_and_sync", side_effect=requests.ReadTimeout(SECRET_URL)):
             with caplog.at_level("DEBUG"):
                 out = MixWorker().run_iteration(db, config, None, FakeDiscovery())
         assert out["errors"] == 1
@@ -749,13 +749,13 @@ class TestNoTokenLeaks:
 
     def test_worker_plex_connect_failure_not_logged(self, config, caplog):
         config.plex_url, config.plex_token = "http://plex", "tok"
-        with patch("plex_playlist_sync.mix_worker.PlexClient", side_effect=requests.ConnectionError(SECRET_URL)):
+        with patch("trackseerr.mix_worker.PlexClient", side_effect=requests.ConnectionError(SECRET_URL)):
             with caplog.at_level("DEBUG"):
                 assert MixWorker()._get_plex(config) is None
         assert "SECRET" not in caplog.text
 
     def test_background_generation_failure_not_logged(self, db, users, config, caplog):
-        from plex_playlist_sync.api.routes import mixes as mixes_route
+        from trackseerr.api.routes import mixes as mixes_route
 
         mix = make_mix(db, users["alice"]["id"])
         with patch.object(mixes_route, "generate_and_sync", side_effect=requests.ReadTimeout(SECRET_URL)):
@@ -775,7 +775,7 @@ def _enable_native(db):
 def _lock_free_from_other_thread(user_id):
     import threading
 
-    from plex_playlist_sync.request_submission import user_request_lock
+    from trackseerr.request_submission import user_request_lock
 
     out = []
 
@@ -794,7 +794,7 @@ def _lock_free_from_other_thread(user_id):
 
 class TestLockNotHeldAcrossNetwork:
     def test_submit_track_request_grabs_outside_lock(self, db, users, config):
-        from plex_playlist_sync.request_submission import submit_track_request
+        from trackseerr.request_submission import submit_track_request
 
         seen = []
 
@@ -802,7 +802,7 @@ class TestLockNotHeldAcrossNetwork:
             seen.append(_lock_free_from_other_thread(users["admin"]["id"]))
             return {"success": False}
 
-        with _enable_native(db), patch("plex_playlist_sync.request_submission.acquisition_coordinator") as coord:
+        with _enable_native(db), patch("trackseerr.request_submission.acquisition_coordinator") as coord:
             coord.search_and_grab.side_effect = grab
             submit_track_request(db, config, users["admin"], "T", "A")
         assert seen == [True]
@@ -818,8 +818,8 @@ class TestLockNotHeldAcrossNetwork:
             return {"success": False}
 
         with _enable_native(gen_env.db), patch(
-            "plex_playlist_sync.tailored_mixes.get_item_availability", side_effect=avail_fn(_missing(gen_env))
-        ), patch("plex_playlist_sync.request_submission.acquisition_coordinator") as coord:
+            "trackseerr.tailored_mixes.get_item_availability", side_effect=avail_fn(_missing(gen_env))
+        ), patch("trackseerr.request_submission.acquisition_coordinator") as coord:
             coord.search_and_grab.side_effect = grab
             res = generate_and_sync(gen_env.db, fake_plex(), gen_env.disc, mix, gen_env.config)
         assert res.acquisitions_queued == 2
@@ -829,7 +829,7 @@ class TestLockNotHeldAcrossNetwork:
 def test_generate_cooldown_map_prunes_expired_entries(api, db, users):
     import time
 
-    from plex_playlist_sync.api.routes import mixes as mixes_route
+    from trackseerr.api.routes import mixes as mixes_route
 
     seed_history(db, users["alice"]["id"])
     h = api.h["alice"]

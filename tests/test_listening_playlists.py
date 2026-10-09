@@ -7,16 +7,16 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_media_client
-from plex_playlist_sync.api.routes.sync import sync_state
-from plex_playlist_sync.backlog_worker import effective_playlist_modes
-from plex_playlist_sync.clients.import_lists import lastfm, listenbrainz
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.list_monitoring import apply_playlist_missing
-from plex_playlist_sync.models import UserPermission
-from plex_playlist_sync.request_submission import RequestRejected
-from plex_playlist_sync.storage import Database
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_media_client
+from trackseerr.api.routes.sync import sync_state
+from trackseerr.backlog_worker import effective_playlist_modes
+from trackseerr.clients.import_lists import lastfm, listenbrainz
+from trackseerr.config import Config
+from trackseerr.list_monitoring import apply_playlist_missing
+from trackseerr.models import UserPermission
+from trackseerr.request_submission import RequestRejected
+from trackseerr.storage import Database
 from tests._rm_helpers import auth_headers
 
 P = "/api/playlists"
@@ -111,7 +111,7 @@ class FakeHttp:
 @pytest.fixture
 def http():
     fake = FakeHttp()
-    with patch("plex_playlist_sync.clients.import_lists.base.requests.get", side_effect=fake):
+    with patch("trackseerr.clients.import_lists.base.requests.get", side_effect=fake):
         yield fake
 
 
@@ -349,7 +349,7 @@ def _listening_row(db, uid="alice", auto=True, perms=BASE | BIT, admin=False) ->
     return "lfm_x"
 
 
-SUBMIT = "plex_playlist_sync.listening_playlists.submit_track_request"
+SUBMIT = "trackseerr.listening_playlists.submit_track_request"
 
 
 def test_no_requests_when_auto_request_is_off(db, config):
@@ -491,7 +491,7 @@ def test_gate_created_playlists_start_list_only_without_the_bit(api, db, config,
 
 
 def test_gate_url_create_starts_list_only_without_the_bit(api, db, config):
-    from plex_playlist_sync.api.dependencies import get_deezer_client, get_spotify_client
+    from trackseerr.api.dependencies import get_deezer_client, get_spotify_client
 
     api.app.dependency_overrides[get_spotify_client] = lambda: None
     api.app.dependency_overrides[get_deezer_client] = lambda: None
@@ -520,7 +520,7 @@ def test_gate_backlog_ignores_track_mode_of_creator_without_bit_until_granted(db
 def test_gate_apply_logs_and_skips_for_creator_without_bit(db, config, caplog):
     _user(db, "alice")
     db.upsert_playlist("pl-a", "Alice", creator_id="alice")
-    with caplog.at_level("INFO"), patch("plex_playlist_sync.list_monitoring.apply_list_item") as apply_item:
+    with caplog.at_level("INFO"), patch("trackseerr.list_monitoring.apply_list_item") as apply_item:
         apply_playlist_missing(db, config, "pl-a")
     apply_item.assert_not_called()
     assert any("may not auto-request" in r.message for r in caplog.records)

@@ -6,12 +6,12 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_discovery_client
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.discovery import DiscoveryClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_discovery_client
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.discovery import DiscoveryClient
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 DEEZER_TRACK = {
     "id": 3135556,
@@ -224,7 +224,7 @@ class TestTrackEndpoint:
         assert r.status_code == 404
 
     def test_upstream_failure_502(self, app_client, test_db, test_config, users):
-        from plex_playlist_sync.clients.discovery import DiscoveryUpstreamError
+        from trackseerr.clients.discovery import DiscoveryUpstreamError
 
         app, client = app_client
         mock = MagicMock(spec=DiscoveryClient)
@@ -246,8 +246,8 @@ class TestTrackEndpoint:
         app.dependency_overrides[get_discovery_client] = lambda: mock
         hint = {"a": "lib-artist-1"}
         with patch(
-            "plex_playlist_sync.api.routes.discovery._library_artist_ids_by_name", return_value=hint
-        ), patch("plex_playlist_sync.api.routes.discovery.normalize_artist_name", return_value="a"):
+            "trackseerr.api.routes.discovery._library_artist_ids_by_name", return_value=hint
+        ), patch("trackseerr.api.routes.discovery.normalize_artist_name", return_value="a"):
             admin = client.get("/api/discovery/track/deezer:track:1", headers=_headers(users["admin"], test_db, test_config))
             alice = client.get("/api/discovery/track/deezer:track:1", headers=_headers(users["alice"], test_db, test_config))
         assert admin.json().get("library_artist_id") == "lib-artist-1"

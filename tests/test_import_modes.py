@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from plex_playlist_sync import acquisition_worker as aw
-from plex_playlist_sync.acquisition_worker import (
+from trackseerr import acquisition_worker as aw
+from trackseerr.acquisition_worker import (
     place_audio_file,
     preserves_source,
     safe_atomic_move,
@@ -185,7 +185,7 @@ def test_governance_unknown_status_keeps_transfer():
 def test_settings_model_rejects_bad_import_mode():
     from pydantic import ValidationError
 
-    from plex_playlist_sync.api.routes.settings import MediaManagementUpdateModel
+    from trackseerr.api.routes.settings import MediaManagementUpdateModel
 
     assert MediaManagementUpdateModel(import_mode="copy").import_mode == "copy"
     with pytest.raises(ValidationError):

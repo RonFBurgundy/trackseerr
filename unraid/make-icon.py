@@ -138,7 +138,7 @@ def build_all_icons() -> bool:
     svg_source = repo_root / "unraid" / "trackseerr.svg"
     targets = [
         (svg_source, repo_root / "unraid" / "trackseerr.png", 512, 512),
-        (svg_source, repo_root / "plex_playlist_sync" / "static" / "favicon.png", 64, 64),
+        (svg_source, repo_root / "trackseerr" / "static" / "favicon.png", 64, 64),
         (requests_svg, repo_root / "unraid" / "trackseerr-requests.png", 512, 512),
     ]
 

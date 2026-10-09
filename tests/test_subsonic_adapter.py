@@ -8,20 +8,20 @@ import re
 import httpx
 import pytest
 
-from plex_playlist_sync.media_servers import (
+from trackseerr.media_servers import (
     MediaServerAuthError,
     MediaServerConnectionError,
     MediaServerError,
     MediaServerUnsupported,
     PlaylistSyncOptions,
 )
-from plex_playlist_sync.media_servers.subsonic import (
+from trackseerr.media_servers.subsonic import (
     SubsonicMediaServer,
     _Song,
     plan_playlist_update,
     score_candidate,
 )
-from plex_playlist_sync.models import Playlist, Track
+from trackseerr.models import Playlist, Track
 from tests.subsonic_fake import FakeSubsonic, default_state, raw_json
 
 SONGS = [

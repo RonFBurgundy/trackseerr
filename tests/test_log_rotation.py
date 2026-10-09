@@ -10,12 +10,12 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.api.routes.system import log_ring_buffer
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.log_rotation import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.api.routes.system import log_ring_buffer
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.log_rotation import (
     CURRENT_LOG_NAME,
     TRACE_LEVEL,
     LogSettings,
@@ -25,7 +25,7 @@ from plex_playlist_sync.log_rotation import (
     load_log_settings,
     resolve_log_file,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 DATEFMT = "%Y-%m-%d %H:%M:%S"
@@ -325,7 +325,7 @@ def api(tmp_path, root_state):
 
     admin = cookies(db.upsert_user("admin-1", "admin_user", "a@x.tv", is_admin=True))
     alice = cookies(db.upsert_user("user-alice", "alice", "al@x.tv", is_admin=False))
-    with patch("plex_playlist_sync.api.routes.system.get_log_file_path", return_value=log_dir / CURRENT_LOG_NAME):
+    with patch("trackseerr.api.routes.system.get_log_file_path", return_value=log_dir / CURRENT_LOG_NAME):
         yield TestClient(app), admin, alice, log_dir, db
     db.close()
 

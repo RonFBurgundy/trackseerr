@@ -8,8 +8,8 @@ from unittest.mock import patch
 from PIL import Image
 import pytest
 
-from plex_playlist_sync import art_thumbs
-from plex_playlist_sync.mediacover import mediacover_service
+from trackseerr import art_thumbs
+from trackseerr.mediacover import mediacover_service
 from tests.test_library_api import (  # noqa: F401  (fixtures + helpers shared with the library API suite)
     _auth_headers,
     app_and_client,

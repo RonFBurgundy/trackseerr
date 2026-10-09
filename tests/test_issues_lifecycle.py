@@ -9,15 +9,15 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import internal_auth
-from plex_playlist_sync.api import tier_middleware as tm
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.api.routes import issues as issues_mod
-from plex_playlist_sync.clients.core_client import CoreClient, ProxyResponse
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import MusicRequest, NotificationEvent, RequestStatus
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr import internal_auth
+from trackseerr.api import tier_middleware as tm
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.api.routes import issues as issues_mod
+from trackseerr.clients.core_client import CoreClient, ProxyResponse
+from trackseerr.config import Config
+from trackseerr.models import MusicRequest, NotificationEvent, RequestStatus
+from trackseerr.storage import SCHEMA_VERSION, Database
 from tests.test_governance_and_issues import (  # noqa: F401  (fixtures)
     _auth_headers,
     seeded_users,
@@ -28,7 +28,7 @@ from tests.test_governance_and_issues import (  # noqa: F401  (fixtures)
 
 @pytest.fixture
 def dispatcher():
-    with patch("plex_playlist_sync.api.routes.issues.notification_dispatcher") as disp:
+    with patch("trackseerr.api.routes.issues.notification_dispatcher") as disp:
         yield disp
 
 
@@ -585,7 +585,7 @@ def core(tmp_path):
     app = create_app(db=db, config=cfg)
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_config] = lambda: cfg
-    with patch("plex_playlist_sync.api.routes.issues.notification_dispatcher"):
+    with patch("trackseerr.api.routes.issues.notification_dispatcher"):
         yield TestClient(app), db
     db.close()
 
@@ -652,7 +652,7 @@ class TestTierPlacement:
         app = create_app(db=db, config=cfg)
         app.dependency_overrides[get_db] = lambda: db
         app.dependency_overrides[get_config] = lambda: cfg
-        from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
+        from trackseerr.auth import create_session_token, get_or_create_secret_key
 
         token = create_session_token(
             user_id="1001", username="alice", is_admin=False, secret_key=get_or_create_secret_key(data_dir=cfg.data_dir)
@@ -691,7 +691,7 @@ class TestTierPlacement:
         app = create_app(db=db, config=cfg)
         app.dependency_overrides[get_db] = lambda: db
         app.dependency_overrides[get_config] = lambda: cfg
-        from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
+        from trackseerr.auth import create_session_token, get_or_create_secret_key
 
         token = create_session_token(
             user_id="1001", username="alice", is_admin=False, secret_key=get_or_create_secret_key(data_dir=cfg.data_dir)

@@ -8,16 +8,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from plex_playlist_sync.api.dependencies import get_discovery_client, get_mbid_enricher
-from plex_playlist_sync.artist_refresh import refresh_single_artist
-from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
-from plex_playlist_sync.library_monitoring import (
+from trackseerr.api.dependencies import get_discovery_client, get_mbid_enricher
+from trackseerr.artist_refresh import refresh_single_artist
+from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.library_monitoring import (
     NATIVE_MONITOR_OPTIONS,
     album_in_metadata_profile,
     album_monitored_for_option,
 )
-from plex_playlist_sync.mediacover import mediacover_service
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr.mediacover import mediacover_service
+from trackseerr.storage import SCHEMA_VERSION, Database
 
 from tests.test_library_api import (  # noqa: F401
     _auth_headers,
@@ -402,7 +402,7 @@ def test_settings_roundtrip_add_metadata_profile(app_and_client, test_db, test_c
 
 
 def test_native_only_guard_409_in_lidarr_mode(app_and_client, test_db, test_config, seeded_users):
-    from plex_playlist_sync.api.dependencies import get_lidarr_client
+    from trackseerr.api.dependencies import get_lidarr_client
 
     app, client = app_and_client
     h = _auth_headers(seeded_users["admin"], test_db, test_config)

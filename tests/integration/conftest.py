@@ -24,8 +24,8 @@ from typing import Any, Optional
 import httpx
 import pytest
 
-from plex_playlist_sync.clients import lidarr as lidarr_mod
-from plex_playlist_sync.clients.lidarr import LidarrClient, invalidate_add_defaults
+from trackseerr.clients import lidarr as lidarr_mod
+from trackseerr.clients.lidarr import LidarrClient, invalidate_add_defaults
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_FILE = REPO_ROOT / "docker-compose.integration.yml"

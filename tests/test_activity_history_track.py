@@ -4,13 +4,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from plex_playlist_sync.activity_service import (
+from trackseerr.activity_service import (
     lidarr_blocklist_record,
     lidarr_history_record,
     native_history_record,
 )
-from plex_playlist_sync.clients.lidarr import LidarrClient
-from plex_playlist_sync.storage import Database
+from trackseerr.clients.lidarr import LidarrClient
+from trackseerr.storage import Database
 
 BASE = {
     "id": 11,

@@ -7,17 +7,17 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import library_manager
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.lidarr_queue import LidarrTrickleWorker
-from plex_playlist_sync.models import MusicRequest, RequestStatus
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database, request_retry_delay
+from trackseerr import library_manager
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.lidarr_queue import LidarrTrickleWorker
+from trackseerr.models import MusicRequest, RequestStatus
+from trackseerr.storage import SCHEMA_VERSION, Database, request_retry_delay
 from tests.lidarr_fake import FakeLidarr, FastClock
 
-HTTPX = "plex_playlist_sync.clients.lidarr.httpx.Client"
+HTTPX = "trackseerr.clients.lidarr.httpx.Client"
 TS = "%Y-%m-%d %H:%M:%S"
 
 
@@ -40,14 +40,14 @@ def item(req_id="req-1"):
 
 
 def run_worker(db, fake, items):
-    from plex_playlist_sync.clients.lidarr import LidarrClient
+    from trackseerr.clients.lidarr import LidarrClient
 
     worker = LidarrTrickleWorker()
     worker._delay_seconds = 0.0
     worker._auto_search = True
     client = LidarrClient("http://lidarr.test:8686", "key-abcdef123456", root_folder="/music")
-    with patch(HTTPX, fake), patch("plex_playlist_sync.lidarr_queue.time", FastClock()), patch(
-        "plex_playlist_sync.clients.lidarr.time.sleep"
+    with patch(HTTPX, fake), patch("trackseerr.lidarr_queue.time", FastClock()), patch(
+        "trackseerr.clients.lidarr.time.sleep"
     ):
         worker._process_groups(LidarrTrickleWorker._group_by_artist(items), client, db)
 
@@ -223,7 +223,7 @@ class TestManualRetryRoute:
         db.update_media_management_settings({"library_mode": "lidarr"})
         make_request(db)
         db.set_request_outcome("req-1", "albums_pending", "waiting")
-        with patch("plex_playlist_sync.api.routes.requests.dispatch_to_lidarr", return_value=True) as dispatch:
+        with patch("trackseerr.api.routes.requests.dispatch_to_lidarr", return_value=True) as dispatch:
             resp = client.post("/api/requests/req-1/retry", headers=headers)
         assert resp.status_code == 200 and resp.json()["success"] is True
         assert dispatch.call_args.args[2] == [item()]

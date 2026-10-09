@@ -12,8 +12,8 @@ from fastapi.exceptions import ResponseValidationError
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from plex_playlist_sync.api import response_models
-from plex_playlist_sync.api.app import response_validation_error_response
+from trackseerr.api import response_models
+from trackseerr.api.app import response_validation_error_response
 
 
 def test_strict_mode_enabled_under_tests():
@@ -32,7 +32,7 @@ def test_extra_key_dropped_when_not_strict():
     # Fresh interpreter with the flag unset: reloading the module in-process would create a second
     # ApiModel class and make issubclass checks elsewhere depend on test order.
     code = (
-        "from plex_playlist_sync.api.response_models import ApiModel\n"
+        "from trackseerr.api.response_models import ApiModel\n"
         "class Item(ApiModel):\n"
         "    a: int\n"
         "assert ApiModel.model_config['extra'] == 'ignore'\n"

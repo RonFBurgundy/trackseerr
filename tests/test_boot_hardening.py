@@ -14,14 +14,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import cli, internal_auth
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.boot import boot_state
-from plex_playlist_sync.cli import RedactLogFilter, setup_logging
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr import cli, internal_auth
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.boot import boot_state
+from trackseerr.cli import RedactLogFilter, setup_logging
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 SECRET = "s" * 40
 
@@ -149,11 +149,11 @@ def _run_init(tmp_path, *, patches: dict[str, Any], plex: Any = None):
     failure = {"code": 0}
     boot_state.begin("starting")
     targets = {
-        "plex_playlist_sync.cli._start_lidarr_trickle": {},
-        "plex_playlist_sync.cli._start_local_workers": {},
-        "plex_playlist_sync.cli._connect_clients": {"return_value": True},
-        "plex_playlist_sync.cli._discover_plex_users": {},
-        "plex_playlist_sync.acquisition_worker.acquisition_worker.start": {},
+        "trackseerr.cli._start_lidarr_trickle": {},
+        "trackseerr.cli._start_local_workers": {},
+        "trackseerr.cli._connect_clients": {"return_value": True},
+        "trackseerr.cli._discover_plex_users": {},
+        "trackseerr.acquisition_worker.acquisition_worker.start": {},
     }
     for name, kwargs in patches.items():
         targets[name] = kwargs
@@ -173,9 +173,9 @@ def _run_init(tmp_path, *, patches: dict[str, Any], plex: Any = None):
 @pytest.mark.parametrize(
     "failing",
     [
-        "plex_playlist_sync.cli._connect_clients",
-        "plex_playlist_sync.cli._discover_plex_users",
-        "plex_playlist_sync.acquisition_worker.acquisition_worker.start",
+        "trackseerr.cli._connect_clients",
+        "trackseerr.cli._discover_plex_users",
+        "trackseerr.acquisition_worker.acquisition_worker.start",
     ],
 )
 def test_post_ready_failure_degrades_but_keeps_serving(tmp_path, caplog, failing):
@@ -191,7 +191,7 @@ def test_post_ready_failure_degrades_but_keeps_serving(tmp_path, caplog, failing
 
 def test_pre_ready_failure_still_exits(tmp_path):
     server, failure, _ = _run_init(
-        tmp_path, patches={"plex_playlist_sync.cli._start_local_workers": {"side_effect": RuntimeError("x")}}
+        tmp_path, patches={"trackseerr.cli._start_local_workers": {"side_effect": RuntimeError("x")}}
     )
     assert server.should_exit is True and failure["code"] == 1
     assert not boot_state.ready
@@ -206,8 +206,8 @@ def test_scheduler_event_is_set_even_when_connect_fails(tmp_path):
     _run_init(
         tmp_path,
         patches={
-            "plex_playlist_sync.cli._start_sync_scheduler": {"side_effect": fake_scheduler},
-            "plex_playlist_sync.cli._connect_clients": {"side_effect": RuntimeError("down")},
+            "trackseerr.cli._start_sync_scheduler": {"side_effect": fake_scheduler},
+            "trackseerr.cli._connect_clients": {"side_effect": RuntimeError("down")},
         },
     )
     # wait_seconds default is > 0 so the scheduler was started with the gating event, now set
@@ -222,7 +222,7 @@ def test_first_sync_waits_for_clients_connected(tmp_path, monkeypatch):
     cfg = _config(tmp_path, wait_seconds=1)
     ready = threading.Event()
     calls: list[Any] = []
-    with patch("plex_playlist_sync.cli.sync_state.execute_sync", side_effect=lambda **kw: calls.append(kw)):
+    with patch("trackseerr.cli.sync_state.execute_sync", side_effect=lambda **kw: calls.append(kw)):
         cli._start_sync_scheduler(Database(":memory:"), cfg, cli._Clients(), ready)
         time.sleep(2.6)  # well past the 1s interval
         assert calls == [], "sync ran before clients were connected"
@@ -241,13 +241,13 @@ def test_plex_provider_retries_connect_and_rate_limits(tmp_path):
     cfg = _config(tmp_path)
     clients = cli._Clients()
     sentinel = object()
-    with patch("plex_playlist_sync.cli.PlexClient", side_effect=[ConnectionError("down"), sentinel]) as ctor:
+    with patch("trackseerr.cli.PlexClient", side_effect=[ConnectionError("down"), sentinel]) as ctor:
         provider = cli._make_plex_provider(cfg, clients, retry_interval=0.0)
         assert provider() is None
         assert provider() is sentinel
         assert provider() is sentinel
         assert ctor.call_count == 2
-    with patch("plex_playlist_sync.cli.PlexClient") as ctor:
+    with patch("trackseerr.cli.PlexClient") as ctor:
         slow = cli._make_plex_provider(cfg, cli._Clients(), retry_interval=3600.0)
         assert slow() is None and slow() is None
         ctor.assert_not_called()  # bounded: no hot reconnect loop

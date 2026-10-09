@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from plex_playlist_sync.library import inspect_audio_file
-from plex_playlist_sync.naming import sanitize_component
+from trackseerr.library import inspect_audio_file
+from trackseerr.naming import sanitize_component
 
 from .conftest import audio_files, configure_roots, run_scan, set_id3, snapshot
 

@@ -14,14 +14,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 import httpx
 
-from plex_playlist_sync.clients.acquisition.base import AcquisitionDriver
-from plex_playlist_sync.clients.acquisition.slskd import SlskdDriver
-from plex_playlist_sync.clients.acquisition.sabnzbd import SabnzbdDriver
-from plex_playlist_sync.clients.acquisition.qbittorrent import QbittorrentDriver
-from plex_playlist_sync.clients.acquisition.torznab import TorznabDriver
-from plex_playlist_sync.clients.acquisition.lidarr_adapter import LidarrAdapter
-from plex_playlist_sync.clients.acquisition import get_acquisition_driver, get_indexer_driver
-from plex_playlist_sync.models import (
+from trackseerr.clients.acquisition.base import AcquisitionDriver
+from trackseerr.clients.acquisition.slskd import SlskdDriver
+from trackseerr.clients.acquisition.sabnzbd import SabnzbdDriver
+from trackseerr.clients.acquisition.qbittorrent import QbittorrentDriver
+from trackseerr.clients.acquisition.torznab import TorznabDriver
+from trackseerr.clients.acquisition.lidarr_adapter import LidarrAdapter
+from trackseerr.clients.acquisition import get_acquisition_driver, get_indexer_driver
+from trackseerr.models import (
     AcquisitionSearchResult,
     DownloadClientConfig,
     DownloadDriverType,

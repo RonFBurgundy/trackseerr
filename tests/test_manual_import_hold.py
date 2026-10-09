@@ -9,13 +9,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import activity_service as svc
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import (
+from trackseerr import activity_service as svc
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.models import (
     ActiveDownload,
     DownloadClientConfig,
     DownloadDriverType,
@@ -25,7 +25,7 @@ from plex_playlist_sync.models import (
     LibraryFile,
     LibraryTrack,
 )
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr.storage import SCHEMA_VERSION, Database
 
 HELD_MSG = "1 file(s) couldn't be matched — manual import required"
 
@@ -110,9 +110,9 @@ def _run_worker(db: Database, dl: Path, staging: Path, metas: dict[str, dict[str
                 "bits_per_sample": 16, "bitrate": 900, "sample_rate": 44100, "extension": ".flac"}
         return {**base, **metas[Path(path).name]}
 
-    with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=driver), \
-         patch("plex_playlist_sync.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("plex_playlist_sync.acquisition_worker.fingerprint_audio_file", return_value=None):
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.acquisition_worker.fingerprint_audio_file", return_value=None):
         stats = AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
     return stats, driver
 
@@ -251,7 +251,7 @@ def test_queue_delete_cancels_client_even_while_files_are_held(tmp_path, db):
     db.update_download_status("dl-1", status="warning", error_message=HELD_MSG)
 
     driver = MagicMock()
-    with patch("plex_playlist_sync.activity_service.get_acquisition_driver", return_value=driver):
+    with patch("trackseerr.activity_service.get_acquisition_driver", return_value=driver):
         assert svc.native_delete_queue_item(db, "dl-1", remove_from_client=True, blocklist=False) is not None
     driver.cancel.assert_called_once()
 
@@ -291,7 +291,7 @@ def _patch_inspect(metas: dict[str, dict[str, Any]]):
     def inspect(path):
         return {"artist": "Daft Punk", "album": "Discovery", "disc_number": 1, "codec": "FLAC",
                 "file_path": str(path), **metas[Path(path).name]}
-    return patch("plex_playlist_sync.api.routes.library.manual_import.inspect_audio_file", side_effect=inspect)
+    return patch("trackseerr.api.routes.library.manual_import.inspect_audio_file", side_effect=inspect)
 
 
 def test_scan_download_id_scopes_to_held_files_and_missing_tracks(tmp_path, db, client, headers):
@@ -440,7 +440,7 @@ def _item_no_mode(path: Path, track_id: str, number: int, title: str) -> dict[st
 
 
 def _commit(client, headers, items, download_id="dl-1"):
-    with patch("plex_playlist_sync.api.routes.library.manual_import.inspect_audio_file",
+    with patch("trackseerr.api.routes.library.manual_import.inspect_audio_file",
                return_value={"title": "t", "codec": "FLAC", "file_path": "x"}):
         resp = client.post("/api/library/manual-import/commit",
                            json={"items": items, "download_id": download_id}, headers=headers)
@@ -483,7 +483,7 @@ def test_commit_failed_item_keeps_warning(tmp_path, db, client, headers):
 
 def test_commit_without_download_id_reports_not_cleared(tmp_path, db, client, headers):
     music, files = _held_download(db, tmp_path, ["a.flac"])
-    with patch("plex_playlist_sync.api.routes.library.manual_import.inspect_audio_file",
+    with patch("trackseerr.api.routes.library.manual_import.inspect_audio_file",
                return_value={"title": "t", "codec": "FLAC", "file_path": "x"}):
         resp = client.post("/api/library/manual-import/commit",
                            json={"items": [_item(files[0], "trk-1", 1, "One More Time")]}, headers=headers)
@@ -510,7 +510,7 @@ def test_commit_cleans_up_client_when_download_cleared(tmp_path, db, client, hea
     music, files = _held_download(db, tmp_path, ["a.flac"])
     db.update_media_management_settings({"seed_complete_action": "remove"})
     driver, cfg = _with_client(db)
-    with cfg, patch("plex_playlist_sync.api.routes.library.manual_import.get_acquisition_driver", return_value=driver):
+    with cfg, patch("trackseerr.api.routes.library.manual_import.get_acquisition_driver", return_value=driver):
         out = _commit(client, headers, [_item(files[0], "trk-1", 1, "One More Time")])
     assert out["download_cleared"] is True
     driver.cleanup_completed.assert_called_once_with("HASH1", delete_files=False)
@@ -519,7 +519,7 @@ def test_commit_cleans_up_client_when_download_cleared(tmp_path, db, client, hea
 def test_commit_does_not_clean_up_client_while_files_remain(tmp_path, db, client, headers):
     music, files = _held_download(db, tmp_path, ["a.flac", "b.flac"])
     driver, cfg = _with_client(db)
-    with cfg, patch("plex_playlist_sync.api.routes.library.manual_import.get_acquisition_driver", return_value=driver):
+    with cfg, patch("trackseerr.api.routes.library.manual_import.get_acquisition_driver", return_value=driver):
         out = _commit(client, headers, [_item(files[0], "trk-1", 1, "One More Time")])
     assert out["download_cleared"] is False
     driver.cleanup_completed.assert_not_called()
@@ -530,7 +530,7 @@ def test_commit_survives_client_cleanup_failure(tmp_path, db, client, headers):
     db.update_media_management_settings({"seed_complete_action": "remove"})
     driver, cfg = _with_client(db)
     driver.cleanup_completed.side_effect = RuntimeError("client down")
-    with cfg, patch("plex_playlist_sync.api.routes.library.manual_import.get_acquisition_driver", return_value=driver):
+    with cfg, patch("trackseerr.api.routes.library.manual_import.get_acquisition_driver", return_value=driver):
         out = _commit(client, headers, [_item(files[0], "trk-1", 1, "One More Time")])
     assert out["download_cleared"] is True
     assert db.get_active_download("dl-1")["status"] == "imported"
@@ -541,7 +541,7 @@ def test_commit_survives_client_cleanup_failure(tmp_path, db, client, headers):
 
 def _commit_with_driver(client, headers, db, files, driver, mode_item=_item_no_mode):
     cfg = patch.object(db, "get_download_client", return_value={"id": "c1", "name": "qb", "driver_type": "qbittorrent"})
-    with cfg, patch("plex_playlist_sync.api.routes.library.manual_import.get_acquisition_driver", return_value=driver):
+    with cfg, patch("trackseerr.api.routes.library.manual_import.get_acquisition_driver", return_value=driver):
         return _commit(client, headers, [mode_item(files[0], "trk-1", 1, "One More Time")])
 
 
@@ -646,9 +646,9 @@ def test_worker_source_preserving_mode_respects_seed_limits(tmp_path, db, mode, 
         return {"artist": "Daft Punk", "album": "Discovery", "disc_number": 1, "codec": "FLAC",
                 "bits_per_sample": 16, "bitrate": 900, "sample_rate": 44100, "extension": ".flac", **MATCHED}
 
-    with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=driver), \
-         patch("plex_playlist_sync.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("plex_playlist_sync.acquisition_worker.fingerprint_audio_file", return_value=None):
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.acquisition_worker.fingerprint_audio_file", return_value=None):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
     assert (dl / "good.flac").exists()
     if cleaned:

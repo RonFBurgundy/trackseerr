@@ -13,13 +13,13 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import internal_auth, local_auth
-from plex_playlist_sync.api import dependencies
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.clients import core_client
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr import internal_auth, local_auth
+from trackseerr.api import dependencies
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.clients import core_client
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 pytestmark = pytest.mark.real_core_client
 

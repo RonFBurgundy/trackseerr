@@ -1,7 +1,7 @@
 import os
 from unittest.mock import patch
 
-from plex_playlist_sync.config import Config, _parse_bool, _split_ids
+from trackseerr.config import Config, _parse_bool, _split_ids
 
 
 def test_parse_bool():

@@ -6,10 +6,10 @@ from unittest.mock import patch
 
 import pytest
 
-from plex_playlist_sync.api.dependencies import get_config
-from plex_playlist_sync.clients.import_lists import ImportListError, ImportListItem
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.import_list_worker import claim_sync, release_sync
+from trackseerr.api.dependencies import get_config
+from trackseerr.clients.import_lists import ImportListError, ImportListItem
+from trackseerr.config import Config
+from trackseerr.import_list_worker import claim_sync, release_sync
 
 # Reuse the authenticated TestClient fixtures of the library API tests.
 from tests.test_library_api import (  # noqa: F401
@@ -160,7 +160,7 @@ def test_boundary_interval_and_option_null_accepted(app_and_client, admin):
 def test_test_endpoint_reads_only_and_limits_sample(app_and_client, admin, test_db):
     _, client = app_and_client
     items = [ImportListItem(kind="track", external_key=f"k{i}", artist_name="A", track_title=f"T{i}") for i in range(25)]
-    with patch("plex_playlist_sync.api.routes.import_lists.fetch_items", return_value=items) as fetch:
+    with patch("trackseerr.api.routes.import_lists.fetch_items", return_value=items) as fetch:
         res = client.post("/api/import-lists/test", json=body(), headers=admin)
     assert res.status_code == 200
     out = res.json()
@@ -178,7 +178,7 @@ def test_test_endpoint_reads_only_and_limits_sample(app_and_client, admin, test_
 def test_test_endpoint_reports_provider_error_and_uses_stored_secret(app_and_client, admin, test_db):
     _, client = app_and_client
     lid = client.post("/api/import-lists", json=body(), headers=admin).json()["id"]
-    with patch("plex_playlist_sync.api.routes.import_lists.fetch_items", side_effect=ImportListError("provider returned HTTP 401")) as fetch:
+    with patch("trackseerr.api.routes.import_lists.fetch_items", side_effect=ImportListError("provider returned HTTP 401")) as fetch:
         res = client.post(f"/api/import-lists/test?list_id={lid}", json=body(config={**LASTFM, "api_key": "********"}), headers=admin)
     assert res.json() == {"ok": False, "item_count": 0, "sample": [], "error": "provider returned HTTP 401"}
     assert fetch.call_args.args[1]["api_key"] == "SECRET-KEY"
@@ -187,7 +187,7 @@ def test_test_endpoint_reports_provider_error_and_uses_stored_secret(app_and_cli
 def test_sync_endpoint_queues_runs_in_background_and_409_when_busy(app_and_client, admin, test_db):
     _, client = app_and_client
     lid = client.post("/api/import-lists", json=body(), headers=admin).json()["id"]
-    with patch("plex_playlist_sync.api.routes.import_lists.sync_import_list") as sync:
+    with patch("trackseerr.api.routes.import_lists.sync_import_list") as sync:
         res = client.post(f"/api/import-lists/{lid}/sync", headers=admin)
     assert res.status_code == 200 and res.json() == {"queued": True}
     assert sync.call_args.args[1] == lid and isinstance(sync.call_args.kwargs["claim_token"], str)
@@ -203,7 +203,7 @@ def test_sync_endpoint_end_to_end_records_items(app_and_client, admin, test_db):
     _, client = app_and_client
     lid = client.post("/api/import-lists", json=body(monitor_mode="none"), headers=admin).json()["id"]
     items = [ImportListItem(kind="track", external_key="a|b", artist_name="A", track_title="B")]
-    with patch("plex_playlist_sync.import_list_worker.fetch_items", return_value=items):
+    with patch("trackseerr.import_list_worker.fetch_items", return_value=items):
         assert client.post(f"/api/import-lists/{lid}/sync", headers=admin).json() == {"queued": True}
     got = client.get(f"/api/import-lists/{lid}", headers=admin).json()
     assert got["last_status"] == "ok" and got["item_counts"]["skipped"] == 1
@@ -212,7 +212,7 @@ def test_sync_endpoint_end_to_end_records_items(app_and_client, admin, test_db):
 def test_sync_endpoint_background_failure_is_recorded_not_raised(app_and_client, admin, test_db):
     _, client = app_and_client
     lid = client.post("/api/import-lists", json=body(), headers=admin).json()["id"]
-    with patch("plex_playlist_sync.api.routes.import_lists.sync_import_list", side_effect=RuntimeError("boom")):
+    with patch("trackseerr.api.routes.import_lists.sync_import_list", side_effect=RuntimeError("boom")):
         assert client.post(f"/api/import-lists/{lid}/sync", headers=admin).status_code == 200
     assert test_db.get_import_list(lid)["last_status"] == "error"
 
@@ -344,7 +344,7 @@ def test_admin_can_set_album_and_artist_monitor_mode(app_and_client, test_db, te
 
 def test_direct_import_does_not_run_monitor_apply_on_the_request_thread(app_and_client, test_db, test_config, seeded_users):
     import threading
-    from plex_playlist_sync.api.dependencies import get_plex_client
+    from trackseerr.api.dependencies import get_plex_client
     from unittest.mock import MagicMock
 
     app, client = app_and_client
@@ -362,7 +362,7 @@ def test_direct_import_does_not_run_monitor_apply_on_the_request_thread(app_and_
         release.wait(timeout=10)
 
     try:
-        with patch("plex_playlist_sync.api.routes.playlists.apply_playlist_missing_safely", side_effect=slow_apply):
+        with patch("trackseerr.api.routes.playlists.apply_playlist_missing_safely", side_effect=slow_apply):
             res = client.post(
                 "/api/playlists/import",
                 json={"name": "Imp", "service": "custom", "tracks": [{"title": "T", "artist": "A"}], "targets": ["admin-1"]},
@@ -381,7 +381,7 @@ def test_direct_import_does_not_run_monitor_apply_on_the_request_thread(app_and_
 def test_test_endpoint_merges_stored_secrets_only_for_same_provider(app_and_client, admin, test_db):
     _, client = app_and_client
     lid = client.post("/api/import-lists", json=body(), headers=admin).json()["id"]
-    with patch("plex_playlist_sync.api.routes.import_lists.fetch_items", return_value=[]) as fetch:
+    with patch("trackseerr.api.routes.import_lists.fetch_items", return_value=[]) as fetch:
         client.post(f"/api/import-lists/test?list_id={lid}", json=body(config={**LASTFM, "api_key": "********"}), headers=admin)
         assert fetch.call_args.args[1]["api_key"] == "SECRET-KEY"
         # Same placeholder aimed at a different provider must not pick up Last.fm's stored key.

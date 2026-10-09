@@ -5,11 +5,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api import tier_middleware as tm
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr.api import tier_middleware as tm
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 
 @pytest.fixture

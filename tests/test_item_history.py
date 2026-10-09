@@ -12,14 +12,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import delay_gate, pending_worker
-from plex_playlist_sync.acquisition_coordinator import AcquisitionCoordinator, acquisition_coordinator
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.backlog_worker import RSSSyncWorker, WantedBacklogWorker
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.item_history import (
+from trackseerr import delay_gate, pending_worker
+from trackseerr.acquisition_coordinator import AcquisitionCoordinator, acquisition_coordinator
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.backlog_worker import RSSSyncWorker, WantedBacklogWorker
+from trackseerr.config import Config
+from trackseerr.item_history import (
     ITEM_EVENTS,
     TRIGGER_KINDS,
     GrabTrigger,
@@ -28,8 +28,8 @@ from plex_playlist_sync.item_history import (
     redact_details,
     request_trigger,
 )
-from plex_playlist_sync.models import AcquisitionSearchResult, MusicRequest, RequestStatus
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr.models import AcquisitionSearchResult, MusicRequest, RequestStatus
+from trackseerr.storage import SCHEMA_VERSION, Database
 
 HQ = "profile-high-quality"
 HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4"
@@ -116,7 +116,7 @@ def grab(db: Database, trigger: GrabTrigger, candidates=None, **kw):
     driver = MagicMock()
     driver.download.return_value = HASH
     with patch.object(coord, "search_all_indexers", return_value=candidates if candidates is not None else [cand()]), patch(
-        "plex_playlist_sync.acquisition_coordinator.get_acquisition_driver", return_value=driver
+        "trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=driver
     ):
         return coord.search_and_grab(
             artist="Nirvana", title="Lithium", album="Nevermind", db=db, quality_profile_id=HQ,
@@ -238,7 +238,7 @@ def test_unknown_event_is_rejected(db: Database, library):
 def test_recording_failure_is_logged_and_swallowed(caplog):
     broken = MagicMock()
     broken.record_item_event.side_effect = sqlite3.OperationalError("disk I/O error")
-    with caplog.at_level(logging.ERROR, logger="plex_playlist_sync.item_history"):
+    with caplog.at_level(logging.ERROR, logger="trackseerr.item_history"):
         assert emit(broken, "imported", track_id="t") is None  # does not raise
     assert any("Could not record item event" in r.message and r.exc_info for r in caplog.records)
 
@@ -352,7 +352,7 @@ def test_pending_delay_gate_keeps_the_trigger_until_release(db, library, clients
     clock["now"] = T0 + timedelta(minutes=61)
     driver = MagicMock()
     driver.download.return_value = HASH
-    with patch("plex_playlist_sync.acquisition_coordinator.get_acquisition_driver", return_value=driver):
+    with patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=driver):
         out = pending_worker.release_due(db, clock["now"])
     assert out["released"] == 1
     row = history_row(db)
@@ -379,7 +379,7 @@ def test_backlog_worker_threads_wanted_and_upgrade_triggers(db, users):
 
 
 def test_manual_wanted_search_threads_actor_and_issue_replacement_kind(db, library):
-    from plex_playlist_sync.backlog_worker import ReplacementSpec, _search_trigger
+    from trackseerr.backlog_worker import ReplacementSpec, _search_trigger
 
     assert _search_trigger(None, None, "admin-1") == GrabTrigger("wanted", label="Wanted search", actor_user_id="admin-1")
     assert _search_trigger(None, 0).kind == "upgrade"
@@ -421,8 +421,8 @@ def test_rss_worker_grab_carries_the_indexer_as_trigger(db, library, users, clie
     idx.fetch_recent.return_value = [match]
     cl = MagicMock()
     cl.download.return_value = "abc123"
-    with patch("plex_playlist_sync.backlog_worker.get_indexer_driver", return_value=idx), patch(
-        "plex_playlist_sync.backlog_worker.get_acquisition_driver", return_value=cl
+    with patch("trackseerr.backlog_worker.get_indexer_driver", return_value=idx), patch(
+        "trackseerr.backlog_worker.get_acquisition_driver", return_value=cl
     ):
         stats = RSSSyncWorker().poll_once(db)
     assert stats["grabs_triggered"] == 1
@@ -431,11 +431,11 @@ def test_rss_worker_grab_carries_the_indexer_as_trigger(db, library, users, clie
 
 
 def test_request_submission_threads_request_trigger_with_username_label(db, users, clients):
-    from plex_playlist_sync.request_submission import submit_track_request
+    from trackseerr.request_submission import submit_track_request
 
     cfg = Config(plex_url="x", plex_token="t", auto_approve_requests=True)
     mock_grab = MagicMock(return_value={"success": True})
-    with patch("plex_playlist_sync.request_submission.native_is_configured", return_value=True), patch.object(
+    with patch("trackseerr.request_submission.native_is_configured", return_value=True), patch.object(
         acquisition_coordinator, "search_and_grab", mock_grab
     ):
         sub = submit_track_request(db, cfg, users["alice"] | {"permissions": 0xFFFF}, "Lithium", "Nirvana", "Nevermind")
@@ -446,13 +446,13 @@ def test_request_submission_threads_request_trigger_with_username_label(db, user
 
 
 def test_system_sourced_requests_keep_their_trigger_through_the_request(db, users, clients):
-    from plex_playlist_sync.request_submission import submit_track_request
+    from trackseerr.request_submission import submit_track_request
 
     cfg = Config(plex_url="x", plex_token="t", auto_approve_requests=True)
     src = GrabTrigger("import_list", ref="lst-1", label="ListenBrainz Weekly", actor_user_id="admin-1")
     mock_grab = MagicMock(return_value={"success": True})
     admin = users["admin"] | {"permissions": 0xFFFF}
-    with patch("plex_playlist_sync.request_submission.native_is_configured", return_value=True), patch.object(
+    with patch("trackseerr.request_submission.native_is_configured", return_value=True), patch.object(
         acquisition_coordinator, "search_and_grab", mock_grab
     ):
         sub = submit_track_request(db, cfg, admin, "Lithium", "Nirvana", "Nevermind", trigger=src)
@@ -463,14 +463,14 @@ def test_system_sourced_requests_keep_their_trigger_through_the_request(db, user
 
 
 def test_mix_acquisition_request_carries_the_mix_trigger(db, users):
-    from plex_playlist_sync import tailored_mixes
-    from plex_playlist_sync.models import UserPermission  # noqa: F401  (documents that permissions come from the row)
+    from trackseerr import tailored_mixes
+    from trackseerr.models import UserPermission  # noqa: F401  (documents that permissions come from the row)
 
     user = users["alice"] | {"permissions": 0xFFFF}
     cfg = Config(plex_url="x", plex_token="t", auto_approve_requests=True)
     track = MagicMock(title="Lithium", artist="Nirvana", album="Nevermind")
     mix = db.create_mix_config("user-alice", "discover_weekly", "Weekly Mix")
-    with patch("plex_playlist_sync.request_submission.native_is_configured", return_value=False):
+    with patch("trackseerr.request_submission.native_is_configured", return_value=False):
         sub = tailored_mixes._queue_acquisition(db, cfg, mix, user, track)
     assert sub is not None
     row = db.get_request(sub.request["id"])
@@ -480,12 +480,12 @@ def test_mix_acquisition_request_carries_the_mix_trigger(db, users):
 
 
 def test_import_list_and_playlist_tracks_become_requests_with_their_trigger(db, users):
-    from plex_playlist_sync import list_monitoring
+    from trackseerr import list_monitoring
 
     cfg = Config(plex_url="x", plex_token="t", auto_approve_requests=True)
     item = list_monitoring.ListItem(kind="track", artist_name="Nirvana", album_title="Nevermind", track_title="Lithium")
     trig = GrabTrigger("import_list", ref="lst-1", label="ListenBrainz", actor_user_id="admin-1")
-    with patch("plex_playlist_sync.request_submission.native_is_configured", return_value=False):
+    with patch("trackseerr.request_submission.native_is_configured", return_value=False):
         result = list_monitoring.apply_list_item(
             db, cfg, item, "track", requested_by=users["admin"] | {"permissions": 0xFFFF}, trigger=trig
         )
@@ -510,7 +510,7 @@ def test_route_callers_assign_request_approved_retry_manual_and_playlist(db, use
         )
     )
     mock_grab = MagicMock(return_value={"success": False, "message": "none"})
-    with patch("plex_playlist_sync.api.routes.requests.native_is_configured", return_value=True), patch.object(
+    with patch("trackseerr.api.routes.requests.native_is_configured", return_value=True), patch.object(
         acquisition_coordinator, "search_and_grab", mock_grab
     ):
         assert client.post(f"/api/requests/{req['id']}/approve", headers=admin_h).status_code == 200
@@ -532,7 +532,7 @@ def test_route_callers_assign_request_approved_retry_manual_and_playlist(db, use
 
 def test_queue_retry_uses_retry_trigger_with_admin_actor(db, users, library, clients, client, config):
     admin_h = headers(users["admin"], db, config)
-    from plex_playlist_sync.models import ActiveDownload, DownloadStatus
+    from trackseerr.models import ActiveDownload, DownloadStatus
 
     db.create_active_download(
         ActiveDownload(
@@ -559,7 +559,7 @@ def test_interactive_grab_route_records_manual_trigger_with_admin_actor(db, user
         },
         "artist": "Nirvana", "title": "Lithium", "album": "Nevermind", "track_id": "trk-1", "album_id": "alb-1",
     }
-    with patch("plex_playlist_sync.api.routes.acquisition.get_acquisition_driver", return_value=driver):
+    with patch("trackseerr.api.routes.acquisition.get_acquisition_driver", return_value=driver):
         resp = client.post("/api/acquisition/grab", json=payload, headers=admin_h)
     assert resp.status_code == 200, resp.text
     row = history_row(db)

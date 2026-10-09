@@ -9,17 +9,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import seed_cleanup as sc
-from plex_playlist_sync.acquisition_worker import deletion_safe, settle_transfer_after_import
-from plex_playlist_sync.activity_service import native_seeding
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.acquisition.base import AcquisitionDriver
-from plex_playlist_sync.clients.acquisition.qbittorrent import QbittorrentDriver
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import ActiveDownload, DownloadClientConfig, DownloadDriverType, DownloadStatus
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr import seed_cleanup as sc
+from trackseerr.acquisition_worker import deletion_safe, settle_transfer_after_import
+from trackseerr.activity_service import native_seeding
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.acquisition.base import AcquisitionDriver
+from trackseerr.clients.acquisition.qbittorrent import QbittorrentDriver
+from trackseerr.config import Config
+from trackseerr.models import ActiveDownload, DownloadClientConfig, DownloadDriverType, DownloadStatus
+from trackseerr.storage import SCHEMA_VERSION, Database
 
 NOW = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
 IMPORTED = DownloadStatus.IMPORTED.value
@@ -111,7 +111,7 @@ class World:
 
 
 def run(db: Database, driver: FakeDriver) -> dict[str, Any]:
-    with patch("plex_playlist_sync.seed_cleanup.get_acquisition_driver", return_value=driver):
+    with patch("trackseerr.seed_cleanup.get_acquisition_driver", return_value=driver):
         return sc.run_sweep(db, now=NOW)
 
 
@@ -487,7 +487,7 @@ def test_sweep_live_rows_are_not_orphans_or_forgotten(db, tmp_path):
 
 
 def test_sweep_is_exclusive_and_tracked(db):
-    from plex_playlist_sync.job_tracker import job_tracker
+    from trackseerr.job_tracker import job_tracker
 
     job_tracker.clear()
     assert sc._run_lock.acquire(blocking=False)
@@ -563,7 +563,7 @@ def test_orphan_remove_route_honours_delete_files(client, db, config, tmp_path):
     for delete in (False, True):
         finding = _orphan_finding(db, w)
         driver = FakeDriver(torrents=[w.torrent(h="feed")])
-        with patch("plex_playlist_sync.seed_cleanup.get_acquisition_driver", return_value=driver):
+        with patch("trackseerr.seed_cleanup.get_acquisition_driver", return_value=driver):
             res = client.post(f"/api/seed-cleanup/orphans/{finding['id']}/remove", json={"delete_files": delete}, headers=h)
         assert res.status_code == 200 and res.json() == {"removed": True, "delete_files": delete}
         assert driver.removed == [("feed", delete)]
@@ -576,7 +576,7 @@ def test_orphan_remove_refuses_delete_files_inside_music_root(client, db, config
     inside = str(tmp_path / "music" / "Artist")
     finding = _orphan_finding(db, w, content=inside)
     driver = FakeDriver(torrents=[{**w.torrent(h="feed"), "content_path": inside}])
-    with patch("plex_playlist_sync.seed_cleanup.get_acquisition_driver", return_value=driver):
+    with patch("trackseerr.seed_cleanup.get_acquisition_driver", return_value=driver):
         res = client.post(f"/api/seed-cleanup/orphans/{finding['id']}/remove", json={"delete_files": True}, headers=h)
         assert res.status_code == 409 and driver.removed == []
         assert db.get_library_health_finding(finding["id"]) is not None
@@ -591,7 +591,7 @@ def test_orphan_remove_refuses_torrent_that_became_tracked(client, db, config, t
     finding = _orphan_finding(db, w)
     w.download(h="feed", status=IMPORTED)
     driver = FakeDriver(torrents=[w.torrent(h="feed")])
-    with patch("plex_playlist_sync.seed_cleanup.get_acquisition_driver", return_value=driver):
+    with patch("trackseerr.seed_cleanup.get_acquisition_driver", return_value=driver):
         res = client.post(f"/api/seed-cleanup/orphans/{finding['id']}/remove", json={"delete_files": False}, headers=h)
     assert res.status_code == 409 and driver.removed == []
 
@@ -614,7 +614,7 @@ def test_failed_retry_route_resets_and_reevaluates(client, db, config, tmp_path)
         run(db, broken)
     finding = next(f for f in db.list_library_health_findings() if f["kind"] == "cleanup_failed")
     healthy = FakeDriver(torrents=[w.torrent()], statuses={"abc": w.status()})
-    with patch("plex_playlist_sync.seed_cleanup.get_acquisition_driver", return_value=healthy):
+    with patch("trackseerr.seed_cleanup.get_acquisition_driver", return_value=healthy):
         res = client.post(f"/api/seed-cleanup/failed/{finding['id']}/retry", headers=h)
     assert res.status_code == 200
     assert res.json() == {"retried": True, "removed": True, "status": IMPORTED, "attempts": 0, "error": None}
@@ -630,7 +630,7 @@ def test_failed_retry_route_still_failing_counts_one_attempt(client, db, config,
     for _ in range(3):
         run(db, broken)
     finding = next(f for f in db.list_library_health_findings() if f["kind"] == "cleanup_failed")
-    with patch("plex_playlist_sync.seed_cleanup.get_acquisition_driver", return_value=broken):
+    with patch("trackseerr.seed_cleanup.get_acquisition_driver", return_value=broken):
         body = client.post(f"/api/seed-cleanup/failed/{finding['id']}/retry", headers=h).json()
     assert body["removed"] is False and body["attempts"] == 1 and "secret" not in body["error"]
 
@@ -700,7 +700,7 @@ def test_qbittorrent_list_category_request_and_parsing():
         {"name": "no hash"},
     ])
     drv = QbittorrentDriver("http://192.168.1.9:8080", category="music-cat")
-    with patch("plex_playlist_sync.clients.acquisition.qbittorrent.httpx.Client", return_value=http):
+    with patch("trackseerr.clients.acquisition.qbittorrent.httpx.Client", return_value=http):
         out = drv.list_category()
     url = http.get.call_args
     assert url.args[0] == "http://192.168.1.9:8080/api/v2/torrents/info"
@@ -712,7 +712,7 @@ def test_qbittorrent_list_category_request_and_parsing():
 def test_qbittorrent_list_category_refuses_empty_category_and_raises_on_http_error():
     assert QbittorrentDriver("http://192.168.1.9:8080", category="").list_category() is None
     http = _http([], status=500)
-    with patch("plex_playlist_sync.clients.acquisition.qbittorrent.httpx.Client", return_value=http):
+    with patch("trackseerr.clients.acquisition.qbittorrent.httpx.Client", return_value=http):
         with pytest.raises(RuntimeError):
             QbittorrentDriver("http://192.168.1.9:8080").list_category()
 
@@ -720,7 +720,7 @@ def test_qbittorrent_list_category_refuses_empty_category_and_raises_on_http_err
 def test_qbittorrent_status_reports_content_path():
     http = _http([{"state": "stalledUP", "progress": 1, "content_path": "/dl/A", "save_path": "/dl", "ratio": 2.0,
                    "seeding_time": 5, "total_size": 9}])
-    with patch("plex_playlist_sync.clients.acquisition.qbittorrent.httpx.Client", return_value=http):
+    with patch("trackseerr.clients.acquisition.qbittorrent.httpx.Client", return_value=http):
         st = QbittorrentDriver("http://192.168.1.9:8080").get_status("ABC")
     assert st["content_path"] == "/dl/A" and st["save_path"] == "/dl"
 
@@ -811,11 +811,11 @@ def test_run_seed_cleanup_task_dispatches_and_reports_already_running(client, db
 
 def test_run_library_health_task_dispatches_and_reports_already_running(client, db, config):
     h = _headers(db, config)
-    with patch("plex_playlist_sync.library_health.start_check_async", return_value=True) as start:
+    with patch("trackseerr.library_health.start_check_async", return_value=True) as start:
         res = client.post("/api/system/tasks/library_health/run", headers=h)
         assert res.status_code == 200 and "dispatched" in res.json()["message"]
         assert start.call_args.kwargs["music_root"] == tmp_music(db)
-    with patch("plex_playlist_sync.library_health.start_check_async", return_value=False):
+    with patch("trackseerr.library_health.start_check_async", return_value=False):
         res = client.post("/api/system/tasks/library_health/run", headers=h)
     assert res.json() == {"success": True, "message": "Task 'library_health' is already running"}
 

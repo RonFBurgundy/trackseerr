@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from plex_playlist_sync.clients.deezer import DeezerClient
+from trackseerr.clients.deezer import DeezerClient
 
 
 class MockDeezerTrack:
@@ -22,7 +22,7 @@ class MockDeezerPlaylist:
         self.tracks = tracks or []
 
 
-@patch("plex_playlist_sync.clients.deezer.deezer.Client")
+@patch("trackseerr.clients.deezer.deezer.Client")
 def test_deezer_user_playlists(mock_client_class):
     mock_dz = MagicMock()
     mock_client_class.return_value = mock_dz
@@ -41,7 +41,7 @@ def test_deezer_user_playlists(mock_client_class):
     assert playlists[0].poster == "http://dz.com/pic.jpg"
 
 
-@patch("plex_playlist_sync.clients.deezer.deezer.Client")
+@patch("trackseerr.clients.deezer.deezer.Client")
 def test_deezer_playlist_tracks(mock_client_class):
     mock_dz = MagicMock()
     mock_client_class.return_value = mock_dz

@@ -7,17 +7,17 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from plex_playlist_sync.api.routes.library.models import IngestArtistRequest
-from plex_playlist_sync.api.routes.library.artists import (
+from trackseerr.api.routes.library.models import IngestArtistRequest
+from trackseerr.api.routes.library.artists import (
     get_artist,
     ingest_artist,
 )
-from plex_playlist_sync.artist_refresh import refresh_single_artist
-from plex_playlist_sync.album_track_hydration import hydrate_album_tracks
-from plex_playlist_sync.clients.discovery import DiscoveryClient
-from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
-from plex_playlist_sync.models import LibraryAlbum, LibraryArtist
-from plex_playlist_sync.storage import Database
+from trackseerr.artist_refresh import refresh_single_artist
+from trackseerr.album_track_hydration import hydrate_album_tracks
+from trackseerr.clients.discovery import DiscoveryClient
+from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.models import LibraryAlbum, LibraryArtist
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -201,7 +201,7 @@ def test_hydration_sets_total_tracks_and_detail_falls_back_to_rows(db: Database)
 
 
 def test_total_tracks_only_grows_unless_authoritative(db: Database):
-    from plex_playlist_sync.artist_refresh import _store_total_tracks
+    from trackseerr.artist_refresh import _store_total_tracks
 
     db.upsert_library_artist(LibraryArtist(id="ar", name="G", monitored=True, monitor_option="none"))
     db.upsert_library_album(

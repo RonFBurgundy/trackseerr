@@ -1,6 +1,6 @@
 """Local accounts (Phase 1): hashing, policy, TOTP, invites, login, revocation, gateway paths, secrecy."""
 
-from plex_playlist_sync.storage import SCHEMA_VERSION
+from trackseerr.storage import SCHEMA_VERSION
 import hashlib
 import json
 import re
@@ -12,12 +12,12 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import internal_auth, local_auth
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.clients.core_client import CoreClient, ProxyResponse
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr import internal_auth, local_auth
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.clients.core_client import CoreClient, ProxyResponse
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 SECRET = "s" * 40
 PW = "correct horse battery staple"
@@ -652,9 +652,9 @@ def test_plex_login_refuses_disabled_and_tombstoned(db, tmp_path):
     cfg = _config(tmp_path, "all-in-one")
     client = _client(db, cfg)
     plex_user = {"id": "1001", "username": "alice", "email": "al@x.tv", "thumb": ""}
-    with patch("plex_playlist_sync.api.routes.auth.check_plex_pin", return_value="tok"), patch(
-        "plex_playlist_sync.api.routes.auth.verify_server_access", return_value=(True, False)
-    ), patch("plex_playlist_sync.api.routes.auth.get_plex_user", return_value=plex_user), patch.dict(
+    with patch("trackseerr.api.routes.auth.check_plex_pin", return_value="tok"), patch(
+        "trackseerr.api.routes.auth.verify_server_access", return_value=(True, False)
+    ), patch("trackseerr.api.routes.auth.get_plex_user", return_value=plex_user), patch.dict(
         "os.environ", {"PLEX_MACHINE_IDENTIFIER": "m1"}
     ):
         assert client.post("/api/auth/plex/verify", json={"pin_id": 1}).status_code == 200
@@ -789,7 +789,7 @@ def test_gateway_forwards_invite_as_service_principal_and_rate_limits(gateway):
 
 def test_gateway_forwards_account_as_user_with_issued_at(gateway, db):
     client, _ = gateway
-    from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
+    from trackseerr.auth import create_session_token, get_or_create_secret_key
 
     db.mirror_local_user("local-" + "b" * 24, "bob")
     cfg = client.app.dependency_overrides[get_config]()
@@ -811,7 +811,7 @@ def test_gateway_forwards_account_as_user_with_issued_at(gateway, db):
 
 def test_gateway_reissues_session_after_password_change(gateway, db):
     client, cfg = gateway
-    from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
+    from trackseerr.auth import create_session_token, get_or_create_secret_key
 
     uid = "local-" + "c" * 24
     db.mirror_local_user(uid, "carl")
@@ -835,7 +835,7 @@ def test_gateway_reissues_session_after_password_change(gateway, db):
     assert db.get_session(tokens[0]) is None and db.get_session(tokens[1]) is None
     new_token = res.cookies.get("session_token")
     assert new_token and db.get_session(new_token) is not None
-    from plex_playlist_sync.storage import ts_to_us
+    from trackseerr.storage import ts_to_us
 
     assert ts_to_us(db.get_session(new_token)["created_at"]) > floor
 
@@ -938,7 +938,7 @@ def test_mfa_secret_not_returned_by_confirm_response(core, db):
 
 
 def test_access_log_redacts_invite_tokens():
-    from plex_playlist_sync.cli import redact_sensitive_query
+    from trackseerr.cli import redact_sensitive_query
 
     line = 'GET /api/auth/invite/' + "a" * 43 + ' HTTP/1.1'
     assert "a" * 43 not in redact_sensitive_query(line)
@@ -972,7 +972,7 @@ def test_create_local_user_returns_user_and_one_time_token(db):
 def test_access_log_filter_replaces_invite_token_with_marker():
     import logging as _logging
 
-    from plex_playlist_sync.cli import RedactAccessLogFilter
+    from trackseerr.cli import RedactAccessLogFilter
 
     tok = "Zx9_-" * 9
     for path, expected in (

@@ -5,7 +5,7 @@ import sqlite3
 from unittest.mock import patch
 import pytest
 
-from plex_playlist_sync.models import (
+from trackseerr.models import (
     ActiveDownload,
     DownloadClientConfig,
     DownloadDriverType,
@@ -14,7 +14,7 @@ from plex_playlist_sync.models import (
     Playlist,
     Track,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -587,9 +587,9 @@ class TestNoLeakedTransactions:
         db.close()
 
     def test_create_app_shares_its_database_with_get_db(self, tmp_path, monkeypatch):
-        from plex_playlist_sync.api import dependencies
-        from plex_playlist_sync.api.app import create_app
-        from plex_playlist_sync.config import Config
+        from trackseerr.api import dependencies
+        from trackseerr.api.app import create_app
+        from trackseerr.config import Config
 
         monkeypatch.delenv("DATABASE_PATH", raising=False)
         monkeypatch.setenv("CONFIG_DIR", str(tmp_path))

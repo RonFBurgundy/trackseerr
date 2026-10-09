@@ -10,14 +10,14 @@ import requests
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.api.routes.scrobbles import MAX_WEBHOOK_BYTES, _base_url
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.cli import RedactAccessLogFilter, install_access_log_redaction, redact_sensitive_query
-from plex_playlist_sync.clients.scrobbler import LastFmClient, LastFmError
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.api.routes.scrobbles import MAX_WEBHOOK_BYTES, _base_url
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.cli import RedactAccessLogFilter, install_access_log_redaction, redact_sensitive_query
+from trackseerr.clients.scrobbler import LastFmClient, LastFmError
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 SP_ID = "37i9dQZF1DXcBWIGoYBM5M"
 SECRET = "SUPERSECRETTOKEN123"
@@ -141,7 +141,7 @@ def test_lastfm_transport_error_never_leaks_token(caplog):
     session = _RaisingSession()
     client = LastFmClient("KEYSECRET", "shh", session=session)
     caplog.set_level(logging.DEBUG)
-    with patch("plex_playlist_sync.clients.scrobbler.time.sleep"), pytest.raises(LastFmError) as ei:
+    with patch("trackseerr.clients.scrobbler.time.sleep"), pytest.raises(LastFmError) as ei:
         client.exchange_token_for_session(SECRET)
     blob = caplog.text + str(ei.value) + repr(ei.value)
     for secret in (SECRET, "SIGSECRET", "SKSECRET"):
@@ -151,7 +151,7 @@ def test_lastfm_transport_error_never_leaks_token(caplog):
 
 
 def test_scrobble_worker_logs_exception_type_only(caplog):
-    from plex_playlist_sync.scrobble_worker import ScrobbleWorker
+    from trackseerr.scrobble_worker import ScrobbleWorker
 
     worker = ScrobbleWorker()
     caplog.set_level(logging.DEBUG)
@@ -237,7 +237,7 @@ def test_redact_helper_and_installation_is_idempotent():
 
 
 def test_other_users_mix_snapshot_is_404_not_403():
-    from plex_playlist_sync.api.routes.plex_playlists import _authorized_snapshot
+    from trackseerr.api.routes.plex_playlists import _authorized_snapshot
 
     snap = {"id": "s1", "plex_user": "admin"}
     fake_db = SimpleNamespace(get_mix_snapshot=lambda sid: snap)

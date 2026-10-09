@@ -9,17 +9,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import recycle_bin
-from plex_playlist_sync.acquisition_worker import evaluate_seed_cleanup, record_import_events
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_plex_client
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.item_history import GrabTrigger
-from plex_playlist_sync.library_scanner import LibraryScanner
-from plex_playlist_sync.models import ActiveDownload, DownloadStatus, MusicRequest, RequestStatus
-from plex_playlist_sync.recycle_bin import DisposeResult, log_recycled, recycle_replaced_files, run_cleanup
-from plex_playlist_sync.storage import Database
+from trackseerr import recycle_bin
+from trackseerr.acquisition_worker import evaluate_seed_cleanup, record_import_events
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_plex_client
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.item_history import GrabTrigger
+from trackseerr.library_scanner import LibraryScanner
+from trackseerr.models import ActiveDownload, DownloadStatus, MusicRequest, RequestStatus
+from trackseerr.recycle_bin import DisposeResult, log_recycled, recycle_replaced_files, run_cleanup
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -197,7 +197,7 @@ def test_seed_cleanup_deleting_files_is_recorded(db):
     db.record_download_grab("dl-s", indexer="T", quality="FLAC", protocol="torrent", trigger=GrabTrigger("request"))
     driver = MagicMock()
     driver.cleanup_completed.return_value = True
-    with patch("plex_playlist_sync.acquisition_worker.deletion_safe", return_value=(True, "")):
+    with patch("trackseerr.acquisition_worker.deletion_safe", return_value=(True, "")):
         outcome = evaluate_seed_cleanup(
             driver, "h-dl-s", {"seed_complete_action": "remove_and_delete"}, "hardlink", None,
             db.get_active_download("dl-s"), db,
@@ -212,7 +212,7 @@ def test_seed_cleanup_that_keeps_files_records_no_deletion(db):
     download(db, "dl-k")
     driver = MagicMock()
     driver.cleanup_completed.return_value = True
-    with patch("plex_playlist_sync.acquisition_worker.deletion_safe", return_value=(False, "shared inode")):
+    with patch("trackseerr.acquisition_worker.deletion_safe", return_value=(False, "shared inode")):
         outcome = evaluate_seed_cleanup(
             driver, "h-dl-k", {"seed_complete_action": "remove_and_delete"}, "hardlink", None,
             db.get_active_download("dl-k"), db,
@@ -240,7 +240,7 @@ def test_scanner_provenance_marks_artists_it_adds(db, tmp_path):
     root.mkdir()
     LibraryScanner().scan(db=db, root_folder=str(root))
     # nothing was added, and the provenance context did not leak out of the scan
-    from plex_playlist_sync.item_history import current_provenance
+    from trackseerr.item_history import current_provenance
 
     assert current_provenance() is None
 
@@ -274,11 +274,11 @@ def test_health_finding_for_an_unindexed_file_is_matched_by_path(db, tmp_path):
 
 
 def test_requested_and_approved_events_are_adopted_once_the_item_is_in_the_library(db):
-    from plex_playlist_sync.request_submission import submit_track_request
+    from trackseerr.request_submission import submit_track_request
 
     cfg = Config(plex_url="x", plex_token="t", auto_approve_requests=True)
     user = db.get_user("user-alice") | {"permissions": 0xFFFF}
-    with patch("plex_playlist_sync.request_submission.native_is_configured", return_value=False):
+    with patch("trackseerr.request_submission.native_is_configured", return_value=False):
         sub = submit_track_request(db, cfg, user, "Come as You Are", "Nirvana", "Nevermind")
     req_id = sub.request["id"]
     orphans = db.conn.execute(
@@ -300,11 +300,11 @@ def test_requested_and_approved_events_are_adopted_once_the_item_is_in_the_libra
 
 
 def test_request_for_an_item_already_in_the_library_is_attached_immediately(db):
-    from plex_playlist_sync.request_submission import submit_track_request
+    from trackseerr.request_submission import submit_track_request
 
     cfg = Config(plex_url="x", plex_token="t", auto_approve_requests=False)
     user = db.get_user("user-alice")
-    with patch("plex_playlist_sync.request_submission.native_is_configured", return_value=False):
+    with patch("trackseerr.request_submission.native_is_configured", return_value=False):
         submit_track_request(db, cfg, user, "Lithium", "Nirvana", "Nevermind")
     (ev,) = events(db, "requested")
     assert ev["album_id"] == "alb-1" and not events(db, "request_approved")
@@ -351,7 +351,7 @@ def test_issue_open_and_resolve_events(db, app_client):
 
 
 def test_issue_replacement_search_is_an_issue_trigger_with_the_admin_as_actor(db, app_client):
-    from plex_playlist_sync.acquisition_coordinator import acquisition_coordinator
+    from trackseerr.acquisition_coordinator import acquisition_coordinator
 
     _, client, cfg = app_client
     h = _h(db, cfg, "admin-1")
@@ -365,7 +365,7 @@ def test_issue_replacement_search_is_an_issue_trigger_with_the_admin_as_actor(db
     with patch.object(acquisition_coordinator, "search_and_grab", mock_grab):
         resp = client.post(f"/api/issues/{issue_id}/actions/research", headers=h)
         assert resp.status_code == 200, resp.text
-        from plex_playlist_sync.backlog_worker import backlog_worker
+        from trackseerr.backlog_worker import backlog_worker
 
         thread = backlog_worker.last_search_thread
         if thread is not None:
@@ -386,7 +386,7 @@ def test_request_approve_and_decline_events(db, app_client):
         {"id": "trk-2", "album_id": "alb-1", "artist_id": "art-1", "title": "Polly", "clean_title": "polly",
          "track_number": 4, "disc_number": 1}
     )
-    with patch("plex_playlist_sync.api.routes.requests.native_is_configured", return_value=False):
+    with patch("trackseerr.api.routes.requests.native_is_configured", return_value=False):
         assert client.post("/api/requests/req-a/approve", headers=h).status_code == 200
     assert client.post("/api/requests/req-d/reject", headers=h).status_code == 200
     (appr,) = events(db, "request_approved")
@@ -439,7 +439,7 @@ def test_rename_apply_records_a_move(db, app_client, tmp_path):
         {"id": "fil-r", "track_id": "trk-1", "file_path": str(legacy), "relative_path": "old/dirty.mp3", "codec": "MP3",
          "quality_name": "MP3 320", "size_bytes": 1, "cutoff_met": True}
     )
-    with patch("plex_playlist_sync.api.routes.library.tagging.validate_media_path", side_effect=lambda p, **kw: Path(p)):
+    with patch("trackseerr.api.routes.library.tagging.validate_media_path", side_effect=lambda p, **kw: Path(p)):
         resp = client.post("/api/library/rename/apply", json={"file_ids": ["fil-r"]}, headers=h)
     assert resp.status_code == 200 and resp.json()["renamed_count"] == 1, resp.text
     ev = events(db, "moved") + events(db, "renamed")

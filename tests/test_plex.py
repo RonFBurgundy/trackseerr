@@ -3,10 +3,10 @@ from unittest.mock import MagicMock, patch
 
 from plexapi.exceptions import NotFound
 
-from plex_playlist_sync.clients.plex import PlexClient, _WARNED_MISSING_SECTIONS, clean_title, music_sections
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.media_servers.plex import PlexMediaServer
-from plex_playlist_sync.models import Playlist, Track
+from trackseerr.clients.plex import PlexClient, _WARNED_MISSING_SECTIONS, clean_title, music_sections
+from trackseerr.config import Config
+from trackseerr.media_servers.plex import PlexMediaServer
+from trackseerr.models import Playlist, Track
 
 
 def test_clean_title():
@@ -40,7 +40,7 @@ class MockPlexTrack:
         return self._album
 
 
-@patch("plex_playlist_sync.clients.plex.PlexServer")
+@patch("trackseerr.clients.plex.PlexServer")
 def test_plex_client_ssl_verification(mock_server):
     # Verify SSL True
     PlexClient("https://plex.example.com", "token", verify_ssl=True)
@@ -53,7 +53,7 @@ def test_plex_client_ssl_verification(mock_server):
     assert session_arg2.verify is False
 
 
-@patch("plex_playlist_sync.clients.plex.PlexServer")
+@patch("trackseerr.clients.plex.PlexServer")
 def test_match_track_direct(mock_server):
     client = PlexClient("http://localhost:32400", "token")
     mock_track = MockPlexTrack("Karma Police", "Radiohead", "OK Computer")
@@ -64,7 +64,7 @@ def test_match_track_direct(mock_server):
     assert matched is mock_track
 
 
-@patch("plex_playlist_sync.clients.plex.PlexServer")
+@patch("trackseerr.clients.plex.PlexServer")
 def test_match_track_fallback_cleaned_title(mock_server):
     client = PlexClient("http://localhost:32400", "token")
     mock_track = MockPlexTrack("Karma Police", "Radiohead", "OK Computer")
@@ -77,7 +77,7 @@ def test_match_track_fallback_cleaned_title(mock_server):
     assert client.server.search.call_count == 2
 
 
-@patch("plex_playlist_sync.clients.plex.PlexServer")
+@patch("trackseerr.clients.plex.PlexServer")
 def test_sync_playlist_creates_new(mock_server, tmp_path):
     client = PlexClient("http://localhost:32400", "token")
     mock_track = MockPlexTrack("Song 1", "Artist 1", "Album 1")
@@ -101,7 +101,7 @@ def test_sync_playlist_creates_new(mock_server, tmp_path):
     client.server.createPlaylist.assert_called_once()
 
 
-@patch("plex_playlist_sync.clients.plex.PlexServer")
+@patch("trackseerr.clients.plex.PlexServer")
 def test_sync_playlist_missing_tracks_csv(mock_server, tmp_path):
     client = PlexClient("http://localhost:32400", "token")
     # No matches found
@@ -123,7 +123,7 @@ def test_sync_playlist_missing_tracks_csv(mock_server, tmp_path):
     assert "Missing Song" in content
 
 
-@patch("plex_playlist_sync.clients.plex.PlexServer")
+@patch("trackseerr.clients.plex.PlexServer")
 def test_get_user_server_admin_vs_switch_user(mock_server):
     client = PlexClient("http://localhost:32400", "token")
     client.server.myPlexAccount.return_value.username = "Boss"
@@ -206,7 +206,7 @@ def test_config_plex_music_section_from_env(monkeypatch):
     assert cfg3.plex_music_section is None
 
 
-@patch("plex_playlist_sync.clients.plex.PlexServer")
+@patch("trackseerr.clients.plex.PlexServer")
 def test_plex_media_server_honors_preferred_section(mock_server):
     client = PlexClient("http://localhost:32400", "token", music_section="Hi-Fi")
     sec1 = MagicMock(title="Music", type="artist")
@@ -218,7 +218,7 @@ def test_plex_media_server_honors_preferred_section(mock_server):
     assert sections == [sec2, sec1]
 
 
-@patch("plex_playlist_sync.clients.plex.PlexServer")
+@patch("trackseerr.clients.plex.PlexServer")
 def test_plex_client_smart_mix_tracks_honors_preferred_section(mock_server):
     client = PlexClient("http://localhost:32400", "token", music_section="Special")
     sec1 = MagicMock(title="General", type="artist")
@@ -236,9 +236,9 @@ def test_plex_client_smart_mix_tracks_honors_preferred_section(mock_server):
     sec1.searchTracks.assert_not_called()
 
 
-@patch("plex_playlist_sync.clients.plex.PlexServer")
+@patch("trackseerr.clients.plex.PlexServer")
 def test_get_media_server_honors_plex_music_section(mock_server):
-    from plex_playlist_sync.media_servers import get_media_server
+    from trackseerr.media_servers import get_media_server
 
     cfg = Config(
         plex_url="http://localhost:32400",
@@ -258,7 +258,7 @@ def test_get_media_server_honors_plex_music_section(mock_server):
     assert adapter2._music_section == "FLAC Music"
 
 
-@patch("plex_playlist_sync.clients.plex.PlexServer")
+@patch("trackseerr.clients.plex.PlexServer")
 def test_plex_client_refresh_music_library_honors_preferred_section(mock_server):
     client = PlexClient("http://localhost:32400", "token", music_section="Lossless")
     sec1 = MagicMock(title="Standard", type="artist")

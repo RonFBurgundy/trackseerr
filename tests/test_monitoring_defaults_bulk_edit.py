@@ -6,16 +6,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from plex_playlist_sync.artist_refresh import refresh_single_artist
-from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
-from plex_playlist_sync.library_monitoring import (
+from trackseerr.artist_refresh import refresh_single_artist
+from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.library_monitoring import (
     NATIVE_MONITOR_OPTIONS,
     album_monitored_for_option,
 )
-from plex_playlist_sync.library_scanner import LibraryScanner
-from plex_playlist_sync.mediacover import mediacover_service
-from plex_playlist_sync.models import LibraryArtist
-from plex_playlist_sync.storage import Database
+from trackseerr.library_scanner import LibraryScanner
+from trackseerr.mediacover import mediacover_service
+from trackseerr.models import LibraryArtist
+from trackseerr.storage import Database
 
 # Reuse the authenticated TestClient fixtures of the library API tests.
 from tests.test_library_api import (  # noqa: F401
@@ -32,7 +32,7 @@ ADDED = "2024-06-15 10:00:00"
 @pytest.fixture(autouse=True)
 def _no_background_hydration():
     """The scanner launches a background refresh (network) for new artists; keep these tests offline."""
-    with patch("plex_playlist_sync.artist_refresh_worker.artist_refresh_worker.refresh_once"):
+    with patch("trackseerr.artist_refresh_worker.artist_refresh_worker.refresh_once"):
         yield
 
 
@@ -169,7 +169,7 @@ def _scan_one(db: Database, root: Path, artist: str = "Band", album: str = "LP",
         "total_tracks": total_tracks, "duration": 10.0, "codec": "FLAC", "bitrate": 1, "sample_rate": 44100,
         "bits_per_sample": 16, "quality_full": "FLAC 16bit 44.1kHz", "file_path": str(f.resolve()),
     }
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", return_value=meta):
+    with patch("trackseerr.library_scanner.inspect_audio_file", return_value=meta):
         LibraryScanner().scan(db, root_folder=str(root))
 
 
@@ -192,7 +192,7 @@ def test_scan_new_artist_gets_scan_default_and_rescan_keeps_user_choice(test_db:
         "bits_per_sample": 16, "quality_full": "FLAC 16bit 44.1kHz", "file_path": str(f.resolve()), **meta_mbid,
     }
     f.write_bytes(b"changed so the scanner re-reads the file")
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", return_value=meta):
+    with patch("trackseerr.library_scanner.inspect_audio_file", return_value=meta):
         LibraryScanner().scan(test_db, root_folder=str(root))
     artist2 = test_db.get_library_artist(artist["id"])
     assert artist2["mbid"] == "mb-1"  # the rescan did update the row ...
@@ -277,7 +277,7 @@ def test_set_artist_monitored_native_every_option(app_and_client, test_db, test_
 
 
 def test_set_artist_monitored_lidarr_preset_and_unsupported_option(app_and_client, test_db, test_config, seeded_users):
-    from plex_playlist_sync.api.dependencies import get_lidarr_client
+    from trackseerr.api.dependencies import get_lidarr_client
 
     app, client = app_and_client
     h = _auth_headers(seeded_users["admin"], test_db, test_config)
@@ -297,8 +297,8 @@ def test_set_artist_monitored_lidarr_preset_and_unsupported_option(app_and_clien
 
 
 def test_lidarr_bulk_partial_failure_reports_progress(app_and_client, test_db, test_config, seeded_users):
-    from plex_playlist_sync.api.dependencies import get_lidarr_client
-    from plex_playlist_sync.clients.lidarr import LidarrApiError
+    from trackseerr.api.dependencies import get_lidarr_client
+    from trackseerr.clients.lidarr import LidarrApiError
 
     app, client = app_and_client
     h = _auth_headers(seeded_users["admin"], test_db, test_config)
@@ -364,7 +364,7 @@ def test_settings_defaults_roundtrip_and_validation(app_and_client, test_db, tes
 # ---------------------------------------------------------------- ingest
 
 def test_ingest_defaults_to_add_monitor_option(app_and_client, test_db, test_config, seeded_users):
-    from plex_playlist_sync.api.dependencies import get_discovery_client
+    from trackseerr.api.dependencies import get_discovery_client
 
     app, client = app_and_client
     h = _auth_headers(seeded_users["admin"], test_db, test_config)
@@ -528,7 +528,7 @@ def test_bulk_edit_albums(app_and_client, test_db, test_config, seeded_users):
 
 
 def test_bulk_edit_albums_lidarr_mode_uses_single_call(app_and_client, test_db, test_config, seeded_users):
-    from plex_playlist_sync.api.dependencies import get_lidarr_client
+    from trackseerr.api.dependencies import get_lidarr_client
 
     app, client = app_and_client
     h = _auth_headers(seeded_users["admin"], test_db, test_config)

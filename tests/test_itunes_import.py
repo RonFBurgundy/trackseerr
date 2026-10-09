@@ -13,12 +13,12 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import itunes_import as imp
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr import itunes_import as imp
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 WIN = "file://localhost/C:/Users/Aaron/iTunes/iTunes%20Media/Music"
 MAC = "file://localhost/Users/aaron/Music/iTunes/iTunes%20Media/Music"
@@ -475,7 +475,7 @@ def test_preview_rejections(env, monkeypatch):
 # --- audit regressions ---------------------------------------------------------------------------------------
 
 def test_second_concurrent_preview_gets_429(env):
-    from plex_playlist_sync.api.routes import itunes_import as route
+    from trackseerr.api.routes import itunes_import as route
 
     assert route._PREVIEW_LOCK.acquire(blocking=False)
     try:

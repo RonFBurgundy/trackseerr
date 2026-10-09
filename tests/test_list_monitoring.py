@@ -7,34 +7,34 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker
-from plex_playlist_sync.backlog_worker import WantedBacklogWorker
-from plex_playlist_sync.clients.import_lists import ImportListError, ImportListItem
-from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient
-from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
-from plex_playlist_sync.import_list_worker import (
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.backlog_worker import WantedBacklogWorker
+from trackseerr.clients.import_lists import ImportListError, ImportListItem
+from trackseerr.clients.lidarr import LidarrApiError, LidarrClient
+from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.import_list_worker import (
     ImportListBusy,
     ImportListWorker,
     claim_sync,
     release_sync,
     sync_import_list,
 )
-from plex_playlist_sync.library_monitoring import LIST_MONITOR_MODES
-from plex_playlist_sync.list_monitoring import (
+from trackseerr.library_monitoring import LIST_MONITOR_MODES
+from trackseerr.list_monitoring import (
     ListItem,
     apply_list_item,
     apply_playlist_missing,
     effective_level,
 )
-from plex_playlist_sync.models import (
+from trackseerr.models import (
     ActiveDownload,
     DownloadClientConfig,
     DownloadDriverType,
     DownloadStatus,
     LibraryArtist,
 )
-from plex_playlist_sync.request_submission import RequestRejected
-from plex_playlist_sync.storage import Database
+from trackseerr.request_submission import RequestRejected
+from trackseerr.storage import Database
 from tests.lidarr_fake import FastClock
 
 ART = "aaaaaaaa-0000-0000-0000-00000000000a"
@@ -56,8 +56,8 @@ def _offline(monkeypatch):
     """Nothing here may reach the network or sleep for real."""
     # Patch the module's own ``time`` name: ``list_monitoring.time.sleep`` is the process-global ``time.sleep``, and
     # a no-op there turns every background thread's sleep loop (in any module) into a hot loop for the whole test.
-    monkeypatch.setattr("plex_playlist_sync.list_monitoring.time", FastClock())
-    monkeypatch.setattr("plex_playlist_sync.mediacover.mediacover_service.ensure_artwork", lambda *a, **k: Path("/tmp/c.jpg"))
+    monkeypatch.setattr("trackseerr.list_monitoring.time", FastClock())
+    monkeypatch.setattr("trackseerr.mediacover.mediacover_service.ensure_artwork", lambda *a, **k: Path("/tmp/c.jpg"))
 
 
 def make_enricher() -> MagicMock:
@@ -172,7 +172,7 @@ def test_native_album_new_artist_monitors_only_that_album_and_tracks(db):
     assert all(t["monitored"] for t in tracks)
 
     # A later artist refresh (option "none") adds the rest of the discography unmonitored and keeps this album.
-    from plex_playlist_sync.artist_refresh import refresh_single_artist
+    from trackseerr.artist_refresh import refresh_single_artist
 
     assert refresh_single_artist(artist["id"], db, enricher=enr)["success"] is True
     assert albums_of(db, artist["id"]) == {"OK Computer": True, "The Bends": False, "Creep": False}
@@ -292,7 +292,7 @@ def test_artist_widening_from_track_item(db):
 
 def test_track_mode_goes_through_submit_track_request_as_system_request(db):
     alice = db.get_user("user-alice")
-    with patch("plex_playlist_sync.list_monitoring.submit_track_request") as submit:
+    with patch("trackseerr.list_monitoring.submit_track_request") as submit:
         res = apply_list_item(db, "cfg", track_item(mbid="rec-1"), "track", quality_profile_id="qp-1", requested_by=alice)
     assert (res.status, res.applied_level) == ("applied", "track")
     args, kwargs = submit.call_args
@@ -320,7 +320,7 @@ def test_track_mode_without_user_fails_and_missing_title_unresolved(db):
 
 
 def test_track_mode_rejected_request_is_failed_not_raised(db):
-    with patch("plex_playlist_sync.list_monitoring.submit_track_request", side_effect=RequestRejected("quota", 400, "Request quota reached")):
+    with patch("trackseerr.list_monitoring.submit_track_request", side_effect=RequestRejected("quota", 400, "Request quota reached")):
         res = apply_list_item(db, None, track_item(), "track", requested_by=db.get_user("admin-1"))
     assert (res.status, res.error) == ("failed", "Request quota reached")
 
@@ -393,7 +393,7 @@ def test_lidarr_artist_ignores_list_monitor_option_and_uses_root_folder_defaults
     """In Lidarr mode the list's artist_monitor_option is ignored: the add carries Lidarr's own defaults."""
     db.update_lidarr_settings({"auto_search": auto_search})
     client = lidarr_client()
-    with patch("plex_playlist_sync.list_monitoring.lidarr_library.apply_monitor_preset") as preset:
+    with patch("trackseerr.list_monitoring.lidarr_library.apply_monitor_preset") as preset:
         res = apply_list_item(db, None, artist_item(), "artist", artist_monitor_option=option, enricher=make_enricher(), lidarr_client=client)
     assert (res.status, res.applied_level) == ("applied", "artist")
     client.add_artist_with_defaults.assert_called_once()
@@ -419,7 +419,7 @@ def test_lidarr_artist_existing_is_untouched_and_errors_are_recorded(db, lidarr_
 
 
 def test_lidarr_unconfigured_is_pending(db, lidarr_mode):
-    with patch("plex_playlist_sync.list_monitoring.build_lidarr_client", return_value=None):
+    with patch("trackseerr.list_monitoring.build_lidarr_client", return_value=None):
         res = apply_list_item(db, None, artist_item(), "artist", enricher=make_enricher())
     assert res.status == "pending" and "not configured" in res.error
 
@@ -463,7 +463,7 @@ def test_playlist_album_mode_monitors_album_stamps_track_once_and_survives_resyn
 
 def test_playlist_artist_mode_applies_artist_level_with_creator_attribution(db):
     _playlist(db, "artist")
-    with patch("plex_playlist_sync.list_monitoring.apply_list_item") as apply:
+    with patch("trackseerr.list_monitoring.apply_list_item") as apply:
         apply.return_value = MagicMock(status="applied")
         apply_playlist_missing(db, None, "pl-1")
     assert apply.call_args.args[3] == "artist"
@@ -493,7 +493,7 @@ def test_playlist_unresolved_track_is_not_stamped_and_retried(db):
 def _backlog_calls(db: Database) -> list[Any]:
     worker = WantedBacklogWorker()
     worker.pace_delay = 0.0
-    with patch("plex_playlist_sync.backlog_worker.acquisition_coordinator.search_and_grab", return_value={"success": False}) as grab:
+    with patch("trackseerr.backlog_worker.acquisition_coordinator.search_and_grab", return_value={"success": False}) as grab:
         worker.poll_once(db=db)
     return [c.kwargs for c in grab.call_args_list]
 
@@ -539,7 +539,7 @@ def _make_list(db: Database, **kw: Any) -> dict[str, Any]:
 
 
 def _fetched(*items: ImportListItem):
-    return patch("plex_playlist_sync.import_list_worker.fetch_items", return_value=list(items))
+    return patch("trackseerr.import_list_worker.fetch_items", return_value=list(items))
 
 
 def test_sync_applies_new_items_once_and_never_reapplies(db):
@@ -609,7 +609,7 @@ def test_sync_track_mode_creates_requests_for_track_items(db):
 
 def test_sync_fetch_error_marks_list_error_and_keeps_items(db):
     lst = _make_list(db)
-    with patch("plex_playlist_sync.import_list_worker.fetch_items", side_effect=ImportListError("provider returned HTTP 500")):
+    with patch("trackseerr.import_list_worker.fetch_items", side_effect=ImportListError("provider returned HTTP 500")):
         summary = sync_import_list(db, lst["id"], None)
     assert summary == {"status": "error", "error": "provider returned HTTP 500"}
     after = db.get_import_list(lst["id"])
@@ -620,7 +620,7 @@ def test_pending_item_is_retried_on_next_sync(db):
     db.update_media_management_settings({"library_mode": "lidarr"})
     lst = _make_list(db, monitor_mode="artist")
     it = ImportListItem(kind="artist", external_key=ART, artist_name="Radiohead", mbid=ART, artist_mbid=ART)
-    with _fetched(it), patch("plex_playlist_sync.list_monitoring.build_lidarr_client", return_value=None):
+    with _fetched(it), patch("trackseerr.list_monitoring.build_lidarr_client", return_value=None):
         sync_import_list(db, lst["id"], None, enricher=make_enricher())
     assert db.import_list_item_counts(lst["id"])["pending"] == 1
     client = lidarr_client()
@@ -651,7 +651,7 @@ def test_worker_syncs_only_due_enabled_lists(db):
     assert off["id"] not in {l["id"] for l in db.list_due_import_lists()}
 
     worker = ImportListWorker()
-    with patch("plex_playlist_sync.import_list_worker.sync_import_list", return_value={"status": "ok"}) as sync:
+    with patch("trackseerr.import_list_worker.sync_import_list", return_value={"status": "ok"}) as sync:
         assert worker.run_due(db, None) == 2
     assert {c.args[1] for c in sync.call_args_list} == {due["id"], fresh["id"]}
     assert worker.lists_synced == 2
@@ -668,7 +668,7 @@ def test_worker_survives_a_crashing_list_and_records_it(db):
             raise RuntimeError("boom")
         return {"status": "ok"}
 
-    with patch("plex_playlist_sync.import_list_worker.sync_import_list", side_effect=fake):
+    with patch("trackseerr.import_list_worker.sync_import_list", side_effect=fake):
         worker.run_due(db, None)
     assert sorted(calls) == sorted([a["id"], b["id"]])
     assert db.get_import_list(a["id"])["last_status"] == "error"
@@ -705,8 +705,8 @@ def _import_one(db: Database, tmp_path: Path, artist: str = "Pink Floyd") -> Non
     }
     worker = AcquisitionWorker()
     worker.staging_dir = str(downloads)
-    with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=driver), patch(
-        "plex_playlist_sync.acquisition_worker.inspect_audio_file", return_value=meta
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), patch(
+        "trackseerr.acquisition_worker.inspect_audio_file", return_value=meta
     ):
         assert worker.poll_once(db=db, staging_dir=str(downloads))["imported"] == 1
 
@@ -741,7 +741,7 @@ def test_playlist_of_non_admin_creator_treats_album_and_artist_as_track(db):
         db.set_playlist_monitor_mode("pl-x", mode)
         db.record_sync_result("pl-x", "success", [{"title": "Airbag", "artist": "Radiohead", "album": "OK Computer"}])
         enr = make_enricher()
-        with patch("plex_playlist_sync.list_monitoring.apply_list_item") as apply:
+        with patch("trackseerr.list_monitoring.apply_list_item") as apply:
             counts = apply_playlist_missing(db, None, "pl-x", enricher=enr)
         assert counts == {"applied": 0, "unresolved": 0, "pending": 0, "failed": 0}
         apply.assert_not_called()
@@ -774,7 +774,7 @@ def test_playlist_stamps_each_track_immediately_and_survives_unexpected_error(db
             raise KeyError("boom")
         return MagicMock(status="applied")
 
-    with patch("plex_playlist_sync.list_monitoring.apply_list_item", side_effect=fake_apply):
+    with patch("trackseerr.list_monitoring.apply_list_item", side_effect=fake_apply):
         counts = apply_playlist_missing(db, None, "pl-1")
     assert seen == ["One", "Two", "Three"]
     assert counts["applied"] == 2 and counts["failed"] == 1
@@ -791,7 +791,7 @@ def test_list_actor_picks_oldest_enabled_admin_not_alphabetical(db):
         db.conn.execute("UPDATE users SET created_at = ? WHERE id = ?", (ts, uid))
     db.conn.execute("UPDATE users SET disabled = 1 WHERE id = 'adm-off'")
     db.conn.commit()
-    from plex_playlist_sync.list_monitoring import list_actor
+    from trackseerr.list_monitoring import list_actor
 
     assert list_actor(db)["id"] == "adm-z"
     # Equal created_at falls back to id.
@@ -804,13 +804,13 @@ def test_native_artist_retry_finishes_refresh_for_artist_this_item_added(db):
     item = artist_item()
     enr = make_enricher()
     added: list[bool] = []
-    with patch("plex_playlist_sync.artist_refresh.refresh_single_artist", return_value={"success": False, "message": "mb down"}):
+    with patch("trackseerr.artist_refresh.refresh_single_artist", return_value={"success": False, "message": "mb down"}):
         res = apply_list_item(db, None, item, "artist", enricher=enr, on_artist_added=lambda: added.append(True))
     assert res.status == "pending" and added == [True]
     assert db.get_library_artist_by_mbid(ART) is not None  # artist exists, refresh did not complete
 
     # Retry without the persisted flag would return early; with it the refresh is done.
-    with patch("plex_playlist_sync.artist_refresh.refresh_single_artist", return_value={"success": True}) as refresh:
+    with patch("trackseerr.artist_refresh.refresh_single_artist", return_value={"success": True}) as refresh:
         res = apply_list_item(db, None, item, "artist", enricher=enr, artist_added=True)
     assert res.status == "applied"
     refresh.assert_called_once()
@@ -818,7 +818,7 @@ def test_native_artist_retry_finishes_refresh_for_artist_this_item_added(db):
 
 def test_native_pre_existing_artist_is_never_refreshed_even_on_retry_without_flag(db):
     db.upsert_library_artist(LibraryArtist(id="a1", name="Radiohead", clean_name="radiohead", path="/music/R", monitored=True, mbid=ART), preserve_monitoring=True)
-    with patch("plex_playlist_sync.artist_refresh.refresh_single_artist") as refresh:
+    with patch("trackseerr.artist_refresh.refresh_single_artist") as refresh:
         res = apply_list_item(db, None, artist_item(), "artist", enricher=make_enricher())
     assert res.status == "applied"
     refresh.assert_not_called()
@@ -841,7 +841,7 @@ def test_lidarr_artist_retry_after_item_added_artist_finds_it_and_changes_nothin
 
 def test_lidarr_pre_existing_artist_untouched(db, lidarr_mode):
     client = lidarr_client(artist_id=9)
-    with patch("plex_playlist_sync.list_monitoring.lidarr_library.apply_monitor_preset") as preset:
+    with patch("trackseerr.list_monitoring.lidarr_library.apply_monitor_preset") as preset:
         res = apply_list_item(db, None, artist_item(), "artist", artist_monitor_option="albums",
                               enricher=make_enricher(), lidarr_client=client)
     assert res.status == "applied"

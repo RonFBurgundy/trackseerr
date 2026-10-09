@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from plex_playlist_sync.m3u import parse_m3u
+from trackseerr.m3u import parse_m3u
 
 from .conftest import audio_files, copy_media, run_scan, set_id3
 
@@ -81,7 +81,7 @@ def test_import_route_passes_parsed_tracks_through(api, lib):
         captured["req"] = req
         return {"name": req.name, "service": req.service, "track_count": len(req.tracks)}
 
-    with patch("plex_playlist_sync.api.routes.playlists.import_playlist_tracks", side_effect=fake_import):
+    with patch("trackseerr.api.routes.playlists.import_playlist_tracks", side_effect=fake_import):
         resp = api.post(
             "/api/playlists/import/m3u",
             {"name": "Discovery mix", "content": _abs_m3u(lib), "targets": ["admin-1"]},

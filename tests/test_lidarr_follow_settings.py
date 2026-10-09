@@ -6,27 +6,27 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.acquisition.lidarr_adapter import LidarrAdapter
-from plex_playlist_sync.clients import lidarr as lidarr_mod
-from plex_playlist_sync.clients.lidarr import LidarrApiError, LidarrClient, invalidate_add_defaults
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.lidarr_queue import LidarrTrickleWorker
-from plex_playlist_sync.lidarr_release import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.acquisition.lidarr_adapter import LidarrAdapter
+from trackseerr.clients import lidarr as lidarr_mod
+from trackseerr.clients.lidarr import LidarrApiError, LidarrClient, invalidate_add_defaults
+from trackseerr.config import Config
+from trackseerr.lidarr_queue import LidarrTrickleWorker
+from trackseerr.lidarr_release import (
     albums_containing_song,
     match_named_album,
     norm_title,
     select_release_for_song,
     titles_match,
 )
-from plex_playlist_sync.models import AcquisitionSearchResult, MusicRequest, RequestStatus
-from plex_playlist_sync.storage import Database
+from trackseerr.models import AcquisitionSearchResult, MusicRequest, RequestStatus
+from trackseerr.storage import Database
 from tests.lidarr_fake import FakeLidarr, FastClock
 
 API_KEY = "lidarr-secret-key-abcdef123456"
-HTTPX = "plex_playlist_sync.clients.lidarr.httpx.Client"
+HTTPX = "trackseerr.clients.lidarr.httpx.Client"
 
 
 @pytest.fixture
@@ -448,7 +448,7 @@ class TestFeedbackLoop:
         worker._delay_seconds = 0.0
         worker._auto_search = True
         groups = LidarrTrickleWorker._group_by_artist(items)
-        with patch(HTTPX, fake), patch("plex_playlist_sync.lidarr_queue.time", FastClock()):
+        with patch(HTTPX, fake), patch("trackseerr.lidarr_queue.time", FastClock()):
             worker._process_groups(groups, client_for(), db)
         return worker
 
@@ -538,7 +538,7 @@ class TestAdapterAndDispatch:
         assert fake.requests("PUT", "album/monitor") == [{"albumIds": [3], "monitored": True}]
 
     def test_request_dispatch_items_carry_the_song_title_and_type(self, test_db):
-        from plex_playlist_sync.request_submission import run_submission_followups, RequestSubmission
+        from trackseerr.request_submission import run_submission_followups, RequestSubmission
 
         test_db.upsert_user("user-a", "alice", "a@x.com", is_admin=False)
         created = test_db.create_request(
@@ -546,7 +546,7 @@ class TestAdapterAndDispatch:
                          status=RequestStatus.PROCESSING)
         )
         test_db.update_media_management_settings({"library_mode": "lidarr"})
-        with patch("plex_playlist_sync.request_submission.dispatch_to_lidarr") as dispatch:
+        with patch("trackseerr.request_submission.dispatch_to_lidarr") as dispatch:
             run_submission_followups(
                 test_db, {"id": "user-a", "username": "alice", "is_admin": False},
                 RequestSubmission(request=created, status=RequestStatus.PROCESSING), source="test", config=None,

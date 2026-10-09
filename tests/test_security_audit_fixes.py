@@ -13,16 +13,16 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import internal_auth, local_auth, local_login
-from plex_playlist_sync.api import dependencies
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.api.routes.system import log_ring_buffer
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.core_client import CoreClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.local_login import LoginError, verify_local_login
-from plex_playlist_sync.storage import Database
+from trackseerr import internal_auth, local_auth, local_login
+from trackseerr.api import dependencies
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.api.routes.system import log_ring_buffer
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.core_client import CoreClient
+from trackseerr.config import Config
+from trackseerr.local_login import LoginError, verify_local_login
+from trackseerr.storage import Database
 
 SECRET = "s" * 40
 PW = "correct horse battery staple"
@@ -90,7 +90,7 @@ def _attempt_rows(db: Database) -> int:
 @pytest.fixture
 def real_logging(tmp_path):
     """Runs the real ``setup_logging`` and restores global logging state afterwards."""
-    from plex_playlist_sync.cli import RedactLogFilter, setup_logging
+    from trackseerr.cli import RedactLogFilter, setup_logging
 
     root = logging.getLogger()
     before_handlers = list(root.handlers)
@@ -229,10 +229,10 @@ def test_gateway_mfa_enrollment_required_is_403_but_account_paths_stay_reachable
 
 
 def _plex_login(client: TestClient):
-    with patch("plex_playlist_sync.api.routes.auth.check_plex_pin", return_value="plex-token"), patch(
-        "plex_playlist_sync.api.routes.auth.verify_server_access", return_value=(True, False)
+    with patch("trackseerr.api.routes.auth.check_plex_pin", return_value="plex-token"), patch(
+        "trackseerr.api.routes.auth.verify_server_access", return_value=(True, False)
     ), patch(
-        "plex_playlist_sync.api.routes.auth.get_plex_user",
+        "trackseerr.api.routes.auth.get_plex_user",
         return_value={"id": "5005", "username": "zed", "email": None},
     ):
         return client.post("/api/auth/plex/verify", json={"pin_id": 1, "target_machine_id": "m1"})
@@ -616,7 +616,7 @@ def test_wrong_mfa_setup_passwords_count_toward_the_lockout(acct):
 def test_exception_traceback_is_redacted_in_handler_output_and_ring_buffer(real_logging):
     import io
 
-    from plex_playlist_sync.cli import RedactLogFilter
+    from trackseerr.cli import RedactLogFilter
 
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
@@ -640,7 +640,7 @@ def test_exception_traceback_is_redacted_in_handler_output_and_ring_buffer(real_
 
 @pytest.mark.parametrize("role", ["gateway", "core"])
 def test_logging_setup_failure_is_fatal_for_tiers(tmp_path, role, monkeypatch, capsys):
-    from plex_playlist_sync import cli
+    from trackseerr import cli
 
     def broken(*a, **k):
         raise OSError("disk on fire")
@@ -652,7 +652,7 @@ def test_logging_setup_failure_is_fatal_for_tiers(tmp_path, role, monkeypatch, c
 
 
 def test_logging_setup_failure_warns_but_continues_all_in_one(tmp_path, monkeypatch, capsys):
-    from plex_playlist_sync import cli
+    from trackseerr import cli
 
     def broken(*a, **k):
         raise OSError("disk on fire")

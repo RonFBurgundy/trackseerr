@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 from plexapi.exceptions import NotFound
 
-from plex_playlist_sync.clients.plex import PlexClient
-from plex_playlist_sync.models import Playlist, Track
+from trackseerr.clients.plex import PlexClient
+from trackseerr.models import Playlist, Track
 
 
 class MockArtist:
@@ -35,7 +35,7 @@ class MockPlexTrack:
 class TestPlexMachineIdentifier:
     """Tests for PlexClient.machine_identifier property."""
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_machine_identifier_returned(self, mock_server_cls):
         mock_server = MagicMock()
         mock_server.machineIdentifier = "unique-machine-identifier-12345"
@@ -48,7 +48,7 @@ class TestPlexMachineIdentifier:
 class TestPlexGetHomeUsers:
     """Tests for PlexClient.get_home_users."""
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_get_home_users_with_managed_users(self, mock_server_cls):
         mock_server = MagicMock()
         mock_account = MagicMock()
@@ -97,7 +97,7 @@ class TestPlexGetHomeUsers:
         assert users[2]["username"] == "Bob (Managed)"
         assert users[2]["is_admin"] is False
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_get_home_users_deduplicates_admin_in_users(self, mock_server_cls):
         mock_server = MagicMock()
         mock_account = MagicMock()
@@ -123,7 +123,7 @@ class TestPlexGetHomeUsers:
         assert len(users) == 2
         assert [u["username"] for u in users] == ["plex_admin", "charlie"]
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_get_home_users_non_plexpass_fallback(self, mock_server_cls):
         mock_server = MagicMock()
         mock_server.friendlyName = "Local Media Server"
@@ -143,7 +143,7 @@ class TestPlexGetHomeUsers:
 class TestMultiUserSync:
     """Tests for PlexClient.sync_playlist_to_users."""
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_track_match_caching_across_users(self, mock_server_cls):
         """Verify that track search/matching occurs ONCE regardless of how many users are synced."""
         mock_server = MagicMock()
@@ -198,7 +198,7 @@ class TestMultiUserSync:
         # Bob synced on user_server_bob
         user_server_bob.createPlaylist.assert_called_once()
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_admin_poster_injection_fallback_on_managed_user_401(self, mock_server_cls):
         """Verify managed user 401 uploadPoster failure triggers admin session poster injection."""
         mock_server = MagicMock()
@@ -249,7 +249,7 @@ class TestMultiUserSync:
         actual_key = mock_server.query.call_args[0][0]
         assert actual_key == expected_key
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_sync_playlist_to_users_zero_matches(self, mock_server_cls, tmp_path):
         mock_server = MagicMock()
         mock_server.search.return_value = []
@@ -279,7 +279,7 @@ class TestMultiUserSync:
         assert csv_file.exists()
         assert "Ghost Track" in csv_file.read_text()
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_sync_playlist_to_users_partial_user_failure(self, mock_server_cls):
         mock_server = MagicMock()
         mock_account = MagicMock()
@@ -315,7 +315,7 @@ class TestMultiUserSync:
         assert "bad_user" in results[0].error
         assert results[1].success is True
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_sync_playlist_to_users_empty_targets(self, mock_server_cls):
         mock_server = MagicMock()
         mock_server_cls.return_value = mock_server
@@ -326,7 +326,7 @@ class TestMultiUserSync:
         results = client.sync_playlist_to_users(playlist=playlist, target_usernames=[])
         assert results == []
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_get_home_users_users_call_fails(self, mock_server_cls):
         mock_server = MagicMock()
         mock_account = MagicMock()
@@ -342,7 +342,7 @@ class TestMultiUserSync:
         assert users[0]["username"] == "plex_admin"
         assert users[0]["is_admin"] is True
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_admin_poster_injection_fallback_failure_does_not_crash(self, mock_server_cls):
         mock_server = MagicMock()
         mock_account = MagicMock()
@@ -379,7 +379,7 @@ class TestMultiUserSync:
         assert len(results) == 1
         assert results[0].success is True
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_sync_playlist_to_users_cleans_obsolete_missing_csv(self, mock_server_cls, tmp_path):
         mock_server = MagicMock()
         mock_account = MagicMock()
@@ -412,7 +412,7 @@ class TestMultiUserSync:
         # Obsolete CSV was deleted
         assert not csv_file.exists()
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_sync_playlist_to_users_fallback_admin_friendly_name(self, mock_server_cls):
         mock_server = MagicMock()
         # myPlexAccount raises

@@ -26,18 +26,18 @@ from fastapi.testclient import TestClient
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_media_client
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.library import (
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_media_client
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.library import (
     build_tags_to_write,
     inspect_audio_file,
     write_audio_tags,
 )
-from plex_playlist_sync.library_manager import MODE_LIDARR
-from plex_playlist_sync.storage import Database
+from trackseerr.library_manager import MODE_LIDARR
+from trackseerr.storage import Database
 
 
 # ---------------------------------------------------------------------------
@@ -571,7 +571,7 @@ def test_retag_embed_art(
     )
 
     # Mock _album_cover_bytes to return test cover art
-    with patch("plex_playlist_sync.api.routes.library.tagging._album_cover_bytes", return_value=_TINY_PNG):
+    with patch("trackseerr.api.routes.library.tagging._album_cover_bytes", return_value=_TINY_PNG):
         resp = client.post(
             "/api/library/retag/apply",
             json={"file_ids": ["fl-1"], "embed_art": True},
@@ -621,8 +621,8 @@ def test_retag_tracked_job_over_50_files(
         })
         file_ids.append(fid)
 
-    with patch("plex_playlist_sync.api.routes.library.tagging.track_job") as mock_track, \
-         patch("plex_playlist_sync.api.routes.library.tagging.record_task_run") as mock_run:
+    with patch("trackseerr.api.routes.library.tagging.track_job") as mock_track, \
+         patch("trackseerr.api.routes.library.tagging.record_task_run") as mock_run:
         mock_job_inst = MagicMock()
         mock_run_inst = MagicMock()
         mock_track.return_value.__enter__.return_value = mock_job_inst
@@ -708,7 +708,7 @@ def test_preview_skips_path_outside_media_roots(
     test_db.upsert_library_track({"id": "trk-outside", "album_id": "alb-outside", "artist_id": "art-outside", "title": "Outside Track"})
     test_db.upsert_library_file({"id": "fl-outside", "track_id": "trk-outside", "file_path": str(outside_file)})
 
-    with patch("plex_playlist_sync.api.routes.library.tagging.inspect_audio_file") as mock_inspect:
+    with patch("trackseerr.api.routes.library.tagging.inspect_audio_file") as mock_inspect:
         resp = client.post(
             "/api/library/retag/preview",
             json={"album_id": "alb-outside"},
@@ -725,7 +725,7 @@ def test_preview_skips_path_outside_media_roots(
 
 def test_cover_lookup_oserror_falls_through(tmp_path: Path):
     """Patching art_pipeline.cached_art_path to raise OSError still returns folder-art bytes."""
-    from plex_playlist_sync.api.routes.library.tagging import _album_cover_bytes
+    from trackseerr.api.routes.library.tagging import _album_cover_bytes
 
     folder = tmp_path / "album_folder"
     folder.mkdir(parents=True)
@@ -738,7 +738,7 @@ def test_cover_lookup_oserror_falls_through(tmp_path: Path):
 
     album_dict = {"id": "alb-test", "path": str(folder)}
 
-    with patch("plex_playlist_sync.art_pipeline.cached_art_path", side_effect=OSError("Disk read failed")):
+    with patch("trackseerr.art_pipeline.cached_art_path", side_effect=OSError("Disk read failed")):
         result = _album_cover_bytes(album_dict, file_path=audio_file)
         assert result == folder_art_bytes
 

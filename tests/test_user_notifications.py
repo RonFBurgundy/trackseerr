@@ -9,23 +9,23 @@ from fastapi import status
 from fastapi.testclient import TestClient
 import pytest
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.models import (
     MusicRequest,
     NotificationChannel,
     NotificationEvent,
     RequestStatus,
 )
-from plex_playlist_sync.notifications import (
+from trackseerr.notifications import (
     USER_FACING_EVENTS,
     NotificationDispatcher,
     notification_dispatcher,
 )
-from plex_playlist_sync.security import mask_secret
-from plex_playlist_sync.storage import Database
+from trackseerr.security import mask_secret
+from trackseerr.storage import Database
 
 
 @pytest.fixture

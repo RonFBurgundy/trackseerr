@@ -19,17 +19,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.acquisition_coordinator import (
+from trackseerr.acquisition_coordinator import (
     AcquisitionCoordinator,
     _to_quality_profile,
 )
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.backlog_worker import WantedBacklogWorker
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import (
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.backlog_worker import WantedBacklogWorker
+from trackseerr.config import Config
+from trackseerr.models import (
     AcquisitionSearchResult,
     ActiveDownload,
     BlocklistItem,
@@ -45,7 +45,7 @@ from plex_playlist_sync.models import (
     QualityProfileItem,
     RequestStatus,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -277,7 +277,7 @@ def test_blocklisted_release_skipped_in_ranking_and_search(test_db: Database):
         "enabled": True,
     })
 
-    with patch("plex_playlist_sync.acquisition_coordinator.get_indexer_driver", return_value=mock_indexer_driver):
+    with patch("trackseerr.acquisition_coordinator.get_indexer_driver", return_value=mock_indexer_driver):
         search_res = coordinator.search_all_indexers(artist="Daft Punk", title="Discovery", db=test_db)
         assert len(search_res) == 1
         assert search_res[0].download_id == "cand-good"
@@ -356,8 +356,8 @@ def test_acquisition_worker_imports_and_populates_native_catalog(test_db: Databa
     worker = AcquisitionWorker()
     worker.staging_dir = str(downloads_dir)
 
-    with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
-        with patch("plex_playlist_sync.acquisition_worker.inspect_audio_file", return_value=mock_meta):
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+        with patch("trackseerr.acquisition_worker.inspect_audio_file", return_value=mock_meta):
             stats = worker.poll_once(db=test_db, staging_dir=str(downloads_dir))
             assert stats["completed"] == 1
             assert stats["imported"] == 1
@@ -433,7 +433,7 @@ def test_failing_download_automatically_blocklists(test_db: Database, workspace_
     }
 
     worker = AcquisitionWorker()
-    with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
         stats = worker.poll_once(db=test_db, staging_dir=str(downloads_dir))
         assert stats["failed"] == 1
 
@@ -459,7 +459,7 @@ def test_failing_download_automatically_blocklists(test_db: Database, workspace_
         "source_path": str(downloads_dir / "nonexistent_folder"),
     }
 
-    with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
         stats2 = worker.poll_once(db=test_db, staging_dir=str(downloads_dir))
         assert stats2["failed"] == 1
 
@@ -516,7 +516,7 @@ def test_wanted_backlog_worker_catalog_missing_tracks_sweep(test_db: Database):
         "score": 900,
     }
 
-    with patch("plex_playlist_sync.backlog_worker.acquisition_coordinator.search_and_grab", return_value=mock_grab_result) as mock_grab:
+    with patch("trackseerr.backlog_worker.acquisition_coordinator.search_and_grab", return_value=mock_grab_result) as mock_grab:
         stats = backlog.poll_once(db=test_db)
         assert stats["items_checked"] >= 1
         assert stats["items_grabbed"] >= 1
@@ -588,7 +588,7 @@ def test_wanted_backlog_worker_catalog_cutoff_unmet_sweep(test_db: Database):
         "score": 900,
     }
 
-    with patch("plex_playlist_sync.backlog_worker.acquisition_coordinator.search_and_grab", return_value=mock_grab_result) as mock_grab:
+    with patch("trackseerr.backlog_worker.acquisition_coordinator.search_and_grab", return_value=mock_grab_result) as mock_grab:
         stats = backlog.poll_once(db=test_db)
         assert stats["items_checked"] == 1
         assert stats["items_grabbed"] == 1
@@ -695,7 +695,7 @@ def test_lidarr_mode_skips_native_catalog_upsert(test_db: Database, workspace_di
     }
 
     worker = AcquisitionWorker()
-    with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
         stats = worker.poll_once(db=test_db, staging_dir=str(downloads_dir))
         assert stats["imported"] == 1
 

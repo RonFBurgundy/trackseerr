@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -382,7 +382,7 @@ class TestDOMIntegrity:
 
     def test_static_index_html_tag_balance_and_dom_hierarchy(self) -> None:
         """Validates that index.html has 0 unclosed tags and 0 tag mismatches."""
-        html_path = Path(__file__).resolve().parent.parent / "plex_playlist_sync" / "static" / "index.html"
+        html_path = Path(__file__).resolve().parent.parent / "trackseerr" / "static" / "index.html"
         assert html_path.is_file(), f"index.html not found at {html_path}"
 
         content = html_path.read_text(encoding="utf-8")

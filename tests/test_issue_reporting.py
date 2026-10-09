@@ -6,9 +6,9 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.models import MusicRequest, NotificationEvent, RequestStatus
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.models import MusicRequest, NotificationEvent, RequestStatus
 from tests.test_governance_and_issues import (  # noqa: F401  (fixtures)
     _auth_headers,
     seeded_users,
@@ -22,7 +22,7 @@ def client(test_db, test_config, seeded_users):
     app = create_app(db=test_db, config=test_config)
     app.dependency_overrides[get_db] = lambda: test_db
     app.dependency_overrides[get_config] = lambda: test_config
-    with patch("plex_playlist_sync.api.routes.issues.notification_dispatcher"):
+    with patch("trackseerr.api.routes.issues.notification_dispatcher"):
         yield TestClient(app)
 
 
@@ -178,7 +178,7 @@ class TestNotification:
         app.dependency_overrides[get_db] = lambda: test_db
         app.dependency_overrides[get_config] = lambda: test_config
         c = TestClient(app)
-        with patch("plex_playlist_sync.api.routes.issues.notification_dispatcher") as disp:
+        with patch("trackseerr.api.routes.issues.notification_dispatcher") as disp:
             r = c.post("/api/issues", json=_body(problem_details="d" * 2000), headers=_hdr("alice", seeded_users, test_db, test_config))
         assert r.status_code == 201
         assert len(r.json()["problem_details"]) == 2000  # stored in full

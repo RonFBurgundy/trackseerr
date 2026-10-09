@@ -5,11 +5,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.models import DownloadDriverType
-from plex_playlist_sync.clients.acquisition import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.models import DownloadDriverType
+from trackseerr.clients.acquisition import (
     get_acquisition_driver,
     is_torrent_driver_type,
     TransmissionDriver,
@@ -19,9 +19,9 @@ from plex_playlist_sync.clients.acquisition import (
     SabnzbdDriver,
     SlskdDriver,
 )
-from plex_playlist_sync.acquisition_coordinator import AcquisitionCoordinator
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr.acquisition_coordinator import AcquisitionCoordinator
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -224,7 +224,7 @@ def test_create_and_test_routes_all_client_types(client: TestClient, auth_header
             assert "••••" in item["password"]
 
     # 7. Test connection endpoint validations
-    with patch("plex_playlist_sync.api.routes.download_clients.get_acquisition_driver") as mock_factory:
+    with patch("trackseerr.api.routes.download_clients.get_acquisition_driver") as mock_factory:
         mock_driver = MagicMock()
         mock_driver.test_connection.return_value = (True, "Connected ok")
         mock_factory.return_value = mock_driver

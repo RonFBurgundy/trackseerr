@@ -11,14 +11,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import plex_playlist_sync
-from plex_playlist_sync import art_pipeline, process_stats, task_manager
-from plex_playlist_sync.backlog_worker import RSSSyncWorker
-from plex_playlist_sync.clients.lidarr import LidarrClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.lidarr_migration import LidarrMigrationJob
-from plex_playlist_sync.library_scanner import LibraryScanner
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+import trackseerr
+from trackseerr import art_pipeline, process_stats, task_manager
+from trackseerr.backlog_worker import RSSSyncWorker
+from trackseerr.clients.lidarr import LidarrClient
+from trackseerr.config import Config
+from trackseerr.lidarr_migration import LidarrMigrationJob
+from trackseerr.library_scanner import LibraryScanner
+from trackseerr.storage import SCHEMA_VERSION, Database
 from tests.test_system_status import (  # noqa: F401
     app_and_client,
     create_auth_cookies,
@@ -373,8 +373,8 @@ def test_activity_endpoint_shape_and_admin_only(app_and_client, seeded_users, se
 def test_activity_makes_no_external_or_heavy_status_calls(app_and_client, seeded_users, secret_key, test_db):
     _, client = app_and_client
     admin = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
-    with patch("plex_playlist_sync.api.routes.system.get_all_scheduled_tasks") as heavy, patch(
-        "plex_playlist_sync.api.routes.system.seed_cleanup.get_status"
+    with patch("trackseerr.api.routes.system.get_all_scheduled_tasks") as heavy, patch(
+        "trackseerr.api.routes.system.seed_cleanup.get_status"
     ) as sc:
         assert client.get("/api/system/activity", cookies=admin).status_code == 200
     heavy.assert_not_called()
@@ -418,7 +418,7 @@ def test_process_stats_cpu_is_a_delta_since_previous_sample(monkeypatch):
 def test_manual_run_endpoint_records_a_manual_run(app_and_client, seeded_users, secret_key, test_db):
     _, client = app_and_client
     admin = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
-    with patch("plex_playlist_sync.backlog_worker.backlog_worker.poll_once", return_value={"items_checked": 4}):
+    with patch("trackseerr.backlog_worker.backlog_worker.poll_once", return_value={"items_checked": 4}):
         assert client.post("/api/system/tasks/wanted_backlog_sweep/run", cookies=admin).status_code == 200
         deadline = time.monotonic() + 5
         rows = []
@@ -434,7 +434,7 @@ def test_manual_run_endpoint_records_a_manual_run(app_and_client, seeded_users, 
 def test_manual_run_records_failure(app_and_client, seeded_users, secret_key, test_db):
     _, client = app_and_client
     admin = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
-    with patch("plex_playlist_sync.backlog_worker.rss_worker.poll_once", side_effect=RuntimeError("feed exploded")):
+    with patch("trackseerr.backlog_worker.rss_worker.poll_once", side_effect=RuntimeError("feed exploded")):
         assert client.post("/api/system/tasks/indexer_rss_sync/run", cookies=admin).status_code == 200
         deadline = time.monotonic() + 5
         rows = []
@@ -466,7 +466,7 @@ def test_task_list_can_trigger_flags(app_and_client, seeded_users, secret_key, t
 
 
 def test_manual_run_scrobble_sync(app_and_client, seeded_users, secret_key, test_db):
-    from plex_playlist_sync.scrobble_worker import scrobble_worker
+    from trackseerr.scrobble_worker import scrobble_worker
 
     _, client = app_and_client
     admin = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
@@ -492,7 +492,7 @@ def test_manual_run_scrobble_sync(app_and_client, seeded_users, secret_key, test
 
 
 def test_manual_run_mix_generation_regenerates_non_due(app_and_client, seeded_users, secret_key, test_db, test_config):
-    from plex_playlist_sync.mix_worker import mix_worker
+    from trackseerr.mix_worker import mix_worker
 
     _, client = app_and_client
     admin = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
@@ -506,7 +506,7 @@ def test_manual_run_mix_generation_regenerates_non_due(app_and_client, seeded_us
     test_db.record_mix_result(mix_row["id"], "{}")
 
     # 1. Normal non-forced run_iteration skips the non-due mix
-    with patch("plex_playlist_sync.mix_worker.generate_and_sync") as mock_gen:
+    with patch("trackseerr.mix_worker.generate_and_sync") as mock_gen:
         outcome = mix_worker.run_iteration(test_db, test_config, plex_client=None, discovery=MagicMock(), force=False)
         assert outcome["due"] == 0
         assert outcome["generated"] == 0
@@ -514,7 +514,7 @@ def test_manual_run_mix_generation_regenerates_non_due(app_and_client, seeded_us
 
     # 2. Manual run via API regenerates the non-due mix (force=True)
     with patch.object(mix_worker, "_get_plex", return_value=None), \
-         patch("plex_playlist_sync.mix_worker.generate_and_sync") as mock_gen:
+         patch("trackseerr.mix_worker.generate_and_sync") as mock_gen:
         resp = client.post("/api/system/tasks/mix_generation/run", cookies=admin)
         assert resp.status_code == 200
         assert resp.json()["success"] is True
@@ -544,8 +544,8 @@ def test_manual_run_non_admin_forbidden(app_and_client, seeded_users, secret_key
 
 
 def test_worker_iteration_locks_serialize(test_db, test_config):
-    from plex_playlist_sync.scrobble_worker import ScrobbleWorker
-    from plex_playlist_sync.mix_worker import MixWorker
+    from trackseerr.scrobble_worker import ScrobbleWorker
+    from trackseerr.mix_worker import MixWorker
 
     sw = ScrobbleWorker()
     mw = MixWorker()
@@ -572,12 +572,12 @@ def test_worker_iteration_locks_serialize(test_db, test_config):
 
 
 def test_mix_worker_run_now_uses_shared_discovery_if_none(test_db, test_config):
-    from plex_playlist_sync.mix_worker import MixWorker
+    from trackseerr.mix_worker import MixWorker
 
     worker = MixWorker()
     assert worker._discovery is None
     with patch.object(worker, "_get_plex", return_value=None), \
-         patch("plex_playlist_sync.mix_worker.get_shared_discovery_client") as mock_shared, \
+         patch("trackseerr.mix_worker.get_shared_discovery_client") as mock_shared, \
          patch.object(worker, "run_iteration", return_value={"due": 0, "generated": 0, "errors": 0}):
         worker.run_now(test_db, test_config)
         mock_shared.assert_called_once_with(test_db)
@@ -588,7 +588,7 @@ def test_mix_worker_run_now_uses_shared_discovery_if_none(test_db, test_config):
 
 
 def test_seed_cleanup_sweep_records_trigger(db):
-    from plex_playlist_sync import seed_cleanup
+    from trackseerr import seed_cleanup
 
     seed_cleanup.run_sweep(db, trigger="scheduled")
     seed_cleanup.run_sweep(db)
@@ -597,7 +597,7 @@ def test_seed_cleanup_sweep_records_trigger(db):
 
 
 def test_recycle_bin_failure_is_recorded_and_still_handled(db):
-    from plex_playlist_sync import recycle_bin
+    from trackseerr import recycle_bin
 
     with patch.object(recycle_bin, "run_cleanup", side_effect=OSError("bin unreadable")):
         assert recycle_bin.RecycleBinWorker().run_once(db) is False  # the worker's own handling is unchanged
@@ -606,7 +606,7 @@ def test_recycle_bin_failure_is_recorded_and_still_handled(db):
 
 
 def test_library_health_due_check_uses_the_given_interval(db):
-    from plex_playlist_sync import library_health
+    from trackseerr import library_health
 
     db.set_library_health_weekly(True) if hasattr(db, "set_library_health_weekly") else None
     run_id = db.conn.execute(
@@ -624,7 +624,7 @@ def test_library_health_due_check_uses_the_given_interval(db):
 
 def _constant_thread_names() -> set[str]:
     names: set[str] = set()
-    root = Path(plex_playlist_sync.__file__).parent
+    root = Path(trackseerr.__file__).parent
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -662,7 +662,7 @@ def test_every_worker_thread_maps_to_a_registered_task():
 
 
 def test_every_registered_task_is_listed_by_the_api(db):
-    from plex_playlist_sync.api.routes.system import get_all_scheduled_tasks
+    from trackseerr.api.routes.system import get_all_scheduled_tasks
 
     db.update_media_management_settings({"library_mode": "lidarr"})
     listed = {t.id for t in get_all_scheduled_tasks(db, _cfg())}
@@ -787,17 +787,17 @@ def test_lidarr_import_completion_requests_backfill(db, art_scheduler_calls):
 
 
 def test_boot_starts_the_art_scheduler_and_closes_interrupted_runs(db, art_scheduler_calls):
-    from plex_playlist_sync.cli import _start_local_workers
+    from trackseerr.cli import _start_local_workers
 
     db.start_task_run("library_health", "scheduled", _iso(timedelta(minutes=-3)))
     cfg = _cfg(enable_backlog_search=False, enable_rss_sync=False, enable_import_lists=False)
-    with patch("plex_playlist_sync.pending_worker.pending_worker.start"), patch(
-        "plex_playlist_sync.artist_refresh_worker.artist_refresh_worker.start"
-    ), patch("plex_playlist_sync.scrobble_worker.scrobble_worker.start"), patch(
-        "plex_playlist_sync.mix_worker.mix_worker.start"
-    ), patch("plex_playlist_sync.library_health.library_health_worker.start"), patch(
-        "plex_playlist_sync.seed_cleanup.seed_cleanup_worker.start"
-    ), patch("plex_playlist_sync.recycle_bin.recycle_bin_worker.start"):
+    with patch("trackseerr.pending_worker.pending_worker.start"), patch(
+        "trackseerr.artist_refresh_worker.artist_refresh_worker.start"
+    ), patch("trackseerr.scrobble_worker.scrobble_worker.start"), patch(
+        "trackseerr.mix_worker.mix_worker.start"
+    ), patch("trackseerr.library_health.library_health_worker.start"), patch(
+        "trackseerr.seed_cleanup.seed_cleanup_worker.start"
+    ), patch("trackseerr.recycle_bin.recycle_bin_worker.start"):
         _start_local_workers(db, cfg)
     assert len(art_scheduler_calls.scheduler_start) == 1
     assert db.list_running_task_runs() == []
@@ -808,7 +808,7 @@ def test_boot_starts_the_art_scheduler_and_closes_interrupted_runs(db, art_sched
 
 
 def test_playlist_sync_is_manual_when_wait_seconds_is_zero(db):
-    from plex_playlist_sync.api.routes.system import get_all_scheduled_tasks
+    from trackseerr.api.routes.system import get_all_scheduled_tasks
 
     scheduled = {t.id: t for t in get_all_scheduled_tasks(db, _cfg(wait_seconds=86400))}["playlist_sync"]
     assert scheduled.schedule_kind == "interval" and scheduled.editable and scheduled.interval_seconds == 86400
@@ -826,7 +826,7 @@ def test_playlist_sync_is_manual_when_wait_seconds_is_zero(db):
 def test_schedule_edit_rejected_for_playlist_sync_when_wait_seconds_is_zero(db):
     from fastapi import HTTPException
 
-    from plex_playlist_sync.api.routes.system import TaskScheduleUpdate, set_task_schedule
+    from trackseerr.api.routes.system import TaskScheduleUpdate, set_task_schedule
 
     with pytest.raises(HTTPException) as err:
         set_task_schedule("playlist_sync", TaskScheduleUpdate(interval_seconds=3600), db=db, config=_cfg(wait_seconds=0), _admin={})

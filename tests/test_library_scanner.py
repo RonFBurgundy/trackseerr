@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from plex_playlist_sync.library_scanner import LibraryScanner
-from plex_playlist_sync.storage import Database
+from trackseerr.library_scanner import LibraryScanner
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -77,7 +77,7 @@ def test_scan_populates_library_hierarchy(db: Database, scanner: LibraryScanner,
             return mock_metadata[resolved]
         raise ValueError(f"Unknown file: {path}")
 
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", side_effect=fake_inspect):
+    with patch("trackseerr.library_scanner.inspect_audio_file", side_effect=fake_inspect):
         status = scanner.scan(db, root_folder=str(music_dir))
 
     assert status["status"] == "completed"
@@ -210,7 +210,7 @@ def test_scan_cancellation(db: Database, scanner: LibraryScanner, tmp_path: Path
             "file_path": str(file_path),
         }
 
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", side_effect=slow_inspect):
+    with patch("trackseerr.library_scanner.inspect_audio_file", side_effect=slow_inspect):
         result = scanner.scan(db, root_folder=str(music_dir))
 
     assert result["status"] == "cancelled"
@@ -262,7 +262,7 @@ def test_cutoff_evaluation_during_scan(db: Database, scanner: LibraryScanner, tm
     def fake_inspect(path):
         return mock_metadata[str(Path(path).resolve())]
 
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", side_effect=fake_inspect):
+    with patch("trackseerr.library_scanner.inspect_audio_file", side_effect=fake_inspect):
         res = scanner.scan(db, root_folder=str(music_dir))
 
     assert res["status"] == "completed"
@@ -287,7 +287,7 @@ def test_scan_path_derived_fallback_on_corrupt_files(db: Database, scanner: Libr
 
     # Let inspect_audio_file raise a realistic Mutagen parsing failure
     with patch(
-        "plex_playlist_sync.library_scanner.inspect_audio_file",
+        "trackseerr.library_scanner.inspect_audio_file",
         side_effect=ValueError("Corrupt flac header"),
     ):
         status = scanner.scan(db, root_folder=str(music_dir))
@@ -336,7 +336,7 @@ def test_start_scan_background_execution(db: Database, scanner: LibraryScanner, 
         "file_path": str((album_dir / "01 - The Grudge.flac").resolve()),
     }
 
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", return_value=mock_metadata):
+    with patch("trackseerr.library_scanner.inspect_audio_file", return_value=mock_metadata):
         started = scanner.start_scan(db, root_folder=str(music_dir))
         assert started is True
 
