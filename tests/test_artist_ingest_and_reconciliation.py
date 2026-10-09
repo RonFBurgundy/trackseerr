@@ -21,6 +21,8 @@ import pytest
 
 from trackseerr.acquisition_worker import (
     AcquisitionWorker,
+)
+from trackseerr.track_matching import (
     reconcile_audio_file_to_track,
 )
 from trackseerr.api.app import create_app

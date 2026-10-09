@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 from trackseerr import library as library_mod
 from trackseerr.acquisition_worker import (
     AcquisitionWorker,
+)
+from trackseerr.track_matching import (
     reconcile_audio_file_to_track,
     reconcile_audio_file_to_track_scored,
 )
@@ -266,7 +268,7 @@ def _run_import(db: Database, dl: Path, staging_dir: Path, meta: dict[str, Any],
     fp_mock = MagicMock(return_value=fp_result)
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", return_value=full_meta), \
-         patch("trackseerr.acquisition_worker.fingerprint_audio_file", fp_mock):
+         patch("trackseerr.track_matching.fingerprint_audio_file", fp_mock):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging_dir))
     return fp_mock
 
@@ -328,9 +330,9 @@ def test_worker_fingerprint_failure_holds_unmatched_file_for_manual_import(tmp_p
 
 
 def _fallback(settings, tracks, tag_track, strength, fp_result, caplog=None):
-    from trackseerr.acquisition_worker import _fingerprint_fallback_match
+    from trackseerr.track_matching import _fingerprint_fallback_match
 
-    with patch("trackseerr.acquisition_worker.fingerprint_audio_file", return_value=fp_result) as m:
+    with patch("trackseerr.track_matching.fingerprint_audio_file", return_value=fp_result) as m:
         return _fingerprint_fallback_match(Path("f.flac"), settings, tracks, tag_track, strength), m
 
 

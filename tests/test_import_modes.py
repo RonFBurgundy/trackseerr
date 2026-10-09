@@ -7,11 +7,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from trackseerr import acquisition_worker as aw
-from trackseerr.acquisition_worker import (
+from trackseerr import import_files as aw
+from trackseerr.import_files import (
     place_audio_file,
     preserves_source,
     safe_atomic_move,
+)
+from trackseerr.seed_safety import (
     settle_transfer_after_import,
 )
 

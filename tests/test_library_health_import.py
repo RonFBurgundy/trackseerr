@@ -91,7 +91,7 @@ def _import(db: Database, tmp_path: Path, meta: dict[str, Any]) -> Path:
             "bitrate": 900, "sample_rate": 44100, "extension": ".flac", **meta}
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", return_value=full), \
-         patch("trackseerr.acquisition_worker.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
     return music
 

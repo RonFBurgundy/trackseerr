@@ -12,7 +12,7 @@ import uuid
 
 from trackseerr import art_pipeline
 from trackseerr.mb_metadata_store import get_shared_discovery_client, get_shared_enricher
-from trackseerr.acquisition_worker import (
+from trackseerr.track_matching import (
     reconcile_audio_file_to_track,
 )
 from trackseerr.clients.discovery import DiscoveryClient

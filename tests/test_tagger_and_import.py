@@ -10,7 +10,8 @@ from fastapi.testclient import TestClient
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 
-from trackseerr.acquisition_worker import AcquisitionWorker, _is_safe_cover_url
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.import_files import _is_safe_cover_url
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db
 from trackseerr.auth import create_session_token, get_or_create_secret_key

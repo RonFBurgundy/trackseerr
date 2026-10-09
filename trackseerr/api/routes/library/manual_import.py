@@ -17,15 +17,21 @@ from trackseerr.item_history import TRIGGER_MANUAL_IMPORT, GrabTrigger, emit, se
 from trackseerr.redaction import redact_text
 from trackseerr.clients.acquisition import get_acquisition_driver, is_torrent_driver_type
 from trackseerr.acquisition_worker import (
-    MATCH_NONE,
-    MATCH_STRONG,
-    effective_import_mode,
     record_import_events,
-    prepare_file_for_tagging,
+)
+from trackseerr.import_files import (
+    effective_import_mode,
     place_audio_file,
+    prepare_file_for_tagging,
     preserves_source,
+)
+from trackseerr.seed_safety import (
     seed_action,
     settle_transfer_after_import,
+)
+from trackseerr.track_matching import (
+    MATCH_NONE,
+    MATCH_STRONG,
     reconcile_audio_file_to_track_scored,
     resolve_download_expected_tracks,
 )

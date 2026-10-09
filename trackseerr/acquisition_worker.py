@@ -6,16 +6,12 @@ paths via the token template engine, performs atomic file moves with
 collision resolution into /music, and triggers Plex library update pings.
 """
 
-import difflib
-import errno
 import json
 import logging
 import os
-import shutil
 import sqlite3
 import threading
 import time
-import urllib.parse
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,7 +22,6 @@ import httpx
 from trackseerr import delay_gate
 from trackseerr.acquisition_coordinator import _to_quality_profile
 from trackseerr.clients.acquisition import get_acquisition_driver, is_torrent_driver_type
-from trackseerr.clients.mbid_enricher import MbidEnricherClient
 from trackseerr.mb_metadata_store import get_shared_enricher
 from trackseerr.clients.plex import PlexClient
 from trackseerr.media_servers import as_media_server
@@ -45,7 +40,6 @@ from trackseerr.recycle_bin import (
     DisposeResult,
     dispose_for_settings,
     effective_quarantine_path,
-    effective_recycle_path,
     library_excluded_paths,
     log_recycled,
     recycle_in_place_target,
@@ -53,7 +47,7 @@ from trackseerr.recycle_bin import (
     restore_recycled,
 )
 from trackseerr.import_quality_check import CHECK_OFF, check_files, normalize_check_mode
-from trackseerr.item_history import TRIGGER_SEED_CLEANUP, download_trigger_kwargs, emit
+from trackseerr.item_history import download_trigger_kwargs, emit
 from trackseerr.library_health import record_weak_match
 from trackseerr.library_monitoring import NATIVE_MONITOR_OPTIONS
 from trackseerr.library_manager import ModeChanged, run_guarded
@@ -63,7 +57,6 @@ from trackseerr.library import (
     embed_album_artwork,
     ArchiveLimitError,
     extract_archive,
-    fingerprint_audio_file,
     inspect_audio_file,
     is_archive_file,
     resolve_collision,
@@ -80,10 +73,28 @@ from trackseerr.models import (
 )
 from trackseerr.naming import build_track_path
 from trackseerr.notifications import notification_dispatcher
-from trackseerr.redaction import redact_text, safe_exc
+from trackseerr.redaction import safe_exc
 from trackseerr.quality import evaluate_release, parse_release_title
-from trackseerr.security import is_safe_service_url
-from trackseerr.storage import Database, clean_library_name
+from trackseerr.storage import Database
+
+from trackseerr.import_files import (
+    _is_safe_cover_url,
+    effective_import_mode,
+    place_audio_file,
+    prepare_file_for_tagging,
+    translate_remote_path,
+)
+from trackseerr.seed_safety import (
+    _under_path,
+    seed_action,
+    settle_transfer_after_import,
+)
+from trackseerr.track_matching import (
+    MATCH_STRONG,
+    _fingerprint_fallback_match,
+    reconcile_audio_file_to_track_scored,
+    resolve_download_expected_tracks,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -115,684 +126,6 @@ def _scan_monitor_option(media_settings: dict[str, Any]) -> str:
     """Monitor option for artists created by an import: the configured scan default, never the model default ``all``."""
     option = str(media_settings.get("scan_monitor_option") or "existing")
     return option if option in NATIVE_MONITOR_OPTIONS else "existing"
-
-
-def _is_safe_cover_url(url: Optional[str]) -> bool:
-    """Validates that a cover artwork URL is safe against SSRF attacks."""
-    if not isinstance(url, str) or not url.strip():
-        return False
-    try:
-        parsed = urllib.parse.urlparse(url.strip())
-        if parsed.scheme not in ("http", "https"):
-            return False
-        hostname = (parsed.hostname or "").lower()
-        whitelisted_domains = (
-            "mzstatic.com",
-            "deezer.com",
-            "dzcdn.net",
-            "spotify.com",
-            "scdn.co",
-            "last.fm",
-            "musicbrainz.org",
-            "discogs.com",
-            "coverartarchive.org",
-            "archive.org",
-        )
-        if any(hostname == d or hostname.endswith("." + d) for d in whitelisted_domains):
-            return True
-        return is_safe_service_url(url, allow_lan=False)
-    except Exception:
-        return False
-
-
-IMPORT_MODES = ("move", "hardlink", "copy")
-
-
-def preserves_source(mode: str | None) -> bool:
-    """True when an import mode leaves the source file in place, so a torrent can keep seeding."""
-    return mode in ("hardlink", "copy")
-
-
-def _copy_atomic(src: Path, dst: Path) -> Path:
-    """Copies src to a hidden temp file beside dst, then os.replace: readers never see a partial file."""
-    tmp_dst = dst.parent / f".tmp_{dst.name}_{os.getpid()}_{time.time_ns()}"
-    try:
-        shutil.copy2(str(src), str(tmp_dst))
-        os.replace(str(tmp_dst), str(dst))
-    except BaseException:
-        try:
-            tmp_dst.unlink(missing_ok=True)
-        except OSError as cleanup_err:
-            logger.warning("Could not remove temp file '%s': %s", tmp_dst, cleanup_err)
-        raise
-    return dst
-
-
-def safe_atomic_move(source_file: Path | str, target_file: Path | str) -> Path:
-    """Atomically places source_file at target_file, safely handling cross-device mounts.
-
-    If source and destination reside on the same filesystem, os.replace is used directly.
-    On EXDEV (different filesystems), writes to a temporary hidden file in the destination
-    folder first, then atomically replaces to ensure Plex never indexes incomplete files.
-    Any other OSError is logged and re-raised.
-    """
-    src = Path(source_file).resolve()
-    dst = Path(target_file).resolve()
-    dst.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        os.replace(str(src), str(dst))
-        return dst
-    except OSError as e:
-        if e.errno != errno.EXDEV:
-            logger.error("Move '%s' -> '%s' failed: %s", src, dst, e)
-            raise
-    _copy_atomic(src, dst)
-    try:
-        src.unlink(missing_ok=True)
-    except OSError as e:
-        logger.warning("Copied '%s' -> '%s' across devices but could not remove the source: %s", src, dst, e)
-    return dst
-
-
-def place_audio_file(
-    source_file: Path | str, target_file: Path | str, mode: str = "move"
-) -> Path:
-    """Places source_file at target_file according to mode.
-
-    - "hardlink": os.link(src, dst); on OSError (e.g. EXDEV) falls back to an atomic copy.
-      The source is always left untouched.
-    - "copy": atomic copy (hidden temp + os.replace); the source is left untouched.
-    - "move": safe_atomic_move (atomic replace, source removed).
-    Any other mode raises ValueError.
-    """
-    if mode not in IMPORT_MODES:
-        raise ValueError(f"Unknown import mode {mode!r}; expected one of {', '.join(IMPORT_MODES)}")
-    src = Path(source_file).resolve()
-    dst = Path(target_file).resolve()
-    dst.parent.mkdir(parents=True, exist_ok=True)
-
-    if mode == "hardlink":
-        try:
-            os.link(str(src), str(dst))
-            logger.info("Successfully hardlinked '%s' -> '%s'", src, dst)
-            clear_exec_bits(dst)
-            return dst
-        except OSError as e:
-            logger.warning("os.link failed (%s); falling back to atomic copy for '%s' -> '%s'", e, src, dst)
-            _copy_atomic(src, dst)
-            clear_exec_bits(dst)
-            return dst
-    if mode == "copy":
-        _copy_atomic(src, dst)
-        clear_exec_bits(dst)
-        return dst
-    placed = safe_atomic_move(source_file, target_file)
-    clear_exec_bits(placed)
-    return placed
-
-
-def ensure_private_copy(path: Path | str) -> bool:
-    """Makes ``path`` safe to rewrite in place: True when no other link shares its inode afterwards.
-
-    A hardlink-imported library file shares its inode with the torrent's seeding file, so tagging it would corrupt the
-    torrent's data. When ``st_nlink > 1`` the file is copied to a hidden temp beside it and ``os.replace``d over it
-    (atomic; the other link keeps the original inode and bytes). Returns False when the copy failed: the caller must
-    then skip every tag/artwork write for that file.
-    """
-    p = Path(path)
-    try:
-        if p.stat().st_nlink <= 1:
-            return True
-    except OSError as e:
-        logger.warning("Cannot stat '%s' before tagging; skipping tag writes: %s", p, e)
-        return False
-    try:
-        _copy_atomic(p, p)
-        clear_exec_bits(p)
-    except OSError as e:
-        logger.warning("Could not break hardlink for tagging '%s'; skipping tag writes: %s", p, e)
-        return False
-    logger.info("Broke hardlink for tagging: %s", p)
-    return True
-
-
-TORRENT_HARDLINK_TAG_MODES = ("copy_and_tag", "keep_hardlink")
-
-
-def effective_import_mode(client_type: str | None, media_settings: dict[str, Any]) -> str:
-    """Import mode for a download: the configured mode for torrent clients, always "move" for everything else.
-
-    Usenet and Soulseek files do not seed from their source, so there is nothing to preserve.
-    """
-    if not is_torrent_driver_type(client_type):
-        return "move"
-    mode = str(media_settings.get("import_mode") or "move")
-    return mode if mode in IMPORT_MODES else "move"
-
-
-def prepare_file_for_tagging(path: Path | str, media_settings: dict[str, Any]) -> bool:
-    """True when ``path`` may be rewritten with tags/artwork; False when tag and art writes must be skipped.
-
-    A hardlinked file (shared inode with a seeding torrent) is either kept untouched (``keep_hardlink``) or split into
-    a private copy first (``copy_and_tag``, the default, via ``ensure_private_copy``).
-    """
-    p = Path(path)
-    if str(media_settings.get("torrent_hardlink_tags") or "copy_and_tag") == "keep_hardlink":
-        try:
-            shared = p.stat().st_nlink > 1
-        except OSError as e:
-            logger.warning("Cannot stat '%s' before tagging; skipping tag writes: %s", p, e)
-            return False
-        if shared:
-            logger.info("Kept hardlink; skipped tag writing for %s", p)
-            return False
-        return True
-    return ensure_private_copy(p)
-
-
-SEED_ACTIONS = ("keep", "remove", "remove_and_delete")
-
-
-def seed_action(media_settings: dict[str, Any]) -> str:
-    """The configured "When seeding is done" action. A missing or unknown value reads as ``keep`` (never touch the client)."""
-    action = str(media_settings.get("seed_complete_action") or "keep")
-    return action if action in SEED_ACTIONS else "keep"
-
-
-def _under_path(path: Path, root: Path) -> bool:
-    return path == root or root in path.parents
-
-
-def _client_path_mappings(db: Any, client_id: Any) -> list[dict[str, str]]:
-    """Remote-to-local path mappings configured on a download client (empty when none or unreadable)."""
-    if not client_id:
-        return []
-    try:
-        cfg = db.get_download_client(str(client_id))
-    except sqlite3.Error as exc:
-        logger.warning("Could not read download client %s for path mappings: %s", client_id, safe_exc(exc))
-        return []
-    extra = (cfg or {}).get("extra_settings_json")
-    if not extra:
-        return []
-    try:
-        data = json.loads(extra) if isinstance(extra, str) else extra
-    except (json.JSONDecodeError, TypeError):
-        return []
-    maps = data.get("remote_path_mappings", []) if isinstance(data, dict) else []
-    return [m for m in maps if isinstance(m, dict)]
-
-
-def _inodes_under(root: Path) -> set[tuple[int, int]]:
-    """(device, inode) of every regular file at or under ``root``."""
-    found: set[tuple[int, int]] = set()
-    if root.is_file():
-        st = root.stat()
-        return {(st.st_dev, st.st_ino)}
-    for dirpath, _dirs, files in os.walk(root):
-        for name in files:
-            try:
-                st = os.stat(os.path.join(dirpath, name))
-            except OSError:
-                continue
-            found.add((st.st_dev, st.st_ino))
-    return found
-
-
-def deletion_safe(
-    download: dict[str, Any],
-    effective_mode: str | None,
-    db: Any,
-    status_dict: Optional[dict[str, Any]] = None,
-) -> tuple[bool, str]:
-    """Strict gate for ``remove_and_delete``: may the client delete the torrent's files? Returns (ok, reason).
-
-    Every condition must hold, otherwise the caller falls back to a plain removal:
-    - the effective import mode, and the mode recorded when the files were placed, are ``hardlink`` or ``copy``;
-    - the download has a placed-files record, and every file in it exists and is not (or inside) the torrent's content;
-      for hardlinks no placed file shares an inode with any file under the torrent content;
-    - no unmatched files are still held for manual import;
-    - the torrent's content path is known and is not at or inside the music root (all paths resolved).
-    """
-    if effective_mode not in ("hardlink", "copy"):
-        return False, f"import mode is {effective_mode or 'unknown'}; files are only deleted for hardlink or copy"
-    placed_mode = download.get("placed_mode")
-    if placed_mode not in ("hardlink", "copy"):
-        return False, f"import mode when the files were placed is {placed_mode or 'unknown'}"
-    if download.get("unmatched_files"):
-        return False, "unmatched files are still held for manual import"
-    placed = [str(p) for p in (download.get("placed_files") or []) if p]
-    if not placed:
-        return False, "no record of the library files placed for this download"
-    raw_content = str((status_dict or {}).get("content_path") or "").strip()
-    if not raw_content:
-        return False, "the torrent's content path is unknown"
-    if db is None:
-        return False, "no database to check the music root"
-    try:
-        music_root_raw = db.get_media_management_settings().get("root_folder_path") or ""
-    except sqlite3.Error as exc:
-        return False, f"could not read the music root ({safe_exc(exc)})"
-    if not str(music_root_raw).strip():
-        return False, "the music root is not configured"
-    mapped = translate_remote_path(raw_content, _client_path_mappings(db, download.get("client_id")))
-    if not mapped:
-        return False, "the torrent's content path was rejected"
-    content = Path(mapped).resolve()
-    music_root = Path(str(music_root_raw)).resolve()
-    if _under_path(content, music_root) or _under_path(music_root, content):
-        return False, "the torrent's content path overlaps the music root"
-    check_inodes = "hardlink" in (effective_mode, placed_mode)
-    torrent_inodes: set[tuple[int, int]] = set()
-    if check_inodes:
-        if not content.exists():
-            return False, "the torrent's content is not visible to TrackSeerr, so shared files cannot be ruled out"
-        try:
-            torrent_inodes = _inodes_under(content)
-        except OSError as exc:
-            return False, f"could not inspect the torrent's content ({safe_exc(exc)})"
-    for raw in placed:
-        lib = Path(raw)
-        try:
-            resolved = lib.resolve()
-            st = resolved.stat()
-        except OSError:
-            return False, f"library file is missing: {raw}"
-        if not resolved.is_file():
-            return False, f"library file is not a regular file: {raw}"
-        if _under_path(resolved, content):
-            return False, f"library file is the torrent's own file: {raw}"
-        if check_inodes and (st.st_dev, st.st_ino) in torrent_inodes:
-            return False, f"library file shares an inode with the torrent: {raw}"
-    return True, "ok"
-
-
-@dataclass
-class SeedOutcome:
-    """Result of one seed-goal evaluation. ``status`` is the DownloadStatus value to record."""
-
-    status: str
-    removed: bool = False
-    deleted_files: bool = False
-    error: Optional[str] = None
-    note: str = ""
-
-
-def evaluate_seed_cleanup(
-    driver: Any,
-    target_lookup: str,
-    media_settings: dict[str, Any],
-    import_mode: str | None,
-    status_dict: Optional[dict[str, Any]],
-    download: Optional[dict[str, Any]] = None,
-    db: Any = None,
-) -> SeedOutcome:
-    """Seed-goal evaluation and the configured action; the one implementation behind the worker, manual import and sweep.
-
-    The goal is the download's snapshotted target (indexer rule or global), else the global limits. An unmet indexer
-    rule always blocks. ``remove_and_delete`` deletes files only when ``deletion_safe`` passes, otherwise it removes
-    the torrent alone and says why in ``note``. A failed client call sets ``error`` and keeps the COMPLETED status.
-    """
-    action = seed_action(media_settings)
-    if action == "keep":
-        return SeedOutcome(DownloadStatus.IMPORTED.value, note="keep")
-    seed_ratio_limit = media_settings.get("seed_ratio_limit")
-    seed_time_limit_minutes = media_settings.get("seed_time_limit_minutes")
-    rule_source = (download or {}).get("seed_rule_source")
-    if rule_source in ("indexer", "global"):
-        seed_ratio_limit = download.get("seed_ratio_target")  # type: ignore[union-attr]
-        seed_time_limit_minutes = download.get("seed_time_target_minutes")  # type: ignore[union-attr]
-    keep = SeedOutcome(DownloadStatus.COMPLETED.value, note="seed goal not met")
-    if rule_source == "indexer":
-        ratio_t = float(seed_ratio_limit or 0.0)
-        time_t = int(seed_time_limit_minutes or 0)
-        if ratio_t > 0 or time_t > 0:  # 0/None never counts as met on its own, nor as a requirement
-            if status_dict is None:
-                logger.info("Keeping transfer %s: seeding status unavailable (indexer seed rule)", target_lookup)
-                return keep
-            cur_ratio = float(status_dict.get("ratio") or 0.0)
-            cur_seeding_sec = int(status_dict.get("seeding_time_seconds") or 0)
-            ratio_met = ratio_t > 0 and cur_ratio >= ratio_t
-            time_met = time_t > 0 and cur_seeding_sec >= time_t * 60
-            if not (ratio_met or time_met):
-                return keep
-    elif preserves_source(import_mode) and (seed_ratio_limit is not None or seed_time_limit_minutes is not None):
-        if status_dict is None:
-            logger.info("Keeping transfer %s: seeding status unavailable", target_lookup)
-            return keep
-        cur_ratio = float(status_dict.get("ratio") or 0.0)
-        cur_seeding_sec = int(status_dict.get("seeding_time_seconds") or 0)
-        ratio_met = seed_ratio_limit is not None and cur_ratio >= float(seed_ratio_limit)
-        time_met = seed_time_limit_minutes is not None and cur_seeding_sec >= int(seed_time_limit_minutes) * 60
-        if not (ratio_met or time_met):
-            return keep
-
-    delete_files = False
-    note = "removed"
-    if action == "remove_and_delete":
-        ok, reason = deletion_safe(download or {}, import_mode, db, status_dict)
-        if ok:
-            delete_files = True
-            note = "removed with files"
-        else:
-            note = f"removed, files kept: {reason}"
-            logger.info("Not deleting files for %s: %s", target_lookup, reason)
-    try:
-        done = driver.cleanup_completed(target_lookup, delete_files=delete_files)
-    except Exception as ex:  # noqa: BLE001 - driver errors span HTTP, auth and parsing; the cause is logged and surfaced
-        logger.warning("Error during cleanup_completed for %s: %s", target_lookup, redact_text(str(ex)))
-        return SeedOutcome(DownloadStatus.COMPLETED.value, error=redact_text(str(ex))[:300] or type(ex).__name__)
-    if done is False and getattr(driver, "is_torrent", False):
-        logger.warning("Download client did not remove %s", target_lookup)
-        return SeedOutcome(DownloadStatus.COMPLETED.value, error="The download client refused or failed the removal")
-    if delete_files and db is not None and (download or {}).get("id"):
-        db.record_download_item_event(
-            "file_deleted", str(download["id"]),  # type: ignore[index]
-            message="Seeding copy deleted after the seed goal was met",
-            details={"release": (download or {}).get("title"), "note": note, "scope": "download client copy"},
-            trigger=TRIGGER_SEED_CLEANUP, trigger_ref="", trigger_label="Seed cleanup",
-        )
-    return SeedOutcome(DownloadStatus.IMPORTED.value, removed=True, deleted_files=delete_files, note=note)
-
-
-def settle_transfer_after_import(
-    driver: Any,
-    target_lookup: str,
-    media_settings: dict[str, Any],
-    import_mode: str | None,
-    status_dict: Optional[dict[str, Any]],
-    download: Optional[dict[str, Any]] = None,
-    db: Any = None,
-) -> str:
-    """Shared post-import download-client governance (worker and manual import).
-
-    Returns the DownloadStatus value to record: COMPLETED when the transfer is kept (seeding
-    continues; the worker's already-imported branch removes it once the goal is met), else IMPORTED.
-    Driven by ``seed_complete_action`` (see ``evaluate_seed_cleanup``):
-    - keep: no client call, IMPORTED.
-    - remove: cleanup_completed(delete_files=False) once the seed goal is met.
-    - remove_and_delete: as remove, but with delete_files=True only when ``deletion_safe`` passes (needs ``db``).
-    A failed removal here is logged and recorded as IMPORTED: the seed-cleanup sweep finds the leftover torrent
-    and retries it with attempt counting.
-    """
-    outcome = evaluate_seed_cleanup(driver, target_lookup, media_settings, import_mode, status_dict, download, db)
-    if outcome.error:
-        return DownloadStatus.IMPORTED.value
-    return outcome.status
-
-
-def reconcile_audio_file_to_track(
-    meta: dict[str, Any],
-    candidate_tracks: list[dict[str, Any]],
-) -> Optional[dict[str, Any]]:
-    """Reconciles an audio file's metadata against expected library tracks; returns only the track.
-
-    Thin wrapper over reconcile_audio_file_to_track_scored (see it for the matching hierarchy).
-    """
-    return reconcile_audio_file_to_track_scored(meta, candidate_tracks)[0]
-
-
-MATCH_STRONG = "strong"
-MATCH_WEAK = "weak"
-MATCH_NONE = "none"
-
-
-def reconcile_audio_file_to_track_scored(
-    meta: dict[str, Any],
-    candidate_tracks: list[dict[str, Any]],
-) -> tuple[Optional[dict[str, Any]], str]:
-    """Reconciles an audio file's metadata against a list of expected library tracks.
-
-    Matching hierarchy:
-    1. Exact match on disc_number and track_number (if mutagen extracted valid track number).
-    2. Clean title similarity match (clean_library_name(t["title"]) == clean_library_name(meta["title"]) or ratio >= 0.85).
-    3. Duration tolerance match (within 5 seconds) if multiple candidates match title.
-
-    Returns (track, strength). Strength is "strong" for a unique disc+track number match, a number match
-    disambiguated to one by exact title, or a unique exact clean-title match; "weak" for every fallback pick
-    (ambiguous picks, duration tie-breaks, fuzzy matches); "none" when nothing matched.
-    """
-    if not candidate_tracks:
-        return None, MATCH_NONE
-
-    file_track = meta.get("track_number")
-    file_disc = meta.get("disc_number") or 1
-    has_valid_track_num = isinstance(file_track, int) and file_track > 0
-
-    # 1. Exact match on disc_number and track_number (if mutagen extracted valid track number)
-    if has_valid_track_num:
-        num_matches = [
-            t
-            for t in candidate_tracks
-            if int(t.get("track_number") or 1) == file_track
-            and int(t.get("disc_number") or 1) == int(file_disc)
-        ]
-        if len(num_matches) == 1:
-            return num_matches[0], MATCH_STRONG
-        elif len(num_matches) > 1:
-            clean_title = clean_library_name(meta.get("title") or "")
-            title_matches = [
-                t
-                for t in num_matches
-                if clean_library_name(t.get("title") or "") == clean_title
-            ]
-            if len(title_matches) == 1:
-                return title_matches[0], MATCH_STRONG
-            file_dur = meta.get("duration") or meta.get("duration_seconds")
-            if file_dur is not None:
-                dur_matches = [
-                    t
-                    for t in num_matches
-                    if t.get("duration_seconds") is not None
-                    and abs(float(t["duration_seconds"]) - float(file_dur)) <= 5.0
-                ]
-                if dur_matches:
-                    return min(
-                        dur_matches,
-                        key=lambda t: abs(float(t["duration_seconds"]) - float(file_dur)),
-                    ), MATCH_WEAK
-            return num_matches[0], MATCH_WEAK
-
-    # 2. Clean title similarity match
-    meta_title = meta.get("title") or ""
-    clean_meta = clean_library_name(meta_title)
-    if not clean_meta and meta.get("file_path"):
-        clean_meta = clean_library_name(Path(meta["file_path"]).stem)
-
-    if clean_meta:
-        # Exact clean title match
-        exact_title_matches = [
-            t
-            for t in candidate_tracks
-            if clean_library_name(t.get("title") or "") == clean_meta
-        ]
-        if len(exact_title_matches) == 1:
-            return exact_title_matches[0], MATCH_STRONG
-        elif len(exact_title_matches) > 1:
-            # 3. Duration tolerance match (within 5 seconds) if multiple candidates match title
-            file_dur = meta.get("duration") or meta.get("duration_seconds")
-            if file_dur is not None:
-                dur_matches = [
-                    t
-                    for t in exact_title_matches
-                    if t.get("duration_seconds") is not None
-                    and abs(float(t["duration_seconds"]) - float(file_dur)) <= 5.0
-                ]
-                if len(dur_matches) == 1:
-                    return dur_matches[0], MATCH_WEAK
-                elif dur_matches:
-                    return min(
-                        dur_matches,
-                        key=lambda t: abs(float(t["duration_seconds"]) - float(file_dur)),
-                    ), MATCH_WEAK
-            return exact_title_matches[0], MATCH_WEAK
-
-        # Fuzzy title match with ratio >= 0.85
-        fuzzy_candidates: list[tuple[float, dict[str, Any]]] = []
-        for t in candidate_tracks:
-            clean_t = clean_library_name(t.get("title") or "")
-            if not clean_t:
-                continue
-            ratio = difflib.SequenceMatcher(None, clean_t, clean_meta).ratio()
-            if ratio >= 0.85:
-                fuzzy_candidates.append((ratio, t))
-
-        if fuzzy_candidates:
-            fuzzy_candidates.sort(key=lambda x: x[0], reverse=True)
-            top_ratio = fuzzy_candidates[0][0]
-            top_matches = [t for r, t in fuzzy_candidates if abs(r - top_ratio) < 0.001]
-            if len(top_matches) == 1:
-                return top_matches[0], MATCH_WEAK
-
-            # 3. Duration tolerance match if multiple fuzzy candidates
-            file_dur = meta.get("duration") or meta.get("duration_seconds")
-            if file_dur is not None:
-                dur_matches = [
-                    t
-                    for t in top_matches
-                    if t.get("duration_seconds") is not None
-                    and abs(float(t["duration_seconds"]) - float(file_dur)) <= 5.0
-                ]
-                if len(dur_matches) == 1:
-                    return dur_matches[0], MATCH_WEAK
-                elif dur_matches:
-                    return min(
-                        dur_matches,
-                        key=lambda t: abs(float(t["duration_seconds"]) - float(file_dur)),
-                    ), MATCH_WEAK
-            return top_matches[0], MATCH_WEAK
-
-    return None, MATCH_NONE
-
-
-FINGERPRINT_MIN_SCORE = 0.80
-
-
-def _fingerprint_fallback_match(
-    file_path: Path,
-    media_settings: dict[str, Any],
-    remaining_tracks: list[dict[str, Any]],
-    tag_track: Optional[dict[str, Any]],
-    strength: str,
-) -> Optional[dict[str, Any]]:
-    """Resolves a weak or missing tag match via AcoustID fingerprinting; returns the tag result when it cannot improve.
-
-    Only runs when the tag match is not strong, fingerprint_on_weak_match is enabled and an AcoustID key is set.
-    fingerprint_audio_file never raises, so a lookup failure leaves the tag result untouched.
-    """
-    if strength == MATCH_STRONG:
-        logger.info("Import match for %s decided by tag-strong", file_path.name)
-        return tag_track
-    api_key = media_settings.get("acoustid_api_key")
-    if not (media_settings.get("fingerprint_on_weak_match") and api_key):
-        logger.info("Import match for %s decided by tag-weak-kept (fingerprint fallback disabled)", file_path.name)
-        return tag_track
-
-    fp = fingerprint_audio_file(file_path, api_key)
-    if fp and float(fp.get("score") or 0.0) >= FINGERPRINT_MIN_SCORE:
-        rec_id = fp.get("recording_id")
-        if rec_id:
-            rec_hits = [t for t in remaining_tracks if t.get("mb_recording_id") == rec_id]
-            if rec_hits:
-                logger.info("Import match for %s decided by fingerprint-recording (%s)", file_path.name, rec_id)
-                return rec_hits[0]
-        fp_title = clean_library_name(fp.get("title") or "")
-        if fp_title:
-            title_hits = [t for t in remaining_tracks if clean_library_name(t.get("title") or "") == fp_title]
-            if len(title_hits) == 1:
-                logger.info("Import match for %s decided by fingerprint-title (%s)", file_path.name, fp_title)
-                return title_hits[0]
-    logger.info("Import match for %s decided by tag-weak-kept (strength=%s)", file_path.name, strength)
-    return tag_track
-
-
-def resolve_download_expected_tracks(
-    db: Database,
-    item: dict[str, Any],
-    req: Optional[dict[str, Any]],
-) -> tuple[Optional[dict[str, Any]], list[dict[str, Any]]]:
-    """The catalog album a native download targets and that album's tracks (the tracks the import expects).
-
-    Resolution order: the download's album_id, its track's album, then artist name + album title.
-    Returns (None, []) when the download cannot be tied to a catalog album.
-    """
-    target_album = None
-    if item.get("album_id"):
-        target_album = db.get_library_album(item["album_id"])
-    elif item.get("track_id"):
-        req_track = db.get_library_track(item["track_id"])
-        if req_track:
-            target_album = db.get_library_album(req_track["album_id"])
-
-    if not target_album:
-        art_name_cand = item.get("artist") or (req.get("artist") if req else None)
-        alb_title_cand = (
-            (item.get("title") if item.get("item_type") == "album" else None)
-            or (req.get("album") or req.get("title") if req else None)
-            or item.get("title")
-        )
-        if art_name_cand and alb_title_cand:
-            art_cand = db.get_library_artist_by_name(art_name_cand)
-            if art_cand:
-                target_album = db.get_library_album_by_title(art_cand["id"], alb_title_cand)
-
-    expected_tracks: list[dict[str, Any]] = []
-    if target_album:
-        expected_tracks = db.list_library_tracks(album_id=target_album["id"], limit=1000)
-    return target_album, expected_tracks
-
-
-def translate_remote_path(
-    remote_path: Optional[str], mappings: list[dict[str, str]]
-) -> Optional[str]:
-    """Translates remote download client file paths to local mount paths.
-
-    If remote_path starts with a mapping's remote_path, replaces that prefix with local_path.
-    Guards against directory traversal attacks.
-    """
-    if remote_path is None:
-        return None
-
-    # Defense against directory traversal attempts in remote path input
-    parts = remote_path.replace("\\", "/").split("/")
-    if ".." in parts:
-        logger.warning("Path traversal attempt rejected in remote_path: %s", remote_path)
-        return None
-
-    if not mappings:
-        return remote_path
-
-    resolved = remote_path
-    for m in mappings:
-        if not isinstance(m, dict):
-            continue
-        r = m.get("remote_path")
-        l = m.get("local_path")
-        if not r or not l:
-            continue
-        r_clean = r.rstrip("/")
-        l_clean = l.rstrip("/")
-        if resolved == r_clean:
-            resolved = l_clean
-            break
-        elif resolved.startswith(r_clean + "/"):
-            resolved = l_clean + resolved[len(r_clean):]
-            break
-        elif resolved.startswith(r_clean + "\\"):
-            resolved = l_clean + "/" + resolved[len(r_clean) + 1:].replace("\\", "/")
-            break
-
-    norm = os.path.normpath(resolved)
-    if ".." in norm.replace("\\", "/").split("/"):
-        logger.warning("Directory traversal detected in remote path mapping: %s", resolved)
-        return None
-
-    return norm
-
-
-def _path_under(path: Path, root: Path) -> bool:
-    return path == root or root in path.parents
 
 
 def record_import_events(

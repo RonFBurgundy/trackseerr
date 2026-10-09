@@ -10,7 +10,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from trackseerr import recycle_bin
-from trackseerr.acquisition_worker import evaluate_seed_cleanup, record_import_events
+from trackseerr.acquisition_worker import record_import_events
+from trackseerr.seed_safety import evaluate_seed_cleanup
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db, get_plex_client
 from trackseerr.auth import create_session_token, get_or_create_secret_key
@@ -197,7 +198,7 @@ def test_seed_cleanup_deleting_files_is_recorded(db):
     db.record_download_grab("dl-s", indexer="T", quality="FLAC", protocol="torrent", trigger=GrabTrigger("request"))
     driver = MagicMock()
     driver.cleanup_completed.return_value = True
-    with patch("trackseerr.acquisition_worker.deletion_safe", return_value=(True, "")):
+    with patch("trackseerr.seed_safety.deletion_safe", return_value=(True, "")):
         outcome = evaluate_seed_cleanup(
             driver, "h-dl-s", {"seed_complete_action": "remove_and_delete"}, "hardlink", None,
             db.get_active_download("dl-s"), db,
@@ -212,7 +213,7 @@ def test_seed_cleanup_that_keeps_files_records_no_deletion(db):
     download(db, "dl-k")
     driver = MagicMock()
     driver.cleanup_completed.return_value = True
-    with patch("trackseerr.acquisition_worker.deletion_safe", return_value=(False, "shared inode")):
+    with patch("trackseerr.seed_safety.deletion_safe", return_value=(False, "shared inode")):
         outcome = evaluate_seed_cleanup(
             driver, "h-dl-k", {"seed_complete_action": "remove_and_delete"}, "hardlink", None,
             db.get_active_download("dl-k"), db,

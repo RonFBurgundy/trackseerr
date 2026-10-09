@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from trackseerr import acquisition_worker as aw
-from trackseerr.acquisition_worker import effective_import_mode, prepare_file_for_tagging
+from trackseerr.import_files import effective_import_mode, prepare_file_for_tagging
 from trackseerr.clients.acquisition import is_torrent_driver_type
 from trackseerr.storage import SCHEMA_VERSION
 
@@ -94,7 +94,7 @@ def test_prepare_file_for_tagging_modes(tmp_path, caplog):
     solo.write_bytes(b"y")
     os.link(a, b)
     keep = {"torrent_hardlink_tags": "keep_hardlink"}
-    with caplog.at_level("INFO", logger="trackseerr.acquisition_worker"):
+    with caplog.at_level("INFO", logger="trackseerr.import_files"):
         assert prepare_file_for_tagging(b, keep) is False
     assert "Kept hardlink; skipped tag writing for" in caplog.text
     assert b.stat().st_nlink == 2
