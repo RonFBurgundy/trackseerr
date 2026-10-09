@@ -382,6 +382,7 @@ class ManualImportTags(ApiModel):
     artist: Optional[str] = None
     album: Optional[str] = None
     album_artist: Optional[str] = None
+    date: Optional[str] = None
     year: Optional[int] = None
     release_year: Optional[int] = None
     track_number: Optional[int] = None

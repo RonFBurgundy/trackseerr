@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from plex_playlist_sync import __version__
 from plex_playlist_sync.api.dependencies import get_db, require_admin, require_core_tier
+from plex_playlist_sync.api.response_models import ApiModel
 from plex_playlist_sync.clients.acquisition import get_indexer_driver
 from plex_playlist_sync.models import IndexerConfig
 from plex_playlist_sync.redaction import redact_text
@@ -34,7 +35,7 @@ router = APIRouter(
 )
 
 
-class LidarrFieldModel(BaseModel):
+class LidarrFieldModel(ApiModel):
     name: str
     value: Any = None
     order: Optional[int] = None
@@ -45,7 +46,7 @@ class LidarrFieldModel(BaseModel):
     hidden: Optional[str] = None
 
 
-class LidarrIndexerItem(BaseModel):
+class LidarrIndexerItem(ApiModel):
     id: int
     name: str
     enableRss: bool = True
@@ -62,7 +63,7 @@ class LidarrIndexerItem(BaseModel):
     fields: list[LidarrFieldModel] = Field(default_factory=list)
 
 
-class SystemStatusResponse(BaseModel):
+class SystemStatusResponse(ApiModel):
     appName: str = "TrackSeerr"
     instanceName: str = "TrackSeerr"
     version: str = LIDARR_COMPAT_VERSION
@@ -494,12 +495,12 @@ def delete_indexer(
     return {}
 
 
-@router.post("/indexer/test", summary="Test indexer connection")
+@router.post("/indexer/test", response_model=dict[str, Any], summary="Test indexer connection")
 def test_indexer(
     payload: LidarrIndexerPayload,
     response: Response,
     force_test: bool = Query(default=False, alias="forceTest"),
-) -> Any:
+) -> dict[str, Any]:
     """Tests connectivity against an indexer, matching Lidarr's test contract."""
     response.headers["X-Application-Version"] = LIDARR_COMPAT_VERSION
 

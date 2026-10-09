@@ -151,6 +151,7 @@ from plex_playlist_sync.models import (
 )
 from plex_playlist_sync.library import (
     AUDIO_EXTENSIONS,
+    _extract_year,
     build_tags_to_write,
     embed_album_artwork,
     fingerprint_audio_file,
@@ -4202,7 +4203,7 @@ def retag_preview(
                     })
 
         # Files with no differences omitted; plus skipped_reason when the file will be skipped
-        if diffs or skipped_reason is not None:
+        if diffs or (not current_meta and skipped_reason is not None):
             preview_items.append({
                 "file_id": str(f["id"]),
                 "track_id": str(t["id"]),
@@ -4347,6 +4348,12 @@ def retag_apply(
                 )
 
                 cover_bytes = _album_cover_bytes(album, file_path=p) if embed_art_requested else None
+
+                if not write_tags_setting and embed_art_requested and not cover_bytes:
+                    skip_msg = "no album cover art available to embed"
+                    results.append({"file_id": fid, "status": "skipped", "message": skip_msg, "reason": skip_msg})
+                    skipped_count += 1
+                    continue
 
                 ok = False
                 if write_tags_setting:

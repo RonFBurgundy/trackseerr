@@ -9624,6 +9624,8 @@ export interface components {
             bits_per_sample?: number | null;
             /** Codec */
             codec?: string | null;
+            /** Date */
+            date?: string | null;
             /** Disc Number */
             disc_number?: number | null;
             /** Duration */
