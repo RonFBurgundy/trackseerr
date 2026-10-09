@@ -78,44 +78,6 @@ def test_schema_version_and_tables(db):
     assert "tags_json" in cols
 
 
-def test_migration_moves_legacy_tags_and_is_idempotent(tmp_path):
-    path = str(tmp_path / "m.db")
-    first = Database(path)
-    first.create_delay_profile({
-        "name": "Metal", "preferred_protocol": "usenet", "delays": {"usenet": 0, "torrent": 0, "soulseek": 0},
-        "bypass_if_highest_quality": True, "tags": [],
-    })
-    first.create_release_profile({"name": "RP", "tags": []})
-    first.upsert_library_artist({"id": "a1", "name": "Sepultura", "monitored": True, "monitor_option": "all"})
-    first.upsert_library_artist({"id": "a2", "name": "Other", "monitored": True, "monitor_option": "all"})
-    first.close()
-
-    conn = sqlite3.connect(path)
-    conn.execute("PRAGMA foreign_keys = OFF")
-    conn.execute("DROP TABLE artist_tags")
-    conn.execute("DROP TABLE tags")
-    conn.execute("DELETE FROM schema_migrations WHERE version >= 64")
-    conn.execute("UPDATE delay_profiles SET tags_json = ? WHERE name = 'Metal'", (json.dumps(["Metal", " Rock!! ", "metal"]),))
-    conn.execute("UPDATE release_profiles SET tags_json = ? WHERE name = 'RP'", (json.dumps(["Lossless"]),))
-    conn.execute("UPDATE library_artists SET metadata_json = ? WHERE id = 'a1'", (json.dumps({"x": 1, "tags": ["Metal", "thrash"]}),))
-    conn.execute("UPDATE library_artists SET metadata_json = ? WHERE id = 'a2'", ("{not json",))
-    conn.commit()
-    conn.close()
-
-    for _ in range(2):  # the second open proves the migration is idempotent
-        d = Database(path)
-        labels = {t["label"] for t in d.list_tags()}
-        assert labels == {"metal", "rock-", "lossless", "thrash"}
-        profile = next(p for p in d.list_delay_profiles() if p["name"] == "Metal")
-        assert profile["tags"] == ["metal", "rock-"]
-        assert d.list_release_profiles()[-1]["tags"] == ["lossless"]
-        assert d.get_artist_tag_labels(artist_id="a1") == ["metal", "thrash"]
-        meta = json.loads(d.get_library_artist("a1")["metadata_json"])
-        assert meta == {"x": 1}  # the metadata_json hack is gone
-        assert d.get_library_artist("a2")["metadata_json"] == "{not json"  # unreadable data untouched
-        d.close()
-
-
 # ------------------------------------------------------------------------------------------- CRUD
 
 

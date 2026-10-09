@@ -258,24 +258,6 @@ def test_fresh_db_defaults_to_existing(tmp_path: Path):
         db.close()
 
 
-def test_existing_install_keeps_saved_add_option_and_artist_options(tmp_path: Path):
-    path = str(tmp_path / "old.db")
-    db = Database(path)
-    db.upsert_library_artist({"id": "old", "name": "old", "monitor_option": "all"})
-    db.update_media_management_settings({"add_monitor_option": "all"})
-    # Pretend this install predates the migration.
-    db.conn.execute("DELETE FROM schema_migrations WHERE version = ?", (SCHEMA_VERSION,))
-    db.conn.commit()
-    db.close()
-
-    db = Database(path)
-    try:
-        assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
-        assert db.get_media_management_settings()["add_monitor_option"] == "all"
-        assert db.get_library_artist("old")["monitor_option"] == "all"
-    finally:
-        db.close()
-
 
 # ------------------------------------------------------------ on-demand hydration
 

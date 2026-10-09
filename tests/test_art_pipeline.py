@@ -69,41 +69,6 @@ def album(test_db, tmp_path):
     return alb, d / "cover.jpg"
 
 
-# ------------------------------------------------------------------------------------------------ migration
-
-
-def test_migration_adds_art_version_columns_and_is_idempotent(tmp_path):
-    assert SCHEMA_VERSION >= 47
-    db = Database(str(tmp_path / "m.db"))
-    try:
-        for table in ("library_artists", "library_albums"):
-            cols = {r[1] for r in db.conn.execute(f"PRAGMA table_info({table})")}
-            assert "art_version" in cols
-        assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
-        with db._lock:
-            cur = db.conn.cursor()
-            db._migration_v47(cur)  # re-running must not fail on the existing column
-    finally:
-        db.close()
-
-
-def test_migration_upgrades_a_v46_database_and_keeps_rows(tmp_path):
-    path = tmp_path / "old.db"
-    db = Database(str(path))
-    db.upsert_library_artist({"id": "a1", "name": "Keep"})
-    db.conn.execute("ALTER TABLE library_artists DROP COLUMN art_version")
-    db.conn.execute("ALTER TABLE library_albums DROP COLUMN art_version")
-    db.conn.execute("DELETE FROM schema_migrations WHERE version >= 47")
-    db.conn.commit()
-    db.close()
-    db = Database(str(path))
-    try:
-        assert db.get_library_artist("a1")["art_version"] is None
-        assert db.set_library_art_version("artist", "a1", "abc") is True
-        assert db.set_library_art_version("artist", "a1", "abc") is False  # unchanged -> no write
-        assert db.get_library_artist("a1")["art_version"] == "abc"
-    finally:
-        db.close()
 
 
 # ------------------------------------------------------------------------------------------------ pre-generation

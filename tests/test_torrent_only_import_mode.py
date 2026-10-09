@@ -134,18 +134,6 @@ def test_manual_commit_torrent_keep_hardlink_skips_tags(tmp_path, db, client, he
     assert files[0].stat().st_nlink == 2
 
 
-def test_migration_v58_and_round_trip(test_db):
-    assert SCHEMA_VERSION >= 58
-    assert test_db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
-    cols = {r[1] for r in test_db.conn.execute("PRAGMA table_info(media_management_settings)").fetchall()}
-    assert "torrent_hardlink_tags" in cols
-    assert test_db.get_media_management_settings()["torrent_hardlink_tags"] == "copy_and_tag"
-    test_db._migration_v58(test_db.conn.cursor())  # idempotent
-    out = test_db.update_media_management_settings({"torrent_hardlink_tags": "keep_hardlink"})
-    assert out["torrent_hardlink_tags"] == "keep_hardlink"
-    with pytest.raises(ValueError):
-        test_db.update_media_management_settings({"torrent_hardlink_tags": "nope"})
-
 
 def test_settings_api_round_trip_and_422(app_and_client, test_db, test_config, seeded_users):
     _, api = app_and_client

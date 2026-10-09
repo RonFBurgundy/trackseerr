@@ -237,62 +237,6 @@ class TestSortKey:
 
 # --------------------------------------------------------------------------------------------- migration
 
-
-class TestMigrationV34:
-    def test_registered_and_columns_and_indexes(self, test_db):
-        versions = {r[0] for r in test_db.conn.execute("SELECT version FROM schema_migrations")}
-        assert 34 in versions
-        for table, col in (("library_artists", "sort_name"), ("library_albums", "sort_title"),
-                           ("library_tracks", "sort_title")):
-            assert col in {r[1] for r in test_db.conn.execute(f"PRAGMA table_info({table})")}
-        idx = {r[1] for r in test_db.conn.execute("PRAGMA index_list(library_artists)")}
-        assert "idx_lib_artists_sort_name" in idx
-
-    def test_backfill_from_pre_v34_shape_and_idempotent(self, test_db):
-        _seed(test_db)
-        expected = {
-            "artists": dict(test_db.conn.execute("SELECT id, sort_name FROM library_artists").fetchall()),
-            "albums": dict(test_db.conn.execute("SELECT id, sort_title FROM library_albums").fetchall()),
-            "tracks": dict(test_db.conn.execute("SELECT id, sort_title FROM library_tracks").fetchall()),
-        }
-        # Reproduce the pre-v34 schema: no indexes on, no column for, the sort keys.
-        for idx in ("idx_lib_artists_sort_name", "idx_lib_albums_sort_title", "idx_lib_tracks_sort_title"):
-            test_db.conn.execute(f"DROP INDEX {idx}")
-        test_db.conn.execute("ALTER TABLE library_artists DROP COLUMN sort_name")
-        test_db.conn.execute("ALTER TABLE library_albums DROP COLUMN sort_title")
-        test_db.conn.execute("ALTER TABLE library_tracks DROP COLUMN sort_title")
-        test_db.conn.commit()
-
-        cur = test_db.conn.cursor()
-        test_db._migration_v34(cur)
-        test_db.conn.commit()
-        got = {
-            "artists": dict(test_db.conn.execute("SELECT id, sort_name FROM library_artists").fetchall()),
-            "albums": dict(test_db.conn.execute("SELECT id, sort_title FROM library_albums").fetchall()),
-            "tracks": dict(test_db.conn.execute("SELECT id, sort_title FROM library_tracks").fetchall()),
-        }
-        assert got == expected and expected["artists"]["ar-00"] == "BEATLES"
-
-        # A second run is a no-op (and a hand-edited key is not clobbered: only empty defaults are backfilled).
-        test_db.conn.execute("UPDATE library_artists SET sort_name = 'KEEP' WHERE id = 'ar-01'")
-        test_db._migration_v34(test_db.conn.cursor())
-        test_db.conn.commit()
-        assert test_db.conn.execute("SELECT sort_name FROM library_artists WHERE id = 'ar-01'").fetchone()[0] == "KEEP"
-        assert test_db.conn.execute(
-            "SELECT COUNT(*) FROM library_artists WHERE sort_name = ''"
-        ).fetchone()[0] == 0
-
-    def test_reopening_a_file_db_does_not_remigrate(self, tmp_path):
-        path = tmp_path / "t.db"
-        db = Database(path)
-        db.upsert_library_artist({"id": "a", "name": "The Cure"})
-        db.close()
-        db = Database(path)
-        assert db.get_library_artist("a")["sort_name"] == "CURE"
-        assert db.conn.execute("SELECT COUNT(*) FROM schema_migrations WHERE version = 34").fetchone()[0] == 1
-        db.close()
-
-
 # --------------------------------------------------------------------------------------------- write paths
 
 
@@ -801,12 +745,6 @@ class TestPerformance:
 
 
 class TestMigrationV35:
-    def test_registered_and_columns(self, test_db):
-        assert 35 in {r[0] for r in test_db.conn.execute("SELECT version FROM schema_migrations")}
-        for table in ("library_artists", "library_albums", "library_tracks"):
-            cols = {r[1] for r in test_db.conn.execute(f"PRAGMA table_info({table})")}
-            assert {"search_text", "search_clean"} <= cols
-
     def test_upserts_persist_folded_text(self, test_db):
         test_db.upsert_library_artist({"id": "a1", "name": "Ørsted"})
         test_db.upsert_library_album({"id": "b1", "artist_id": "a1", "title": "Éclat!"})
@@ -821,21 +759,6 @@ class TestMigrationV35:
         # the folded columns never leak into API rows
         assert "search_text" not in test_db.get_library_track("t1")
 
-    def test_backfill_and_idempotent(self, test_db):
-        test_db.upsert_library_artist({"id": "a1", "name": "Mötley Crüe"})
-        test_db.upsert_library_album({"id": "b1", "artist_id": "a1", "title": "Éclat"})
-        test_db.upsert_library_track({"id": "t1", "album_id": "b1", "artist_id": "a1", "title": "Ünder"})
-        for table in ("library_artists", "library_albums", "library_tracks"):
-            test_db.conn.execute(f"ALTER TABLE {table} DROP COLUMN search_text")
-            test_db.conn.execute(f"ALTER TABLE {table} DROP COLUMN search_clean")
-        test_db.conn.commit()
-        test_db._migration_v35(test_db.conn.cursor())
-        test_db.conn.commit()
-        get = lambda t: test_db.conn.execute(f"SELECT search_text FROM {t}").fetchone()[0]  # noqa: E731
-        assert (get("library_artists"), get("library_albums"), get("library_tracks")) == ("motley crue", "eclat", "under")
-        test_db.conn.execute("UPDATE library_artists SET search_text = 'keep'")
-        test_db._migration_v35(test_db.conn.cursor())
-        assert get("library_artists") == "keep"  # only rows with empty folded columns are backfilled
 
 
 class TestSearchFollowsRenames:

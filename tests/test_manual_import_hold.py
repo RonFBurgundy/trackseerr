@@ -122,18 +122,6 @@ MATCHED = {"title": "Aerodynamic", "track_number": 2}
 UNMATCHED = {"title": "Zzz Qqq Nothing", "track_number": None}
 
 
-# ------------------------------------------------------------------ migration
-
-
-def test_migration_v55_adds_unmatched_files_column(db: Database):
-    assert SCHEMA_VERSION >= 55
-    assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
-    cols = [r[1] for r in db.conn.execute("PRAGMA table_info(active_downloads)").fetchall()]
-    assert "unmatched_files" in cols
-    # Re-running the migration on an upgraded database is a no-op.
-    db._migration_v55(db.conn.cursor())
-
-
 def test_unmatched_files_round_trip_and_corrupt_value(db: Database, tmp_path: Path):
     _seed(db, tmp_path)
     assert db.get_active_download("dl-1")["unmatched_files"] == []

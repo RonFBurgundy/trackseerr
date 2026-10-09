@@ -1078,32 +1078,6 @@ def test_empty_last_role_is_recorded_silently_never_inferred_as_a_flip(tmp_path)
         db.close()
 
 
-def test_migrations_are_idempotent_across_role_flips(tmp_path):
-    path = str(tmp_path / "sync_db.sqlite")
-    for role in ("all-in-one", "core", "all-in-one", "core", "gateway"):
-        db = Database(path)
-        record_boot_role(db, role)
-        versions = [r[0] for r in db.conn.execute("SELECT version FROM schema_migrations ORDER BY version")]
-        assert versions == list(range(1, SCHEMA_VERSION + 1))
-        db.close()
-    db = Database(path)
-    cols = [r[1] for r in db.conn.execute("PRAGMA table_info(general_settings)")]
-    assert cols.count("last_role") == 1 and cols.count("instance_id") == 1
-    db.close()
-
-
-def test_v30_adds_columns_to_a_v29_database(tmp_path):
-    path = str(tmp_path / "sync_db.sqlite")
-    db = Database(path)
-    _populate(db)
-    db.conn.execute("DELETE FROM schema_migrations WHERE version = 30")
-    db.conn.commit()
-    db.close()
-    db = Database(path)  # re-running v30 over existing columns must not fail or lose data
-    assert db.get_general_settings()["application_url"] == "https://music.example.com"
-    assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
-    db.close()
-
 
 # --------------------------------------------------------------------------- audit fixes: role guard by content
 

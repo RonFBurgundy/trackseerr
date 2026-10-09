@@ -75,17 +75,6 @@ def test_cutoff_composite_index_exists_and_is_used():
     assert total == 1000 and len(rows) == 50
 
 
-def test_migration_is_idempotent_on_existing_db(tmp_path):
-    path = tmp_path / "x.db"
-    Database(str(path)).close()
-    conn = sqlite3.connect(path)
-    conn.execute("DROP INDEX idx_lib_files_track_cutoff")
-    conn.execute("DELETE FROM schema_migrations WHERE version >= 42")
-    conn.commit()
-    conn.close()
-    db = Database(str(path))
-    assert "idx_lib_files_track_cutoff" in {r[1] for r in db.conn.execute("PRAGMA index_list(library_files)")}
-
 
 # ------------------------------------------------------------------------------------------ bounded Lidarr calls
 

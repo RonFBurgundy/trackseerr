@@ -520,20 +520,6 @@ def test_saving_none_keeps_the_credentials_of_the_previous_type(env):
     assert env.db.get_media_server_settings()["api_key"] == "jf-secret"
 
 
-def test_migration_adds_credentials_type_and_backfills():
-    d = Database(":memory:")
-    d.conn.execute("DROP TABLE media_server_settings")
-    d.conn.execute(
-        "CREATE TABLE media_server_settings (id INTEGER PRIMARY KEY CHECK (id = 1), type TEXT NOT NULL DEFAULT '', "
-        "url TEXT NOT NULL DEFAULT '', username TEXT NOT NULL DEFAULT '', password TEXT NOT NULL DEFAULT '', "
-        "api_key TEXT NOT NULL DEFAULT '', updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
-    )
-    d.conn.execute("INSERT INTO media_server_settings (id, type, url, api_key) VALUES (1, 'jellyfin', 'http://j', 'k')")
-    cur = d.conn.cursor()
-    d._migration_v41(cur)
-    d.conn.commit()
-    assert d.get_media_server_settings()["credentials_type"] == "jellyfin"
-
 
 def test_settings_get_and_test_require_the_core_tier():
     from fastapi import HTTPException

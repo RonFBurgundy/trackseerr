@@ -439,6 +439,11 @@ def validate_backup(path: Union[str, Path]) -> dict[str, Any]:
                     f"Backup schema version ({schema_version}) is newer than current application schema version ({SCHEMA_VERSION})"
                 )
 
+            if schema_version < SCHEMA_VERSION:
+                raise BackupValidationError(
+                    f"Backup schema version ({schema_version}) predates the v{SCHEMA_VERSION} baseline and cannot be restored by this build"
+                )
+
             # Extract SQLite database to temporary location and test PRAGMA integrity_check == ok
             with tempfile.TemporaryDirectory() as temp_dir:
                 extracted_db = Path(temp_dir) / DB_MEMBER_NAME

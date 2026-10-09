@@ -106,23 +106,6 @@ def test_setting_round_trips_through_the_api(admin_client):
     assert client.get("/api/settings/lidarr", headers=headers).json()["prefer_singles"] is False
 
 
-def _columns(db):
-    return [r[1] for r in db.conn.execute("PRAGMA table_info(lidarr_settings)").fetchall()]
-
-
-def test_migration_is_idempotent_and_adds_the_column_to_an_old_table(test_db):
-    assert _columns(test_db).count("prefer_singles") == 1
-    cur = test_db.conn.cursor()
-    test_db._migration_v38(cur)  # re-run with the column present: no error, no duplicate
-    assert _columns(test_db).count("prefer_singles") == 1
-
-    test_db.conn.execute("ALTER TABLE lidarr_settings DROP COLUMN prefer_singles")
-    assert "prefer_singles" not in _columns(test_db)
-    test_db._migration_v38(test_db.conn.cursor())
-    assert _columns(test_db).count("prefer_singles") == 1
-    assert test_db.get_lidarr_settings()["prefer_singles"] is True  # the existing singleton row gets the default
-
-
 # --------------------------------------------------------------------- defaults endpoint: singles_enabled
 
 

@@ -534,30 +534,6 @@ def test_migration_v60_creates_artist_links(db):
     assert {"library_artist_id", "discovery_id", "mbid", "confidence", "updated_at"} <= cols
 
 
-def test_migration_v60_applies_on_existing_v59_database(tmp_path):
-    path = str(tmp_path / "t.db")
-    first = Database(path)
-    first.conn.execute("DROP TABLE artist_links")
-    first.conn.execute("DELETE FROM schema_migrations WHERE version >= 60")
-    first.conn.commit()
-    first.close()
-
-    reopened = Database(path)
-    try:
-        assert reopened.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
-        reopened.save_artist_link("a1", "deezer:artist:1", None, "name")
-        reopened.save_artist_link("a1", "deezer:artist:2", None, "name")  # same library id replaces the row
-        assert reopened.get_artist_link(library_artist_id="a1")["discovery_id"] == "deezer:artist:2"
-        with pytest.raises(sqlite3.IntegrityError):
-            reopened.conn.execute("INSERT INTO artist_links (library_artist_id, confidence) VALUES ('a1', 'name')")
-    finally:
-        reopened.close()
-
-
-def test_migration_v60_is_idempotent(db):
-    db._migration_v60(db.conn.cursor())
-
-
 # ----------------------------------------------------------------------------------------------- role shaping
 
 _FORBIDDEN_FOR_REQUESTERS = {

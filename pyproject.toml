@@ -49,7 +49,7 @@ where = ["."]
 include = ["trackseerr*"]
 
 [tool.setuptools.package-data]
-trackseerr = ["static/*", "data/*.txt"]
+trackseerr = ["static/*", "data/*.txt", "storage_schema.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

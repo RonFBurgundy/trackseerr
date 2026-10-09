@@ -283,37 +283,6 @@ def test_database_migration_and_accessors(test_db):
     assert test_db.get_last_seen_changelog_version(user["id"]) == "1.1.0"
 
 
-def test_migration_applies_on_existing_database(tmp_path):
-    """Migration v68 cleanly applies to an existing SQLite DB migrating up."""
-    db_file = tmp_path / "existing_v67.db"
-    # Create a fully migrated DB first
-    db = Database(str(db_file))
-    db.close()
-
-    # Revert migration 68 and drop the new column
-    conn = sqlite3.connect(str(db_file))
-    conn.execute("ALTER TABLE users DROP COLUMN last_seen_changelog_version")
-    conn.execute("DELETE FROM schema_migrations WHERE version >= 68")
-    conn.commit()
-    conn.close()
-
-    # Opening with Database runs _migrate() applying migration 68
-    db = Database(str(db_file))
-    try:
-        top = db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
-        assert top == SCHEMA_VERSION
-
-        cols = {r[1] for r in db.conn.execute("PRAGMA table_info(users)").fetchall()}
-        assert "last_seen_changelog_version" in cols
-
-        # Check accessors on newly migrated DB
-        user = db.upsert_user("u-migrated", "migrated_admin", is_admin=True)
-        assert db.get_last_seen_changelog_version(user["id"]) is None
-        db.set_last_seen_changelog_version(user["id"], "1.0.0")
-        assert db.get_last_seen_changelog_version(user["id"]) == "1.0.0"
-    finally:
-        db.close()
-
 
 # =============================================================================
 # 5. Endpoint Auth & Query Param Tests

@@ -30,88 +30,11 @@ from tests.test_metadata_profiles import (  # noqa: F401
 QP = "/api/settings/quality-profiles"
 
 
-# ------------------------------------------------------------------ 1. v51 inherits allowed / position
-
-
-def _plant_v50(path: str, profiles: list[tuple[str, str, list[dict]]]) -> None:
-    conn = sqlite3.connect(path)
-    conn.execute(
-        "DELETE FROM quality_definitions WHERE quality IN (%s)" % ",".join("?" * len(V51_NEW_QUALITIES)),
-        V51_NEW_QUALITIES,
-    )
-    conn.execute("ALTER TABLE media_management_settings DROP COLUMN import_bitrate_check")
-    conn.execute("DELETE FROM schema_migrations WHERE version >= 51")
-    conn.execute("DELETE FROM quality_profiles")
-    for pid, cutoff, items in profiles:
-        conn.execute(
-            "INSERT INTO quality_profiles (id, name, cutoff, items_json) VALUES (?,?,?,?)",
-            (pid, pid, cutoff, json.dumps(items)),
-        )
-    conn.commit()
-    conn.close()
+# ------------------------------------------------------------------ 2 + 3. UI save keeps legacy fields / tags
 
 
 def _q(quality, allowed):
     return {"type": "quality", "quality": quality, "allowed": allowed}
-
-
-def _v50_db(tmp_path, profiles):
-    path = str(tmp_path / "t.db")
-    Database(path).close()
-    _plant_v50(path, profiles)
-    return Database(path)
-
-
-def test_v51_new_qualities_inherit_allowed_and_position(tmp_path):
-    allow = [_q("FLAC 24bit", True), _q("FLAC 16bit", True), _q("MP3 320", True), _q("Unknown", True)]
-    deny = [_q("FLAC 24bit", True), _q("FLAC 16bit", False), _q("MP3 320", True), _q("Unknown", False)]
-    grouped = [
-        {"type": "group", "name": "Lossless", "allowed": True, "items": ["FLAC 24bit", "FLAC 16bit"]},
-        _q("MP3 320", True),
-        _q("Unknown", True),
-    ]
-    db = _v50_db(tmp_path, [("allow", "FLAC 16bit", allow), ("deny", "MP3 320", deny), ("grp", "Lossless", grouped)])
-    try:
-        a = db.get_quality_profile("allow")
-        assert [e["quality"] for e in a["items"]] == [
-            "FLAC 24bit", "FLAC 16bit", "ALAC", "MP3 320", "Unknown",
-            "WAV/AIFF", "MP3 V1", "AAC (other)", "Opus", "OGG Vorbis",
-        ]
-        assert all(e["allowed"] for e in a["items"]) and a["cutoff"] == "FLAC 16bit"
-        d = db.get_quality_profile("deny")
-        by_q = {e["quality"]: e["allowed"] for e in d["items"]}
-        assert [by_q[q] for q in V51_NEW_QUALITIES] == [False] * 6
-        assert [e["quality"] for e in d["items"]][:3] == ["FLAC 24bit", "FLAC 16bit", "ALAC"]
-        assert d["cutoff"] == "MP3 320"
-        g = db.get_quality_profile("grp")
-        assert g["items"][0]["items"] == ["FLAC 24bit", "FLAC 16bit", "ALAC"] and g["cutoff"] == "Lossless"
-        assert [e["quality"] for e in g["items"][1:3]] == ["MP3 320", "Unknown"]
-        # behaviour: what parsed as FLAC 16bit / Unknown before v51 is still accepted (or rejected) as before
-        for prof_id, expect in (("allow", True), ("deny", False), ("grp", True)):
-            prof = _to_quality_profile(db.get_quality_profile(prof_id))
-            for title in ("A - B [ALAC]", "A - B [WAV]", "A - B [OGG Vorbis]", "A - B [Opus]"):
-                res = evaluate_release(parse_release_title(title), prof)
-                assert not any("not allowed" in r for r in res.rejection_reasons) is expect, (prof_id, title)
-    finally:
-        db.close()
-
-
-def test_v51_is_idempotent(tmp_path):
-    items = [_q("FLAC 16bit", True), _q("Unknown", False)]
-    db = _v50_db(tmp_path, [("p", "FLAC 16bit", items)])
-    try:
-        first = db.get_quality_profile("p")["items"]
-        cur = db.conn.cursor()
-        db._migration_v51(cur)
-        db._migration_v51(cur)
-        db.conn.commit()
-        assert db.get_quality_profile("p")["items"] == first
-        assert [e["quality"] for e in first].count("ALAC") == 1
-    finally:
-        db.close()
-
-
-# ------------------------------------------------------------------ 2 + 3. UI save keeps legacy fields / tags
 
 
 def _v2_body(**extra):
@@ -265,27 +188,6 @@ def test_default_320_and_v0_max_are_400(test_db):
     assert defs["MP3 320"]["default_max_kbps"] == 400
 
 
-def test_v52_bumps_only_rows_equal_to_old_defaults(tmp_path):
-    path = str(tmp_path / "t.db")
-    Database(path).close()
-    conn = sqlite3.connect(path)
-    conn.execute("UPDATE quality_definitions SET max_kbps = 350 WHERE quality = 'MP3 320'")  # untouched old default
-    conn.execute("UPDATE quality_definitions SET max_kbps = 360 WHERE quality = 'MP3 V0'")  # user edited
-    conn.execute("DELETE FROM schema_migrations WHERE version >= 52")
-    conn.commit()
-    conn.close()
-    db = Database(path)
-    try:
-        defs = {d["quality"]: d for d in db.list_quality_definitions()}
-        assert defs["MP3 320"]["max_kbps"] == 400
-        assert defs["MP3 V0"]["max_kbps"] == 360
-        assert (defs["MP3 320"]["min_kbps"], defs["MP3 320"]["preferred_kbps"]) == (290, 320)
-        cur = db.conn.cursor()
-        db._migration_v52(cur)  # idempotent
-        assert db.get_quality_definition("MP3 V0")["max_kbps"] == 360
-    finally:
-        db.close()
-
 
 # ------------------------------------------------------------------ 6. v49 weight order vs list-index cutoff
 
@@ -335,35 +237,6 @@ def test_v49_zero_and_equal_weights():
     assert legacy_cutoff_for_entries(items, "MP3 320") == ("MP3 320", True)
     assert legacy_cutoff_for_entries(items, "Nope") == ("Nope", True)
 
-
-def test_v49_migration_rewrites_cutoff(tmp_path):
-    path = str(tmp_path / "t.db")
-    Database(path).close()
-    conn = sqlite3.connect(path)
-    for table in ("quality_definitions", "custom_formats", "release_profiles"):
-        conn.execute(f"DROP TABLE {table}")
-    for col in ("format_items_json", "min_format_score", "cutoff_format_score", "min_upgrade_format_score"):
-        conn.execute(f"ALTER TABLE quality_profiles DROP COLUMN {col}")
-    conn.execute("DELETE FROM schema_migrations WHERE version >= 49")
-    conn.execute("DELETE FROM quality_profiles")
-    items = _items(("FLAC 16bit", 900), ("FLAC 24bit", 1000), ("MP3 320", 800), ("Unknown", 100))
-    conn.execute(
-        "INSERT INTO quality_profiles (id, name, cutoff, items_json) VALUES ('o', 'o', 'FLAC 24bit', ?)",
-        (json.dumps(items),),
-    )
-    conn.commit()
-    conn.close()
-    db = Database(path)
-    try:
-        p = db.get_quality_profile("o")
-        assert [e["quality"] for e in p["items"]][:3] == ["FLAC 24bit", "FLAC 16bit", "ALAC"]
-        assert p["cutoff"] == "FLAC 16bit"
-        prof = _to_quality_profile(p)
-        assert evaluate_release(parse_release_title("A - B [FLAC 16bit]"), prof).meets_cutoff
-        assert evaluate_release(parse_release_title("A - B [FLAC 24bit]"), prof).meets_cutoff
-        assert not evaluate_release(parse_release_title("A - B [MP3 320]"), prof).meets_cutoff
-    finally:
-        db.close()
 
 
 # ------------------------------------------------------------------ 7. deprecated release-profile aliases

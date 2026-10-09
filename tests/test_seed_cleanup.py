@@ -115,30 +115,6 @@ def run(db: Database, driver: FakeDriver) -> dict[str, Any]:
         return sc.run_sweep(db, now=NOW)
 
 
-# ------------------------------------------------------------------ migration
-
-
-def test_migration_v59_maps_boolean_and_widens_finding_kinds(db):
-    assert SCHEMA_VERSION >= 59
-    for legacy, expected in ((1, "remove"), (0, "keep")):
-        db.conn.execute("ALTER TABLE media_management_settings DROP COLUMN seed_complete_action")
-        db.conn.execute("UPDATE media_management_settings SET delete_completed_transfers = ?", (legacy,))
-        db._migration_v59(db.conn.cursor())
-        assert db.get_media_management_settings()["seed_complete_action"] == expected
-    db.upsert_library_health_findings(
-        [{"kind": "weak_match", "cause": "c", "group_key": "g", "path": "/p"}], "2026-01-01T00:00:00+00:00"
-    )
-    db._migration_v59(db.conn.cursor())  # idempotent; findings survive the table rebuild
-    assert db.count_library_health_findings() == 1
-    db.upsert_library_health_findings(
-        [{"kind": "orphan_torrent", "cause": "c", "group_key": "g", "path": "/o"},
-         {"kind": "cleanup_failed", "cause": "c", "group_key": "g", "path": "/f"}], "2026-01-01T00:00:00+00:00"
-    )
-    assert db.count_library_health_findings() == 3
-    cols = {r[1] for r in db.conn.execute("PRAGMA table_info(active_downloads)")}
-    assert {"cleanup_attempts", "cleanup_error", "placed_files"} <= cols
-
-
 def test_settings_accept_action_and_legacy_boolean(db):
     assert db.update_media_management_settings({"seed_complete_action": "remove_and_delete"})["seed_complete_action"] == "remove_and_delete"
     assert db.update_media_management_settings({"delete_completed_transfers": False})["seed_complete_action"] == "keep"

@@ -113,36 +113,6 @@ def grab(db, candidates, **kw):
 # --------------------------------------------------------------------------------------------- migration
 
 
-def test_v50_migration_seeds_default_and_pending_table(tmp_path):
-    assert SCHEMA_VERSION >= 51
-    path = str(tmp_path / "m.db")
-    Database(path).close()
-    conn = sqlite3.connect(path)
-    conn.execute("DROP TABLE delay_profiles")
-    conn.execute("DROP TABLE pending_releases")
-    conn.execute("DELETE FROM schema_migrations WHERE version >= 50")
-    conn.commit()
-    conn.close()
-    d = Database(path)
-    try:
-        assert d.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
-        profiles = d.list_delay_profiles()
-        assert len(profiles) == 1
-        p = profiles[0]
-        assert p["is_default"] and p["tags"] == [] and p["preferred_protocol"] == "usenet"
-        assert p["delays"] == {"usenet": 0, "torrent": 0, "soulseek": 0}
-        assert p["bypass_if_highest_quality"] is True and p["bypass_if_above_score"] is None
-        cols = {r[1] for r in d.conn.execute("PRAGMA table_info(pending_releases)")}
-        assert {"title", "payload_json", "protocol", "quality", "format_score", "album_id", "track_id", "artist_name",
-                "added_at", "release_at", "reason"} <= cols
-    finally:
-        d.close()
-    d = Database(path)  # re-opening does not duplicate the default
-    try:
-        assert len(d.list_delay_profiles()) == 1
-    finally:
-        d.close()
-
 
 def test_fresh_install_seeded_quality_profiles_use_minus_100(db):
     assert {p["min_format_score"] for p in db.list_quality_profiles()} == {-100}

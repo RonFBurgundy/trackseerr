@@ -83,17 +83,6 @@ def test_upgrade_allowed_round_trips_through_api(db, tmp_path):
     assert db.get_quality_profile(pid)["upgrade_allowed"] is True
 
 
-def test_upgrade_allowed_defaults_on_and_migration_is_idempotent(tmp_path):
-    path = str(tmp_path / "t.db")
-    d = Database(path)
-    assert d.get_default_quality_profile()["upgrade_allowed"] is True
-    d.conn.execute("DELETE FROM schema_migrations WHERE version = 31")
-    d.conn.commit()
-    d.close()
-    d = Database(path)  # re-running v31 over the existing column must not fail
-    assert d.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] >= 31
-    d.close()
-
 
 def test_cutoff_unmet_requests_skip_profiles_that_forbid_upgrades(db):
     default = db.get_default_quality_profile()

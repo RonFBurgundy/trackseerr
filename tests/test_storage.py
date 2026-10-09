@@ -1,6 +1,7 @@
 """Tests for SQLite persistence engine: migrations, CRUD operations, foreign key cascades, and targeting."""
 
 from datetime import datetime, timezone
+from pathlib import Path
 import sqlite3
 from unittest.mock import patch
 import pytest
@@ -633,3 +634,26 @@ def test_ensure_connection_is_single_under_concurrent_access_after_close(tmp_pat
     assert len(opened) == 1
     assert len({id(c) for c in seen}) == 1
     db.close()
+
+
+def test_pre_baseline_database_is_refused(tmp_path: Path) -> None:
+    db_file = tmp_path / "old.sqlite"
+    conn = sqlite3.connect(str(db_file))
+    conn.execute(
+        "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP))"
+    )
+    conn.execute("INSERT INTO schema_migrations (version) VALUES (40)")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(RuntimeError, match="predates the v71 baseline"):
+        Database(db_file)
+
+
+def test_fresh_database_records_baseline_version(tmp_path: Path) -> None:
+    db = Database(tmp_path / "fresh.sqlite")
+    try:
+        cur = db.conn.execute("SELECT version FROM schema_migrations")
+        assert [tuple(row) for row in cur.fetchall()] == [(71,)]
+    finally:
+        db.close()
