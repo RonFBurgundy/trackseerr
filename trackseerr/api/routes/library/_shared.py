@@ -154,7 +154,7 @@ def _image_headers(cache_control: str, etag: Optional[str] = None) -> dict[str, 
 def _placeholder() -> RedirectResponse:
     return RedirectResponse(url=_PLACEHOLDER, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
-def _lidarr_image(
+def _lidarr_image(  # noqa: C901
     kind_list: str,
     kind_cover: str,
     raw_id: str,

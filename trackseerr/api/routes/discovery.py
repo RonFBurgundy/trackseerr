@@ -123,7 +123,7 @@ def _library_artist_ids_by_name(
     return found
 
 
-def annotate_item_statuses(
+def annotate_item_statuses(  # noqa: C901, PLR0915
     items: list[dict[str, Any]],
     db: Database,
     plex_client: Optional[PlexClient] = None,

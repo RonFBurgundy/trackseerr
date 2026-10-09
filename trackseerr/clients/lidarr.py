@@ -498,7 +498,7 @@ class LidarrClient:
             out.append({"album": album, "title": title if kind == "track" else "", "item_type": kind})
         return out
 
-    def add_artist_and_albums(
+    def add_artist_and_albums(  # noqa: C901
         self,
         artist_name: str,
         album_names: Optional[list[str]] = None,
@@ -614,7 +614,7 @@ class LidarrClient:
             logger.error("Exception in Lidarr add_artist_and_albums: %s", _exc_text(e))
             return {"status": "error", "artist": clean_artist, "message": _exc_text(e)}
 
-    def _monitor_wants(
+    def _monitor_wants(  # noqa: C901
         self,
         artist_id: int,
         albums: list[dict[str, Any]],

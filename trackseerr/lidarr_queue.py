@@ -357,7 +357,7 @@ class LidarrTrickleWorker:
         except (sqlite3.Error, ValueError, TypeError, AttributeError) as exc:
             logger.warning("Could not record unsent-request event: %s", safe_exc(exc))
 
-    def _process_groups(
+    def _process_groups(  # noqa: C901, PLR0915
         self,
         artist_groups: dict[str, list[dict[str, Any]]],
         client: LidarrClient,

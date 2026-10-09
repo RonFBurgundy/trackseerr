@@ -432,7 +432,7 @@ class WantedBacklogWorker:
         thread.start()
         return len(runnable)
 
-    def _collect_sweep_items(
+    def _collect_sweep_items(  # noqa: C901, PLR0915
         self, db: Database, stats: Optional[dict[str, int]] = None
     ) -> Optional[list[tuple]]:
         """Collect backlog items to search across requests, missing tracks, and native catalog."""

@@ -156,7 +156,7 @@ def create_request(
 
 
 @router.post("/batch", status_code=status.HTTP_201_CREATED, response_model=BatchCreatedResponse, response_model_exclude_unset=True)
-def create_batch_requests(
+def create_batch_requests(  # noqa: C901
     body: BatchCreateMusicRequestBody,
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),

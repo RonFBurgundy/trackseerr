@@ -239,7 +239,7 @@ def _walk_audio_files(folder: Path) -> list[Path]:
     return found
 
 @router.post("/manual-import/scan", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=list[ManualImportScanItem], response_model_exclude_unset=True)
-def manual_import_scan(
+def manual_import_scan(  # noqa: C901
     body: Optional[ManualImportScanRequest] = None,
     db: Database = Depends(get_db),
     _admin: dict[str, Any] = Depends(require_admin),
@@ -326,7 +326,7 @@ def manual_import_album_tracks(
     return _candidate_tracks(db, db.list_library_tracks(album_id=album_id, limit=1000))
 
 @router.post("/manual-import/commit", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=ManualImportCommitResponse, response_model_exclude_unset=True)
-def manual_import_commit(
+def manual_import_commit(  # noqa: C901, PLR0915
     body: ManualImportCommitRequest,
     db: Database = Depends(get_db),
     plex_client: Optional[Any] = Depends(get_media_client),

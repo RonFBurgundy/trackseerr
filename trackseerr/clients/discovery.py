@@ -657,7 +657,7 @@ class DiscoveryClient:
             self._set_cached(cache_key, result)
         return result
 
-    def _get_deezer_track_details(self, num_id: str) -> Optional[dict[str, Any]]:
+    def _get_deezer_track_details(self, num_id: str) -> Optional[dict[str, Any]]:  # noqa: C901
         """Deezer ``/track/{id}``; label/genres come from the (cached) album lookup and are omitted on failure."""
         if not num_id.isdigit():
             return None

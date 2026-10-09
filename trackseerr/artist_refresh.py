@@ -86,7 +86,7 @@ def _queue_release_date_update(
         upd_album.append("total_tracks = ?")
         upd_params.append(_positive_int(rg.get("track_count")))
 
-def reconcile_artist_files(db: Database, artist_id: str) -> int:
+def reconcile_artist_files(db: Database, artist_id: str) -> int:  # noqa: C901
     """Matches unlinked or unassigned library_files in artist folder to canonical library_tracks."""
     artist = db.get_library_artist(artist_id)
     if not artist:
@@ -886,7 +886,7 @@ def _refresh_result(
     return res_dict
 
 
-def refresh_single_artist(
+def refresh_single_artist(  # noqa: C901
     artist_id: str,
     db: Database,
     discovery_client: Optional[DiscoveryClient] = None,

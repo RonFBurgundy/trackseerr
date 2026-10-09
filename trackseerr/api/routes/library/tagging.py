@@ -340,7 +340,7 @@ def _format_diff_val(val: Any) -> Optional[str]:
     response_model=list[RetagPreviewItem],
     response_model_exclude_unset=True,
 )
-def retag_preview(
+def retag_preview(  # noqa: C901, PLR0915
     body: Optional[RetagPreviewRequest] = None,
     db: Database = Depends(get_db),
     _admin: dict[str, Any] = Depends(require_admin),
@@ -481,7 +481,7 @@ def retag_preview(
     response_model=RetagApplyResponse,
     response_model_exclude_unset=True,
 )
-def retag_apply(
+def retag_apply(  # noqa: C901, PLR0915
     body: RetagApplyRequest,
     db: Database = Depends(get_db),
     plex_client: Optional[Any] = Depends(get_media_client),
@@ -505,7 +505,7 @@ def retag_apply(
             "errors": [],
         }
 
-    def _execute_apply(job_handle: Optional[Any] = None, run_handle: Optional[Any] = None) -> dict[str, Any]:
+    def _execute_apply(job_handle: Optional[Any] = None, run_handle: Optional[Any] = None) -> dict[str, Any]:  # noqa: C901, PLR0915
         media_settings = db.get_media_management_settings()
         write_tags_setting = bool(media_settings.get("write_audio_tags", True))
         embed_art_requested = bool(body.embed_art)

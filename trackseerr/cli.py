@@ -642,7 +642,7 @@ def _background_init(
     logger.info("[boot] complete after %.2fs", boot_state.elapsed())
 
 
-def main() -> int:
+def main() -> int:  # noqa: C901, PLR0915
     process_started = time.monotonic()
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)

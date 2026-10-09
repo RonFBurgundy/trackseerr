@@ -536,7 +536,7 @@ class NotificationDispatcher:
             return True, f"Test notification sent to {delivered} active subscription(s)"
         return False, last_error or "Failed to deliver push notification"
 
-    def _run_dispatch(
+    def _run_dispatch(  # noqa: C901, PLR0915
         self,
         event: str,
         data: dict[str, Any],

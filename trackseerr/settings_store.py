@@ -121,7 +121,7 @@ class SettingsStoreMixin:
             )
             return res
 
-    def update_media_management_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+    def update_media_management_settings(self, settings: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
         """Updates media management settings (singleton row id=1)."""
         allowed_keys = {
             "artist_folder_format",

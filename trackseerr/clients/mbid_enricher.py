@@ -354,7 +354,7 @@ class MbidEnricherClient:
                 store_ttl = ttl_with_jitter(base_ttl)
             self._store.put(key, kind, data, store_ttl)
 
-    def lookup_track_mbids(
+    def lookup_track_mbids(  # noqa: C901, PLR0915
         self,
         artist: str,
         album: str,
@@ -587,7 +587,7 @@ class MbidEnricherClient:
             self._set_cached(cache_key, None)
             return None
 
-    def lookup_album_mbids(
+    def lookup_album_mbids(  # noqa: C901
         self, artist_name: str, album_title: str
     ) -> Optional[dict[str, Optional[str]]]:
         """Queries the mirror for release group and artist MBIDs."""
@@ -688,7 +688,7 @@ class MbidEnricherClient:
         """Queries the mirror for the canonical artist MBID (alias for lookup_artist_mbid)."""
         return self.lookup_artist_mbid(artist_name)
 
-    def get_artist_details(self, mbid: str, force: bool = False) -> Optional[dict[str, Any]]:
+    def get_artist_details(self, mbid: str, force: bool = False) -> Optional[dict[str, Any]]:  # noqa: C901
         """Queries the mirror for artist metadata (country, disambiguation, genres, urls)."""
         if not mbid or not str(mbid).strip():
             return None
@@ -838,7 +838,7 @@ class MbidEnricherClient:
             self._set_cached(cache_key, None)
             return None
 
-    def get_artist_discography_result(
+    def get_artist_discography_result(  # noqa: C901
         self, mbid: str, limit: int = 100, force: bool = False
     ) -> tuple[list[dict[str, Any]], bool]:
         """Paginates artist release groups. Returns (release_groups, complete)."""
@@ -991,7 +991,7 @@ class MbidEnricherClient:
         items, _ = self.get_artist_discography_result(mbid, limit=limit, force=force)
         return items
 
-    def get_release_group_tracks(
+    def get_release_group_tracks(  # noqa: C901
         self, release_group_id: str, force: bool = False
     ) -> list[dict[str, Any]]:
         """Queries MusicBrainz / BrainzMash for canonical tracks within a release group."""

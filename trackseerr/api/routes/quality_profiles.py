@@ -132,7 +132,7 @@ def _bad_request(detail: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
 
-def _validate_profile(payload: QualityProfilePayload, db: Database) -> list[dict[str, Any]]:
+def _validate_profile(payload: QualityProfilePayload, db: Database) -> list[dict[str, Any]]:  # noqa: C901
     """Normalizes ``items`` to v2 entries and raises clear 400s for an inconsistent profile."""
     for idx, cf in enumerate(payload.custom_formats):
         pattern = cf.get("pattern") if isinstance(cf, dict) else None

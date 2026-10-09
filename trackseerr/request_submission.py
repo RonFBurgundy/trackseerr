@@ -263,7 +263,7 @@ def _norm(text: Optional[str]) -> str:
     return (text or "").strip().casefold()
 
 
-def submit_batch_requests(
+def submit_batch_requests(  # noqa: C901
     db: Database,
     config: Any,
     user: dict[str, Any],

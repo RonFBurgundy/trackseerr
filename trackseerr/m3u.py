@@ -73,7 +73,7 @@ def _orient_display_name(left: str, right: str, raw_path: str) -> tuple[str, str
     return left, right, (right, left)
 
 
-def parse_m3u(content: str) -> list[dict[str, Any]]:
+def parse_m3u(content: str) -> list[dict[str, Any]]:  # noqa: C901, PLR0915
     """Safely parses an M3U or M3U8 playlist content string into a list of tracks.
 
     Returns:

@@ -199,7 +199,7 @@ def _extract_year(date_val: Any) -> int | None:
     return None
 
 
-def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
+def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:  # noqa: C901, PLR0915
     """Inspects an audio file using Mutagen to extract tags and stream properties.
 
     Supports FLAC, MP3 (ID3), M4A/AAC (MP4), and Ogg/Opus.
@@ -526,7 +526,7 @@ def build_tags_to_write(
     return tags
 
 
-def write_audio_tags(
+def write_audio_tags(  # noqa: C901, PLR0915
     file_path: str | Path,
     tags: dict[str, Any],
     cover_art_bytes: bytes | None = None,
@@ -808,7 +808,7 @@ def _check_archive_limits(count: int, total: int, kind: str) -> None:
         )
 
 
-def extract_archive(archive_path: Path | str, target_dir: Path | str) -> list[Path]:
+def extract_archive(archive_path: Path | str, target_dir: Path | str) -> list[Path]:  # noqa: C901
     """Extracts an archive (.zip, .tar, .tar.gz, .tgz, .tar.bz2) safely into target_dir.
 
     Validates that target_dir exists and protects against path traversal attacks.

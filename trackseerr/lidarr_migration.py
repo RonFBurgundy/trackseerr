@@ -95,7 +95,7 @@ class LidarrMigrationJob:
             self._thread.start()
             return True
 
-    def run_migration(
+    def run_migration(  # noqa: C901, PLR0915
         self,
         db: Database,
         lidarr_client: LidarrClient,

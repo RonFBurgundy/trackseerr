@@ -191,7 +191,7 @@ def move_leading_article(name: str | None) -> str:
     return f"{m.group(2).strip()}, {m.group(1)}"
 
 
-def format_quality(metadata: dict[str, Any]) -> str:
+def format_quality(metadata: dict[str, Any]) -> str:  # noqa: C901
     """Builds a human-readable quality string (e.g. 'FLAC 24bit 96kHz' or 'MP3 320kbps')."""
     if metadata.get("quality_full"):
         return str(metadata["quality_full"]).strip()
@@ -290,7 +290,7 @@ def sanitize_component(name: str, colon_replacement: str = " - ") -> str:
     return result
 
 
-def resolve_token(token: str, metadata: dict[str, Any], clean_artist_names: bool = False) -> str | None:
+def resolve_token(token: str, metadata: dict[str, Any], clean_artist_names: bool = False) -> str | None:  # noqa: C901, PLR0915
     """Resolves a token identifier against metadata."""
     t = token.strip()
 

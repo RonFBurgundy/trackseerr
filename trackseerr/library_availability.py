@@ -12,7 +12,7 @@ from trackseerr.storage import Database, clean_library_name
 logger = logging.getLogger(__name__)
 
 
-def get_item_availability(
+def get_item_availability(  # noqa: C901, PLR0915
     db: Database,
     artist_name: Optional[str] = None,
     album_title: Optional[str] = None,

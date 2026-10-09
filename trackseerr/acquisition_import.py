@@ -563,7 +563,7 @@ class ImportPipelineMixin(ImportCatalogMixin):
         # Files with no catalog match when the release has expected tracks: left on disk for manual import.
         job.held_files = []
 
-    def _place_one_file(
+    def _place_one_file(  # noqa: C901, PLR0915
         self,
         db: Database,
         ctx: _PollContext,

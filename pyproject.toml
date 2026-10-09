@@ -61,3 +61,9 @@ markers = ["integration: contract tests against a real Lidarr container (RUN_INT
 
 [tool.ruff.lint]
 ignore = ["B008"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.pylint]
+max-statements = 80

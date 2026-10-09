@@ -338,7 +338,7 @@ class PlexClient:
 
         return available_tracks, missing_tracks
 
-    def update_or_create_playlist(
+    def update_or_create_playlist(  # noqa: C901
         self,
         name: str,
         tracks: List[object],
@@ -990,7 +990,7 @@ class PlexClient:
             logger.error("Error searching Plex library tracks for '%s': %s", clean_query, safe_exc(e))
             return []
 
-    def get_smart_mix_tracks(self, mix_type: str, limit: int = 50) -> list[dict[str, Any]]:
+    def get_smart_mix_tracks(self, mix_type: str, limit: int = 50) -> list[dict[str, Any]]:  # noqa: C901
         """Extract smart mix track recommendations based on local Plex library statistics.
 
         Supported mix types:
