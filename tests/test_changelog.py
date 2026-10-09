@@ -293,7 +293,7 @@ def test_migration_applies_on_existing_database(tmp_path):
     # Revert migration 68 and drop the new column
     conn = sqlite3.connect(str(db_file))
     conn.execute("ALTER TABLE users DROP COLUMN last_seen_changelog_version")
-    conn.execute("DELETE FROM schema_migrations WHERE version >= ?", (SCHEMA_VERSION,))
+    conn.execute("DELETE FROM schema_migrations WHERE version >= 68")
     conn.commit()
     conn.close()
 

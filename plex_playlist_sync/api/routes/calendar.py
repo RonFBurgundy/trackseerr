@@ -42,8 +42,8 @@ FEED_FUTURE_DAYS = 180
 _DATE_PART_RE = re.compile(r"^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?")
 
 
-def parse_release_date(release_date: Any, year: Optional[int] = None) -> Optional[date]:
-    """Extracts a valid date from an album release_date or fallback year."""
+def parse_release_date_range(release_date: Any, year: Optional[int] = None) -> Optional[tuple[date, date, date]]:
+    """Extracts (representative_date, start_date, end_date) from an album release_date or fallback year."""
     if release_date:
         s = str(release_date).strip()
         if "T" in s:
@@ -51,18 +51,43 @@ def parse_release_date(release_date: Any, year: Optional[int] = None) -> Optiona
         m = _DATE_PART_RE.match(s)
         if m:
             y = int(m.group(1))
-            mo = int(m.group(2) or 1)
-            d = int(m.group(3) or 1)
-            try:
-                return date(y, mo, d)
-            except ValueError:
-                pass
+            if m.group(2) and m.group(3):
+                try:
+                    d = date(y, int(m.group(2)), int(m.group(3)))
+                    return (d, d, d)
+                except ValueError:
+                    pass
+            elif m.group(2):
+                try:
+                    mo = int(m.group(2))
+                    start_m = date(y, mo, 1)
+                    if mo == 12:
+                        end_m = date(y, 12, 31)
+                    else:
+                        end_m = date(y, mo + 1, 1) - timedelta(days=1)
+                    return (start_m, start_m, end_m)
+                except ValueError:
+                    pass
+            else:
+                try:
+                    start_y = date(y, 1, 1)
+                    end_y = date(y, 12, 31)
+                    return (start_y, start_y, end_y)
+                except ValueError:
+                    pass
     if year is not None:
         try:
-            return date(int(year), 1, 1)
+            y = int(year)
+            return (date(y, 1, 1), date(y, 1, 1), date(y, 12, 31))
         except (ValueError, TypeError):
             pass
     return None
+
+
+def parse_release_date(release_date: Any, year: Optional[int] = None) -> Optional[date]:
+    """Extracts a valid date from an album release_date or fallback year."""
+    bounds = parse_release_date_range(release_date, year)
+    return bounds[0] if bounds else None
 
 
 def derive_calendar_status(
@@ -133,8 +158,11 @@ def _get_native_calendar(
     filtered_albums: list[tuple[dict[str, Any], date]] = []
     for row in album_rows:
         al = dict(row)
-        rdate = parse_release_date(al.get("release_date"), al.get("year"))
-        if not rdate or not (start_date <= rdate <= end_date):
+        date_info = parse_release_date_range(al.get("release_date"), al.get("year"))
+        if not date_info:
+            continue
+        rdate, min_d, max_d = date_info
+        if not (min_d <= end_date and max_d >= start_date):
             continue
         alb_mon = bool(al.get("album_monitored", 1))
         art_mon = bool(al.get("artist_monitored", 1))
@@ -195,38 +223,76 @@ def _get_lidarr_calendar(
 ) -> list[CalendarItem]:
     lidarr = require_lidarr(client)
     album_rows = lidarr_library.snapshot("albums", lidarr)
-    artist_rows = {r.id: r for r in lidarr_library.snapshot("artists", lidarr)}
+    raw_artists = lidarr_library.snapshot("artists", lidarr)
+    artist_rows: dict[str, Any] = {}
+    for r in raw_artists:
+        art_id = str(getattr(r, "id", None) or (r.get("id") if isinstance(r, dict) else ""))
+        if art_id:
+            artist_rows[art_id] = r
 
     items: list[CalendarItem] = []
     for row in album_rows:
-        rec = row.record
-        rdate = parse_release_date(rec.get("release_date"), rec.get("year"))
-        if not rdate or not (start_date <= rdate <= end_date):
+        rec = getattr(row, "record", None) or (row if isinstance(row, dict) else {})
+        date_info = parse_release_date_range(rec.get("release_date") or rec.get("releaseDate"), rec.get("year"))
+        if not date_info:
+            continue
+        rdate, min_d, max_d = date_info
+        if not (min_d <= end_date and max_d >= start_date):
             continue
 
-        aid = str(rec.get("id"))
-        art_id = str(rec.get("artist_id"))
+        aid = str(rec.get("id") or getattr(row, "id", ""))
+        art_id = str(rec.get("artist_id") or rec.get("artistId") or (rec.get("artist") or {}).get("id") or "")
         art_row = artist_rows.get(art_id)
-        art_mon = bool(art_row.monitored) if art_row else True
+        if art_row is not None:
+            if hasattr(art_row, "monitored"):
+                art_mon = bool(art_row.monitored)
+            elif isinstance(art_row, dict):
+                art_mon = bool(art_row.get("monitored", True))
+            else:
+                art_mon = True
+        else:
+            art_mon = True
+
         alb_mon = bool(rec.get("monitored", True))
         if not unmonitored and (not alb_mon or not art_mon):
             continue
 
-        file_count = int(rec.get("track_file_count") or 0)
-        total_tracks = int(rec.get("total_tracks") or rec.get("track_count") or 0)
+        stats = rec.get("statistics") if isinstance(rec.get("statistics"), dict) else {}
+        file_count = int(rec.get("track_file_count") or stats.get("trackFileCount") or 0)
+        total_tracks = int(
+            rec.get("total_tracks")
+            or rec.get("track_count")
+            or stats.get("totalTrackCount")
+            or stats.get("trackCount")
+            or 0
+        )
         status_val = derive_calendar_status(file_count, total_tracks, rdate, today)
+
+        cover_url = rec.get("cover_url")
+        if not cover_url:
+            images = rec.get("images") or []
+            if isinstance(images, list):
+                for img in images:
+                    if isinstance(img, dict) and img.get("coverType") == "cover" and img.get("url"):
+                        raw_u = str(img["url"])
+                        cover_url = f"/api/lidarr{raw_u}" if raw_u.startswith("/") else f"/api/lidarr/{raw_u}"
+                        break
 
         items.append(
             CalendarItem(
                 id=aid,
                 artist_id=art_id,
-                artist_name=str(rec.get("artist_name") or "Unknown Artist"),
+                artist_name=str(
+                    rec.get("artist_name")
+                    or (rec.get("artist") or {}).get("artistName")
+                    or "Unknown Artist"
+                ),
                 title=str(rec.get("title") or "Unknown Album"),
-                album_type=str(rec.get("album_type") or "album"),
+                album_type=str(rec.get("album_type") or rec.get("albumType") or "album"),
                 release_date=rdate.isoformat(),
                 monitored=alb_mon,
                 status=status_val,
-                cover_url=rec.get("cover_url"),
+                cover_url=cover_url,
             )
         )
 
@@ -303,15 +369,21 @@ def generate_ical_feed(items: list[CalendarItem], now_dt: Optional[datetime] = N
     lines: list[str] = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
-        "PRODID:-//TrackSeerr//Release Calendar//EN",
+        "PRODID:-//Trackseerr//Release Calendar//EN",
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
-        "X-WR-CALNAME:TrackSeerr Releases",
+        "X-WR-CALNAME:Trackseerr Releases",
     ]
 
     for item in items:
         # DTSTART;VALUE=DATE requires YYYYMMDD
         clean_date = item.release_date.replace("-", "")
+        try:
+            d_obj = date.fromisoformat(item.release_date)
+            next_day_obj = d_obj + timedelta(days=1)
+            end_date_str = next_day_obj.strftime("%Y%m%d")
+        except ValueError:
+            end_date_str = clean_date
         uid = f"album-{item.id}@trackseerr"
         summary = escape_ical_text(f"{item.artist_name} - {item.title}")
         description = escape_ical_text(f"Status: {item.status} | Type: {item.album_type or 'album'}")
@@ -322,6 +394,7 @@ def generate_ical_feed(items: list[CalendarItem], now_dt: Optional[datetime] = N
                 f"UID:{uid}",
                 f"DTSTAMP:{stamp}",
                 f"DTSTART;VALUE=DATE:{clean_date}",
+                f"DTEND;VALUE=DATE:{end_date_str}",
                 f"SUMMARY:{summary}",
                 f"DESCRIPTION:{description}",
                 "END:VEVENT",
