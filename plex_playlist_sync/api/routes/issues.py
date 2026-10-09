@@ -26,7 +26,7 @@ from plex_playlist_sync.api.dependencies import (
     require_user,
 )
 from plex_playlist_sync.api.schemas.issues import IssueCount, IssueDeleted, IssueSeen
-from plex_playlist_sync.api.routes import library as library_routes
+from plex_playlist_sync.api.routes.library.manual_import import manual_import_album_tracks
 from plex_playlist_sync.api.routes import requests as requests_routes
 from plex_playlist_sync.api.routes import wanted as wanted_routes
 from plex_playlist_sync.clients.lidarr import LidarrClient
@@ -792,7 +792,7 @@ def run_issue_action(
         assert album_id is not None
         album = db.get_library_album(album_id) or {}
         artist = db.get_library_artist(album["artist_id"]) if album.get("artist_id") else None
-        tracks = library_routes.manual_import_album_tracks(album_id, db=db, _admin=admin)
+        tracks = manual_import_album_tracks(album_id, db=db, _admin=admin)
         result = {
             "scope": {"album_id": album_id},
             "album": {"id": album_id, "title": album.get("title"), "artist_name": (artist or {}).get("name")},

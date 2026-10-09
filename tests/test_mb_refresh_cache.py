@@ -10,7 +10,7 @@ import requests
 
 from plex_playlist_sync.api.app import create_app
 from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.api.routes.library import refresh_single_artist
+from plex_playlist_sync.artist_refresh import refresh_single_artist
 from plex_playlist_sync.artist_refresh_worker import (
     ArtistRefreshWorker,
     _LAST_REFRESH_PREFIX,

@@ -655,7 +655,7 @@ def test_hydrated_track_monitored_rule():
 
 
 def _refresh(db: Database, option: str) -> list[dict]:
-    from plex_playlist_sync.api.routes.library import refresh_single_artist
+    from plex_playlist_sync.artist_refresh import refresh_single_artist
     from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
     from plex_playlist_sync.mediacover import mediacover_service
 

@@ -265,8 +265,8 @@ def test_manual_import_default_folder_is_first_client_root(db, api, headers, tre
     db.update_media_management_settings({"root_folder_path": str(tree["library"]), "staging_folder_path": ""})
     write_mp3(tree["qbit"] / "Song.mp3")
     with patch("plex_playlist_sync.download_roots.get_acquisition_driver", return_value=_driver([str(tree["qbit"])])), \
-         patch("plex_playlist_sync.api.routes.library._scan_one_file", return_value=(MagicMock(), _scanned_item())) as scan, \
-         patch("plex_playlist_sync.api.routes.library._unscoped_match_fields", return_value=_NO_MATCH):
+         patch("plex_playlist_sync.api.routes.library.manual_import._scan_one_file", return_value=(MagicMock(), _scanned_item())) as scan, \
+         patch("plex_playlist_sync.api.routes.library.manual_import._unscoped_match_fields", return_value=_NO_MATCH):
         resp = api.post("/api/library/manual-import/scan", json={}, headers=headers)
     assert resp.status_code == 200, resp.text
     assert [Path(c.args[1]) for c in scan.call_args_list] == [(tree["qbit"] / "Song.mp3").resolve()]
@@ -283,7 +283,7 @@ def test_manual_import_default_folder_400_when_nothing_known(db, api, headers, t
 
 def test_validate_media_path_approves_client_roots(db, tree, tmp_path):
     from fastapi import HTTPException
-    from plex_playlist_sync.api.routes.library import validate_media_path
+    from plex_playlist_sync.api.routes.library._shared import validate_media_path
 
     _client(db)
     db.update_media_management_settings({"root_folder_path": str(tree["library"]), "staging_folder_path": ""})

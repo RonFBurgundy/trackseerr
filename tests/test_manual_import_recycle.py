@@ -86,7 +86,7 @@ def _write(path: Path, data: bytes) -> Path:
 
 
 def _commit(client, headers, items, **extra):
-    with patch("plex_playlist_sync.api.routes.library.inspect_audio_file", return_value=dict(META)):
+    with patch("plex_playlist_sync.api.routes.library.manual_import.inspect_audio_file", return_value=dict(META)):
         resp = client.post("/api/library/manual-import/commit", json={"items": items, **extra}, headers=headers)
     assert resp.status_code == 200, resp.text
     return resp.json()
@@ -136,7 +136,7 @@ def test_same_path_placement_failure_restores_old_file(tmp_path, db, client, hea
     _write(target, b"OLDBYTES")
     _row(db, "f-old", "trk-1", target)
     src = _write(staging / "new.flac", flac_bytes())
-    with patch("plex_playlist_sync.api.routes.library.place_audio_file", side_effect=OSError("boom")):
+    with patch("plex_playlist_sync.api.routes.library.manual_import.place_audio_file", side_effect=OSError("boom")):
         out = _commit(client, headers, [_item(src)])
     assert out["failed_count"] == 1
     assert target.read_bytes() == b"OLDBYTES" and _bin_files(music) == []
@@ -200,7 +200,7 @@ def test_hardlinked_old_file_recycled_client_copy_untouched(tmp_path, db, client
     os.link(seed, old)
     _row(db, "f-old", "trk-1", old)
     src = _write(staging / "new.flac", flac_bytes())
-    with patch("plex_playlist_sync.api.routes.library.allowed_roots_for_all_clients") as roots:
+    with patch("plex_playlist_sync.api.routes.library.manual_import.allowed_roots_for_all_clients") as roots:
         from plex_playlist_sync.download_roots import AllowedRoots
         roots.return_value = AllowedRoots(roots=[downloads.resolve()])
         out = _commit(client, headers, [_item(src)])
@@ -216,7 +216,7 @@ def test_old_file_under_client_root_is_kept_not_moved(tmp_path, db, client, head
     _row(db, "f-old", "trk-1", old)
     src = _write(staging / "new.flac", flac_bytes())
     from plex_playlist_sync.download_roots import AllowedRoots
-    with patch("plex_playlist_sync.api.routes.library.allowed_roots_for_all_clients",
+    with patch("plex_playlist_sync.api.routes.library.manual_import.allowed_roots_for_all_clients",
                return_value=AllowedRoots(roots=[(music / "wrong").resolve()])):
         out = _commit(client, headers, [_item(src)])
     assert out["imported_count"] == 1

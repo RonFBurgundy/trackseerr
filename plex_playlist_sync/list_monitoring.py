@@ -307,7 +307,7 @@ def _apply_artist_native(
     if not (created or resume):
         return
     # Deferred import: the route module pulls in the whole API layer.
-    from plex_playlist_sync.api.routes.library import refresh_single_artist
+    from plex_playlist_sync.artist_refresh import refresh_single_artist
 
     result = refresh_single_artist(str(artist["id"]), db, enricher=enricher)
     if not result.get("success", True):

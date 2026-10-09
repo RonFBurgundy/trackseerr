@@ -187,7 +187,7 @@ class ArtistRefreshWorker:
 
         ``only_stale`` (scheduled sweeps) skips artists refreshed within the last ``interval_seconds``.
         """
-        from plex_playlist_sync.api.routes.library import refresh_single_artist
+        from plex_playlist_sync.artist_refresh import refresh_single_artist
 
         with self._run_lock:
             dc = discovery_client or get_shared_discovery_client(db)

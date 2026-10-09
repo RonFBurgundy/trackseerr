@@ -911,7 +911,7 @@ class TestAcoustIDEndpoint:
         _create_minimal_flac(flac_file)
 
         # When acoustid is not installed or returns None
-        with patch("plex_playlist_sync.api.routes.library.fingerprint_audio_file", return_value=None):
+        with patch("plex_playlist_sync.api.routes.library.manual_import.fingerprint_audio_file", return_value=None):
             res = client.post(
                 "/api/library/manual-import/fingerprint",
                 json={"file_path": str(flac_file)},
@@ -939,7 +939,7 @@ class TestAcoustIDEndpoint:
             "artist": "Daft Punk",
         }
 
-        with patch("plex_playlist_sync.api.routes.library.fingerprint_audio_file", return_value=matched_data):
+        with patch("plex_playlist_sync.api.routes.library.manual_import.fingerprint_audio_file", return_value=matched_data):
             res = client.post(
                 "/api/library/manual-import/fingerprint",
                 json={"file_path": str(flac_file)},

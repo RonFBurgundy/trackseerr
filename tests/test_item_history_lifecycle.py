@@ -439,7 +439,7 @@ def test_rename_apply_records_a_move(db, app_client, tmp_path):
         {"id": "fil-r", "track_id": "trk-1", "file_path": str(legacy), "relative_path": "old/dirty.mp3", "codec": "MP3",
          "quality_name": "MP3 320", "size_bytes": 1, "cutoff_met": True}
     )
-    with patch("plex_playlist_sync.api.routes.library.validate_media_path", side_effect=lambda p, **kw: Path(p)):
+    with patch("plex_playlist_sync.api.routes.library.tagging.validate_media_path", side_effect=lambda p, **kw: Path(p)):
         resp = client.post("/api/library/rename/apply", json={"file_ids": ["fil-r"]}, headers=h)
     assert resp.status_code == 200 and resp.json()["renamed_count"] == 1, resp.text
     ev = events(db, "moved") + events(db, "renamed")

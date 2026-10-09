@@ -89,7 +89,7 @@ def test_release_group_tracklist_has_14_tracks(mb, discography):
 @pytest.fixture(scope="module")
 def refreshed(mb, discography, tmp_path_factory, discovery_src):
     """One scan + one real refresh_single_artist run shared by the assertions below."""
-    from plex_playlist_sync.api.routes.library import refresh_single_artist
+    from plex_playlist_sync.artist_refresh import refresh_single_artist
     from plex_playlist_sync.storage import Database
 
     base = tmp_path_factory.mktemp("mb")
@@ -99,7 +99,7 @@ def refreshed(mb, discography, tmp_path_factory, discovery_src):
     db = Database(str(base / "mb.db"))
     run_scan(db, root)
     (artist,) = db.list_library_artists()
-    with patch("plex_playlist_sync.api.routes.library.mediacover_service") as cover:
+    with patch("plex_playlist_sync.artist_refresh.mediacover_service") as cover:
         cover.ensure_artwork.return_value = None
         result = refresh_single_artist(artist["id"], db, discovery_client=MagicMock(), enricher=mb)
     yield db, artist["id"], result

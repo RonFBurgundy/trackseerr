@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from plex_playlist_sync.api.routes.library import refresh_single_artist
+from plex_playlist_sync.artist_refresh import refresh_single_artist
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.library_monitoring import (
     NATIVE_MONITOR_OPTIONS,

@@ -127,7 +127,7 @@ def test_manual_commit_torrent_keep_hardlink_skips_tags(tmp_path, db, client, he
     db.update_media_management_settings({"import_mode": "hardlink", "torrent_hardlink_tags": "keep_hardlink"})
     item = {"source_path": str(files[0]), "artist_id": "art-1", "album_id": "alb-1", "track_id": "trk-1",
             "track_title": "One More Time", "track_number": 1, "write_tags": True}
-    with patch("plex_playlist_sync.api.routes.library.write_audio_tags") as w:
+    with patch("plex_playlist_sync.api.routes.library.manual_import.write_audio_tags") as w:
         out = _commit(client, headers, [item])
     assert out["imported_count"] == 1
     w.assert_not_called()

@@ -158,10 +158,10 @@ def test_ingest_existing_artist(client, admin, seeded):
 
 def test_refresh_and_search_native(client, admin, seeded):
     result = {"success": True, "artist_id": "art-1", "refreshed_at": "2026-01-01T00:00:00"}
-    with patch("plex_playlist_sync.api.routes.library.refresh_single_artist", return_value=result):
+    with patch("plex_playlist_sync.api.routes.library.artists.refresh_single_artist", return_value=result):
         assert _ok(client.post(f"{PREFIX}/artists/art-1/refresh", headers=admin)) == result
     failed = {"success": False, "message": "Artist is a system folder; skipped", "artist_id": "art-1"}
-    with patch("plex_playlist_sync.api.routes.library.refresh_single_artist", return_value=failed):
+    with patch("plex_playlist_sync.api.routes.library.artists.refresh_single_artist", return_value=failed):
         assert _ok(client.post(f"{PREFIX}/artists/art-1/refresh", headers=admin)) == failed
     assert client.post(f"{PREFIX}/artists/art-1/search", headers=admin).status_code == 409
 
@@ -225,21 +225,21 @@ def test_scan_and_migration_jobs(client, admin, seeded):
 
 def test_manual_import_scan_album_tracks_and_fingerprint(client, admin, seeded, db):
     audio = seeded["audio"]
-    with patch("plex_playlist_sync.api.routes.library.validate_media_path", side_effect=lambda p, **_: Path(p)):
+    with patch("plex_playlist_sync.api.routes.library.manual_import.validate_media_path", side_effect=lambda p, **_: Path(p)):
         items = _ok(client.post(
             f"{PREFIX}/manual-import/scan", json={"file_paths": [str(audio)], "album_id": "alb-1"}, headers=admin
         ))
         assert items[0]["tags"]["codec"] and len(items[0]["candidate_tracks"]) == 1  # trk-2 has no file
         assert items[0]["match_strength"] in {"strong", "weak", "none"}
         with patch(
-            "plex_playlist_sync.api.routes.library.fingerprint_audio_file",
+            "plex_playlist_sync.api.routes.library.manual_import.fingerprint_audio_file",
             return_value={"score": 0.98, "recording_id": "rec-1", "title": "Airbag", "artist": "Radiohead"},
         ):
             db.conn.execute("UPDATE library_tracks SET mb_recording_id='rec-1' WHERE id='trk-1'")
             db.conn.commit()
             fp = _ok(client.post(f"{PREFIX}/manual-import/fingerprint", json={"file_path": str(audio)}, headers=admin))
             assert fp["fingerprint"]["recording_id"] == "rec-1" and fp["library_track"]["artist"] == "Radiohead"
-        with patch("plex_playlist_sync.api.routes.library.fingerprint_audio_file", return_value=None):
+        with patch("plex_playlist_sync.api.routes.library.manual_import.fingerprint_audio_file", return_value=None):
             miss = _ok(client.post(f"{PREFIX}/manual-import/fingerprint", json={"file_path": str(audio)}, headers=admin))
             assert miss["success"] is False and "fingerprint" not in miss
     tracks = _ok(client.get(f"{PREFIX}/manual-import/album-tracks?album_id=alb-1", headers=admin))
@@ -247,7 +247,7 @@ def test_manual_import_scan_album_tracks_and_fingerprint(client, admin, seeded, 
 
 
 def test_rename_preview_apply(client, admin, seeded):
-    with patch("plex_playlist_sync.api.routes.library.validate_media_path", side_effect=lambda p, **_: Path(p)):
+    with patch("plex_playlist_sync.api.routes.library.tagging.validate_media_path", side_effect=lambda p, **_: Path(p)):
         preview = _ok(client.post(f"{PREFIX}/rename/preview", json={}, headers=admin))
         assert set(preview[0]) == {"file_id", "track_id", "current_path", "proposed_path", "needs_rename"}
         applied = _ok(client.post(f"{PREFIX}/rename/apply", json={"file_ids": ["missing"]}, headers=admin))

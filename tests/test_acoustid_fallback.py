@@ -368,7 +368,7 @@ def test_manual_fingerprint_route_returns_library_track(client, test_db, test_co
     audio = tmp_path / "x.flac"
     _create_minimal_flac(audio)
     fp = {"score": 0.97, "recording_id": REC_1, "title": "Karma Police", "artist": "Radiohead"}
-    with patch("plex_playlist_sync.api.routes.library.fingerprint_audio_file", return_value=fp):
+    with patch("plex_playlist_sync.api.routes.library.manual_import.fingerprint_audio_file", return_value=fp):
         resp = client.post("/api/library/manual-import/fingerprint", json={"file_path": str(audio)}, headers=headers)
     assert resp.status_code == 200
     assert resp.json() == {
@@ -378,6 +378,6 @@ def test_manual_fingerprint_route_returns_library_track(client, test_db, test_co
     }
 
     fp2 = {**fp, "recording_id": "33333333-3333-3333-3333-333333333333"}
-    with patch("plex_playlist_sync.api.routes.library.fingerprint_audio_file", return_value=fp2):
+    with patch("plex_playlist_sync.api.routes.library.manual_import.fingerprint_audio_file", return_value=fp2):
         resp = client.post("/api/library/manual-import/fingerprint", json={"file_path": str(audio)}, headers=headers)
     assert resp.json()["library_track"] is None

@@ -586,7 +586,7 @@ def test_manual_import_scan_and_commit(
     mock_plex = MagicMock()
     app.dependency_overrides[get_plex_client] = lambda: mock_plex
 
-    with patch("plex_playlist_sync.api.routes.library.inspect_audio_file", return_value=mock_meta):
+    with patch("plex_playlist_sync.api.routes.library.manual_import.inspect_audio_file", return_value=mock_meta):
         # 1. Scan staging folder
         resp_scan = client.post(
             "/api/library/manual-import/scan",
@@ -688,7 +688,7 @@ def _manual_import_cutoff(app, client, test_db, test_config, seeded_users, tmp_p
         "artist_name": "Radiohead", "album_title": "OK Computer", "track_title": "Karma Police",
         "track_number": 6, "disc_number": 1, "year": 1997, "mode": "move", "write_tags": False,
     }
-    with patch("plex_playlist_sync.api.routes.library.inspect_audio_file", return_value=meta):
+    with patch("plex_playlist_sync.api.routes.library.manual_import.inspect_audio_file", return_value=meta):
         resp = client.post("/api/library/manual-import/commit", json={"items": [item]}, headers=admin_headers)
     assert resp.status_code == 200 and resp.json()["imported_count"] == 1
     return test_db.get_library_file_for_track("trk-c")
@@ -928,7 +928,7 @@ def test_get_artist_image_redirect(
 
 
 def test_album_total_discs_helper_counts_catalog_discs():
-    from plex_playlist_sync.api.routes.library import _album_total_discs
+    from plex_playlist_sync.api.routes.library._shared import _album_total_discs
 
     class FakeDB:
         def list_library_tracks(self, album_id=None, limit=0):

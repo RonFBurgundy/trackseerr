@@ -606,14 +606,14 @@ class TestDetailAndActions:
         assert lidarr.calls == []
 
     def test_mutations_run_under_lidarr_work_guard(self, api, admin_h, lidarr):
-        with patch("plex_playlist_sync.api.routes.library.work_guard") as guard:
+        with patch("plex_playlist_sync.api.routes.library._shared.work_guard") as guard:
             guard.return_value.__enter__.return_value = None
             guard.return_value.__exit__.return_value = False
             assert api.post("/api/library/albums/105/search", headers=admin_h).status_code == 200
             assert guard.call_args.args[1] == "lidarr"
 
     def test_mode_change_is_409_and_sends_nothing(self, api, admin_h, lidarr):
-        with patch("plex_playlist_sync.api.routes.library.work_guard", side_effect=ModeChanged("lidarr", "native")):
+        with patch("plex_playlist_sync.api.routes.library._shared.work_guard", side_effect=ModeChanged("lidarr", "native")):
             for method, path, kw in (
                 ("put", "/api/library/artists/2/monitored", {"json": {"monitored": True}}),
                 ("put", "/api/library/albums/101/monitored", {"json": {"monitored": True}}),
@@ -894,7 +894,7 @@ class TestCoverProxyHardening:
         (folder / "artist.png").write_bytes(b"\x89PNG")
         artist = {"id": "n1", "name": "Nat", "path": str(folder)}
         with patch.object(Database, "get_library_artist", return_value=artist), patch(
-            "plex_playlist_sync.api.routes.library.validate_media_path", return_value=folder
+            "plex_playlist_sync.api.routes.library._shared.validate_media_path", return_value=folder
         ):
             res = _img(api, admin_h, "/api/library/artists/n1/image")
         assert res.status_code == 200 and res.headers["content-type"] == "image/png"
@@ -1065,7 +1065,14 @@ class TestGatewayDenial:
         from plex_playlist_sync.api.dependencies import require_core_tier
         from plex_playlist_sync.api.routes.library import router
 
-        route = next(r for r in router.routes if getattr(r, "path", "") in (pattern, f"/library{pattern}") and "GET" in r.methods)
+        def _walk(r_list):
+            for r in r_list:
+                if hasattr(r, "effective_candidates"):
+                    yield from _walk(r.effective_candidates())
+                else:
+                    yield r
+
+        route = next(r for r in _walk(router.routes) if getattr(r, "path", "") in (pattern, f"/library{pattern}") and "GET" in r.methods)
         calls = []
         stack = [route.dependant]
         while stack:

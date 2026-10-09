@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from plex_playlist_sync.api.routes.library import validate_media_path
+from plex_playlist_sync.api.routes.library._shared import validate_media_path
 from plex_playlist_sync.models import DownloadClientConfig, DownloadDriverType
 from plex_playlist_sync.storage import Database
 
