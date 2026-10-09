@@ -4008,16 +4008,16 @@ def _album_cover_bytes(album: dict[str, Any], file_path: Optional[Path] = None) 
             cached = art_pipeline.cached_art_path("album", album_id)
             if cached.is_file():
                 return cached.read_bytes()
-        except Exception:
-            pass
+        except OSError as exc:
+            logger.debug("Retag cover lookup (cached) failed for album %s: %s", album_id, exc)
 
     if file_path is not None:
         try:
             folder_art = find_folder_art(file_path.parent)
             if folder_art is not None and folder_art.is_file():
                 return folder_art.read_bytes()
-        except Exception:
-            pass
+        except OSError as exc:
+            logger.debug("Retag cover lookup (folder) failed for album %s: %s", album_id, exc)
 
     album_path = album.get("path")
     if album_path:
@@ -4025,8 +4025,8 @@ def _album_cover_bytes(album: dict[str, Any], file_path: Optional[Path] = None) 
             local = art_pipeline.local_folder_art("album", str(album_path))
             if local is not None and local.is_file():
                 return local.read_bytes()
-        except Exception:
-            pass
+        except OSError as exc:
+            logger.debug("Retag cover lookup (local) failed for album %s: %s", album_id, exc)
 
     cover_url = album.get("cover_url")
     if cover_url and _is_safe_cover_url(cover_url):
@@ -4136,38 +4136,41 @@ def retag_preview(
         if not artist or not album:
             continue
 
-        try:
-            p = validate_media_path(current_path_str, db=db)
-        except Exception:
-            p = Path(current_path_str).resolve()
-
-        try:
-            rel_path = str(p.relative_to(root_dir))
-        except ValueError:
-            rel_path = f.get("relative_path") or p.name
-
+        rel_path = f.get("relative_path") or Path(current_path_str).name
         skipped_reason: Optional[str] = None
         current_meta: dict[str, Any] = {}
 
-        if not p.exists() or not p.is_file():
-            skipped_reason = "File does not exist on disk"
-        elif p.suffix.lower() not in (".flac", ".mp3", ".m4a", ".aac", ".mp4", ".ogg", ".opus"):
-            skipped_reason = f"unsupported format ({p.suffix.lower()})"
-        else:
-            try:
-                current_meta = inspect_audio_file(p)
-            except Exception as exc:
-                skipped_reason = f"unreadable: {safe_exc(exc)}"
+        try:
+            p = validate_media_path(current_path_str, db=db)
+        except HTTPException:
+            p = None
+            skipped_reason = "Path is outside the configured media roots"
 
-        if skipped_reason is None:
-            if keep_hardlinks:
+        if p is not None:
+            try:
+                rel_path = str(p.relative_to(root_dir))
+            except ValueError:
+                rel_path = f.get("relative_path") or p.name
+
+            if not p.exists() or not p.is_file():
+                skipped_reason = "File does not exist on disk"
+            elif p.suffix.lower() not in (".flac", ".mp3", ".m4a", ".aac", ".mp4", ".ogg", ".opus"):
+                skipped_reason = f"unsupported format ({p.suffix.lower()})"
+            else:
                 try:
-                    if p.stat().st_nlink > 1:
-                        skipped_reason = "hardlink keep"
-                except OSError as exc:
+                    current_meta = inspect_audio_file(p)
+                except Exception as exc:
                     skipped_reason = f"unreadable: {safe_exc(exc)}"
-            if skipped_reason is None and not write_tags_enabled:
-                skipped_reason = "write_audio_tags disabled in media management settings"
+
+            if skipped_reason is None:
+                if keep_hardlinks:
+                    try:
+                        if p.stat().st_nlink > 1:
+                            skipped_reason = "hardlink keep"
+                    except OSError as exc:
+                        skipped_reason = f"unreadable: {safe_exc(exc)}"
+                if skipped_reason is None and not write_tags_enabled:
+                    skipped_reason = "write_audio_tags disabled in media management settings"
 
         # Compute proposed tags
         total_discs = _album_total_discs(db, alb_id)

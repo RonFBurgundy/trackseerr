@@ -685,3 +685,60 @@ def test_retag_preview_unsupported_format_shows_skipped_reason(
     items = resp.json()
     assert len(items) == 1
     assert "unsupported format" in items[0]["skipped_reason"]
+
+
+def test_preview_skips_path_outside_media_roots(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    """A library file whose file_path lies outside the configured root is skipped and never opened."""
+    app, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    music_dir = tmp_path / "music"
+    music_dir.mkdir(parents=True)
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir(parents=True)
+
+    outside_file = outside_dir / "outside_track.flac"
+    _create_minimal_flac(outside_file)
+
+    test_db.update_media_management_settings({"root_folder_path": str(music_dir)})
+    test_db.upsert_library_artist({"id": "art-outside", "name": "Outside Artist"})
+    test_db.upsert_library_album({"id": "alb-outside", "artist_id": "art-outside", "title": "Outside Album", "year": 2021})
+    test_db.upsert_library_track({"id": "trk-outside", "album_id": "alb-outside", "artist_id": "art-outside", "title": "Outside Track"})
+    test_db.upsert_library_file({"id": "fl-outside", "track_id": "trk-outside", "file_path": str(outside_file)})
+
+    with patch("plex_playlist_sync.api.routes.library.inspect_audio_file") as mock_inspect:
+        resp = client.post(
+            "/api/library/retag/preview",
+            json={"album_id": "alb-outside"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        items = resp.json()
+        assert len(items) == 1
+        item = items[0]
+        assert item["file_id"] == "fl-outside"
+        assert item["skipped_reason"] == "Path is outside the configured media roots"
+        mock_inspect.assert_not_called()
+
+
+def test_cover_lookup_oserror_falls_through(tmp_path: Path):
+    """Patching art_pipeline.cached_art_path to raise OSError still returns folder-art bytes."""
+    from plex_playlist_sync.api.routes.library import _album_cover_bytes
+
+    folder = tmp_path / "album_folder"
+    folder.mkdir(parents=True)
+    audio_file = folder / "track.flac"
+    audio_file.touch()
+
+    folder_art_file = folder / "cover.jpg"
+    folder_art_bytes = b"fake-cover-bytes"
+    folder_art_file.write_bytes(folder_art_bytes)
+
+    album_dict = {"id": "alb-test", "path": str(folder)}
+
+    with patch("plex_playlist_sync.api.routes.library.art_pipeline.cached_art_path", side_effect=OSError("Disk read failed")):
+        result = _album_cover_bytes(album_dict, file_path=audio_file)
+        assert result == folder_art_bytes
+
