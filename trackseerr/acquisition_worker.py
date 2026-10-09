@@ -257,7 +257,7 @@ class AcquisitionWorker(ImportPipelineMixin):
             self._note_archive_failure(archive, e)
             return []
 
-    def _find_audio_files(self, candidate_path: Optional[str | Path], search_term: str) -> list[Path]:
+    def _find_audio_files(self, candidate_path: Optional[str | Path], search_term: str) -> list[Path]:  # noqa: C901
         """Locates downloaded audio files from the source path or, failing that, the allowed download roots.
 
         A candidate is used only if it passes ``AllowedRoots.check`` (under a client-reported or legacy staging root,

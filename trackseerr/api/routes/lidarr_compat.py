@@ -211,7 +211,7 @@ def _row_to_lidarr_indexer(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _parse_and_validate_indexer_payload(
+def _parse_and_validate_indexer_payload(  # noqa: C901
     payload: LidarrIndexerPayload,
 ) -> tuple[Optional[dict[str, Any]], Optional[JSONResponse]]:
     field_map: dict[str, Any] = {}

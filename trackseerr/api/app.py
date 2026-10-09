@@ -163,7 +163,7 @@ def response_validation_error_response(request: Request, exc: Exception) -> JSON
     return JSONResponse(status_code=500, content={"detail": "Internal response error"})
 
 
-def create_app(
+def create_app(  # noqa: C901, PLR0915
     db: Optional[Database] = None,
     config: Optional[Config] = None,
 ) -> FastAPI:

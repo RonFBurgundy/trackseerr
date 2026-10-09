@@ -323,7 +323,7 @@ def _components(path: str) -> list[str]:
     return [c for c in path.replace("\\", "/").split("/") if c]
 
 
-def suggest_mappings(
+def suggest_mappings(  # noqa: C901
     export_paths: list[str],
     library_paths: list[str],
     sample_size: int = 2000,

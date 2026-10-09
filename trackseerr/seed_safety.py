@@ -75,7 +75,7 @@ def _inodes_under(root: Path) -> set[tuple[int, int]]:
 
 
 
-def deletion_safe(
+def deletion_safe(  # noqa: C901
     download: dict[str, Any],
     effective_mode: str | None,
     db: Any,

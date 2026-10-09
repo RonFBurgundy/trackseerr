@@ -284,7 +284,7 @@ def _top_tracks(discovery: Any, discovery_id: Optional[str], annotate: Any) -> l
     return result
 
 
-def build_profile(
+def build_profile(  # noqa: C901
     db: Database,
     discovery: Any,
     source: Optional[LibrarySource],

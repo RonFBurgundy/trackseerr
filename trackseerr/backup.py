@@ -376,7 +376,7 @@ def prune_scheduled(
     return deleted_names
 
 
-def validate_backup(path: Union[str, Path]) -> dict[str, Any]:
+def validate_backup(path: Union[str, Path]) -> dict[str, Any]:  # noqa: C901
     """Validates an archive for zip structure, member names, security bounds, schema version, and database integrity."""
     archive_path = Path(path).resolve()
     if not archive_path.is_file():

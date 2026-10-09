@@ -184,7 +184,7 @@ class DelugeDriver(AcquisitionDriver):
         """Deluge is a downloader; search is handled via Torznab indexers."""
         return []
 
-    def download(self, result: AcquisitionSearchResult) -> str:
+    def download(self, result: AcquisitionSearchResult) -> str:  # noqa: C901
         """Submits magnet link or torrent URL to Deluge."""
         if not is_safe_service_url(self.host_url):
             raise ValueError("Prohibited host URL")

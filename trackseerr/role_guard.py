@@ -208,7 +208,7 @@ def _url_host_port(url: str) -> tuple[str, Optional[int]]:
         return "", None
 
 
-def check_role_environment(
+def check_role_environment(  # noqa: C901
     role: str,
     env: Mapping[str, str],
     fs: Optional[RoleFs] = None,

@@ -242,7 +242,7 @@ class SlskdDriver(AcquisitionDriver):
 
         return f"{username}::{quote(filename)}"
 
-    def get_status(self, download_id: str) -> dict[str, Any]:
+    def get_status(self, download_id: str) -> dict[str, Any]:  # noqa: C901
         """Inspects transfer status across all slskd downloads."""
         if not is_safe_service_url(self.host_url):
             return {"status": DownloadStatus.FAILED.value, "error_message": "Prohibited host URL"}

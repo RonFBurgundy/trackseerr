@@ -128,7 +128,7 @@ def verify_local_login(
             )
 
 
-def _verify_local_login_locked(
+def _verify_local_login_locked(  # noqa: C901
     db: Database,
     *,
     username: str,

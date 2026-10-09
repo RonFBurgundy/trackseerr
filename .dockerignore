@@ -16,5 +16,5 @@ __pycache__
 .coverage
 htmlcov
 data/
-!plex_playlist_sync/data/
+!trackseerr/data/
 *.log

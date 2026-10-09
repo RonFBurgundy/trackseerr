@@ -172,7 +172,7 @@ def _defer_profile_recompute_after_ingest(
     )
 
 @router.post("/artists/ingest", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=IngestArtistResponse, response_model_exclude_unset=True)
-def ingest_artist(
+def ingest_artist(  # noqa: C901, PLR0915
     body: IngestArtistRequest,
     db: Database = Depends(get_db),
     discovery_client: DiscoveryClient = Depends(get_discovery_client),

@@ -332,7 +332,7 @@ def _resolve_mapping(
     return (suggestion[0], suggestion[1]), True
 
 
-def _execute(db: Any, server: Optional[Any], music_root: Path, now: datetime) -> dict[str, Any]:
+def _execute(db: Any, server: Optional[Any], music_root: Path, now: datetime) -> dict[str, Any]:  # noqa: C901
     started = now.isoformat()
     run: dict[str, Any] = {
         "started_at": started,

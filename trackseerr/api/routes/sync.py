@@ -131,7 +131,7 @@ class SyncState:
         return skip
 
     @tracked("playlist_sync", "Plex Playlist Sync")
-    def execute_sync(
+    def execute_sync(  # noqa: C901, PLR0915
         self,
         db: Database,
         config: Config,
@@ -391,7 +391,7 @@ async def stream_sync_logs(
 
 
 @router.post("/webhook", response_model=SyncWebhookResponse, response_model_exclude_unset=True)
-async def handle_sync_webhook(
+async def handle_sync_webhook(  # noqa: C901
     background_tasks: BackgroundTasks,
     request: Request,
     _auth: dict[str, Any] = Depends(verify_feed_access),

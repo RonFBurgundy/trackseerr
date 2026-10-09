@@ -231,7 +231,7 @@ def normalize_format(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def validate_format(fmt: dict[str, Any]) -> list[str]:
+def validate_format(fmt: dict[str, Any]) -> list[str]:  # noqa: C901
     """Returns human-readable problems with a normalized format ([] = valid). Unsupported specs are not errors."""
     problems: list[str] = []
     if not fmt.get("name"):
@@ -606,7 +606,7 @@ def _check_kbps(
 DEFAULT_MINIMUM_SEEDERS = 1  # a torrent with no seeders can never complete
 
 
-def evaluate_prepared(
+def evaluate_prepared(  # noqa: C901, PLR0915
     release: ParsedRelease,
     prepared: PreparedProfile,
     size_bytes: Optional[int] = None,

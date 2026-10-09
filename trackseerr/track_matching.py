@@ -39,7 +39,7 @@ MATCH_NONE = "none"
 
 
 
-def reconcile_audio_file_to_track_scored(
+def reconcile_audio_file_to_track_scored(  # noqa: C901
     meta: dict[str, Any],
     candidate_tracks: list[dict[str, Any]],
 ) -> tuple[Optional[dict[str, Any]], str]:

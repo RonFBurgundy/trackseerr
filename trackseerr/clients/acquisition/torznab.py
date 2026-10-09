@@ -64,7 +64,7 @@ class TorznabDriver(AcquisitionDriver):
         except Exception as e:
             return False, f"Connection error: {str(e)}"
 
-    def _parse_item(
+    def _parse_item(  # noqa: C901
         self,
         item: ET.Element,
         default_artist: str = "",

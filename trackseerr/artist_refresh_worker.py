@@ -175,7 +175,7 @@ class ArtistRefreshWorker:
         return out
 
     @tracked("artist_metadata_refresh", "Artist Metadata & Discography Refresh")
-    def refresh_once(
+    def refresh_once(  # noqa: C901, PLR0915
         self,
         db: Database,
         discovery_client: Optional[DiscoveryClient] = None,

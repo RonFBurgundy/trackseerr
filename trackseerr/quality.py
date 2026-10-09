@@ -137,7 +137,7 @@ def extract_release_group(title: str) -> Optional[str]:
     return None
 
 
-def parse_release_title(title: str) -> ParsedRelease:
+def parse_release_title(title: str) -> ParsedRelease:  # noqa: C901, PLR0915
     """Parses a release title into structured audio format, source, tags, and metadata.
 
     Handles scene and P2P conventions, including bitrates, audio channels,

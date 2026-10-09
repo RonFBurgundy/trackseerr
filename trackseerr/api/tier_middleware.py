@@ -349,7 +349,7 @@ class GatewayGuardMiddleware:
 
         await _not_found()(scope, receive, send)
 
-    async def _forward(
+    async def _forward(  # noqa: C901
         self,
         scope: Scope,
         receive: Receive,

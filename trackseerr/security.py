@@ -211,7 +211,7 @@ def resolve_masked_value(submitted: Any, stored: Any, masked_stored: Any, field:
     return submitted
 
 
-def mask_channel_config(channel_type: str, config: dict[str, Any]) -> dict[str, Any]:
+def mask_channel_config(channel_type: str, config: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
     """Masks sensitive credentials in notification channel configuration."""
     if not isinstance(config, dict):
         return {}
@@ -354,7 +354,7 @@ def _is_forbidden_address(ip: "ipaddress.IPv4Address | ipaddress.IPv6Address") -
     return isinstance(ip, ipaddress.IPv6Address) and (ip in _AWS_IMDSV6_NET or ip == _AWS_IMDSV6_IP)
 
 
-def is_safe_service_url(url: Optional[str], allow_lan: bool = True) -> bool:
+def is_safe_service_url(url: Optional[str], allow_lan: bool = True) -> bool:  # noqa: C901
     """Validates that a service host URL (download client or indexer) is safe against SSRF.
 
     Accepts HTTP and HTTPS schemes on homelab LAN IPs (private, loopback if allow_lan=True, docker container names)

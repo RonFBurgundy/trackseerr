@@ -109,7 +109,7 @@ class TagMixin:
     # Migration v64
     # ------------------------------------------------------------------------------------------------------------
 
-    def _migration_v64(self, cur: sqlite3.Cursor) -> None:
+    def _migration_v64(self, cur: sqlite3.Cursor) -> None:  # noqa: C901
         """Tags registry, artist assignments and ``import_lists.tags_json``; folds legacy tag data in. Idempotent."""
         cur.execute(
             """

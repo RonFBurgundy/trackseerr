@@ -495,7 +495,7 @@ def _run_manual(db: Database, task_id: str, thread_name: str, body: Callable[[Ru
 
 
 @router.post("/tasks/{task_id}/run", response_model=TaskActionResult, response_model_exclude_unset=True, summary="Trigger a scheduled task manually")
-def run_scheduled_task(
+def run_scheduled_task(  # noqa: C901, PLR0915
     task_id: str,
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),

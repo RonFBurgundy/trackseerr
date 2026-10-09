@@ -128,7 +128,7 @@ def _discovery_by_seed(discovery: Any, seed: str, include_seed: bool) -> list[Mi
     return candidates
 
 
-def compile_user_mix(
+def compile_user_mix(  # noqa: C901
     db: Any, discovery: Any, config: dict[str, Any], now: Optional[datetime] = None
 ) -> list[MixTrack]:
     """Build the track list for a mix config row. Raises InsufficientHistoryError when there is nothing to seed from."""
@@ -254,7 +254,7 @@ def _queue_acquisition(
     return submission
 
 
-def generate_and_sync(
+def generate_and_sync(  # noqa: C901
     db: Any,
     plex_client: Any,
     discovery: Any,

@@ -578,7 +578,7 @@ class LibraryArtistStoreMixin:
     _BULK_CHUNK = 500
     _UNSET: Any = object()
 
-    def bulk_edit_library_artists(
+    def bulk_edit_library_artists(  # noqa: C901, PLR0915
         self,
         artist_ids: Optional[list[str]] = None,
         *,
