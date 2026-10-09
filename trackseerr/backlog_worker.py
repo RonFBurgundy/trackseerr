@@ -432,10 +432,10 @@ class WantedBacklogWorker:
         thread.start()
         return len(runnable)
 
-    def _sweep(self, db: Database) -> dict[str, int]:
-        items_checked = 0
-        items_grabbed = 0
-        errors_count = 0
+    def _collect_sweep_items(
+        self, db: Database, stats: Optional[dict[str, int]] = None
+    ) -> Optional[list[tuple]]:
+        """Collect backlog items to search across requests, missing tracks, and native catalog."""
         tag_cache: dict[str, list[str]] = {}
 
         # 1. Query active downloads to avoid duplicate searches
@@ -444,7 +444,8 @@ class WantedBacklogWorker:
         except Exception as e:
             logger.error("WantedBacklogWorker error querying active downloads: %s", e)
             active_dls = []
-            errors_count += 1
+            if stats is not None:
+                stats["errors"] += 1
 
         active_req_ids = {d["request_id"] for d in active_dls if d.get("request_id")}
         active_track_ids = {d["track_id"] for d in active_dls if d.get("track_id")}
@@ -459,7 +460,8 @@ class WantedBacklogWorker:
         except Exception as e:
             logger.error("WantedBacklogWorker error querying requests: %s", e)
             requests = []
-            errors_count += 1
+            if stats is not None:
+                stats["errors"] += 1
 
         media_settings = db.get_media_management_settings()
         enable_upgrades = bool(media_settings.get("enable_quality_upgrades", True))
@@ -492,7 +494,8 @@ class WantedBacklogWorker:
                         unfulfilled_requests.append(r)
             except Exception as e:
                 logger.error("WantedBacklogWorker error querying cutoff unmet requests: %s", e)
-                errors_count += 1
+                if stats is not None:
+                    stats["errors"] += 1
 
         # 3. Query unfulfilled missing tracks: lidarr_status != 'monitored'
         try:
@@ -500,7 +503,8 @@ class WantedBacklogWorker:
         except Exception as e:
             logger.error("WantedBacklogWorker error querying missing tracks: %s", e)
             missing_tracks = []
-            errors_count += 1
+            if stats is not None:
+                stats["errors"] += 1
 
         # A playlist's monitor mode decides whether its missing tracks are searched one by one: "none" never,
         # "album"/"artist" only until the list mode has taken them over (then the monitored album/artist is searched).
@@ -509,7 +513,8 @@ class WantedBacklogWorker:
         except Exception as e:
             logger.error("WantedBacklogWorker error reading playlist monitor modes: %s", e)
             playlist_modes = {}
-            errors_count += 1
+            if stats is not None:
+                stats["errors"] += 1
 
         def _searchable_as_track(t: dict[str, Any]) -> bool:
             mode = playlist_modes.get(str(t.get("playlist_id")), "track")
@@ -622,7 +627,8 @@ class WantedBacklogWorker:
                     )
             except Exception as e:
                 logger.error("WantedBacklogWorker error querying missing catalog tracks: %s", e)
-                errors_count += 1
+                if stats is not None:
+                    stats["errors"] += 1
 
             if enable_upgrades:
                 try:
@@ -668,9 +674,16 @@ class WantedBacklogWorker:
                         )
                 except Exception as e:
                     logger.error("WantedBacklogWorker error querying cutoff unmet catalog tracks: %s", e)
-                    errors_count += 1
+                    if stats is not None:
+                        stats["errors"] += 1
 
-        for (
+        return items_to_search
+
+    def _search_sweep_item(
+        self, db: Database, item: tuple, stats: dict[str, int]
+    ) -> None:
+        """Search indexers and grab a release for a single backlog item."""
+        (
             artist,
             title,
             album,
@@ -681,77 +694,93 @@ class WantedBacklogWorker:
             min_score,
             track_id,
             album_id,
-        ) in items_to_search:
+        ) = item
+
+        stats["items_checked"] += 1
+        try:
+            res = acquisition_coordinator.search_and_grab(
+                artist=artist,
+                title=title,
+                album=album,
+                item_type=item_type,
+                request_id=req_id,
+                db=db,
+                quality_profile_id=qp_id,
+                min_score=min_score,
+                track_id=track_id,
+                album_id=album_id,
+                trigger=_search_trigger(None, min_score),
+            )
+            if track_id:
+                db.mark_tracks_searched([str(track_id)])
+            if res.get("success"):
+                stats["items_grabbed"] += 1
+                logger.info(
+                    "WantedBacklogWorker grabbed release for '%s - %s' (request_id=%s, missing_id=%s, track_id=%s)",
+                    artist,
+                    title,
+                    req_id,
+                    missing_id,
+                    track_id,
+                )
+                if req_id:
+                    db.update_request_status(req_id, RequestStatus.PROCESSING)
+                if missing_id:
+                    db.update_missing_track_lidarr_status(missing_id, "grabbed")
+        except Exception as e:
+            logger.error("Error during search_and_grab for '%s - %s': %s", artist, title, e)
+            stats["errors"] += 1
+
+        # Pacing delay between calls
+        if self.pace_delay > 0 and not self._stop_event.is_set():
+            slept = 0.0
+            while slept < self.pace_delay and not self._stop_event.is_set():
+                step = min(0.2, self.pace_delay - slept)
+                self._stop_event.wait(step)
+                slept += step
+
+    def _sweep(self, db: Database) -> dict[str, int]:
+        """Perform a backlog sweep across unfulfilled requests and missing tracks."""
+        stats = {
+            "items_checked": 0,
+            "items_grabbed": 0,
+            "errors": 0,
+        }
+        items = self._collect_sweep_items(db, stats)
+        if items is None:
+            with self._lock:
+                self.items_checked += stats["items_checked"]
+                self.items_grabbed += stats["items_grabbed"]
+                self.errors += stats["errors"]
+            return stats
+
+        for item in items:
             if self._stop_event.is_set():
                 logger.info("WantedBacklogWorker sweep interrupted by stop event")
                 break
 
+            artist, title = item[0], item[1]
             if not artist or not title:
                 continue
 
-            items_checked += 1
-            try:
-                res = acquisition_coordinator.search_and_grab(
-                    artist=artist,
-                    title=title,
-                    album=album,
-                    item_type=item_type,
-                    request_id=req_id,
-                    db=db,
-                    quality_profile_id=qp_id,
-                    min_score=min_score,
-                    track_id=track_id,
-                    album_id=album_id,
-                    trigger=_search_trigger(None, min_score),
-                )
-                if track_id:
-                    db.mark_tracks_searched([str(track_id)])
-                if res.get("success"):
-                    items_grabbed += 1
-                    logger.info(
-                        "WantedBacklogWorker grabbed release for '%s - %s' (request_id=%s, missing_id=%s, track_id=%s)",
-                        artist,
-                        title,
-                        req_id,
-                        missing_id,
-                        track_id,
-                    )
-                    if req_id:
-                        db.update_request_status(req_id, RequestStatus.PROCESSING)
-                    if missing_id:
-                        db.update_missing_track_lidarr_status(missing_id, "grabbed")
-            except Exception as e:
-                logger.error("Error during search_and_grab for '%s - %s': %s", artist, title, e)
-                errors_count += 1
-
-            # Pacing delay between calls
-            if self.pace_delay > 0 and not self._stop_event.is_set():
-                slept = 0.0
-                while slept < self.pace_delay and not self._stop_event.is_set():
-                    step = min(0.2, self.pace_delay - slept)
-                    self._stop_event.wait(step)
-                    slept += step
+            self._search_sweep_item(db, item, stats)
 
         with self._lock:
-            self.items_checked += items_checked
-            self.items_grabbed += items_grabbed
-            self.errors += errors_count
+            self.items_checked += stats["items_checked"]
+            self.items_grabbed += stats["items_grabbed"]
+            self.errors += stats["errors"]
 
         try:
             db.record_event(
                 "backlog_sweep",
-                f"Backlog sweep completed: {items_checked} items checked, {items_grabbed} grabbed",
+                f"Backlog sweep completed: {stats['items_checked']} items checked, {stats['items_grabbed']} grabbed",
                 source="BacklogWorker",
                 severity="info",
             )
         except Exception as ev_err:
             logger.warning("Failed to record backlog_sweep event: %s", ev_err)
 
-        return {
-            "items_checked": items_checked,
-            "items_grabbed": items_grabbed,
-            "errors": errors_count,
-        }
+        return stats
 
 
 class RSSSyncWorker:
@@ -851,18 +880,18 @@ class RSSSyncWorker:
             logger.debug("RSSSyncWorker: library manager is Lidarr; skipping native RSS sync")
             return {"releases_scanned": 0, "grabs_triggered": 0, "errors": 0, "skipped": "library manager is Lidarr"}
 
-    def _sync(self, db: Database) -> dict[str, int]:
-        releases_scanned = 0
-        grabs_triggered = 0
-        errors_count = 0
-
+    def _collect_wanted_requests(
+        self, db: Database, stats: Optional[dict[str, int]] = None
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], set[Any]]:
+        """Gather enabled indexers, unfulfilled requests, and active request IDs."""
         # 1. Retrieve enabled indexers
         try:
             indexers = db.list_indexers(enabled_only=True)
         except Exception as e:
             logger.error("RSSSyncWorker error listing enabled indexers: %s", e)
             indexers = []
-            errors_count += 1
+            if stats is not None:
+                stats["errors"] += 1
 
         # 2. Gather wanted requests without active transfers
         try:
@@ -870,7 +899,8 @@ class RSSSyncWorker:
         except Exception as e:
             logger.error("RSSSyncWorker error querying active downloads: %s", e)
             active_dls = []
-            errors_count += 1
+            if stats is not None:
+                stats["errors"] += 1
 
         active_req_ids = {d["request_id"] for d in active_dls if d.get("request_id")}
         try:
@@ -878,7 +908,8 @@ class RSSSyncWorker:
         except Exception as e:
             logger.error("RSSSyncWorker error querying requests: %s", e)
             all_requests = []
-            errors_count += 1
+            if stats is not None:
+                stats["errors"] += 1
 
         media_settings = db.get_media_management_settings()
         enable_upgrades = bool(media_settings.get("enable_quality_upgrades", True))
@@ -898,18 +929,330 @@ class RSSSyncWorker:
                         wanted_requests.append(r)
             except Exception as e:
                 logger.error("RSSSyncWorker error querying cutoff unmet requests: %s", e)
-                errors_count += 1
+                if stats is not None:
+                    stats["errors"] += 1
+
+        return indexers, wanted_requests, active_req_ids
+
+    def _fetch_recent_releases(
+        self, idx_cfg: dict[str, Any], stats: Optional[dict[str, int]] = None
+    ) -> Optional[list[Any]]:
+        """Fetch recent releases from an enabled indexer driver."""
+        try:
+            driver = get_indexer_driver(idx_cfg)
+            if hasattr(driver, "fetch_recent"):
+                return driver.fetch_recent(limit=100)
+            logger.debug("Indexer driver '%s' does not implement fetch_recent", idx_cfg.get("name"))
+            return None
+        except Exception as e:
+            logger.warning("Error fetching recent releases from indexer '%s': %s", idx_cfg.get("name"), e)
+            if stats is not None:
+                stats["errors"] += 1
+            return None
+
+    def _match_wanted_request(
+        self,
+        candidate: Any,
+        wanted_requests: list[dict[str, Any]],
+        active_req_ids: Optional[set[Any]] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Find the first unfulfilled request matching the RSS candidate release."""
+        active_ids = active_req_ids or set()
+        for req in wanted_requests:
+            if req.get("id") in active_ids:
+                continue
+            if _matches_request(candidate, req):
+                return req
+        return None
+
+    def _evaluate_rss_candidate(
+        self,
+        db: Database,
+        candidate: Any,
+        matched_req: dict[str, Any],
+        default_profile: Optional[Any],
+    ) -> Optional[tuple[Optional[Any], Optional[Any], list[str], GrabTrigger]]:
+        """Evaluate an RSS candidate against quality profile and cutoff upgrade thresholds."""
+        eval_res = None
+        req_profile = default_profile
+        req_artist_tags: list[str] = []
+        if matched_req.get("quality_profile_id"):
+            try:
+                p_dict = db.get_quality_profile(matched_req["quality_profile_id"])
+                if p_dict:
+                    req_profile = _to_quality_profile(p_dict)
+            except Exception as e:
+                logger.warning("Error fetching quality profile for request %s: %s", matched_req["id"], e)
+
+        if req_profile:
+            parsed = parse_release_title(candidate.title)
+            req_artist_tags = delay_gate.artist_tags(db, matched_req.get("artist") or candidate.artist)
+            eval_res = evaluate_release(
+                release=parsed,
+                profile=req_profile,
+                size_bytes=candidate.size_bytes if candidate.size_bytes > 0 else None,
+                artist_tags=req_artist_tags,
+            )
+            if not eval_res.is_acceptable:
+                logger.debug(
+                    "RSS candidate '%s' rejected by profile for request %s (%s)",
+                    candidate.title,
+                    matched_req["id"],
+                    eval_res.rejection_reasons,
+                )
+                return None
+
+            # If this is a cutoff-unmet request, verify candidate.score > current_score
+            if matched_req.get("cutoff_met") == 0 or matched_req.get("status") == "available":
+                current_quality = matched_req.get("current_quality")
+                current_score = 0
+                if current_quality:
+                    current_score = _current_floor(
+                        db,
+                        req_profile,
+                        current_quality,
+                        request_id=matched_req.get("id"),
+                        artist_tags=req_artist_tags,
+                    )
+
+                if eval_res.score <= current_score:
+                    logger.debug(
+                        "RSS candidate '%s' score %d does not exceed current score %d for upgrade request %s",
+                        candidate.title,
+                        eval_res.score,
+                        current_score,
+                        matched_req["id"],
+                    )
+                    return None
+
+        indexer_name = str((candidate.extra or {}).get("indexer_name") or candidate.source or "") or None
+        rss_trigger = GrabTrigger(TRIGGER_RSS, ref=indexer_name, label=indexer_name or "RSS")
+        return eval_res, req_profile, req_artist_tags, rss_trigger
+
+    def _delay_gate_rss_candidate(
+        self,
+        db: Database,
+        candidate: Any,
+        matched_req: dict[str, Any],
+        eval_res: Optional[Any],
+        req_profile: Optional[Any],
+        req_artist_tags: list[str],
+        rss_trigger: GrabTrigger,
+    ) -> tuple[bool, Optional[Any]]:
+        """Apply delay-gate rules to determine if the candidate can be grabbed immediately."""
+        claimed_pending = None
+        if eval_res is not None and req_profile is not None:
+            delay_profile = delay_gate.resolve_delay_profile(
+                db, matched_req.get("artist") or candidate.artist, tags=req_artist_tags
+            )
+            decision = delay_gate.apply_gate(
+                db,
+                profile=delay_profile,
+                top_tier=delay_gate.highest_allowed_tier(prepare_profile(req_profile)),
+                candidate=candidate,
+                result=eval_res,
+                rank=candidate_rank(candidate, eval_res, delay_profile.get("preferred_protocol")),
+                artist=str(matched_req.get("artist") or candidate.artist or ""),
+                item_title=str(matched_req.get("title") or ""),
+                album=matched_req.get("album"),
+                item_type=str(matched_req.get("item_type") or "track"),
+                request_id=str(matched_req["id"]),
+                album_id=None,
+                track_id=None,
+                quality_profile_id=matched_req.get("quality_profile_id"),
+                trigger=rss_trigger,
+            )
+            if not decision.grab:
+                logger.info(
+                    "RSS held '%s' for request %s: %s", candidate.title, matched_req["id"], decision.reason
+                )
+                return False, None
+            claimed_pending = decision.claimed
+
+        return True, claimed_pending
+
+    def _grab_rss_candidate(
+        self,
+        db: Database,
+        candidate: Any,
+        matched_req: dict[str, Any],
+        eval_res: Optional[Any],
+        rss_trigger: GrabTrigger,
+        claimed_pending: Optional[Any],
+        stats: dict[str, int],
+        active_req_ids: Optional[set[Any]] = None,
+    ) -> None:
+        """Locate a client, dispatch download, and record active download and history in database."""
+        # Find download client for protocol
+        client = acquisition_coordinator.find_client_for_protocol(
+            protocol=candidate.protocol, db=db
+        )
+        if not client:
+            if claimed_pending:
+                db.restore_pending_release(claimed_pending)
+            logger.warning(
+                "RSS matched '%s' for request %s but no client available for protocol %s",
+                candidate.title,
+                matched_req["id"],
+                candidate.protocol,
+            )
+            return
+
+        # Dispatch download to client
+        try:
+            client_driver = get_acquisition_driver(client)
+            download_hash = client_driver.download(candidate)
+        except Exception as e:
+            logger.error(
+                "Dispatch download failed on client '%s' for '%s': %s",
+                client.get("name"),
+                candidate.title,
+                e,
+            )
+            stats["errors"] += 1
+            if claimed_pending:
+                db.restore_pending_release(claimed_pending)
+            return
+
+        # Record active download in database
+        download_id = f"dl-{uuid.uuid4().hex[:12]}"
+        active_dl = ActiveDownload(
+            id=download_id,
+            request_id=matched_req["id"],
+            client_id=str(client["id"]),
+            download_hash=download_hash,
+            title=candidate.title,
+            artist=matched_req.get("artist", candidate.artist),
+            item_type=matched_req.get("item_type", "track"),
+            status=DownloadStatus.QUEUED.value,
+            progress=0.0,
+            size_bytes=candidate.size_bytes,
+            source_path=None,
+            target_path=None,
+        )
+        try:
+            db.create_active_download(active_dl)
+            apply_seed_rules_at_grab(
+                db, client_driver, download_id, download_hash, candidate.title, candidate.protocol,
+                candidate.extra,
+            )
+            try:
+                db.record_download_grab(
+                    download_id,
+                    indexer=str((candidate.extra or {}).get("indexer_name") or candidate.source or "") or None,
+                    quality=eval_res.parsed_quality if eval_res else None,
+                    protocol=candidate.protocol or None,
+                    upgrade=matched_req.get("cutoff_met") == 0 or matched_req.get("status") == "available",
+                    trigger=rss_trigger,
+                )
+            except sqlite3.Error as hist_err:
+                logger.warning("Failed to record grab history for %s: %s", download_id, type(hist_err).__name__)
+            db.clear_pending_for_item(str(matched_req["id"]))
+            db.update_request_status(matched_req["id"], RequestStatus.PROCESSING)
+            if active_req_ids is not None:
+                active_req_ids.add(matched_req["id"])
+            stats["grabs_triggered"] += 1
+            try:
+                notification_dispatcher.dispatch(
+                    NotificationEvent.DOWNLOAD_STARTED,
+                    data={
+                        "artist": active_dl.artist,
+                        "title": active_dl.title,
+                        "release": candidate.title,
+                        "client": client.get("name"),
+                        "request_id": matched_req["id"],
+                        "user_id": matched_req.get("user_id") or matched_req.get("requested_by"),
+                        "download_id": download_id,
+                        "size_bytes": candidate.size_bytes,
+                    },
+                    db=db,
+                )
+            except Exception as ex:
+                logger.warning("Failed to dispatch RSS DOWNLOAD_STARTED notification: %s", ex)
+
+            try:
+                db.record_event(
+                    "download_started",
+                    f"Grabbed '{active_dl.title}' via {client.get('name')}",
+                    source="AcquisitionWorker",
+                    severity="info",
+                    details={
+                        "artist": active_dl.artist,
+                        "title": active_dl.title,
+                        "release": candidate.title,
+                        "client": client.get("name"),
+                        "request_id": matched_req["id"],
+                        "download_id": download_id,
+                        "size_bytes": candidate.size_bytes,
+                    },
+                )
+            except Exception as ev_err:
+                logger.warning("Failed to record RSS download_started event: %s", ev_err)
+
+            logger.info(
+                "RSSSyncWorker grabbed '%s' for request %s via %s (score=%s)",
+                candidate.title,
+                matched_req["id"],
+                client.get("name"),
+                eval_res.score if eval_res else "N/A",
+            )
+        except Exception as e:
+            logger.error("Error creating active download for '%s': %s", candidate.title, e)
+            stats["errors"] += 1
+
+    def _process_rss_candidate(
+        self,
+        db: Database,
+        idx_cfg: dict[str, Any],
+        candidate: Any,
+        wanted_requests: list[dict[str, Any]],
+        default_profile: Optional[Any],
+        stats: dict[str, int],
+        active_req_ids: Optional[set[Any]] = None,
+    ) -> None:
+        """Process a single RSS candidate release against wanted requests."""
+        matched_req = self._match_wanted_request(candidate, wanted_requests, active_req_ids)
+        if not matched_req:
+            return
+
+        eval_data = self._evaluate_rss_candidate(db, candidate, matched_req, default_profile)
+        if eval_data is None:
+            return
+        eval_res, req_profile, req_artist_tags, rss_trigger = eval_data
+
+        can_grab, claimed_pending = self._delay_gate_rss_candidate(
+            db, candidate, matched_req, eval_res, req_profile, req_artist_tags, rss_trigger
+        )
+        if not can_grab:
+            return
+
+        self._grab_rss_candidate(
+            db,
+            candidate,
+            matched_req,
+            eval_res,
+            rss_trigger,
+            claimed_pending,
+            stats,
+            active_req_ids,
+        )
+
+    def _sync(self, db: Database) -> dict[str, int]:
+        """Poll enabled indexers for recent releases and process candidate matches."""
+        stats = {
+            "releases_scanned": 0,
+            "grabs_triggered": 0,
+            "errors": 0,
+        }
+
+        indexers, wanted_requests, active_req_ids = self._collect_wanted_requests(db, stats)
 
         if not indexers or not wanted_requests:
             with self._lock:
-                self.releases_scanned += releases_scanned
-                self.grabs_triggered += grabs_triggered
-                self.errors += errors_count
-            return {
-                "releases_scanned": releases_scanned,
-                "grabs_triggered": grabs_triggered,
-                "errors": errors_count,
-            }
+                self.releases_scanned += stats["releases_scanned"]
+                self.grabs_triggered += stats["grabs_triggered"]
+                self.errors += stats["errors"]
+            return stats
 
         # 3. Retrieve default quality profile
         try:
@@ -924,257 +1267,41 @@ class RSSSyncWorker:
             if self._stop_event.is_set():
                 break
 
-            try:
-                driver = get_indexer_driver(idx_cfg)
-                if hasattr(driver, "fetch_recent"):
-                    recent_releases = driver.fetch_recent(limit=100)
-                else:
-                    logger.debug("Indexer driver '%s' does not implement fetch_recent", idx_cfg.get("name"))
-                    continue
-            except Exception as e:
-                logger.warning("Error fetching recent releases from indexer '%s': %s", idx_cfg.get("name"), e)
-                errors_count += 1
+            recent_releases = self._fetch_recent_releases(idx_cfg, stats)
+            if recent_releases is None:
                 continue
 
             for candidate in recent_releases:
                 if self._stop_event.is_set():
                     break
 
-                releases_scanned += 1
-
-                # Check if release matches any wanted request
-                matched_req = None
-                for req in wanted_requests:
-                    if req["id"] in active_req_ids:
-                        continue
-                    if _matches_request(candidate, req):
-                        matched_req = req
-                        break
-
-                if not matched_req:
-                    continue
-
-                # Evaluate candidate against quality profile
-                eval_res = None
-                req_profile = profile
-                if matched_req.get("quality_profile_id"):
-                    try:
-                        p_dict = db.get_quality_profile(matched_req["quality_profile_id"])
-                        if p_dict:
-                            req_profile = _to_quality_profile(p_dict)
-                    except Exception as e:
-                        logger.warning("Error fetching quality profile for request %s: %s", matched_req["id"], e)
-
-                if req_profile:
-                    parsed = parse_release_title(candidate.title)
-                    req_artist_tags = delay_gate.artist_tags(db, matched_req.get("artist") or candidate.artist)
-                    eval_res = evaluate_release(
-                        release=parsed,
-                        profile=req_profile,
-                        size_bytes=candidate.size_bytes if candidate.size_bytes > 0 else None,
-                        artist_tags=req_artist_tags,
-                    )
-                    if not eval_res.is_acceptable:
-                        logger.debug(
-                            "RSS candidate '%s' rejected by profile for request %s (%s)",
-                            candidate.title,
-                            matched_req["id"],
-                            eval_res.rejection_reasons,
-                        )
-                        continue
-
-                    # If this is a cutoff-unmet request, verify candidate.score > current_score
-                    if matched_req.get("cutoff_met") == 0 or matched_req.get("status") == "available":
-                        current_quality = matched_req.get("current_quality")
-                        current_score = 0
-                        if current_quality:
-                            current_score = _current_floor(
-                                db,
-                                req_profile,
-                                current_quality,
-                                request_id=matched_req.get("id"),
-                                artist_tags=req_artist_tags,
-                            )
-
-                        if eval_res.score <= current_score:
-                            logger.debug(
-                                "RSS candidate '%s' score %d does not exceed current score %d for upgrade request %s",
-                                candidate.title,
-                                eval_res.score,
-                                current_score,
-                                matched_req["id"],
-                            )
-                            continue
-
-                indexer_name = str((candidate.extra or {}).get("indexer_name") or candidate.source or "") or None
-                rss_trigger = GrabTrigger(TRIGGER_RSS, ref=indexer_name, label=indexer_name or "RSS")
-
-                # Delay gate: park the best release of the item until its protocol delay has elapsed
-                claimed_pending = None
-                if eval_res is not None and req_profile is not None:
-                    delay_profile = delay_gate.resolve_delay_profile(
-                        db, matched_req.get("artist") or candidate.artist, tags=req_artist_tags
-                    )
-                    decision = delay_gate.apply_gate(
-                        db,
-                        profile=delay_profile,
-                        top_tier=delay_gate.highest_allowed_tier(prepare_profile(req_profile)),
-                        candidate=candidate,
-                        result=eval_res,
-                        rank=candidate_rank(candidate, eval_res, delay_profile.get("preferred_protocol")),
-                        artist=str(matched_req.get("artist") or candidate.artist or ""),
-                        item_title=str(matched_req.get("title") or ""),
-                        album=matched_req.get("album"),
-                        item_type=str(matched_req.get("item_type") or "track"),
-                        request_id=str(matched_req["id"]),
-                        album_id=None,
-                        track_id=None,
-                        quality_profile_id=matched_req.get("quality_profile_id"),
-                        trigger=rss_trigger,
-                    )
-                    if not decision.grab:
-                        logger.info(
-                            "RSS held '%s' for request %s: %s", candidate.title, matched_req["id"], decision.reason
-                        )
-                        continue
-                    claimed_pending = decision.claimed
-
-                # Find download client for protocol
-                client = acquisition_coordinator.find_client_for_protocol(
-                    protocol=candidate.protocol, db=db
+                stats["releases_scanned"] += 1
+                self._process_rss_candidate(
+                    db,
+                    idx_cfg,
+                    candidate,
+                    wanted_requests,
+                    profile,
+                    stats,
+                    active_req_ids,
                 )
-                if not client:
-                    if claimed_pending:
-                        db.restore_pending_release(claimed_pending)
-                    logger.warning(
-                        "RSS matched '%s' for request %s but no client available for protocol %s",
-                        candidate.title,
-                        matched_req["id"],
-                        candidate.protocol,
-                    )
-                    continue
-
-                # Dispatch download to client
-                try:
-                    client_driver = get_acquisition_driver(client)
-                    download_hash = client_driver.download(candidate)
-                except Exception as e:
-                    logger.error(
-                        "Dispatch download failed on client '%s' for '%s': %s",
-                        client.get("name"),
-                        candidate.title,
-                        e,
-                    )
-                    errors_count += 1
-                    if claimed_pending:
-                        db.restore_pending_release(claimed_pending)
-                    continue
-
-                # Record active download in database
-                download_id = f"dl-{uuid.uuid4().hex[:12]}"
-                active_dl = ActiveDownload(
-                    id=download_id,
-                    request_id=matched_req["id"],
-                    client_id=str(client["id"]),
-                    download_hash=download_hash,
-                    title=candidate.title,
-                    artist=matched_req.get("artist", candidate.artist),
-                    item_type=matched_req.get("item_type", "track"),
-                    status=DownloadStatus.QUEUED.value,
-                    progress=0.0,
-                    size_bytes=candidate.size_bytes,
-                    source_path=None,
-                    target_path=None,
-                )
-                try:
-                    db.create_active_download(active_dl)
-                    apply_seed_rules_at_grab(
-                        db, client_driver, download_id, download_hash, candidate.title, candidate.protocol,
-                        candidate.extra,
-                    )
-                    try:
-                        db.record_download_grab(
-                            download_id,
-                            indexer=str((candidate.extra or {}).get("indexer_name") or candidate.source or "") or None,
-                            quality=eval_res.parsed_quality if eval_res else None,
-                            protocol=candidate.protocol or None,
-                            upgrade=matched_req.get("cutoff_met") == 0 or matched_req.get("status") == "available",
-                            trigger=rss_trigger,
-                        )
-                    except sqlite3.Error as hist_err:
-                        logger.warning("Failed to record grab history for %s: %s", download_id, type(hist_err).__name__)
-                    db.clear_pending_for_item(str(matched_req["id"]))
-                    db.update_request_status(matched_req["id"], RequestStatus.PROCESSING)
-                    active_req_ids.add(matched_req["id"])
-                    grabs_triggered += 1
-                    try:
-                        notification_dispatcher.dispatch(
-                            NotificationEvent.DOWNLOAD_STARTED,
-                            data={
-                                "artist": active_dl.artist,
-                                "title": active_dl.title,
-                                "release": candidate.title,
-                                "client": client.get("name"),
-                                "request_id": matched_req["id"],
-                                "user_id": matched_req.get("user_id") or matched_req.get("requested_by"),
-                                "download_id": download_id,
-                                "size_bytes": candidate.size_bytes,
-                            },
-                            db=db,
-                        )
-                    except Exception as ex:
-                        logger.warning("Failed to dispatch RSS DOWNLOAD_STARTED notification: %s", ex)
-
-                    try:
-                        db.record_event(
-                            "download_started",
-                            f"Grabbed '{active_dl.title}' via {client.get('name')}",
-                            source="AcquisitionWorker",
-                            severity="info",
-                            details={
-                                "artist": active_dl.artist,
-                                "title": active_dl.title,
-                                "release": candidate.title,
-                                "client": client.get("name"),
-                                "request_id": matched_req["id"],
-                                "download_id": download_id,
-                                "size_bytes": candidate.size_bytes,
-                            },
-                        )
-                    except Exception as ev_err:
-                        logger.warning("Failed to record RSS download_started event: %s", ev_err)
-
-                    logger.info(
-                        "RSSSyncWorker grabbed '%s' for request %s via %s (score=%s)",
-                        candidate.title,
-                        matched_req["id"],
-                        client.get("name"),
-                        eval_res.score if eval_res else "N/A",
-                    )
-                except Exception as e:
-                    logger.error("Error creating active download for '%s': %s", candidate.title, e)
-                    errors_count += 1
 
         with self._lock:
-            self.releases_scanned += releases_scanned
-            self.grabs_triggered += grabs_triggered
-            self.errors += errors_count
+            self.releases_scanned += stats["releases_scanned"]
+            self.grabs_triggered += stats["grabs_triggered"]
+            self.errors += stats["errors"]
 
         try:
             db.record_event(
                 "rss_synced",
-                f"RSS sync completed: {releases_scanned} releases scanned, {grabs_triggered} grabbed",
+                f"RSS sync completed: {stats['releases_scanned']} releases scanned, {stats['grabs_triggered']} grabbed",
                 source="RssSyncWorker",
                 severity="info",
             )
         except Exception as ev_err:
             logger.warning("Failed to record rss_synced event: %s", ev_err)
 
-        return {
-            "releases_scanned": releases_scanned,
-            "grabs_triggered": grabs_triggered,
-            "errors": errors_count,
-        }
+        return stats
 
 
 # Singletons
