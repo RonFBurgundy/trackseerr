@@ -7,12 +7,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from plex_playlist_sync.api.routes.library import (
-    IngestArtistRequest,
+from plex_playlist_sync.api.routes.library.models import IngestArtistRequest
+from plex_playlist_sync.api.routes.library.artists import (
     get_artist,
     ingest_artist,
-    refresh_single_artist,
 )
+from plex_playlist_sync.artist_refresh import refresh_single_artist
 from plex_playlist_sync.album_track_hydration import hydrate_album_tracks
 from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
@@ -201,7 +201,7 @@ def test_hydration_sets_total_tracks_and_detail_falls_back_to_rows(db: Database)
 
 
 def test_total_tracks_only_grows_unless_authoritative(db: Database):
-    from plex_playlist_sync.api.routes.library import _store_total_tracks
+    from plex_playlist_sync.artist_refresh import _store_total_tracks
 
     db.upsert_library_artist(LibraryArtist(id="ar", name="G", monitored=True, monitor_option="none"))
     db.upsert_library_album(

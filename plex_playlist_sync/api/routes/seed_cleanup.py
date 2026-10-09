@@ -15,7 +15,7 @@ from plex_playlist_sync.api.schemas.seed_cleanup import (
     SeedCleanupStarted,
     SeedCleanupStatus,
 )
-from plex_playlist_sync.api.routes.library import native_only
+from plex_playlist_sync.api.routes.library._shared import native_only
 from plex_playlist_sync.library_health import KIND_CLEANUP_FAILED, KIND_ORPHAN_TORRENT
 from plex_playlist_sync.storage import Database
 

@@ -82,7 +82,7 @@ def _validated_folder_art(kind: str, path: Optional[str], db: Optional[Database]
     # Lazy: the routes module imports this one at import time.
     from fastapi import HTTPException
 
-    from plex_playlist_sync.api.routes.library import validate_media_path
+    from plex_playlist_sync.api.routes.library._shared import validate_media_path
 
     try:
         validated = validate_media_path(path, db=db)

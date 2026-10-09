@@ -172,7 +172,7 @@ def test_native_album_new_artist_monitors_only_that_album_and_tracks(db):
     assert all(t["monitored"] for t in tracks)
 
     # A later artist refresh (option "none") adds the rest of the discography unmonitored and keeps this album.
-    from plex_playlist_sync.api.routes.library import refresh_single_artist
+    from plex_playlist_sync.artist_refresh import refresh_single_artist
 
     assert refresh_single_artist(artist["id"], db, enricher=enr)["success"] is True
     assert albums_of(db, artist["id"]) == {"OK Computer": True, "The Bends": False, "Creep": False}
@@ -804,13 +804,13 @@ def test_native_artist_retry_finishes_refresh_for_artist_this_item_added(db):
     item = artist_item()
     enr = make_enricher()
     added: list[bool] = []
-    with patch("plex_playlist_sync.api.routes.library.refresh_single_artist", return_value={"success": False, "message": "mb down"}):
+    with patch("plex_playlist_sync.artist_refresh.refresh_single_artist", return_value={"success": False, "message": "mb down"}):
         res = apply_list_item(db, None, item, "artist", enricher=enr, on_artist_added=lambda: added.append(True))
     assert res.status == "pending" and added == [True]
     assert db.get_library_artist_by_mbid(ART) is not None  # artist exists, refresh did not complete
 
     # Retry without the persisted flag would return early; with it the refresh is done.
-    with patch("plex_playlist_sync.api.routes.library.refresh_single_artist", return_value={"success": True}) as refresh:
+    with patch("plex_playlist_sync.artist_refresh.refresh_single_artist", return_value={"success": True}) as refresh:
         res = apply_list_item(db, None, item, "artist", enricher=enr, artist_added=True)
     assert res.status == "applied"
     refresh.assert_called_once()
@@ -818,7 +818,7 @@ def test_native_artist_retry_finishes_refresh_for_artist_this_item_added(db):
 
 def test_native_pre_existing_artist_is_never_refreshed_even_on_retry_without_flag(db):
     db.upsert_library_artist(LibraryArtist(id="a1", name="Radiohead", clean_name="radiohead", path="/music/R", monitored=True, mbid=ART), preserve_monitoring=True)
-    with patch("plex_playlist_sync.api.routes.library.refresh_single_artist") as refresh:
+    with patch("plex_playlist_sync.artist_refresh.refresh_single_artist") as refresh:
         res = apply_list_item(db, None, artist_item(), "artist", enricher=make_enricher())
     assert res.status == "applied"
     refresh.assert_not_called()

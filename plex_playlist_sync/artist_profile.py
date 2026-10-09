@@ -91,7 +91,11 @@ class LibrarySource:
         return self._from_native(artist_id)
 
     def _from_native(self, artist_id: str) -> Optional[tuple[dict[str, Any], list[dict[str, Any]]]]:
-        from plex_playlist_sync.api.routes import library as library_routes
+        from plex_playlist_sync.api.routes.library._shared import (
+            _enrich_artists,
+            _versioned_art_url,
+        )
+        from plex_playlist_sync.artist_refresh import _album_track_counts
 
         try:
             artist = self.db.get_library_artist(artist_id)
@@ -105,8 +109,8 @@ class LibrarySource:
                 if len(page) < 500:
                     break
                 offset += 500
-            stored, with_files = library_routes._album_track_counts(self.db, artist_id)
-            counts = library_routes._enrich_artists(self.db, [artist])[0]
+            stored, with_files = _album_track_counts(self.db, artist_id)
+            counts = _enrich_artists(self.db, [artist])[0]
         except sqlite3.Error as exc:
             logger.warning("Could not read library artist %s for profile: %s", artist_id, exc)
             return None
@@ -117,7 +121,7 @@ class LibrarySource:
                 "title": alb.get("title") or "",
                 "year": alb.get("year") or _year(alb.get("release_date")),
                 "release_date": alb.get("release_date"),
-                "cover_url": library_routes._versioned_art_url(
+                "cover_url": _versioned_art_url(
                     "album", alb["id"], alb.get("art_version"), alb.get("cover_url")
                 ),
                 "track_count": int(alb.get("total_tracks") or stored.get(alb["id"], 0) or 0),

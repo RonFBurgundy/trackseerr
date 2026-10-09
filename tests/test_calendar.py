@@ -31,7 +31,7 @@ import pytest
 from plex_playlist_sync import lidarr_library
 from plex_playlist_sync.api.app import create_app
 from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.api.routes.library import refresh_single_artist
+from plex_playlist_sync.artist_refresh import refresh_single_artist
 from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
 from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient

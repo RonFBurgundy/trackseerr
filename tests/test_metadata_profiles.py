@@ -9,7 +9,7 @@ import pytest
 import requests
 
 from plex_playlist_sync.api.dependencies import get_discovery_client, get_mbid_enricher
-from plex_playlist_sync.api.routes.library import refresh_single_artist
+from plex_playlist_sync.artist_refresh import refresh_single_artist
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.library_monitoring import (
     NATIVE_MONITOR_OPTIONS,

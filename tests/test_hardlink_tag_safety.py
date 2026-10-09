@@ -104,7 +104,7 @@ def _commit_hardlink(tmp_path, db, client, headers, *, write_tags: bool):
 def test_manual_commit_hardlink_with_tags_leaves_torrent_file_untouched(tmp_path, db, client, headers):
     music, src, item = _commit_hardlink(tmp_path, db, client, headers, write_tags=True)
     before, ino = src.read_bytes(), src.stat().st_ino
-    with patch("plex_playlist_sync.api.routes.library.write_audio_tags", side_effect=_fake_write_tags):
+    with patch("plex_playlist_sync.api.routes.library.manual_import.write_audio_tags", side_effect=_fake_write_tags):
         _commit(client, headers, [item])
     placed = list(music.rglob("*.flac"))
     assert len(placed) == 1
@@ -116,7 +116,7 @@ def test_manual_commit_copy_failure_skips_tags(tmp_path, db, client, headers):
     music, src, item = _commit_hardlink(tmp_path, db, client, headers, write_tags=True)
     before = src.read_bytes()
     calls = []
-    with patch("plex_playlist_sync.api.routes.library.write_audio_tags", side_effect=lambda *a, **k: calls.append(a)), \
+    with patch("plex_playlist_sync.api.routes.library.manual_import.write_audio_tags", side_effect=lambda *a, **k: calls.append(a)), \
          patch("plex_playlist_sync.acquisition_worker.ensure_private_copy", return_value=False):
         _commit(client, headers, [item])
     assert calls == [] and src.read_bytes() == before

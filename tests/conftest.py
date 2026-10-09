@@ -374,10 +374,10 @@ class _BackgroundJobs:
 def background_jobs(monkeypatch):
     """Route-layer background jobs (``library._run_in_background``) are queued, not threaded: drive them with
     ``background_jobs.run()`` so tests stay deterministic and offline."""
-    from plex_playlist_sync.api.routes import library
-
+    from plex_playlist_sync.api.routes.library import artists
+ 
     jobs = _BackgroundJobs()
-    monkeypatch.setattr(library, "_run_in_background", lambda target, name: jobs.pending.append((name, target)))
+    monkeypatch.setattr(artists, "_run_in_background", lambda target, name: jobs.pending.append((name, target)))
     return jobs
 
 

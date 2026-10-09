@@ -152,7 +152,7 @@ def test_cover_endpoint_returns_fast_while_remote_hangs(tmp_path):
     release = threading.Event()
     local_svc = MediaCoverService(base_dir=tmp_path / "mc")
     try:
-        with patch("plex_playlist_sync.api.routes.library.mediacover_service", local_svc), patch.object(
+        with patch("plex_playlist_sync.api.routes.library._shared.mediacover_service", local_svc), patch.object(
             mc.requests, "get", side_effect=lambda *a, **k: release.wait(10)
         ):
             for path in ("/api/library/albums/al1/cover", "/api/library/artists/ar1/image"):
@@ -210,7 +210,7 @@ def test_worker_skips_recently_refreshed_artists(tmp_path):
     w.pace_delay = 0
     seen = []
     with patch(
-        "plex_playlist_sync.api.routes.library.refresh_single_artist",
+        "plex_playlist_sync.artist_refresh.refresh_single_artist",
         side_effect=lambda artist_id, **k: seen.append(artist_id) or {"success": True},
     ):
         res = w.refresh_once(db=db, discovery_client=MagicMock(), enricher=MagicMock(), only_stale=True)

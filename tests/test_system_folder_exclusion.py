@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from plex_playlist_sync.api.routes.library import _walk_audio_files, refresh_single_artist
+from plex_playlist_sync.api.routes.library.manual_import import _walk_audio_files
+from plex_playlist_sync.artist_refresh import refresh_single_artist
 from plex_playlist_sync.clients.discovery import DiscoveryClient
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.library_health import _walk_audio

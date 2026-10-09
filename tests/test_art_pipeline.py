@@ -399,7 +399,7 @@ def test_resolver_follows_prefer_local_artwork_and_version_follows_the_served_fi
 def test_resolver_rejects_unapproved_paths(test_db, album):
     alb, _ = album
     with patch(
-        "plex_playlist_sync.api.routes.library.validate_media_path",
+        "plex_playlist_sync.api.routes.library._shared.validate_media_path",
         side_effect=__import__("fastapi").HTTPException(status_code=403, detail="no"),
     ):
         assert art_pipeline.resolve_served_art("album", alb, {"prefer_local_artwork": True}, test_db) is None

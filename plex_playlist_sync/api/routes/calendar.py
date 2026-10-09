@@ -21,7 +21,7 @@ from plex_playlist_sync.api.dependencies import (
     verify_feed_access,
 )
 from plex_playlist_sync.api.routes.activity import require_lidarr
-from plex_playlist_sync.api.routes.library import _versioned_art_url
+from plex_playlist_sync.api.routes.library._shared import _versioned_art_url
 from plex_playlist_sync.api.schemas.calendar import CalendarItem, CalendarStatus
 from plex_playlist_sync.clients.lidarr import LidarrClient
 from plex_playlist_sync.config import Config

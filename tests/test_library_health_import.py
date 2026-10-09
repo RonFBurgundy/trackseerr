@@ -130,7 +130,7 @@ def test_recording_failure_does_not_break_the_import(db, tmp_path):
 
 
 def _commit(client, headers, items):
-    with patch("plex_playlist_sync.api.routes.library.inspect_audio_file",
+    with patch("plex_playlist_sync.api.routes.library.manual_import.inspect_audio_file",
                return_value={"title": "t", "codec": "FLAC", "file_path": "x"}):
         resp = client.post("/api/library/manual-import/commit", json={"items": items}, headers=headers)
     assert resp.status_code == 200, resp.text

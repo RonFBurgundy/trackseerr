@@ -1,0 +1,166 @@
+"""Browse and statistics endpoints for artists, albums, and tracks."""
+
+import logging
+from typing import Any, Optional
+
+from fastapi import APIRouter, Depends, Query
+
+
+from plex_playlist_sync import lidarr_library
+from plex_playlist_sync.api.dependencies import (
+    get_db,
+    get_lidarr_client,
+    get_mbid_enricher,
+    require_admin,
+    require_core_tier,
+)
+from plex_playlist_sync.api.schemas.library import (
+    AlbumsPage,
+    ArtistsPage,
+    LibraryIndexResponse,
+    LibraryStats,
+    TracksPage,
+)
+from plex_playlist_sync.api.routes.activity import (
+    MAX_PAGE,
+    require_lidarr,
+)
+from plex_playlist_sync.clients.lidarr import (
+    LidarrClient,
+)
+from plex_playlist_sync.album_track_hydration import hydrate_album_tracks
+from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
+from plex_playlist_sync.storage import Database
+
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+from ._shared import (_SORT_DIR, _is_lidarr, _lidarr_fetch, _paged, _index, _lidarr_paged, _lidarr_index, _lidarr_tracks_paged, _lidarr_tracks_index, _enrich_artists, _enrich_albums, _enrich_tracks)
+
+@router.get("/stats", response_model=LibraryStats, response_model_exclude_unset=True)
+def get_library_stats(
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Aggregate library statistics (Lidarr's own statistics in Lidarr mode, the native catalog otherwise)."""
+    if _is_lidarr(db):
+        lidarr = require_lidarr(client)
+        return _lidarr_fetch(lambda: lidarr_library.library_stats(lidarr), "Library")
+    return db.get_library_stats()
+
+@router.get("/artists/paged", dependencies=[Depends(require_core_tier)], response_model=ArtistsPage, response_model_exclude_unset=True)
+def paged_artists(
+    page: int = Query(1, ge=1, le=MAX_PAGE),
+    page_size: int = Query(50, ge=1, le=200),
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("asc", pattern=_SORT_DIR),
+    q: Optional[str] = Query(None, max_length=200),
+    monitored_only: bool = False,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """A page of library artists (with counts) plus the filtered total."""
+    if _is_lidarr(db):
+        return _lidarr_paged(db, "artists", page, page_size, sort_key, sort_dir, q, monitored_only, None, client)
+    return _paged("artists", page, page_size, sort_key, sort_dir, q, monitored_only, None, None, db, _enrich_artists)
+
+@router.get("/artists/index", dependencies=[Depends(require_core_tier)], response_model=LibraryIndexResponse, response_model_exclude_unset=True)
+def artists_index(
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("asc", pattern=_SORT_DIR),
+    q: Optional[str] = Query(None, max_length=200),
+    monitored_only: bool = False,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Scrubber groups ``[{label, offset, count}]`` for the artists list, in its order."""
+    if _is_lidarr(db):
+        return _lidarr_index("artists", sort_key, sort_dir, q, monitored_only, None, client)
+    return _index("artists", sort_key, sort_dir, q, monitored_only, None, None, db)
+
+@router.get("/albums/paged", dependencies=[Depends(require_core_tier)], response_model=AlbumsPage, response_model_exclude_unset=True)
+def paged_albums(
+    page: int = Query(1, ge=1, le=MAX_PAGE),
+    page_size: int = Query(50, ge=1, le=200),
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("asc", pattern=_SORT_DIR),
+    q: Optional[str] = Query(None, max_length=200),
+    monitored_only: bool = False,
+    artist_id: Optional[str] = None,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """A page of library albums (with artist name and track count) plus the filtered total."""
+    if _is_lidarr(db):
+        return _lidarr_paged(db, "albums", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, client)
+    return _paged("albums", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, None, db, _enrich_albums)
+
+@router.get("/albums/index", dependencies=[Depends(require_core_tier)], response_model=LibraryIndexResponse, response_model_exclude_unset=True)
+def albums_index(
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("asc", pattern=_SORT_DIR),
+    q: Optional[str] = Query(None, max_length=200),
+    monitored_only: bool = False,
+    artist_id: Optional[str] = None,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Scrubber groups for the albums list, in its order."""
+    if _is_lidarr(db):
+        return _lidarr_index("albums", sort_key, sort_dir, q, monitored_only, artist_id, client)
+    return _index("albums", sort_key, sort_dir, q, monitored_only, artist_id, None, db)
+
+@router.get("/tracks/paged", dependencies=[Depends(require_core_tier)], response_model=TracksPage, response_model_exclude_unset=True)
+def paged_tracks(
+    page: int = Query(1, ge=1, le=MAX_PAGE),
+    page_size: int = Query(50, ge=1, le=200),
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("asc", pattern=_SORT_DIR),
+    q: Optional[str] = Query(None, max_length=200),
+    monitored_only: bool = False,
+    artist_id: Optional[str] = None,
+    album_id: Optional[str] = None,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    enricher: MbidEnricherClient = Depends(get_mbid_enricher),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """A page of library tracks (with artist, album and file details) plus the filtered total.
+
+    Opening an album whose tracklist was never fetched (unmonitored albums are not hydrated on add/refresh) fetches it
+    from MusicBrainz once, stored unmonitored, before the first page is read. NOTE: this GET therefore has a write
+    side effect (it may create track rows). It is single-flight per album, and an album whose fetch failed or came
+    back empty is not retried for 10 minutes (see ``hydrate_album_tracks``).
+    """
+    if _is_lidarr(db):
+        return _lidarr_tracks_paged(page, page_size, sort_key, sort_dir, q, monitored_only, album_id, client)
+    if album_id and page == 1 and not q and not monitored_only:
+        hydrate_album_tracks(db, enricher, album_id)
+    return _paged(
+        "tracks", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, album_id, db, _enrich_tracks
+    )
+
+@router.get("/tracks/index", dependencies=[Depends(require_core_tier)], response_model=LibraryIndexResponse, response_model_exclude_unset=True)
+def tracks_index(
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("asc", pattern=_SORT_DIR),
+    q: Optional[str] = Query(None, max_length=200),
+    monitored_only: bool = False,
+    artist_id: Optional[str] = None,
+    album_id: Optional[str] = None,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Scrubber groups for the tracks list, in its order."""
+    if _is_lidarr(db):
+        return _lidarr_tracks_index(sort_key, sort_dir, album_id, client)
+    return _index("tracks", sort_key, sort_dir, q, monitored_only, artist_id, album_id, db)
+

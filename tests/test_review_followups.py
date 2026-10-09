@@ -9,7 +9,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from plex_playlist_sync import album_track_hydration as hyd
-from plex_playlist_sync.api.routes import library as library_routes
+from plex_playlist_sync.api.routes.library import albums as albums_routes
+from plex_playlist_sync.api.routes.library import browse as browse_routes
 from plex_playlist_sync.api.dependencies import get_mbid_enricher
 from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
 from plex_playlist_sync.library_monitoring import album_monitored_for_option, normalize_secondary_types
@@ -68,7 +69,7 @@ def test_bulk_monitor_has_total_deadline_and_skipped_albums_hydrate_lazily(
     app.dependency_overrides[get_mbid_enricher] = lambda: enr
     h = _auth_headers(seeded_users["admin"], test_db, test_config)
     ids = _bare_albums(test_db, 6)
-    monkeypatch.setattr(library_routes, "BULK_HYDRATE_DEADLINE_SECONDS", 0.6)
+    monkeypatch.setattr(albums_routes, "BULK_HYDRATE_DEADLINE_SECONDS", 0.6)
 
     t0 = time.monotonic()
     r = client.post("/api/library/albums/bulk-edit", json={"album_ids": ids, "monitored": True}, headers=h)
@@ -135,7 +136,7 @@ def test_paged_get_skips_a_recently_failed_album(app_and_client, test_db, test_c
 
 def test_hydration_docstring_documents_get_side_effect():
     assert "side effect" in hyd.hydrate_album_tracks.__doc__.lower()
-    assert "side effect" in library_routes.paged_tracks.__doc__.lower()
+    assert "side effect" in browse_routes.paged_tracks.__doc__.lower()
 
 
 # --------------------------------------------------------------------------- 3. preview would_change
