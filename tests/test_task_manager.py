@@ -373,8 +373,8 @@ def test_activity_endpoint_shape_and_admin_only(app_and_client, seeded_users, se
 def test_activity_makes_no_external_or_heavy_status_calls(app_and_client, seeded_users, secret_key, test_db):
     _, client = app_and_client
     admin = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
-    with patch("trackseerr.api.routes.system.get_all_scheduled_tasks") as heavy, patch(
-        "trackseerr.api.routes.system.seed_cleanup.get_status"
+    with patch("trackseerr.api.routes.system.tasks.get_all_scheduled_tasks") as heavy, patch(
+        "trackseerr.api.routes.system.tasks.seed_cleanup.get_status"
     ) as sc:
         assert client.get("/api/system/activity", cookies=admin).status_code == 200
     heavy.assert_not_called()
@@ -662,7 +662,7 @@ def test_every_worker_thread_maps_to_a_registered_task():
 
 
 def test_every_registered_task_is_listed_by_the_api(db):
-    from trackseerr.api.routes.system import get_all_scheduled_tasks
+    from trackseerr.api.routes.system.tasks import get_all_scheduled_tasks
 
     db.update_media_management_settings({"library_mode": "lidarr"})
     listed = {t.id for t in get_all_scheduled_tasks(db, _cfg())}
@@ -808,7 +808,7 @@ def test_boot_starts_the_art_scheduler_and_closes_interrupted_runs(db, art_sched
 
 
 def test_playlist_sync_is_manual_when_wait_seconds_is_zero(db):
-    from trackseerr.api.routes.system import get_all_scheduled_tasks
+    from trackseerr.api.routes.system.tasks import get_all_scheduled_tasks
 
     scheduled = {t.id: t for t in get_all_scheduled_tasks(db, _cfg(wait_seconds=86400))}["playlist_sync"]
     assert scheduled.schedule_kind == "interval" and scheduled.editable and scheduled.interval_seconds == 86400
@@ -826,7 +826,7 @@ def test_playlist_sync_is_manual_when_wait_seconds_is_zero(db):
 def test_schedule_edit_rejected_for_playlist_sync_when_wait_seconds_is_zero(db):
     from fastapi import HTTPException
 
-    from trackseerr.api.routes.system import TaskScheduleUpdate, set_task_schedule
+    from trackseerr.api.routes.system.tasks import TaskScheduleUpdate, set_task_schedule
 
     with pytest.raises(HTTPException) as err:
         set_task_schedule("playlist_sync", TaskScheduleUpdate(interval_seconds=3600), db=db, config=_cfg(wait_seconds=0), _admin={})

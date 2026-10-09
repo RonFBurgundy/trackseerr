@@ -315,7 +315,7 @@ def test_status_endpoint_reports_subsonic(env):
     fake = FakeSubsonic(default_state([]))
     fake.state.users["u"] = fake.state.users["admin"].__class__("u", True, "p")
     adapter = SubsonicMediaServer(URL, "u", "p", transport=fake.transport(), sleep=lambda _s: None)
-    with patch("trackseerr.api.routes.system.build_subsonic", return_value=adapter):
+    with patch("trackseerr.api.routes.system.status.build_subsonic", return_value=adapter):
         body = env.tc.get("/api/system/media-server").json()
     assert body == {
         "type": "subsonic",
@@ -327,7 +327,7 @@ def test_status_endpoint_reports_subsonic(env):
 def test_status_endpoint_subsonic_unreachable(env):
     env.cfg.media_server = "subsonic"
     env.cfg.subsonic_url, env.cfg.subsonic_user, env.cfg.subsonic_password = URL, "u", "p"
-    with patch("trackseerr.api.routes.system.build_subsonic", return_value=None):
+    with patch("trackseerr.api.routes.system.status.build_subsonic", return_value=None):
         body = env.tc.get("/api/system/media-server").json()
     assert body["type"] == "subsonic" and body["connected"] is False
 

@@ -274,9 +274,9 @@ def test_system_routes(client, db, admin, alice):
         "mode": "native", "reachable": None, "version": None, "health": []}
     tasks = _ok(client.get("/api/system/tasks", headers=admin))
     assert tasks
-    with patch("trackseerr.api.routes.system.threading.Thread"):
+    with patch("trackseerr.api.routes.system.tasks.threading.Thread"):
         assert _ok(client.post("/api/system/tasks/filesystem_scan/run", headers=admin))["success"] is True
-    with patch("trackseerr.api.routes.system.library_scanner.cancel_scan"):
+    with patch("trackseerr.api.routes.system.tasks.library_scanner.cancel_scan"):
         assert _ok(client.post("/api/system/tasks/filesystem_scan/cancel", headers=admin))["message"]
     assert _ok(client.delete("/api/system/events", headers=admin)) == {"success": True}
     assert _ok(client.delete("/api/system/logs", headers=admin)) == {"success": True}

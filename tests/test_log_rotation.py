@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db
-from trackseerr.api.routes.system import log_ring_buffer
+from trackseerr.api.routes.system.logs import log_ring_buffer
 from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.config import Config
 from trackseerr.log_rotation import (
@@ -325,7 +325,7 @@ def api(tmp_path, root_state):
 
     admin = cookies(db.upsert_user("admin-1", "admin_user", "a@x.tv", is_admin=True))
     alice = cookies(db.upsert_user("user-alice", "alice", "al@x.tv", is_admin=False))
-    with patch("trackseerr.api.routes.system.get_log_file_path", return_value=log_dir / CURRENT_LOG_NAME):
+    with patch("trackseerr.api.routes.system.logs.get_log_file_path", return_value=log_dir / CURRENT_LOG_NAME):
         yield TestClient(app), admin, alice, log_dir, db
     db.close()
 

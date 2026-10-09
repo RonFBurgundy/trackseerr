@@ -1,4 +1,4 @@
-"""Response models for the routes of ``/api/system`` that were untyped (``api/routes/system.py``).
+"""Response models for the routes of ``/api/system`` that were untyped (``api/routes/system/``).
 
 The status and task-list models (``SystemStatusResponse``, ``ScheduledTaskItem``) already lived in ``system.py`` and now
 derive from ``ApiModel`` there. The SSE stream and the log download are not modelled.

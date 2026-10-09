@@ -214,7 +214,7 @@ def test_status_endpoint_reports_jellyfin_capabilities(env):
     env.cfg.media_server, env.cfg.jellyfin_url, env.cfg.jellyfin_api_key = "jellyfin", URL, API_KEY
     fake = FakeJellyfin(default_state([]))
     adapter = JellyfinMediaServer(URL, API_KEY, transport=fake.transport(), sleep=lambda _s: None)
-    with patch("trackseerr.api.routes.system.build_jellyfin", return_value=adapter):
+    with patch("trackseerr.api.routes.system.status.build_jellyfin", return_value=adapter):
         body = env.tc.get("/api/system/media-server").json()
     assert body == {
         "type": "jellyfin",
@@ -225,7 +225,7 @@ def test_status_endpoint_reports_jellyfin_capabilities(env):
 
 def test_status_endpoint_unreachable(env):
     env.cfg.media_server, env.cfg.jellyfin_url, env.cfg.jellyfin_api_key = "jellyfin", URL, "k"
-    with patch("trackseerr.api.routes.system.build_jellyfin", return_value=None):
+    with patch("trackseerr.api.routes.system.status.build_jellyfin", return_value=None):
         body = env.tc.get("/api/system/media-server").json()
     assert body["type"] == "jellyfin" and body["connected"] is False
 
