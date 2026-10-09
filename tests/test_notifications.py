@@ -930,10 +930,13 @@ class TestNotificationEventTriggers:
         target_file = music_root / "Artist" / "Album" / "01 - Song.flac"
 
         with patch("trackseerr.acquisition_worker.get_acquisition_driver") as mock_drv, patch(
-            "trackseerr.acquisition_worker.inspect_audio_file",
+            "trackseerr.acquisition_import.inspect_audio_file",
             return_value={"artist": "Artist", "title": "Song", "album": "Album", "track_number": 1},
-        ), patch("trackseerr.acquisition_worker.place_audio_file", return_value=target_file), patch(
-            "trackseerr.acquisition_worker.resolve_collision", return_value=str(target_file)
+        ), patch(
+            "trackseerr.acquisition_catalog.inspect_audio_file",
+            return_value={"artist": "Artist", "title": "Song", "album": "Album", "track_number": 1},
+        ), patch("trackseerr.acquisition_import.place_audio_file", return_value=target_file), patch(
+            "trackseerr.acquisition_import.resolve_collision", return_value=str(target_file)
         ), patch.object(
             notification_dispatcher, "dispatch", side_effect=track_dispatch
         ):

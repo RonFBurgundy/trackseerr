@@ -16,7 +16,7 @@ from trackseerr.download_roots import allowed_roots_for_all_clients
 from trackseerr.item_history import TRIGGER_MANUAL_IMPORT, GrabTrigger, emit, set_provenance
 from trackseerr.redaction import redact_text
 from trackseerr.clients.acquisition import get_acquisition_driver, is_torrent_driver_type
-from trackseerr.acquisition_worker import (
+from trackseerr.acquisition_import import (
     record_import_events,
 )
 from trackseerr.import_files import (

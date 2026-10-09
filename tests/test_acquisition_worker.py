@@ -235,7 +235,8 @@ def test_worker_poll_once_completed_and_organizes(test_db, workspace_dirs):
     test_db.update_media_management_settings(settings)
 
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
-        with patch("trackseerr.acquisition_worker.inspect_audio_file", return_value=mock_meta):
+        with patch("trackseerr.acquisition_import.inspect_audio_file", return_value=mock_meta), \
+             patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=mock_meta):
             stats = worker.poll_once(db=test_db, plex_client=mock_plex, staging_dir=str(downloads_dir))
             assert stats["completed"] == 1
             assert stats["imported"] == 1
@@ -340,7 +341,8 @@ def test_import_of_replacement_grab_comments_on_issue(test_db, workspace_dirs):
     test_db.update_media_management_settings(settings)
 
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
-        with patch("trackseerr.acquisition_worker.inspect_audio_file", return_value=mock_meta):
+        with patch("trackseerr.acquisition_import.inspect_audio_file", return_value=mock_meta), \
+             patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=mock_meta):
             stats = worker.poll_once(db=test_db, plex_client=mock_plex, staging_dir=str(downloads_dir))
             assert stats["completed"] == 1
             assert stats["imported"] == 1
@@ -503,7 +505,7 @@ def test_worker_rejects_target_escaping_root_folder(test_db, workspace_dirs):
 
     # Mock build_track_path to return a path outside music_dir (e.g. /etc/cron.d/evil.mp3)
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
-        with patch("trackseerr.acquisition_worker.build_track_path", return_value="/etc/cron.d/evil.mp3"):
+        with patch("trackseerr.acquisition_import.build_track_path", return_value="/etc/cron.d/evil.mp3"):
             stats = worker.poll_once(db=test_db, staging_dir=str(downloads_dir))
             assert stats["failed"] == 1
             assert stats["imported"] == 0

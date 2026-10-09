@@ -267,7 +267,8 @@ def _run_import(db: Database, dl: Path, staging_dir: Path, meta: dict[str, Any],
                  "bits_per_sample": 16, "bitrate": 900, "sample_rate": 44100, "extension": ".flac", **meta}
     fp_mock = MagicMock(return_value=fp_result)
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
-         patch("trackseerr.acquisition_worker.inspect_audio_file", return_value=full_meta), \
+         patch("trackseerr.acquisition_import.inspect_audio_file", return_value=full_meta), \
+         patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=full_meta), \
          patch("trackseerr.track_matching.fingerprint_audio_file", fp_mock):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging_dir))
     return fp_mock

@@ -706,7 +706,9 @@ def _import_one(db: Database, tmp_path: Path, artist: str = "Pink Floyd") -> Non
     worker = AcquisitionWorker()
     worker.staging_dir = str(downloads)
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), patch(
-        "trackseerr.acquisition_worker.inspect_audio_file", return_value=meta
+        "trackseerr.acquisition_import.inspect_audio_file", return_value=meta
+    ), patch(
+        "trackseerr.acquisition_catalog.inspect_audio_file", return_value=meta
     ):
         assert worker.poll_once(db=db, staging_dir=str(downloads))["imported"] == 1
 
