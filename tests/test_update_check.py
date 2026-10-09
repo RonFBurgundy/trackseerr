@@ -4,6 +4,7 @@ database persistence & migration v70, system API endpoints, and task registratio
 """
 
 from datetime import datetime, timezone
+import logging
 import os
 import sqlite3
 from unittest.mock import MagicMock, patch
@@ -151,6 +152,67 @@ class TestVersionComparison:
         assert final_t[1] == 4  # final tier
 
         assert dev_t < alpha_t < beta_t < rc_t < final_t
+
+    def test_invalid_pep440_falls_back_to_heuristic(self, caplog):
+        """Invalid PEP 440 version strings fall back to heuristic parser and log at DEBUG."""
+        with caplog.at_level(logging.DEBUG, logger="plex_playlist_sync.update_check"):
+            assert is_newer_version("1.2.0-hotfix", "1.1.0") is True
+            assert is_newer_version("1.1.0", "1.2.0-hotfix") is False
+
+        debug_records = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.DEBUG and "packaging.version failed to parse" in r.getMessage()
+        ]
+        assert len(debug_records) >= 1
+        rec = debug_records[0]
+        assert "1.2.0-hotfix" in rec.getMessage()
+        assert "1.1.0" in rec.getMessage()
+
+    def test_unparseable_pair_returns_false_and_logs(self, caplog):
+        """When fallback parser raises ValueError or TypeError, returns False and logs WARNING."""
+        with caplog.at_level(logging.WARNING, logger="plex_playlist_sync.update_check"):
+            with patch(
+                "plex_playlist_sync.update_check._fallback_parse_tuple",
+                side_effect=ValueError("bad digits"),
+            ):
+                assert is_newer_version("invalid-a", "invalid-b") is False
+
+        warning_records = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "Fallback version parsing failed" in r.getMessage()
+        ]
+        assert len(warning_records) == 1
+        rec = warning_records[0]
+        assert "invalid-a" in rec.getMessage()
+        assert "invalid-b" in rec.getMessage()
+        assert "bad digits" in rec.getMessage()
+
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="plex_playlist_sync.update_check"):
+            with patch(
+                "plex_playlist_sync.update_check._fallback_parse_tuple",
+                side_effect=TypeError("incomparable"),
+            ):
+                assert is_newer_version("bad-1", "bad-2") is False
+
+        type_err_records = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "Fallback version parsing failed" in r.getMessage()
+        ]
+        assert len(type_err_records) == 1
+        assert "bad-1" in type_err_records[0].getMessage()
+        assert "bad-2" in type_err_records[0].getMessage()
+        assert "incomparable" in type_err_records[0].getMessage()
+
+    def test_fallback_when_packaging_unavailable(self):
+        """When packaging module is not available (pkg_version is None), fallback parser handles comparisons."""
+        with patch("plex_playlist_sync.update_check.pkg_version", None):
+            assert is_newer_version("1.2.0", "1.1.0") is True
+            assert is_newer_version("1.0.0", "1.1.0") is False
+            assert is_newer_version("1.1.0", "1.1.0") is False
 
 
 # =============================================================================

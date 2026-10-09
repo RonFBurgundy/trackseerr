@@ -83,15 +83,25 @@ def is_newer_version(remote_version: str, current_version: str) -> bool:
     if pkg_version is not None:
         try:
             return pkg_version.parse(rem) > pkg_version.parse(cur)
-        except Exception:
-            # Fall back to heuristic parse if packaging raises InvalidVersion
-            pass
+        except pkg_version.InvalidVersion as exc:
+            logger.debug(
+                "packaging.version failed to parse version strings (remote=%s, current=%s): %s",
+                remote_version,
+                current_version,
+                exc,
+            )
 
     try:
         rem_tuple = _fallback_parse_tuple(rem)
         cur_tuple = _fallback_parse_tuple(cur)
         return rem_tuple > cur_tuple
-    except Exception:
+    except (ValueError, TypeError) as exc:
+        logger.warning(
+            "Fallback version parsing failed (remote=%s, current=%s): %s",
+            remote_version,
+            current_version,
+            exc,
+        )
         return False
 
 
