@@ -573,6 +573,319 @@ def _link_mb_release_groups(st: _RefreshState) -> None:
                 _update_album_from_release_group(st.db, existing_alb, rg, rg_id)
 
 
+def _resolve_deezer_artist(st: _RefreshState) -> None:
+    """Resolve Deezer artist ID and artwork URLs via discovery search."""
+    try:
+        d_art = st.discovery_client.search_artist(st.artist_name)
+        if not isinstance(d_art, dict):
+            d_art = None
+        if not d_art:
+            search_results = st.discovery_client.search(st.artist_name, item_type="all", limit=5)
+            if isinstance(search_results, list):
+                for item in search_results:
+                    if isinstance(item, dict):
+                        item_art = (item.get("artist") or "").lower().strip()
+                        if item.get("item_type") == "artist" or item_art == st.artist_name.lower():
+                            item_id = item.get("id")
+                            if item_id and isinstance(item_id, (str, int)):
+                                d_art = {
+                                    "id": str(item_id),
+                                    "name": str(item.get("artist") or item.get("title") or ""),
+                                    "image_url": str(item.get("cover_url")) if item.get("cover_url") else None,
+                                }
+                                break
+        if isinstance(d_art, dict) and d_art.get("id") and isinstance(d_art["id"], (str, int)):
+            st.foreign_artist_id = str(d_art["id"])
+            st.artist["foreign_artist_id"] = st.foreign_artist_id
+            art_upd = ["foreign_artist_id = ?"]
+            art_params: list[Any] = [st.foreign_artist_id]
+            if d_art.get("image_url") and not st.artist.get("image_url") and isinstance(d_art["image_url"], str):
+                art_upd.append("image_url = ?")
+                art_params.append(d_art["image_url"])
+                st.artist["image_url"] = d_art["image_url"]
+            if d_art.get("banner_url") and not st.artist.get("banner_url") and isinstance(d_art["banner_url"], str):
+                art_upd.append("banner_url = ?")
+                art_params.append(d_art["banner_url"])
+                st.artist["banner_url"] = d_art["banner_url"]
+            art_upd.append("updated_at = CURRENT_TIMESTAMP")
+            art_params.append(st.artist_id)
+            with st.db._lock:
+                st.db.conn.execute(
+                    f"UPDATE library_artists SET {', '.join(art_upd)} WHERE id = ?",
+                    art_params,
+                )
+                st.db.conn.commit()
+    except Exception as exc:
+        logger.warning("Error resolving Deezer artist ID for '%s': %s", st.artist_name, exc)
+
+
+def _apply_deezer_artist_art(st: _RefreshState, artist_details: dict[str, Any]) -> None:
+    """Update artist image and banner URLs from Deezer artist details if missing."""
+    d_img = (
+        artist_details.get("image_url")
+        or artist_details.get("picture_xl")
+        or artist_details.get("picture_big")
+    )
+    d_banner = (
+        artist_details.get("banner_url")
+        or artist_details.get("picture_xl")
+    )
+    art_upd = []
+    art_params: list[Any] = []
+    if d_img and not st.artist.get("image_url"):
+        art_upd.append("image_url = ?")
+        art_params.append(d_img)
+        st.artist["image_url"] = d_img
+    if d_banner and not st.artist.get("banner_url"):
+        art_upd.append("banner_url = ?")
+        art_params.append(d_banner)
+        st.artist["banner_url"] = d_banner
+    if art_upd:
+        art_upd.append("updated_at = CURRENT_TIMESTAMP")
+        art_params.append(st.artist_id)
+        with st.db._lock:
+            st.db.conn.execute(
+                f"UPDATE library_artists SET {', '.join(art_upd)} WHERE id = ?",
+                art_params,
+            )
+            st.db.conn.commit()
+
+
+def _upsert_deezer_album(
+    st: _RefreshState,
+    section_name: str,
+    album: dict[str, Any],
+    seen_album_ids: set[Any],
+) -> Optional[tuple[str, bool, Optional[dict[str, Any]]]]:
+    """Find or create a library album for a Deezer release."""
+    foreign_album_id = album.get("id")
+    if foreign_album_id and foreign_album_id in seen_album_ids:
+        return None
+    if foreign_album_id:
+        seen_album_ids.add(foreign_album_id)
+
+    album_title = album.get("title") or "Unknown Album"
+    existing_alb = None
+    if foreign_album_id:
+        existing_alb = st.db.get_library_album_by_foreign_id(foreign_album_id)
+    if not existing_alb:
+        existing_alb = st.db.get_library_album_by_title(st.artist_id, album_title)
+
+    year_val: Optional[int] = None
+    if album.get("year") is not None:
+        try:
+            year_val = int(album["year"])
+        except (ValueError, TypeError):
+            pass
+    if year_val is None and album.get("release_date"):
+        rdate = str(album["release_date"]).strip()
+        if len(rdate) >= 4 and rdate[:4].isdigit():
+            year_val = int(rdate[:4])
+
+    album_type = album.get("record_type") or (
+        "single" if section_name == "singles_eps" else ("compilation" if section_name == "compilations" else "album")
+    )
+    artist_path = st.artist.get("path")
+
+    if existing_alb:
+        album_id = existing_alb["id"]
+        alb_monitored = bool(existing_alb["monitored"])
+        alb_path = existing_alb.get("path") or (str(Path(artist_path) / album_title) if artist_path else None)
+    else:
+        album_id = str(uuid.uuid4())
+        alb_monitored = album_monitored_for_option(
+            st.artist.get("monitor_option", "all"),
+            artist_monitored=bool(st.artist.get("monitored", True)),
+            album_type=section_to_album_type(section_name),
+            has_files=False,
+            release_date=album.get("release_date"),
+            year=year_val,
+            artist_added_at=st.artist.get("created_at"),
+            profile=st.metadata_profile,
+        )
+        alb_path = str(Path(artist_path) / album_title) if artist_path else None
+
+    st.db.upsert_library_album(
+        LibraryAlbum(
+            id=album_id,
+            artist_id=st.artist_id,
+            title=album_title,
+            clean_title=clean_library_name(album_title),
+            foreign_album_id=foreign_album_id,
+            release_date=album.get("release_date") or (existing_alb.get("release_date") if existing_alb else None),
+            year=year_val or (existing_alb.get("year") if existing_alb else None),
+            album_type=album_type,
+            monitored=alb_monitored,
+            path=alb_path,
+            cover_url=(existing_alb.get("cover_url") if existing_alb else None) or album.get("cover_url"),
+            mb_release_group_id=existing_alb.get("mb_release_group_id") if existing_alb else None,
+            mb_release_id=existing_alb.get("mb_release_id") if existing_alb else None,
+            total_tracks=_positive_int(album.get("track_count")),
+        )
+    )
+    return album_id, alb_monitored, existing_alb
+
+
+def _hydrate_deezer_album_tracks(
+    st: _RefreshState, foreign_album_id: Any, album_id: str
+) -> None:
+    """Hydrate canonical tracks for a monitored Deezer album."""
+    album_details = None
+    try:
+        album_details = st.discovery_client.get_album_details(foreign_album_id, force=st.force)
+    except Exception as exc:
+        logger.warning(
+            "Discovery client get_album_details failed during refresh for %s: %s",
+            foreign_album_id,
+            exc,
+        )
+
+    if album_details:
+        _store_total_tracks(st.db, album_id, album_details.get("track_count"))
+    if album_details and isinstance(album_details.get("tracks"), list):
+        monitor_opt = st.artist.get("monitor_option", "all")
+        with album_hydration_lock(album_id):
+            for trk in album_details["tracks"]:
+                foreign_track_id = trk.get("id")
+                existing_trk = None
+                if foreign_track_id:
+                    existing_trk = st.db.get_library_track_by_foreign_id(
+                        foreign_track_id, album_id=album_id
+                    )
+                if not existing_trk:
+                    existing_trk = st.db.get_library_track_by_title(
+                        album_id,
+                        trk.get("title", ""),
+                        track_number=trk.get("track_number"),
+                    )
+
+                if existing_trk:
+                    track_id = existing_trk["id"]
+                    trk_monitored = bool(existing_trk["monitored"])
+                else:
+                    track_id = str(uuid.uuid4())
+                    trk_monitored = hydrated_track_monitored(monitor_opt)
+
+                trk_title = trk.get("title") or "Unknown Track"
+                trk_num = int(trk.get("track_number") or 1)
+                disc_num = int(trk.get("disc_number") or 1)
+                dur = (
+                    float(trk["duration_seconds"])
+                    if trk.get("duration_seconds") is not None
+                    else None
+                )
+
+                st.db.upsert_library_track(
+                    LibraryTrack(
+                        id=track_id,
+                        album_id=album_id,
+                        artist_id=st.artist_id,
+                        title=trk_title,
+                        clean_title=clean_library_name(trk_title),
+                        track_number=trk_num,
+                        disc_number=disc_num,
+                        duration_seconds=dur,
+                        monitored=trk_monitored,
+                        foreign_track_id=foreign_track_id,
+                    )
+                )
+
+
+def _sync_deezer_discography(st: _RefreshState) -> None:
+    """Fetch Deezer discography and upsert albums, cover art, and tracks."""
+    try:
+        artist_details = st.discovery_client.get_artist_details(st.foreign_artist_id, force=st.force)
+        if artist_details:
+            _apply_deezer_artist_art(st, artist_details)
+
+            sections = [
+                ("albums", artist_details.get("albums") or []),
+                ("singles_eps", artist_details.get("singles_eps") or []),
+                ("compilations", artist_details.get("compilations") or []),
+            ]
+            seen_album_ids: set[Any] = set()
+
+            for section_name, album_list in sections:
+                for album in album_list:
+                    upsert_res = _upsert_deezer_album(st, section_name, album, seen_album_ids)
+                    if not upsert_res:
+                        continue
+                    album_id, alb_monitored, existing_alb = upsert_res
+
+                    # Cache album cover
+                    cov = album.get("cover_url") or (existing_alb.get("cover_url") if existing_alb else None)
+                    if cov:
+                        try:
+                            mediacover_service.ensure_artwork("album_cover", album_id, cov)
+                        except Exception as exc:
+                            logger.debug("Error caching cover for album %s: %s", album_id, exc)
+
+                    foreign_album_id = album.get("id")
+                    if alb_monitored and foreign_album_id:
+                        _hydrate_deezer_album_tracks(st, foreign_album_id, album_id)
+    except Exception as exc:
+        logger.warning(
+            "Discovery client get_artist_details failed for refresh of %s: %s",
+            st.foreign_artist_id,
+            exc,
+        )
+
+
+def _cache_artist_artwork(st: _RefreshState) -> None:
+    """Ensure artist poster and banner artwork are cached via mediacover."""
+    if st.artist.get("image_url"):
+        try:
+            mediacover_service.ensure_artwork("artist_poster", st.artist_id, st.artist["image_url"])
+        except Exception as exc:
+            logger.debug("Error caching artist %s for %s: %s", "poster", st.artist_id, exc)
+    if st.artist.get("banner_url"):
+        try:
+            mediacover_service.ensure_artwork("artist_banner", st.artist_id, st.artist["banner_url"])
+        except Exception as exc:
+            logger.debug("Error caching artist %s for %s: %s", "banner", st.artist_id, exc)
+
+
+def _refresh_result(
+    st: _RefreshState,
+    enricher_stats_before: dict[str, Any],
+    discovery_stats_before: dict[str, Any],
+) -> dict[str, Any]:
+    """Compute stats deltas and return the refresh result dictionary."""
+    enricher_stats_after = st.enricher.stats()
+    discovery_stats_after = st.discovery_client.stats()
+
+    net_reqs = enricher_stats_after.get("network_requests", 0) - enricher_stats_before.get("network_requests", 0)
+    c_hits = enricher_stats_after.get("cache_hits", 0) - enricher_stats_before.get("cache_hits", 0)
+    dz_reqs = discovery_stats_after.get("network_requests", 0) - discovery_stats_before.get("network_requests", 0)
+    dz_hits = discovery_stats_after.get("cache_hits", 0) - discovery_stats_before.get("cache_hits", 0)
+
+    if not st.foreign_artist_id and not st.mbid:
+        res_dict: dict[str, Any] = {
+            "success": False,
+            "message": "Artist has no linked discovery foreign ID or MusicBrainz ID",
+            "network_requests": net_reqs,
+            "cache_hits": c_hits,
+            "deezer_requests": dz_reqs,
+            "deezer_cache_hits": dz_hits,
+        }
+        if st.source_unavailable:
+            res_dict["source_unavailable"] = True
+        return res_dict
+
+    res_dict = {
+        "success": True,
+        "artist_id": st.artist_id,
+        "refreshed_at": datetime.now().isoformat(),
+        "network_requests": net_reqs,
+        "cache_hits": c_hits,
+        "deezer_requests": dz_reqs,
+        "deezer_cache_hits": dz_hits,
+    }
+    if st.source_unavailable:
+        res_dict["source_unavailable"] = True
+    return res_dict
+
+
 def refresh_single_artist(
     artist_id: str,
     db: Database,
@@ -588,8 +901,6 @@ def refresh_single_artist(
 
     enricher_stats_before = enricher.stats()
     discovery_stats_before = discovery_client.stats()
-    source_unavailable = False
-    discography_fetched = False
 
     artist = db.get_library_artist(artist_id)
     if artist is None:
@@ -599,13 +910,9 @@ def refresh_single_artist(
     if is_system_folder_name(artist_name):
         logger.info("Skipping metadata refresh for artist %r (%s): name is an OS/NAS system or trash folder", artist_name, artist_id)
         return {"success": False, "message": "Artist is a system folder; skipped", "artist_id": artist_id}
-    foreign_artist_id = artist.get("foreign_artist_id")
+
     # Optional metadata profile: shapes only the monitored flag of albums created by this refresh.
     metadata_profile = db.get_metadata_profile(artist["metadata_profile_id"]) if artist.get("metadata_profile_id") else None
-
-    # Check circuit breaker before MusicBrainz operations
-    source_unavailable = not enricher.source_available()
-
     st = _RefreshState(
         artist_id=artist_id,
         db=db,
@@ -615,9 +922,9 @@ def refresh_single_artist(
         artist=artist,
         artist_name=artist_name,
         metadata_profile=metadata_profile,
-        foreign_artist_id=foreign_artist_id,
+        foreign_artist_id=artist.get("foreign_artist_id"),
         mbid=artist.get("mbid"),
-        source_unavailable=source_unavailable,
+        source_unavailable=not enricher.source_available(),
     )
 
     # 1. Enrich with MusicBrainz metadata and discography
@@ -639,248 +946,10 @@ def refresh_single_artist(
     # 2. Retrieve discography and artwork from Deezer only if MusicBrainz discography was not found
     if not st.mb_discography_found:
         if not st.foreign_artist_id and st.artist_name:
-            try:
-                d_art = discovery_client.search_artist(st.artist_name)
-                if not isinstance(d_art, dict):
-                    d_art = None
-                if not d_art:
-                    search_results = discovery_client.search(st.artist_name, item_type="all", limit=5)
-                    if isinstance(search_results, list):
-                        for item in search_results:
-                            if isinstance(item, dict):
-                                item_art = (item.get("artist") or "").lower().strip()
-                                if item.get("item_type") == "artist" or item_art == st.artist_name.lower():
-                                    item_id = item.get("id")
-                                    if item_id and isinstance(item_id, (str, int)):
-                                        d_art = {
-                                            "id": str(item_id),
-                                            "name": str(item.get("artist") or item.get("title") or ""),
-                                            "image_url": str(item.get("cover_url")) if item.get("cover_url") else None,
-                                        }
-                                        break
-                if isinstance(d_art, dict) and d_art.get("id") and isinstance(d_art["id"], (str, int)):
-                    st.foreign_artist_id = str(d_art["id"])
-                    st.artist["foreign_artist_id"] = st.foreign_artist_id
-                    art_upd = ["foreign_artist_id = ?"]
-                    art_params = [st.foreign_artist_id]
-                    if d_art.get("image_url") and not st.artist.get("image_url") and isinstance(d_art["image_url"], str):
-                        art_upd.append("image_url = ?")
-                        art_params.append(d_art["image_url"])
-                        st.artist["image_url"] = d_art["image_url"]
-                    if d_art.get("banner_url") and not st.artist.get("banner_url") and isinstance(d_art["banner_url"], str):
-                        art_upd.append("banner_url = ?")
-                        art_params.append(d_art["banner_url"])
-                        st.artist["banner_url"] = d_art["banner_url"]
-                    art_upd.append("updated_at = CURRENT_TIMESTAMP")
-                    art_params.append(artist_id)
-                    with db._lock:
-                        db.conn.execute(
-                            f"UPDATE library_artists SET {', '.join(art_upd)} WHERE id = ?",
-                            art_params,
-                        )
-                        db.conn.commit()
-            except Exception as exc:
-                logger.warning("Error resolving Deezer artist ID for '%s': %s", st.artist_name, exc)
+            _resolve_deezer_artist(st)
 
         if st.foreign_artist_id:
-            try:
-                artist_details = discovery_client.get_artist_details(st.foreign_artist_id, force=force)
-                if artist_details:
-                    d_img = (
-                        artist_details.get("image_url")
-                        or artist_details.get("picture_xl")
-                        or artist_details.get("picture_big")
-                    )
-                    d_banner = (
-                        artist_details.get("banner_url")
-                        or artist_details.get("picture_xl")
-                    )
-                    art_upd = []
-                    art_params = []
-                    if d_img and not st.artist.get("image_url"):
-                        art_upd.append("image_url = ?")
-                        art_params.append(d_img)
-                        st.artist["image_url"] = d_img
-                    if d_banner and not st.artist.get("banner_url"):
-                        art_upd.append("banner_url = ?")
-                        art_params.append(d_banner)
-                        st.artist["banner_url"] = d_banner
-                    if art_upd:
-                        art_upd.append("updated_at = CURRENT_TIMESTAMP")
-                        art_params.append(artist_id)
-                        with db._lock:
-                            db.conn.execute(
-                                f"UPDATE library_artists SET {', '.join(art_upd)} WHERE id = ?",
-                                art_params,
-                            )
-                            db.conn.commit()
-
-                    sections = [
-                        ("albums", artist_details.get("albums") or []),
-                        ("singles_eps", artist_details.get("singles_eps") or []),
-                        ("compilations", artist_details.get("compilations") or []),
-                    ]
-                    artist_path = st.artist.get("path")
-                    seen_album_ids: set[str] = set()
-
-                    for section_name, album_list in sections:
-                        for album in album_list:
-                            foreign_album_id = album.get("id")
-                            if foreign_album_id and foreign_album_id in seen_album_ids:
-                                continue
-                            if foreign_album_id:
-                                seen_album_ids.add(foreign_album_id)
-
-                            album_title = album.get("title") or "Unknown Album"
-                            existing_alb = None
-                            if foreign_album_id:
-                                existing_alb = db.get_library_album_by_foreign_id(foreign_album_id)
-                            if not existing_alb:
-                                existing_alb = db.get_library_album_by_title(artist_id, album_title)
-
-                            year_val: Optional[int] = None
-                            if album.get("year") is not None:
-                                try:
-                                    year_val = int(album["year"])
-                                except (ValueError, TypeError):
-                                    pass
-                            if year_val is None and album.get("release_date"):
-                                rdate = str(album["release_date"]).strip()
-                                if len(rdate) >= 4 and rdate[:4].isdigit():
-                                    year_val = int(rdate[:4])
-
-                            album_type = album.get("record_type") or (
-                                "single" if section_name == "singles_eps" else (
-                                    "compilation" if section_name == "compilations" else "album"
-                                )
-                            )
-
-                            if existing_alb:
-                                album_id = existing_alb["id"]
-                                alb_monitored = bool(existing_alb["monitored"])
-                                alb_path = existing_alb.get("path") or (
-                                    str(Path(artist_path) / album_title) if artist_path else None
-                                )
-                                upd_cov = existing_alb.get("cover_url") or album.get("cover_url")
-                                db.upsert_library_album(
-                                    LibraryAlbum(
-                                        id=album_id,
-                                        artist_id=artist_id,
-                                        title=album_title,
-                                        clean_title=clean_library_name(album_title),
-                                        foreign_album_id=foreign_album_id,
-                                        release_date=album.get("release_date") or existing_alb.get("release_date"),
-                                        year=year_val or existing_alb.get("year"),
-                                        album_type=album_type,
-                                        monitored=alb_monitored,
-                                        path=alb_path,
-                                        cover_url=upd_cov,
-                                        mb_release_group_id=existing_alb.get("mb_release_group_id"),
-                                        mb_release_id=existing_alb.get("mb_release_id"),
-                                        total_tracks=_positive_int(album.get("track_count")),
-                                    )
-                                )
-                            else:
-                                album_id = str(uuid.uuid4())
-                                monitor_opt = st.artist.get("monitor_option", "all")
-                                alb_monitored = album_monitored_for_option(
-                                    monitor_opt,
-                                    artist_monitored=bool(st.artist.get("monitored", True)),
-                                    album_type=section_to_album_type(section_name),
-                                    has_files=False,
-                                    release_date=album.get("release_date"),
-                                    year=year_val,
-                                    artist_added_at=st.artist.get("created_at"),
-                                    profile=st.metadata_profile,
-                                )
-
-                                alb_path = str(Path(artist_path) / album_title) if artist_path else None
-                                db.upsert_library_album(
-                                    LibraryAlbum(
-                                        id=album_id,
-                                        artist_id=artist_id,
-                                        title=album_title,
-                                        clean_title=clean_library_name(album_title),
-                                        foreign_album_id=foreign_album_id,
-                                        release_date=album.get("release_date"),
-                                        year=year_val,
-                                        album_type=album_type,
-                                        monitored=alb_monitored,
-                                        path=alb_path,
-                                        cover_url=album.get("cover_url"),
-                                        total_tracks=_positive_int(album.get("track_count")),
-                                    )
-                                )
-
-                            # Cache album cover
-                            cov = album.get("cover_url") or (existing_alb.get("cover_url") if existing_alb else None)
-                            if cov:
-                                try:
-                                    mediacover_service.ensure_artwork("album_cover", album_id, cov)
-                                except Exception:
-                                    pass
-
-                            if alb_monitored and foreign_album_id:
-                                album_details = None
-                                try:
-                                    album_details = discovery_client.get_album_details(foreign_album_id, force=force)
-                                except Exception as exc:
-                                    logger.warning(
-                                        "Discovery client get_album_details failed during refresh for %s: %s",
-                                        foreign_album_id,
-                                        exc,
-                                    )
-
-                                if album_details:
-                                    _store_total_tracks(db, album_id, album_details.get("track_count"))
-                                if album_details and isinstance(album_details.get("tracks"), list):
-                                    with album_hydration_lock(album_id):
-                                        for trk in album_details["tracks"]:
-                                            foreign_track_id = trk.get("id")
-                                            existing_trk = None
-                                            if foreign_track_id:
-                                                existing_trk = db.get_library_track_by_foreign_id(
-                                                    foreign_track_id, album_id=album_id
-                                                )
-                                            if not existing_trk:
-                                                existing_trk = db.get_library_track_by_title(
-                                                    album_id,
-                                                    trk.get("title", ""),
-                                                    track_number=trk.get("track_number"),
-                                                )
-
-                                            if existing_trk:
-                                                track_id = existing_trk["id"]
-                                                trk_monitored = bool(existing_trk["monitored"])
-                                            else:
-                                                track_id = str(uuid.uuid4())
-                                                trk_monitored = hydrated_track_monitored(st.artist.get("monitor_option", "all"))
-
-                                            trk_title = trk.get("title") or "Unknown Track"
-                                            trk_num = int(trk.get("track_number") or 1)
-                                            disc_num = int(trk.get("disc_number") or 1)
-                                            dur = (
-                                                float(trk["duration_seconds"])
-                                                if trk.get("duration_seconds") is not None
-                                                else None
-                                            )
-
-                                            db.upsert_library_track(
-                                                LibraryTrack(
-                                                    id=track_id,
-                                                    album_id=album_id,
-                                                    artist_id=artist_id,
-                                                    title=trk_title,
-                                                    clean_title=clean_library_name(trk_title),
-                                                    track_number=trk_num,
-                                                    disc_number=disc_num,
-                                                    duration_seconds=dur,
-                                                    monitored=trk_monitored,
-                                                    foreign_track_id=foreign_track_id,
-                                                )
-                                            )
-            except Exception as exc:
-                logger.warning("Discovery client get_artist_details failed for refresh of %s: %s", st.foreign_artist_id, exc)
+            _sync_deezer_discography(st)
 
         # 3. Post-Deezer MusicBrainz metadata enrichment (bio, country, genres, and album release groups)
         if not st.source_unavailable and not st.mbid and st.artist_name:
@@ -897,17 +966,7 @@ def refresh_single_artist(
                 st.db.finish_pending_profile_recompute(st.artist_id)
 
     # Cache artist poster & banner
-    if st.artist.get("image_url"):
-        try:
-            mediacover_service.ensure_artwork("artist_poster", artist_id, st.artist["image_url"])
-        except Exception:
-            pass
-    if st.artist.get("banner_url"):
-        try:
-            mediacover_service.ensure_artwork("artist_banner", artist_id, st.artist["banner_url"])
-        except Exception:
-            pass
-
+    _cache_artist_artwork(st)
     art_pipeline.schedule_precache(db, artist_id)
 
     # Reconcile files
@@ -916,36 +975,4 @@ def refresh_single_artist(
     except Exception as r_err:
         logger.warning("Error running file reconciliation for artist %s: %s", artist_id, r_err)
 
-    enricher_stats_after = enricher.stats()
-    discovery_stats_after = discovery_client.stats()
-
-    net_reqs = enricher_stats_after.get("network_requests", 0) - enricher_stats_before.get("network_requests", 0)
-    c_hits = enricher_stats_after.get("cache_hits", 0) - enricher_stats_before.get("cache_hits", 0)
-    dz_reqs = discovery_stats_after.get("network_requests", 0) - discovery_stats_before.get("network_requests", 0)
-    dz_hits = discovery_stats_after.get("cache_hits", 0) - discovery_stats_before.get("cache_hits", 0)
-
-    if not st.foreign_artist_id and not st.mbid:
-        res_dict = {
-            "success": False,
-            "message": "Artist has no linked discovery foreign ID or MusicBrainz ID",
-            "network_requests": net_reqs,
-            "cache_hits": c_hits,
-            "deezer_requests": dz_reqs,
-            "deezer_cache_hits": dz_hits,
-        }
-        if st.source_unavailable:
-            res_dict["source_unavailable"] = True
-        return res_dict
-
-    res_dict = {
-        "success": True,
-        "artist_id": artist_id,
-        "refreshed_at": datetime.now().isoformat(),
-        "network_requests": net_reqs,
-        "cache_hits": c_hits,
-        "deezer_requests": dz_reqs,
-        "deezer_cache_hits": dz_hits,
-    }
-    if st.source_unavailable:
-        res_dict["source_unavailable"] = True
-    return res_dict
+    return _refresh_result(st, enricher_stats_before, discovery_stats_before)
