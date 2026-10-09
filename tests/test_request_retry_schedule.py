@@ -116,21 +116,6 @@ class TestSchedule:
         req = db.get_request("req-1")
         assert (req["status_reason"], attempts(db), req["next_attempt_at"]) == (None, 0, None)
 
-    def test_migration_v66_on_an_existing_db(self, tmp_path):
-        path = tmp_path / "old.db"
-        d = Database(path)
-        d.conn.execute("DELETE FROM schema_migrations WHERE version >= ?", (66,))
-        d.conn.execute("ALTER TABLE music_requests DROP COLUMN next_attempt_at")
-        d.conn.execute("ALTER TABLE music_requests DROP COLUMN retry_attempts")
-        d.conn.commit()
-        d.close()
-        d = Database(path)
-        cols = {r[1] for r in d.conn.execute("PRAGMA table_info(music_requests)")}
-        assert {"retry_attempts", "next_attempt_at"} <= cols
-        assert SCHEMA_VERSION >= 66
-        assert d.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
-        d.close()
-
 
 class TestSweep:
     def stuck_fake(self):

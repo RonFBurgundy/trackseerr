@@ -1,6 +1,7 @@
 """Tests for SQLite persistence engine: migrations, CRUD operations, foreign key cascades, and targeting."""
 
 from datetime import datetime, timezone
+from pathlib import Path
 import sqlite3
 from unittest.mock import patch
 import pytest
@@ -14,7 +15,7 @@ from trackseerr.models import (
     Playlist,
     Track,
 )
-from trackseerr.storage import Database
+from trackseerr.storage import SCHEMA_VERSION, Database
 
 
 @pytest.fixture
@@ -633,3 +634,53 @@ def test_ensure_connection_is_single_under_concurrent_access_after_close(tmp_pat
     assert len(opened) == 1
     assert len({id(c) for c in seen}) == 1
     db.close()
+
+
+def test_pre_baseline_database_is_refused(tmp_path: Path) -> None:
+    db_file = tmp_path / "old.sqlite"
+    conn = sqlite3.connect(str(db_file))
+    conn.execute(
+        "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP))"
+    )
+    conn.execute("INSERT INTO schema_migrations (version) VALUES (40)")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(RuntimeError, match="predates the v71 baseline"):
+        Database(db_file)
+
+
+def test_fresh_database_records_baseline_version(tmp_path: Path) -> None:
+    db = Database(tmp_path / "fresh.sqlite")
+    try:
+        cur = db.conn.execute("SELECT version FROM schema_migrations")
+        assert [tuple(row) for row in cur.fetchall()] == [(71,)]
+    finally:
+        db.close()
+
+
+def test_fresh_database_seeds_quality_reference_data(tmp_path):
+    assert SCHEMA_VERSION >= 52
+    db = Database(str(tmp_path / "fresh.db"))
+    try:
+        assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
+        defs = {d["quality"]: d for d in db.list_quality_definitions()}
+        assert (defs["FLAC 24bit"]["min_kbps"], defs["FLAC 24bit"]["preferred_kbps"], defs["FLAC 24bit"]["max_kbps"]) == (0, 2000, 9500)
+        assert (defs["MP3 320"]["min_kbps"], defs["MP3 320"]["preferred_kbps"], defs["MP3 320"]["max_kbps"]) == (290, 320, 400)
+        assert (defs["MP3 V2"]["min_kbps"], defs["MP3 V2"]["max_kbps"]) == (130, 280)
+        names = {f["name"] for f in db.list_custom_formats()}
+        assert {"Preferred Groups", "CD", "Lossless", "Hi-Res 24bit", "WEB", "Vinyl", "Mono",
+                "Censored/Clean", "Remastered", "Deluxe"} <= names
+        groups = db.get_custom_format_by_name("Preferred Groups")
+        assert len(groups["specifications"]) == 7
+        rp = next(r for r in db.list_release_profiles() if r["name"] == "Reject bad sources")
+        assert rp["enabled"] and len(rp["ignored"]) == 5 and rp["required"] == []
+        # seeded default scores on the stock profiles
+        prof = db.get_quality_profile("profile-lossless")
+        scores = {fi["format_id"]: fi["score"] for fi in prof["format_items"]}
+        assert scores[groups["id"]] == 100
+        assert scores[db.get_custom_format_by_name("Vinyl")["id"]] == -50
+        assert prof["min_upgrade_format_score"] == 1
+    finally:
+        db.close()
+

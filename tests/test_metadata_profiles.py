@@ -592,59 +592,6 @@ def test_future_option_works_off_refresh_release_date(test_db: Database):
 
 # ------------------------------------------------------------------ v48 rename migration + deprecated aliases
 
-def _downgrade_to_v47(db: Database) -> None:
-    """Puts an upgraded DB back into its v47 shape (old table/column names, v48 not recorded)."""
-    db.conn.execute("ALTER TABLE native_metadata_profiles RENAME TO native_release_profiles")
-    db.conn.execute("ALTER TABLE library_artists RENAME COLUMN metadata_profile_id TO release_profile_id")
-    db.conn.execute(
-        "ALTER TABLE media_management_settings RENAME COLUMN add_metadata_profile_id TO add_release_profile_id"
-    )
-    db.conn.execute("DELETE FROM schema_migrations WHERE version >= 48")
-    db.conn.commit()
-
-
-def test_v48_renames_release_profiles_preserving_data(tmp_path: Path):
-    path = tmp_path / "v47.db"
-    db = Database(path)
-    custom = db.create_metadata_profile("Custom", ["album", "ep"], ["studio", "live"])
-    seeded = _profile_id(db, "Studio Albums")
-    _artist(db, "a1", profile=custom["id"])
-    _artist(db, "a2", profile=seeded)
-    _artist(db, "a3", profile=None)
-    db.update_media_management_settings({"add_metadata_profile_id": custom["id"]})
-    _downgrade_to_v47(db)
-    old_tables = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert "native_release_profiles" in old_tables and "native_metadata_profiles" not in old_tables
-    db.close()
-
-    up = Database(path)
-    assert up.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION >= 48
-    tables = {r[0] for r in up.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert "native_metadata_profiles" in tables and "native_release_profiles" not in tables
-    artist_cols = {r[1] for r in up.conn.execute("PRAGMA table_info(library_artists)")}
-    assert "metadata_profile_id" in artist_cols and "release_profile_id" not in artist_cols
-    mm_cols = {r[1] for r in up.conn.execute("PRAGMA table_info(media_management_settings)")}
-    assert "add_metadata_profile_id" in mm_cols and "add_release_profile_id" not in mm_cols
-
-    profiles = {p["name"]: p for p in up.list_metadata_profiles()}
-    assert set(profiles) >= {"Custom", "Studio Albums", "Everything"}
-    assert profiles["Custom"]["id"] == custom["id"]
-    assert profiles["Custom"]["primary_types"] == ["album", "ep"]
-    assert profiles["Custom"]["secondary_types"] == ["studio", "live"]
-    assert profiles["Custom"]["artist_count"] == 1 and profiles["Studio Albums"]["artist_count"] == 1
-    assert up.get_library_artist("a1")["metadata_profile_id"] == custom["id"]
-    assert up.get_library_artist("a2")["metadata_profile_id"] == seeded
-    assert up.get_library_artist("a3")["metadata_profile_id"] is None
-    assert up.get_media_management_settings()["add_metadata_profile_id"] == custom["id"]
-
-    # The FK reference was rewritten with the table: it resolves, and ON DELETE SET NULL still fires.
-    fks = [r for r in up.conn.execute("PRAGMA foreign_key_list(library_artists)") if r[3] == "metadata_profile_id"]
-    assert [r[2] for r in fks] == ["native_metadata_profiles"] and fks[0][6] == "SET NULL"
-    assert up.conn.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert up.delete_metadata_profile(custom["id"]) == 1
-    assert up.get_library_artist("a1")["metadata_profile_id"] is None
-    assert up.get_media_management_settings()["add_metadata_profile_id"] is None
-    up.close()
 
 
 def test_deprecated_release_profile_request_aliases(app_and_client, test_db, test_config, seeded_users):

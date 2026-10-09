@@ -176,49 +176,6 @@ class TestMigrationAndSeed:
         assert all("dl-live" not in r["id"] for r in rows)
         assert [r["message"] for r in rows if r["event"] == "failed"] == ["nope"]
 
-    def test_migration_backfills_progress_clock_only_where_null_and_non_terminal(self, tmp_path):
-        path = tmp_path / "stall.db"
-        db = Database(str(path))
-        for did in ("dl-live", "dl-kept", "dl-done"):
-            _dl(db, did, status="downloading")
-        db.conn.execute("UPDATE active_downloads SET status='imported' WHERE id='dl-done'")
-        db.conn.execute("UPDATE active_downloads SET progress_updated_at = NULL")
-        db.conn.execute("UPDATE active_downloads SET progress_updated_at = '2020-01-01 00:00:00' WHERE id='dl-kept'")
-        db.conn.execute("UPDATE active_downloads SET created_at = '2020-01-01 00:00:00'")
-        db.conn.execute("DELETE FROM schema_migrations WHERE version >= 33")
-        db.conn.commit()
-        db.close()
-        db = Database(str(path))
-        try:
-            clocks = {r["id"]: r["progress_updated_at"] for r in db.conn.execute("SELECT id, progress_updated_at FROM active_downloads")}
-            assert clocks["dl-live"] and clocks["dl-live"] >= "2026"  # started now, not at the 2020 created_at
-            assert clocks["dl-kept"] == "2020-01-01 00:00:00"  # an existing clock is never reset
-            assert clocks["dl-done"] is None  # terminal rows are left alone
-            row = db.get_native_queue_item("dl-live")
-            assert activity_service.native_queue_record(row, datetime.now(timezone.utc))["stalled"] is False
-        finally:
-            db.close()
-
-    def test_migration_seeds_existing_database(self, tmp_path):
-        path = tmp_path / "old.db"
-        db = Database(str(path))
-        _dl(db, "dl-old", status="downloading")
-        db.conn.execute("UPDATE active_downloads SET status='imported' WHERE id='dl-old'")
-        db.conn.execute("DELETE FROM download_history")
-        db.conn.execute("DELETE FROM schema_migrations WHERE version >= 33")
-        db.conn.execute("DROP TABLE download_history")
-        db.conn.commit()
-        db.close()
-        db = Database(str(path))  # re-applies v33 over the already-altered columns
-        try:
-            assert db.conn.execute("SELECT COUNT(*) FROM download_history").fetchone()[0] == 2
-        finally:
-            db.close()
-        db = Database(str(path))  # and a plain reopen adds nothing
-        try:
-            assert db.conn.execute("SELECT COUNT(*) FROM download_history").fetchone()[0] == 2
-        finally:
-            db.close()
 
 
 # ----------------------------------------------------------------------------------------------- native: queue

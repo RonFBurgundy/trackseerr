@@ -300,36 +300,6 @@ def test_clean_library_name_treats_underscore_as_whitespace():
     assert clean_library_name("snake_case") == "snake case"
 
 
-def test_migration_v39_recomputes_underscore_keys_and_is_idempotent(tmp_path):
-    path = str(tmp_path / "m39.db")
-    database = Database(path)
-    database.upsert_library_artist(LibraryArtist(id="ar", name="Daft Punk; Pharrell Williams", monitored=True))
-    database.upsert_library_album(LibraryAlbum(id="al", artist_id="ar", title="Get_Lucky", monitored=True))
-    database.upsert_library_track(LibraryTrack(id="t", album_id="al", artist_id="ar", title="Get_Lucky"))
-    # Simulate rows written before the fix: stale underscore keys and a v38 schema.
-    database.conn.execute("UPDATE library_artists SET clean_name = 'daft punk_ pharrell williams'")
-    database.conn.execute("UPDATE library_albums SET clean_title = 'get_lucky', search_clean = 'get_lucky'")
-    database.conn.execute("UPDATE library_tracks SET clean_title = 'get_lucky', search_clean = 'get_lucky'")
-    database.conn.execute("DELETE FROM schema_migrations WHERE version >= 39")
-    database.conn.commit()
-    database.close()
-
-    for _ in range(2):  # the second open runs v39 again over already-clean rows
-        database = Database(path)
-        try:
-            assert database.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
-            assert database.get_library_artist("ar")["clean_name"] == "daft punk pharrell williams"
-            assert database.get_library_album("al")["clean_title"] == "get lucky"
-            assert database.get_library_track("t")["clean_title"] == "get lucky"
-            assert database.conn.execute("SELECT search_clean FROM library_tracks").fetchone()[0] == "get lucky"
-            assert database.get_library_artist_by_name("Daft Punk_ Pharrell Williams")["id"] == "ar"
-            database.conn.execute("DELETE FROM schema_migrations WHERE version = 39")
-            database.conn.commit()
-        finally:
-            database.close()
-    assert sqlite3.connect(path).execute("SELECT COUNT(*) FROM library_artists").fetchone()[0] == 1
-
-
 # ------------------------------------------------------------------ bug 11: folder art
 
 

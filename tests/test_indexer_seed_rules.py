@@ -92,12 +92,6 @@ def test_migration_v56_columns(db: Database):
     assert {"indexer_id", "seed_ratio_target", "seed_time_target_minutes", "seed_rule_source"} <= dl_cols
 
 
-def test_migration_v56_idempotent_on_existing_columns(db: Database):
-    cur = db.conn.cursor()
-    db._migration_v56(cur)  # re-running must not raise on already-present columns
-    assert _indexer(db)["seed_ratio"] is None
-
-
 # ------------------------------------------------------------------ indexer CRUD + validation
 
 

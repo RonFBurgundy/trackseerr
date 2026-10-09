@@ -120,38 +120,6 @@ class TestMigrationV69:
         assert "vapid_private_key" in gs_columns
         db.close()
 
-    def test_migration_v69_direct_call(self):
-        """Directly invoke _migration_v69 on a raw SQLite connection with prior tables."""
-        conn = sqlite3.connect(":memory:")
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-
-        # Create prerequisite tables as they exist in v68
-        cur.execute("CREATE TABLE notification_channels (id TEXT PRIMARY KEY, name TEXT)")
-        cur.execute("CREATE TABLE general_settings (id INTEGER PRIMARY KEY)")
-        cur.execute("INSERT INTO general_settings (id) VALUES (1)")
-        conn.commit()
-
-        # Run migration v69
-        db = Database.__new__(Database)
-        db._migration_v69(cur)
-        conn.commit()
-
-        # Verify columns and tables
-        cur.execute("PRAGMA table_info(notification_channels)")
-        assert "owner_user_id" in [row["name"] for row in cur.fetchall()]
-
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = {row["name"] for row in cur.fetchall()}
-        assert "user_notifications" in tables
-        assert "web_push_subscriptions" in tables
-        assert "user_notification_prefs" in tables
-
-        cur.execute("PRAGMA table_info(general_settings)")
-        gs_cols = {row["name"] for row in cur.fetchall()}
-        assert "vapid_public_key" in gs_cols
-        assert "vapid_private_key" in gs_cols
-        conn.close()
 
 
 # =============================================================================

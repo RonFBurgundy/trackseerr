@@ -241,20 +241,6 @@ def test_manual_grab_without_request_id_clears_by_album_id(api, db, clients, clo
     assert db.list_pending_releases() == []
 
 
-def test_migration_normalizes_legacy_keys_and_is_idempotent(db):
-    base = {"title": "t", "release_at": "2026-01-01T13:00:00Z"}
-    db.upsert_pending_release({**base, "item_key": "req:r1", "request_id": "r1", "album_id": "a1", "added_at": "2026-01-01T11:00:00Z"})
-    db.upsert_pending_release({**base, "item_key": "album:a1", "album_id": "a1", "added_at": "2026-01-01T12:00:00Z"})
-    db.upsert_pending_release({**base, "item_key": "req:r2", "request_id": "r2", "added_at": "2026-01-01T12:00:00Z"})
-    db.upsert_pending_release({**base, "item_key": "name:x|y|", "added_at": "2026-01-01T12:00:00Z"})
-    for _ in range(2):
-        cur = db.conn.cursor()
-        db._migration_v53(cur)
-        db.conn.commit()
-    rows = sorted((r["item_key"], r["added_at"]) for r in db.list_pending_releases())
-    assert rows == [("album:a1", "2026-01-01T11:00:00Z"), ("name:x|y|", "2026-01-01T12:00:00Z"),
-                    ("req:r2", "2026-01-01T12:00:00Z")]
-
 
 # ---------------------------------------------------------------------------------------------- 3. re-validation
 

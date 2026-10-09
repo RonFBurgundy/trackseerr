@@ -249,6 +249,14 @@ def test_validate_backup_rejections(test_db: Database, tmp_path: Path):
     with pytest.raises(BackupValidationError, match="newer than current"):
         validate_backup(newer_zip)
 
+    # 4b. Older schema_version (predates baseline)
+    older_zip = tmp_path / "older.zip"
+    with zipfile.ZipFile(older_zip, "w") as zf:
+        zf.writestr(MANIFEST_MEMBER_NAME, json.dumps({"schema_version": SCHEMA_VERSION - 1}))
+        zf.writestr(DB_MEMBER_NAME, b"")
+    with pytest.raises(BackupValidationError, match="predates the v71 baseline"):
+        validate_backup(older_zip)
+
     # 5. Corrupt database (integrity check failure)
     corrupt_zip = tmp_path / "corrupt.zip"
     with zipfile.ZipFile(corrupt_zip, "w") as zf:

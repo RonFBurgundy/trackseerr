@@ -68,28 +68,6 @@ def test_defaults_for_new_install(db, tmp_path):
     assert rb.effective_quarantine_path(mm) == (tmp_path / "music" / ".trackseerr-quarantine").resolve()
 
 
-def test_migration_on_existing_db(tmp_path):
-    path = tmp_path / "old.db"
-    db = Database(str(path))
-    db.close()
-    conn = sqlite3.connect(path)
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(media_management_settings)")]
-    rebuilt = [c for c in cols if not c.startswith(("recycle_bin_", "quarantine_folder"))]
-    for c in ("recycle_bin_path", "recycle_bin_cleanup_days", "recycle_bin_permanent_delete", "quarantine_folder_path"):
-        conn.execute(f"ALTER TABLE media_management_settings DROP COLUMN {c}")
-    conn.execute("DELETE FROM schema_migrations WHERE version >= ?", (SCHEMA_VERSION,))
-    conn.commit()
-    conn.close()
-    assert [c for c in rebuilt]  # the table kept its other columns
-    db = Database(str(path))
-    try:
-        mm = db.get_media_management_settings()
-        assert mm["recycle_bin_cleanup_days"] == 30 and mm["recycle_bin_path"] == ""
-        assert mm["recycle_bin_permanent_delete"] is False
-        assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
-    finally:
-        db.close()
-
 
 def test_negative_cleanup_days_rejected(db):
     with pytest.raises(ValueError):

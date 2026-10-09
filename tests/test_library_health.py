@@ -479,27 +479,6 @@ def test_record_weak_match_and_failure_never_raises(db):
     assert db.count_library_health_findings() == 1
 
 
-# ------------------------------------------------------------------ migration
-
-
-def test_migration_v57(db):
-    assert SCHEMA_VERSION >= 57
-    assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] >= 57
-    for table in ("library_health_findings", "library_health_runs", "library_health_dismissals"):
-        assert db.conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (table,)).fetchone()
-    cols = {r[1] for r in db.conn.execute("PRAGMA table_info(media_server_settings)")}
-    assert "path_mapping_json" in cols
-    assert db.get_library_health_weekly() is True
-    db._migration_v57(db.conn.cursor())  # idempotent
-    # settings saves keep the mapping
-    db.set_media_server_path_mapping({"server_prefix": "/a", "local_prefix": "/b", "auto": False, "server_kind": ""})
-    db.save_media_server_settings({"type": "jellyfin", "url": "http://j"})
-    assert db.get_media_server_path_mapping()["server_prefix"] == "/a"
-    with pytest.raises(sqlite3.IntegrityError):
-        db.conn.execute(
-            "INSERT INTO library_health_findings (id, kind, cause, group_key, path, first_seen, last_seen) "
-            "VALUES ('x', 'bogus', 'c', 'g', 'p', 'n', 'n')"
-        )
 
 
 # ------------------------------------------------------------------ routes

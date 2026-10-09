@@ -38,63 +38,6 @@ def track(track_id, album_id, title):
     return {"id": track_id, "albumId": album_id, "title": title}
 
 
-# ------------------------------------------------------------------------------------------ 1. schema v38
-
-
-def _downgrade_to_v37(path: str) -> None:
-    """Rebuilds the state of an install that ran migration v28 before it knew the status columns."""
-    raw = sqlite3.connect(path)
-    for table, columns in (
-        ("music_requests", ("status_reason", "status_message")),
-        ("missing_tracks", ("attempts", "next_attempt_at")),
-    ):
-        for column in columns:
-            raw.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
-    raw.execute("DELETE FROM schema_migrations WHERE version >= 38")
-    raw.commit()
-    raw.close()
-
-
-class TestMigrationV38:
-    def test_v37_database_gains_the_columns_and_requests_work(self, tmp_path):
-        path = str(tmp_path / "sync.sqlite")
-        db = Database(path)
-        db.upsert_user("u1", "alice", "a@x.com", is_admin=False)
-        db.create_request(
-            MusicRequest(id="r1", user_id="u1", item_type="track", title="T", artist="A", status=RequestStatus.PROCESSING)
-        )
-        db.close()
-        _downgrade_to_v37(path)
-        raw = sqlite3.connect(path)
-        assert "status_reason" not in {r[1] for r in raw.execute("PRAGMA table_info(music_requests)")}
-        assert raw.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 37
-        raw.close()
-
-        db = Database(path)  # runs v38 over the v37 schema
-        try:
-            assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
-            assert db.get_request("r1")["status_reason"] is None
-            assert [r["id"] for r in db.list_requests()] == ["r1"]
-            assert db.set_request_outcome("r1", "not_in_metadata_profile", "nope")
-            row = db.get_request("r1")
-            assert (row["status_reason"], row["status_message"]) == ("not_in_metadata_profile", "nope")
-            assert db.list_requests(user_id="u1")[0]["status_message"] == "nope"
-            db.update_request_status("r1", "approved")
-            assert db.get_request("r1")["status_reason"] is None  # a status change clears the stale outcome
-        finally:
-            db.close()
-
-    def test_v38_is_idempotent(self, tmp_path):
-        path = str(tmp_path / "sync.sqlite")
-        db = Database(path)
-        db.conn.execute("DELETE FROM schema_migrations WHERE version = 38")
-        db.conn.commit()
-        db.close()
-        db = Database(path)  # columns already exist: must not raise
-        try:
-            assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
-        finally:
-            db.close()
 
 
 # ------------------------------------------------------------------------------------------ 2. retry policy

@@ -511,66 +511,6 @@ class TestUpdateApiEndpoints:
 
 
 class TestMigrationV70:
-    def test_migration_v70_applies_on_v69_database(self):
-        """Simulate a v69 general_settings table and verify _migration_v70 applies cleanly."""
-        conn = sqlite3.connect(":memory:")
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-
-        # Create general_settings as in v69 (without update_* columns)
-        cur.execute(
-            """
-            CREATE TABLE general_settings (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                vapid_public_key TEXT,
-                vapid_private_key TEXT,
-                vapid_sub TEXT,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        cur.execute("INSERT INTO general_settings (id) VALUES (1)")
-        conn.commit()
-
-        # Run migration v70
-        db = Database.__new__(Database)
-        db._migration_v70(cur)
-        conn.commit()
-
-        # Verify new columns
-        cur.execute("PRAGMA table_info(general_settings)")
-        cols = {row["name"]: row for row in cur.fetchall()}
-        assert "update_check_enabled" in cols
-        assert "update_latest_version" in cols
-        assert "update_release_url" in cols
-        assert "update_published_at" in cols
-        assert "update_checked_at" in cols
-        assert "update_error" in cols
-
-        # Check default value of update_check_enabled
-        cur.execute("SELECT update_check_enabled FROM general_settings WHERE id = 1")
-        row = cur.fetchone()
-        assert row["update_check_enabled"] == 1
-        conn.close()
-
-    def test_migration_v70_is_idempotent(self):
-        """Running _migration_v70 repeatedly causes no errors."""
-        conn = sqlite3.connect(":memory:")
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        cur.execute("CREATE TABLE general_settings (id INTEGER PRIMARY KEY CHECK (id = 1))")
-        cur.execute("INSERT INTO general_settings (id) VALUES (1)")
-        conn.commit()
-
-        db = Database.__new__(Database)
-        db._migration_v70(cur)
-        db._migration_v70(cur)  # Second run
-        conn.commit()
-
-        cur.execute("PRAGMA table_info(general_settings)")
-        cols = {row["name"] for row in cur.fetchall()}
-        assert "update_check_enabled" in cols
-        conn.close()
 
     def test_database_reaches_schema_head(self, test_db):
         """Full Database initialization reaches SCHEMA_VERSION (>= 70)."""
