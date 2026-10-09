@@ -237,7 +237,7 @@ def test_main_emits_boot_banner_and_timed_steps(tmp_path, caplog):
     assert any(m.startswith("Initializing TrackSeerr v") and "role=all-in-one" in m for m in messages)
     assert "[boot] step: config load" in joined
     assert "[boot] step: database open + migrations done in" in joined
-    assert "[boot] migrations: applied" in joined
+    assert "[boot] migrations: initialized fresh database at baseline v" in joined
     assert "[boot] step: binding web server on" in joined
     assert "[boot] step: starting background workers done in" in joined
     assert "[boot] step: connecting to Plex done in" in joined
