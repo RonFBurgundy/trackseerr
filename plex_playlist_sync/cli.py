@@ -523,6 +523,11 @@ def _start_local_workers(db: Database, config: Config) -> None:
     logger.info("Starting BackupWorker (database backup & retention pruning)")
     backup_worker.start(db=db, config=config, interval_fn=interval_fn(db, config, "backup"))
 
+    from .update_check import update_check_worker
+
+    logger.info("Starting UpdateCheckWorker (software update check)")
+    update_check_worker.start(db=db, config=config, interval_fn=interval_fn(db, config, "update_check"))
+
 
 def _log_when_listening(server: uvicorn.Server, host: str, port: int, started_at: float) -> None:
     """Logs a ``[boot]`` line, with time since process start, once uvicorn has bound its socket."""

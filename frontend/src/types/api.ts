@@ -5676,6 +5676,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/system/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * TrackSeerr update status and check configuration
+         * @description Returns current and latest version, release URL, timestamps, and update status (admin only).
+         */
+        get: operations["get_system_update_api_system_update_get"];
+        /**
+         * Enable or disable software update check
+         * @description Updates the update_check_enabled setting (admin only).
+         */
+        put: operations["put_system_update_api_system_update_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tags": {
         parameters: {
             query?: never;
@@ -12365,6 +12389,27 @@ export interface components {
             storage: components["schemas"]["DiskUsageItem"][];
             workers: components["schemas"]["WorkerStatus"];
         };
+        /** SystemUpdateResponse */
+        SystemUpdateResponse: {
+            /** Checked At */
+            checked_at?: string | null;
+            /** Current Commit */
+            current_commit?: string | null;
+            /** Current Version */
+            current_version: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Error */
+            error?: string | null;
+            /** Latest Version */
+            latest_version?: string | null;
+            /** Published At */
+            published_at?: string | null;
+            /** Release Url */
+            release_url?: string | null;
+            /** Update Available */
+            update_available: boolean;
+        };
         /** TagDeleted */
         TagDeleted: {
             /** Id */
@@ -12653,6 +12698,11 @@ export interface components {
             /** Problem Details */
             problem_details?: string | null;
             status?: components["schemas"]["IssueStatus"] | null;
+        };
+        /** UpdateSettingsPayload */
+        UpdateSettingsPayload: {
+            /** Enabled */
+            enabled: boolean;
         };
         /** UpdateUserGovernanceBody */
         UpdateUserGovernanceBody: {
@@ -23023,6 +23073,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScheduledTaskItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_system_update_api_system_update_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUpdateResponse"];
+                };
+            };
+        };
+    };
+    put_system_update_api_system_update_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSettingsPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUpdateResponse"];
                 };
             };
             /** @description Validation Error */

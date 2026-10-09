@@ -135,3 +135,20 @@ class ResourcesResponse(ApiModel):
     rss_bytes: Optional[int] = None
     thread_count: Optional[int] = None
     uptime_seconds: Optional[float] = None
+
+
+class SystemUpdateResponse(ApiModel):
+    current_version: str
+    current_commit: Optional[str] = None
+    latest_version: Optional[str] = None
+    release_url: Optional[str] = None
+    published_at: Optional[str] = None
+    checked_at: Optional[str] = None
+    update_available: bool
+    enabled: bool
+    error: Optional[str] = None
+
+
+class UpdateSettingsPayload(ApiModel):
+    enabled: bool
+

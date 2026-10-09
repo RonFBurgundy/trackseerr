@@ -112,6 +112,7 @@ export interface TestIndexerPayload {
 }
 
 export type SystemStatusInfo = Schema<'SystemStatusResponse'>;
+export type SystemUpdateInfo = Schema<'SystemUpdateResponse'>;
 
 export interface AudioPreviewTrack {
   id: string;

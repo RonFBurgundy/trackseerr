@@ -13,6 +13,8 @@ export interface SettingsNavProps {
   onNavigate: (route: SettingsRoute) => void;
   /** Section or leaf ids rendered dimmed (inactive in the current library-manager mode). */
   inactiveIds?: ReadonlySet<string>;
+  /** Admin only: badge shown on the System section when an update is available. */
+  updateAvailable?: boolean;
 }
 
 const STRIP_CLASS = '!gap-1.5 p-1.5 sm:p-2';
@@ -21,7 +23,7 @@ const STRIP_CLASS = '!gap-1.5 p-1.5 sm:p-2';
  * One row of keys. Top level: the sections. Inside a section with several pages the row is replaced by
  * a back key plus that section's page keys ("drill-down replaces"), so there is never a second row.
  */
-export const SettingsNav: React.FC<SettingsNavProps> = ({ sections, route, onNavigate, inactiveIds }) => {
+export const SettingsNav: React.FC<SettingsNavProps> = ({ sections, route, onNavigate, inactiveIds, updateAvailable }) => {
   // Remembers which section the user backed out of; moving to another section closes the picker by itself.
   const [pickingFrom, setPickingFrom] = useState<SettingsSection | null>(null);
   const active = sections.find((s) => s.id === route.sub);
@@ -50,6 +52,14 @@ export const SettingsNav: React.FC<SettingsNavProps> = ({ sections, route, onNav
             aria-current={activeLeaf === l.id ? 'page' : undefined}
           >
             {l.label}
+            {active.id === 'system' && l.id === 'status' && updateAvailable && (
+              <span
+                className="ml-1.5 px-1 rounded-[3px] bg-[var(--accent-amber)] text-[10px] font-mono font-bold text-black uppercase"
+                aria-label="Update available"
+              >
+                Update
+              </span>
+            )}
           </TapeDeckButton>
         ))}
       </TabStrip>
@@ -79,6 +89,14 @@ export const SettingsNav: React.FC<SettingsNavProps> = ({ sections, route, onNav
             aria-current={route.sub === s.id ? 'page' : undefined}
           >
             {s.label}
+            {s.id === 'system' && updateAvailable && (
+              <span
+                className="ml-1.5 px-1 rounded-[3px] bg-[var(--accent-amber)] text-[10px] font-mono font-bold text-black uppercase"
+                aria-label="Update available"
+              >
+                Update
+              </span>
+            )}
           </TapeDeckButton>
         );
       })}

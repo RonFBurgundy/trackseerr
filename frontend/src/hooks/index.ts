@@ -111,3 +111,4 @@ export * from './useRenamePreview';
 export * from './useMissingTracks';
 export * from './useChangelog';
 export * from './useBackups';
+export * from './useUpdateCheck';

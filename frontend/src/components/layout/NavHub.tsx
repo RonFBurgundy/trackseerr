@@ -21,6 +21,8 @@ export interface NavHubProps {
   reviewCount?: number;
   issuesOpenCount?: number;
   issuesUnreadCount?: number;
+  /** Admin only: software update available. */
+  updateAvailable?: boolean;
   onLogout?: () => void;
   tier?: DeploymentTier;
   /** Called after navigating to a search result that points at one setting inside its page. */
@@ -151,12 +153,13 @@ const HubPanel: React.FC<NavHubProps> = ({
   reviewCount = 0,
   issuesOpenCount = 0,
   issuesUnreadCount = 0,
+  updateAvailable = false,
   onLogout,
   tier = 'all-in-one',
   onHighlight,
 }) => {
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const tree = buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount, issuesOpenCount, issuesUnreadCount });
+  const tree = buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount, issuesOpenCount, issuesUnreadCount, updateAvailable });
   const [searching, setSearching] = useState<boolean>(false);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(activeAncestorKeys(tree, route)));
 
