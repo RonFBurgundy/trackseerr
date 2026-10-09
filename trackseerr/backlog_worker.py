@@ -7,7 +7,7 @@
 """
 
 from difflib import SequenceMatcher
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import logging
 import sqlite3
@@ -210,6 +210,34 @@ def _searched_since(value: Any, cutoff: datetime) -> bool:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed >= cutoff
+
+
+@dataclass
+class _SweepCollect:
+    """Encapsulates cross-phase state during backlog sweep collection."""
+
+    db: Database
+    stats: Optional[dict[str, int]] = None
+    tag_cache: dict[str, list[str]] = field(default_factory=dict)
+    active_req_ids: set[str] = field(default_factory=set)
+    active_track_ids: set[str] = field(default_factory=set)
+    active_artist_titles: set[tuple[str, str]] = field(default_factory=set)
+    enable_upgrades: bool = True
+    library_mode: str = "native"
+    items_to_search: list[
+        tuple[
+            str,
+            str,
+            Optional[str],
+            str,
+            Optional[str],
+            Optional[int],
+            Optional[str],
+            Optional[int],
+            Optional[str],
+            Optional[str],
+        ]
+    ] = field(default_factory=list)
 
 
 class WantedBacklogWorker:
@@ -432,89 +460,88 @@ class WantedBacklogWorker:
         thread.start()
         return len(runnable)
 
-    def _collect_sweep_items(  # noqa: C901, PLR0915
-        self, db: Database, stats: Optional[dict[str, int]] = None
-    ) -> Optional[list[tuple]]:
-        """Collect backlog items to search across requests, missing tracks, and native catalog."""
-        tag_cache: dict[str, list[str]] = {}
-
-        # 1. Query active downloads to avoid duplicate searches
+    def _collect_active_downloads(self, ctx: _SweepCollect) -> None:
+        """Query active downloads to populate deduplication sets."""
         try:
-            active_dls = db.list_active_downloads(statuses=["queued", "downloading", "importing", "warning"])
+            active_dls = ctx.db.list_active_downloads(statuses=["queued", "downloading", "importing", "warning"])
         except Exception as e:
             logger.error("WantedBacklogWorker error querying active downloads: %s", e)
             active_dls = []
-            if stats is not None:
-                stats["errors"] += 1
+            if ctx.stats is not None:
+                ctx.stats["errors"] += 1
 
-        active_req_ids = {d["request_id"] for d in active_dls if d.get("request_id")}
-        active_track_ids = {d["track_id"] for d in active_dls if d.get("track_id")}
-        active_artist_titles = {
+        ctx.active_req_ids = {d["request_id"] for d in active_dls if d.get("request_id")}
+        ctx.active_track_ids = {d["track_id"] for d in active_dls if d.get("track_id")}
+        ctx.active_artist_titles = {
             ((d.get("artist") or "").strip().lower(), (d.get("title") or "").strip().lower())
             for d in active_dls
         }
 
-        # 2. Query unfulfilled requests: status in ('processing', 'pending')
+    def _collect_unfulfilled_requests(self, ctx: _SweepCollect) -> list[dict[str, Any]]:
+        """Query unfulfilled requests and cutoff-unmet requests when upgrades enabled."""
         try:
-            requests = db.list_requests()
+            requests = ctx.db.list_requests()
         except Exception as e:
             logger.error("WantedBacklogWorker error querying requests: %s", e)
             requests = []
-            if stats is not None:
-                stats["errors"] += 1
+            if ctx.stats is not None:
+                ctx.stats["errors"] += 1
 
-        media_settings = db.get_media_management_settings()
-        enable_upgrades = bool(media_settings.get("enable_quality_upgrades", True))
-        library_mode = media_settings.get("library_mode", "native")
+        media_settings = ctx.db.get_media_management_settings()
+        ctx.enable_upgrades = bool(media_settings.get("enable_quality_upgrades", True))
+        ctx.library_mode = media_settings.get("library_mode", "native")
 
         unfulfilled_requests = [
             r
             for r in requests
             if r.get("status") in ("processing", "pending")
-            and r.get("id") not in active_req_ids
+            and r.get("id") not in ctx.active_req_ids
             and (
                 (r.get("artist") or "").strip().lower(),
                 (r.get("title") or "").strip().lower(),
             )
-            not in active_artist_titles
+            not in ctx.active_artist_titles
         ]
 
-        if enable_upgrades:
+        if ctx.enable_upgrades:
             try:
-                cutoff_unmet = db.get_cutoff_unmet_requests()
+                cutoff_unmet = ctx.db.get_cutoff_unmet_requests()
                 for r in cutoff_unmet:
                     if (
-                        r.get("id") not in active_req_ids
+                        r.get("id") not in ctx.active_req_ids
                         and (
                             (r.get("artist") or "").strip().lower(),
                             (r.get("title") or "").strip().lower(),
                         )
-                        not in active_artist_titles
+                        not in ctx.active_artist_titles
                     ):
                         unfulfilled_requests.append(r)
             except Exception as e:
                 logger.error("WantedBacklogWorker error querying cutoff unmet requests: %s", e)
-                if stats is not None:
-                    stats["errors"] += 1
+                if ctx.stats is not None:
+                    ctx.stats["errors"] += 1
 
-        # 3. Query unfulfilled missing tracks: lidarr_status != 'monitored'
+        return unfulfilled_requests
+
+    def _collect_unfulfilled_missing(self, ctx: _SweepCollect) -> list[dict[str, Any]]:
+        """Query unfulfilled missing playlist tracks respecting playlist monitor modes."""
         try:
-            missing_tracks = db.get_missing_tracks()
+            missing_tracks = ctx.db.get_missing_tracks()
         except Exception as e:
             logger.error("WantedBacklogWorker error querying missing tracks: %s", e)
             missing_tracks = []
-            if stats is not None:
-                stats["errors"] += 1
+            if ctx.stats is not None:
+                ctx.stats["errors"] += 1
 
         # A playlist's monitor mode decides whether its missing tracks are searched one by one: "none" never,
         # "album"/"artist" only until the list mode has taken them over (then the monitored album/artist is searched).
         try:
-            playlist_modes = effective_playlist_modes(db)
+            playlist_modes = effective_playlist_modes(ctx.db)
         except Exception as e:
             logger.error("WantedBacklogWorker error reading playlist monitor modes: %s", e)
             playlist_modes = {}
-            if stats is not None:
-                stats["errors"] += 1
+            if ctx.stats is not None:
+                ctx.stats["errors"] += 1
 
         def _searchable_as_track(t: dict[str, Any]) -> bool:
             mode = playlist_modes.get(str(t.get("playlist_id")), "track")
@@ -531,44 +558,34 @@ class WantedBacklogWorker:
                 (t.get("artist") or "").strip().lower(),
                 (t.get("title") or "").strip().lower(),
             )
-            not in active_artist_titles
+            not in ctx.active_artist_titles
         ]
+        return unfulfilled_missing
 
-        # Items to search: (artist, title, album, item_type, request_id, missing_track_id, quality_profile_id, min_score, track_id, album_id)
-        items_to_search: list[
-            tuple[
-                str,
-                str,
-                Optional[str],
-                str,
-                Optional[str],
-                Optional[int],
-                Optional[str],
-                Optional[int],
-                Optional[str],
-                Optional[str],
-            ]
-        ] = []
+    def _append_request_items(
+        self, ctx: _SweepCollect, unfulfilled_requests: list[dict[str, Any]]
+    ) -> None:
+        """Convert unfulfilled requests into search tuples and append to items_to_search."""
         for r in unfulfilled_requests:
             is_upgrade = (r.get("status") == "available" or r.get("cutoff_met") == 0)
             min_score = None
             qp_id = r.get("quality_profile_id")
             if is_upgrade:
-                profile_dict = db.get_quality_profile(qp_id) if qp_id else db.get_default_quality_profile()
+                profile_dict = ctx.db.get_quality_profile(qp_id) if qp_id else ctx.db.get_default_quality_profile()
                 if profile_dict:
                     prof = _to_quality_profile(profile_dict)
                     cur_q = r.get("current_quality")
                     if cur_q:
                         min_score = _current_floor(
-                            db,
+                            ctx.db,
                             prof,
                             cur_q,
                             request_id=r.get("id"),
-                            artist_tags=_cached_artist_tags(db, tag_cache, r.get("artist")),
+                            artist_tags=_cached_artist_tags(ctx.db, ctx.tag_cache, r.get("artist")),
                         )
                     else:
                         min_score = 0
-            items_to_search.append(
+            ctx.items_to_search.append(
                 (
                     r.get("artist", "").strip(),
                     r.get("title", "").strip(),
@@ -583,8 +600,12 @@ class WantedBacklogWorker:
                 )
             )
 
+    def _append_missing_items(
+        self, ctx: _SweepCollect, unfulfilled_missing: list[dict[str, Any]]
+    ) -> None:
+        """Convert unfulfilled missing tracks into search tuples and append to items_to_search."""
         for t in unfulfilled_missing:
-            items_to_search.append(
+            ctx.items_to_search.append(
                 (
                     t.get("artist", "").strip(),
                     t.get("title", "").strip(),
@@ -599,85 +620,100 @@ class WantedBacklogWorker:
                 )
             )
 
-        # 4. Query native catalog missing and cutoff-unmet tracks if in native mode
-        if library_mode == "native":
-            try:
-                missing_catalog = db.get_monitored_missing_catalog_tracks(limit=100)
-                for t in missing_catalog:
-                    t_id = t["track_id"]
-                    t_pair = (
-                        (t.get("artist_name") or "").strip().lower(),
-                        (t.get("track_title") or "").strip().lower(),
+    def _append_native_missing(self, ctx: _SweepCollect) -> None:
+        """Query monitored missing native catalog tracks and append to items_to_search."""
+        try:
+            missing_catalog = ctx.db.get_monitored_missing_catalog_tracks(limit=100)
+            for t in missing_catalog:
+                t_id = t["track_id"]
+                t_pair = (
+                    (t.get("artist_name") or "").strip().lower(),
+                    (t.get("track_title") or "").strip().lower(),
+                )
+                if t_id in ctx.active_track_ids or t_pair in ctx.active_artist_titles:
+                    continue
+                ctx.items_to_search.append(
+                    (
+                        t.get("artist_name", "").strip(),
+                        t.get("track_title", "").strip(),
+                        t.get("album_title", "").strip() if t.get("album_title") else None,
+                        "track",
+                        None,
+                        None,
+                        t.get("quality_profile_id"),
+                        None,
+                        t_id,
+                        t.get("album_id"),
                     )
-                    if t_id in active_track_ids or t_pair in active_artist_titles:
-                        continue
-                    items_to_search.append(
-                        (
-                            t.get("artist_name", "").strip(),
-                            t.get("track_title", "").strip(),
-                            t.get("album_title", "").strip() if t.get("album_title") else None,
-                            "track",
-                            None,
-                            None,
-                            t.get("quality_profile_id"),
-                            None,
-                            t_id,
-                            t.get("album_id"),
+                )
+        except Exception as e:
+            logger.error("WantedBacklogWorker error querying missing catalog tracks: %s", e)
+            if ctx.stats is not None:
+                ctx.stats["errors"] += 1
+
+    def _append_native_cutoff_unmet(self, ctx: _SweepCollect) -> None:
+        """Query cutoff-unmet native catalog tracks and append to items_to_search."""
+        try:
+            cutoff_unmet_catalog = ctx.db.get_cutoff_unmet_catalog_tracks(limit=100)
+            for t in cutoff_unmet_catalog:
+                t_id = t["track_id"]
+                t_pair = (
+                    (t.get("artist_name") or "").strip().lower(),
+                    (t.get("track_title") or "").strip().lower(),
+                )
+                if t_id in ctx.active_track_ids or t_pair in ctx.active_artist_titles:
+                    continue
+
+                qp_id = t.get("quality_profile_id")
+                profile_dict = ctx.db.get_quality_profile(qp_id) if qp_id else ctx.db.get_default_quality_profile()
+                min_score = 0
+                if profile_dict:
+                    prof = _to_quality_profile(profile_dict)
+                    cur_q = t.get("quality_name")
+                    if cur_q:
+                        min_score = _current_floor(
+                            ctx.db,
+                            prof,
+                            cur_q,
+                            track_id=t.get("track_id"),
+                            album_id=t.get("album_id"),
+                            artist_tags=_cached_artist_tags(ctx.db, ctx.tag_cache, t.get("artist_name")),
                         )
+
+                ctx.items_to_search.append(
+                    (
+                        t.get("artist_name", "").strip(),
+                        t.get("track_title", "").strip(),
+                        t.get("album_title", "").strip() if t.get("album_title") else None,
+                        "track",
+                        None,
+                        None,
+                        qp_id,
+                        min_score,
+                        t_id,
+                        t.get("album_id"),
                     )
-            except Exception as e:
-                logger.error("WantedBacklogWorker error querying missing catalog tracks: %s", e)
-                if stats is not None:
-                    stats["errors"] += 1
+                )
+        except Exception as e:
+            logger.error("WantedBacklogWorker error querying cutoff unmet catalog tracks: %s", e)
+            if ctx.stats is not None:
+                ctx.stats["errors"] += 1
 
-            if enable_upgrades:
-                try:
-                    cutoff_unmet_catalog = db.get_cutoff_unmet_catalog_tracks(limit=100)
-                    for t in cutoff_unmet_catalog:
-                        t_id = t["track_id"]
-                        t_pair = (
-                            (t.get("artist_name") or "").strip().lower(),
-                            (t.get("track_title") or "").strip().lower(),
-                        )
-                        if t_id in active_track_ids or t_pair in active_artist_titles:
-                            continue
-
-                        qp_id = t.get("quality_profile_id")
-                        profile_dict = db.get_quality_profile(qp_id) if qp_id else db.get_default_quality_profile()
-                        min_score = 0
-                        if profile_dict:
-                            prof = _to_quality_profile(profile_dict)
-                            cur_q = t.get("quality_name")
-                            if cur_q:
-                                min_score = _current_floor(
-                                    db,
-                                    prof,
-                                    cur_q,
-                                    track_id=t.get("track_id"),
-                                    album_id=t.get("album_id"),
-                                    artist_tags=_cached_artist_tags(db, tag_cache, t.get("artist_name")),
-                                )
-
-                        items_to_search.append(
-                            (
-                                t.get("artist_name", "").strip(),
-                                t.get("track_title", "").strip(),
-                                t.get("album_title", "").strip() if t.get("album_title") else None,
-                                "track",
-                                None,
-                                None,
-                                qp_id,
-                                min_score,
-                                t_id,
-                                t.get("album_id"),
-                            )
-                        )
-                except Exception as e:
-                    logger.error("WantedBacklogWorker error querying cutoff unmet catalog tracks: %s", e)
-                    if stats is not None:
-                        stats["errors"] += 1
-
-        return items_to_search
+    def _collect_sweep_items(
+        self, db: Database, stats: Optional[dict[str, int]] = None
+    ) -> Optional[list[tuple]]:
+        """Collect backlog items to search across requests, missing tracks, and native catalog."""
+        ctx = _SweepCollect(db=db, stats=stats)
+        self._collect_active_downloads(ctx)
+        unfulfilled_requests = self._collect_unfulfilled_requests(ctx)
+        unfulfilled_missing = self._collect_unfulfilled_missing(ctx)
+        self._append_request_items(ctx, unfulfilled_requests)
+        self._append_missing_items(ctx, unfulfilled_missing)
+        if ctx.library_mode == "native":
+            self._append_native_missing(ctx)
+            if ctx.enable_upgrades:
+                self._append_native_cutoff_unmet(ctx)
+        return ctx.items_to_search
 
     def _search_sweep_item(
         self, db: Database, item: tuple, stats: dict[str, int]
