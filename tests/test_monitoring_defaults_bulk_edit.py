@@ -125,11 +125,13 @@ def test_refresh_new_albums_unmonitored_under_existing_but_existing_albums_keep_
     )
     enricher = MagicMock(spec=MbidEnricherClient)
     enricher.get_artist_details.return_value = {"id": "mbid-band"}
-    enricher.get_artist_discography.return_value = [
+    disco1 = [
         {"id": "rg-owned", "title": "Owned", "album_type": "album", "year": 2000},
         {"id": "rg-new1", "title": "New One", "album_type": "album", "year": 2001},
         {"id": "rg-new2", "title": "New Single", "album_type": "single", "year": 2002},
     ]
+    enricher.get_artist_discography.return_value = disco1
+    enricher.get_artist_discography_result.return_value = (disco1, True)
     enricher.get_release_group_tracks.return_value = []
     discovery = MagicMock()  # no real Deezer / iTunes lookups in tests
     discovery.get_artist_details.return_value = None
@@ -145,7 +147,9 @@ def test_refresh_new_albums_follow_all_option(test_db: Database):
     )
     enricher = MagicMock(spec=MbidEnricherClient)
     enricher.get_artist_details.return_value = {"id": "mbid-b2"}
-    enricher.get_artist_discography.return_value = [{"id": "rg-x", "title": "X", "album_type": "album", "year": 2001}]
+    disco2 = [{"id": "rg-x", "title": "X", "album_type": "album", "year": 2001}]
+    enricher.get_artist_discography.return_value = disco2
+    enricher.get_artist_discography_result.return_value = (disco2, True)
     enricher.get_release_group_tracks.return_value = []
     discovery = MagicMock()  # no real Deezer / iTunes lookups in tests
     discovery.get_artist_details.return_value = None

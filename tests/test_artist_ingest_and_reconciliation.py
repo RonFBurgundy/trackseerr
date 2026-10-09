@@ -104,7 +104,7 @@ def mock_discovery_client():
     """Provides a mock DiscoveryClient with mock discography and album details."""
     client = MagicMock(spec=DiscoveryClient)
 
-    def fake_get_artist_details(artist_id: str) -> dict[str, Any]:
+    def fake_get_artist_details(artist_id: str, force: bool = False) -> dict[str, Any]:
         return {
             "id": artist_id,
             "name": "Daft Punk",
@@ -144,7 +144,7 @@ def mock_discovery_client():
             ],
         }
 
-    def fake_get_album_details(album_id: str) -> dict[str, Any]:
+    def fake_get_album_details(album_id: str, force: bool = False) -> dict[str, Any]:
         catalogs = {
             "deezer:album:302127": {
                 "id": "deezer:album:302127",
@@ -414,7 +414,7 @@ def test_artist_refresh_preserves_existing_files_and_adds_albums(
     assert file_record is not None
 
     # 3. Update mock DiscoveryClient to return a new 3rd album for Justice
-    def updated_artist_details(artist_id: str) -> dict[str, Any]:
+    def updated_artist_details(artist_id: str, force: bool = False) -> dict[str, Any]:
         return {
             "id": artist_id,
             "name": "Justice",
@@ -436,7 +436,7 @@ def test_artist_refresh_preserves_existing_files_and_adds_albums(
             "compilations": [],
         }
 
-    def updated_album_details(album_id: str) -> dict[str, Any]:
+    def updated_album_details(album_id: str, force: bool = False) -> dict[str, Any]:
         if album_id == "deezer:album:999999":
             return {
                 "id": "deezer:album:999999",

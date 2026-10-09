@@ -227,6 +227,11 @@ class ArtistRefreshResponse(ApiModel):
     message: Optional[str] = None
     artist_id: Optional[str] = None
     refreshed_at: Optional[str] = None
+    network_requests: Optional[int] = None
+    cache_hits: Optional[int] = None
+    deezer_requests: Optional[int] = None
+    deezer_cache_hits: Optional[int] = None
+    source_unavailable: Optional[bool] = None
 
 
 class BulkArtistsResult(ApiModel):

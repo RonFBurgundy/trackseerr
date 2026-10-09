@@ -841,7 +841,7 @@ class TestCollectionsStorageAndAPI:
         ]
 
         with patch("plex_playlist_sync.clients.mbid_enricher.MbidEnricherClient.get_artist_details", return_value=mock_details), \
-             patch("plex_playlist_sync.clients.mbid_enricher.MbidEnricherClient.get_artist_discography", return_value=mock_disco):
+             patch("plex_playlist_sync.clients.mbid_enricher.MbidEnricherClient.get_artist_discography_result", return_value=(mock_disco, True)):
             res = client.post(f"/api/library/artists/{art['id']}/refresh", headers=headers)
 
         assert res.status_code == 200

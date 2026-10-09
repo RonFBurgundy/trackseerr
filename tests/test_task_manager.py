@@ -571,17 +571,17 @@ def test_worker_iteration_locks_serialize(test_db, test_config):
         assert not t_mw.is_alive()
 
 
-def test_mix_worker_run_now_instantiates_discovery_if_none(test_db, test_config):
+def test_mix_worker_run_now_uses_shared_discovery_if_none(test_db, test_config):
     from plex_playlist_sync.mix_worker import MixWorker
 
     worker = MixWorker()
     assert worker._discovery is None
     with patch.object(worker, "_get_plex", return_value=None), \
-         patch("plex_playlist_sync.mix_worker.DiscoveryClient") as mock_disc_cls, \
+         patch("plex_playlist_sync.mix_worker.get_shared_discovery_client") as mock_shared, \
          patch.object(worker, "run_iteration", return_value={"due": 0, "generated": 0, "errors": 0}):
         worker.run_now(test_db, test_config)
-        mock_disc_cls.assert_called_once()
-        assert worker._discovery == mock_disc_cls.return_value
+        mock_shared.assert_called_once_with(test_db)
+        assert worker._discovery is mock_shared.return_value
 
 
 # ----------------------------------------------------------------------------- scheduled paths record

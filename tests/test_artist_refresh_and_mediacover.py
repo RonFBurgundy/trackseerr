@@ -316,6 +316,12 @@ def test_refresh_single_artist_hydrates_tracks_and_caches_artwork(test_db: Datab
             "cover_url": "https://coverartarchive.org/release-group/rg-dark-side-123/front-500.jpg",
         }
     ]
+    mock_enricher.get_artist_discography_result.return_value = (
+        mock_enricher.get_artist_discography.return_value,
+        True,
+    )
+    mock_enricher.source_available.return_value = True
+    mock_enricher.stats.return_value = {"network_requests": 0, "cache_hits": 0}
     mock_enricher.get_release_group_tracks.return_value = [
         {
             "track_number": 1,

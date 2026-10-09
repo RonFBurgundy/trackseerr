@@ -194,6 +194,7 @@ def test_refresh_does_not_override_user_track_monitoring(test_db: Database):
     enricher = MagicMock(spec=MbidEnricherClient)
     enricher.get_artist_details.return_value = {"id": "mb-ar"}
     enricher.get_artist_discography.return_value = [{"id": "rg-alb", "title": "alb", "album_type": "album", "year": 2000}]
+    enricher.get_artist_discography_result.return_value = (enricher.get_artist_discography.return_value, True)
     enricher.get_release_group_tracks.return_value = [
         {"track_number": i, "title": f"T{i}", "disc_number": 1, "duration_seconds": 1.0, "mb_recording_id": None}
         for i in (1, 2, 3, 4)

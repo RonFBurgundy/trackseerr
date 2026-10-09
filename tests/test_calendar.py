@@ -718,7 +718,7 @@ class TestCalendarArtistRefreshRetention:
             "genres": ["Synthwave"],
             "bio": "Electronic band",
         }
-        mock_enricher.get_artist_discography.return_value = [
+        disco = [
             {
                 "id": "rg-future-lp",
                 "title": "Neon Tomorrow",
@@ -729,6 +729,8 @@ class TestCalendarArtistRefreshRetention:
                 "track_count": 8,
             }
         ]
+        mock_enricher.get_artist_discography.return_value = disco
+        mock_enricher.get_artist_discography_result.return_value = (disco, True)
         mock_enricher.get_release_group_tracks.return_value = []
 
         mock_discovery = MagicMock(spec=DiscoveryClient)

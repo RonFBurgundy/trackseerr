@@ -676,6 +676,7 @@ def _refresh(db: Database, option: str) -> list[dict]:
     enricher.get_artist_discography.return_value = [
         {"id": "rg-1", "title": "Discovery", "album_type": "album", "year": 2001}
     ]
+    enricher.get_artist_discography_result.return_value = (enricher.get_artist_discography.return_value, True)
     enricher.get_release_group_tracks.return_value = [
         {"track_number": 1, "disc_number": 1, "title": "One More Time", "mb_recording_id": "r1"},
         {"track_number": 2, "disc_number": 1, "title": "Aerodynamic", "mb_recording_id": "r2"},

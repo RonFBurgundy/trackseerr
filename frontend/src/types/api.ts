@@ -6294,10 +6294,20 @@ export interface components {
         ArtistRefreshResponse: {
             /** Artist Id */
             artist_id?: string | null;
+            /** Cache Hits */
+            cache_hits?: number | null;
+            /** Deezer Cache Hits */
+            deezer_cache_hits?: number | null;
+            /** Deezer Requests */
+            deezer_requests?: number | null;
             /** Message */
             message?: string | null;
+            /** Network Requests */
+            network_requests?: number | null;
             /** Refreshed At */
             refreshed_at?: string | null;
+            /** Source Unavailable */
+            source_unavailable?: boolean | null;
             /** Success */
             success: boolean;
         };

@@ -5,12 +5,15 @@ import os
 import re
 import threading
 import time
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 import urllib.parse
 
 import requests
 
 from plex_playlist_sync.system_paths import is_system_folder_name
+
+if TYPE_CHECKING:
+    from plex_playlist_sync.mb_metadata_store import MbMetadataStore
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,89 @@ def _sanitize_lucene_query(text: str) -> str:
     return re.sub(r'["\\/]', " ", text).strip()
 
 
+class _CircuitBreaker:
+    """Thread-safe circuit breaker tracking consecutive failures per host."""
+
+    def __init__(
+        self,
+        host: str,
+        failure_threshold: int = 5,
+        cooldown_seconds: float = 300.0,
+    ) -> None:
+        self.host = host
+        self.failure_threshold = failure_threshold
+        self.cooldown_seconds = cooldown_seconds
+        self._state: str = "closed"  # "closed", "open", "half_open"
+        self._consecutive_failures: int = 0
+        self._last_failure_time: float = 0.0
+        self._half_open_in_flight: bool = False
+        self._lock = threading.Lock()
+
+    @property
+    def state(self) -> str:
+        with self._lock:
+            self._check_cooldown_locked()
+            return self._state
+
+    def _check_cooldown_locked(self) -> None:
+        if self._state == "open":
+            now = time.monotonic()
+            if now - self._last_failure_time >= self.cooldown_seconds:
+                self._state = "half_open"
+                self._half_open_in_flight = False
+
+    def can_attempt(self) -> bool:
+        """Returns True if a request can be attempted under breaker policy."""
+        with self._lock:
+            self._check_cooldown_locked()
+            if self._state == "closed":
+                return True
+            if self._state == "half_open":
+                if not self._half_open_in_flight:
+                    self._half_open_in_flight = True
+                    return True
+                return False
+            return False
+
+    def record_result(self, is_failure: bool) -> None:
+        """Records outcome of an attempted call."""
+        with self._lock:
+            now = time.monotonic()
+            if is_failure:
+                self._consecutive_failures += 1
+                self._last_failure_time = now
+                if self._state == "half_open" or self._consecutive_failures >= self.failure_threshold:
+                    if self._state != "open":
+                        logger.warning(
+                            "Circuit breaker opened for host %s after %d consecutive failures (cooldown=%ss)",
+                            self.host,
+                            self._consecutive_failures,
+                            self.cooldown_seconds,
+                        )
+                    self._state = "open"
+                    self._half_open_in_flight = False
+            else:
+                was_not_closed = (self._state != "closed")
+                self._consecutive_failures = 0
+                self._state = "closed"
+                self._half_open_in_flight = False
+                if was_not_closed:
+                    logger.info("Circuit breaker closed for host %s after successful response", self.host)
+
+
+def _extract_host(url: str) -> str:
+    """Extracts host / netloc from URL string."""
+    parsed = urllib.parse.urlparse(url)
+    return parsed.netloc or url
+
+
+def _is_breaker_failure(resp: Optional[requests.Response]) -> bool:
+    """Returns True if response constitutes a circuit breaker failure."""
+    if resp is None:
+        return True
+    return resp.status_code in (429, 500, 502, 503, 504)
+
+
 class MbidEnricherClient:
     """High-speed cached MBID resolver querying MusicBrainz REST mirrors and Cover Art Archive."""
 
@@ -32,6 +118,7 @@ class MbidEnricherClient:
         timeout: float = 3.0,
         cache_ttl: float = 3600.0,
         min_interval: float = 1.0,
+        store: Optional["MbMetadataStore"] = None,
     ) -> None:
         default_base = (
             os.getenv("MUSICBRAINZ_URL")
@@ -45,7 +132,15 @@ class MbidEnricherClient:
         self._last_request_time: float = 0.0
         self._rate_limit_lock = threading.Lock()
         self._cache: dict[str, tuple[float, Any]] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._store = store
+        self._network_requests: int = 0
+        self._cache_hits: int = 0
+        self._breakers: dict[str, _CircuitBreaker] = {}
+        mirror_host = _extract_host(self.base_url)
+        self._breakers[mirror_host] = _CircuitBreaker(mirror_host)
+        if mirror_host != "musicbrainz.org":
+            self._breakers["musicbrainz.org"] = _CircuitBreaker("musicbrainz.org")
         self._session = requests.Session()
         self._session.headers.update(
             {
@@ -53,6 +148,42 @@ class MbidEnricherClient:
                 "Accept": "application/json",
             }
         )
+
+    def _get_breaker(self, host: str) -> _CircuitBreaker:
+        with self._lock:
+            if host not in self._breakers:
+                self._breakers[host] = _CircuitBreaker(host)
+            return self._breakers[host]
+
+    def source_available(self, host: Optional[str] = None) -> bool:
+        """Returns False only when the specified host (or every usable host) has an open circuit breaker."""
+        with self._lock:
+            if host is not None:
+                clean_host = _extract_host(host)
+                if clean_host not in self._breakers:
+                    self._breakers[clean_host] = _CircuitBreaker(clean_host)
+                return self._breakers[clean_host].state != "open"
+            mirror_host = _extract_host(self.base_url)
+            usable_hosts = [mirror_host]
+            if mirror_host != "musicbrainz.org":
+                usable_hosts.append("musicbrainz.org")
+            return any(
+                self._breakers[h].state != "open"
+                for h in usable_hosts
+                if h in self._breakers
+            )
+
+    def stats(self) -> dict[str, Any]:
+        """Returns thread-safe network request, cache hit counters, and circuit breaker states."""
+        with self._lock:
+            breaker_states = {
+                host: breaker.state for host, breaker in self._breakers.items()
+            }
+            return {
+                "network_requests": self._network_requests,
+                "cache_hits": self._cache_hits,
+                "breaker_state": breaker_states,
+            }
 
     def _rate_limit(self, url: str) -> None:
         """Enforces rate limiting (1 req/sec) when communicating with musicbrainz.org."""
@@ -71,6 +202,8 @@ class MbidEnricherClient:
         for attempt in range(max_retries + 1):
             self._rate_limit(url)
             try:
+                with self._lock:
+                    self._network_requests += 1
                 resp = self._session.get(url, params=params, timeout=self.timeout)
                 if resp.status_code in (429, 503):
                     logger.warning(
@@ -88,7 +221,8 @@ class MbidEnricherClient:
                                 retry_after = float(retry_hdr)
                         except (ValueError, TypeError):
                             pass
-                        time.sleep(min(retry_after, 1.0))
+                        max_wait = 30.0 if "musicbrainz.org" in url else 1.0
+                        time.sleep(min(retry_after, max_wait))
                         continue
                     return resp
                 return resp
@@ -112,23 +246,49 @@ class MbidEnricherClient:
     def _request(
         self, url: str, params: Optional[dict[str, Any]] = None, max_retries: int = 1
     ) -> Optional[requests.Response]:
-        """Executes HTTP request with resilient fallback to https://musicbrainz.org upon error/403/5xx."""
+        """Executes HTTP request with circuit breakers and fallback to https://musicbrainz.org."""
+        mirror_host = _extract_host(self.base_url)
+        is_mirror_base = (self.base_url != "https://musicbrainz.org" and mirror_host != "musicbrainz.org")
+
+        if not is_mirror_base:
+            mb_breaker = self._get_breaker("musicbrainz.org")
+            if not mb_breaker.can_attempt():
+                return None
+            resp = self._do_http_call(url, params=params, max_retries=max_retries)
+            mb_breaker.record_result(_is_breaker_failure(resp))
+            return resp
+
+        mirror_breaker = self._get_breaker(mirror_host)
+        mb_breaker = self._get_breaker("musicbrainz.org")
+        fallback_url = "https://musicbrainz.org" + url[len(self.base_url):] if url.startswith(self.base_url) else None
+
+        if not mirror_breaker.can_attempt():
+            if fallback_url is None or not mb_breaker.can_attempt():
+                return None
+            fallback_resp = self._do_http_call(fallback_url, params=params, max_retries=max_retries)
+            mb_breaker.record_result(_is_breaker_failure(fallback_resp))
+            return fallback_resp
+
         resp = self._do_http_call(url, params=params, max_retries=max_retries)
+        mirror_breaker.record_result(_is_breaker_failure(resp))
+
         if resp is not None and resp.status_code == 200:
             return resp
 
-        # Resilient fallback: if request to self.base_url returns a network error, 403, or 5xx
         is_error = resp is None or resp.status_code in (403, 500, 502, 503, 504)
-        if is_error and self.base_url != "https://musicbrainz.org" and url.startswith(self.base_url):
-            fallback_url = "https://musicbrainz.org" + url[len(self.base_url):]
+        if is_error and fallback_url is not None:
+            if not mb_breaker.can_attempt():
+                return resp
             logger.warning(
                 "MbidEnricherClient: Mirror request failed (status=%s), falling back to %s",
                 resp.status_code if resp is not None else "None",
                 fallback_url,
             )
             fallback_resp = self._do_http_call(fallback_url, params=params, max_retries=max_retries)
+            mb_breaker.record_result(_is_breaker_failure(fallback_resp))
             if fallback_resp is not None and fallback_resp.status_code == 200:
                 return fallback_resp
+            return fallback_resp
 
         return resp
 
@@ -145,6 +305,55 @@ class MbidEnricherClient:
         with self._lock:
             self._cache[key] = (time.time(), data)
 
+    def _lookup(self, key: str, force: bool = False) -> tuple[bool, Any]:
+        """Lookup in L1 in-memory cache, then L2 persistent store. Increments cache_hits on hit."""
+        if force:
+            return False, None
+        hit, data = self._get_cached(key)
+        if hit:
+            with self._lock:
+                self._cache_hits += 1
+            return True, data
+        if self._store is not None:
+            hit, data = self._store.get(key)
+            if hit:
+                self._set_cached(key, data)
+                with self._lock:
+                    self._cache_hits += 1
+                return True, data
+        return False, None
+
+    def _remember(
+        self, key: str, kind: str, data: Any, ttl: Optional[float] = None
+    ) -> None:
+        """Stores parsed 200 / 404 result in L1 and (if store present) L2 with appropriate TTL."""
+        from plex_playlist_sync.mb_metadata_store import (
+            TTL_ARTIST_DETAILS,
+            TTL_DISCOGRAPHY,
+            TTL_LOOKUP,
+            TTL_NEGATIVE,
+            TTL_RG_LOOKUP,
+            TTL_RG_TRACKS,
+            ttl_with_jitter,
+        )
+
+        self._set_cached(key, data)
+        if self._store is not None:
+            if data is None or data == []:
+                store_ttl = TTL_NEGATIVE
+            elif ttl is not None:
+                store_ttl = ttl_with_jitter(float(ttl))
+            else:
+                default_ttls = {
+                    "artist_details": TTL_ARTIST_DETAILS,
+                    "discography": TTL_DISCOGRAPHY,
+                    "rg_tracks": TTL_RG_TRACKS,
+                    "rg_lookup": TTL_RG_LOOKUP,
+                }
+                base_ttl = default_ttls.get(kind, TTL_LOOKUP)
+                store_ttl = ttl_with_jitter(base_ttl)
+            self._store.put(key, kind, data, store_ttl)
+
     def lookup_track_mbids(
         self,
         artist: str,
@@ -159,20 +368,35 @@ class MbidEnricherClient:
         clean_isrc = (isrc or "").strip().upper()
 
         cache_key = f"track:{clean_artist.lower()}:{clean_album.lower()}:{clean_title.lower()}:{clean_isrc}"
-        hit, cached_data = self._get_cached(cache_key)
+        hit, cached_data = self._lookup(cache_key)
         if hit:
             return cached_data
 
         try:
+            recordings = None
+            had_success_200 = False
+
             # 1. Try ISRC lookup first if present
-            recordings = []
             if clean_isrc:
                 url = f"{self.base_url}/ws/2/recording"
                 params = {"query": f"isrc:{clean_isrc}", "fmt": "json"}
                 resp = self._request(url, params=params)
                 if resp is not None and resp.status_code == 200:
-                    data = resp.json()
-                    recordings = data.get("recordings") or []
+                    try:
+                        data = resp.json()
+                        if isinstance(data, dict):
+                            recordings = data.get("recordings") or []
+                            had_success_200 = True
+                    except ValueError as exc:
+                        logger.warning(
+                            "MbidEnricherClient: lookup_track_mbids JSON decode failed for %s (%s): %s",
+                            url,
+                            cache_key,
+                            exc,
+                        )
+                elif resp is not None and resp.status_code == 404:
+                    had_success_200 = True
+                    recordings = []
 
             # 2. If no ISRC match, search by recording, artist, and release
             if not recordings and clean_title:
@@ -186,14 +410,34 @@ class MbidEnricherClient:
                 params = {"query": query_str, "fmt": "json"}
                 resp = self._request(url, params=params)
                 if resp is not None and resp.status_code == 200:
-                    data = resp.json()
-                    recordings = data.get("recordings") or []
+                    try:
+                        data = resp.json()
+                        if isinstance(data, dict):
+                            recordings = data.get("recordings") or []
+                            had_success_200 = True
+                    except ValueError as exc:
+                        logger.warning(
+                            "MbidEnricherClient: lookup_track_mbids JSON decode failed for %s (%s): %s",
+                            url,
+                            cache_key,
+                            exc,
+                        )
+                elif resp is not None and resp.status_code == 404:
+                    had_success_200 = True
+                    recordings = []
 
             if not recordings:
-                self._set_cached(cache_key, None)
+                if had_success_200:
+                    self._remember(cache_key, "track_lookup", None)
+                else:
+                    self._set_cached(cache_key, None)
                 return None
 
             rec = recordings[0]
+            if not isinstance(rec, dict):
+                self._set_cached(cache_key, None)
+                return None
+
             musicbrainz_trackid = rec.get("id")
 
             musicbrainz_artistid: Optional[str] = None
@@ -224,7 +468,7 @@ class MbidEnricherClient:
                 "musicbrainz_releasegroupid": musicbrainz_releasegroupid,
                 "musicbrainz_trackid": musicbrainz_trackid,
             }
-            self._set_cached(cache_key, result)
+            self._remember(cache_key, "track_lookup", result)
             return result
 
         except Exception as exc:
@@ -242,7 +486,7 @@ class MbidEnricherClient:
         if not resource:
             return None
         cache_key = f"urlrel:{resource.lower()}"
-        hit, cached_data = self._get_cached(cache_key)
+        hit, cached_data = self._lookup(cache_key)
         if hit:
             return cached_data
 
@@ -252,19 +496,41 @@ class MbidEnricherClient:
             )
             if resp is None or resp.status_code != 200:
                 if resp is not None and resp.status_code == 404:
+                    self._remember(cache_key, "url_lookup", None)
+                else:
                     self._set_cached(cache_key, None)
                 return None
-            data = resp.json()
+
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                logger.warning(
+                    "MbidEnricherClient: lookup_artist_mbid_by_url JSON decode failed for %s: %s",
+                    cache_key,
+                    exc,
+                )
+                self._set_cached(cache_key, None)
+                return None
+
+            if not isinstance(data, dict):
+                self._set_cached(cache_key, None)
+                return None
+
             mbid: Optional[str] = None
             for rel in data.get("relations") or []:
                 artist = rel.get("artist") if isinstance(rel, dict) else None
                 if isinstance(artist, dict) and artist.get("id"):
                     mbid = str(artist["id"])
                     break
-            self._set_cached(cache_key, mbid)
+            self._remember(cache_key, "url_lookup", mbid)
             return mbid
         except (ValueError, AttributeError, TypeError) as exc:
             logger.warning("MbidEnricherClient: lookup_artist_mbid_by_url failed for '%s': %s", resource, exc)
+            self._set_cached(cache_key, None)
+            return None
+        except Exception as exc:
+            logger.warning("MbidEnricherClient: lookup_artist_mbid_by_url unexpected error for '%s': %s", resource, exc)
+            self._set_cached(cache_key, None)
             return None
 
     def lookup_artist_mbid(self, artist_name: str) -> Optional[str]:
@@ -277,7 +543,7 @@ class MbidEnricherClient:
             return None
 
         cache_key = f"artist:{clean_name.lower()}"
-        hit, cached_data = self._get_cached(cache_key)
+        hit, cached_data = self._lookup(cache_key)
         if hit:
             return cached_data
 
@@ -286,17 +552,34 @@ class MbidEnricherClient:
             params = {"query": f'artist:"{clean_name}"', "fmt": "json"}
             resp = self._request(url, params=params)
             if resp is None or resp.status_code != 200:
+                if resp is not None and resp.status_code == 404:
+                    self._remember(cache_key, "artist_lookup", None)
+                else:
+                    self._set_cached(cache_key, None)
+                return None
+
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                logger.warning(
+                    "MbidEnricherClient: lookup_artist_mbid JSON decode failed for %s: %s",
+                    cache_key,
+                    exc,
+                )
                 self._set_cached(cache_key, None)
                 return None
 
-            data = resp.json()
+            if not isinstance(data, dict):
+                self._set_cached(cache_key, None)
+                return None
+
             artists = data.get("artists") or []
             if not artists:
-                self._set_cached(cache_key, None)
+                self._remember(cache_key, "artist_lookup", None)
                 return None
 
-            mbid = artists[0].get("id")
-            self._set_cached(cache_key, mbid)
+            mbid = artists[0].get("id") if isinstance(artists[0], dict) else None
+            self._remember(cache_key, "artist_lookup", mbid)
             return mbid
 
         except Exception as exc:
@@ -319,7 +602,7 @@ class MbidEnricherClient:
             return None
 
         cache_key = f"album:{clean_artist.lower()}:{clean_album.lower()}"
-        hit, cached_data = self._get_cached(cache_key)
+        hit, cached_data = self._lookup(cache_key)
         if hit:
             return cached_data
 
@@ -331,18 +614,38 @@ class MbidEnricherClient:
             params = {"query": " AND ".join(query_parts), "fmt": "json"}
             resp = self._request(url, params=params)
             if resp is None or resp.status_code != 200:
+                if resp is not None and resp.status_code == 404:
+                    self._remember(cache_key, "album_lookup", None)
+                else:
+                    self._set_cached(cache_key, None)
+                return None
+
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                logger.warning(
+                    "MbidEnricherClient: lookup_album_mbids JSON decode failed for %s: %s",
+                    cache_key,
+                    exc,
+                )
                 self._set_cached(cache_key, None)
                 return None
 
-            data = resp.json()
+            if not isinstance(data, dict):
+                self._set_cached(cache_key, None)
+                return None
+
             release_groups = data.get("release-groups") or []
             if not release_groups:
-                self._set_cached(cache_key, None)
+                self._remember(cache_key, "album_lookup", None)
                 return None
 
             rg0 = release_groups[0]
-            rg_id = rg0.get("id")
+            if not isinstance(rg0, dict):
+                self._set_cached(cache_key, None)
+                return None
 
+            rg_id = rg0.get("id")
             art_id: Optional[str] = None
             artist_credit = rg0.get("artist-credit") or []
             if artist_credit and isinstance(artist_credit, list):
@@ -358,7 +661,7 @@ class MbidEnricherClient:
                 "mb_release_group_id": rg_id,
                 "mb_artist_id": art_id,
             }
-            self._set_cached(cache_key, result)
+            self._remember(cache_key, "album_lookup", result)
             return result
 
         except Exception as exc:
@@ -385,14 +688,17 @@ class MbidEnricherClient:
         """Queries the mirror for the canonical artist MBID (alias for lookup_artist_mbid)."""
         return self.lookup_artist_mbid(artist_name)
 
-    def get_artist_details(self, mbid: str) -> Optional[dict[str, Any]]:
+    def get_artist_details(self, mbid: str, force: bool = False) -> Optional[dict[str, Any]]:
         """Queries the mirror for artist metadata (country, disambiguation, genres, urls)."""
         if not mbid or not str(mbid).strip():
             return None
 
         clean_mbid = str(mbid).strip()
+        if self._store is not None:
+            clean_mbid = self._store.resolve_redirect(clean_mbid)
+
         cache_key = f"artist_details:{clean_mbid.lower()}"
-        hit, cached_data = self._get_cached(cache_key)
+        hit, cached_data = self._lookup(cache_key, force=force)
         if hit:
             return cached_data
 
@@ -401,13 +707,30 @@ class MbidEnricherClient:
             params = {"inc": "genres+tags+url-rels", "fmt": "json"}
             resp = self._request(url, params=params)
             if resp is None or resp.status_code != 200:
+                if resp is not None and resp.status_code == 404:
+                    self._remember(cache_key, "artist_details", None)
+                else:
+                    self._set_cached(cache_key, None)
+                return None
+
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                logger.warning(
+                    "MbidEnricherClient: get_artist_details JSON decode failed for %s: %s",
+                    clean_mbid,
+                    exc,
+                )
                 self._set_cached(cache_key, None)
                 return None
 
-            data = resp.json()
             if not isinstance(data, dict):
                 self._set_cached(cache_key, None)
                 return None
+
+            resp_id = data.get("id")
+            if resp_id and str(resp_id).lower() != clean_mbid.lower() and self._store is not None:
+                self._store.record_redirect(clean_mbid, str(resp_id), "artist")
 
             genre_names: list[str] = []
             for g in (data.get("genres") or []):
@@ -445,7 +768,9 @@ class MbidEnricherClient:
                 "genres": genre_names,
                 "urls": urls,
             }
-            self._set_cached(cache_key, result)
+            if resp_id and str(resp_id).lower() != clean_mbid.lower():
+                self._remember(f"artist_details:{str(resp_id).lower()}", "artist_details", result)
+            self._remember(cache_key, "artist_details", result)
             return result
 
         except Exception as exc:
@@ -457,82 +782,199 @@ class MbidEnricherClient:
             self._set_cached(cache_key, None)
             return None
 
-    def get_artist_discography(self, mbid: str, limit: int = 100) -> list[dict[str, Any]]:
-        """Queries the mirror for full artist release groups and categorizes release types."""
-        if not mbid or not str(mbid).strip():
-            return []
+    def resolve_release_group(self, rg_id: str) -> Optional[str]:
+        """Resolves canonical release group MBID, recording redirects if updated."""
+        if not rg_id or not str(rg_id).strip():
+            return None
 
-        clean_mbid = str(mbid).strip()
-        cache_key = f"discography:{clean_mbid.lower()}:{limit}"
-        hit, cached_data = self._get_cached(cache_key)
+        clean_id = str(rg_id).strip()
+        if self._store is not None:
+            clean_id = self._store.resolve_redirect(clean_id)
+
+        cache_key = f"rg_lookup:{clean_id.lower()}"
+        hit, cached_data = self._lookup(cache_key)
         if hit:
             return cached_data
 
         try:
-            url = f"{self.base_url}/ws/2/release-group"
-            params = {"artist": clean_mbid, "limit": limit, "fmt": "json"}
+            url = f"{self.base_url}/ws/2/release-group/{clean_id}"
+            params = {"fmt": "json"}
             resp = self._request(url, params=params)
             if resp is None or resp.status_code != 200:
-                self._set_cached(cache_key, [])
-                return []
-
-            data = resp.json()
-            if not isinstance(data, dict):
-                self._set_cached(cache_key, [])
-                return []
-
-            release_groups = data.get("release-groups") or []
-            results: list[dict[str, Any]] = []
-
-            for rg in release_groups:
-                if not isinstance(rg, dict):
-                    continue
-                rg_id = str(rg.get("id") or "")
-                title = str(rg.get("title") or "Unknown Album")
-                primary_type = str(rg.get("primary-type") or "Album")
-                raw_secondary = rg.get("secondary-types") or []
-                secondary_types = [str(st).lower() for st in raw_secondary if st]
-
-                first_release_date = rg.get("first-release-date")
-                year: Optional[int] = None
-                if first_release_date:
-                    date_str = str(first_release_date).strip()
-                    if len(date_str) >= 4 and date_str[:4].isdigit():
-                        year = int(date_str[:4])
-
-                pt_lower = primary_type.lower()
-                st_set = set(secondary_types)
-
-                if "live" in st_set:
-                    album_type = "live"
-                elif bool(st_set.intersection({"compilation", "soundtrack", "remix"})):
-                    album_type = "compilation"
-                elif pt_lower in ("single", "ep"):
-                    album_type = pt_lower
+                if resp is not None and resp.status_code == 404:
+                    self._remember(cache_key, "rg_lookup", None)
                 else:
-                    album_type = "album"
+                    self._set_cached(cache_key, None)
+                return None
 
-                cover_url = (
-                    f"https://coverartarchive.org/release-group/{rg_id}/front-500"
-                    if rg_id
-                    else None
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                logger.warning(
+                    "MbidEnricherClient: resolve_release_group JSON decode failed for %s: %s",
+                    clean_id,
+                    exc,
+                )
+                self._set_cached(cache_key, None)
+                return None
+
+            if not isinstance(data, dict):
+                self._set_cached(cache_key, None)
+                return None
+
+            resp_id = data.get("id")
+            if not resp_id:
+                self._set_cached(cache_key, None)
+                return None
+
+            canonical_id = str(resp_id).strip()
+            if canonical_id.lower() != clean_id.lower() and self._store is not None:
+                self._store.record_redirect(clean_id, canonical_id, "release_group")
+                self._remember(f"rg_lookup:{canonical_id.lower()}", "rg_lookup", canonical_id)
+            self._remember(cache_key, "rg_lookup", canonical_id)
+            return canonical_id
+        except Exception as exc:
+            logger.warning("MbidEnricherClient: resolve_release_group failed for '%s': %s", clean_id, exc)
+            self._set_cached(cache_key, None)
+            return None
+
+    def get_artist_discography_result(
+        self, mbid: str, limit: int = 100, force: bool = False
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Paginates artist release groups. Returns (release_groups, complete)."""
+        if not mbid or not str(mbid).strip():
+            return [], False
+
+        clean_mbid = str(mbid).strip()
+        if self._store is not None:
+            clean_mbid = self._store.resolve_redirect(clean_mbid)
+
+        cache_key = f"discography:{clean_mbid.lower()}"
+        hit, cached_data = self._lookup(cache_key, force=force)
+        if hit and isinstance(cached_data, list):
+            return cached_data, True
+
+        page_size = max(1, min(int(limit), 100))
+        all_items: list[dict[str, Any]] = []
+        max_pages = 25
+        page_num = 0
+        complete = False
+
+        try:
+            while page_num < max_pages:
+                offset = page_num * page_size
+                url = f"{self.base_url}/ws/2/release-group"
+                params = {"artist": clean_mbid, "limit": page_size, "offset": offset, "fmt": "json"}
+                resp = self._request(url, params=params)
+                if resp is None or resp.status_code != 200:
+                    if page_num == 0:
+                        return [], False
+                    logger.warning(
+                        "MbidEnricherClient: discography page failed for artist %s at offset %d (status=%s)",
+                        clean_mbid,
+                        offset,
+                        resp.status_code if resp is not None else "None",
+                    )
+                    return all_items, False
+
+                try:
+                    data = resp.json()
+                except Exception as exc:
+                    if page_num == 0:
+                        return [], False
+                    logger.warning(
+                        "MbidEnricherClient: discography JSON decode failed for artist %s at offset %d: %s",
+                        clean_mbid,
+                        offset,
+                        exc,
+                    )
+                    return all_items, False
+
+                if not isinstance(data, dict):
+                    if page_num == 0:
+                        return [], False
+                    logger.warning(
+                        "MbidEnricherClient: discography non-dict JSON for artist %s at offset %d",
+                        clean_mbid,
+                        offset,
+                    )
+                    return all_items, False
+
+                release_groups = data.get("release-groups") or []
+                if not isinstance(release_groups, list) or not release_groups:
+                    complete = True
+                    break
+
+                for rg in release_groups:
+                    if not isinstance(rg, dict):
+                        continue
+                    rg_id = str(rg.get("id") or "")
+                    title = str(rg.get("title") or "Unknown Album")
+                    primary_type = str(rg.get("primary-type") or "Album")
+                    raw_secondary = rg.get("secondary-types") or []
+                    secondary_types = [str(st).lower() for st in raw_secondary if st]
+
+                    first_release_date = rg.get("first-release-date")
+                    year: Optional[int] = None
+                    if first_release_date:
+                        date_str = str(first_release_date).strip()
+                        if len(date_str) >= 4 and date_str[:4].isdigit():
+                            year = int(date_str[:4])
+
+                    pt_lower = primary_type.lower()
+                    st_set = set(secondary_types)
+
+                    if "live" in st_set:
+                        album_type = "live"
+                    elif bool(st_set.intersection({"compilation", "soundtrack", "remix"})):
+                        album_type = "compilation"
+                    elif pt_lower in ("single", "ep"):
+                        album_type = pt_lower
+                    else:
+                        album_type = "album"
+
+                    cover_url = (
+                        f"https://coverartarchive.org/release-group/{rg_id}/front-500"
+                        if rg_id
+                        else None
+                    )
+
+                    all_items.append(
+                        {
+                            "id": rg_id,
+                            "title": title,
+                            "primary_type": primary_type,
+                            "secondary_types": secondary_types,
+                            "first_release_date": first_release_date,
+                            "year": year,
+                            "album_type": album_type,
+                            "cover_url": cover_url,
+                        }
+                    )
+
+                rg_count_raw = data.get("release-group-count")
+                if rg_count_raw is not None:
+                    try:
+                        total_count = int(rg_count_raw)
+                    except (ValueError, TypeError):
+                        total_count = len(release_groups)
+                else:
+                    total_count = len(release_groups)
+
+                page_num += 1
+                if (page_num * page_size) >= total_count or len(release_groups) < page_size:
+                    complete = True
+                    break
+
+            if not complete and page_num >= max_pages:
+                logger.warning(
+                    "MbidEnricherClient: discography paging hard cap (25 pages) reached for artist %s",
+                    clean_mbid,
                 )
 
-                results.append(
-                    {
-                        "id": rg_id,
-                        "title": title,
-                        "primary_type": primary_type,
-                        "secondary_types": secondary_types,
-                        "first_release_date": first_release_date,
-                        "year": year,
-                        "album_type": album_type,
-                        "cover_url": cover_url,
-                    }
-                )
-
-            self._set_cached(cache_key, results)
-            return results
+            if complete:
+                self._remember(cache_key, "discography", all_items)
+            return all_items, complete
 
         except Exception as exc:
             logger.warning(
@@ -540,18 +982,29 @@ class MbidEnricherClient:
                 clean_mbid,
                 exc,
             )
-            self._set_cached(cache_key, [])
-            return []
+            return all_items if page_num > 0 else [], False
 
-    def get_release_group_tracks(self, release_group_id: str) -> list[dict[str, Any]]:
+    def get_artist_discography(
+        self, mbid: str, limit: int = 100, force: bool = False
+    ) -> list[dict[str, Any]]:
+        """Queries the mirror for full artist release groups and categorizes release types."""
+        items, _ = self.get_artist_discography_result(mbid, limit=limit, force=force)
+        return items
+
+    def get_release_group_tracks(
+        self, release_group_id: str, force: bool = False
+    ) -> list[dict[str, Any]]:
         """Queries MusicBrainz / BrainzMash for canonical tracks within a release group."""
         if not release_group_id or not str(release_group_id).strip():
             return []
 
         clean_rg_id = str(release_group_id).strip()
+        if self._store is not None:
+            clean_rg_id = self._store.resolve_redirect(clean_rg_id)
+
         cache_key = f"tracks:rg:{clean_rg_id.lower()}"
-        hit, cached_data = self._get_cached(cache_key)
-        if hit:
+        hit, cached_data = self._lookup(cache_key, force=force)
+        if hit and isinstance(cached_data, list):
             return cached_data
 
         try:
@@ -564,17 +1017,30 @@ class MbidEnricherClient:
             }
             resp = self._request(url, params=params)
             if resp is None or resp.status_code != 200:
+                if resp is not None and resp.status_code == 404:
+                    self._remember(cache_key, "rg_tracks", [])
+                else:
+                    self._set_cached(cache_key, [])
+                return []
+
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                logger.warning(
+                    "MbidEnricherClient: get_release_group_tracks JSON decode failed for %s: %s",
+                    cache_key,
+                    exc,
+                )
                 self._set_cached(cache_key, [])
                 return []
 
-            data = resp.json()
             if not isinstance(data, dict):
                 self._set_cached(cache_key, [])
                 return []
 
             releases = data.get("releases") or []
             if not releases or not isinstance(releases, list):
-                self._set_cached(cache_key, [])
+                self._remember(cache_key, "rg_tracks", [])
                 return []
 
             first_release = releases[0]
@@ -626,7 +1092,7 @@ class MbidEnricherClient:
                         }
                     )
 
-            self._set_cached(cache_key, results)
+            self._remember(cache_key, "rg_tracks", results)
             return results
 
         except Exception as exc:
@@ -637,4 +1103,3 @@ class MbidEnricherClient:
             )
             self._set_cached(cache_key, [])
             return []
-

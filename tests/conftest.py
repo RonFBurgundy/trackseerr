@@ -101,6 +101,16 @@ def _restore_root_logging():
 
 
 @pytest.fixture(autouse=True)
+def _reset_shared_metadata_clients():
+    """Drop the process-wide MusicBrainz/Deezer clients so no test inherits another's db or mirror."""
+    from plex_playlist_sync.mb_metadata_store import reset_shared_clients
+
+    reset_shared_clients()
+    yield
+    reset_shared_clients()
+
+
+@pytest.fixture(autouse=True)
 def _stub_mbid_enricher(request, monkeypatch):
     """Autouse fixture that stubs MbidEnricherClient.lookup_track_mbids to return None without network calls.
 

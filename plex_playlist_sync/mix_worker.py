@@ -9,6 +9,7 @@ import requests
 from plexapi.exceptions import PlexApiException
 
 from plex_playlist_sync.clients.discovery import DiscoveryClient
+from plex_playlist_sync.mb_metadata_store import get_shared_discovery_client
 from plex_playlist_sync.clients.plex import PlexClient
 from plex_playlist_sync.config import Config
 from plex_playlist_sync.storage import Database
@@ -109,7 +110,7 @@ class MixWorker:
         """Manually run tailored mix generation now for every configured mix."""
         plex = self._get_plex(config)
         if self._discovery is None:
-            self._discovery = DiscoveryClient()
+            self._discovery = get_shared_discovery_client(db)
         with self._iteration_lock:
             return self.run_iteration(db, config, plex, self._discovery, force=True)
 
@@ -145,7 +146,7 @@ class MixWorker:
                 return False
             self._stop_event.clear()
             self._is_running = True
-        self._discovery = discovery or DiscoveryClient()
+        self._discovery = discovery or get_shared_discovery_client(db)
         cycle_interval = interval_fn or (lambda: float(interval_seconds))
 
         def _loop() -> None:

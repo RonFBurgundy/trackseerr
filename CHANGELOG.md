@@ -22,6 +22,18 @@ heading becomes the version and date.
 - Bulk retag: preview tag changes across many albums, then apply them in one step.
 - Update check: the System page shows when a newer TrackSeerr release is available, and the check can be turned off.
 
+### Changed
+
+- Artist and album metadata from MusicBrainz and Deezer is now stored locally and refreshed on a schedule, so artist refreshes make far fewer requests to those services. Refreshing an artist by hand always fetches fresh data.
+- When the MusicBrainz mirror is down, TrackSeerr switches to musicbrainz.org without waiting on the mirror for every request. When both are down, scheduled refreshes pause and retry the skipped artists on the next run.
+- Deezer requests are paced to stay under Deezer's rate limit, and a "quota exceeded" reply is retried instead of being treated as missing data.
+
+### Fixed
+
+- Artists with more than 100 releases now show their complete discography.
+- Albums and artists whose MusicBrainz IDs were merged or changed are relinked automatically.
+- The MusicBrainz mirror setting is now used everywhere; some background tasks ignored it.
+
 ## [1.0.0] - first TrackSeerr release (not yet tagged)
 
 TrackSeerr began as a fork of plex-playlist-sync. The earlier `v1.0.0`–`v1.0.3`

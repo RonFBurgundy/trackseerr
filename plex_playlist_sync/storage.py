@@ -76,7 +76,7 @@ def clean_library_name(text: str) -> str:
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
 SEED_COMPLETE_ACTIONS = ("keep", "remove", "remove_and_delete")
-SCHEMA_VERSION = 70  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 71  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:
@@ -397,6 +397,7 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
                 (68, self._migration_v68),
                 (69, self._migration_v69),
                 (70, self._migration_v70),
+                (71, self._migration_v71),
             ]
 
             applied = 0
@@ -2131,6 +2132,35 @@ class Database(QualityCatalogMixin, DelayProfileMixin, ItemHistoryMixin, TagMixi
         for name, decl in columns:
             if name not in have_general:
                 cur.execute(f"ALTER TABLE general_settings ADD COLUMN {name} {decl};")
+
+    def _migration_v71(self, cur: sqlite3.Cursor) -> None:
+        """MusicBrainz persistent metadata store and ID redirects."""
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS mb_metadata_cache (
+                cache_key TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            );"""
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mb_cache_expires ON mb_metadata_cache(expires_at);"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mb_cache_kind ON mb_metadata_cache(kind);"
+        )
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS mb_id_redirects (
+                old_id TEXT PRIMARY KEY,
+                new_id TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                seen_at TEXT NOT NULL
+            );"""
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mb_redirects_new ON mb_id_redirects(new_id);"
+        )
 
     def _migration_v37(self, cur: sqlite3.Cursor) -> None:
         """Import lists, per-playlist monitor mode and the missing-track "already applied" marker."""
