@@ -10,6 +10,7 @@ This page covers TrackSeerr's own library manager. If Lidarr manages your librar
 - [Calendar](#calendar)
 - [Importing files by hand](#importing-files-by-hand)
 - [File naming](#file-naming)
+- [Retagging files](#retagging-files)
 - [Deleted and rejected files](#deleted-and-rejected-files)
 - [History](#history)
 - [Library health](#library-health)
@@ -142,6 +143,19 @@ Presets:
 | Audiophile / Detailed | Adds codec, bit depth, and sample rate to every file name. |
 
 New imports use the current format. To rename files already in the library, click **Rename files** on the **Library** page, an artist page, or an album. TrackSeerr shows each current path next to its new path. Pick the files to rename and apply.
+
+## Retagging files
+
+Admins can write catalog metadata to existing audio files. Click **Retag files** on the **Library** page, an artist page, or an album.
+
+TrackSeerr compares tags on each file with catalog metadata. The preview lists each differing field with its current value and proposed value. Files that already match are omitted.
+
+Select the files you want to update and apply the changes. You can also embed album artwork.
+
+TrackSeerr protects seeding torrents. If a library file shares data with a seeding torrent through a hardlink, TrackSeerr checks your media management settings:
+
+- With **Copy and tag**, TrackSeerr makes a private copy of the file before writing tags. The original seeding file remains untouched.
+- With **Keep hardlink**, TrackSeerr skips tagging the file so the torrent stays intact.
 
 ## Deleted and rejected files
 

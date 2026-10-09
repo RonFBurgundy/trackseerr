@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Disc, Eye, FileText, FolderInput, Layers, Loader2, Music, RefreshCw, User } from 'lucide-react';
+import { Disc, Eye, FileText, FolderInput, Layers, Loader2, Music, RefreshCw, Tag, User } from 'lucide-react';
 import type { UseLibraryReturn, LibraryTab } from '@/hooks/useLibrary';
 import type { AppRoute, LibraryRoute, NavigateOptions } from '@/hooks/useAppRoute';
 import { useLibraryDrilldown } from '@/hooks/useLibraryDrilldown';
@@ -26,6 +26,8 @@ import {
   LidarrMigrationBanner,
   RenameModal,
   type RenameScope,
+  RetagModal,
+  type RetagScope,
   TracksPanel,
 } from '@/components/library';
 import { ManualImportModal } from '@/components/manualImport';
@@ -111,6 +113,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const [monitoredOnly, setMonitoredOnly] = useState<boolean>(false);
   const [importScope, setImportScope] = useState<ManualImportScope | null>(null);
   const [renameScope, setRenameScope] = useState<RenameScope | null>(null);
+  const [retagScope, setRetagScope] = useState<RetagScope | null>(null);
   /** Data source reported by the paged artists/albums responses; used until the manager settings load. */
   const [listMode, setListMode] = useState<string | null>(null);
 
@@ -192,6 +195,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         onGoToArtist={drill.openArtist}
         onImportFiles={openAlbumImport}
         onRenameFiles={(album) => setRenameScope({ albumId: String(album.id), albumTitle: album.title || undefined })}
+        onRetagFiles={(album) => setRetagScope({ albumId: String(album.id), albumTitle: album.title || undefined })}
         onToggleTrackMonitored={toggleTrackMonitored}
         onToast={showToast}
       />
@@ -209,6 +213,14 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         onClose={() => setRenameScope(null)}
         onRenamed={() => {
           showToast('Files renamed');
+          void reloadCatalog();
+        }}
+      />
+      <RetagModal
+        scope={retagScope}
+        onClose={() => setRetagScope(null)}
+        onRetagged={() => {
+          showToast('Files retagged');
           void reloadCatalog();
         }}
       />
@@ -230,6 +242,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             onOpenAlbum={drill.openAlbum}
             onImportAlbum={openAlbumImport}
             onRenameFiles={() => setRenameScope({ artistId: String(selectedArtistId) })}
+            onRetagFiles={() => setRetagScope({ artistId: String(selectedArtistId) })}
             onChanged={() => void refresh()}
             onToggleArtistMonitored={toggleArtistMonitored}
             onToggleAlbumMonitored={toggleAlbumMonitored}
@@ -337,6 +350,18 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               title="Rename files"
             >
               Rename files&hellip;
+            </TapeDeckButton>
+          )}
+          {isAdmin && !lidarrMode && (
+            <TapeDeckButton
+              size="sm"
+              className="shrink-0"
+              onClick={() => setRetagScope({})}
+              icon={<Tag className="h-3.5 w-3.5" />}
+              collapseLabel="xl"
+              title="Retag files"
+            >
+              Retag files&hellip;
             </TapeDeckButton>
           )}
           {/* Scanning is a native-library action; Lidarr manages its own files. */}

@@ -40,3 +40,4 @@ export * from './missingService';
 export * from './changelogService';
 export * from './backupService';
 export * from './calendarService';
+export * from './retagService';

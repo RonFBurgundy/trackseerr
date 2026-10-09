@@ -495,12 +495,12 @@ def delete_indexer(
     return {}
 
 
-@router.post("/indexer/test", summary="Test indexer connection")
+@router.post("/indexer/test", response_model=dict[str, Any], summary="Test indexer connection")
 def test_indexer(
     payload: LidarrIndexerPayload,
     response: Response,
     force_test: bool = Query(default=False, alias="forceTest"),
-) -> Any:
+) -> dict[str, Any]:
     """Tests connectivity against an indexer, matching Lidarr's test contract."""
     response.headers["X-Application-Version"] = LIDARR_COMPAT_VERSION
 
