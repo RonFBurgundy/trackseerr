@@ -12,29 +12,8 @@ os.environ.setdefault("TRACKSEERR_STRICT_RESPONSES", "1")
 # New React SPA tests explicitly unset or set TRACKSEERR_LEGACY_UI to '0'.
 os.environ["TRACKSEERR_LEGACY_UI"] = "1"
 
-import _pytest.fixtures
 import pytest
 from unittest.mock import patch
-
-# Work around pytest 9.1.1 fixture-matching issue when directory traversal creates duplicate Package nodes
-# (e.g. alternating test paths like tests/local_media/... tests/... tests/local_media/...).
-# Node-based matching fails because fixturedef.node is the first Package instance while subsequent tests
-# have a distinct Package instance as parent. Allowing baseid fallback matches correctly.
-_orig_matchfactories = _pytest.fixtures.FixtureManager._matchfactories
-
-
-def _robust_matchfactories(self, fixturedefs, node):
-    parent_nodes = set(node.iter_parents())
-    parentnodeids = {n.nodeid for n in parent_nodes}
-    for fixturedef in fixturedefs:
-        if fixturedef.node is not None:
-            if fixturedef.node in parent_nodes or fixturedef.baseid in parentnodeids:
-                yield fixturedef
-        elif fixturedef.baseid in parentnodeids:
-            yield fixturedef
-
-
-_pytest.fixtures.FixtureManager._matchfactories = _robust_matchfactories
 
 # The Lidarr contract tests need a real Lidarr: not even collected unless RUN_INTEGRATION=1 (docs/INTEGRATION_TESTS.md).
 collect_ignore_glob = [] if os.environ.get("RUN_INTEGRATION") == "1" else ["integration/*"]
