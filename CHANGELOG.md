@@ -15,6 +15,12 @@ heading becomes the version and date.
 
 - Backup and restore: scheduled and on-demand backups of the database and settings, with restore from the System page.
 - Changelog: a "What's new" section on the System page and a one-time notice for admins after an upgrade.
+- Lidarr-compatible API, so Prowlarr can sync its indexers to TrackSeerr.
+- Transmission, Deluge and NZBGet download clients.
+- Per-user notifications: an in-app inbox and browser push notifications, with per-user preferences.
+- Release calendar for monitored artists, with a private iCal feed for calendar apps.
+- Bulk retag: preview tag changes across many albums, then apply them in one step.
+- Update check: the System page shows when a newer TrackSeerr release is available, and the check can be turned off.
 
 ## [1.0.0] - first TrackSeerr release (not yet tagged)
 
