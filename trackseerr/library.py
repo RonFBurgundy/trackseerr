@@ -4,6 +4,7 @@ Extracts tags, stream metrics, and codecs via Mutagen with cross-platform collis
 """
 
 import base64
+from dataclasses import dataclass, field
 import logging
 import os
 import re
@@ -199,7 +200,182 @@ def _extract_year(date_val: Any) -> int | None:
     return None
 
 
-def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:  # noqa: C901, PLR0915
+@dataclass
+class _TagFields:
+    title: str | None = None
+    artist: str | None = None
+    album: str | None = None
+    album_artist: str | None = None
+    year: int | None = None
+    raw_date: str | None = None
+    track_number: int | None = None
+    total_tracks: int | None = None
+    disc_number: int | None = None
+    total_discs: int | None = None
+    codec: str = "UNKNOWN"
+    bitrate: int | None = None
+    sample_rate: int | None = None
+    bits_per_sample: int | None = None
+    duration: float = 0.0
+    musicbrainz_artistid: str | None = None
+    musicbrainz_albumartistid: str | None = None
+    artists: list[str] = field(default_factory=list)
+    musicbrainz_albumid: str | None = None
+    musicbrainz_releasegroupid: str | None = None
+    musicbrainz_trackid: str | None = None
+    isrc: str | None = None
+
+
+def _read_flac_tags(audio: Any, tags: Any, f: _TagFields) -> None:
+    f.codec = "FLAC"
+    if tags:
+        f.title = tags.get("title", [None])[0]
+        f.artist = tags.get("artist", [None])[0]
+        f.album = tags.get("album", [None])[0]
+        f.album_artist = tags.get("albumartist", [None])[0] or tags.get("album_artist", [None])[0]
+        f.raw_date = tags.get("date", [None])[0]
+        f.year = _extract_year(f.raw_date)
+        f.track_number, f.total_tracks = _parse_num_total(tags.get("tracknumber", [None])[0])
+        if f.total_tracks is None:
+            f.total_tracks = _parse_int(tags.get("tracktotal", [None])[0] or tags.get("totaltracks", [None])[0])
+        f.disc_number, f.total_discs = _parse_num_total(tags.get("discnumber", [None])[0])
+        if f.total_discs is None:
+            f.total_discs = _parse_int(tags.get("disctotal", [None])[0] or tags.get("totaldiscs", [None])[0])
+        f.musicbrainz_artistid = tags.get("musicbrainz_artistid", [None])[0]
+        f.musicbrainz_albumartistid = tags.get("musicbrainz_albumartistid", [None])[0]
+        f.artists = _clean_credits(tags.get("artists"))
+        f.musicbrainz_albumid = tags.get("musicbrainz_albumid", [None])[0]
+        f.musicbrainz_releasegroupid = tags.get("musicbrainz_releasegroupid", [None])[0]
+        f.musicbrainz_trackid = tags.get("musicbrainz_trackid", [None])[0]
+        f.isrc = tags.get("isrc", [None])[0]
+
+
+def _read_mp3_tags(audio: Any, tags: Any, f: _TagFields) -> None:
+    f.codec = "MP3"
+    if f.bits_per_sample is None:
+        f.bits_per_sample = 16
+    if tags:
+        def id3_val(key: str) -> str | None:
+            frame = tags.get(key)
+            if frame and hasattr(frame, "text") and frame.text:
+                return str(frame.text[0])
+            return None
+
+        f.title = id3_val("TIT2")
+        f.artist = id3_val("TPE1")
+        f.album = id3_val("TALB")
+        f.album_artist = id3_val("TPE2")
+        f.raw_date = id3_val("TDRC") or id3_val("TYER")
+        f.year = _extract_year(f.raw_date)
+        f.track_number, f.total_tracks = _parse_num_total(id3_val("TRCK"))
+        f.disc_number, f.total_discs = _parse_num_total(id3_val("TPOS"))
+        f.musicbrainz_artistid = id3_val("TXXX:MusicBrainz Artist Id")
+        f.musicbrainz_albumartistid = id3_val("TXXX:MusicBrainz Album Artist Id")
+        artists_frame = tags.get("TXXX:ARTISTS")
+        f.artists = _clean_credits(getattr(artists_frame, "text", None))
+        f.musicbrainz_albumid = id3_val("TXXX:MusicBrainz Album Id")
+        f.musicbrainz_releasegroupid = id3_val("TXXX:MusicBrainz Release Group Id")
+        ufid = tags.get("UFID:http://musicbrainz.org")
+        if ufid and hasattr(ufid, "data") and ufid.data:
+            try:
+                f.musicbrainz_trackid = ufid.data.decode("ascii")
+            except Exception:
+                f.musicbrainz_trackid = str(ufid.data)
+        if not f.musicbrainz_trackid:
+            f.musicbrainz_trackid = id3_val("TXXX:MusicBrainz Track Id") or id3_val("TXXX:MusicBrainz Recording Id")
+        f.isrc = id3_val("TSRC") or id3_val("TXXX:ISRC")
+
+
+def _read_mp4_tags(audio: Any, tags: Any, f: _TagFields) -> None:
+    info = getattr(audio, "info", None)
+    f.codec = "ALAC" if getattr(info, "codec", "").lower() == "alac" else "AAC"
+    if tags:
+        def mp4_val(key: str) -> str | None:
+            v = tags.get(key)
+            if v and isinstance(v, list) and v:
+                raw = v[0]
+                if isinstance(raw, (bytes, bytearray)):
+                    return raw.decode("utf-8", errors="ignore")
+                return str(raw)
+            return None
+
+        f.title = mp4_val("\xa9nam")
+        f.artist = mp4_val("\xa9ART")
+        f.album = mp4_val("\xa9alb")
+        f.album_artist = mp4_val("aART")
+        f.raw_date = mp4_val("\xa9day")
+        f.year = _extract_year(f.raw_date)
+
+        trkn = tags.get("trkn")
+        if trkn and isinstance(trkn, list) and trkn:
+            f.track_number, f.total_tracks = _parse_num_total(trkn[0])
+
+        disk = tags.get("disk")
+        if disk and isinstance(disk, list) and disk:
+            f.disc_number, f.total_discs = _parse_num_total(disk[0])
+
+        f.musicbrainz_artistid = mp4_val("----:com.apple.iTunes:MusicBrainz Artist Id")
+        f.musicbrainz_albumartistid = mp4_val("----:com.apple.iTunes:MusicBrainz Album Artist Id")
+        f.artists = _clean_credits(tags.get("----:com.apple.iTunes:ARTISTS"))
+        f.musicbrainz_albumid = mp4_val("----:com.apple.iTunes:MusicBrainz Album Id")
+        f.musicbrainz_releasegroupid = mp4_val("----:com.apple.iTunes:MusicBrainz Release Group Id")
+        f.musicbrainz_trackid = mp4_val("----:com.apple.iTunes:MusicBrainz Track Id")
+        f.isrc = mp4_val("----:com.apple.iTunes:ISRC")
+
+
+def _read_ogg_tags(audio: Any, tags: Any, f: _TagFields) -> None:
+    f.codec = "Opus" if isinstance(audio, OggOpus) else "Vorbis"
+    if tags:
+        f.title = tags.get("title", [None])[0]
+        f.artist = tags.get("artist", [None])[0]
+        f.album = tags.get("album", [None])[0]
+        f.album_artist = tags.get("albumartist", [None])[0] or tags.get("album_artist", [None])[0]
+        f.raw_date = tags.get("date", [None])[0]
+        f.year = _extract_year(f.raw_date)
+        f.track_number, f.total_tracks = _parse_num_total(tags.get("tracknumber", [None])[0])
+        f.disc_number, f.total_discs = _parse_num_total(tags.get("discnumber", [None])[0])
+        f.musicbrainz_artistid = tags.get("musicbrainz_artistid", [None])[0]
+        f.musicbrainz_albumartistid = tags.get("musicbrainz_albumartistid", [None])[0]
+        f.artists = _clean_credits(tags.get("artists"))
+        f.musicbrainz_albumid = tags.get("musicbrainz_albumid", [None])[0]
+        f.musicbrainz_releasegroupid = tags.get("musicbrainz_releasegroupid", [None])[0]
+        f.musicbrainz_trackid = tags.get("musicbrainz_trackid", [None])[0]
+        f.isrc = tags.get("isrc", [None])[0]
+
+
+def _read_fallback_tags(audio: Any, tags: Any, suffix: str, f: _TagFields) -> None:
+    if suffix in (".flac",):
+        f.codec = "FLAC"
+    elif suffix in (".mp3",):
+        f.codec = "MP3"
+    elif suffix in (".m4a", ".aac"):
+        f.codec = "AAC"
+    elif suffix in (".opus",):
+        f.codec = "Opus"
+    elif suffix in (".ogg",):
+        f.codec = "Vorbis"
+    elif suffix in (".wav",):
+        f.codec = "WAV"
+
+    if tags:
+        f.title = str(tags.get("title", [""])[0]) or None
+        f.artist = str(tags.get("artist", [""])[0]) or None
+        f.album = str(tags.get("album", [""])[0]) or None
+        f.album_artist = str(tags.get("albumartist", [""])[0]) or None
+        f.raw_date = str(tags.get("date", [""])[0]) or None
+        f.year = _extract_year(f.raw_date)
+        f.track_number, f.total_tracks = _parse_num_total(tags.get("tracknumber", [""])[0])
+        f.disc_number, f.total_discs = _parse_num_total(tags.get("discnumber", [""])[0])
+        f.musicbrainz_artistid = str(tags.get("musicbrainz_artistid", [""])[0]) or None
+        f.musicbrainz_albumartistid = str(tags.get("musicbrainz_albumartistid", [""])[0]) or None
+        f.artists = _clean_credits(tags.get("artists"))
+        f.musicbrainz_albumid = str(tags.get("musicbrainz_albumid", [""])[0]) or None
+        f.musicbrainz_releasegroupid = str(tags.get("musicbrainz_releasegroupid", [""])[0]) or None
+        f.musicbrainz_trackid = str(tags.get("musicbrainz_trackid", [""])[0]) or None
+        f.isrc = str(tags.get("isrc", [""])[0]) or None
+
+
+def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
     """Inspects an audio file using Mutagen to extract tags and stream properties.
 
     Supports FLAC, MP3 (ID3), M4A/AAC (MP4), and Ogg/Opus.
@@ -216,213 +392,63 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:  # noqa: C901, 
     if audio is None:
         raise ValueError(f"Unsupported audio file format or corrupted file: {path}")
 
-    title: str | None = None
-    artist: str | None = None
-    album: str | None = None
-    album_artist: str | None = None
-    year: int | None = None
-    raw_date: str | None = None
-    track_number: int | None = None
-    total_tracks: int | None = None
-    disc_number: int | None = None
-    total_discs: int | None = None
-    codec = "UNKNOWN"
-    bitrate: int | None = None
-    sample_rate: int | None = None
-    bits_per_sample: int | None = None
-    duration: float = 0.0
-    musicbrainz_artistid: str | None = None
-    musicbrainz_albumartistid: str | None = None
-    artists: list[str] = []
-    musicbrainz_albumid: str | None = None
-    musicbrainz_releasegroupid: str | None = None
-    musicbrainz_trackid: str | None = None
-    isrc: str | None = None
+    f = _TagFields()
 
     tags = getattr(audio, "tags", None)
     info = getattr(audio, "info", None)
 
     if info is not None:
-        duration = float(getattr(info, "length", 0.0))
-        sample_rate = _parse_int(getattr(info, "sample_rate", None))
-        bitrate = _parse_int(getattr(info, "bitrate", None))
-        bits_per_sample = _parse_int(getattr(info, "bits_per_sample", None))
+        f.duration = float(getattr(info, "length", 0.0))
+        f.sample_rate = _parse_int(getattr(info, "sample_rate", None))
+        f.bitrate = _parse_int(getattr(info, "bitrate", None))
+        f.bits_per_sample = _parse_int(getattr(info, "bits_per_sample", None))
 
     # 1. FLAC
     if isinstance(audio, FLAC):
-        codec = "FLAC"
-        if tags:
-            title = tags.get("title", [None])[0]
-            artist = tags.get("artist", [None])[0]
-            album = tags.get("album", [None])[0]
-            album_artist = tags.get("albumartist", [None])[0] or tags.get("album_artist", [None])[0]
-            raw_date = tags.get("date", [None])[0]
-            year = _extract_year(raw_date)
-            track_number, total_tracks = _parse_num_total(tags.get("tracknumber", [None])[0])
-            if total_tracks is None:
-                total_tracks = _parse_int(tags.get("tracktotal", [None])[0] or tags.get("totaltracks", [None])[0])
-            disc_number, total_discs = _parse_num_total(tags.get("discnumber", [None])[0])
-            if total_discs is None:
-                total_discs = _parse_int(tags.get("disctotal", [None])[0] or tags.get("totaldiscs", [None])[0])
-            musicbrainz_artistid = tags.get("musicbrainz_artistid", [None])[0]
-            musicbrainz_albumartistid = tags.get("musicbrainz_albumartistid", [None])[0]
-            artists = _clean_credits(tags.get("artists"))
-            musicbrainz_albumid = tags.get("musicbrainz_albumid", [None])[0]
-            musicbrainz_releasegroupid = tags.get("musicbrainz_releasegroupid", [None])[0]
-            musicbrainz_trackid = tags.get("musicbrainz_trackid", [None])[0]
-            isrc = tags.get("isrc", [None])[0]
+        _read_flac_tags(audio, tags, f)
 
     # 2. MP3 (ID3)
     elif isinstance(audio, MP3):
-        codec = "MP3"
-        if bits_per_sample is None:
-            bits_per_sample = 16
-        if tags:
-            def id3_val(key: str) -> str | None:
-                frame = tags.get(key)
-                if frame and hasattr(frame, "text") and frame.text:
-                    return str(frame.text[0])
-                return None
-
-            title = id3_val("TIT2")
-            artist = id3_val("TPE1")
-            album = id3_val("TALB")
-            album_artist = id3_val("TPE2")
-            raw_date = id3_val("TDRC") or id3_val("TYER")
-            year = _extract_year(raw_date)
-            track_number, total_tracks = _parse_num_total(id3_val("TRCK"))
-            disc_number, total_discs = _parse_num_total(id3_val("TPOS"))
-            musicbrainz_artistid = id3_val("TXXX:MusicBrainz Artist Id")
-            musicbrainz_albumartistid = id3_val("TXXX:MusicBrainz Album Artist Id")
-            artists_frame = tags.get("TXXX:ARTISTS")
-            artists = _clean_credits(getattr(artists_frame, "text", None))
-            musicbrainz_albumid = id3_val("TXXX:MusicBrainz Album Id")
-            musicbrainz_releasegroupid = id3_val("TXXX:MusicBrainz Release Group Id")
-            ufid = tags.get("UFID:http://musicbrainz.org")
-            if ufid and hasattr(ufid, "data") and ufid.data:
-                try:
-                    musicbrainz_trackid = ufid.data.decode("ascii")
-                except Exception:
-                    musicbrainz_trackid = str(ufid.data)
-            if not musicbrainz_trackid:
-                musicbrainz_trackid = id3_val("TXXX:MusicBrainz Track Id") or id3_val("TXXX:MusicBrainz Recording Id")
-            isrc = id3_val("TSRC") or id3_val("TXXX:ISRC")
+        _read_mp3_tags(audio, tags, f)
 
     # 3. MP4 / M4A / AAC / ALAC
     elif isinstance(audio, MP4):
-        codec = "ALAC" if getattr(info, "codec", "").lower() == "alac" else "AAC"
-        if tags:
-            def mp4_val(key: str) -> str | None:
-                v = tags.get(key)
-                if v and isinstance(v, list) and v:
-                    raw = v[0]
-                    if isinstance(raw, (bytes, bytearray)):
-                        return raw.decode("utf-8", errors="ignore")
-                    return str(raw)
-                return None
-
-            title = mp4_val("\xa9nam")
-            artist = mp4_val("\xa9ART")
-            album = mp4_val("\xa9alb")
-            album_artist = mp4_val("aART")
-            raw_date = mp4_val("\xa9day")
-            year = _extract_year(raw_date)
-
-            trkn = tags.get("trkn")
-            if trkn and isinstance(trkn, list) and trkn:
-                track_number, total_tracks = _parse_num_total(trkn[0])
-
-            disk = tags.get("disk")
-            if disk and isinstance(disk, list) and disk:
-                disc_number, total_discs = _parse_num_total(disk[0])
-
-            musicbrainz_artistid = mp4_val("----:com.apple.iTunes:MusicBrainz Artist Id")
-            musicbrainz_albumartistid = mp4_val("----:com.apple.iTunes:MusicBrainz Album Artist Id")
-            artists = _clean_credits(tags.get("----:com.apple.iTunes:ARTISTS"))
-            musicbrainz_albumid = mp4_val("----:com.apple.iTunes:MusicBrainz Album Id")
-            musicbrainz_releasegroupid = mp4_val("----:com.apple.iTunes:MusicBrainz Release Group Id")
-            musicbrainz_trackid = mp4_val("----:com.apple.iTunes:MusicBrainz Track Id")
-            isrc = mp4_val("----:com.apple.iTunes:ISRC")
+        _read_mp4_tags(audio, tags, f)
 
     # 4. Ogg Opus or Ogg Vorbis
     elif isinstance(audio, (OggOpus, OggVorbis)):
-        codec = "Opus" if isinstance(audio, OggOpus) else "Vorbis"
-        if tags:
-            title = tags.get("title", [None])[0]
-            artist = tags.get("artist", [None])[0]
-            album = tags.get("album", [None])[0]
-            album_artist = tags.get("albumartist", [None])[0] or tags.get("album_artist", [None])[0]
-            raw_date = tags.get("date", [None])[0]
-            year = _extract_year(raw_date)
-            track_number, total_tracks = _parse_num_total(tags.get("tracknumber", [None])[0])
-            disc_number, total_discs = _parse_num_total(tags.get("discnumber", [None])[0])
-            musicbrainz_artistid = tags.get("musicbrainz_artistid", [None])[0]
-            musicbrainz_albumartistid = tags.get("musicbrainz_albumartistid", [None])[0]
-            artists = _clean_credits(tags.get("artists"))
-            musicbrainz_albumid = tags.get("musicbrainz_albumid", [None])[0]
-            musicbrainz_releasegroupid = tags.get("musicbrainz_releasegroupid", [None])[0]
-            musicbrainz_trackid = tags.get("musicbrainz_trackid", [None])[0]
-            isrc = tags.get("isrc", [None])[0]
+        _read_ogg_tags(audio, tags, f)
 
     # 5. Generic Mutagen File fallback
     else:
-        suffix = path.suffix.lower()
-        if suffix in (".flac",):
-            codec = "FLAC"
-        elif suffix in (".mp3",):
-            codec = "MP3"
-        elif suffix in (".m4a", ".aac"):
-            codec = "AAC"
-        elif suffix in (".opus",):
-            codec = "Opus"
-        elif suffix in (".ogg",):
-            codec = "Vorbis"
-        elif suffix in (".wav",):
-            codec = "WAV"
-
-        if tags:
-            title = str(tags.get("title", [""])[0]) or None
-            artist = str(tags.get("artist", [""])[0]) or None
-            album = str(tags.get("album", [""])[0]) or None
-            album_artist = str(tags.get("albumartist", [""])[0]) or None
-            raw_date = str(tags.get("date", [""])[0]) or None
-            year = _extract_year(raw_date)
-            track_number, total_tracks = _parse_num_total(tags.get("tracknumber", [""])[0])
-            disc_number, total_discs = _parse_num_total(tags.get("discnumber", [""])[0])
-            musicbrainz_artistid = str(tags.get("musicbrainz_artistid", [""])[0]) or None
-            musicbrainz_albumartistid = str(tags.get("musicbrainz_albumartistid", [""])[0]) or None
-            artists = _clean_credits(tags.get("artists"))
-            musicbrainz_albumid = str(tags.get("musicbrainz_albumid", [""])[0]) or None
-            musicbrainz_releasegroupid = str(tags.get("musicbrainz_releasegroupid", [""])[0]) or None
-            musicbrainz_trackid = str(tags.get("musicbrainz_trackid", [""])[0]) or None
-            isrc = str(tags.get("isrc", [""])[0]) or None
+        _read_fallback_tags(audio, tags, path.suffix.lower(), f)
 
     metadata: dict[str, Any] = {
-        "title": title,
-        "artist": artist,
-        "album": album,
-        "album_artist": album_artist,
-        "date": raw_date or (str(year) if year is not None else None),
-        "year": year,
-        "release_year": year,
-        "track_number": track_number or None,
-        "total_tracks": total_tracks,
-        "disc_number": disc_number or 1,
-        "total_discs": total_discs or 1,
-        "codec": codec,
-        "bitrate": bitrate,
-        "sample_rate": sample_rate,
-        "bits_per_sample": bits_per_sample,
-        "duration": round(duration, 2),
+        "title": f.title,
+        "artist": f.artist,
+        "album": f.album,
+        "album_artist": f.album_artist,
+        "date": f.raw_date or (str(f.year) if f.year is not None else None),
+        "year": f.year,
+        "release_year": f.year,
+        "track_number": f.track_number or None,
+        "total_tracks": f.total_tracks,
+        "disc_number": f.disc_number or 1,
+        "total_discs": f.total_discs or 1,
+        "codec": f.codec,
+        "bitrate": f.bitrate,
+        "sample_rate": f.sample_rate,
+        "bits_per_sample": f.bits_per_sample,
+        "duration": round(f.duration, 2),
         "extension": path.suffix.lower(),
         "file_path": str(path),
-        "musicbrainz_artistid": musicbrainz_artistid,
-        "musicbrainz_albumartistid": musicbrainz_albumartistid,
-        "artists": artists,
-        "musicbrainz_albumid": musicbrainz_albumid,
-        "musicbrainz_releasegroupid": musicbrainz_releasegroupid,
-        "musicbrainz_trackid": musicbrainz_trackid,
-        "isrc": isrc,
+        "musicbrainz_artistid": f.musicbrainz_artistid,
+        "musicbrainz_albumartistid": f.musicbrainz_albumartistid,
+        "artists": f.artists,
+        "musicbrainz_albumid": f.musicbrainz_albumid,
+        "musicbrainz_releasegroupid": f.musicbrainz_releasegroupid,
+        "musicbrainz_trackid": f.musicbrainz_trackid,
+        "isrc": f.isrc,
     }
 
     metadata["quality_full"] = format_quality(metadata)
@@ -526,7 +552,247 @@ def build_tags_to_write(
     return tags
 
 
-def write_audio_tags(  # noqa: C901, PLR0915
+@dataclass
+class _TagValues:
+    title: Any = None
+    artist: Any = None
+    album: Any = None
+    album_artist: Any = None
+    date: Any = None
+    track: Any = None
+    total_tracks: Any = None
+    disc: Any = None
+    total_discs: Any = None
+    mb_artist: Any = None
+    mb_album: Any = None
+    mb_releasegroup: Any = None
+    mb_track: Any = None
+    isrc: Any = None
+
+
+def _write_flac_tags(  # noqa: C901
+    path: Path,
+    vals: _TagValues,
+    cover_art_bytes: bytes | None = None,
+) -> bool:
+    audio = FLAC(str(path))
+    if audio.tags is None:
+        audio.add_tags()
+
+    if vals.title is not None:
+        audio["title"] = [str(vals.title)]
+    if vals.artist is not None:
+        audio["artist"] = [str(vals.artist)]
+    if vals.album is not None:
+        audio["album"] = [str(vals.album)]
+    if vals.album_artist is not None:
+        audio["albumartist"] = [str(vals.album_artist)]
+    if vals.date is not None:
+        audio["date"] = [str(vals.date)]
+    if vals.track is not None:
+        audio["tracknumber"] = [str(vals.track)]
+    if vals.total_tracks is not None:
+        audio["totaltracks"] = [str(vals.total_tracks)]
+    if vals.disc is not None:
+        audio["discnumber"] = [str(vals.disc)]
+    if vals.total_discs is not None:
+        audio["totaldiscs"] = [str(vals.total_discs)]
+    if vals.mb_artist is not None:
+        audio["musicbrainz_artistid"] = [str(vals.mb_artist)]
+    if vals.mb_album is not None:
+        audio["musicbrainz_albumid"] = [str(vals.mb_album)]
+    if vals.mb_releasegroup is not None:
+        audio["musicbrainz_releasegroupid"] = [str(vals.mb_releasegroup)]
+    if vals.mb_track is not None:
+        audio["musicbrainz_trackid"] = [str(vals.mb_track)]
+    if vals.isrc is not None:
+        audio["isrc"] = [str(vals.isrc)]
+
+    if cover_art_bytes:
+        pic = Picture()
+        pic.type = 3  # Cover (front)
+        pic.mime = "image/png" if cover_art_bytes.startswith(b"\x89PNG") else "image/jpeg"
+        pic.data = cover_art_bytes
+        audio.clear_pictures()
+        audio.add_picture(pic)
+
+    audio.save()
+    return True
+
+
+def _write_mp3_tags(
+    path: Path,
+    vals: _TagValues,
+    cover_art_bytes: bytes | None = None,
+) -> bool:
+    audio = MP3(str(path))
+    if audio.tags is None:
+        audio.add_tags()
+
+    if vals.title is not None:
+        audio.tags.setall("TIT2", [TIT2(encoding=3, text=[str(vals.title)])])
+    if vals.artist is not None:
+        audio.tags.setall("TPE1", [TPE1(encoding=3, text=[str(vals.artist)])])
+    if vals.album is not None:
+        audio.tags.setall("TALB", [TALB(encoding=3, text=[str(vals.album)])])
+    if vals.album_artist is not None:
+        audio.tags.setall("TPE2", [TPE2(encoding=3, text=[str(vals.album_artist)])])
+    if vals.date is not None:
+        audio.tags.setall("TDRC", [TDRC(encoding=3, text=[str(vals.date)])])
+    if vals.track is not None:
+        track_val = f"{vals.track}/{vals.total_tracks}" if vals.total_tracks else str(vals.track)
+        audio.tags.setall("TRCK", [TRCK(encoding=3, text=[track_val])])
+    if vals.disc is not None:
+        disc_val = f"{vals.disc}/{vals.total_discs}" if vals.total_discs else str(vals.disc)
+        audio.tags.setall("TPOS", [TPOS(encoding=3, text=[disc_val])])
+    if vals.mb_artist is not None:
+        audio.tags.setall(
+            "TXXX:MusicBrainz Artist Id",
+            [TXXX(encoding=3, desc="MusicBrainz Artist Id", text=[str(vals.mb_artist)])],
+        )
+    if vals.mb_album is not None:
+        audio.tags.setall(
+            "TXXX:MusicBrainz Album Id",
+            [TXXX(encoding=3, desc="MusicBrainz Album Id", text=[str(vals.mb_album)])],
+        )
+    if vals.mb_releasegroup is not None:
+        audio.tags.setall(
+            "TXXX:MusicBrainz Release Group Id",
+            [TXXX(encoding=3, desc="MusicBrainz Release Group Id", text=[str(vals.mb_releasegroup)])],
+        )
+    if vals.mb_track is not None:
+        audio.tags.setall(
+            "UFID:http://musicbrainz.org",
+            [UFID(owner="http://musicbrainz.org", data=str(vals.mb_track).encode("ascii"))],
+        )
+    if vals.isrc is not None:
+        audio.tags.setall("TSRC", [TSRC(encoding=3, text=[str(vals.isrc)])])
+
+    if cover_art_bytes:
+        mime = "image/png" if cover_art_bytes.startswith(b"\x89PNG") else "image/jpeg"
+        audio.tags.setall(
+            "APIC",
+            [APIC(encoding=3, mime=mime, type=3, desc="Cover", data=cover_art_bytes)],
+        )
+
+    audio.save(v2_version=4)
+    return True
+
+
+def _write_mp4_tags(  # noqa: C901
+    path: Path,
+    vals: _TagValues,
+    cover_art_bytes: bytes | None = None,
+) -> bool:
+    audio = MP4(str(path))
+    if audio.tags is None:
+        audio.add_tags()
+
+    if vals.title is not None:
+        audio["\xa9nam"] = [str(vals.title)]
+    if vals.artist is not None:
+        audio["\xa9ART"] = [str(vals.artist)]
+    if vals.album is not None:
+        audio["\xa9alb"] = [str(vals.album)]
+    if vals.album_artist is not None:
+        audio["aART"] = [str(vals.album_artist)]
+    if vals.date is not None:
+        audio["\xa9day"] = [str(vals.date)]
+
+    if vals.track is not None:
+        try:
+            trkn_num = int(vals.track)
+            trkn_total = int(vals.total_tracks) if vals.total_tracks else 0
+            audio["trkn"] = [(trkn_num, trkn_total)]
+        except (ValueError, TypeError):
+            pass
+
+    if vals.disc is not None:
+        try:
+            disc_num = int(vals.disc)
+            disc_total = int(vals.total_discs) if vals.total_discs else 0
+            audio["disk"] = [(disc_num, disc_total)]
+        except (ValueError, TypeError):
+            pass
+
+    if vals.mb_artist is not None:
+        audio["----:com.apple.iTunes:MusicBrainz Artist Id"] = [str(vals.mb_artist).encode("utf-8")]
+    if vals.mb_album is not None:
+        audio["----:com.apple.iTunes:MusicBrainz Album Id"] = [str(vals.mb_album).encode("utf-8")]
+    if vals.mb_releasegroup is not None:
+        audio["----:com.apple.iTunes:MusicBrainz Release Group Id"] = [str(vals.mb_releasegroup).encode("utf-8")]
+    if vals.mb_track is not None:
+        audio["----:com.apple.iTunes:MusicBrainz Track Id"] = [str(vals.mb_track).encode("utf-8")]
+    if vals.isrc is not None:
+        audio["----:com.apple.iTunes:ISRC"] = [str(vals.isrc).encode("utf-8")]
+
+    if cover_art_bytes:
+        img_fmt = (
+            MP4Cover.FORMAT_PNG
+            if cover_art_bytes.startswith(b"\x89PNG")
+            else MP4Cover.FORMAT_JPEG
+        )
+        audio["covr"] = [MP4Cover(cover_art_bytes, imageformat=img_fmt)]
+
+    audio.save()
+    return True
+
+
+def _write_ogg_tags(  # noqa: C901
+    path: Path,
+    vals: _TagValues,
+    cover_art_bytes: bytes | None = None,
+) -> bool:
+    suffix = path.suffix.lower()
+    if suffix == ".opus":
+        audio = OggOpus(str(path))
+    else:
+        audio = OggVorbis(str(path))
+
+    if audio.tags is None:
+        audio.add_tags()
+
+    if vals.title is not None:
+        audio["title"] = [str(vals.title)]
+    if vals.artist is not None:
+        audio["artist"] = [str(vals.artist)]
+    if vals.album is not None:
+        audio["album"] = [str(vals.album)]
+    if vals.album_artist is not None:
+        audio["albumartist"] = [str(vals.album_artist)]
+    if vals.date is not None:
+        audio["date"] = [str(vals.date)]
+    if vals.track is not None:
+        audio["tracknumber"] = [str(vals.track)]
+    if vals.total_tracks is not None:
+        audio["totaltracks"] = [str(vals.total_tracks)]
+    if vals.disc is not None:
+        audio["discnumber"] = [str(vals.disc)]
+    if vals.total_discs is not None:
+        audio["totaldiscs"] = [str(vals.total_discs)]
+    if vals.mb_artist is not None:
+        audio["musicbrainz_artistid"] = [str(vals.mb_artist)]
+    if vals.mb_album is not None:
+        audio["musicbrainz_albumid"] = [str(vals.mb_album)]
+    if vals.mb_releasegroup is not None:
+        audio["musicbrainz_releasegroupid"] = [str(vals.mb_releasegroup)]
+    if vals.mb_track is not None:
+        audio["musicbrainz_trackid"] = [str(vals.mb_track)]
+    if vals.isrc is not None:
+        audio["isrc"] = [str(vals.isrc)]
+
+    if cover_art_bytes:
+        pic = Picture()
+        pic.type = 3
+        pic.mime = "image/png" if cover_art_bytes.startswith(b"\x89PNG") else "image/jpeg"
+        pic.data = cover_art_bytes
+        audio["metadata_block_picture"] = [base64.b64encode(pic.write()).decode("ascii")]
+
+    audio.save()
+    return True
+
+
+def write_audio_tags(
     file_path: str | Path,
     tags: dict[str, Any],
     cover_art_bytes: bytes | None = None,
@@ -560,210 +826,38 @@ def write_audio_tags(  # noqa: C901, PLR0915
         mb_track = tags.get("musicbrainz_trackid")
         tag_isrc = tags.get("isrc")
 
+        vals = _TagValues(
+            title=t_title,
+            artist=t_artist,
+            album=t_album,
+            album_artist=t_album_artist,
+            date=t_date,
+            track=t_track,
+            total_tracks=t_total_tracks,
+            disc=t_disc,
+            total_discs=t_total_discs,
+            mb_artist=mb_artist,
+            mb_album=mb_album,
+            mb_releasegroup=mb_releasegroup,
+            mb_track=mb_track,
+            isrc=tag_isrc,
+        )
+
         # 1. FLAC
         if suffix == ".flac":
-            audio = FLAC(str(path))
-            if audio.tags is None:
-                audio.add_tags()
-
-            if t_title is not None:
-                audio["title"] = [str(t_title)]
-            if t_artist is not None:
-                audio["artist"] = [str(t_artist)]
-            if t_album is not None:
-                audio["album"] = [str(t_album)]
-            if t_album_artist is not None:
-                audio["albumartist"] = [str(t_album_artist)]
-            if t_date is not None:
-                audio["date"] = [str(t_date)]
-            if t_track is not None:
-                audio["tracknumber"] = [str(t_track)]
-            if t_total_tracks is not None:
-                audio["totaltracks"] = [str(t_total_tracks)]
-            if t_disc is not None:
-                audio["discnumber"] = [str(t_disc)]
-            if t_total_discs is not None:
-                audio["totaldiscs"] = [str(t_total_discs)]
-            if mb_artist is not None:
-                audio["musicbrainz_artistid"] = [str(mb_artist)]
-            if mb_album is not None:
-                audio["musicbrainz_albumid"] = [str(mb_album)]
-            if mb_releasegroup is not None:
-                audio["musicbrainz_releasegroupid"] = [str(mb_releasegroup)]
-            if mb_track is not None:
-                audio["musicbrainz_trackid"] = [str(mb_track)]
-            if tag_isrc is not None:
-                audio["isrc"] = [str(tag_isrc)]
-
-            if cover_art_bytes:
-                pic = Picture()
-                pic.type = 3  # Cover (front)
-                pic.mime = "image/png" if cover_art_bytes.startswith(b"\x89PNG") else "image/jpeg"
-                pic.data = cover_art_bytes
-                audio.clear_pictures()
-                audio.add_picture(pic)
-
-            audio.save()
-            return True
+            return _write_flac_tags(path, vals, cover_art_bytes)
 
         # 2. MP3
         elif suffix == ".mp3":
-            audio = MP3(str(path))
-            if audio.tags is None:
-                audio.add_tags()
-
-            if t_title is not None:
-                audio.tags.setall("TIT2", [TIT2(encoding=3, text=[str(t_title)])])
-            if t_artist is not None:
-                audio.tags.setall("TPE1", [TPE1(encoding=3, text=[str(t_artist)])])
-            if t_album is not None:
-                audio.tags.setall("TALB", [TALB(encoding=3, text=[str(t_album)])])
-            if t_album_artist is not None:
-                audio.tags.setall("TPE2", [TPE2(encoding=3, text=[str(t_album_artist)])])
-            if t_date is not None:
-                audio.tags.setall("TDRC", [TDRC(encoding=3, text=[str(t_date)])])
-            if t_track is not None:
-                track_val = f"{t_track}/{t_total_tracks}" if t_total_tracks else str(t_track)
-                audio.tags.setall("TRCK", [TRCK(encoding=3, text=[track_val])])
-            if t_disc is not None:
-                disc_val = f"{t_disc}/{t_total_discs}" if t_total_discs else str(t_disc)
-                audio.tags.setall("TPOS", [TPOS(encoding=3, text=[disc_val])])
-            if mb_artist is not None:
-                audio.tags.setall(
-                    "TXXX:MusicBrainz Artist Id",
-                    [TXXX(encoding=3, desc="MusicBrainz Artist Id", text=[str(mb_artist)])],
-                )
-            if mb_album is not None:
-                audio.tags.setall(
-                    "TXXX:MusicBrainz Album Id",
-                    [TXXX(encoding=3, desc="MusicBrainz Album Id", text=[str(mb_album)])],
-                )
-            if mb_releasegroup is not None:
-                audio.tags.setall(
-                    "TXXX:MusicBrainz Release Group Id",
-                    [TXXX(encoding=3, desc="MusicBrainz Release Group Id", text=[str(mb_releasegroup)])],
-                )
-            if mb_track is not None:
-                audio.tags.setall(
-                    "UFID:http://musicbrainz.org",
-                    [UFID(owner="http://musicbrainz.org", data=str(mb_track).encode("ascii"))],
-                )
-            if tag_isrc is not None:
-                audio.tags.setall("TSRC", [TSRC(encoding=3, text=[str(tag_isrc)])])
-
-            if cover_art_bytes:
-                mime = "image/png" if cover_art_bytes.startswith(b"\x89PNG") else "image/jpeg"
-                audio.tags.setall(
-                    "APIC",
-                    [APIC(encoding=3, mime=mime, type=3, desc="Cover", data=cover_art_bytes)],
-                )
-
-            audio.save(v2_version=4)
-            return True
+            return _write_mp3_tags(path, vals, cover_art_bytes)
 
         # 3. MP4 / M4A / AAC
         elif suffix in (".m4a", ".aac", ".mp4"):
-            audio = MP4(str(path))
-            if audio.tags is None:
-                audio.add_tags()
-
-            if t_title is not None:
-                audio["\xa9nam"] = [str(t_title)]
-            if t_artist is not None:
-                audio["\xa9ART"] = [str(t_artist)]
-            if t_album is not None:
-                audio["\xa9alb"] = [str(t_album)]
-            if t_album_artist is not None:
-                audio["aART"] = [str(t_album_artist)]
-            if t_date is not None:
-                audio["\xa9day"] = [str(t_date)]
-
-            if t_track is not None:
-                try:
-                    trkn_num = int(t_track)
-                    trkn_total = int(t_total_tracks) if t_total_tracks else 0
-                    audio["trkn"] = [(trkn_num, trkn_total)]
-                except (ValueError, TypeError):
-                    pass
-
-            if t_disc is not None:
-                try:
-                    disc_num = int(t_disc)
-                    disc_total = int(t_total_discs) if t_total_discs else 0
-                    audio["disk"] = [(disc_num, disc_total)]
-                except (ValueError, TypeError):
-                    pass
-
-            if mb_artist is not None:
-                audio["----:com.apple.iTunes:MusicBrainz Artist Id"] = [str(mb_artist).encode("utf-8")]
-            if mb_album is not None:
-                audio["----:com.apple.iTunes:MusicBrainz Album Id"] = [str(mb_album).encode("utf-8")]
-            if mb_releasegroup is not None:
-                audio["----:com.apple.iTunes:MusicBrainz Release Group Id"] = [str(mb_releasegroup).encode("utf-8")]
-            if mb_track is not None:
-                audio["----:com.apple.iTunes:MusicBrainz Track Id"] = [str(mb_track).encode("utf-8")]
-            if tag_isrc is not None:
-                audio["----:com.apple.iTunes:ISRC"] = [str(tag_isrc).encode("utf-8")]
-
-            if cover_art_bytes:
-                img_fmt = (
-                    MP4Cover.FORMAT_PNG
-                    if cover_art_bytes.startswith(b"\x89PNG")
-                    else MP4Cover.FORMAT_JPEG
-                )
-                audio["covr"] = [MP4Cover(cover_art_bytes, imageformat=img_fmt)]
-
-            audio.save()
-            return True
+            return _write_mp4_tags(path, vals, cover_art_bytes)
 
         # 4. Ogg Vorbis or Ogg Opus
         elif suffix in (".ogg", ".opus"):
-            if suffix == ".opus":
-                audio = OggOpus(str(path))
-            else:
-                audio = OggVorbis(str(path))
-
-            if audio.tags is None:
-                audio.add_tags()
-
-            if t_title is not None:
-                audio["title"] = [str(t_title)]
-            if t_artist is not None:
-                audio["artist"] = [str(t_artist)]
-            if t_album is not None:
-                audio["album"] = [str(t_album)]
-            if t_album_artist is not None:
-                audio["albumartist"] = [str(t_album_artist)]
-            if t_date is not None:
-                audio["date"] = [str(t_date)]
-            if t_track is not None:
-                audio["tracknumber"] = [str(t_track)]
-            if t_total_tracks is not None:
-                audio["totaltracks"] = [str(t_total_tracks)]
-            if t_disc is not None:
-                audio["discnumber"] = [str(t_disc)]
-            if t_total_discs is not None:
-                audio["totaldiscs"] = [str(t_total_discs)]
-            if mb_artist is not None:
-                audio["musicbrainz_artistid"] = [str(mb_artist)]
-            if mb_album is not None:
-                audio["musicbrainz_albumid"] = [str(mb_album)]
-            if mb_releasegroup is not None:
-                audio["musicbrainz_releasegroupid"] = [str(mb_releasegroup)]
-            if mb_track is not None:
-                audio["musicbrainz_trackid"] = [str(mb_track)]
-            if tag_isrc is not None:
-                audio["isrc"] = [str(tag_isrc)]
-
-            if cover_art_bytes:
-                pic = Picture()
-                pic.type = 3
-                pic.mime = "image/png" if cover_art_bytes.startswith(b"\x89PNG") else "image/jpeg"
-                pic.data = cover_art_bytes
-                audio["metadata_block_picture"] = [base64.b64encode(pic.write()).decode("ascii")]
-
-            audio.save()
-            return True
+            return _write_ogg_tags(path, vals, cover_art_bytes)
 
         else:
             logger.warning("Unsupported audio container for tag writing: %s", suffix)
