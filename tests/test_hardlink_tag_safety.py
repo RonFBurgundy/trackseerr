@@ -64,7 +64,7 @@ def _worker_import(tmp_path, db, *, write_tags: bool):
 def test_worker_hardlink_with_tags_leaves_torrent_file_untouched(tmp_path, db):
     music, src = _worker_import(tmp_path, db, write_tags=True)
     before, ino = src.read_bytes(), src.stat().st_ino
-    with patch("trackseerr.acquisition_worker.write_audio_tags", side_effect=_fake_write_tags):
+    with patch("trackseerr.acquisition_import.write_audio_tags", side_effect=_fake_write_tags):
         _run_worker(db, src.parent, tmp_path / "staging", {"good.flac": MATCHED})
     placed = list(music.rglob("*.flac"))
     assert len(placed) == 1
@@ -77,7 +77,7 @@ def test_worker_copy_failure_skips_tags(tmp_path, db):
     music, src = _worker_import(tmp_path, db, write_tags=True)
     before = src.read_bytes()
     calls = []
-    with patch("trackseerr.acquisition_worker.write_audio_tags", side_effect=lambda *a, **k: calls.append(a)), \
+    with patch("trackseerr.acquisition_import.write_audio_tags", side_effect=lambda *a, **k: calls.append(a)), \
          patch("trackseerr.import_files.ensure_private_copy", return_value=False):
         _run_worker(db, src.parent, tmp_path / "staging", {"good.flac": MATCHED})
     assert calls == []

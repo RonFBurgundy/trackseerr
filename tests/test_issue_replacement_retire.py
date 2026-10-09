@@ -74,7 +74,8 @@ def _run_import(db, tmp_path, *, replacement, old_path_factory, rename_error=Non
         return real_rename(src, dst)
 
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
-         patch("trackseerr.acquisition_worker.inspect_audio_file", return_value=_meta(dl_file, ext)), \
+         patch("trackseerr.acquisition_import.inspect_audio_file", return_value=_meta(dl_file, ext)), \
+         patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=_meta(dl_file, ext)), \
          patch("trackseerr.recycle_bin.os.rename", side_effect=fake_rename):
         stats = AcquisitionWorker().poll_once(db=db, plex_client=MagicMock(), staging_dir=str(downloads))
     assert stats["imported"] == 1

@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from trackseerr import recycle_bin
-from trackseerr.acquisition_worker import record_import_events
+from trackseerr.acquisition_import import record_import_events
 from trackseerr.seed_safety import evaluate_seed_cleanup
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db, get_plex_client

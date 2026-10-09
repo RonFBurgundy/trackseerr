@@ -15,7 +15,8 @@ from mutagen.oggopus import OggOpus
 from mutagen.oggvorbis import OggVorbis
 from mutagen.wave import WAVE
 
-from trackseerr.acquisition_worker import AcquisitionWorker, _quality_from_codec
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.acquisition_import import _quality_from_codec
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db
 from trackseerr.auth import create_session_token, get_or_create_secret_key
@@ -362,7 +363,9 @@ def _run_import(tmp_path, mode, mutagen_result):
         "track_number": 1, "year": 2020, "disc_number": 1, "total_discs": 1,
     }
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), patch(
-        "trackseerr.acquisition_worker.inspect_audio_file", return_value=meta
+        "trackseerr.acquisition_import.inspect_audio_file", return_value=meta
+    ), patch(
+        "trackseerr.acquisition_catalog.inspect_audio_file", return_value=meta
     ), patch("trackseerr.import_quality_check.mutagen.File", return_value=mutagen_result):
         stats = AcquisitionWorker().poll_once(db=db, plex_client=MagicMock(), staging_dir=str(downloads))
     return db, stats, audio

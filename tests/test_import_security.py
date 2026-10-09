@@ -176,7 +176,9 @@ def _run(tmp_path, mode, files: dict[str, bytes], mutagen_result, driver_type=Do
     meta = {"artist": "Artist X", "title": "Song", "album": "Album X", "file_path": str(paths[0]), "extension": ".mp3",
             "track_number": 1, "year": 2020, "disc_number": 1, "total_discs": 1}
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), patch(
-        "trackseerr.acquisition_worker.inspect_audio_file", return_value=meta
+        "trackseerr.acquisition_import.inspect_audio_file", return_value=meta
+    ), patch(
+        "trackseerr.acquisition_catalog.inspect_audio_file", return_value=meta
     ), patch("trackseerr.import_quality_check.mutagen.File", return_value=mutagen_result):
         stats = AcquisitionWorker().poll_once(db=db, plex_client=MagicMock(), staging_dir=str(downloads))
     return db, stats, paths, downloads, music

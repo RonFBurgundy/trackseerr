@@ -357,7 +357,8 @@ def test_acquisition_worker_imports_and_populates_native_catalog(test_db: Databa
     worker.staging_dir = str(downloads_dir)
 
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
-        with patch("trackseerr.acquisition_worker.inspect_audio_file", return_value=mock_meta):
+        with patch("trackseerr.acquisition_import.inspect_audio_file", return_value=mock_meta), \
+             patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=mock_meta):
             stats = worker.poll_once(db=test_db, staging_dir=str(downloads_dir))
             assert stats["completed"] == 1
             assert stats["imported"] == 1

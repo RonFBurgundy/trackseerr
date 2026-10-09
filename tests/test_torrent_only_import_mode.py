@@ -50,7 +50,7 @@ def test_worker_usenet_download_is_moved_and_tagged_despite_hardlink_setting(tmp
     music, staging, src = _worker_setup(tmp_path, db, write_audio_tags=True)
     db.conn.execute("UPDATE download_clients SET driver_type = 'sabnzbd' WHERE id = 'c1'")
     db.conn.commit()
-    with patch("trackseerr.acquisition_worker.write_audio_tags", side_effect=_fake_write_tags) as w:
+    with patch("trackseerr.acquisition_import.write_audio_tags", side_effect=_fake_write_tags) as w:
         _run_worker(db, src.parent, staging, {"good.flac": MATCHED})
     placed = list(music.rglob("*.flac"))
     assert len(placed) == 1 and not src.exists()
@@ -68,7 +68,7 @@ def test_worker_torrent_keep_hardlink_skips_tags(tmp_path, db):
     music, staging, src = _worker_setup(tmp_path, db, write_audio_tags=True, torrent_hardlink_tags="keep_hardlink")
     _as_torrent(db)
     before = src.read_bytes()
-    with patch("trackseerr.acquisition_worker.write_audio_tags") as w:
+    with patch("trackseerr.acquisition_import.write_audio_tags") as w:
         _run_worker(db, src.parent, staging, {"good.flac": MATCHED})
     placed = list(music.rglob("*.flac"))
     assert len(placed) == 1
@@ -81,7 +81,7 @@ def test_worker_torrent_copy_and_tag_leaves_torrent_untouched(tmp_path, db):
     music, staging, src = _worker_setup(tmp_path, db, write_audio_tags=True, torrent_hardlink_tags="copy_and_tag")
     _as_torrent(db)
     before, ino = src.read_bytes(), src.stat().st_ino
-    with patch("trackseerr.acquisition_worker.write_audio_tags", side_effect=_fake_write_tags):
+    with patch("trackseerr.acquisition_import.write_audio_tags", side_effect=_fake_write_tags):
         _run_worker(db, src.parent, staging, {"good.flac": MATCHED})
     placed = list(music.rglob("*.flac"))
     assert src.read_bytes() == before and src.stat().st_ino == ino and src.stat().st_nlink == 1

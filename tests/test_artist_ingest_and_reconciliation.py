@@ -632,7 +632,8 @@ def test_acquisition_worker_reconciles_multitrack_album_with_unacquired_remainin
     }
 
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver), \
-         patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=mock_inspect):
+         patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=mock_inspect), \
+         patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=mock_inspect):
         worker.poll_once(db=test_db, staging_dir=str(staging_dir))
 
     # 4. Verify reconciliation results:
