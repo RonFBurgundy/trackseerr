@@ -823,6 +823,18 @@ def record_import_events(
         )
 
 
+@dataclass(frozen=True)
+class _PollContext:
+    """Settings and clients snapshot for a single acquisition poll pass."""
+
+    media_settings: dict[str, Any]
+    write_tags: bool
+    embed_art: bool
+    save_cover: bool
+    plex_client: Optional[PlexClient]
+    lidarr_mode: bool
+
+
 class AcquisitionWorker:
     """Thread-safe background runner monitoring active downloads and organizing media."""
 
@@ -1150,112 +1162,469 @@ class AcquisitionWorker:
         if not active_items:
             return stats
 
+
+        ctx = _PollContext(
+            media_settings=media_settings,
+            write_tags=write_tags,
+            embed_art=embed_art,
+            save_cover=save_cover,
+            plex_client=plex_client,
+            lidarr_mode=lidarr_mode,
+        )
+
         for item in active_items:
+            self._process_item(db, ctx, item, stats)
+
+        return stats
+
+    def _notify_download_failed(
+        self,
+        db: Database,
+        item: dict[str, Any],
+        err_text: str,
+    ) -> None:
+        """Record a download failure event and dispatch a failure notification."""
+        try:
+            db.record_event(
+                "download_failed",
+                f"Download failed for '{item.get('title', '')}': {err_text}",
+                source="AcquisitionWorker",
+                severity="error",
+            )
+        except Exception as ev_err:
+            logger.warning("Failed to record download_failed event: %s", ev_err)
+        try:
+            req_info = db.get_request(item["request_id"]) if item.get("request_id") else None
+            notification_dispatcher.dispatch(
+                NotificationEvent.DOWNLOAD_FAILED,
+                data={
+                    "artist": item.get("artist"),
+                    "title": item.get("title"),
+                    "download_id": item["id"],
+                    "request_id": item.get("request_id"),
+                    "user_id": req_info.get("user_id") if req_info else None,
+                    "error_message": err_text,
+                },
+                db=db,
+            )
+        except Exception as ex:
+            logger.warning("Failed to dispatch DOWNLOAD_FAILED notification: %s", ex)
+
+    def _process_item(
+        self,
+        db: Database,
+        ctx: _PollContext,
+        item: dict[str, Any],
+        stats: dict[str, int],
+    ) -> None:
+        """Poll driver status for a single download item and trigger import if ready."""
+        self.allowed_roots = None
+        download_id = item["id"]
+        client_id = item.get("client_id")
+        media_settings = ctx.media_settings
+        stats["polled"] += 1
+        client_config = db.get_download_client(client_id) if client_id else None
+        if not client_config:
+            logger.warning("Download client %s not found for active download %s", client_id, download_id)
+            err_msg = f"Client '{client_id}' not found"
+            db.update_download_status(
+                download_id,
+                status=DownloadStatus.FAILED.value,
+                error_message=err_msg,
+            )
+            self._notify_download_failed(db, item, err_msg)
+            stats["failed"] += 1
+            return
+
+        try:
+            driver = get_acquisition_driver(client_config)
+        except Exception as e:
+            logger.error("Could not instantiate driver for client %s: %s", client_id, e)
+            err_msg = f"Driver error: {str(e)}"
+            db.update_download_status(
+                download_id,
+                status=DownloadStatus.FAILED.value,
+                error_message=err_msg,
+            )
+            self._notify_download_failed(db, item, err_msg)
+            stats["failed"] += 1
+            return
+
+        # Poll driver status
+        target_lookup = item.get("download_hash") or download_id
+        try:
+            status_dict = driver.get_status(target_lookup)
+        except Exception as e:
+            logger.warning("Exception querying driver status for %s: %s", target_lookup, e)
+            return
+
+        cur_status = status_dict.get("status", DownloadStatus.DOWNLOADING.value).lower()
+        progress = float(status_dict.get("progress") or 0.0)
+        size_bytes = status_dict.get("size_bytes")
+        db.update_download_progress(download_id, progress, size_bytes)
+        if "ratio" in status_dict:  # torrent clients report seeding progress; the queue shows it for held downloads
+            try:
+                db.record_seed_progress(
+                    download_id,
+                    float(status_dict.get("ratio") or 0.0),
+                    int(status_dict.get("seeding_time_seconds") or 0),
+                )
+            except (sqlite3.Error, TypeError, ValueError) as seed_err:
+                logger.warning("Could not record seed progress for %s: %s", download_id, seed_err)
+
+        if item.get("status") == DownloadStatus.QUEUED.value and cur_status == DownloadStatus.DOWNLOADING.value:
+            client_name = client_config.get("name", "Client") if client_config else "Client"
+            try:
+                db.record_event(
+                    "download_started",
+                    f"Grabbed '{item.get('title', '')}' via {client_name}",
+                    source="AcquisitionWorker",
+                    severity="info",
+                    details={
+                        "artist": item.get("artist"),
+                        "title": item.get("title"),
+                        "client": client_name,
+                        "download_id": download_id,
+                        "size_bytes": size_bytes,
+                    },
+                )
+            except Exception as ev_err:
+                logger.warning("Failed to record download_started event: %s", ev_err)
+
+        # If failed
+        if cur_status == DownloadStatus.FAILED.value:
+            err_msg = status_dict.get("error_message") or "Download failed"
+            db.update_download_status(download_id, status=DownloadStatus.FAILED.value, error_message=err_msg)
+            self._notify_download_failed(db, item, err_msg)
+            try:
+                db.add_to_blocklist(
+                    source_title=item.get("title", ""),
+                    artist=item.get("artist"),
+                    release_guid=item.get("id"),
+                    info_hash=item.get("download_hash"),
+                    reason=err_msg,
+                    download_id=download_id,
+                )
+            except Exception as bl_err:
+                logger.warning("Failed to add failed download to blocklist: %s", bl_err)
+            stats["failed"] += 1
+            return
+
+        # If completed or ready to import
+        is_ready = cur_status == DownloadStatus.COMPLETED.value or item.get("status") == DownloadStatus.COMPLETED.value
+        already_imported = bool(item.get("target_path"))
+
+        if already_imported and is_ready:
+            # Torrent already imported, currently seeding under governance
+            if seed_action(media_settings) != "keep" and int(item.get("cleanup_attempts") or 0) < 3:
+                db.update_download_status(
+                    download_id,
+                    status=settle_transfer_after_import(
+                        driver,
+                        target_lookup,
+                        media_settings,
+                        effective_import_mode(client_config.get("driver_type"), media_settings),
+                        status_dict,
+                        item,
+                        db,
+                    ),
+                )
+            return
+
+
+        if is_ready:
+            self._import_ready_item(
+                db,
+                ctx,
+                item,
+                client_config,
+                driver,
+                status_dict,
+                stats,
+            )
+        else:
+            # Update progress and active status
+            db.update_download_status(download_id, status=cur_status)
+
+    def _finalize_lidarr_item(
+        self,
+        db: Database,
+        ctx: _PollContext,
+        item: dict[str, Any],
+        stats: dict[str, int],
+    ) -> None:
+        """Finalize and record availability for a Lidarr-managed download."""
+        download_id = item["id"]
+        plex_client = ctx.plex_client
+        db.update_download_status(download_id, status=DownloadStatus.IMPORTED.value)
+        req_row = None
+        if item.get("request_id"):
+            db.update_request_status(item["request_id"], RequestStatus.AVAILABLE.value)
+            req_row = db.get_request(item["request_id"])
+        stats["imported"] += 1
+        try:
+            db.record_event(
+                "item_available",
+                f"Imported '{item.get('title', '')}' to library",
+                source="AcquisitionWorker",
+                severity="info",
+            )
+        except Exception as ev_err:
+            logger.warning("Failed to record Lidarr item_available event: %s", ev_err)
+        try:
+            notification_dispatcher.dispatch(
+                NotificationEvent.ITEM_AVAILABLE,
+                data={
+                    "artist": item.get("artist"),
+                    "title": item.get("title"),
+                    "album": item.get("title") if item.get("item_type") == "album" else None,
+                    "request_id": item.get("request_id"),
+                    "download_id": download_id,
+                    "cover_url": req_row.get("cover_url") if req_row else None,
+                    "username": req_row.get("username") if req_row else None,
+                    "user_id": req_row.get("user_id") if req_row else None,
+                },
+                db=db,
+            )
+        except Exception as ex:
+            logger.warning("Failed to dispatch ITEM_AVAILABLE notification for Lidarr import: %s", ex)
+
+        if plex_client:
+            try:
+                as_media_server(plex_client).refresh_library()
+            except Exception as e:
+                logger.warning("Error refreshing Plex after Lidarr import: %s", e)
+
+    def _import_ready_item(
+        self,
+        db: Database,
+        ctx: _PollContext,
+        item: dict[str, Any],
+        client_config: dict[str, Any],
+        driver: Any,
+        status_dict: dict[str, Any],
+        stats: dict[str, int],
+    ) -> None:
+        """Import audio files for a completed download into the music library."""
+        download_id = item["id"]
+        client_id = item.get("client_id")
+        target_lookup = item.get("download_hash") or download_id
+        media_settings = ctx.media_settings
+        write_tags = ctx.write_tags
+        embed_art = ctx.embed_art
+        save_cover = ctx.save_cover
+        plex_client = ctx.plex_client
+
+        stats["completed"] += 1
+        db.update_download_status(download_id, status=DownloadStatus.IMPORTING.value)
+
+        # Special case: Lidarr performs native file organization
+        driver_type = str(client_config.get("driver_type", "")).lower()
+        import_mode = effective_import_mode(driver_type, media_settings)
+        if driver_type == "lidarr":
+            self._finalize_lidarr_item(db, ctx, item, stats)
+            return
+        # Locate downloaded audio files with remote path translation
+        mappings: list[dict[str, str]] = []
+        extra_json = client_config.get("extra_settings_json")
+        if extra_json:
+            try:
+                extra_data = json.loads(extra_json) if isinstance(extra_json, str) else extra_json
+                if isinstance(extra_data, dict):
+                    mappings = extra_data.get("remote_path_mappings", [])
+            except (json.JSONDecodeError, TypeError):
+                mappings = []
+
+        raw_src = status_dict.get("source_path") or item.get("source_path")
+        candidate_src = translate_remote_path(raw_src, mappings) if raw_src else None
+        client_label = str(client_config.get("name") or client_id or "download client")
+        self.allowed_roots = allowed_roots_for_client(db, media_settings, client_config, driver=driver)
+        if not self.allowed_roots.roots:
+            reason = "; ".join(self.allowed_roots.errors) or f"Could not read download folder from {client_label}"
+            err_msg = f"{reason}; check client connection"
+            logger.warning("Download %s cannot be imported yet: %s", download_id, err_msg)
+            db.update_download_status(download_id, status=DownloadStatus.COMPLETED.value, error_message=err_msg)
             self.allowed_roots = None
-            download_id = item["id"]
-            client_id = item.get("client_id")
-            stats["polled"] += 1
+            return
+        if candidate_src:
+            ok, reject_reason = self.allowed_roots.check(candidate_src)
+            if not ok:
+                logger.warning("Rejecting source path %s from %s: %s", candidate_src, client_label, reject_reason)
+                candidate_src = None
 
-            def _notify_failed(err_text: str) -> None:
+        search_term = item.get("title") or item.get("artist") or ""
+        self._archive_errors = []
+        audio_files = self._find_audio_files(candidate_src, search_term)
+
+        if self._archive_errors and not audio_files:
+            err_msg = "Archive rejected: " + "; ".join(self._archive_errors)
+            try:
+                db.record_event(
+                    "import_security",
+                    f"Archive limits exceeded for '{item.get('title', '')}': {err_msg}",
+                    source="AcquisitionWorker",
+                    severity="error",
+                    details={"download_id": download_id, "archives": list(self._archive_errors)},
+                )
+            except sqlite3.Error as ev_err:
+                logger.warning("Failed to record import_security event: %s", ev_err)
+            db.update_download_status(download_id, status=DownloadStatus.FAILED.value, error_message=err_msg)
+            self._notify_download_failed(db, item, err_msg)
+            try:
+                db.add_to_blocklist(
+                    source_title=item.get("title", ""),
+                    artist=item.get("artist"),
+                    release_guid=item.get("id"),
+                    info_hash=item.get("download_hash"),
+                    reason=err_msg,
+                    download_id=download_id,
+                )
+            except Exception as bl_err:
+                logger.warning("Failed to add archive-rejected download to blocklist: %s", bl_err)
+            stats["failed"] += 1
+            return
+
+        if not audio_files:
+            logger.warning(
+                "Download %s marked completed but no audio files found at %s or download roots %s",
+                download_id,
+                candidate_src,
+                ", ".join(str(r) for r in self._effective_roots().roots),
+            )
+            err_msg = "No audio files found for import in download staging"
+            db.update_download_status(
+                download_id,
+                status=DownloadStatus.FAILED.value,
+                error_message=err_msg,
+            )
+            self._notify_download_failed(db, item, err_msg)
+            try:
+                db.add_to_blocklist(
+                    source_title=item.get("title", ""),
+                    artist=item.get("artist"),
+                    release_guid=item.get("id"),
+                    info_hash=item.get("download_hash"),
+                    reason=err_msg,
+                    download_id=download_id,
+                )
+            except Exception as bl_err:
+                logger.warning("Failed to add missing-audio download to blocklist: %s", bl_err)
+            stats["failed"] += 1
+            return
+
+        # Security gate (always on, any import_bitrate_check mode): magic bytes + header parse. One bad file
+        # rejects the whole release; offenders are quarantined, never imported.
+        probes: dict[str, Any] = {}
+        security = verify_files(audio_files, probes)
+        if security.failed:
+            err_msg = f"Security check failed: {security.reason()}"
+            # Torrent sources keep seeding from their download folder, so they are copied, never moved. Usenet,
+            # Soulseek and staging sources have nothing seeding and are moved out of the download folder.
+            q_root = effective_quarantine_path(media_settings)
+            keep_sources = is_torrent_driver_type(driver_type)
+            if q_root is None:
+                # No quarantine or library root is configured: never fall back to the process cwd.
+                logger.warning(
+                    "No quarantine folder or library root configured; leaving rejected files of download "
+                    "%s in place (release is still refused).", download_id,
+                )
+                moved = []
+            else:
+                moved = quarantine_files(
+                    [p for p, _ in security.failures], q_root, str(download_id), copy=keep_sources
+                )
+            try:
+                db.record_event(
+                    "import_security",
+                    f"Security check failed for '{item.get('title', '')}': {security.reason()}",
+                    source="AcquisitionWorker",
+                    severity="error",
+                    details={
+                        "download_id": download_id,
+                        "files": [{"file": p, "reason": r} for p, r in security.failures],
+                        "quarantined_to": [str(m) for m in moved],
+                        "sources_kept_for_seeding": keep_sources,
+                    },
+                )
+            except sqlite3.Error as ev_err:
+                logger.warning("Failed to record import_security event: %s", ev_err)
+            db.record_download_item_event(
+                "quarantined", str(download_id), message=f"Import security: {security.reason()}",
+                details={
+                    "release": item.get("title"),
+                    "files": [{"file": p, "reason": r} for p, r in security.failures],
+                    "quarantined_to": [str(m) for m in moved], "copied": keep_sources,
+                },
+            )
+            logger.error("Import security failure for download %s: %s", download_id, err_msg)
+            db.update_download_status(download_id, status=DownloadStatus.FAILED.value, error_message=err_msg)
+            self._notify_download_failed(db, item, err_msg)
+            try:
+                db.add_to_blocklist(
+                    source_title=item.get("title", ""),
+                    artist=item.get("artist"),
+                    release_guid=item.get("id"),
+                    info_hash=item.get("download_hash"),
+                    reason=err_msg,
+                    download_id=download_id,
+                )
+            except Exception as bl_err:
+                logger.warning("Failed to add security-rejected download to blocklist: %s", bl_err)
+            stats["failed"] += 1
+            return
+
+        # Per-track bitrate check (media management: import_bitrate_check = off | warn | reject).
+        check_mode = normalize_check_mode(media_settings.get("import_bitrate_check"))
+        if check_mode != CHECK_OFF:
+            try:
+                definitions = {str(d["quality"]): d for d in db.list_quality_definitions()}
+                check = check_files(audio_files, check_mode, definitions, probes=probes)
+            except Exception as chk_err:  # noqa: BLE001 - the check is advisory; it must never crash the worker loop
+                logger.warning(
+                    "Import bitrate check failed for download %s: %s: %s",
+                    download_id,
+                    type(chk_err).__name__,
+                    chk_err,
+                )
+                check = None
+            if check is not None and (check.out_of_range or check.skipped):
+                summary = check.reason()
                 try:
                     db.record_event(
-                        "download_failed",
-                        f"Download failed for '{item.get('title', '')}': {err_text}",
+                        "import_bitrate_check",
+                        f"Bitrate check ({check_mode}) for '{item.get('title', '')}': {summary}",
                         source="AcquisitionWorker",
-                        severity="error",
-                    )
-                except Exception as ev_err:
-                    logger.warning("Failed to record download_failed event: %s", ev_err)
-                try:
-                    req_info = db.get_request(item["request_id"]) if item.get("request_id") else None
-                    notification_dispatcher.dispatch(
-                        NotificationEvent.DOWNLOAD_FAILED,
-                        data={
-                            "artist": item.get("artist"),
-                            "title": item.get("title"),
-                            "download_id": download_id,
-                            "request_id": item.get("request_id"),
-                            "user_id": req_info.get("user_id") if req_info else None,
-                            "error_message": err_text,
-                        },
-                        db=db,
-                    )
-                except Exception as ex:
-                    logger.warning("Failed to dispatch DOWNLOAD_FAILED notification: %s", ex)
-
-            client_config = db.get_download_client(client_id) if client_id else None
-            if not client_config:
-                logger.warning("Download client %s not found for active download %s", client_id, download_id)
-                err_msg = f"Client '{client_id}' not found"
-                db.update_download_status(
-                    download_id,
-                    status=DownloadStatus.FAILED.value,
-                    error_message=err_msg,
-                )
-                _notify_failed(err_msg)
-                stats["failed"] += 1
-                continue
-
-            try:
-                driver = get_acquisition_driver(client_config)
-            except Exception as e:
-                logger.error("Could not instantiate driver for client %s: %s", client_id, e)
-                err_msg = f"Driver error: {str(e)}"
-                db.update_download_status(
-                    download_id,
-                    status=DownloadStatus.FAILED.value,
-                    error_message=err_msg,
-                )
-                _notify_failed(err_msg)
-                stats["failed"] += 1
-                continue
-
-            # Poll driver status
-            target_lookup = item.get("download_hash") or download_id
-            try:
-                status_dict = driver.get_status(target_lookup)
-            except Exception as e:
-                logger.warning("Exception querying driver status for %s: %s", target_lookup, e)
-                continue
-
-            cur_status = status_dict.get("status", DownloadStatus.DOWNLOADING.value).lower()
-            progress = float(status_dict.get("progress") or 0.0)
-            size_bytes = status_dict.get("size_bytes")
-            db.update_download_progress(download_id, progress, size_bytes)
-            if "ratio" in status_dict:  # torrent clients report seeding progress; the queue shows it for held downloads
-                try:
-                    db.record_seed_progress(
-                        download_id,
-                        float(status_dict.get("ratio") or 0.0),
-                        int(status_dict.get("seeding_time_seconds") or 0),
-                    )
-                except (sqlite3.Error, TypeError, ValueError) as seed_err:
-                    logger.warning("Could not record seed progress for %s: %s", download_id, seed_err)
-
-            if item.get("status") == DownloadStatus.QUEUED.value and cur_status == DownloadStatus.DOWNLOADING.value:
-                client_name = client_config.get("name", "Client") if client_config else "Client"
-                try:
-                    db.record_event(
-                        "download_started",
-                        f"Grabbed '{item.get('title', '')}' via {client_name}",
-                        source="AcquisitionWorker",
-                        severity="info",
+                        severity="error" if check.failed else "warning",
                         details={
-                            "artist": item.get("artist"),
-                            "title": item.get("title"),
-                            "client": client_name,
                             "download_id": download_id,
-                            "size_bytes": size_bytes,
+                            "mode": check_mode,
+                            "checked": check.checked,
+                            "out_of_range": [
+                                {
+                                    "file": f.path,
+                                    "quality": f.quality,
+                                    "kbps": round(f.kbps, 1),
+                                    "min_kbps": f.min_kbps,
+                                    "max_kbps": f.max_kbps,
+                                    "severity": f.severity,
+                                    "detail": f.detail,
+                                }
+                                for f in check.out_of_range
+                            ],
+                            "skipped": [{"file": p, "reason": r} for p, r in check.skipped],
                         },
                     )
-                except Exception as ev_err:
-                    logger.warning("Failed to record download_started event: %s", ev_err)
-
-            # If failed
-            if cur_status == DownloadStatus.FAILED.value:
-                err_msg = status_dict.get("error_message") or "Download failed"
-                db.update_download_status(download_id, status=DownloadStatus.FAILED.value, error_message=err_msg)
-                _notify_failed(err_msg)
+                except sqlite3.Error as ev_err:
+                    logger.warning("Failed to record import_bitrate_check event: %s", ev_err)
+                logger.warning("Import bitrate check (%s) for download %s: %s", check_mode, download_id, summary)
+            if check is not None and check.failed:
+                err_msg = f"Bitrate check failed: {check.reason()}"
+                db.update_download_status(
+                    download_id,
+                    status=DownloadStatus.FAILED.value,
+                    error_message=err_msg,
+                )
+                self._notify_download_failed(db, item, err_msg)
                 try:
                     db.add_to_blocklist(
                         source_title=item.get("title", ""),
@@ -1266,899 +1635,609 @@ class AcquisitionWorker:
                         download_id=download_id,
                     )
                 except Exception as bl_err:
-                    logger.warning("Failed to add failed download to blocklist: %s", bl_err)
+                    logger.warning("Failed to add bitrate-rejected download to blocklist: %s", bl_err)
                 stats["failed"] += 1
+                return
+
+        # Organize and move each audio file
+        imported_paths: list[str] = []
+        root_folder = media_settings.get("root_folder_path") or "/music"
+        root_path = Path(root_folder).resolve()
+
+        # Fetch associated request and album cover art if available
+        req = db.get_request(item["request_id"]) if item.get("request_id") else None
+        cover_bytes: bytes | None = None
+        if req and (embed_art or save_cover):
+            cover_url = req.get("cover_url")
+            if cover_url and _is_safe_cover_url(cover_url):
+                try:
+                    resp = httpx.get(cover_url, timeout=10.0, follow_redirects=True)
+                    if resp.status_code == 200 and resp.content:
+                        cover_bytes = resp.content
+                except httpx.HTTPError as e:
+                    logger.warning("HTTP error fetching cover art from %s: %s", cover_url, e)
+                except Exception as e:
+                    logger.warning("Error fetching cover art from %s: %s", cover_url, e)
+            elif cover_url:
+                logger.warning("Cover art URL rejected by SSRF protection: %s", cover_url)
+
+        last_metadata: dict[str, Any] = {}
+
+        # Check if item has album_id or matches an existing album in catalog
+        target_album, expected_tracks = resolve_download_expected_tracks(db, item, req)
+
+        remaining_expected_tracks = list(expected_tracks)
+        placed_to_track: dict[str, dict[str, Any]] = {}
+        # placed path -> (recycle result, old file row) for old files recycled right before an in-place replace
+        recycled_in_place: dict[str, tuple[DisposeResult, dict[str, Any]]] = {}
+        # Files with no catalog match when the release has expected tracks: left on disk for manual import.
+        held_files: list[str] = []
+
+        for af in audio_files:
+            try:
+                metadata = inspect_audio_file(af)
+            except Exception as e:
+                logger.warning("Mutagen inspection failed for %s: %s; using item defaults", af, e)
+                metadata = {
+                    "artist": item.get("artist", "Unknown Artist"),
+                    "title": item.get("title", af.stem),
+                    "album": item.get("title") if item.get("item_type") == "album" else "Unknown Album",
+                    "file_path": str(af),
+                    "extension": af.suffix.lower(),
+                    "track_number": None,
+                    "disc_number": 1,
+                    "total_discs": 1,
+                }
+
+            # Fallbacks for empty tags
+            if not metadata.get("artist"):
+                metadata["artist"] = item.get("artist") or "Unknown Artist"
+            if not metadata.get("title"):
+                metadata["title"] = item.get("title") or af.stem
+
+            # Reconcile against expected catalog tracks if present
+            matched_expected_track = None
+            file_weak_strength: Optional[str] = None
+            if remaining_expected_tracks:
+                matched_expected_track, match_strength = reconcile_audio_file_to_track_scored(
+                    metadata, remaining_expected_tracks
+                )
+                tag_track = matched_expected_track
+                matched_expected_track = _fingerprint_fallback_match(
+                    af, media_settings, remaining_expected_tracks, matched_expected_track, match_strength
+                )
+                if matched_expected_track is not None and matched_expected_track is tag_track and match_strength != MATCH_STRONG:
+                    file_weak_strength = match_strength
+                if matched_expected_track:
+                    remaining_expected_tracks.remove(matched_expected_track)
+                    metadata["title"] = matched_expected_track["title"]
+                    metadata["track_number"] = int(matched_expected_track.get("track_number") or 1)
+                    metadata["disc_number"] = int(matched_expected_track.get("disc_number") or 1)
+                    if target_album:
+                        metadata["album"] = target_album["title"]
+                        art_cand = db.get_library_artist(target_album["artist_id"])
+                        if art_cand:
+                            metadata["artist"] = art_cand["name"]
+
+            if expected_tracks and matched_expected_track is None:
+                logger.warning(
+                    "Holding unmatched file %s for download %s (manual import required)", af, download_id
+                )
+                held_files.append(str(af))
                 continue
 
-            # If completed or ready to import
-            is_ready = cur_status == DownloadStatus.COMPLETED.value or item.get("status") == DownloadStatus.COMPLETED.value
-            already_imported = bool(item.get("target_path"))
+            # Disc 1 of a multi-disc release must use the multi-disc format too.
+            known_discs = [int(metadata.get("total_discs") or 1)]
+            known_discs += [int(t.get("disc_number") or 1) for t in expected_tracks]
+            metadata["total_discs"] = max(known_discs)
 
-            if already_imported and is_ready:
-                # Torrent already imported, currently seeding under governance
-                if seed_action(media_settings) != "keep" and int(item.get("cleanup_attempts") or 0) < 3:
-                    db.update_download_status(
-                        download_id,
-                        status=settle_transfer_after_import(
-                            driver,
-                            target_lookup,
-                            media_settings,
-                            effective_import_mode(client_config.get("driver_type"), media_settings),
-                            status_dict,
-                            item,
-                            db,
+            last_metadata = metadata
+
+            target_str = build_track_path(metadata, media_settings)
+            desired_path = Path(target_str).resolve()
+            pre_recycled = self._recycle_in_place_target(
+                db, media_settings, root_path, desired_path, matched_expected_track
+            )
+            final_target = desired_path if pre_recycled is not None else resolve_collision(target_str)
+            target_path = Path(final_target).resolve()
+            if not target_path.is_relative_to(root_path):
+                logger.error("Destination %s escapes music root %s", target_path, root_path)
+                if pre_recycled is not None:
+                    restore_recycled(pre_recycled[0])
+                continue
+
+            try:
+                placed_path = place_audio_file(af, target_path, mode=import_mode)
+            except Exception:
+                if pre_recycled is not None:
+                    restore_recycled(pre_recycled[0])  # the replacement never landed: put the old bytes back
+                raise
+            if pre_recycled is not None:
+                # The old file's bytes now live in the recycle bin; its row would point at the new file.
+                recycled_in_place[str(placed_path)] = pre_recycled
+            imported_paths.append(str(placed_path))
+            if matched_expected_track:
+                placed_to_track[str(placed_path)] = matched_expected_track
+                if file_weak_strength is not None:
+                    record_weak_match(
+                        db,
+                        str(placed_path),
+                        track_id=str(matched_expected_track.get("id") or ""),
+                        title=str(matched_expected_track.get("title") or ""),
+                        source_name=str(item.get("title") or ""),
+                        strength=file_weak_strength,
+                    )
+            logger.info("Successfully imported '%s' -> '%s'", af.name, placed_path)
+            try:
+                db.record_event(
+                    "item_available",
+                    f"Imported '{af.name}' to library",
+                    source="AcquisitionWorker",
+                    severity="info",
+                )
+            except Exception as ev_err:
+                logger.warning("Failed to record item_available event: %s", ev_err)
+
+            # Tag writing and artwork embedding
+            tags_to_write: dict[str, Any] = build_tags_to_write(
+                metadata,
+                req=req,
+                audio_files_count=len(audio_files),
+            )
+
+            # Asynchronously enrich with MBIDs if enabled
+            if media_settings.get("enrich_mbids", True):
+                try:
+                    enricher = get_shared_enricher(db)
+                    artist_query = str(tags_to_write.get("artist") or "")
+                    album_query = str(tags_to_write.get("album") or "")
+                    title_query = str(tags_to_write.get("title") or "")
+                    track_isrc = metadata.get("isrc")
+                    resolved_mbids = enricher.lookup_track_mbids(
+                        artist_query, album_query, title_query, isrc=track_isrc
+                    )
+                    if resolved_mbids:
+                        for mb_key in (
+                            "musicbrainz_artistid",
+                            "musicbrainz_albumid",
+                            "musicbrainz_releasegroupid",
+                            "musicbrainz_trackid",
+                        ):
+                            if resolved_mbids.get(mb_key):
+                                tags_to_write[mb_key] = resolved_mbids[mb_key]
+
+                    if not cover_bytes and (embed_art or save_cover):
+                        rg_id = resolved_mbids.get("musicbrainz_releasegroupid") if resolved_mbids else None
+                        rel_id = resolved_mbids.get("musicbrainz_albumid") if resolved_mbids else None
+                        resolved_cover_url = enricher.get_cover_art_url(release_group_id=rg_id, release_id=rel_id)
+                        if resolved_cover_url and _is_safe_cover_url(resolved_cover_url):
+                            try:
+                                resp = httpx.get(resolved_cover_url, timeout=5.0, follow_redirects=True)
+                                if resp.status_code == 200 and resp.content:
+                                    cover_bytes = resp.content
+                            except Exception as exc:
+                                logger.debug("Failed fetching cover art from Cover Art Archive %s: %s", resolved_cover_url, exc)
+                except Exception as e:
+                    logger.warning("AcquisitionWorker: MBID enrichment error: %s", e)
+
+            file_write_tags, file_embed_art = write_tags, embed_art
+            if (file_write_tags or (file_embed_art and cover_bytes)) and not prepare_file_for_tagging(placed_path, media_settings):
+                file_write_tags = file_embed_art = False
+            if file_write_tags:
+                art_to_embed = cover_bytes if file_embed_art else None
+                try:
+                    write_audio_tags(placed_path, tags=tags_to_write, cover_art_bytes=art_to_embed)
+                except Exception as e:
+                    logger.warning("Error writing audio tags to %s: %s", placed_path, e)
+            elif file_embed_art and cover_bytes:
+                try:
+                    embed_album_artwork(placed_path, cover_bytes)
+                except Exception as e:
+                    logger.warning("Error embedding artwork into %s: %s", placed_path, e)
+
+            if save_cover and cover_bytes:
+                cover_file = placed_path.parent / "cover.jpg"
+                if not cover_file.exists():
+                    try:
+                        cover_file.write_bytes(cover_bytes)
+                        clear_exec_bits(cover_file)
+                        logger.info("Saved album cover to %s", cover_file)
+                    except OSError as e:
+                        logger.warning("Failed to save cover.jpg at %s: %s", cover_file, e)
+
+        if held_files:
+            db.set_download_unmatched_files(download_id, held_files)
+            held_msg = f"{len(held_files)} file(s) couldn't be matched — manual import required"
+            if not imported_paths:
+                # Nothing placed: park the download for manual import (not a failure, no blocklisting).
+                db.update_download_status(
+                    download_id, status=DownloadStatus.WARNING.value, error_message=held_msg
+                )
+                return
+
+        if not imported_paths:
+            logger.error("No audio files were successfully imported for download %s", download_id)
+            err_msg = "Destination escaped music root or placement failed"
+            db.update_download_status(
+                download_id,
+                status=DownloadStatus.FAILED.value,
+                error_message=err_msg,
+            )
+            self._notify_download_failed(db, item, err_msg)
+            try:
+                db.add_to_blocklist(
+                    source_title=item.get("title", ""),
+                    artist=item.get("artist"),
+                    release_guid=item.get("id"),
+                    info_hash=item.get("download_hash"),
+                    reason=err_msg,
+                    download_id=download_id,
+                )
+            except Exception as bl_err:
+                logger.warning("Failed to add unplaced download to blocklist: %s", bl_err)
+            stats["failed"] += 1
+            return
+
+        # Update database records
+        target_summary = imported_paths[0] if imported_paths else None
+        db.update_download_status(
+            download_id,
+            status=DownloadStatus.IMPORTING.value,
+            target_path=target_summary,
+        )
+
+        # An issue-driven replacement retires the track's previous file(s) once the new row is in.
+        replacement_issue_id: Optional[str] = None
+        replaced_retired: list[str] = []
+        replaced_kept: list[str] = []
+        try:
+            replacement_issue_id = db.get_download_replacement_issue(str(download_id))
+        except sqlite3.Error as ri_err:
+            logger.warning("Could not look up replacement issue for %s: %s", download_id, safe_exc(ri_err))
+
+        # Native catalog upsert (when library_mode != "lidarr")
+        if media_settings.get("library_mode") != "lidarr":
+            # Artist tag labels by artist id, looked up once per artist across the placed files.
+            import_tag_cache: dict[str, list[str]] = {}
+            for placed_str in imported_paths:
+                try:
+                    placed_p = Path(placed_str).resolve()
+                    try:
+                        f_meta = inspect_audio_file(placed_p)
+                    except Exception as insp_err:
+                        logger.warning(
+                            "Could not inspect placed audio file %s: %s; using fallback metadata",
+                            placed_p,
+                            insp_err,
+                        )
+                        f_meta = {}
+
+                    matched_track = placed_to_track.get(placed_str)
+                    if matched_track and target_album:
+                        artist_id = target_album["artist_id"]
+                        artist_row = db.get_library_artist(artist_id) or {
+                            "id": artist_id,
+                            "name": item.get("artist") or "Unknown Artist",
+                            "quality_profile_id": None,
+                        }
+                        album_id = target_album["id"]
+                        album_row = target_album
+                        track_id = matched_track["id"]
+                        track_row = matched_track
+                        db.set_track_monitored(track_id, True)
+                    else:
+                        artist_name = (
+                            f_meta.get("artist")
+                            or item.get("artist")
+                            or (req.get("artist") if req else None)
+                            or "Unknown Artist"
+                        ).strip()
+
+                        # 1. Resolve / upsert LibraryArtist
+                        artist_row = None
+                        existing_track = None
+                        if item.get("track_id"):
+                            existing_track = db.get_library_track(item["track_id"])
+                            if existing_track:
+                                artist_row = db.get_library_artist(existing_track["artist_id"])
+                        if not artist_row:
+                            artist_row = db.get_library_artist_by_name(artist_name)
+                        if not artist_row:
+                            artist_id = str(uuid.uuid4())
+                            artist_folder = (
+                                str(placed_p.parent.parent)
+                                if placed_p.parent != root_path
+                                else str(placed_p.parent)
+                            )
+                            artist_row = db.upsert_library_artist(
+                                LibraryArtist(
+                                    id=artist_id,
+                                    name=artist_name,
+                                    path=artist_folder,
+                                    monitor_option=_scan_monitor_option(media_settings),
+                                ),
+                                preserve_monitoring=True,
+                            )
+                        artist_id = artist_row["id"]
+
+                        # 2. Resolve / upsert LibraryAlbum
+                        album_title = (
+                            f_meta.get("album")
+                            or (item.get("title") if item.get("item_type") == "album" else None)
+                            or (req.get("album") or req.get("title") if req else None)
+                            or "Unknown Album"
+                        ).strip()
+                        year_val = f_meta.get("year")
+                        if year_val is None and req and req.get("release_date"):
+                            rdate = str(req["release_date"]).strip()
+                            if len(rdate) >= 4 and rdate[:4].isdigit():
+                                year_val = int(rdate[:4])
+
+                        album_row = None
+                        if item.get("album_id"):
+                            album_row = db.get_library_album(item["album_id"])
+                        elif item.get("track_id") and existing_track:
+                            album_row = db.get_library_album(existing_track["album_id"])
+                        if not album_row:
+                            album_row = db.get_library_album_by_title(artist_id, album_title)
+                        if not album_row:
+                            album_id = str(uuid.uuid4())
+                            album_row = db.upsert_library_album(
+                                LibraryAlbum(
+                                    id=album_id,
+                                    artist_id=artist_id,
+                                    title=album_title,
+                                    year=year_val,
+                                    path=str(placed_p.parent),
+                                )
+                            )
+                        album_id = album_row["id"]
+
+                        # 3. Resolve / upsert LibraryTrack
+                        track_row = None
+                        if item.get("track_id"):
+                            track_row = existing_track or db.get_library_track(item["track_id"])
+                        if not track_row:
+                            track_title = (
+                                f_meta.get("title")
+                                or item.get("title")
+                                or (req.get("title") if req else None)
+                                or placed_p.stem
+                            ).strip()
+                            track_num = int(f_meta.get("track_number") or 1)
+                            track_row = db.get_library_track_by_title(
+                                album_id, track_title, track_number=track_num
+                            )
+                            if not track_row:
+                                track_id = str(uuid.uuid4())
+                                track_row = db.upsert_library_track(
+                                    LibraryTrack(
+                                        id=track_id,
+                                        album_id=album_id,
+                                        artist_id=artist_id,
+                                        title=track_title,
+                                        track_number=track_num,
+                                        disc_number=int(f_meta.get("disc_number") or 1),
+                                        duration_seconds=(
+                                            float(f_meta["duration"])
+                                            if f_meta.get("duration") is not None
+                                            else None
+                                        ),
+                                    )
+                                )
+                        track_id = track_row["id"]
+
+                    # 4. Evaluate cutoff against artist's quality profile (or default)
+                    qp_id = artist_row.get("quality_profile_id") or (
+                        req.get("quality_profile_id") if req else None
+                    )
+                    prof_dict = db.get_quality_profile(qp_id) if qp_id else None
+                    if not prof_dict:
+                        prof_dict = db.get_default_quality_profile()
+
+                    parsed = parse_release_title(item.get("title") or placed_p.name)
+                    if parsed.quality == "Unknown":
+                        parsed.quality = _quality_from_codec(f_meta) or parsed.quality
+
+                    file_size = (
+                        placed_p.stat().st_size
+                        if placed_p.exists()
+                        else int(item.get("size_bytes") or 0)
+                    )
+                    cutoff_met = True
+                    quality_str = parsed.quality
+                    if prof_dict:
+                        profile_obj = _to_quality_profile(prof_dict)
+                        if artist_id not in import_tag_cache:
+                            import_tag_cache[artist_id] = delay_gate.artist_tags(
+                                db, artist_row.get("name"), artist_id
+                            )
+                        eval_res = evaluate_release(
+                            release=parsed,
+                            profile=profile_obj,
+                            size_bytes=file_size,
+                            artist_tags=import_tag_cache[artist_id],
+                        )
+                        quality_str = eval_res.parsed_quality
+                        cutoff_met = eval_res.meets_cutoff
+
+                    # 5. Upsert LibraryFile
+                    rel_path = (
+                        str(placed_p.relative_to(root_path))
+                        if placed_p.is_relative_to(root_path)
+                        else str(placed_p)
+                    )
+                    file_id = f"fil-{uuid.uuid4().hex[:12]}"
+                    # Every other file the track has is superseded by this import (upgrade or issue
+                    # replacement), except files this same download placed (a multi-file release).
+                    sibling_paths = {str(Path(p).resolve()) for p in imported_paths} | {str(placed_p)}
+                    old_file_rows = [
+                        r for r in db.list_library_files_for_track(track_id)
+                        if str(r.get("file_path") or "") not in sibling_paths
+                    ]
+                    in_place = recycled_in_place.pop(str(placed_p), None)
+                    if in_place is not None:
+                        old_file_rows = [r for r in old_file_rows if str(r["id"]) != str(in_place[1]["id"])]
+                        self._log_recycled(db, item, in_place[0], placed_p, in_place[1], quality_str, media_settings,
+                                           replacement_issue_id, replaced_retired)
+                        try:
+                            db.delete_library_file(str(in_place[1]["id"]))
+                        except sqlite3.Error as del_err:
+                            logger.warning("Could not remove stale library file row %s: %s", in_place[1].get("id"), safe_exc(del_err))
+                    db.upsert_library_file(
+                        LibraryFile(
+                            id=file_id,
+                            track_id=track_id,
+                            file_path=str(placed_p),
+                            relative_path=rel_path,
+                            codec=f_meta.get("codec") or placed_p.suffix.lstrip(".").upper(),
+                            bitrate=int(f_meta["bitrate"]) if f_meta.get("bitrate") is not None else None,
+                            sample_rate=int(f_meta["sample_rate"]) if f_meta.get("sample_rate") is not None else None,
+                            bits_per_sample=int(f_meta["bits_per_sample"]) if f_meta.get("bits_per_sample") is not None else None,
+                            quality_name=quality_str,
+                            size_bytes=file_size,
+                            cutoff_met=cutoff_met,
+                        )
+                    )
+                    logger.info(
+                        "Native catalog upserted file %s for track %s (cutoff_met=%s)",
+                        file_id,
+                        track_id,
+                        cutoff_met,
+                    )
+                    record_import_events(
+                        db, item, str(track_id), placed_p, quality_str, f_meta,
+                        ([in_place[1]] if in_place is not None else []) + old_file_rows,
+                    )
+                    if old_file_rows:
+                        self._recycle_replaced_files(
+                            db, item, replacement_issue_id, old_file_rows, placed_p, root_path,
+                            media_settings, quality_str, replaced_retired, replaced_kept,
+                        )
+                except Exception as upsert_err:
+                    logger.exception(
+                        "Error upserting native library records for %s: %s",
+                        placed_str,
+                        upsert_err,
+                    )
+        if item.get("request_id"):
+            db.update_request_status(item["request_id"], RequestStatus.AVAILABLE.value)
+            try:
+                parsed = parse_release_title(item.get("title") or "")
+                if parsed.quality == "Unknown" and last_metadata:
+                    parsed.quality = _quality_from_codec(last_metadata) or parsed.quality
+
+                profile_dict = None
+                if req and req.get("quality_profile_id"):
+                    profile_dict = db.get_quality_profile(req["quality_profile_id"])
+                if not profile_dict:
+                    profile_dict = db.get_default_quality_profile()
+
+                if profile_dict:
+                    profile = _to_quality_profile(profile_dict)
+                    eval_res = evaluate_release(
+                        release=parsed,
+                        profile=profile,
+                        size_bytes=item.get("size_bytes"),
+                        artist_tags=delay_gate.artist_tags(
+                            db, (req.get("artist") if req else None) or item.get("artist")
                         ),
                     )
-                continue
-
-            if is_ready:
-                stats["completed"] += 1
-                db.update_download_status(download_id, status=DownloadStatus.IMPORTING.value)
-
-                # Special case: Lidarr performs native file organization
-                driver_type = str(client_config.get("driver_type", "")).lower()
-                import_mode = effective_import_mode(driver_type, media_settings)
-                if driver_type == "lidarr":
-                    db.update_download_status(download_id, status=DownloadStatus.IMPORTED.value)
-                    req_row = None
-                    if item.get("request_id"):
-                        db.update_request_status(item["request_id"], RequestStatus.AVAILABLE.value)
-                        req_row = db.get_request(item["request_id"])
-                    stats["imported"] += 1
-                    try:
-                        db.record_event(
-                            "item_available",
-                            f"Imported '{item.get('title', '')}' to library",
-                            source="AcquisitionWorker",
-                            severity="info",
-                        )
-                    except Exception as ev_err:
-                        logger.warning("Failed to record Lidarr item_available event: %s", ev_err)
-                    try:
-                        notification_dispatcher.dispatch(
-                            NotificationEvent.ITEM_AVAILABLE,
-                            data={
-                                "artist": item.get("artist"),
-                                "title": item.get("title"),
-                                "album": item.get("title") if item.get("item_type") == "album" else None,
-                                "request_id": item.get("request_id"),
-                                "download_id": download_id,
-                                "cover_url": req_row.get("cover_url") if req_row else None,
-                                "username": req_row.get("username") if req_row else None,
-                                "user_id": req_row.get("user_id") if req_row else None,
-                            },
-                            db=db,
-                        )
-                    except Exception as ex:
-                        logger.warning("Failed to dispatch ITEM_AVAILABLE notification for Lidarr import: %s", ex)
-
-                    if plex_client:
-                        try:
-                            as_media_server(plex_client).refresh_library()
-                        except Exception as e:
-                            logger.warning("Error refreshing Plex after Lidarr import: %s", e)
-                    continue
-
-                # Locate downloaded audio files with remote path translation
-                mappings: list[dict[str, str]] = []
-                extra_json = client_config.get("extra_settings_json")
-                if extra_json:
-                    try:
-                        extra_data = json.loads(extra_json) if isinstance(extra_json, str) else extra_json
-                        if isinstance(extra_data, dict):
-                            mappings = extra_data.get("remote_path_mappings", [])
-                    except (json.JSONDecodeError, TypeError):
-                        mappings = []
-
-                raw_src = status_dict.get("source_path") or item.get("source_path")
-                candidate_src = translate_remote_path(raw_src, mappings) if raw_src else None
-                client_label = str(client_config.get("name") or client_id or "download client")
-                self.allowed_roots = allowed_roots_for_client(db, media_settings, client_config, driver=driver)
-                if not self.allowed_roots.roots:
-                    reason = "; ".join(self.allowed_roots.errors) or f"Could not read download folder from {client_label}"
-                    err_msg = f"{reason}; check client connection"
-                    logger.warning("Download %s cannot be imported yet: %s", download_id, err_msg)
-                    db.update_download_status(download_id, status=DownloadStatus.COMPLETED.value, error_message=err_msg)
-                    self.allowed_roots = None
-                    continue
-                if candidate_src:
-                    ok, reject_reason = self.allowed_roots.check(candidate_src)
-                    if not ok:
-                        logger.warning("Rejecting source path %s from %s: %s", candidate_src, client_label, reject_reason)
-                        candidate_src = None
-
-                search_term = item.get("title") or item.get("artist") or ""
-                self._archive_errors = []
-                audio_files = self._find_audio_files(candidate_src, search_term)
-
-                if self._archive_errors and not audio_files:
-                    err_msg = "Archive rejected: " + "; ".join(self._archive_errors)
-                    try:
-                        db.record_event(
-                            "import_security",
-                            f"Archive limits exceeded for '{item.get('title', '')}': {err_msg}",
-                            source="AcquisitionWorker",
-                            severity="error",
-                            details={"download_id": download_id, "archives": list(self._archive_errors)},
-                        )
-                    except sqlite3.Error as ev_err:
-                        logger.warning("Failed to record import_security event: %s", ev_err)
-                    db.update_download_status(download_id, status=DownloadStatus.FAILED.value, error_message=err_msg)
-                    _notify_failed(err_msg)
-                    try:
-                        db.add_to_blocklist(
-                            source_title=item.get("title", ""),
-                            artist=item.get("artist"),
-                            release_guid=item.get("id"),
-                            info_hash=item.get("download_hash"),
-                            reason=err_msg,
-                            download_id=download_id,
-                        )
-                    except Exception as bl_err:
-                        logger.warning("Failed to add archive-rejected download to blocklist: %s", bl_err)
-                    stats["failed"] += 1
-                    continue
-
-                if not audio_files:
-                    logger.warning(
-                        "Download %s marked completed but no audio files found at %s or download roots %s",
-                        download_id,
-                        candidate_src,
-                        ", ".join(str(r) for r in self._effective_roots().roots),
+                    current_q = eval_res.parsed_quality
+                    cutoff_met_val = 1 if eval_res.meets_cutoff else 0
+                    db.update_request_quality(
+                        item["request_id"],
+                        current_quality=current_q,
+                        cutoff_met=cutoff_met_val,
                     )
-                    err_msg = "No audio files found for import in download staging"
-                    db.update_download_status(
-                        download_id,
-                        status=DownloadStatus.FAILED.value,
-                        error_message=err_msg,
-                    )
-                    _notify_failed(err_msg)
-                    try:
-                        db.add_to_blocklist(
-                            source_title=item.get("title", ""),
-                            artist=item.get("artist"),
-                            release_guid=item.get("id"),
-                            info_hash=item.get("download_hash"),
-                            reason=err_msg,
-                            download_id=download_id,
-                        )
-                    except Exception as bl_err:
-                        logger.warning("Failed to add missing-audio download to blocklist: %s", bl_err)
-                    stats["failed"] += 1
-                    continue
+            except Exception as ex:
+                logger.warning("Error evaluating release quality for request %s: %s", item.get("request_id"), ex)
 
-                # Security gate (always on, any import_bitrate_check mode): magic bytes + header parse. One bad file
-                # rejects the whole release; offenders are quarantined, never imported.
-                probes: dict[str, Any] = {}
-                security = verify_files(audio_files, probes)
-                if security.failed:
-                    err_msg = f"Security check failed: {security.reason()}"
-                    # Torrent sources keep seeding from their download folder, so they are copied, never moved. Usenet,
-                    # Soulseek and staging sources have nothing seeding and are moved out of the download folder.
-                    q_root = effective_quarantine_path(media_settings)
-                    keep_sources = is_torrent_driver_type(driver_type)
-                    if q_root is None:
-                        # No quarantine or library root is configured: never fall back to the process cwd.
-                        logger.warning(
-                            "No quarantine folder or library root configured; leaving rejected files of download "
-                            "%s in place (release is still refused).", download_id,
-                        )
-                        moved = []
-                    else:
-                        moved = quarantine_files(
-                            [p for p, _ in security.failures], q_root, str(download_id), copy=keep_sources
-                        )
-                    try:
-                        db.record_event(
-                            "import_security",
-                            f"Security check failed for '{item.get('title', '')}': {security.reason()}",
-                            source="AcquisitionWorker",
-                            severity="error",
-                            details={
-                                "download_id": download_id,
-                                "files": [{"file": p, "reason": r} for p, r in security.failures],
-                                "quarantined_to": [str(m) for m in moved],
-                                "sources_kept_for_seeding": keep_sources,
-                            },
-                        )
-                    except sqlite3.Error as ev_err:
-                        logger.warning("Failed to record import_security event: %s", ev_err)
-                    db.record_download_item_event(
-                        "quarantined", str(download_id), message=f"Import security: {security.reason()}",
-                        details={
-                            "release": item.get("title"),
-                            "files": [{"file": p, "reason": r} for p, r in security.failures],
-                            "quarantined_to": [str(m) for m in moved], "copied": keep_sources,
-                        },
-                    )
-                    logger.error("Import security failure for download %s: %s", download_id, err_msg)
-                    db.update_download_status(download_id, status=DownloadStatus.FAILED.value, error_message=err_msg)
-                    _notify_failed(err_msg)
-                    try:
-                        db.add_to_blocklist(
-                            source_title=item.get("title", ""),
-                            artist=item.get("artist"),
-                            release_guid=item.get("id"),
-                            info_hash=item.get("download_hash"),
-                            reason=err_msg,
-                            download_id=download_id,
-                        )
-                    except Exception as bl_err:
-                        logger.warning("Failed to add security-rejected download to blocklist: %s", bl_err)
-                    stats["failed"] += 1
-                    continue
-
-                # Per-track bitrate check (media management: import_bitrate_check = off | warn | reject).
-                check_mode = normalize_check_mode(media_settings.get("import_bitrate_check"))
-                if check_mode != CHECK_OFF:
-                    try:
-                        definitions = {str(d["quality"]): d for d in db.list_quality_definitions()}
-                        check = check_files(audio_files, check_mode, definitions, probes=probes)
-                    except Exception as chk_err:  # noqa: BLE001 - the check is advisory; it must never crash the worker loop
-                        logger.warning(
-                            "Import bitrate check failed for download %s: %s: %s",
-                            download_id,
-                            type(chk_err).__name__,
-                            chk_err,
-                        )
-                        check = None
-                    if check is not None and (check.out_of_range or check.skipped):
-                        summary = check.reason()
-                        try:
-                            db.record_event(
-                                "import_bitrate_check",
-                                f"Bitrate check ({check_mode}) for '{item.get('title', '')}': {summary}",
-                                source="AcquisitionWorker",
-                                severity="error" if check.failed else "warning",
-                                details={
-                                    "download_id": download_id,
-                                    "mode": check_mode,
-                                    "checked": check.checked,
-                                    "out_of_range": [
-                                        {
-                                            "file": f.path,
-                                            "quality": f.quality,
-                                            "kbps": round(f.kbps, 1),
-                                            "min_kbps": f.min_kbps,
-                                            "max_kbps": f.max_kbps,
-                                            "severity": f.severity,
-                                            "detail": f.detail,
-                                        }
-                                        for f in check.out_of_range
-                                    ],
-                                    "skipped": [{"file": p, "reason": r} for p, r in check.skipped],
-                                },
-                            )
-                        except sqlite3.Error as ev_err:
-                            logger.warning("Failed to record import_bitrate_check event: %s", ev_err)
-                        logger.warning("Import bitrate check (%s) for download %s: %s", check_mode, download_id, summary)
-                    if check is not None and check.failed:
-                        err_msg = f"Bitrate check failed: {check.reason()}"
-                        db.update_download_status(
-                            download_id,
-                            status=DownloadStatus.FAILED.value,
-                            error_message=err_msg,
-                        )
-                        _notify_failed(err_msg)
-                        try:
-                            db.add_to_blocklist(
-                                source_title=item.get("title", ""),
-                                artist=item.get("artist"),
-                                release_guid=item.get("id"),
-                                info_hash=item.get("download_hash"),
-                                reason=err_msg,
-                                download_id=download_id,
-                            )
-                        except Exception as bl_err:
-                            logger.warning("Failed to add bitrate-rejected download to blocklist: %s", bl_err)
-                        stats["failed"] += 1
-                        continue
-
-                # Organize and move each audio file
-                imported_paths: list[str] = []
-                root_folder = media_settings.get("root_folder_path") or "/music"
-                root_path = Path(root_folder).resolve()
-
-                # Fetch associated request and album cover art if available
-                req = db.get_request(item["request_id"]) if item.get("request_id") else None
-                cover_bytes: bytes | None = None
-                if req and (embed_art or save_cover):
-                    cover_url = req.get("cover_url")
-                    if cover_url and _is_safe_cover_url(cover_url):
-                        try:
-                            resp = httpx.get(cover_url, timeout=10.0, follow_redirects=True)
-                            if resp.status_code == 200 and resp.content:
-                                cover_bytes = resp.content
-                        except httpx.HTTPError as e:
-                            logger.warning("HTTP error fetching cover art from %s: %s", cover_url, e)
-                        except Exception as e:
-                            logger.warning("Error fetching cover art from %s: %s", cover_url, e)
-                    elif cover_url:
-                        logger.warning("Cover art URL rejected by SSRF protection: %s", cover_url)
-
-                last_metadata: dict[str, Any] = {}
-
-                # Check if item has album_id or matches an existing album in catalog
-                target_album, expected_tracks = resolve_download_expected_tracks(db, item, req)
-
-                remaining_expected_tracks = list(expected_tracks)
-                placed_to_track: dict[str, dict[str, Any]] = {}
-                # placed path -> (recycle result, old file row) for old files recycled right before an in-place replace
-                recycled_in_place: dict[str, tuple[DisposeResult, dict[str, Any]]] = {}
-                # Files with no catalog match when the release has expected tracks: left on disk for manual import.
-                held_files: list[str] = []
-
-                for af in audio_files:
-                    try:
-                        metadata = inspect_audio_file(af)
-                    except Exception as e:
-                        logger.warning("Mutagen inspection failed for %s: %s; using item defaults", af, e)
-                        metadata = {
-                            "artist": item.get("artist", "Unknown Artist"),
-                            "title": item.get("title", af.stem),
-                            "album": item.get("title") if item.get("item_type") == "album" else "Unknown Album",
-                            "file_path": str(af),
-                            "extension": af.suffix.lower(),
-                            "track_number": None,
-                            "disc_number": 1,
-                            "total_discs": 1,
-                        }
-
-                    # Fallbacks for empty tags
-                    if not metadata.get("artist"):
-                        metadata["artist"] = item.get("artist") or "Unknown Artist"
-                    if not metadata.get("title"):
-                        metadata["title"] = item.get("title") or af.stem
-
-                    # Reconcile against expected catalog tracks if present
-                    matched_expected_track = None
-                    file_weak_strength: Optional[str] = None
-                    if remaining_expected_tracks:
-                        matched_expected_track, match_strength = reconcile_audio_file_to_track_scored(
-                            metadata, remaining_expected_tracks
-                        )
-                        tag_track = matched_expected_track
-                        matched_expected_track = _fingerprint_fallback_match(
-                            af, media_settings, remaining_expected_tracks, matched_expected_track, match_strength
-                        )
-                        if matched_expected_track is not None and matched_expected_track is tag_track and match_strength != MATCH_STRONG:
-                            file_weak_strength = match_strength
-                        if matched_expected_track:
-                            remaining_expected_tracks.remove(matched_expected_track)
-                            metadata["title"] = matched_expected_track["title"]
-                            metadata["track_number"] = int(matched_expected_track.get("track_number") or 1)
-                            metadata["disc_number"] = int(matched_expected_track.get("disc_number") or 1)
-                            if target_album:
-                                metadata["album"] = target_album["title"]
-                                art_cand = db.get_library_artist(target_album["artist_id"])
-                                if art_cand:
-                                    metadata["artist"] = art_cand["name"]
-
-                    if expected_tracks and matched_expected_track is None:
-                        logger.warning(
-                            "Holding unmatched file %s for download %s (manual import required)", af, download_id
-                        )
-                        held_files.append(str(af))
-                        continue
-
-                    # Disc 1 of a multi-disc release must use the multi-disc format too.
-                    known_discs = [int(metadata.get("total_discs") or 1)]
-                    known_discs += [int(t.get("disc_number") or 1) for t in expected_tracks]
-                    metadata["total_discs"] = max(known_discs)
-
-                    last_metadata = metadata
-
-                    target_str = build_track_path(metadata, media_settings)
-                    desired_path = Path(target_str).resolve()
-                    pre_recycled = self._recycle_in_place_target(
-                        db, media_settings, root_path, desired_path, matched_expected_track
-                    )
-                    final_target = desired_path if pre_recycled is not None else resolve_collision(target_str)
-                    target_path = Path(final_target).resolve()
-                    if not target_path.is_relative_to(root_path):
-                        logger.error("Destination %s escapes music root %s", target_path, root_path)
-                        if pre_recycled is not None:
-                            restore_recycled(pre_recycled[0])
-                        continue
-
-                    try:
-                        placed_path = place_audio_file(af, target_path, mode=import_mode)
-                    except Exception:
-                        if pre_recycled is not None:
-                            restore_recycled(pre_recycled[0])  # the replacement never landed: put the old bytes back
-                        raise
-                    if pre_recycled is not None:
-                        # The old file's bytes now live in the recycle bin; its row would point at the new file.
-                        recycled_in_place[str(placed_path)] = pre_recycled
-                    imported_paths.append(str(placed_path))
-                    if matched_expected_track:
-                        placed_to_track[str(placed_path)] = matched_expected_track
-                        if file_weak_strength is not None:
-                            record_weak_match(
-                                db,
-                                str(placed_path),
-                                track_id=str(matched_expected_track.get("id") or ""),
-                                title=str(matched_expected_track.get("title") or ""),
-                                source_name=str(item.get("title") or ""),
-                                strength=file_weak_strength,
-                            )
-                    logger.info("Successfully imported '%s' -> '%s'", af.name, placed_path)
-                    try:
-                        db.record_event(
-                            "item_available",
-                            f"Imported '{af.name}' to library",
-                            source="AcquisitionWorker",
-                            severity="info",
-                        )
-                    except Exception as ev_err:
-                        logger.warning("Failed to record item_available event: %s", ev_err)
-
-                    # Tag writing and artwork embedding
-                    tags_to_write: dict[str, Any] = build_tags_to_write(
-                        metadata,
-                        req=req,
-                        audio_files_count=len(audio_files),
-                    )
-
-                    # Asynchronously enrich with MBIDs if enabled
-                    if media_settings.get("enrich_mbids", True):
-                        try:
-                            enricher = get_shared_enricher(db)
-                            artist_query = str(tags_to_write.get("artist") or "")
-                            album_query = str(tags_to_write.get("album") or "")
-                            title_query = str(tags_to_write.get("title") or "")
-                            track_isrc = metadata.get("isrc")
-                            resolved_mbids = enricher.lookup_track_mbids(
-                                artist_query, album_query, title_query, isrc=track_isrc
-                            )
-                            if resolved_mbids:
-                                for mb_key in (
-                                    "musicbrainz_artistid",
-                                    "musicbrainz_albumid",
-                                    "musicbrainz_releasegroupid",
-                                    "musicbrainz_trackid",
-                                ):
-                                    if resolved_mbids.get(mb_key):
-                                        tags_to_write[mb_key] = resolved_mbids[mb_key]
-
-                            if not cover_bytes and (embed_art or save_cover):
-                                rg_id = resolved_mbids.get("musicbrainz_releasegroupid") if resolved_mbids else None
-                                rel_id = resolved_mbids.get("musicbrainz_albumid") if resolved_mbids else None
-                                resolved_cover_url = enricher.get_cover_art_url(release_group_id=rg_id, release_id=rel_id)
-                                if resolved_cover_url and _is_safe_cover_url(resolved_cover_url):
-                                    try:
-                                        resp = httpx.get(resolved_cover_url, timeout=5.0, follow_redirects=True)
-                                        if resp.status_code == 200 and resp.content:
-                                            cover_bytes = resp.content
-                                    except Exception as exc:
-                                        logger.debug("Failed fetching cover art from Cover Art Archive %s: %s", resolved_cover_url, exc)
-                        except Exception as e:
-                            logger.warning("AcquisitionWorker: MBID enrichment error: %s", e)
-
-                    file_write_tags, file_embed_art = write_tags, embed_art
-                    if (file_write_tags or (file_embed_art and cover_bytes)) and not prepare_file_for_tagging(placed_path, media_settings):
-                        file_write_tags = file_embed_art = False
-                    if file_write_tags:
-                        art_to_embed = cover_bytes if file_embed_art else None
-                        try:
-                            write_audio_tags(placed_path, tags=tags_to_write, cover_art_bytes=art_to_embed)
-                        except Exception as e:
-                            logger.warning("Error writing audio tags to %s: %s", placed_path, e)
-                    elif file_embed_art and cover_bytes:
-                        try:
-                            embed_album_artwork(placed_path, cover_bytes)
-                        except Exception as e:
-                            logger.warning("Error embedding artwork into %s: %s", placed_path, e)
-
-                    if save_cover and cover_bytes:
-                        cover_file = placed_path.parent / "cover.jpg"
-                        if not cover_file.exists():
-                            try:
-                                cover_file.write_bytes(cover_bytes)
-                                clear_exec_bits(cover_file)
-                                logger.info("Saved album cover to %s", cover_file)
-                            except OSError as e:
-                                logger.warning("Failed to save cover.jpg at %s: %s", cover_file, e)
-
-                if held_files:
-                    db.set_download_unmatched_files(download_id, held_files)
-                    held_msg = f"{len(held_files)} file(s) couldn't be matched — manual import required"
-                    if not imported_paths:
-                        # Nothing placed: park the download for manual import (not a failure, no blocklisting).
-                        db.update_download_status(
-                            download_id, status=DownloadStatus.WARNING.value, error_message=held_msg
-                        )
-                        continue
-
-                if not imported_paths:
-                    logger.error("No audio files were successfully imported for download %s", download_id)
-                    err_msg = "Destination escaped music root or placement failed"
-                    db.update_download_status(
-                        download_id,
-                        status=DownloadStatus.FAILED.value,
-                        error_message=err_msg,
-                    )
-                    _notify_failed(err_msg)
-                    try:
-                        db.add_to_blocklist(
-                            source_title=item.get("title", ""),
-                            artist=item.get("artist"),
-                            release_guid=item.get("id"),
-                            info_hash=item.get("download_hash"),
-                            reason=err_msg,
-                            download_id=download_id,
-                        )
-                    except Exception as bl_err:
-                        logger.warning("Failed to add unplaced download to blocklist: %s", bl_err)
-                    stats["failed"] += 1
-                    continue
-
-                # Update database records
-                target_summary = imported_paths[0] if imported_paths else None
-                db.update_download_status(
-                    download_id,
-                    status=DownloadStatus.IMPORTING.value,
-                    target_path=target_summary,
+        should_keep_seeding = False
+        # Held files still live in the client's download folder: never remove the transfer while they wait.
+        if held_files:
+            logger.info(
+                "Download %s keeps %d unmatched file(s); skipping download-client cleanup",
+                download_id,
+                len(held_files),
+            )
+        else:
+            try:
+                db.set_download_placed_files(download_id, imported_paths, import_mode)
+            except sqlite3.Error as placed_err:
+                logger.warning("Could not record placed files for %s: %s", download_id, safe_exc(placed_err))
+            should_keep_seeding = (
+                settle_transfer_after_import(
+                    driver,
+                    target_lookup,
+                    media_settings,
+                    import_mode,
+                    status_dict,
+                    db.get_active_download(download_id) or item,
+                    db,
                 )
+                == DownloadStatus.COMPLETED.value
+            )
 
-                # An issue-driven replacement retires the track's previous file(s) once the new row is in.
-                replacement_issue_id: Optional[str] = None
-                replaced_retired: list[str] = []
-                replaced_kept: list[str] = []
-                try:
-                    replacement_issue_id = db.get_download_replacement_issue(str(download_id))
-                except sqlite3.Error as ri_err:
-                    logger.warning("Could not look up replacement issue for %s: %s", download_id, safe_exc(ri_err))
+        if held_files:
+            db.update_download_status(
+                download_id,
+                status=DownloadStatus.WARNING.value,
+                error_message=held_msg,
+                target_path=target_summary,
+            )
+        elif should_keep_seeding:
+            db.update_download_status(
+                download_id,
+                status=DownloadStatus.COMPLETED.value,
+                target_path=target_summary,
+            )
+        else:
+            db.update_download_status(
+                download_id,
+                status=DownloadStatus.IMPORTED.value,
+                target_path=target_summary,
+            )
 
-                # Native catalog upsert (when library_mode != "lidarr")
-                if media_settings.get("library_mode") != "lidarr":
-                    # Artist tag labels by artist id, looked up once per artist across the placed files.
-                    import_tag_cache: dict[str, list[str]] = {}
-                    for placed_str in imported_paths:
-                        try:
-                            placed_p = Path(placed_str).resolve()
-                            try:
-                                f_meta = inspect_audio_file(placed_p)
-                            except Exception as insp_err:
-                                logger.warning(
-                                    "Could not inspect placed audio file %s: %s; using fallback metadata",
-                                    placed_p,
-                                    insp_err,
-                                )
-                                f_meta = {}
+        stats["imported"] += 1
 
-                            matched_track = placed_to_track.get(placed_str)
-                            if matched_track and target_album:
-                                artist_id = target_album["artist_id"]
-                                artist_row = db.get_library_artist(artist_id) or {
-                                    "id": artist_id,
-                                    "name": item.get("artist") or "Unknown Artist",
-                                    "quality_profile_id": None,
-                                }
-                                album_id = target_album["id"]
-                                album_row = target_album
-                                track_id = matched_track["id"]
-                                track_row = matched_track
-                                db.set_track_monitored(track_id, True)
-                            else:
-                                artist_name = (
-                                    f_meta.get("artist")
-                                    or item.get("artist")
-                                    or (req.get("artist") if req else None)
-                                    or "Unknown Artist"
-                                ).strip()
+        try:  # a grab made by an issue's "Search again" tells that issue; the admin decides the status
+            issue_id = replacement_issue_id
+            if issue_id and db.get_issue(issue_id):
+                body = "Replacement imported"
+                for line in replaced_retired:
+                    body += f"\nRetired old file: {line}"
+                for line in replaced_kept:
+                    body += f"\nOld file kept at {line}"
+                db.add_issue_comment(issue_id, None, body, is_admin=True, is_system=True, staff=True)
+        except sqlite3.Error as issue_err:
+            logger.warning("Could not comment on the issue for download %s: %s", download_id, safe_exc(issue_err))
 
-                                # 1. Resolve / upsert LibraryArtist
-                                artist_row = None
-                                existing_track = None
-                                if item.get("track_id"):
-                                    existing_track = db.get_library_track(item["track_id"])
-                                    if existing_track:
-                                        artist_row = db.get_library_artist(existing_track["artist_id"])
-                                if not artist_row:
-                                    artist_row = db.get_library_artist_by_name(artist_name)
-                                if not artist_row:
-                                    artist_id = str(uuid.uuid4())
-                                    artist_folder = (
-                                        str(placed_p.parent.parent)
-                                        if placed_p.parent != root_path
-                                        else str(placed_p.parent)
-                                    )
-                                    artist_row = db.upsert_library_artist(
-                                        LibraryArtist(
-                                            id=artist_id,
-                                            name=artist_name,
-                                            path=artist_folder,
-                                            monitor_option=_scan_monitor_option(media_settings),
-                                        ),
-                                        preserve_monitoring=True,
-                                    )
-                                artist_id = artist_row["id"]
+        try:
+            notification_dispatcher.dispatch(
+                NotificationEvent.ITEM_AVAILABLE,
+                data={
+                    "artist": item.get("artist"),
+                    "title": item.get("title"),
+                    "album": item.get("title") if item.get("item_type") == "album" else None,
+                    "request_id": item.get("request_id"),
+                    "download_id": download_id,
+                    "target_path": target_summary,
+                    "cover_url": req.get("cover_url") if req else None,
+                    "username": req.get("username") if req else None,
+                    "user_id": req.get("user_id") if req else None,
+                },
+                db=db,
+            )
+        except Exception as ex:
+            logger.warning("Failed to dispatch ITEM_AVAILABLE notification for native import: %s", ex)
 
-                                # 2. Resolve / upsert LibraryAlbum
-                                album_title = (
-                                    f_meta.get("album")
-                                    or (item.get("title") if item.get("item_type") == "album" else None)
-                                    or (req.get("album") or req.get("title") if req else None)
-                                    or "Unknown Album"
-                                ).strip()
-                                year_val = f_meta.get("year")
-                                if year_val is None and req and req.get("release_date"):
-                                    rdate = str(req["release_date"]).strip()
-                                    if len(rdate) >= 4 and rdate[:4].isdigit():
-                                        year_val = int(rdate[:4])
-
-                                album_row = None
-                                if item.get("album_id"):
-                                    album_row = db.get_library_album(item["album_id"])
-                                elif item.get("track_id") and existing_track:
-                                    album_row = db.get_library_album(existing_track["album_id"])
-                                if not album_row:
-                                    album_row = db.get_library_album_by_title(artist_id, album_title)
-                                if not album_row:
-                                    album_id = str(uuid.uuid4())
-                                    album_row = db.upsert_library_album(
-                                        LibraryAlbum(
-                                            id=album_id,
-                                            artist_id=artist_id,
-                                            title=album_title,
-                                            year=year_val,
-                                            path=str(placed_p.parent),
-                                        )
-                                    )
-                                album_id = album_row["id"]
-
-                                # 3. Resolve / upsert LibraryTrack
-                                track_row = None
-                                if item.get("track_id"):
-                                    track_row = existing_track or db.get_library_track(item["track_id"])
-                                if not track_row:
-                                    track_title = (
-                                        f_meta.get("title")
-                                        or item.get("title")
-                                        or (req.get("title") if req else None)
-                                        or placed_p.stem
-                                    ).strip()
-                                    track_num = int(f_meta.get("track_number") or 1)
-                                    track_row = db.get_library_track_by_title(
-                                        album_id, track_title, track_number=track_num
-                                    )
-                                    if not track_row:
-                                        track_id = str(uuid.uuid4())
-                                        track_row = db.upsert_library_track(
-                                            LibraryTrack(
-                                                id=track_id,
-                                                album_id=album_id,
-                                                artist_id=artist_id,
-                                                title=track_title,
-                                                track_number=track_num,
-                                                disc_number=int(f_meta.get("disc_number") or 1),
-                                                duration_seconds=(
-                                                    float(f_meta["duration"])
-                                                    if f_meta.get("duration") is not None
-                                                    else None
-                                                ),
-                                            )
-                                        )
-                                track_id = track_row["id"]
-
-                            # 4. Evaluate cutoff against artist's quality profile (or default)
-                            qp_id = artist_row.get("quality_profile_id") or (
-                                req.get("quality_profile_id") if req else None
-                            )
-                            prof_dict = db.get_quality_profile(qp_id) if qp_id else None
-                            if not prof_dict:
-                                prof_dict = db.get_default_quality_profile()
-
-                            parsed = parse_release_title(item.get("title") or placed_p.name)
-                            if parsed.quality == "Unknown":
-                                parsed.quality = _quality_from_codec(f_meta) or parsed.quality
-
-                            file_size = (
-                                placed_p.stat().st_size
-                                if placed_p.exists()
-                                else int(item.get("size_bytes") or 0)
-                            )
-                            cutoff_met = True
-                            quality_str = parsed.quality
-                            if prof_dict:
-                                profile_obj = _to_quality_profile(prof_dict)
-                                if artist_id not in import_tag_cache:
-                                    import_tag_cache[artist_id] = delay_gate.artist_tags(
-                                        db, artist_row.get("name"), artist_id
-                                    )
-                                eval_res = evaluate_release(
-                                    release=parsed,
-                                    profile=profile_obj,
-                                    size_bytes=file_size,
-                                    artist_tags=import_tag_cache[artist_id],
-                                )
-                                quality_str = eval_res.parsed_quality
-                                cutoff_met = eval_res.meets_cutoff
-
-                            # 5. Upsert LibraryFile
-                            rel_path = (
-                                str(placed_p.relative_to(root_path))
-                                if placed_p.is_relative_to(root_path)
-                                else str(placed_p)
-                            )
-                            file_id = f"fil-{uuid.uuid4().hex[:12]}"
-                            # Every other file the track has is superseded by this import (upgrade or issue
-                            # replacement), except files this same download placed (a multi-file release).
-                            sibling_paths = {str(Path(p).resolve()) for p in imported_paths} | {str(placed_p)}
-                            old_file_rows = [
-                                r for r in db.list_library_files_for_track(track_id)
-                                if str(r.get("file_path") or "") not in sibling_paths
-                            ]
-                            in_place = recycled_in_place.pop(str(placed_p), None)
-                            if in_place is not None:
-                                old_file_rows = [r for r in old_file_rows if str(r["id"]) != str(in_place[1]["id"])]
-                                self._log_recycled(db, item, in_place[0], placed_p, in_place[1], quality_str, media_settings,
-                                                   replacement_issue_id, replaced_retired)
-                                try:
-                                    db.delete_library_file(str(in_place[1]["id"]))
-                                except sqlite3.Error as del_err:
-                                    logger.warning("Could not remove stale library file row %s: %s", in_place[1].get("id"), safe_exc(del_err))
-                            db.upsert_library_file(
-                                LibraryFile(
-                                    id=file_id,
-                                    track_id=track_id,
-                                    file_path=str(placed_p),
-                                    relative_path=rel_path,
-                                    codec=f_meta.get("codec") or placed_p.suffix.lstrip(".").upper(),
-                                    bitrate=int(f_meta["bitrate"]) if f_meta.get("bitrate") is not None else None,
-                                    sample_rate=int(f_meta["sample_rate"]) if f_meta.get("sample_rate") is not None else None,
-                                    bits_per_sample=int(f_meta["bits_per_sample"]) if f_meta.get("bits_per_sample") is not None else None,
-                                    quality_name=quality_str,
-                                    size_bytes=file_size,
-                                    cutoff_met=cutoff_met,
-                                )
-                            )
-                            logger.info(
-                                "Native catalog upserted file %s for track %s (cutoff_met=%s)",
-                                file_id,
-                                track_id,
-                                cutoff_met,
-                            )
-                            record_import_events(
-                                db, item, str(track_id), placed_p, quality_str, f_meta,
-                                ([in_place[1]] if in_place is not None else []) + old_file_rows,
-                            )
-                            if old_file_rows:
-                                self._recycle_replaced_files(
-                                    db, item, replacement_issue_id, old_file_rows, placed_p, root_path,
-                                    media_settings, quality_str, replaced_retired, replaced_kept,
-                                )
-                        except Exception as upsert_err:
-                            logger.exception(
-                                "Error upserting native library records for %s: %s",
-                                placed_str,
-                                upsert_err,
-                            )
-                if item.get("request_id"):
-                    db.update_request_status(item["request_id"], RequestStatus.AVAILABLE.value)
-                    try:
-                        parsed = parse_release_title(item.get("title") or "")
-                        if parsed.quality == "Unknown" and last_metadata:
-                            parsed.quality = _quality_from_codec(last_metadata) or parsed.quality
-
-                        profile_dict = None
-                        if req and req.get("quality_profile_id"):
-                            profile_dict = db.get_quality_profile(req["quality_profile_id"])
-                        if not profile_dict:
-                            profile_dict = db.get_default_quality_profile()
-
-                        if profile_dict:
-                            profile = _to_quality_profile(profile_dict)
-                            eval_res = evaluate_release(
-                                release=parsed,
-                                profile=profile,
-                                size_bytes=item.get("size_bytes"),
-                                artist_tags=delay_gate.artist_tags(
-                                    db, (req.get("artist") if req else None) or item.get("artist")
-                                ),
-                            )
-                            current_q = eval_res.parsed_quality
-                            cutoff_met_val = 1 if eval_res.meets_cutoff else 0
-                            db.update_request_quality(
-                                item["request_id"],
-                                current_quality=current_q,
-                                cutoff_met=cutoff_met_val,
-                            )
-                    except Exception as ex:
-                        logger.warning("Error evaluating release quality for request %s: %s", item.get("request_id"), ex)
-
-                should_keep_seeding = False
-                # Held files still live in the client's download folder: never remove the transfer while they wait.
-                if held_files:
-                    logger.info(
-                        "Download %s keeps %d unmatched file(s); skipping download-client cleanup",
-                        download_id,
-                        len(held_files),
-                    )
-                else:
-                    try:
-                        db.set_download_placed_files(download_id, imported_paths, import_mode)
-                    except sqlite3.Error as placed_err:
-                        logger.warning("Could not record placed files for %s: %s", download_id, safe_exc(placed_err))
-                    should_keep_seeding = (
-                        settle_transfer_after_import(
-                            driver,
-                            target_lookup,
-                            media_settings,
-                            import_mode,
-                            status_dict,
-                            db.get_active_download(download_id) or item,
-                            db,
-                        )
-                        == DownloadStatus.COMPLETED.value
-                    )
-
-                if held_files:
-                    db.update_download_status(
-                        download_id,
-                        status=DownloadStatus.WARNING.value,
-                        error_message=held_msg,
-                        target_path=target_summary,
-                    )
-                elif should_keep_seeding:
-                    db.update_download_status(
-                        download_id,
-                        status=DownloadStatus.COMPLETED.value,
-                        target_path=target_summary,
-                    )
-                else:
-                    db.update_download_status(
-                        download_id,
-                        status=DownloadStatus.IMPORTED.value,
-                        target_path=target_summary,
-                    )
-
-                stats["imported"] += 1
-
-                try:  # a grab made by an issue's "Search again" tells that issue; the admin decides the status
-                    issue_id = replacement_issue_id
-                    if issue_id and db.get_issue(issue_id):
-                        body = "Replacement imported"
-                        for line in replaced_retired:
-                            body += f"\nRetired old file: {line}"
-                        for line in replaced_kept:
-                            body += f"\nOld file kept at {line}"
-                        db.add_issue_comment(issue_id, None, body, is_admin=True, is_system=True, staff=True)
-                except sqlite3.Error as issue_err:
-                    logger.warning("Could not comment on the issue for download %s: %s", download_id, safe_exc(issue_err))
-
-                try:
-                    notification_dispatcher.dispatch(
-                        NotificationEvent.ITEM_AVAILABLE,
-                        data={
-                            "artist": item.get("artist"),
-                            "title": item.get("title"),
-                            "album": item.get("title") if item.get("item_type") == "album" else None,
-                            "request_id": item.get("request_id"),
-                            "download_id": download_id,
-                            "target_path": target_summary,
-                            "cover_url": req.get("cover_url") if req else None,
-                            "username": req.get("username") if req else None,
-                            "user_id": req.get("user_id") if req else None,
-                        },
-                        db=db,
-                    )
-                except Exception as ex:
-                    logger.warning("Failed to dispatch ITEM_AVAILABLE notification for native import: %s", ex)
-
-                # Trigger Plex library refresh ping
-                if plex_client:
-                    try:
-                        as_media_server(plex_client).refresh_library()
-                    except Exception as e:
-                        logger.warning("Error triggering Plex library refresh: %s", e)
-
-            else:
-                # Update progress and active status
-                db.update_download_status(download_id, status=cur_status)
-
-        return stats
+        # Trigger Plex library refresh ping
+        if plex_client:
+            try:
+                as_media_server(plex_client).refresh_library()
+            except Exception as e:
+                logger.warning("Error triggering Plex library refresh: %s", e)
 
 
 # Global acquisition worker instance
