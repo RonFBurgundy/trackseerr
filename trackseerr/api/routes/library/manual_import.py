@@ -1,6 +1,7 @@
 """Endpoints for manual import scanning, track matching, and commit pipeline."""
 
 import sqlite3
+from dataclasses import dataclass, field
 import logging
 import os
 from pathlib import Path
@@ -82,7 +83,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 from ._shared import (validate_media_path, native_only, _album_total_discs)
-from .models import (ManualImportScanRequest, ManualImportCommitRequest, FingerprintRequest)
+from .models import (ManualImportScanRequest, ManualImportCommitRequest, FingerprintRequest, ManualImportItem)
 
 def _scan_fallback_tags(p: Path) -> dict[str, Any]:
     return {
@@ -325,23 +326,38 @@ def manual_import_album_tracks(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
     return _candidate_tracks(db, db.list_library_tracks(album_id=album_id, limit=1000))
 
-@router.post("/manual-import/commit", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=ManualImportCommitResponse, response_model_exclude_unset=True)
-def manual_import_commit(  # noqa: C901, PLR0915
+@dataclass
+class _CommitRun:
+    """State across manual import commit phases for a single batch."""
+
+    db: Database
+    body: ManualImportCommitRequest
+    media_settings: dict[str, Any]
+    root_dir: Path
+    download_row: Optional[dict[str, Any]]
+    download_client_type: Optional[str]
+    client_roots: list[Path]
+    batch_placed: set[str] = field(default_factory=set)
+    replaced_retired: list[str] = field(default_factory=list)
+    replaced_kept: list[str] = field(default_factory=list)
+    manual_import_tag_cache: dict[str, list[str]] = field(default_factory=dict)
+    imported_count: int = 0
+    failed_count: int = 0
+    results: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _prepare_commit(
     body: ManualImportCommitRequest,
-    db: Database = Depends(get_db),
-    plex_client: Optional[Any] = Depends(get_media_client),
-    _admin: dict[str, Any] = Depends(require_admin),
-) -> dict[str, Any]:
-    """Commits selected manual import items: resolves/creates catalog entities, moves/copies files to destination, tags them, and registers them in the library."""
+    db: Database,
+    _admin: dict[str, Any],
+) -> _CommitRun:
+    """Validates download target and initializes the commit run state."""
     set_provenance(
         GrabTrigger(
             TRIGGER_MANUAL_IMPORT, label=_admin.get("username"),
             actor_user_id=str(_admin["id"]) if _admin.get("id") and _admin["id"] != "api_key_user" else None,
         )
     )
-    imported_count = 0
-    failed_count = 0
-    results: list[dict[str, Any]] = []
 
     download_row: Optional[dict[str, Any]] = None
     if body.download_id:
@@ -366,340 +382,439 @@ def manual_import_commit(  # noqa: C901, PLR0915
     except (sqlite3.Error, OSError, ValueError) as exc:
         logger.warning("Could not read every download client's folders for the recycle check: %s", redact_text(str(exc)))
         client_roots = []
-    batch_placed: set[str] = set()  # files placed by this commit: never recycled as another item's "old" file
-    replaced_retired: list[str] = []
-    replaced_kept: list[str] = []
 
-    manual_import_tag_cache: dict[str, list[str]] = {}  # artist id -> tag labels, one lookup per artist
+    return _CommitRun(
+        db=db,
+        body=body,
+        media_settings=media_settings,
+        root_dir=root_dir,
+        download_row=download_row,
+        download_client_type=download_client_type,
+        client_roots=client_roots,
+    )
+
+
+def _resolve_commit_catalog(
+    run: _CommitRun,
+    item: ManualImportItem,
+    inspected: dict[str, Any],
+    source_path: Optional[Path] = None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], int]:
+    """1-3. Resolve or create artist, album, and track catalog entries."""
+    if source_path is None:
+        source_str = item.source_path or item.file_path or inspected.get("file_path") or ""
+        source_path = Path(source_str)
+
+    # 1. Resolve or Create Artist
+    artist_id = item.artist_id
+    artist = run.db.get_library_artist(artist_id) if artist_id else None
+    if not artist:
+        art_name = (
+            item.artist_name
+            or resolve_album_artist(inspected, known_artist=lambda n: run.db.get_library_artist_by_name(n) is not None)
+            or "Unknown Artist"
+        ).strip()
+        artist = run.db.get_library_artist_by_name(art_name)
+        if not artist:
+            artist = run.db.upsert_library_artist({
+                "id": str(uuid.uuid4()),
+                "name": art_name,
+                "clean_name": clean_library_name(art_name),
+                "monitored": True,
+                "monitor_option": str(run.media_settings.get("add_monitor_option") or DEFAULT_MONITOR_OPTION),
+            })
+    artist_id = artist["id"]
+
+    # 2. Resolve or Create Album
+    album_id = item.album_id
+    album = run.db.get_library_album(album_id) if album_id else None
+    if not album:
+        alb_title = (item.album_title or inspected.get("album") or "Unknown Album").strip()
+        album = run.db.get_library_album_by_title(artist_id, alb_title)
+        if not album:
+            alb_year = item.year or inspected.get("year")
+            album = run.db.upsert_library_album({
+                "id": str(uuid.uuid4()),
+                "artist_id": artist_id,
+                "title": alb_title,
+                "clean_title": clean_library_name(alb_title),
+                "year": alb_year,
+                "monitored": True,
+            })
+    album_id = album["id"]
+
+    # 3. Resolve or Create Track
+    track_id = item.track_id
+    track = run.db.get_library_track(track_id) if track_id else None
+    file_title, file_trkn = parse_filename_track(source_path.stem)
+    trkn = item.track_number or inspected.get("track_number") or file_trkn
+    disc = item.disc_number or inspected.get("disc_number") or 1
+    if not track:
+        trk_title = (item.track_title or inspected.get("title") or file_title).strip()
+        track = run.db.get_library_track_by_title(album_id, trk_title, track_number=trkn)
+        if not track:
+            track = run.db.upsert_library_track({
+                "id": str(uuid.uuid4()),
+                "album_id": album_id,
+                "artist_id": artist_id,
+                "title": trk_title,
+                "clean_title": clean_library_name(trk_title),
+                "track_number": trkn or 1,
+                "disc_number": disc,
+                "duration_seconds": inspected.get("duration"),
+                "monitored": True,
+            })
+
+    return artist, album, track, disc
+
+
+def _evaluate_commit_quality(
+    run: _CommitRun,
+    artist: dict[str, Any],
+    album: dict[str, Any],
+    track: dict[str, Any],
+    inspected: dict[str, Any],
+    source_path: Path,
+) -> tuple[bool, str]:
+    """3b. Quality profile & Cutoff evaluation."""
+    cutoff_met = True
+    quality_name = str(inspected.get("quality_full") or inspected.get("codec") or "Unknown")
+    artist_id = artist["id"]
+    album_id = album["id"]
+    track_id = track["id"]
+    try:
+        qp_id = artist.get("quality_profile_id")
+        profile_dict = run.db.get_quality_profile(qp_id) if qp_id else None
+        if not profile_dict:
+            profile_dict = run.db.get_default_quality_profile()
+        if profile_dict:
+            qp = _to_quality_profile(profile_dict)
+            quality_input = (
+                inspected.get("quality_full")
+                or inspected.get("codec")
+                or source_path.suffix.lstrip(".").upper()
+            )
+            parsed = parse_release_title(str(quality_input))
+            if parsed.quality == "Unknown" and quality_input:
+                parsed.quality = str(quality_input)
+            fsize = source_path.stat().st_size
+            if artist_id not in run.manual_import_tag_cache:
+                run.manual_import_tag_cache[artist_id] = delay_gate.artist_tags(run.db, artist.get("name"), artist_id)
+            import_artist_tags = run.manual_import_tag_cache[artist_id]
+            eval_result = evaluate_release(parsed, qp, size_bytes=fsize, artist_tags=import_artist_tags)
+            # A bare quality string scores 0 format points and could never reach ``cutoff_format_score``, so
+            # judge the quality tier only; when the imported release title is known (and its quality matches)
+            # score from it instead, exactly as ``backlog_worker._current_floor`` does.
+            bd = eval_result.breakdown
+            cutoff_met = bool(bd.quality_cutoff_met if bd is not None else eval_result.meets_cutoff)
+            title = run.db.get_imported_release_title(track_id=track_id, album_id=album_id)
+            if title:
+                titled = parse_release_title(title)
+                if titled.quality in {parsed.quality, str(quality_input)}:
+                    cutoff_met = bool(
+                        evaluate_release(
+                            titled, qp, size_bytes=fsize, artist_tags=import_artist_tags
+                        ).meets_cutoff
+                    )
+            quality_name = eval_result.parsed_quality or str(quality_input)
+    except Exception as exc:
+        logger.warning("Cutoff evaluation error during manual import for %s: %s", source_path, exc)
+        cutoff_met = True
+    return cutoff_met, quality_name
+
+
+def _place_commit_file(
+    run: _CommitRun,
+    item: ManualImportItem,
+    source_path: Path,
+    target_proposed: Any,
+    source_row: Optional[dict[str, Any]],
+    is_rematch: bool,
+    quality_name: str,
+    track: dict[str, Any],
+) -> tuple[Path, str, bool, Optional[tuple[Any, dict[str, Any]]]]:
+    """Rematch/placement/recycle-in-place."""
+    pre_recycled: Optional[tuple[Any, dict[str, Any]]] = None
+    desired_path = Path(target_proposed).resolve()
+    if is_rematch and desired_path == source_path:
+        target_dest = source_path  # already at its naming path for the new track
+    else:
+        if desired_path != source_path and str(desired_path) not in run.batch_placed:
+            # The track's current file sits on the clean target name: rename it into the bin first so the
+            # new file takes that name instead of ``Name (1).ext`` (restored below if placement fails).
+            pre_recycled = recycle_in_place_target(
+                run.db, run.media_settings, run.root_dir, desired_path, track["id"], run.client_roots
+            )
+        target_dest = desired_path if pre_recycled is not None else resolve_collision(target_proposed)
+
+    # 5. Place file
+    if is_rematch:
+        effective_mode = "move"
+    elif run.download_row is not None:
+        # Non-torrent downloads never seed, so they are always moved whatever the item asks for.
+        effective_mode = (
+            item.mode or effective_import_mode(run.download_client_type, run.media_settings)
+            if is_torrent_driver_type(run.download_client_type)
+            else "move"
+        )
+    else:
+        effective_mode = item.mode or str(run.media_settings.get("import_mode") or "move")
+    if is_rematch and target_dest == source_path:
+        placed_file = source_path
+    else:
+        try:
+            placed_file = place_audio_file(source_path, target_dest, mode=effective_mode)
+        except Exception:
+            if pre_recycled is not None:
+                restore_recycled(pre_recycled[0])  # the replacement never landed: put the old bytes back
+            raise
+    newly_placed = placed_file != source_path or not is_rematch
+    if pre_recycled is not None:
+        # The old file's bytes now live in the bin; its row (same path) must go before the new row is keyed.
+        log_recycled(
+            run.db, pre_recycled[0], placed_file, pre_recycled[1], quality_name,
+            title=str(track.get("title") or ""), download_id=run.body.download_id,
+            issue_id=run.body.issue_id, retired=run.replaced_retired,
+            source="ManualImport", log_prefix="Manual import",
+        )
+        try:
+            run.db.delete_library_file(str(pre_recycled[1]["id"]))
+        except sqlite3.Error as del_err:
+            logger.warning("Could not remove stale library file row %s: %s", pre_recycled[1].get("id"), redact_text(str(del_err)))
+    if is_rematch and source_row is not None and str(placed_file) != str(source_row["file_path"]):
+        run.db.delete_library_file(str(source_row["id"]))
+
+    return placed_file, effective_mode, newly_placed, pre_recycled
+
+
+def _record_commit_file(
+    run: _CommitRun,
+    item: ManualImportItem,
+    source_path: Path,
+    placed_file: Path,
+    meta: dict[str, Any],
+    quality_name: str,
+    cutoff_met: bool,
+    artist: dict[str, Any],
+    album: dict[str, Any],
+    track: dict[str, Any],
+    source_row: Optional[dict[str, Any]],
+    is_rematch: bool,
+    newly_placed: bool,
+    pre_recycled: Optional[tuple[Any, dict[str, Any]]],
+) -> str:
+    """Tagging, library file upsert, superseded retirement, rematch bookkeeping, album path backfill."""
+    artist_id = artist["id"]
+    album_id = album["id"]
+    track_id = track["id"]
+
+    # 6. Write audio tags if requested
+    write_tags = item.write_tags
+    if write_tags is None:
+        write_tags = bool(run.media_settings.get("write_audio_tags", True))
+    if write_tags and not prepare_file_for_tagging(placed_file, run.media_settings):
+        # A shared inode (torrent seeding link) must never be rewritten; the copy failed, so skip tags.
+        write_tags = False
+    if write_tags:
+        try:
+            write_audio_tags(placed_file, meta)
+        except Exception as exc:
+            logger.warning("Error writing tags to %s: %s", placed_file, exc)
+
+    try:
+        rel_path = str(placed_file.relative_to(run.root_dir))
+    except ValueError:
+        rel_path = placed_file.name
+
+    existing_f = run.db.get_library_file_by_path(str(placed_file))
+    file_id = str(existing_f["id"]) if existing_f else str(uuid.uuid4())
+    run.db.upsert_library_file({
+        "id": file_id,
+        "track_id": track_id,
+        "file_path": str(placed_file),
+        "relative_path": rel_path,
+        "codec": meta.get("codec") or placed_file.suffix.lstrip(".").upper(),
+        "bitrate": meta.get("bitrate"),
+        "sample_rate": meta.get("sample_rate"),
+        "bits_per_sample": meta.get("bits_per_sample"),
+        "quality_name": quality_name,
+        "size_bytes": placed_file.stat().st_size if placed_file.exists() else 0,
+        "cutoff_met": cutoff_met,
+    })
+
+    superseded: list[dict[str, Any]] = []
+    if newly_placed:
+        # A file really landed for this track: every other file it had is superseded (rename to the bin,
+        # same rules and ``file_recycled`` event as a worker import). Files from this batch, and the
+        # rematched library file itself (moved, not recycled), are never candidates.
+        run.batch_placed.add(str(placed_file))
+        skip_ids = {file_id} | ({str(source_row["id"])} if source_row is not None else set())
+        superseded = [
+            r for r in run.db.list_library_files_for_track(track_id)
+            if str(r["id"]) not in skip_ids
+            and str(r.get("file_path") or "") not in run.batch_placed
+            and str(r.get("file_path") or "") != str(source_path)
+        ]
+        if superseded:
+            recycle_replaced_files(
+                run.db, superseded, placed_file, run.root_dir, run.media_settings, run.client_roots, quality_name,
+                run.replaced_retired, run.replaced_kept,
+                title=str(track.get("title") or ""), download_id=run.body.download_id,
+                issue_id=run.body.issue_id, source="ManualImport", log_prefix="Manual import",
+            )
+
+    if is_rematch:
+        if str(placed_file) != str(source_path):
+            emit(
+                run.db, "moved", track_id=str(track_id), message=f"Moved to {placed_file.name}",
+                details={"from": str(source_path), "to": str(placed_file), "reason": "manual rematch"},
+            )
+    elif newly_placed:
+        record_import_events(
+            run.db,
+            {"id": run.body.download_id, "title": str(track.get("title") or ""),
+             "request_id": run.download_row.get("request_id") if run.download_row else None},
+            str(track_id), placed_file, quality_name, meta,
+            superseded + ([pre_recycled[1]] if pre_recycled is not None else []),
+        )
+
+    if is_rematch:
+        for finding_path in {str(source_path), str(placed_file)}:
+            run.db.delete_library_health_finding_by_path(finding_path, kind="weak_match")
+
+    # Update album folder path if missing
+    if not album.get("path"):
+        run.db.upsert_library_album({
+            "id": album_id,
+            "artist_id": artist_id,
+            "title": album["title"],
+            "path": str(placed_file.parent),
+        })
+
+    return file_id
+
+
+def _commit_one_item(run: _CommitRun, item: ManualImportItem) -> None:
+    """Commits a single manual import item into the catalog and filesystem."""
+    source_str = item.source_path or item.file_path
+    source_path = validate_media_path(source_str, db=run.db, purpose="import")
+    if not source_path.exists() or not source_path.is_file():
+        run.failed_count += 1
+        run.results.append({
+            "source_path": source_str,
+            "status": "failed",
+            "error": "Source file not found on disk",
+        })
+        return
+
+    try:
+        inspected = inspect_audio_file(source_path)
+    except Exception as exc:
+        logger.warning("inspect_audio_file failed for %s, using fallback tags: %s", source_path, exc)
+        inspected = {
+            "title": source_path.stem,
+            "artist": None,
+            "album": None,
+            "year": None,
+            "track_number": None,
+            "disc_number": 1,
+            "codec": source_path.suffix.lstrip(".").upper(),
+            "file_path": str(source_path),
+        }
+
+    artist, album, track, disc = _resolve_commit_catalog(run, item, inspected, source_path)
+    cutoff_met, quality_name = _evaluate_commit_quality(run, artist, album, track, inspected, source_path)
+
+    # 4. Resolve destination path
+    meta = dict(inspected)
+    meta["quality_full"] = quality_name  # same catalog source as rename preview/apply
+    meta["artist"] = artist["name"]
+    meta["album_artist"] = artist["name"]
+    meta["album"] = album["title"]
+    meta["title"] = track["title"]
+    meta["track_number"] = track["track_number"]
+    meta["disc_number"] = track["disc_number"]
+    meta["total_discs"] = _album_total_discs(run.db, album["id"], disc, inspected.get("total_discs"))
+    if album.get("year"):
+        meta["year"] = album["year"]
+        meta["release_year"] = album["year"]
+    meta["extension"] = source_path.suffix
+
+    target_proposed = build_track_path(meta, run.media_settings)
+    validate_media_path(target_proposed, db=run.db)
+
+    # A file already registered inside the library is a re-assign, not a new import: it is always moved
+    # within the library (never copied or linked from itself), and the old track loses its file record.
+    # A hardlinked library file keeps the torrent's inode: renaming a link never touches the other name.
+    source_row = run.db.get_library_file_by_path(str(source_path))
+    is_rematch = source_row is not None and source_path.is_relative_to(run.root_dir)
+
+    placed_file, effective_mode, newly_placed, pre_recycled = _place_commit_file(
+        run, item, source_path, target_proposed, source_row, is_rematch, quality_name, track
+    )
+
+    file_id = _record_commit_file(
+        run, item, source_path, placed_file, meta, quality_name, cutoff_met,
+        artist, album, track, source_row, is_rematch, newly_placed, pre_recycled
+    )
+
+    run.imported_count += 1
+    run.results.append({
+        "source_path": source_str,
+        "destination_path": str(placed_file),
+        "artist_id": artist["id"],
+        "album_id": album["id"],
+        "track_id": track["id"],
+        "file_id": file_id,
+        "status": "imported",
+        "mode": effective_mode,
+        "rematch": is_rematch,
+    })
+
+
+@router.post("/manual-import/commit", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=ManualImportCommitResponse, response_model_exclude_unset=True)
+def manual_import_commit(
+    body: ManualImportCommitRequest,
+    db: Database = Depends(get_db),
+    plex_client: Optional[Any] = Depends(get_media_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Commits selected manual import items: resolves/creates catalog entities, moves/copies files to destination, tags them, and registers them in the library."""
+    run = _prepare_commit(body, db, _admin)
+
     for item in body.items:
         source_str = item.source_path or item.file_path
         if not source_str:
-            failed_count += 1
-            results.append({"status": "failed", "error": "No source path provided"})
+            run.failed_count += 1
+            run.results.append({"status": "failed", "error": "No source path provided"})
             continue
 
         try:
-            source_path = validate_media_path(source_str, db=db, purpose="import")
-            if not source_path.exists() or not source_path.is_file():
-                failed_count += 1
-                results.append({
-                    "source_path": source_str,
-                    "status": "failed",
-                    "error": "Source file not found on disk",
-                })
-                continue
-
-            try:
-                inspected = inspect_audio_file(source_path)
-            except Exception as exc:
-                logger.warning("inspect_audio_file failed for %s, using fallback tags: %s", source_path, exc)
-                inspected = {
-                    "title": source_path.stem,
-                    "artist": None,
-                    "album": None,
-                    "year": None,
-                    "track_number": None,
-                    "disc_number": 1,
-                    "codec": source_path.suffix.lstrip(".").upper(),
-                    "file_path": str(source_path),
-                }
-
-            # 1. Resolve or Create Artist
-            artist_id = item.artist_id
-            artist = db.get_library_artist(artist_id) if artist_id else None
-            if not artist:
-                art_name = (
-                    item.artist_name
-                    or resolve_album_artist(inspected, known_artist=lambda n: db.get_library_artist_by_name(n) is not None)
-                    or "Unknown Artist"
-                ).strip()
-                artist = db.get_library_artist_by_name(art_name)
-                if not artist:
-                    artist = db.upsert_library_artist({
-                        "id": str(uuid.uuid4()),
-                        "name": art_name,
-                        "clean_name": clean_library_name(art_name),
-                        "monitored": True,
-                        "monitor_option": str(media_settings.get("add_monitor_option") or DEFAULT_MONITOR_OPTION),
-                    })
-            artist_id = artist["id"]
-
-            # 2. Resolve or Create Album
-            album_id = item.album_id
-            album = db.get_library_album(album_id) if album_id else None
-            if not album:
-                alb_title = (item.album_title or inspected.get("album") or "Unknown Album").strip()
-                album = db.get_library_album_by_title(artist_id, alb_title)
-                if not album:
-                    alb_year = item.year or inspected.get("year")
-                    album = db.upsert_library_album({
-                        "id": str(uuid.uuid4()),
-                        "artist_id": artist_id,
-                        "title": alb_title,
-                        "clean_title": clean_library_name(alb_title),
-                        "year": alb_year,
-                        "monitored": True,
-                    })
-            album_id = album["id"]
-
-            # 3. Resolve or Create Track
-            track_id = item.track_id
-            track = db.get_library_track(track_id) if track_id else None
-            file_title, file_trkn = parse_filename_track(source_path.stem)
-            trkn = item.track_number or inspected.get("track_number") or file_trkn
-            disc = item.disc_number or inspected.get("disc_number") or 1
-            if not track:
-                trk_title = (item.track_title or inspected.get("title") or file_title).strip()
-                track = db.get_library_track_by_title(album_id, trk_title, track_number=trkn)
-                if not track:
-                    track = db.upsert_library_track({
-                        "id": str(uuid.uuid4()),
-                        "album_id": album_id,
-                        "artist_id": artist_id,
-                        "title": trk_title,
-                        "clean_title": clean_library_name(trk_title),
-                        "track_number": trkn or 1,
-                        "disc_number": disc,
-                        "duration_seconds": inspected.get("duration"),
-                        "monitored": True,
-                    })
-            track_id = track["id"]
-
-            # 3b. Quality profile & Cutoff evaluation
-            cutoff_met = True
-            quality_name = str(inspected.get("quality_full") or inspected.get("codec") or "Unknown")
-            try:
-                qp_id = artist.get("quality_profile_id")
-                profile_dict = db.get_quality_profile(qp_id) if qp_id else None
-                if not profile_dict:
-                    profile_dict = db.get_default_quality_profile()
-                if profile_dict:
-                    qp = _to_quality_profile(profile_dict)
-                    quality_input = (
-                        inspected.get("quality_full")
-                        or inspected.get("codec")
-                        or source_path.suffix.lstrip(".").upper()
-                    )
-                    parsed = parse_release_title(str(quality_input))
-                    if parsed.quality == "Unknown" and quality_input:
-                        parsed.quality = str(quality_input)
-                    fsize = source_path.stat().st_size
-                    if artist_id not in manual_import_tag_cache:
-                        manual_import_tag_cache[artist_id] = delay_gate.artist_tags(db, artist.get("name"), artist_id)
-                    import_artist_tags = manual_import_tag_cache[artist_id]
-                    eval_result = evaluate_release(parsed, qp, size_bytes=fsize, artist_tags=import_artist_tags)
-                    # A bare quality string scores 0 format points and could never reach ``cutoff_format_score``, so
-                    # judge the quality tier only; when the imported release title is known (and its quality matches)
-                    # score from it instead, exactly as ``backlog_worker._current_floor`` does.
-                    bd = eval_result.breakdown
-                    cutoff_met = bool(bd.quality_cutoff_met if bd is not None else eval_result.meets_cutoff)
-                    title = db.get_imported_release_title(track_id=track_id, album_id=album_id)
-                    if title:
-                        titled = parse_release_title(title)
-                        if titled.quality in {parsed.quality, str(quality_input)}:
-                            cutoff_met = bool(
-                                evaluate_release(
-                                    titled, qp, size_bytes=fsize, artist_tags=import_artist_tags
-                                ).meets_cutoff
-                            )
-                    quality_name = eval_result.parsed_quality or str(quality_input)
-            except Exception as exc:
-                logger.warning("Cutoff evaluation error during manual import for %s: %s", source_path, exc)
-                cutoff_met = True
-
-            # 4. Resolve destination path
-            meta = dict(inspected)
-            meta["quality_full"] = quality_name  # same catalog source as rename preview/apply
-            meta["artist"] = artist["name"]
-            meta["album_artist"] = artist["name"]
-            meta["album"] = album["title"]
-            meta["title"] = track["title"]
-            meta["track_number"] = track["track_number"]
-            meta["disc_number"] = track["disc_number"]
-            meta["total_discs"] = _album_total_discs(db, album_id, disc, inspected.get("total_discs"))
-            if album.get("year"):
-                meta["year"] = album["year"]
-                meta["release_year"] = album["year"]
-            meta["extension"] = source_path.suffix
-
-            target_proposed = build_track_path(meta, media_settings)
-            validate_media_path(target_proposed, db=db)
-
-            # A file already registered inside the library is a re-assign, not a new import: it is always moved
-            # within the library (never copied or linked from itself), and the old track loses its file record.
-            # A hardlinked library file keeps the torrent's inode: renaming a link never touches the other name.
-            source_row = db.get_library_file_by_path(str(source_path))
-            is_rematch = source_row is not None and source_path.is_relative_to(root_dir)
-            pre_recycled: Optional[tuple[Any, dict[str, Any]]] = None
-            desired_path = Path(target_proposed).resolve()
-            if is_rematch and desired_path == source_path:
-                target_dest = source_path  # already at its naming path for the new track
-            else:
-                if desired_path != source_path and str(desired_path) not in batch_placed:
-                    # The track's current file sits on the clean target name: rename it into the bin first so the
-                    # new file takes that name instead of ``Name (1).ext`` (restored below if placement fails).
-                    pre_recycled = recycle_in_place_target(
-                        db, media_settings, root_dir, desired_path, track_id, client_roots
-                    )
-                target_dest = desired_path if pre_recycled is not None else resolve_collision(target_proposed)
-
-            # 5. Place file
-            if is_rematch:
-                effective_mode = "move"
-            elif download_row is not None:
-                # Non-torrent downloads never seed, so they are always moved whatever the item asks for.
-                effective_mode = (
-                    item.mode or effective_import_mode(download_client_type, media_settings)
-                    if is_torrent_driver_type(download_client_type)
-                    else "move"
-                )
-            else:
-                effective_mode = item.mode or str(media_settings.get("import_mode") or "move")
-            if is_rematch and target_dest == source_path:
-                placed_file = source_path
-            else:
-                try:
-                    placed_file = place_audio_file(source_path, target_dest, mode=effective_mode)
-                except Exception:
-                    if pre_recycled is not None:
-                        restore_recycled(pre_recycled[0])  # the replacement never landed: put the old bytes back
-                    raise
-            newly_placed = placed_file != source_path or not is_rematch
-            if pre_recycled is not None:
-                # The old file's bytes now live in the bin; its row (same path) must go before the new row is keyed.
-                log_recycled(
-                    db, pre_recycled[0], placed_file, pre_recycled[1], quality_name,
-                    title=str(track.get("title") or ""), download_id=body.download_id,
-                    issue_id=body.issue_id, retired=replaced_retired,
-                    source="ManualImport", log_prefix="Manual import",
-                )
-                try:
-                    db.delete_library_file(str(pre_recycled[1]["id"]))
-                except sqlite3.Error as del_err:
-                    logger.warning("Could not remove stale library file row %s: %s", pre_recycled[1].get("id"), redact_text(str(del_err)))
-            if is_rematch and source_row is not None and str(placed_file) != str(source_row["file_path"]):
-                db.delete_library_file(str(source_row["id"]))
-
-            # 6. Write audio tags if requested
-            write_tags = item.write_tags
-            if write_tags is None:
-                write_tags = bool(media_settings.get("write_audio_tags", True))
-            if write_tags and not prepare_file_for_tagging(placed_file, media_settings):
-                # A shared inode (torrent seeding link) must never be rewritten; the copy failed, so skip tags.
-                write_tags = False
-            if write_tags:
-                try:
-                    write_audio_tags(placed_file, meta)
-                except Exception as exc:
-                    logger.warning("Error writing tags to %s: %s", placed_file, exc)
-
-            try:
-                rel_path = str(placed_file.relative_to(root_dir))
-            except ValueError:
-                rel_path = placed_file.name
-
-            existing_f = db.get_library_file_by_path(str(placed_file))
-            file_id = str(existing_f["id"]) if existing_f else str(uuid.uuid4())
-            db.upsert_library_file({
-                "id": file_id,
-                "track_id": track_id,
-                "file_path": str(placed_file),
-                "relative_path": rel_path,
-                "codec": meta.get("codec") or placed_file.suffix.lstrip(".").upper(),
-                "bitrate": meta.get("bitrate"),
-                "sample_rate": meta.get("sample_rate"),
-                "bits_per_sample": meta.get("bits_per_sample"),
-                "quality_name": quality_name,
-                "size_bytes": placed_file.stat().st_size if placed_file.exists() else 0,
-                "cutoff_met": cutoff_met,
-            })
-
-            superseded: list[dict[str, Any]] = []
-            if newly_placed:
-                # A file really landed for this track: every other file it had is superseded (rename to the bin,
-                # same rules and ``file_recycled`` event as a worker import). Files from this batch, and the
-                # rematched library file itself (moved, not recycled), are never candidates.
-                batch_placed.add(str(placed_file))
-                skip_ids = {file_id} | ({str(source_row["id"])} if source_row is not None else set())
-                superseded = [
-                    r for r in db.list_library_files_for_track(track_id)
-                    if str(r["id"]) not in skip_ids
-                    and str(r.get("file_path") or "") not in batch_placed
-                    and str(r.get("file_path") or "") != str(source_path)
-                ]
-                if superseded:
-                    recycle_replaced_files(
-                        db, superseded, placed_file, root_dir, media_settings, client_roots, quality_name,
-                        replaced_retired, replaced_kept,
-                        title=str(track.get("title") or ""), download_id=body.download_id,
-                        issue_id=body.issue_id, source="ManualImport", log_prefix="Manual import",
-                    )
-
-            if is_rematch:
-                if str(placed_file) != str(source_path):
-                    emit(
-                        db, "moved", track_id=str(track_id), message=f"Moved to {placed_file.name}",
-                        details={"from": str(source_path), "to": str(placed_file), "reason": "manual rematch"},
-                    )
-            elif newly_placed:
-                record_import_events(
-                    db,
-                    {"id": body.download_id, "title": str(track.get("title") or ""),
-                     "request_id": download_row.get("request_id") if download_row else None},
-                    str(track_id), placed_file, quality_name, meta,
-                    superseded + ([pre_recycled[1]] if pre_recycled is not None else []),
-                )
-
-            if is_rematch:
-                for finding_path in {str(source_path), str(placed_file)}:
-                    db.delete_library_health_finding_by_path(finding_path, kind="weak_match")
-
-            # Update album folder path if missing
-            if not album.get("path"):
-                db.upsert_library_album({
-                    "id": album_id,
-                    "artist_id": artist_id,
-                    "title": album["title"],
-                    "path": str(placed_file.parent),
-                })
-
-            imported_count += 1
-            results.append({
-                "source_path": source_str,
-                "destination_path": str(placed_file),
-                "artist_id": artist_id,
-                "album_id": album_id,
-                "track_id": track_id,
-                "file_id": file_id,
-                "status": "imported",
-                "mode": effective_mode,
-                "rematch": is_rematch,
-            })
-
+            _commit_one_item(run, item)
         except Exception as exc:
             logger.exception("Failed to import %s: %s", source_str, redact_text(str(exc)))
-            failed_count += 1
-            results.append({
+            run.failed_count += 1
+            run.results.append({
                 "source_path": source_str,
                 "status": "failed",
                 "error": redact_text(str(exc)),
             })
 
-    if body.issue_id and (replaced_retired or replaced_kept):
+    if body.issue_id and (run.replaced_retired or run.replaced_kept):
         try:
             if db.get_issue(body.issue_id):
                 comment = "Replacement imported"
-                for line in replaced_retired:
+                for line in run.replaced_retired:
                     comment += f"\nRetired old file: {line}"
-                for line in replaced_kept:
+                for line in run.replaced_kept:
                     comment += f"\nOld file kept at {line}"
                 db.add_issue_comment(body.issue_id, None, comment, is_admin=True, is_system=True, staff=True)
         except sqlite3.Error as issue_err:
             logger.warning("Could not comment on issue %s after manual import: %s", body.issue_id, redact_text(str(issue_err)))
 
     download_cleared = False
-    if download_row is not None and str(download_row.get("status")) == DownloadStatus.WARNING.value:
-        download_cleared = _settle_download_after_manual_import(db, download_row, results, media_settings)
+    if run.download_row is not None and str(run.download_row.get("status")) == DownloadStatus.WARNING.value:
+        download_cleared = _settle_download_after_manual_import(db, run.download_row, run.results, run.media_settings)
 
     if plex_client:
         try:
@@ -708,9 +823,9 @@ def manual_import_commit(  # noqa: C901, PLR0915
             logger.warning("Error refreshing media-server library: %s", exc)
 
     return {
-        "imported_count": imported_count,
-        "failed_count": failed_count,
-        "results": results,
+        "imported_count": run.imported_count,
+        "failed_count": run.failed_count,
+        "results": run.results,
         "download_cleared": download_cleared,
     }
 
