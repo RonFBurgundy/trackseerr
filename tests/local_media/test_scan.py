@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from plex_playlist_sync.library import _extract_year, inspect_audio_file
-from plex_playlist_sync.models import AudioQuality, QualityProfile, QualityProfileItem
-from plex_playlist_sync.quality import evaluate_release, parse_release_title
+from trackseerr.library import _extract_year, inspect_audio_file
+from trackseerr.models import AudioQuality, QualityProfile, QualityProfileItem
+from trackseerr.quality import evaluate_release, parse_release_title
 
 from .conftest import run_scan, set_id3, snapshot
 

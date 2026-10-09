@@ -18,7 +18,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY plex_playlist_sync ./plex_playlist_sync
+COPY trackseerr ./trackseerr
 COPY pyproject.toml README.md CHANGELOG.md ./
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
@@ -33,4 +33,4 @@ VOLUME ["/config", "/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5250/api/health')" || exit 1
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["python", "-m", "plex_playlist_sync"]
+CMD ["python", "-m", "trackseerr"]

@@ -3,10 +3,10 @@
 import json
 import sqlite3
 
-from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
-from plex_playlist_sync.models import QualityProfile, QualityProfileItem
-from plex_playlist_sync.quality import evaluate_release, parse_release_title
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr.acquisition_coordinator import _to_quality_profile
+from trackseerr.models import QualityProfile, QualityProfileItem
+from trackseerr.quality import evaluate_release, parse_release_title
+from trackseerr.storage import SCHEMA_VERSION, Database
 
 
 V51_NEW = ("WAV/AIFF", "MP3 V1", "AAC (other)", "Opus", "OGG Vorbis")

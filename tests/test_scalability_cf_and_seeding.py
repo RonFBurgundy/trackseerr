@@ -17,10 +17,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker
-from plex_playlist_sync.clients.acquisition.qbittorrent import QbittorrentDriver
-from plex_playlist_sync.library_scanner import LibraryScanner
-from plex_playlist_sync.models import (
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.clients.acquisition.qbittorrent import QbittorrentDriver
+from trackseerr.library_scanner import LibraryScanner
+from trackseerr.models import (
     ActiveDownload,
     DownloadClientConfig,
     DownloadDriverType,
@@ -29,8 +29,8 @@ from plex_playlist_sync.models import (
     QualityProfile,
     QualityProfileItem,
 )
-from plex_playlist_sync.quality import evaluate_release
-from plex_playlist_sync.storage import Database
+from trackseerr.quality import evaluate_release
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -280,7 +280,7 @@ def test_library_scanner_skips_unchanged_files_via_cache(test_db: Database, test
         }
 
     # Initial scan: inspect_audio_file must be called for all 5 files
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", side_effect=mock_inspect):
+    with patch("trackseerr.library_scanner.inspect_audio_file", side_effect=mock_inspect):
         res1 = test_scanner.scan(test_db, root_folder=str(music_dir))
 
     assert res1["status"] == "completed"
@@ -295,7 +295,7 @@ def test_library_scanner_skips_unchanged_files_via_cache(test_db: Database, test
     # Second scan: Files are identical on disk with matching size_bytes
     # inspect_audio_file MUST NOT be called!
     inspect_call_count = 0
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", side_effect=mock_inspect):
+    with patch("trackseerr.library_scanner.inspect_audio_file", side_effect=mock_inspect):
         res2 = test_scanner.scan(test_db, root_folder=str(music_dir))
 
     assert res2["status"] == "completed"
@@ -306,7 +306,7 @@ def test_library_scanner_skips_unchanged_files_via_cache(test_db: Database, test
     # Third scan: Modify exactly 1 file on disk
     file_paths[0].write_bytes(b"modified and enlarged audio file content to change size")
     inspect_call_count = 0
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", side_effect=mock_inspect):
+    with patch("trackseerr.library_scanner.inspect_audio_file", side_effect=mock_inspect):
         res3 = test_scanner.scan(test_db, root_folder=str(music_dir))
 
     assert res3["status"] == "completed"
@@ -398,7 +398,7 @@ def test_seeding_governance_preserves_hardlink_until_ratio_and_time_limits(
     worker = AcquisitionWorker()
 
     with patch(
-        "plex_playlist_sync.acquisition_worker.get_acquisition_driver",
+        "trackseerr.acquisition_worker.get_acquisition_driver",
         return_value=mock_driver,
     ):
         # --- Tick 1: Download completed, imported as hardlink, but ratio (0.4) < 2.0 and time (10m) < 60m ---
@@ -517,7 +517,7 @@ def test_seeding_governance_time_limit_only(test_db: Database, tmp_path: Path):
     worker = AcquisitionWorker()
 
     with patch(
-        "plex_playlist_sync.acquisition_worker.get_acquisition_driver",
+        "trackseerr.acquisition_worker.get_acquisition_driver",
         return_value=mock_driver,
     ):
         # 15 minutes (< 30 minutes)

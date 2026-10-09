@@ -9,10 +9,10 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-import plex_playlist_sync.api.app as app_module
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+import trackseerr.api.app as app_module
+from trackseerr.api.app import create_app
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -57,7 +57,7 @@ def _create_mock_dist(base_path: Path) -> Path:
 
 @contextmanager
 def _patch_app_dist(dist_path: Path) -> Generator[None, None, None]:
-    """Patches path resolution in plex_playlist_sync.api.app to use a specific dist directory."""
+    """Patches path resolution in trackseerr.api.app to use a specific dist directory."""
 
     class FrontendProxy:
         def __init__(self, target_dist: Path) -> None:

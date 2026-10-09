@@ -10,14 +10,14 @@ from fastapi.testclient import TestClient
 import pytest
 import requests
 
-import plex_playlist_sync.mediacover as mc
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.artist_refresh_worker import ArtistRefreshWorker
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.mediacover import MediaCoverService
-from plex_playlist_sync.storage import Database
+import trackseerr.mediacover as mc
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.artist_refresh_worker import ArtistRefreshWorker
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.mediacover import MediaCoverService
+from trackseerr.storage import Database
 
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
 URL = "https://coverartarchive.org/release-group/abc/front-500"
@@ -152,7 +152,7 @@ def test_cover_endpoint_returns_fast_while_remote_hangs(tmp_path):
     release = threading.Event()
     local_svc = MediaCoverService(base_dir=tmp_path / "mc")
     try:
-        with patch("plex_playlist_sync.api.routes.library._shared.mediacover_service", local_svc), patch.object(
+        with patch("trackseerr.api.routes.library._shared.mediacover_service", local_svc), patch.object(
             mc.requests, "get", side_effect=lambda *a, **k: release.wait(10)
         ):
             for path in ("/api/library/albums/al1/cover", "/api/library/artists/ar1/image"):
@@ -210,7 +210,7 @@ def test_worker_skips_recently_refreshed_artists(tmp_path):
     w.pace_delay = 0
     seen = []
     with patch(
-        "plex_playlist_sync.artist_refresh.refresh_single_artist",
+        "trackseerr.artist_refresh.refresh_single_artist",
         side_effect=lambda artist_id, **k: seen.append(artist_id) or {"success": True},
     ):
         res = w.refresh_once(db=db, discovery_client=MagicMock(), enricher=MagicMock(), only_stale=True)

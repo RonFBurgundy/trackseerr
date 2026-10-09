@@ -28,7 +28,7 @@ Guardrails must be unit-testable: a pure function `check_role_environment(role, 
 ## 2. Version/protocol handshake
 
 - Add `PROTOCOL_VERSION = 1` in `internal_auth.py`. This is the gateway↔core contract version, independent of the package version.
-- `pyproject.toml` (`0.1.0.dev1`) and `plex_playlist_sync/__init__.py` (`1.0.0`) disagree. Make `__init__.__version__` read the installed package metadata (`importlib.metadata.version("trackseerr")` or the actual dist name), with a fallback. Set `pyproject` to the real version (`1.0.0`) so they agree.
+- `pyproject.toml` (`0.1.0.dev1`) and `trackseerr/__init__.py` (`1.0.0`) disagree. Make `__init__.__version__` read the installed package metadata (`importlib.metadata.version("trackseerr")` or the actual dist name), with a fallback. Set `pyproject` to the real version (`1.0.0`) so they agree.
 - Core `GET /api/internal/hello` is service principal only, and every other caller gets 404. It returns `{protocol: 1, version: "x.y.z", role: "core", instance_id}`. `instance_id` is a random id persisted in `general_settings` on first use.
 - **Gateway at startup:**
   - Calls `hello` and retries with backoff for up to 60 s. The core may still be booting.
@@ -75,7 +75,7 @@ Guardrails must be unit-testable: a pure function `check_role_environment(role, 
 
 ## 5. `init-dmz` command
 
-`python -m plex_playlist_sync init-dmz [--from-existing] [--public-url URL] [--core-lan-bind IP] [--network NAME] [--out DIR]`:
+`python -m trackseerr init-dmz [--from-existing] [--public-url URL] [--core-lan-bind IP] [--network NAME] [--out DIR]`:
 - Generates a 64-hex-character secret with `secrets.token_hex(32)`.
 - Writes `docker-compose.dmz.yml` and `.env` into `--out` (default: the current directory). `.env` gets mode 0600 and holds the secret. It **never overwrites** existing files: it adds a `.new` suffix and prints a notice.
 - Prints the exact Unraid values for both templates: the secret, URLs and network.

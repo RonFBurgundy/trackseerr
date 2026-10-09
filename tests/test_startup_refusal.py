@@ -37,17 +37,17 @@ def _assert_clean_refusal(proc: subprocess.CompletedProcess) -> None:
 
 
 def test_cli_gateway_with_plex_token_refuses_cleanly():
-    _assert_clean_refusal(_run([sys.executable, "-m", "plex_playlist_sync"], _env(**GATEWAY)))
+    _assert_clean_refusal(_run([sys.executable, "-m", "trackseerr"], _env(**GATEWAY)))
 
 
 def test_importing_app_module_gateway_with_plex_token_refuses_cleanly():
-    proc = _run([sys.executable, "-c", "from plex_playlist_sync.api.app import app"], _env(**GATEWAY))
+    proc = _run([sys.executable, "-c", "from trackseerr.api.app import app"], _env(**GATEWAY))
     _assert_clean_refusal(proc)
 
 
 def test_uvicorn_style_attribute_lookup_weak_secret_refuses_cleanly():
     env = _env(ROLE="core", INTERNAL_CORE_SECRET="short")
-    proc = _run([sys.executable, "-c", "import plex_playlist_sync.api.app as m; m.app"], env)
+    proc = _run([sys.executable, "-c", "import trackseerr.api.app as m; m.app"], env)
     assert proc.returncode == 1
     assert "INTERNAL_CORE_SECRET" in proc.stderr
     assert "Traceback" not in proc.stderr
@@ -55,7 +55,7 @@ def test_uvicorn_style_attribute_lookup_weak_secret_refuses_cleanly():
 
 def test_all_in_one_import_and_lazy_app_still_work():
     code = (
-        "import plex_playlist_sync.api.app as m, plex_playlist_sync.cli;"
+        "import trackseerr.api.app as m, trackseerr.cli;"
         "assert 'app' not in vars(m);"
         "a = m.app; assert m.app is a; print('ok')"
     )

@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-import plex_playlist_sync
-from plex_playlist_sync.changelog import (
+import trackseerr
+from trackseerr.changelog import (
     clear_changelog_cache,
     get_build_info,
     get_changelog,
@@ -17,7 +17,7 @@ from plex_playlist_sync.changelog import (
     parse_changelog,
     strip_inline_markdown,
 )
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr.storage import SCHEMA_VERSION, Database
 from tests.test_system_status import (  # noqa: F401
     app_and_client,
     create_auth_cookies,
@@ -246,15 +246,15 @@ def test_latest_release_selection_rules():
 
 
 def test_get_build_info(monkeypatch):
-    """Build info returns plex_playlist_sync.__version__ and short commit or None."""
+    """Build info returns trackseerr.__version__ and short commit or None."""
     monkeypatch.delenv("TRACKSEERR_COMMIT", raising=False)
     v, commit = get_build_info()
-    assert v == plex_playlist_sync.__version__
+    assert v == trackseerr.__version__
     assert commit is None
 
     monkeypatch.setenv("TRACKSEERR_COMMIT", "abcdef123456789")
     v2, commit2 = get_build_info()
-    assert v2 == plex_playlist_sync.__version__
+    assert v2 == trackseerr.__version__
     assert commit2 == "abcdef1"
 
 
@@ -402,7 +402,7 @@ def test_unseen_seen_flow_and_user_isolation(app_and_client, secret_key, test_db
     resp1 = client.get("/api/system/changelog/unseen", cookies=admin1_cookies)
     assert resp1.status_code == 200
     assert resp1.json() == {"show": False, "release": None}
-    assert test_db.get_last_seen_changelog_version(admin1["id"]) == plex_playlist_sync.__version__
+    assert test_db.get_last_seen_changelog_version(admin1["id"]) == trackseerr.__version__
 
     # Calling again remains show: false
     resp1_again = client.get("/api/system/changelog/unseen", cookies=admin1_cookies)
@@ -420,7 +420,7 @@ def test_unseen_seen_flow_and_user_isolation(app_and_client, secret_key, test_db
     resp_seen = client.post("/api/system/changelog/seen", cookies=admin1_cookies)
     assert resp_seen.status_code == 200
     assert resp_seen.json()["success"] is True
-    assert test_db.get_last_seen_changelog_version(admin1["id"]) == plex_playlist_sync.__version__
+    assert test_db.get_last_seen_changelog_version(admin1["id"]) == trackseerr.__version__
 
     # Next check for Admin 1 returns show: false
     resp_after_seen = client.get("/api/system/changelog/unseen", cookies=admin1_cookies)
@@ -434,7 +434,7 @@ def test_unseen_seen_flow_and_user_isolation(app_and_client, secret_key, test_db
     assert resp_admin2.json()["show"] is True
 
     # Rule: If current version does NOT have a changelog entry, show is false
-    monkeypatch.setattr(plex_playlist_sync, "__version__", "9.9.9")
+    monkeypatch.setattr(trackseerr, "__version__", "9.9.9")
     test_db.set_last_seen_changelog_version(admin1["id"], "1.0.0")
     resp_no_entry = client.get("/api/system/changelog/unseen", cookies=admin1_cookies)
     assert resp_no_entry.json() == {"show": False, "release": None}

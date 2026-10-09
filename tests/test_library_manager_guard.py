@@ -13,17 +13,17 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from plex_playlist_sync.item_history import GrabTrigger
-from plex_playlist_sync import library_manager as lm
-from plex_playlist_sync.acquisition_coordinator import acquisition_coordinator
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.job_tracker import job_tracker, summarize_result
-from plex_playlist_sync.lidarr_migration import LidarrMigrationJob
-from plex_playlist_sync.lidarr_queue import MAX_PENDING_ITEMS, lidarr_worker
-from plex_playlist_sync.storage import Database
+from trackseerr.item_history import GrabTrigger
+from trackseerr import library_manager as lm
+from trackseerr.acquisition_coordinator import acquisition_coordinator
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.job_tracker import job_tracker, summarize_result
+from trackseerr.lidarr_migration import LidarrMigrationJob
+from trackseerr.lidarr_queue import MAX_PENDING_ITEMS, lidarr_worker
+from trackseerr.storage import Database
 
 API_KEY = "lidarr-secret-key-abcdef123456"
 
@@ -297,7 +297,7 @@ class TestGrabRoute:
     def test_grab_409_in_lidarr_mode_without_touching_clients(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client
         _set_mode(test_db, "lidarr")
-        with patch("plex_playlist_sync.api.routes.acquisition.get_acquisition_driver") as driver:
+        with patch("trackseerr.api.routes.acquisition.get_acquisition_driver") as driver:
             resp = client.post(
                 "/api/acquisition/grab", json=GRAB_PAYLOAD, headers=_headers(seeded_users["admin"], test_db, test_config)
             )
@@ -312,7 +312,7 @@ class TestGrabRoute:
             observed.append(lm.in_flight_count(lm.MODE_NATIVE))
             return {"success": True, "download_id": "dl-1", "client": "qbit", "message": "Successfully enqueued"}
 
-        with patch("plex_playlist_sync.api.routes.acquisition._grab_release", side_effect=fake):
+        with patch("trackseerr.api.routes.acquisition._grab_release", side_effect=fake):
             resp = client.post(
                 "/api/acquisition/grab", json=GRAB_PAYLOAD, headers=_headers(seeded_users["admin"], test_db, test_config)
             )
@@ -379,7 +379,7 @@ class TestMissingStatusNative:
     def test_native_mode_does_not_contact_lidarr(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client
         test_db.update_lidarr_settings({"url": "http://lidarr.test:8686", "api_key": API_KEY})
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as cls, patch.object(
+        with patch("trackseerr.clients.lidarr.httpx.Client") as cls, patch.object(
             httpx, "get"
         ) as raw_get:
             resp = client.get(
@@ -491,7 +491,7 @@ class TestLogStreamAuth:
         assert client.get("/api/system/logs/stream").status_code == 403
 
     def test_admin_session_cookie_is_accepted(self, test_db, test_config, seeded_users):
-        from plex_playlist_sync.api.routes.system import stream_system_logs
+        from trackseerr.api.routes.system import stream_system_logs
 
         token = _token(seeded_users["admin"], test_db, test_config)
         scope = {

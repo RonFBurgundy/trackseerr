@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.clients.mbid_enricher import MbidEnricherClient
 
 from .conftest import copy_media, run_scan, set_id3, snapshot
 
@@ -89,8 +89,8 @@ def test_release_group_tracklist_has_14_tracks(mb, discography):
 @pytest.fixture(scope="module")
 def refreshed(mb, discography, tmp_path_factory, discovery_src):
     """One scan + one real refresh_single_artist run shared by the assertions below."""
-    from plex_playlist_sync.artist_refresh import refresh_single_artist
-    from plex_playlist_sync.storage import Database
+    from trackseerr.artist_refresh import refresh_single_artist
+    from trackseerr.storage import Database
 
     base = tmp_path_factory.mktemp("mb")
     root = base / "music"
@@ -99,7 +99,7 @@ def refreshed(mb, discography, tmp_path_factory, discovery_src):
     db = Database(str(base / "mb.db"))
     run_scan(db, root)
     (artist,) = db.list_library_artists()
-    with patch("plex_playlist_sync.artist_refresh.mediacover_service") as cover:
+    with patch("trackseerr.artist_refresh.mediacover_service") as cover:
         cover.ensure_artwork.return_value = None
         result = refresh_single_artist(artist["id"], db, discovery_client=MagicMock(), enricher=mb)
     yield db, artist["id"], result

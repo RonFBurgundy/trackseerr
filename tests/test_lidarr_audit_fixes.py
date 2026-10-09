@@ -1,8 +1,8 @@
 """Regression tests for the Lidarr follow-settings audit: schema v38, retry scheduling, title normalisation,
 partial-load settling, acquisition-layer outcomes, removed env vars."""
 
-from plex_playlist_sync.item_history import GrabTrigger
-from plex_playlist_sync.storage import SCHEMA_VERSION
+from trackseerr.item_history import GrabTrigger
+from trackseerr.storage import SCHEMA_VERSION
 import inspect
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -10,19 +10,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from plex_playlist_sync import list_monitoring
-from plex_playlist_sync.acquisition_coordinator import AcquisitionCoordinator
-from plex_playlist_sync.clients.acquisition.base import AcquisitionRetryableError, AcquisitionUnavailableError
-from plex_playlist_sync.clients.acquisition.lidarr_adapter import LidarrAdapter
-from plex_playlist_sync.clients.lidarr import LidarrClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.lidarr_queue import LidarrTrickleWorker
-from plex_playlist_sync.lidarr_release import norm_title, titles_match
-from plex_playlist_sync.models import AcquisitionSearchResult, MusicRequest, RequestStatus
-from plex_playlist_sync.storage import Database, lidarr_item_due, lidarr_retry_delay
+from trackseerr import list_monitoring
+from trackseerr.acquisition_coordinator import AcquisitionCoordinator
+from trackseerr.clients.acquisition.base import AcquisitionRetryableError, AcquisitionUnavailableError
+from trackseerr.clients.acquisition.lidarr_adapter import LidarrAdapter
+from trackseerr.clients.lidarr import LidarrClient
+from trackseerr.config import Config
+from trackseerr.lidarr_queue import LidarrTrickleWorker
+from trackseerr.lidarr_release import norm_title, titles_match
+from trackseerr.models import AcquisitionSearchResult, MusicRequest, RequestStatus
+from trackseerr.storage import Database, lidarr_item_due, lidarr_retry_delay
 from tests.lidarr_fake import FakeLidarr, FastClock
 
-HTTPX = "plex_playlist_sync.clients.lidarr.httpx.Client"
+HTTPX = "trackseerr.clients.lidarr.httpx.Client"
 SONG = "Bohemian Rhapsody"
 
 
@@ -161,7 +161,7 @@ class TestRetryPolicy:
         worker = LidarrTrickleWorker()
         worker._delay_seconds = 0.0
         worker._auto_search = True
-        with patch(HTTPX, fake), patch("plex_playlist_sync.lidarr_queue.time", FastClock()):
+        with patch(HTTPX, fake), patch("trackseerr.lidarr_queue.time", FastClock()):
             worker._process_groups(LidarrTrickleWorker._group_by_artist(items), client_for(), db)
 
     def test_not_in_metadata_profile_is_unavailable_and_not_re_enqueued_until_due(self, db):
@@ -255,7 +255,7 @@ class TestSettling:
         return fake
 
     def add(self, fake, attempts=6):
-        with patch(HTTPX, fake), patch("plex_playlist_sync.clients.lidarr.time.sleep") as sleep:
+        with patch(HTTPX, fake), patch("trackseerr.clients.lidarr.time.sleep") as sleep:
             res = client_for().add_artist_and_albums(
                 "Queen", wants=[{"album": "", "title": SONG, "item_type": "track"}], album_wait_attempts=attempts
             )
@@ -346,8 +346,8 @@ class TestAdapterOutcomes:
         )
 
     def run(self, fake):
-        with patch(HTTPX, fake), patch("plex_playlist_sync.clients.lidarr.time.sleep") as sleep, patch(
-            "plex_playlist_sync.clients.acquisition.lidarr_adapter.is_safe_service_url", return_value=True
+        with patch(HTTPX, fake), patch("trackseerr.clients.lidarr.time.sleep") as sleep, patch(
+            "trackseerr.clients.acquisition.lidarr_adapter.is_safe_service_url", return_value=True
         ):
             try:
                 return self.adapter().download(self.result()), sleep
@@ -413,9 +413,9 @@ class TestCoordinatorRecordsOutcome:
             with patch.object(coordinator, "search_all_indexers", return_value=[candidate]), patch.object(
                 coordinator, "evaluate_and_rank", return_value=[(candidate, MagicMock(score=10))]
             ), patch.object(coordinator, "find_client_for_protocol", return_value={"id": 1, "name": "lidarr"}), patch(
-                "plex_playlist_sync.acquisition_coordinator.get_acquisition_driver", return_value=driver
+                "trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=driver
             ), patch.object(db, "get_default_quality_profile", return_value=profile), patch(
-                "plex_playlist_sync.acquisition_coordinator._to_quality_profile", return_value=MagicMock()
+                "trackseerr.acquisition_coordinator._to_quality_profile", return_value=MagicMock()
             ):
                 res = coordinator._search_and_grab(
                     "Queen", SONG, None, "track", "r1", db, None, None, None, None, False, None, GrabTrigger("request")

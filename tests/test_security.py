@@ -3,7 +3,7 @@
 from pathlib import Path
 import pytest
 
-from plex_playlist_sync.security import (
+from trackseerr.security import (
     extract_deezer_id,
     extract_spotify_id,
     is_safe_service_url,
@@ -305,12 +305,12 @@ class TestIsSafeServiceUrl:
         assert is_safe_service_url("http://10.0.0.5:5030", allow_lan=False) is False
 
         # hostname->127.0.0.1 rejected with allow_lan=True and False
-        monkeypatch.setattr("plex_playlist_sync.security._resolve_host", lambda host: ["127.0.0.1"])
+        monkeypatch.setattr("trackseerr.security._resolve_host", lambda host: ["127.0.0.1"])
         assert is_safe_service_url("http://custom-host.local:8080", allow_lan=True) is False
         assert is_safe_service_url("http://custom-host.local:8080", allow_lan=False) is False
 
         # hostname->192.168.1.5 allowed with allow_lan=True, rejected with allow_lan=False
-        monkeypatch.setattr("plex_playlist_sync.security._resolve_host", lambda host: ["192.168.1.5"])
+        monkeypatch.setattr("trackseerr.security._resolve_host", lambda host: ["192.168.1.5"])
         assert is_safe_service_url("http://custom-host.local:8080", allow_lan=True) is True
         assert is_safe_service_url("http://custom-host.local:8080", allow_lan=False) is False
 

@@ -8,16 +8,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import (
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.models import (
     ActiveDownload, DownloadClientConfig, DownloadDriverType, DownloadStatus,
     LibraryAlbum, LibraryArtist, LibraryFile, LibraryTrack,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 
 def _flac(path: Path) -> None:
@@ -89,9 +89,9 @@ def _import(db: Database, tmp_path: Path, meta: dict[str, Any]) -> Path:
                                       "speed_bps": 0, "eta_seconds": 0, "source_path": str(dl), "error_message": None}
     full = {"artist": "Daft Punk", "album": "Discovery", "disc_number": 1, "codec": "FLAC", "bits_per_sample": 16,
             "bitrate": 900, "sample_rate": 44100, "extension": ".flac", **meta}
-    with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=driver), \
-         patch("plex_playlist_sync.acquisition_worker.inspect_audio_file", return_value=full), \
-         patch("plex_playlist_sync.acquisition_worker.fingerprint_audio_file", return_value=None):
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_worker.inspect_audio_file", return_value=full), \
+         patch("trackseerr.acquisition_worker.fingerprint_audio_file", return_value=None):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
     return music
 
@@ -130,7 +130,7 @@ def test_recording_failure_does_not_break_the_import(db, tmp_path):
 
 
 def _commit(client, headers, items):
-    with patch("plex_playlist_sync.api.routes.library.manual_import.inspect_audio_file",
+    with patch("trackseerr.api.routes.library.manual_import.inspect_audio_file",
                return_value={"title": "t", "codec": "FLAC", "file_path": "x"}):
         resp = client.post("/api/library/manual-import/commit", json={"items": items}, headers=headers)
     assert resp.status_code == 200, resp.text

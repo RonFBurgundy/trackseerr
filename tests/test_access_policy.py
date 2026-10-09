@@ -8,13 +8,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import internal_auth
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_discovery_client
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.core_client import CoreClient, ProxyResponse
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr import internal_auth
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_discovery_client
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.core_client import CoreClient, ProxyResponse
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 SECRET = "s" * 40
 
@@ -166,7 +166,7 @@ def test_sync_webhook_refuses_user_and_accepts_api_key(env):
     client, db = env["client"], env["db"]
     assert client.post("/api/sync/webhook", headers=env["alice"]).status_code == 403
     assert client.post("/api/sync/webhook").status_code == 401
-    with patch("plex_playlist_sync.api.routes.sync.sync_state.execute_sync"):
+    with patch("trackseerr.api.routes.sync.sync_state.execute_sync"):
         res = client.post("/api/sync/webhook", headers={"X-Api-Key": db.get_api_key()})
     assert res.status_code == 200
 
@@ -193,7 +193,7 @@ def stream_ok():
     from fastapi.responses import PlainTextResponse
 
     with patch(
-        "plex_playlist_sync.api.routes.system.StreamingResponse",
+        "trackseerr.api.routes.system.StreamingResponse",
         lambda *a, **k: PlainTextResponse("ok"),
     ):
         yield

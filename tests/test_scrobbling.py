@@ -10,21 +10,21 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.scrobbler import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.scrobbler import (
     LastFmClient,
     LastFmError,
     ListenBrainzClient,
     ListenBrainzError,
     lastfm_signature,
 )
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import UserScrobbleConfig
-from plex_playlist_sync.scrobble_worker import ScrobbleWorker
-from plex_playlist_sync.scrobbling import forward_listen, get_lastfm_credentials, resolve_plex_user
-from plex_playlist_sync.storage import Database
+from trackseerr.config import Config
+from trackseerr.models import UserScrobbleConfig
+from trackseerr.scrobble_worker import ScrobbleWorker
+from trackseerr.scrobbling import forward_listen, get_lastfm_credentials, resolve_plex_user
+from trackseerr.storage import Database
 
 SESSION_SECRET = "SECRETSESSIONKEY123"
 LB_SECRET = "SECRETLBTOKEN456"
@@ -373,14 +373,14 @@ def test_lastfm_scrobble_posts_signed_form():
 
 def test_lastfm_retries_on_503_then_succeeds():
     session = FakeSession(FakeResponse(503), FakeResponse(429), FakeResponse(200, {"scrobbles": {}}))
-    with patch("plex_playlist_sync.clients.scrobbler.time.sleep") as slept:
+    with patch("trackseerr.clients.scrobbler.time.sleep") as slept:
         LastFmClient("K", "s", session=session).scrobble("A", "T", 1, "S")
     assert len(session.calls) == 3 and slept.call_count == 2
 
 
 def test_lastfm_gives_up_after_three_attempts():
     session = FakeSession(FakeResponse(503), requests.ConnectionError("down"), FakeResponse(502))
-    with patch("plex_playlist_sync.clients.scrobbler.time.sleep"):
+    with patch("trackseerr.clients.scrobbler.time.sleep"):
         with pytest.raises(LastFmError) as ei:
             LastFmClient("K", "s", session=session).scrobble("A", "T", 1, "S")
     assert ei.value.code == 0 and not ei.value.permanent and len(session.calls) == 3
@@ -409,7 +409,7 @@ def test_listenbrainz_submit_rejected_and_retry():
         ListenBrainzClient(session=session).submit_listen("bad", "A", "T", timestamp=1)
     assert ei.value.status == 401 and ei.value.permanent
     session = FakeSession(FakeResponse(503), FakeResponse(200, {"status": "ok"}))
-    with patch("plex_playlist_sync.clients.scrobbler.time.sleep"):
+    with patch("trackseerr.clients.scrobbler.time.sleep"):
         ListenBrainzClient(session=session).submit_listen("t", "A", "T", timestamp=1)
     assert len(session.calls) == 2
 
@@ -543,7 +543,7 @@ def test_webhook_multipart_scrobble_inserts_and_queues_forwarding(db, config, us
     db.upsert_scrobble_config("u-admin", lastfm_session_key="sk")
     tc = make_client(db, config)
     body, ctype = multipart_body(scrobble_payload(account_id=1, title="ronadmin"))
-    with patch("plex_playlist_sync.api.routes.scrobbles.forward_listen") as fwd:
+    with patch("trackseerr.api.routes.scrobbles.forward_listen") as fwd:
         r = tc.post(webhook_url(db), content=body, headers={"content-type": ctype})
     assert r.status_code == 200 and r.json() == {"status": "ok"}
     listens = db.list_listens("u-admin")
@@ -554,14 +554,14 @@ def test_webhook_multipart_scrobble_inserts_and_queues_forwarding(db, config, us
     assert row["lastfm_status"] == "pending"
     assert fwd.call_args.args[1] == row["id"]
     # same play again within 10 min is deduped
-    with patch("plex_playlist_sync.api.routes.scrobbles.forward_listen") as fwd2:
+    with patch("trackseerr.api.routes.scrobbles.forward_listen") as fwd2:
         r2 = tc.post(webhook_url(db), content=body, headers={"content-type": ctype})
     assert r2.json() == {"status": "ignored"} and fwd2.call_count == 0 and len(db.list_listens("u-admin")) == 1
 
 
 def test_webhook_json_payload_works(db, config, users):
     tc = make_client(db, config)
-    with patch("plex_playlist_sync.api.routes.scrobbles.forward_listen") as fwd:
+    with patch("trackseerr.api.routes.scrobbles.forward_listen") as fwd:
         r = tc.post(webhook_url(db), json=scrobble_payload(account_id=1001, title="Alice", ratingKey="77"))
     assert r.status_code == 200 and r.json()["status"] == "ok"
     assert len(db.list_listens("1001")) == 1 and fwd.call_count == 1
@@ -569,7 +569,7 @@ def test_webhook_json_payload_works(db, config, users):
 
 def test_webhook_uses_originalTitle_for_track_artist(db, config, users):
     tc = make_client(db, config)
-    with patch("plex_playlist_sync.api.routes.scrobbles.forward_listen"):
+    with patch("trackseerr.api.routes.scrobbles.forward_listen"):
         tc.post(webhook_url(db), json=scrobble_payload(account_id=1001, grandparentTitle="Various Artists", originalTitle="Real Artist"))
     assert db.list_listens("1001")[0]["artist"] == "Real Artist"
 
@@ -602,7 +602,7 @@ def test_webhook_play_event_triggers_now_playing_not_storage(db, config, users):
     tc = make_client(db, config)
     payload = scrobble_payload(account_id=1001, title="Alice")
     payload["event"] = "media.play"
-    with patch("plex_playlist_sync.api.routes.scrobbles.send_now_playing") as np_:
+    with patch("trackseerr.api.routes.scrobbles.send_now_playing") as np_:
         r = tc.post(webhook_url(db), json=payload)
     assert r.json() == {"status": "ok"} and np_.call_count == 1
     assert db.list_listens("1001") == []
@@ -1064,7 +1064,7 @@ def test_worker_history_poll_inserts_through_resolver(db, config, users):
     ]
     plex = fake_plex(entries, {1: "ronadmin", 1001: "Alice", 55: "BOB", 999: "ghost"})
     worker = ScrobbleWorker()
-    with patch("plex_playlist_sync.scrobble_worker.forward_listen"):
+    with patch("trackseerr.scrobble_worker.forward_listen"):
         result = worker.run_iteration(db, config, plex, now=now, force=True)
     assert result["ingested"] == 3
     owner = db.list_listens("u-admin")
@@ -1119,8 +1119,8 @@ def test_worker_retry_pass_forwards_pending(db, config, users):
         db.mark_forward_result(exhausted, "lastfm", "failed", "x")
     lf, lb = MagicMock(), MagicMock()
     worker = ScrobbleWorker()
-    with patch("plex_playlist_sync.scrobbling.build_lastfm_client", return_value=lf), \
-         patch("plex_playlist_sync.scrobbling.ListenBrainzClient", return_value=lb):
+    with patch("trackseerr.scrobbling.build_lastfm_client", return_value=lf), \
+         patch("trackseerr.scrobbling.ListenBrainzClient", return_value=lb):
         result = worker.run_iteration(db, config, plex_client=None, force=True)
     assert result == {"ingested": 0, "retried": 1}
     row = db.get_listen(lid)

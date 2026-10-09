@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from plex_playlist_sync.api.routes.library._shared import validate_media_path
-from plex_playlist_sync.models import DownloadClientConfig, DownloadDriverType
-from plex_playlist_sync.storage import Database
+from trackseerr.api.routes.library._shared import validate_media_path
+from trackseerr.models import DownloadClientConfig, DownloadDriverType
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def configured(db, tree):
     driver = MagicMock()
     driver.get_download_roots.return_value = [str(tree["qbit"])]
     driver.last_roots_error = None
-    with patch("plex_playlist_sync.download_roots.get_acquisition_driver", return_value=driver):
+    with patch("trackseerr.download_roots.get_acquisition_driver", return_value=driver):
         yield db
 
 

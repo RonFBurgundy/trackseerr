@@ -6,22 +6,22 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import (
     get_config,
     get_db,
     get_deezer_client,
     get_plex_client,
     get_spotify_client,
 )
-from plex_playlist_sync.auth import (
+from trackseerr.auth import (
     PlexAuthError,
     create_session_token,
     get_or_create_secret_key,
 )
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import Playlist, Track
-from plex_playlist_sync.storage import Database
+from trackseerr.config import Config
+from trackseerr.models import Playlist, Track
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -119,7 +119,7 @@ class TestSecurityHeadersAndCORS:
 
 
 class TestAuthEndpoints:
-    @patch("plex_playlist_sync.api.routes.auth.create_plex_pin")
+    @patch("trackseerr.api.routes.auth.create_plex_pin")
     def test_generate_pin_success(self, mock_create_pin, app_and_client):
         mock_create_pin.return_value = {
             "id": 12345,
@@ -134,7 +134,7 @@ class TestAuthEndpoints:
         assert data["code"] == "CODE12"
         assert "auth_url" in data
 
-    @patch("plex_playlist_sync.api.routes.auth.create_plex_pin")
+    @patch("trackseerr.api.routes.auth.create_plex_pin")
     def test_generate_pin_with_forward_url(self, mock_create_pin, app_and_client):
         mock_create_pin.return_value = {
             "id": 12345,
@@ -148,7 +148,7 @@ class TestAuthEndpoints:
         assert resp.status_code == 200
         mock_create_pin.assert_called_once_with(forward_url="http://testserver/")
 
-    @patch("plex_playlist_sync.api.routes.auth.create_plex_pin")
+    @patch("trackseerr.api.routes.auth.create_plex_pin")
     def test_generate_pin_uses_application_url_as_fallback_forward_url(self, mock_create_pin, app_and_client, test_db):
         test_db.update_general_settings({"application_url": "https://trackseerr.mydomain.com"})
         mock_create_pin.return_value = {
@@ -163,7 +163,7 @@ class TestAuthEndpoints:
 
 
 
-    @patch("plex_playlist_sync.api.routes.auth.create_plex_pin")
+    @patch("trackseerr.api.routes.auth.create_plex_pin")
     def test_generate_pin_failure_upstream(self, mock_create_pin, app_and_client):
         mock_create_pin.side_effect = PlexAuthError("Plex server down")
         _, client = app_and_client
@@ -171,7 +171,7 @@ class TestAuthEndpoints:
         assert resp.status_code == 502
         assert "Plex server down" in resp.json()["detail"]
 
-    @patch("plex_playlist_sync.api.routes.auth.check_plex_pin")
+    @patch("trackseerr.api.routes.auth.check_plex_pin")
     def test_verify_pin_unclaimed_or_expired(self, mock_check_pin, app_and_client):
         mock_check_pin.return_value = None
         _, client = app_and_client
@@ -179,8 +179,8 @@ class TestAuthEndpoints:
         assert resp.status_code == 400
         assert "not yet authorized" in resp.json()["detail"]
 
-    @patch("plex_playlist_sync.api.routes.auth.verify_server_access")
-    @patch("plex_playlist_sync.api.routes.auth.check_plex_pin")
+    @patch("trackseerr.api.routes.auth.verify_server_access")
+    @patch("trackseerr.api.routes.auth.check_plex_pin")
     def test_verify_pin_outsider_403_rejection(
         self, mock_check_pin, mock_verify_access, app_and_client
     ):
@@ -195,9 +195,9 @@ class TestAuthEndpoints:
         assert resp.status_code == 403
         assert "Forbidden" in resp.json()["detail"]
 
-    @patch("plex_playlist_sync.api.routes.auth.get_plex_user")
-    @patch("plex_playlist_sync.api.routes.auth.verify_server_access")
-    @patch("plex_playlist_sync.api.routes.auth.check_plex_pin")
+    @patch("trackseerr.api.routes.auth.get_plex_user")
+    @patch("trackseerr.api.routes.auth.verify_server_access")
+    @patch("trackseerr.api.routes.auth.check_plex_pin")
     def test_verify_pin_success_admin_and_cookie_set(
         self, mock_check_pin, mock_verify_access, mock_get_user, app_and_client, test_db
     ):
@@ -234,9 +234,9 @@ class TestAuthEndpoints:
         db_session = test_db.get_session(data["token"])
         assert db_session is not None
 
-    @patch("plex_playlist_sync.api.routes.auth.get_plex_user")
-    @patch("plex_playlist_sync.api.routes.auth.verify_server_access")
-    @patch("plex_playlist_sync.api.routes.auth.check_plex_pin")
+    @patch("trackseerr.api.routes.auth.get_plex_user")
+    @patch("trackseerr.api.routes.auth.verify_server_access")
+    @patch("trackseerr.api.routes.auth.check_plex_pin")
     def test_verify_pin_success_regular_user(
         self, mock_check_pin, mock_verify_access, mock_get_user, app_and_client, test_db
     ):
@@ -784,7 +784,7 @@ class TestEdgeCasesAndBranchCoverage:
         app, client = app_and_client
         app.dependency_overrides[get_plex_client] = lambda: None
 
-        with patch("plex_playlist_sync.api.routes.auth.check_plex_pin") as mock_check, \
+        with patch("trackseerr.api.routes.auth.check_plex_pin") as mock_check, \
              patch.dict("os.environ", {}, clear=True):
             mock_check.return_value = "some-token"
             resp = client.post("/api/auth/plex/verify", json={"pin_id": 123})
@@ -792,9 +792,9 @@ class TestEdgeCasesAndBranchCoverage:
             assert "machine identifier is not configured" in resp.json()["detail"]
 
     def test_verify_pin_get_user_plex_auth_error(self, app_and_client):
-        with patch("plex_playlist_sync.api.routes.auth.check_plex_pin") as mock_check, \
-             patch("plex_playlist_sync.api.routes.auth.verify_server_access") as mock_access, \
-             patch("plex_playlist_sync.api.routes.auth.get_plex_user") as mock_get_user:
+        with patch("trackseerr.api.routes.auth.check_plex_pin") as mock_check, \
+             patch("trackseerr.api.routes.auth.verify_server_access") as mock_access, \
+             patch("trackseerr.api.routes.auth.get_plex_user") as mock_get_user:
             mock_check.return_value = "some-token"
             mock_access.return_value = (True, True)
             mock_get_user.side_effect = PlexAuthError("Plex user endpoint failed")
@@ -808,7 +808,7 @@ class TestEdgeCasesAndBranchCoverage:
             assert "Failed to retrieve user details from Plex" in resp.json()["detail"]
 
     def test_verify_pin_unexpected_error(self, app_and_client):
-        with patch("plex_playlist_sync.api.routes.auth.check_plex_pin") as mock_check:
+        with patch("trackseerr.api.routes.auth.check_plex_pin") as mock_check:
             mock_check.side_effect = RuntimeError("Crash")
             _, client = app_and_client
             resp = client.post("/api/auth/plex/verify", json={"pin_id": 123})
@@ -847,8 +847,8 @@ class TestEdgeCasesAndBranchCoverage:
     def test_sync_state_execute_sync_full_flow(
         self, test_db, test_config
     ):
-        from plex_playlist_sync.api.routes.sync import sync_state
-        from plex_playlist_sync.models import SyncResult
+        from trackseerr.api.routes.sync import sync_state
+        from trackseerr.models import SyncResult
 
         # Seed playlist and users
         user = test_db.upsert_user("u1", "alice", is_admin=False)
@@ -886,7 +886,7 @@ class TestEdgeCasesAndBranchCoverage:
             sync_state.is_syncing = False
 
     def test_dependencies_client_fallbacks(self, monkeypatch, tmp_path):
-        from plex_playlist_sync.api.dependencies import (
+        from trackseerr.api.dependencies import (
             get_current_user,
             get_db,
             get_deezer_client,
@@ -903,7 +903,7 @@ class TestEdgeCasesAndBranchCoverage:
 
         # Test get_plex_client exception handling
         cfg_bad_plex = Config(plex_url="invalid://url", plex_token="bad", data_dir=str(tmp_path))
-        with patch("plex_playlist_sync.api.dependencies.PlexClient", side_effect=Exception("Plex init fail")):
+        with patch("trackseerr.api.dependencies.PlexClient", side_effect=Exception("Plex init fail")):
             assert get_plex_client(cfg_bad_plex) is None
 
         # Test get_spotify_client exception handling
@@ -915,17 +915,17 @@ class TestEdgeCasesAndBranchCoverage:
             data_dir=str(tmp_path),
         )
         # Test get_spotify_client falls back to SpotifyWebScraper if SpotifyClient fails
-        with patch("plex_playlist_sync.api.dependencies.SpotifyClient", side_effect=Exception("Spotify init fail")):
+        with patch("trackseerr.api.dependencies.SpotifyClient", side_effect=Exception("Spotify init fail")):
             fallback_client = get_spotify_client(cfg_bad_sp)
             assert fallback_client is not None
             assert hasattr(fallback_client, "get_playlist_by_id")
 
         # Test get_spotify_client returns None if both fail
-        with patch("plex_playlist_sync.api.dependencies.SpotifyClient", side_effect=Exception("Spotify init fail")), \
-             patch("plex_playlist_sync.api.dependencies.SpotifyWebScraper", side_effect=Exception("Scraper fail")):
+        with patch("trackseerr.api.dependencies.SpotifyClient", side_effect=Exception("Spotify init fail")), \
+             patch("trackseerr.api.dependencies.SpotifyWebScraper", side_effect=Exception("Scraper fail")):
             assert get_spotify_client(cfg_bad_sp) is None
 
         # Test get_deezer_client exception handling
-        with patch("plex_playlist_sync.api.dependencies.DeezerClient", side_effect=Exception("Deezer init fail")):
+        with patch("trackseerr.api.dependencies.DeezerClient", side_effect=Exception("Deezer init fail")):
             assert get_deezer_client() is None
 

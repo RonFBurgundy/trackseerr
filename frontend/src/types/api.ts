@@ -13196,35 +13196,35 @@ export interface components {
             };
         };
         /** DeletedResponse */
-        plex_playlist_sync__api__schemas__delay_profiles__DeletedResponse: {
+        trackseerr__api__schemas__delay_profiles__DeletedResponse: {
             /** Id */
             id: number;
             /** Status */
             status: string;
         };
         /** DeletedResponse */
-        plex_playlist_sync__api__schemas__download_clients__DeletedResponse: {
+        trackseerr__api__schemas__download_clients__DeletedResponse: {
             /** Id */
             id: string;
             /** Status */
             status: string;
         };
         /** DeletedResponse */
-        plex_playlist_sync__api__schemas__indexers__DeletedResponse: {
+        trackseerr__api__schemas__indexers__DeletedResponse: {
             /** Id */
             id: string;
             /** Status */
             status: string;
         };
         /** DeletedResponse */
-        plex_playlist_sync__api__schemas__notifications__DeletedResponse: {
+        trackseerr__api__schemas__notifications__DeletedResponse: {
             /** Id */
             id: string;
             /** Status */
             status: string;
         };
         /** DeletedResponse */
-        plex_playlist_sync__api__schemas__quality_profiles__DeletedResponse: {
+        trackseerr__api__schemas__quality_profiles__DeletedResponse: {
             /** Id */
             id: string;
             /** Status */
@@ -13560,7 +13560,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["plex_playlist_sync__api__schemas__notifications__DeletedResponse"];
+                    "application/json": components["schemas"]["trackseerr__api__schemas__notifications__DeletedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -21189,7 +21189,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["plex_playlist_sync__api__schemas__delay_profiles__DeletedResponse"];
+                    "application/json": components["schemas"]["trackseerr__api__schemas__delay_profiles__DeletedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -21337,7 +21337,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["plex_playlist_sync__api__schemas__download_clients__DeletedResponse"];
+                    "application/json": components["schemas"]["trackseerr__api__schemas__download_clients__DeletedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -21507,7 +21507,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["plex_playlist_sync__api__schemas__indexers__DeletedResponse"];
+                    "application/json": components["schemas"]["trackseerr__api__schemas__indexers__DeletedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -22048,7 +22048,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["plex_playlist_sync__api__schemas__notifications__DeletedResponse"];
+                    "application/json": components["schemas"]["trackseerr__api__schemas__notifications__DeletedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -22302,7 +22302,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["plex_playlist_sync__api__schemas__quality_profiles__DeletedResponse"];
+                    "application/json": components["schemas"]["trackseerr__api__schemas__quality_profiles__DeletedResponse"];
                 };
             };
             /** @description Validation Error */

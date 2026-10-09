@@ -11,26 +11,26 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import local_auth, media_server
-from plex_playlist_sync.admin_bootstrap import ensure_bootstrap_admin
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_plex_client, require_core_tier
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.cli import _Clients, _apply_saved_media_server_settings, _discover_media_server_users
-from plex_playlist_sync.config import Config, MediaServerView, set_media_server_overlay
-from plex_playlist_sync.local_login import LoginError, verify_local_login
-from plex_playlist_sync.media_servers import (
+from trackseerr import local_auth, media_server
+from trackseerr.admin_bootstrap import ensure_bootstrap_admin
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_plex_client, require_core_tier
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.cli import _Clients, _apply_saved_media_server_settings, _discover_media_server_users
+from trackseerr.config import Config, MediaServerView, set_media_server_overlay
+from trackseerr.local_login import LoginError, verify_local_login
+from trackseerr.media_servers import (
     ServerUser,
     SubsonicMediaServer,
     build_jellyfin,
     build_subsonic,
     import_server_users,
 )
-from plex_playlist_sync.media_servers import settings as ms_settings
-from plex_playlist_sync.media_servers.base import MediaServerError
-from plex_playlist_sync.models import Playlist, Track
-from plex_playlist_sync.security import is_safe_service_url
-from plex_playlist_sync.storage import Database
+from trackseerr.media_servers import settings as ms_settings
+from trackseerr.media_servers.base import MediaServerError
+from trackseerr.models import Playlist, Track
+from trackseerr.security import is_safe_service_url
+from trackseerr.storage import Database
 from tests.subsonic_fake import FakeSubsonic, default_state
 
 PW = "correct horse battery staple"
@@ -164,9 +164,9 @@ def test_plex_login_is_refused_when_any_same_named_row_is_local(db, tmp_path):
     app.dependency_overrides[get_config] = lambda: cfg
     client = TestClient(app)
     plex_user = {"id": "5555", "username": "ghost", "email": "g@x.tv", "thumb": ""}
-    with patch("plex_playlist_sync.api.routes.auth.check_plex_pin", return_value="tok"), patch(
-        "plex_playlist_sync.api.routes.auth.verify_server_access", return_value=(True, False)
-    ), patch("plex_playlist_sync.api.routes.auth.get_plex_user", return_value=plex_user), patch.dict(
+    with patch("trackseerr.api.routes.auth.check_plex_pin", return_value="tok"), patch(
+        "trackseerr.api.routes.auth.verify_server_access", return_value=(True, False)
+    ), patch("trackseerr.api.routes.auth.get_plex_user", return_value=plex_user), patch.dict(
         "os.environ", {"PLEX_MACHINE_IDENTIFIER": "m1"}
     ):
         assert client.post("/api/auth/plex/verify", json={"pin_id": 1}).status_code == 403
@@ -274,7 +274,7 @@ def test_replacing_the_adapter_does_not_close_the_one_a_sync_holds(monkeypatch):
     fake.state.users["ua"] = fake.state.users["admin"].__class__("ua", True, "pa")
     real = SubsonicMediaServer
     monkeypatch.setattr(
-        "plex_playlist_sync.media_servers.SubsonicMediaServer",
+        "trackseerr.media_servers.SubsonicMediaServer",
         lambda *a, **kw: real(*a, transport=fake.transport(), sleep=lambda _s: None, **kw),
     )
     cfg = Config(plex_url="", plex_token="")
@@ -289,7 +289,7 @@ def test_replacing_the_adapter_does_not_close_the_one_a_sync_holds(monkeypatch):
 
     fake.state.respond_with = settings_change_mid_sync
     playlist = Playlist(id="p", name="Mix", tracks=[Track("Song A", "Artist 1", "Album X"), Track("Song B", "Artist 1", "Album X")])
-    from plex_playlist_sync.media_servers import PlaylistSyncOptions
+    from trackseerr.media_servers import PlaylistSyncOptions
 
     (result,) = held.sync_playlist(playlist, [""], PlaylistSyncOptions())
     assert result.success and not held._http.is_closed
@@ -320,13 +320,13 @@ def test_run_once_loads_the_saved_media_server(tmp_path, monkeypatch):
     _saved_subsonic_db(tmp_path)
     monkeypatch.delenv("CONFIG_DIR", raising=False)
     cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path), config_dir=str(tmp_path / "nope"))
-    with patch("plex_playlist_sync.cli.os.path.isdir", return_value=False):
+    with patch("trackseerr.cli.os.path.isdir", return_value=False):
         _apply_saved_media_server_settings(cfg)
     assert cfg.subsonic_configured and cfg.media_server_source == "settings"
 
 
 def test_run_once_main_connects_with_the_saved_server(tmp_path):
-    from plex_playlist_sync.cli import main
+    from trackseerr.cli import main
 
     _saved_subsonic_db(tmp_path)
     seen: dict[str, bool] = {}
@@ -336,9 +336,9 @@ def test_run_once_main_connects_with_the_saved_server(tmp_path):
         return True
 
     env = {"RUN_ONCE": "1", "DATA_DIR": str(tmp_path)}
-    with patch.dict("os.environ", env, clear=True), patch("plex_playlist_sync.cli._connect_clients", connect), patch(
-        "plex_playlist_sync.cli.SyncCoordinator"
-    ), patch("plex_playlist_sync.cli.os.path.isdir", return_value=False):
+    with patch.dict("os.environ", env, clear=True), patch("trackseerr.cli._connect_clients", connect), patch(
+        "trackseerr.cli.SyncCoordinator"
+    ), patch("trackseerr.cli.os.path.isdir", return_value=False):
         assert main() == 0
     assert seen == {"subsonic": True}
 
@@ -346,14 +346,14 @@ def test_run_once_main_connects_with_the_saved_server(tmp_path):
 def test_run_once_ignores_saved_settings_when_the_environment_names_a_server(tmp_path):
     _saved_subsonic_db(tmp_path)
     cfg = Config(plex_url="http://plex", plex_token="t", data_dir=str(tmp_path))
-    with patch("plex_playlist_sync.cli.os.path.isdir", return_value=False):
+    with patch("trackseerr.cli.os.path.isdir", return_value=False):
         _apply_saved_media_server_settings(cfg)
     assert cfg.media_server_type == "plex" and not cfg.subsonic_configured
 
 
 def test_run_once_without_a_database_creates_none_and_keeps_env_behaviour(tmp_path):
     cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
-    with patch("plex_playlist_sync.cli.os.path.isdir", return_value=False):
+    with patch("trackseerr.cli.os.path.isdir", return_value=False):
         _apply_saved_media_server_settings(cfg)
     assert not (tmp_path / "sync_db.sqlite").exists() and cfg.media_server_type == "none"
 
@@ -379,7 +379,7 @@ def test_run_once_without_a_database_creates_none_and_keeps_env_behaviour(tmp_pa
     ],
 )
 def test_hostnames_are_judged_by_what_they_resolve_to(resolved, expected):
-    with patch("plex_playlist_sync.security._resolve_host", return_value=resolved):
+    with patch("trackseerr.security._resolve_host", return_value=resolved):
         assert is_safe_service_url("http://media.example.com:8096") is expected
 
 
@@ -413,7 +413,7 @@ def test_saved_settings_url_resolving_to_metadata_is_not_connected_but_env_is_tr
     cfg.apply_media_server_overlay({"type": "subsonic", "url": "http://nav.example:4533", "username": "u", "password": "p"})
     jelly = Config(plex_url="", plex_token="")
     jelly.apply_media_server_overlay({"type": "jellyfin", "url": "http://jf.example:8096", "api_key": "k"})
-    with patch("plex_playlist_sync.security._resolve_host", return_value=["169.254.169.254"]):
+    with patch("trackseerr.security._resolve_host", return_value=["169.254.169.254"]):
         with caplog.at_level(logging.ERROR):
             assert build_subsonic(cfg) is None and build_jellyfin(jelly) is None
         env_cfg = Config(plex_url="", plex_token="", media_server="subsonic", subsonic_url="http://nav.example:4533",
@@ -538,7 +538,7 @@ def test_migration_adds_credentials_type_and_backfills():
 def test_settings_get_and_test_require_the_core_tier():
     from fastapi import HTTPException
 
-    from plex_playlist_sync.api.routes import settings as settings_routes
+    from trackseerr.api.routes import settings as settings_routes
 
     wanted = {("/media-server", "GET"), ("/media-server/test", "POST")}
     found = set()
@@ -554,7 +554,7 @@ def test_settings_get_and_test_require_the_core_tier():
 
 
 def test_save_and_test_routes_reject_a_hostname_that_resolves_to_metadata(env):
-    with patch("plex_playlist_sync.security._resolve_host", return_value=["169.254.169.254"]):
+    with patch("trackseerr.security._resolve_host", return_value=["169.254.169.254"]):
         assert env.tc.put("/api/settings/media-server", json={**SUB, "url": "http://sneaky.example:4533"}, headers=env.admin).status_code == 400
         res = env.tc.post("/api/settings/media-server/test", json={**SUB, "url": "http://sneaky.example:4533"}, headers=env.admin).json()
     assert res["ok"] is False and "SSRF" in res["message"]
@@ -564,7 +564,7 @@ def test_save_and_test_routes_reject_a_hostname_that_resolves_to_metadata(env):
 
 
 def test_user_refresh_skips_colliding_names_and_survives_a_bad_row(env):
-    from plex_playlist_sync.api.dependencies import get_media_client
+    from trackseerr.api.dependencies import get_media_client
 
     env.cfg.media_server = "jellyfin"
     local_admin(env.db, "kid")  # a local account already owns the name Jellyfin also has
@@ -574,7 +574,7 @@ def test_user_refresh_skips_colliding_names_and_survives_a_bad_row(env):
         list_users=lambda: [jf_user("jf-1", "KID"), jf_user("jf-2", "friend", admin=True), jf_user("jf-3", "later")],
     )
     env.app.dependency_overrides[get_media_client] = lambda: server
-    with patch("plex_playlist_sync.api.routes.users.as_media_server", return_value=server):
+    with patch("trackseerr.api.routes.users.as_media_server", return_value=server):
         res = env.tc.post("/api/users/refresh", headers=env.admin)
     assert res.status_code == 200, res.text
     users = {u["username"]: u for u in res.json()}

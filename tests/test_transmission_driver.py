@@ -7,22 +7,22 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.acquisition import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.acquisition import (
     get_acquisition_driver,
     is_torrent_driver_type,
 )
-from plex_playlist_sync.clients.acquisition.base import AcquisitionRetryableError
-from plex_playlist_sync.clients.acquisition.transmission import TransmissionDriver
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import (
+from trackseerr.clients.acquisition.base import AcquisitionRetryableError
+from trackseerr.clients.acquisition.transmission import TransmissionDriver
+from trackseerr.config import Config
+from trackseerr.models import (
     AcquisitionSearchResult,
     DownloadDriverType,
     DownloadStatus,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 
 def _mock_response(status_code: int = 200, payload: Any = None, headers: Any = None) -> MagicMock:

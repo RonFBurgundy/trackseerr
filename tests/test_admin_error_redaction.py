@@ -6,11 +6,11 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 API_SECRET = "SECRET123"
 PLEX_SECRET = "plexsecret456"
@@ -55,8 +55,8 @@ def _assert_clean(resp_text: str, caplog) -> None:
 def test_download_client_test_redacts(client_and_headers, caplog):
     client, headers = client_and_headers
     caplog.set_level(logging.DEBUG)
-    with patch("plex_playlist_sync.api.routes.download_clients.is_safe_service_url", return_value=True), patch(
-        "plex_playlist_sync.api.routes.download_clients.get_acquisition_driver", side_effect=RuntimeError(LEAKY)
+    with patch("trackseerr.api.routes.download_clients.is_safe_service_url", return_value=True), patch(
+        "trackseerr.api.routes.download_clients.get_acquisition_driver", side_effect=RuntimeError(LEAKY)
     ):
         resp = client.post(
             "/api/settings/download-clients/test",
@@ -73,8 +73,8 @@ def test_download_client_test_redacts(client_and_headers, caplog):
 def test_indexer_test_redacts(client_and_headers, caplog):
     client, headers = client_and_headers
     caplog.set_level(logging.DEBUG)
-    with patch("plex_playlist_sync.api.routes.indexers.is_safe_service_url", return_value=True), patch(
-        "plex_playlist_sync.api.routes.indexers.get_indexer_driver", side_effect=RuntimeError(LEAKY)
+    with patch("trackseerr.api.routes.indexers.is_safe_service_url", return_value=True), patch(
+        "trackseerr.api.routes.indexers.get_indexer_driver", side_effect=RuntimeError(LEAKY)
     ):
         resp = client.post(
             "/api/settings/indexers/test",
@@ -90,8 +90,8 @@ def test_indexer_test_redacts(client_and_headers, caplog):
 def test_lidarr_test_redacts(client_and_headers, caplog):
     client, headers = client_and_headers
     caplog.set_level(logging.DEBUG)
-    with patch("plex_playlist_sync.api.routes.settings.is_safe_service_url", return_value=True), patch(
-        "plex_playlist_sync.api.routes.settings.LidarrClient", side_effect=RuntimeError(LEAKY)
+    with patch("trackseerr.api.routes.settings.is_safe_service_url", return_value=True), patch(
+        "trackseerr.api.routes.settings.LidarrClient", side_effect=RuntimeError(LEAKY)
     ):
         resp = client.post(
             "/api/settings/lidarr/test",
@@ -114,8 +114,8 @@ def test_lidarr_test_result_error_redacted(client_and_headers, caplog):
         def test_connection(self):
             return {"online": False, "error": LEAKY}
 
-    with patch("plex_playlist_sync.api.routes.settings.is_safe_service_url", return_value=True), patch(
-        "plex_playlist_sync.api.routes.settings.LidarrClient", FakeClient
+    with patch("trackseerr.api.routes.settings.is_safe_service_url", return_value=True), patch(
+        "trackseerr.api.routes.settings.LidarrClient", FakeClient
     ):
         resp = client.post(
             "/api/settings/lidarr/test",

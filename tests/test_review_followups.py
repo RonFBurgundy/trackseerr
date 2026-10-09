@@ -8,13 +8,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from plex_playlist_sync import album_track_hydration as hyd
-from plex_playlist_sync.api.routes.library import albums as albums_routes
-from plex_playlist_sync.api.routes.library import browse as browse_routes
-from plex_playlist_sync.api.dependencies import get_mbid_enricher
-from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
-from plex_playlist_sync.library_monitoring import album_monitored_for_option, normalize_secondary_types
-from plex_playlist_sync.storage import Database
+from trackseerr import album_track_hydration as hyd
+from trackseerr.api.routes.library import albums as albums_routes
+from trackseerr.api.routes.library import browse as browse_routes
+from trackseerr.api.dependencies import get_mbid_enricher
+from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.library_monitoring import album_monitored_for_option, normalize_secondary_types
+from trackseerr.storage import Database
 
 from tests.test_library_api import (  # noqa: F401
     _auth_headers,

@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_plex_client
-from plex_playlist_sync.api.routes.system import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_plex_client
+from trackseerr.api.routes.system import (
     _get_db_metrics,
     _get_disk_metrics,
     _get_worker_statuses,
@@ -16,9 +16,9 @@ from plex_playlist_sync.api.routes.system import (
     get_all_scheduled_tasks,
     log_ring_buffer,
 )
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -275,7 +275,7 @@ def test_client_and_indexer_pings(test_db):
     mock_driver.test_connection.return_value = (True, "Connected to SABnzbd")
 
     with patch(
-        "plex_playlist_sync.api.routes.system.get_acquisition_driver",
+        "trackseerr.api.routes.system.get_acquisition_driver",
         return_value=mock_driver,
     ) as mock_get_driver:
         client_results = _ping_download_clients(test_db)
@@ -337,7 +337,7 @@ def test_client_and_indexer_pings(test_db):
     mock_idx_driver.test_connection.return_value = (True, "Torznab caps OK")
 
     with patch(
-        "plex_playlist_sync.api.routes.system.get_indexer_driver",
+        "trackseerr.api.routes.system.get_indexer_driver",
         return_value=mock_idx_driver,
     ) as mock_get_idx:
         indexer_results = _ping_indexers(test_db)
@@ -631,7 +631,7 @@ def test_run_scheduled_task_api(app_and_client, seeded_users, secret_key, test_d
     assert resp_non_admin.status_code == 403
 
     # 2. Admin successfully triggers wanted_backlog_sweep
-    with patch("plex_playlist_sync.backlog_worker.backlog_worker.poll_once") as mock_sweep:
+    with patch("trackseerr.backlog_worker.backlog_worker.poll_once") as mock_sweep:
         resp_admin = client.post(
             "/api/system/tasks/wanted_backlog_sweep/run", cookies=admin_cookies
         )
@@ -661,7 +661,7 @@ def test_cancel_scheduled_task_api(app_and_client, seeded_users, secret_key, tes
     assert resp_non_admin.status_code == 403
 
     # 2. Admin cancels filesystem_scan -> 200
-    with patch("plex_playlist_sync.library_scanner.library_scanner.cancel_scan") as mock_cancel:
+    with patch("trackseerr.library_scanner.library_scanner.cancel_scan") as mock_cancel:
         mock_cancel.return_value = {"status": "cancelled", "is_scanning": False}
         resp_admin = client.post(
             "/api/system/tasks/filesystem_scan/cancel", cookies=admin_cookies

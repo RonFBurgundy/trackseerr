@@ -120,7 +120,7 @@ Required storage method names, so the mixes phase can rely on them:
 - `count_mix_acquisitions_since(user_id, since_iso) -> int`: counts across all of that user's mixes, so the quota is per user per week
 - `add_mix_acquisition(mix_id, request_id)`
 
-## Outbound clients — `plex_playlist_sync/clients/scrobbler.py`
+## Outbound clients — `trackseerr/clients/scrobbler.py`
 
 **`LastFmClient(api_key, api_secret, session=requests.Session(), timeout=10)`**
 - **[corrected] HTTPS everywhere.** Auth URL: `https://www.last.fm/api/auth/?api_key=<key>&cb=<quote_plus(callback)>`. API: `https://ws.audioscrobbler.com/2.0/`.
@@ -186,7 +186,7 @@ UserListen { id: int, artist, title, album: string|null, played_at: string, sour
 
 Session keys and tokens are never returned, masked or otherwise. Only the `*_connected` booleans are exposed.
 
-## Tailored mixes — `plex_playlist_sync/tailored_mixes.py`, `/api/mixes` (`api/routes/mixes.py`)
+## Tailored mixes — `trackseerr/tailored_mixes.py`, `/api/mixes` (`api/routes/mixes.py`)
 
 **Deezer additions to `DiscoveryClient`** (keyless, cached like the existing methods):
 - `get_related_artists(deezer_artist_id, limit=20) -> list[{id, name}]` from `https://api.deezer.com/artist/{id}/related`

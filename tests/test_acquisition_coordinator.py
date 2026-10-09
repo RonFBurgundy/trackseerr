@@ -17,17 +17,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.item_history import GrabTrigger
-from plex_playlist_sync.acquisition_coordinator import (
+from trackseerr.item_history import GrabTrigger
+from trackseerr.acquisition_coordinator import (
     AcquisitionCoordinator,
     acquisition_coordinator,
 )
-from plex_playlist_sync.acquisition_worker import translate_remote_path
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_lidarr_client
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import (
+from trackseerr.acquisition_worker import translate_remote_path
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_lidarr_client
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.models import (
     AcquisitionSearchResult,
     DownloadClientConfig,
     DownloadDriverType,
@@ -38,7 +38,7 @@ from plex_playlist_sync.models import (
     QualityProfileItem,
     RequestStatus,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -178,10 +178,10 @@ def test_search_all_indexers_aggregates_sources(test_db):
     coordinator = AcquisitionCoordinator()
 
     with patch(
-        "plex_playlist_sync.acquisition_coordinator.get_indexer_driver",
+        "trackseerr.acquisition_coordinator.get_indexer_driver",
         side_effect=mock_get_indexer_driver,
     ), patch(
-        "plex_playlist_sync.acquisition_coordinator.get_acquisition_driver",
+        "trackseerr.acquisition_coordinator.get_acquisition_driver",
         side_effect=mock_get_acquisition_driver,
     ):
         results = coordinator.search_all_indexers("Radiohead", "Karma Police", db=test_db)
@@ -236,7 +236,7 @@ def test_search_all_indexers_error_isolation(test_db):
 
     coordinator = AcquisitionCoordinator()
     with patch(
-        "plex_playlist_sync.acquisition_coordinator.get_indexer_driver",
+        "trackseerr.acquisition_coordinator.get_indexer_driver",
         side_effect=mock_get_indexer,
     ):
         results = coordinator.search_all_indexers("Daft Punk", "One More Time", db=test_db)
@@ -452,7 +452,7 @@ def test_search_and_grab_qbittorrent(test_db):
     mock_driver.download.return_value = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
     with patch.object(coordinator, "search_all_indexers", return_value=[candidate]), patch(
-        "plex_playlist_sync.acquisition_coordinator.get_acquisition_driver",
+        "trackseerr.acquisition_coordinator.get_acquisition_driver",
         return_value=mock_driver,
     ):
         result = coordinator.search_and_grab(
@@ -515,7 +515,7 @@ def test_search_and_grab_sabnzbd(test_db):
     mock_sab.download.return_value = "SABnzbd_nzo_abc999"
 
     with patch.object(coordinator, "search_all_indexers", return_value=[candidate]), patch(
-        "plex_playlist_sync.acquisition_coordinator.get_acquisition_driver",
+        "trackseerr.acquisition_coordinator.get_acquisition_driver",
         return_value=mock_sab,
     ):
         res = coordinator.search_and_grab(
@@ -556,7 +556,7 @@ def test_search_and_grab_slskd(test_db):
     mock_slskd.download.return_value = "user1::Music/Song.flac"
 
     with patch.object(coordinator, "search_all_indexers", return_value=[candidate]), patch(
-        "plex_playlist_sync.acquisition_coordinator.get_acquisition_driver",
+        "trackseerr.acquisition_coordinator.get_acquisition_driver",
         return_value=mock_slskd,
     ):
         res = coordinator.search_and_grab(
@@ -670,10 +670,10 @@ def test_requests_api_native_grab_precedence(app_and_client, test_db, test_confi
     )
 
     with patch(
-        "plex_playlist_sync.api.routes.requests.acquisition_coordinator.search_and_grab",
+        "trackseerr.api.routes.requests.acquisition_coordinator.search_and_grab",
         return_value={"success": True, "download_id": "dl-12345", "download_hash": "hash123"},
     ) as mock_grab, patch(
-        "plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle"
+        "trackseerr.lidarr_queue.lidarr_worker.start_trickle"
     ) as mock_lidarr:
         resp = client.post(
             "/api/requests",
@@ -721,10 +721,10 @@ def test_requests_api_no_lidarr_fallback_when_native_unmatched(app_and_client, t
 
     try:
         with patch(
-            "plex_playlist_sync.api.routes.requests.acquisition_coordinator.search_and_grab",
+            "trackseerr.api.routes.requests.acquisition_coordinator.search_and_grab",
             return_value={"success": False, "message": "No acceptable releases found"},
         ) as mock_grab, patch(
-            "plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle"
+            "trackseerr.lidarr_queue.lidarr_worker.start_trickle"
         ) as mock_lidarr:
             resp = client.post(
                 "/api/requests",
@@ -779,7 +779,7 @@ def test_missing_track_grab_endpoint(app_and_client, test_db, test_config, seede
 
     # 3. Successful admin grab dispatch
     with patch(
-        "plex_playlist_sync.api.routes.missing.acquisition_coordinator.search_and_grab",
+        "trackseerr.api.routes.missing.acquisition_coordinator.search_and_grab",
         return_value={
             "success": True,
             "download_id": "dl-missing-1",

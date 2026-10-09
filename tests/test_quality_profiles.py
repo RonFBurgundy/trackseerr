@@ -3,19 +3,19 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.models import (
     AudioQuality,
     EvaluationResult,
     ParsedRelease,
     QualityProfile,
     QualityProfileItem,
 )
-from plex_playlist_sync.quality import evaluate_release, parse_release_title
-from plex_playlist_sync.storage import Database
+from trackseerr.quality import evaluate_release, parse_release_title
+from trackseerr.storage import Database
 
 
 @pytest.fixture

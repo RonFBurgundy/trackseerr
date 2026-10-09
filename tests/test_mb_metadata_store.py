@@ -8,13 +8,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
-from plex_playlist_sync.mb_metadata_store import (
+from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.mb_metadata_store import (
     MbMetadataStore,
     get_shared_enricher,
     reset_shared_enricher,
 )
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr.storage import SCHEMA_VERSION, Database
 
 pytestmark = pytest.mark.real_mbid_enricher
 
@@ -505,7 +505,7 @@ def test_no_direct_construction():
     """Production code builds metadata clients only via mb_metadata_store (and the client modules themselves)."""
     from pathlib import Path
 
-    root = Path(__file__).resolve().parent.parent / "plex_playlist_sync"
+    root = Path(__file__).resolve().parent.parent / "trackseerr"
     allowed = {"mbid_enricher.py", "discovery.py", "mb_metadata_store.py"}
     offenders = []
     for path in root.rglob("*.py"):

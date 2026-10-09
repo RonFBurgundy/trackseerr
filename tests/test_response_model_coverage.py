@@ -9,10 +9,10 @@ import pydantic
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
 
-import plex_playlist_sync.api.routes as routes_pkg
+import trackseerr.api.routes as routes_pkg
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.response_models import ApiModel
+from trackseerr.api.app import create_app
+from trackseerr.api.response_models import ApiModel
 
 
 def _walk(t, seen, bad, where):
@@ -27,8 +27,8 @@ def _walk(t, seen, bad, where):
 
 
 def _app(tmp_path):
-    from plex_playlist_sync.config import Config
-    from plex_playlist_sync.storage import Database
+    from trackseerr.config import Config
+    from trackseerr.storage import Database
 
     cfg = Config(plex_url="http://127.0.0.1:32400", plex_token="t", data_dir=str(tmp_path))
     return create_app(db=Database(":memory:"), config=cfg)
@@ -42,7 +42,7 @@ def _api_routes(app):
     """
     out = [(f"app:{r.path}", r) for r in app.routes if isinstance(r, APIRoute)]
     for m in pkgutil.iter_modules(routes_pkg.__path__):
-        mod = importlib.import_module(f"plex_playlist_sync.api.routes.{m.name}")
+        mod = importlib.import_module(f"trackseerr.api.routes.{m.name}")
         for attr, obj in vars(mod).items():
             if isinstance(obj, APIRouter) and obj.__module__ is not None:
                 for r in obj.routes:

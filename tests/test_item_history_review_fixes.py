@@ -10,10 +10,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from plex_playlist_sync import recycle_bin
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, require_admin
-from plex_playlist_sync.item_history import (
+from trackseerr import recycle_bin
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, require_admin
+from trackseerr.item_history import (
     TRIGGER_KINDS,
     TRIGGER_RSS,
     GrabTrigger,
@@ -23,8 +23,8 @@ from plex_playlist_sync.item_history import (
     public_message,
     redact_details,
 )
-from plex_playlist_sync.library_scanner import LibraryScanner
-from plex_playlist_sync.storage import Database
+from trackseerr.library_scanner import LibraryScanner
+from trackseerr.storage import Database
 from tests.test_item_history import client, config, db, headers, library, users  # noqa: F401  (fixtures)
 
 LABEL = "SECRET-LABEL-7731"
@@ -309,12 +309,12 @@ def test_api_key_principal_is_not_persisted_as_actor(db, config, method, url, se
     app.dependency_overrides[require_admin] = lambda: {"id": "api_key_user", "username": "api", "is_admin": True}
     from fastapi.testclient import TestClient
 
-    with patch(f"plex_playlist_sync.activity_service.{service_fn}", return_value={"success": True, "message": "ok"}) as fn:
+    with patch(f"trackseerr.activity_service.{service_fn}", return_value={"success": True, "message": "ok"}) as fn:
         assert getattr(TestClient(app), method)(url).status_code == 200
     assert fn.call_args.args[2] is None
 
     app.dependency_overrides[require_admin] = lambda: {"id": "admin-1", "username": "admin_user", "is_admin": True}
-    with patch(f"plex_playlist_sync.activity_service.{service_fn}", return_value={"success": True, "message": "ok"}) as fn:
+    with patch(f"trackseerr.activity_service.{service_fn}", return_value={"success": True, "message": "ok"}) as fn:
         assert getattr(TestClient(app), method)(url).status_code == 200
     assert fn.call_args.args[2] == "admin-1"
 
@@ -332,7 +332,7 @@ def test_scan_added_album_event_carries_the_scan_trigger(db, tmp_path):  # noqa:
     song = tmp_path / "music" / "Nirvana" / "Bleach" / "01 - Come As You Are.flac"
     song.parent.mkdir(parents=True)
     song.write_bytes(b"x")
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", side_effect=lambda p: _scan_meta(song)):
+    with patch("trackseerr.library_scanner.inspect_audio_file", side_effect=lambda p: _scan_meta(song)):
         status = LibraryScanner().scan(db, root_folder=str(tmp_path / "music"))
     assert status["albums_created"] == 1
     album = db.get_library_album_by_title(db.get_library_artist_by_name("Nirvana")["id"], "Bleach")
@@ -355,8 +355,8 @@ def test_background_scan_thread_and_hydration_thread_keep_the_scan_provenance(db
         done.set()
 
     scanner = LibraryScanner()
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", side_effect=lambda p: _scan_meta(song)), patch(
-        "plex_playlist_sync.artist_refresh_worker.artist_refresh_worker.refresh_once", side_effect=refresh
+    with patch("trackseerr.library_scanner.inspect_audio_file", side_effect=lambda p: _scan_meta(song)), patch(
+        "trackseerr.artist_refresh_worker.artist_refresh_worker.refresh_once", side_effect=refresh
     ):
         assert scanner.start_scan(db, root_folder=str(tmp_path / "music"))
         scanner._thread.join(timeout=30)

@@ -8,20 +8,20 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 import requests
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.artist_refresh import refresh_single_artist
-from plex_playlist_sync.artist_refresh_worker import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.artist_refresh import refresh_single_artist
+from trackseerr.artist_refresh_worker import (
     ArtistRefreshWorker,
     _LAST_REFRESH_PREFIX,
 )
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.discovery import DiscoveryClient
-from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.mb_metadata_store import MbMetadataStore
-from plex_playlist_sync.models import LibraryAlbum, LibraryArtist
-from plex_playlist_sync.storage import Database
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.discovery import DiscoveryClient
+from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.config import Config
+from trackseerr.mb_metadata_store import MbMetadataStore
+from trackseerr.models import LibraryAlbum, LibraryArtist
+from trackseerr.storage import Database
 from starlette.testclient import TestClient
 
 pytestmark = pytest.mark.real_mbid_enricher
@@ -733,7 +733,7 @@ def test_source_unavailable_not_stamped_and_sweep_aborts(test_db: Database):
     result has aborted_source_unavailable.
     """
     import time
-    from plex_playlist_sync.clients.mbid_enricher import _extract_host
+    from trackseerr.clients.mbid_enricher import _extract_host
 
     store = MbMetadataStore(test_db)
     client = MbidEnricherClient(store=store)

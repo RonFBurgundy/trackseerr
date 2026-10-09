@@ -15,8 +15,8 @@ from pathlib import Path
 import mutagen
 import pytest
 
-from plex_playlist_sync.library import embed_album_artwork, inspect_audio_file
-from plex_playlist_sync.library_scanner import extract_embedded_cover_art
+from trackseerr.library import embed_album_artwork, inspect_audio_file
+from trackseerr.library_scanner import extract_embedded_cover_art
 
 from .conftest import configure_roots, run_scan, snapshot
 

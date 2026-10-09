@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from plex_playlist_sync import itunes_import as imp
+from trackseerr import itunes_import as imp
 
 from .conftest import MINI_SET, run_scan
 

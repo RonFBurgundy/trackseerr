@@ -13,13 +13,13 @@ from typing import Any, Iterator
 import httpx
 import pytest
 
-from plex_playlist_sync.media_servers import (
+from trackseerr.media_servers import (
     MediaServerAuthError,
     MediaServerError,
     PlaylistSyncOptions,
     SubsonicMediaServer,
 )
-from plex_playlist_sync.models import Playlist, Track
+from trackseerr.models import Playlist, Track
 from tests.integration.navidrome.make_music import TRACKS
 
 pytestmark = pytest.mark.integration

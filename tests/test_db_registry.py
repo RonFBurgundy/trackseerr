@@ -2,8 +2,8 @@
 
 import pytest
 
-from plex_playlist_sync.api import dependencies as deps
-from plex_playlist_sync.storage import Database
+from trackseerr.api import dependencies as deps
+from trackseerr.storage import Database
 
 
 @pytest.fixture

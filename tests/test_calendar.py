@@ -28,16 +28,16 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 import pytest
 
-from plex_playlist_sync import lidarr_library
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.artist_refresh import refresh_single_artist
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.discovery import DiscoveryClient
-from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import LibraryAlbum, LibraryArtist, LibraryFile, LibraryTrack
-from plex_playlist_sync.storage import Database
+from trackseerr import lidarr_library
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.artist_refresh import refresh_single_artist
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.discovery import DiscoveryClient
+from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.config import Config
+from trackseerr.models import LibraryAlbum, LibraryArtist, LibraryFile, LibraryTrack
+from trackseerr.storage import Database
 
 FEED_TOKEN = "test-feed-token-secret-xyz"
 LIDARR_API_KEY = "lidarr-key-123456"
@@ -518,7 +518,7 @@ class TestCalendarLidarrMode:
         start = (today - timedelta(days=10)).isoformat()
         end = (today + timedelta(days=10)).isoformat()
 
-        with patch("plex_playlist_sync.lidarr_library.snapshot", side_effect=fake_snapshot):
+        with patch("trackseerr.lidarr_library.snapshot", side_effect=fake_snapshot):
             # 1. unmonitored=false
             resp = client.get(f"/api/calendar?start={start}&end={end}", headers=admin_headers)
             assert resp.status_code == 200
@@ -736,7 +736,7 @@ class TestCalendarArtistRefreshRetention:
         mock_discovery = MagicMock(spec=DiscoveryClient)
         mock_discovery.search.return_value = []
 
-        with patch("plex_playlist_sync.mediacover.mediacover_service.ensure_artwork", return_value=None):
+        with patch("trackseerr.mediacover.mediacover_service.ensure_artwork", return_value=None):
             res = refresh_single_artist(
                 artist_id=artist_id,
                 db=test_db,

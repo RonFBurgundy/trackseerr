@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from plex_playlist_sync.library import inspect_audio_file, write_audio_tags
-from plex_playlist_sync.quality import parse_release_title
+from trackseerr.library import inspect_audio_file, write_audio_tags
+from trackseerr.quality import parse_release_title
 
 from .conftest import audio_files, configure_roots, copy_media, run_scan, snapshot
 

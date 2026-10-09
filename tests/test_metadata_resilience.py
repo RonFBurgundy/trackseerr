@@ -10,12 +10,12 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 import requests
 
-from plex_playlist_sync.clients.discovery import (
+from trackseerr.clients.discovery import (
     DiscoveryClient,
     _reset_deezer_pacer,
 )
-from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
-from plex_playlist_sync.mb_metadata_store import (
+from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.mb_metadata_store import (
     MbMetadataStore,
     get_shared_discovery_client,
     get_shared_enricher,
@@ -23,7 +23,7 @@ from plex_playlist_sync.mb_metadata_store import (
     reset_shared_discovery_client,
     reset_shared_enricher,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 pytestmark = pytest.mark.real_mbid_enricher
 

@@ -1,1 +1,1 @@
-"""Tests package for plex-playlist-sync."""
+"""Tests package for trackseerr."""

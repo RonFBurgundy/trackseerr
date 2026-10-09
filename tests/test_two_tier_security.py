@@ -10,15 +10,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import internal_auth
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, has_permission
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.core_client import CoreClient, ProxyResponse
-from plex_playlist_sync.cli import main
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import UserPermission
-from plex_playlist_sync.storage import Database
+from trackseerr import internal_auth
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, has_permission
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.core_client import CoreClient, ProxyResponse
+from trackseerr.cli import main
+from trackseerr.config import Config
+from trackseerr.models import UserPermission
+from trackseerr.storage import Database
 
 SECRET = "s" * 40
 
@@ -533,7 +533,7 @@ def test_gateway_core_unreachable_is_502(gateway):
 
 
 def test_gateway_allowlist_includes_mixes_and_excludes_webhook():
-    from plex_playlist_sync.api import tier_middleware as tm
+    from trackseerr.api import tier_middleware as tm
 
     assert tm._allowed(tm.GATEWAY_FORWARD_ALLOWLIST, "DELETE", "/api/mixes/a/b")
     assert not tm._allowed(tm.GATEWAY_FORWARD_ALLOWLIST, "POST", "/api/scrobbles/plex")
@@ -652,7 +652,7 @@ def test_create_app_without_config_reads_env(monkeypatch):
     ],
 )
 def test_redirect_location_filtering(value, expected):
-    from plex_playlist_sync.api.tier_middleware import _safe_location
+    from trackseerr.api.tier_middleware import _safe_location
 
     assert _safe_location(value, "http://core.internal:5251") == expected
 

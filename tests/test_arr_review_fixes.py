@@ -7,16 +7,16 @@ from unittest.mock import patch
 
 import pytest
 
-from plex_playlist_sync.acquisition_coordinator import _to_quality_profile
-from plex_playlist_sync.backlog_worker import _current_floor
-from plex_playlist_sync.decision_engine import DurationInfo, resolve_durations, upgrade_floor
-from plex_playlist_sync.quality import evaluate_release, parse_release_title
-from plex_playlist_sync.quality_defaults import (
+from trackseerr.acquisition_coordinator import _to_quality_profile
+from trackseerr.backlog_worker import _current_floor
+from trackseerr.decision_engine import DurationInfo, resolve_durations, upgrade_floor
+from trackseerr.quality import evaluate_release, parse_release_title
+from trackseerr.quality_defaults import (
     V51_NEW_QUALITIES,
     legacy_cutoff_for_entries,
     legacy_items_to_entries,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 from tests.test_library_scanner import db, scanner  # noqa: F401
 from tests.test_metadata_profiles import (  # noqa: F401
@@ -236,7 +236,7 @@ def test_library_scan_treats_cutoff_format_score_as_met(db, scanner, tmp_path: P
         "codec": "FLAC", "bitrate": 900000, "sample_rate": 44100, "bits_per_sample": 16,
         "quality_full": "FLAC 16bit 44.1kHz", "file_path": str(f.resolve()),
     }
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", return_value=meta):
+    with patch("trackseerr.library_scanner.inspect_audio_file", return_value=meta):
         assert scanner.scan(db, root_folder=str(tmp_path / "music"))["status"] == "completed"
     row = db.get_library_file_by_path(str(f.resolve()))
     assert row is not None and row["cutoff_met"] is True

@@ -7,13 +7,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker
-from plex_playlist_sync.naming import build_track_path
-from plex_playlist_sync.recycle_bin import RECYCLE_DIRNAME
-from plex_playlist_sync.models import (
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.naming import build_track_path
+from trackseerr.recycle_bin import RECYCLE_DIRNAME
+from trackseerr.models import (
     ActiveDownload, DownloadClientConfig, DownloadDriverType, DownloadStatus, MediaIssue, MusicRequest, RequestStatus,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 from tests.audio_fixtures import write_flac, write_mp3
 
 
@@ -73,9 +73,9 @@ def _run_import(db, tmp_path, *, replacement, old_path_factory, rename_error=Non
             raise OSError(rename_error, "Invalid cross-device link")
         return real_rename(src, dst)
 
-    with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=driver), \
-         patch("plex_playlist_sync.acquisition_worker.inspect_audio_file", return_value=_meta(dl_file, ext)), \
-         patch("plex_playlist_sync.recycle_bin.os.rename", side_effect=fake_rename):
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_worker.inspect_audio_file", return_value=_meta(dl_file, ext)), \
+         patch("trackseerr.recycle_bin.os.rename", side_effect=fake_rename):
         stats = AcquisitionWorker().poll_once(db=db, plex_client=MagicMock(), staging_dir=str(downloads))
     assert stats["imported"] == 1
     return downloads, music, old
@@ -149,7 +149,7 @@ def test_same_path_overwrite_recycles_old_bytes_first(db, tmp_path):
 
 
 def test_name_clash_in_recycle_bin_gets_numeric_suffix(db, tmp_path):
-    from plex_playlist_sync.recycle_bin import dispose_replaced_file
+    from trackseerr.recycle_bin import dispose_replaced_file
     from datetime import date
 
     music = tmp_path / "music"
@@ -238,7 +238,7 @@ def test_path_under_client_root_is_never_moved(db, tmp_path):
 
 
 def test_client_roots_of_other_clients_are_protected(db, tmp_path):
-    from plex_playlist_sync.recycle_bin import dispose_replaced_file
+    from trackseerr.recycle_bin import dispose_replaced_file
 
     music = tmp_path / "music"
     other_root = music / "torrents-inside-library"  # a second client's folder that overlaps the library tree
@@ -250,7 +250,7 @@ def test_client_roots_of_other_clients_are_protected(db, tmp_path):
 
 
 def test_symlink_escaping_library_is_not_moved(db, tmp_path):
-    from plex_playlist_sync.recycle_bin import dispose_replaced_file
+    from trackseerr.recycle_bin import dispose_replaced_file
 
     music, outside = tmp_path / "music", tmp_path / "outside"
     music.mkdir(), outside.mkdir()

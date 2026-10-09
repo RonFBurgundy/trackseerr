@@ -6,15 +6,15 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import media_server
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_media_client, get_plex_client
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config, ConfigError, get_media_server_overlay, set_media_server_overlay
-from plex_playlist_sync.media_servers import SubsonicMediaServer, build_subsonic, capabilities_for
-from plex_playlist_sync.media_servers import settings as ms_settings
-from plex_playlist_sync.role_guard import GATEWAY_FORBIDDEN_ENV, check_role_environment, core_like_reasons
-from plex_playlist_sync.storage import Database
+from trackseerr import media_server
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_media_client, get_plex_client
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config, ConfigError, get_media_server_overlay, set_media_server_overlay
+from trackseerr.media_servers import SubsonicMediaServer, build_subsonic, capabilities_for
+from trackseerr.media_servers import settings as ms_settings
+from trackseerr.role_guard import GATEWAY_FORBIDDEN_ENV, check_role_environment, core_like_reasons
+from trackseerr.storage import Database
 from tests.subsonic_fake import FakeSubsonic, default_state
 
 URL = "http://navidrome:4533"
@@ -281,7 +281,7 @@ def fake_server(monkeypatch):
     def factory(*a, **kw):
         return real(*a, transport=fake.transport(), sleep=lambda _s: None, **kw)
 
-    monkeypatch.setattr("plex_playlist_sync.api.routes.settings.SubsonicMediaServer", factory)
+    monkeypatch.setattr("trackseerr.api.routes.settings.SubsonicMediaServer", factory)
     return fake
 
 
@@ -315,7 +315,7 @@ def test_status_endpoint_reports_subsonic(env):
     fake = FakeSubsonic(default_state([]))
     fake.state.users["u"] = fake.state.users["admin"].__class__("u", True, "p")
     adapter = SubsonicMediaServer(URL, "u", "p", transport=fake.transport(), sleep=lambda _s: None)
-    with patch("plex_playlist_sync.api.routes.system.build_subsonic", return_value=adapter):
+    with patch("trackseerr.api.routes.system.build_subsonic", return_value=adapter):
         body = env.tc.get("/api/system/media-server").json()
     assert body == {
         "type": "subsonic",
@@ -327,7 +327,7 @@ def test_status_endpoint_reports_subsonic(env):
 def test_status_endpoint_subsonic_unreachable(env):
     env.cfg.media_server = "subsonic"
     env.cfg.subsonic_url, env.cfg.subsonic_user, env.cfg.subsonic_password = URL, "u", "p"
-    with patch("plex_playlist_sync.api.routes.system.build_subsonic", return_value=None):
+    with patch("trackseerr.api.routes.system.build_subsonic", return_value=None):
         body = env.tc.get("/api/system/media-server").json()
     assert body["type"] == "subsonic" and body["connected"] is False
 
@@ -338,7 +338,7 @@ def test_generic_search_route_works_on_subsonic(env):
     fake = FakeSubsonic(default_state([("Song A", "Artist 1", "Album X")]))
     fake.state.users["u"] = fake.state.users["admin"].__class__("u", True, "p")
     adapter = SubsonicMediaServer(URL, "u", "p", transport=fake.transport(), sleep=lambda _s: None)
-    with patch("plex_playlist_sync.api.dependencies.build_subsonic", return_value=adapter):
+    with patch("trackseerr.api.dependencies.build_subsonic", return_value=adapter):
         res = env.tc.get("/api/missing/search", params={"query": "song"}, headers=env.admin)
     assert res.status_code == 200 and [t["title"] for t in res.json()] == ["Song A"]
 
@@ -347,6 +347,6 @@ def test_plex_only_routes_do_not_get_a_subsonic_client(env):
     env.app.dependency_overrides.pop(get_plex_client, None)
     env.cfg.media_server = "subsonic"
     env.cfg.subsonic_url, env.cfg.subsonic_user, env.cfg.subsonic_password = URL, "u", "p"
-    from plex_playlist_sync.api.dependencies import get_plex_client as real_get_plex_client
+    from trackseerr.api.dependencies import get_plex_client as real_get_plex_client
 
     assert real_get_plex_client(env.cfg) is None  # plex_enabled is False whenever Subsonic is the active server

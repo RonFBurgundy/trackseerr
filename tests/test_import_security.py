@@ -10,12 +10,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from plex_playlist_sync import library
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker, place_audio_file
-from plex_playlist_sync.import_security import check_magic, quarantine_files, verify_files
-from plex_playlist_sync.library import ArchiveLimitError, extract_archive
-from plex_playlist_sync.models import ActiveDownload, DownloadClientConfig, DownloadDriverType, DownloadStatus
-from plex_playlist_sync.storage import Database
+from trackseerr import library
+from trackseerr.acquisition_worker import AcquisitionWorker, place_audio_file
+from trackseerr.import_security import check_magic, quarantine_files, verify_files
+from trackseerr.library import ArchiveLimitError, extract_archive
+from trackseerr.models import ActiveDownload, DownloadClientConfig, DownloadDriverType, DownloadStatus
+from trackseerr.storage import Database
 
 PAD = b"\x00" * 32
 
@@ -132,12 +132,12 @@ def test_verify_files_probe_parse_once_and_magic_failure_not_parsed(tmp_path):
     fake_audio = MagicMock()
     fake_audio.info.length = 10.0
     fake_audio.info.bitrate = 320000
-    with patch("plex_playlist_sync.import_quality_check.mutagen.File", return_value=fake_audio) as mf:
+    with patch("trackseerr.import_quality_check.mutagen.File", return_value=fake_audio) as mf:
         probes: dict = {}
         res = verify_files([good, bad], probes)
         assert mf.call_count == 1  # only the magic-clean file is parsed
         # check_files reuses the shared probe: no second parse
-        from plex_playlist_sync.import_quality_check import check_files
+        from trackseerr.import_quality_check import check_files
 
         check_files([good], "warn", {}, probes=probes)
         assert mf.call_count == 1
@@ -174,9 +174,9 @@ def _run(tmp_path, mode, files: dict[str, bytes], mutagen_result, driver_type=Do
                                       "speed_bps": 0, "eta_seconds": 0, "source_path": str(rel), "error_message": None}
     meta = {"artist": "Artist X", "title": "Song", "album": "Album X", "file_path": str(paths[0]), "extension": ".mp3",
             "track_number": 1, "year": 2020, "disc_number": 1, "total_discs": 1}
-    with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=driver), patch(
-        "plex_playlist_sync.acquisition_worker.inspect_audio_file", return_value=meta
-    ), patch("plex_playlist_sync.import_quality_check.mutagen.File", return_value=mutagen_result):
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), patch(
+        "trackseerr.acquisition_worker.inspect_audio_file", return_value=meta
+    ), patch("trackseerr.import_quality_check.mutagen.File", return_value=mutagen_result):
         stats = AcquisitionWorker().poll_once(db=db, plex_client=MagicMock(), staging_dir=str(downloads))
     return db, stats, paths, downloads, music
 
@@ -288,7 +288,7 @@ def test_place_copy_fallback_clears_exec_bits(tmp_path):
     src = tmp_path / "s.flac"
     src.write_bytes(b"fLaC")
     os.chmod(src, 0o755)
-    with patch("plex_playlist_sync.acquisition_worker.os.link", side_effect=OSError("EXDEV")):
+    with patch("trackseerr.acquisition_worker.os.link", side_effect=OSError("EXDEV")):
         dst = place_audio_file(src, tmp_path / "lib" / "d.flac", mode="hardlink")
     assert dst.stat().st_ino != src.stat().st_ino  # a real copy
     assert stat.S_IMODE(dst.stat().st_mode) == 0o644
@@ -429,7 +429,7 @@ def test_worker_archive_limit_records_event_and_fails(tmp_path):
     driver = MagicMock()
     driver.get_status.return_value = {"status": DownloadStatus.COMPLETED.value, "progress": 100.0, "size_bytes": 1,
                                       "speed_bps": 0, "eta_seconds": 0, "source_path": str(arc), "error_message": None}
-    with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=driver), patch.object(
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), patch.object(
         library, "MAX_ARCHIVE_UNCOMPRESSED_BYTES", 1
     ):
         stats = AcquisitionWorker().poll_once(db=db, plex_client=MagicMock(), staging_dir=str(downloads))

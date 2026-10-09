@@ -7,17 +7,17 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.library_scanner import LibraryScanner
-from plex_playlist_sync.models import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.library_scanner import LibraryScanner
+from trackseerr.models import (
     DownloadClientConfig, DownloadDriverType, LibraryAlbum, LibraryArtist, LibraryFile, LibraryTrack, MediaIssue,
 )
-from plex_playlist_sync.naming import build_track_path
-from plex_playlist_sync.recycle_bin import RECYCLE_DIRNAME
-from plex_playlist_sync.storage import Database
+from trackseerr.naming import build_track_path
+from trackseerr.recycle_bin import RECYCLE_DIRNAME
+from trackseerr.storage import Database
 from tests.audio_fixtures import flac_bytes
 
 
@@ -86,7 +86,7 @@ def _write(path: Path, data: bytes) -> Path:
 
 
 def _commit(client, headers, items, **extra):
-    with patch("plex_playlist_sync.api.routes.library.manual_import.inspect_audio_file", return_value=dict(META)):
+    with patch("trackseerr.api.routes.library.manual_import.inspect_audio_file", return_value=dict(META)):
         resp = client.post("/api/library/manual-import/commit", json={"items": items, **extra}, headers=headers)
     assert resp.status_code == 200, resp.text
     return resp.json()
@@ -136,7 +136,7 @@ def test_same_path_placement_failure_restores_old_file(tmp_path, db, client, hea
     _write(target, b"OLDBYTES")
     _row(db, "f-old", "trk-1", target)
     src = _write(staging / "new.flac", flac_bytes())
-    with patch("plex_playlist_sync.api.routes.library.manual_import.place_audio_file", side_effect=OSError("boom")):
+    with patch("trackseerr.api.routes.library.manual_import.place_audio_file", side_effect=OSError("boom")):
         out = _commit(client, headers, [_item(src)])
     assert out["failed_count"] == 1
     assert target.read_bytes() == b"OLDBYTES" and _bin_files(music) == []
@@ -200,8 +200,8 @@ def test_hardlinked_old_file_recycled_client_copy_untouched(tmp_path, db, client
     os.link(seed, old)
     _row(db, "f-old", "trk-1", old)
     src = _write(staging / "new.flac", flac_bytes())
-    with patch("plex_playlist_sync.api.routes.library.manual_import.allowed_roots_for_all_clients") as roots:
-        from plex_playlist_sync.download_roots import AllowedRoots
+    with patch("trackseerr.api.routes.library.manual_import.allowed_roots_for_all_clients") as roots:
+        from trackseerr.download_roots import AllowedRoots
         roots.return_value = AllowedRoots(roots=[downloads.resolve()])
         out = _commit(client, headers, [_item(src)])
     assert out["imported_count"] == 1, out
@@ -215,8 +215,8 @@ def test_old_file_under_client_root_is_kept_not_moved(tmp_path, db, client, head
     old = _write(music / "wrong" / "old.mp3", b"OLD")
     _row(db, "f-old", "trk-1", old)
     src = _write(staging / "new.flac", flac_bytes())
-    from plex_playlist_sync.download_roots import AllowedRoots
-    with patch("plex_playlist_sync.api.routes.library.manual_import.allowed_roots_for_all_clients",
+    from trackseerr.download_roots import AllowedRoots
+    with patch("trackseerr.api.routes.library.manual_import.allowed_roots_for_all_clients",
                return_value=AllowedRoots(roots=[(music / "wrong").resolve()])):
         out = _commit(client, headers, [_item(src)])
     assert out["imported_count"] == 1
@@ -263,8 +263,8 @@ def test_scanner_never_lists_excluded_dirs_and_finds_same_files(tmp_path, db):
             listed.append(root)
             yield root, dirs, files
 
-    with patch("plex_playlist_sync.library_scanner.os.walk", side_effect=spy_walk), \
-            patch("plex_playlist_sync.library_scanner.inspect_audio_file", side_effect=_fake_inspect):
+    with patch("trackseerr.library_scanner.os.walk", side_effect=spy_walk), \
+            patch("trackseerr.library_scanner.inspect_audio_file", side_effect=_fake_inspect):
         status = LibraryScanner().scan(db, root_folder=str(music))
     assert status["total_files_found"] == 3
     assert not any(RECYCLE_DIRNAME in r or "_quarantine" in r or "quarantine" in r for r in listed)

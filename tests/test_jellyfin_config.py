@@ -6,15 +6,15 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import media_server
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_media_client, get_plex_client
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config, ConfigError, set_media_server_overlay
-from plex_playlist_sync.media_servers import JellyfinMediaServer, build_jellyfin, build_media_server, capabilities_for
-from plex_playlist_sync.media_servers import settings as ms_settings
-from plex_playlist_sync.role_guard import GATEWAY_FORBIDDEN_ENV, check_role_environment, core_like_reasons
-from plex_playlist_sync.storage import Database
+from trackseerr import media_server
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_media_client, get_plex_client
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config, ConfigError, set_media_server_overlay
+from trackseerr.media_servers import JellyfinMediaServer, build_jellyfin, build_media_server, capabilities_for
+from trackseerr.media_servers import settings as ms_settings
+from trackseerr.role_guard import GATEWAY_FORBIDDEN_ENV, check_role_environment, core_like_reasons
+from trackseerr.storage import Database
 from tests.jellyfin_fake import API_KEY, FakeJellyfin, default_state
 
 URL = "http://jellyfin:8096"
@@ -200,7 +200,7 @@ def test_test_connection_ok_and_bad_key(env, monkeypatch):
     fake = FakeJellyfin(default_state([]))
     real = JellyfinMediaServer
     monkeypatch.setattr(
-        "plex_playlist_sync.api.routes.settings.JellyfinMediaServer",
+        "trackseerr.api.routes.settings.JellyfinMediaServer",
         lambda *a, **kw: real(*a, transport=fake.transport(), sleep=lambda _s: None, **kw),
     )
     ok = env.tc.post("/api/settings/media-server/test", json={**BODY, "api_key": API_KEY}, headers=env.admin).json()
@@ -214,7 +214,7 @@ def test_status_endpoint_reports_jellyfin_capabilities(env):
     env.cfg.media_server, env.cfg.jellyfin_url, env.cfg.jellyfin_api_key = "jellyfin", URL, API_KEY
     fake = FakeJellyfin(default_state([]))
     adapter = JellyfinMediaServer(URL, API_KEY, transport=fake.transport(), sleep=lambda _s: None)
-    with patch("plex_playlist_sync.api.routes.system.build_jellyfin", return_value=adapter):
+    with patch("trackseerr.api.routes.system.build_jellyfin", return_value=adapter):
         body = env.tc.get("/api/system/media-server").json()
     assert body == {
         "type": "jellyfin",
@@ -225,7 +225,7 @@ def test_status_endpoint_reports_jellyfin_capabilities(env):
 
 def test_status_endpoint_unreachable(env):
     env.cfg.media_server, env.cfg.jellyfin_url, env.cfg.jellyfin_api_key = "jellyfin", URL, "k"
-    with patch("plex_playlist_sync.api.routes.system.build_jellyfin", return_value=None):
+    with patch("trackseerr.api.routes.system.build_jellyfin", return_value=None):
         body = env.tc.get("/api/system/media-server").json()
     assert body["type"] == "jellyfin" and body["connected"] is False
 
@@ -245,7 +245,7 @@ def test_user_refresh_discovers_jellyfin_users(env):
 
 
 def test_discover_media_server_users_populates_the_user_table():
-    from plex_playlist_sync.cli import _discover_media_server_users
+    from trackseerr.cli import _discover_media_server_users
 
     db = Database(":memory:")
     fake = FakeJellyfin(default_state([]))
@@ -259,7 +259,7 @@ def test_discover_media_server_users_populates_the_user_table():
 
 
 def test_discover_media_server_users_survives_an_unreachable_server():
-    from plex_playlist_sync.cli import _discover_media_server_users
+    from trackseerr.cli import _discover_media_server_users
 
     db = Database(":memory:")
     adapter = JellyfinMediaServer(URL, "wrong-key", transport=FakeJellyfin(default_state([])).transport(), sleep=lambda _s: None)

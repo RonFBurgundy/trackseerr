@@ -8,7 +8,7 @@ no-op made those loops hot, and each pass allocated (log records, mock call reco
 import threading
 from unittest.mock import MagicMock, patch
 
-from plex_playlist_sync import cli
+from trackseerr import cli
 from tests.lidarr_fake import FastClock
 
 
@@ -59,11 +59,11 @@ def test_fast_clock_finishes_a_cooldown_loop_without_waiting():
 
 def test_interval_workers_wait_on_their_stop_event_not_time_sleep():
     """Worker loops that sleep between ticks must use ``Event.wait``; a no-op ``time.sleep`` would make them hot."""
-    from plex_playlist_sync.backlog_worker import RSSSyncWorker
-    from plex_playlist_sync.pending_worker import PendingReleaseWorker
+    from trackseerr.backlog_worker import RSSSyncWorker
+    from trackseerr.pending_worker import PendingReleaseWorker
 
     workers = [PendingReleaseWorker(), RSSSyncWorker()]
-    with patch("time.sleep") as fake_sleep, patch("plex_playlist_sync.pending_worker.release_due") as rd:
+    with patch("time.sleep") as fake_sleep, patch("trackseerr.pending_worker.release_due") as rd:
         rd.return_value = {"released": 0}
         for w in workers:
             w.start(MagicMock(), 3600)

@@ -8,22 +8,22 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.item_history import GrabTrigger
-from plex_playlist_sync import delay_gate, pending_worker
-from plex_playlist_sync.acquisition_coordinator import AcquisitionCoordinator
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.backlog_worker import RSSSyncWorker
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.decision_engine import PROTOCOL_PREFERENCE, rank_key
-from plex_playlist_sync.models import (
+from trackseerr.item_history import GrabTrigger
+from trackseerr import delay_gate, pending_worker
+from trackseerr.acquisition_coordinator import AcquisitionCoordinator
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.backlog_worker import RSSSyncWorker
+from trackseerr.config import Config
+from trackseerr.decision_engine import PROTOCOL_PREFERENCE, rank_key
+from trackseerr.models import (
     AcquisitionSearchResult,
     EvaluationResult,
     MusicRequest,
     RequestStatus,
 )
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr.storage import SCHEMA_VERSION, Database
 
 HQ = "profile-high-quality"  # FLAC 24/16, MP3 320, AAC 256, MP3 V0 allowed; FLAC 24bit is the top tier
 DP = "/api/settings/delay-profiles"
@@ -101,7 +101,7 @@ def grab(db, candidates, **kw):
     driver = MagicMock()
     driver.download.return_value = HASH
     with patch.object(coord, "search_all_indexers", return_value=candidates), patch(
-        "plex_playlist_sync.acquisition_coordinator.get_acquisition_driver", return_value=driver
+        "trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=driver
     ):
         res = coord.search_and_grab(
             artist="Nirvana", title="Nevermind", album="Nevermind", db=db, quality_profile_id=HQ,
@@ -227,7 +227,7 @@ def test_delay_holds_then_releases_on_tick(db, clients, clock):
     clock.advance(30)
     driver = MagicMock()
     driver.download.return_value = HASH
-    with patch("plex_playlist_sync.acquisition_coordinator.get_acquisition_driver", return_value=driver):
+    with patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=driver):
         assert pending_worker.release_due(db, now=clock.now) == {"due": 0, "released": 0, "failed": 0, "dropped": 0}
         assert len(db.list_pending_releases()) == 1
         clock.advance(31)
@@ -327,8 +327,8 @@ def test_rss_holds_release_behind_delay(db, clients, clock):
     idx.fetch_recent.return_value = [cand("Nirvana - Nevermind (1991) [FLAC 16bit]")]
     client = MagicMock()
     client.download.return_value = HASH
-    with patch("plex_playlist_sync.backlog_worker.get_indexer_driver", return_value=idx), patch(
-        "plex_playlist_sync.backlog_worker.get_acquisition_driver", return_value=client
+    with patch("trackseerr.backlog_worker.get_indexer_driver", return_value=idx), patch(
+        "trackseerr.backlog_worker.get_acquisition_driver", return_value=client
     ):
         stats = RSSSyncWorker().poll_once(db)
     assert stats["grabs_triggered"] == 0
@@ -508,7 +508,7 @@ def test_pending_grab_now(api, db, clients, clock):
     assert client.post(f"{PEND}/99999/grab", headers=admin).status_code == 404
     driver = MagicMock()
     driver.download.return_value = HASH
-    with patch("plex_playlist_sync.acquisition_coordinator.get_acquisition_driver", return_value=driver):
+    with patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=driver):
         r = client.post(f"{PEND}/{row['id']}/grab", headers=admin)
     assert r.status_code == 200 and r.json()["success"] is True and r.json()["download_id"]
     driver.download.assert_called_once()
@@ -536,7 +536,7 @@ def test_manual_search_orders_by_rank_key_with_profile_protocol(api, db):
     ]
 
     def order():
-        with patch("plex_playlist_sync.api.routes.acquisition.acquisition_coordinator.search_all_indexers", return_value=candidates):
+        with patch("trackseerr.api.routes.acquisition.acquisition_coordinator.search_all_indexers", return_value=candidates):
             r = client.post("/api/acquisition/search", json={"artist": "Nirvana", "title": "Nevermind", "quality_profile_id": HQ}, headers=admin)
         assert r.status_code == 200, r.text
         return [x["id"] for x in r.json()["results"]]
@@ -555,8 +555,8 @@ def test_manual_search_sort_key_is_rank_key(api, db):
         cand("Nirvana - Nevermind [FLAC 24bit]", "torrent", 1, "flac24"),
         cand("Nirvana - Nevermind [MP3 128]", "usenet", None, "bad"),
     ]
-    with patch("plex_playlist_sync.api.routes.acquisition.acquisition_coordinator.search_all_indexers", return_value=candidates), \
-         patch("plex_playlist_sync.api.routes.acquisition.candidate_rank", wraps=__import__("plex_playlist_sync.acquisition_coordinator", fromlist=["x"]).candidate_rank) as spy:
+    with patch("trackseerr.api.routes.acquisition.acquisition_coordinator.search_all_indexers", return_value=candidates), \
+         patch("trackseerr.api.routes.acquisition.candidate_rank", wraps=__import__("trackseerr.acquisition_coordinator", fromlist=["x"]).candidate_rank) as spy:
         r = client.post("/api/acquisition/search", json={"artist": "Nirvana", "title": "Nevermind", "quality_profile_id": HQ}, headers=admin)
     ids = [x["id"] for x in r.json()["results"]]
     assert ids[0] == "flac24" and ids[-1] == "bad"
@@ -579,7 +579,7 @@ def test_manual_grab_endpoint_bypasses_delay_and_clears_pending(api, db, clients
     }
     driver = MagicMock()
     driver.download.return_value = HASH
-    with patch("plex_playlist_sync.api.routes.acquisition.get_acquisition_driver", return_value=driver):
+    with patch("trackseerr.api.routes.acquisition.get_acquisition_driver", return_value=driver):
         r = client.post("/api/acquisition/grab", json=payload, headers=admin)
     assert r.status_code == 200 and r.json()["success"] is True
     driver.download.assert_called_once()

@@ -3,9 +3,9 @@
 import json
 from unittest.mock import patch
 
-from plex_playlist_sync import recycle_bin as rb
-from plex_playlist_sync import seed_cleanup as sc
-from plex_playlist_sync.models import DownloadStatus
+from trackseerr import recycle_bin as rb
+from trackseerr import seed_cleanup as sc
+from trackseerr.models import DownloadStatus
 from tests._rm_helpers import admin, alice, client, config, db, ok  # noqa: F401
 
 
@@ -84,9 +84,9 @@ def test_library_health_full_flow(client, db, admin, alice):
 def test_library_health_with_media_server_and_check(client, db, admin):
     from types import SimpleNamespace
 
-    from plex_playlist_sync.api.app import create_app  # noqa: F401
-    from plex_playlist_sync.api.dependencies import get_active_media_server
-    from plex_playlist_sync import library_health as lh
+    from trackseerr.api.app import create_app  # noqa: F401
+    from trackseerr.api.dependencies import get_active_media_server
+    from trackseerr import library_health as lh
 
     server = SimpleNamespace(kind="plex", capabilities=SimpleNamespace(file_paths=True))
     client.app.dependency_overrides[get_active_media_server] = lambda: server
@@ -106,5 +106,5 @@ def test_queue_list_and_cancel(client, db, admin):
     })
     items = ok(client.get("/api/queue", headers=admin))
     assert items[0]["client_name"] == "qbit" and items[0]["status"] == "downloading"
-    with patch("plex_playlist_sync.api.routes.queue.get_acquisition_driver"):
+    with patch("trackseerr.api.routes.queue.get_acquisition_driver"):
         assert ok(client.delete("/api/queue/dl-1", headers=admin)) == {"status": "cancelled", "id": "dl-1"}

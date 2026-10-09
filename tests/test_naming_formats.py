@@ -3,11 +3,11 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.naming import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.naming import (
     PRESETS,
     build_track_path,
     legacy_to_track_formats,
@@ -15,7 +15,7 @@ from plex_playlist_sync.naming import (
     split_template_segments,
     validate_format,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 META = {
     "artist": "The Beatles",
@@ -233,7 +233,7 @@ class TestArtistTokens:
         assert render_template("{Artist Name}{ [Artist Genre]}", META) == "The Beatles"
 
     def test_every_token_is_documented(self):
-        from plex_playlist_sync.naming import SUPPORTED_TOKENS, TOKEN_HELP
+        from trackseerr.naming import SUPPORTED_TOKENS, TOKEN_HELP
 
         documented = {t.strip("{}") for g in TOKEN_HELP for t, _, _ in g["tokens"]}
         assert set(SUPPORTED_TOKENS) <= documented

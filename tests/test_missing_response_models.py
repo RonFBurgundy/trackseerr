@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from plex_playlist_sync.api.dependencies import get_media_client
+from trackseerr.api.dependencies import get_media_client
 from tests._rm_helpers import admin, alice, client, config, db, ok  # noqa: F401
 
 M = "/api/missing"
@@ -47,7 +47,7 @@ def test_grab_missing_track(client, db, seeded, admin):
     delayed = {"success": False, "delayed": True, "pending_id": 4, "release_at": "2026-10-07T10:00:00+00:00", "message": "held"}
     grabbed = {"success": True, "download_id": "dl-1", "download_hash": "abc", "release": "Radiohead - Airbag", "client": "qbit", "score": 90}
     for result in (delayed, grabbed):
-        with patch("plex_playlist_sync.api.routes.missing.acquisition_coordinator.search_and_grab", return_value=result):
+        with patch("trackseerr.api.routes.missing.acquisition_coordinator.search_and_grab", return_value=result):
             assert ok(client.post(f"{M}/{track_id}/grab", headers=admin)) == result
 
 
@@ -56,5 +56,5 @@ def test_search_media_server_tracks(client, config, admin):
             {"id": "7", "rating_key": "7", "title": "Lucky", "artist": "Radiohead", "album": None, "duration": 249.0}]
     server = SimpleNamespace(search_tracks=lambda q, limit=15: hits)
     client.app.dependency_overrides[get_media_client] = lambda: object()
-    with patch("plex_playlist_sync.api.routes.missing.as_media_server", return_value=server):
+    with patch("trackseerr.api.routes.missing.as_media_server", return_value=server):
         assert ok(client.get(f"{M}/search?query=air", headers=admin)) == hits

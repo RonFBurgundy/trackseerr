@@ -8,15 +8,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.item_history import GrabTrigger
-from plex_playlist_sync import delay_gate, pending_worker
-from plex_playlist_sync.acquisition_coordinator import AcquisitionCoordinator
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import AcquisitionSearchResult, MusicRequest, RequestStatus
-from plex_playlist_sync.storage import Database
+from trackseerr.item_history import GrabTrigger
+from trackseerr import delay_gate, pending_worker
+from trackseerr.acquisition_coordinator import AcquisitionCoordinator
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.models import AcquisitionSearchResult, MusicRequest, RequestStatus
+from trackseerr.storage import Database
 
 HQ = "profile-high-quality"
 HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4"
@@ -77,7 +77,7 @@ def grab(db, candidates, **kw):
     driver = MagicMock()
     driver.download.return_value = HASH
     with patch.object(coord, "search_all_indexers", return_value=candidates), patch(
-        "plex_playlist_sync.acquisition_coordinator.get_acquisition_driver", return_value=driver
+        "trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=driver
     ):
         res = coord.search_and_grab(
             artist="Nirvana", title="Nevermind", album="Nevermind", db=db, quality_profile_id=HQ,
@@ -97,7 +97,7 @@ def tick(db, clock, minutes=0):
     clock.advance(minutes)
     driver = MagicMock()
     driver.download.return_value = HASH
-    with patch("plex_playlist_sync.acquisition_coordinator.get_acquisition_driver", return_value=driver):
+    with patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=driver):
         return pending_worker.release_due(db, now=clock.now), driver
 
 
@@ -124,7 +124,7 @@ def test_grab_pending_twice_grabs_once(db, clients, clock):
     row = park(db)
     driver = MagicMock()
     driver.download.return_value = HASH
-    with patch("plex_playlist_sync.acquisition_coordinator.get_acquisition_driver", return_value=driver):
+    with patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=driver):
         first = pending_worker.grab_pending(db, row)
         second = pending_worker.grab_pending(db, row)
     assert first["success"] is True
@@ -155,7 +155,7 @@ def test_endpoint_and_tick_race_grabs_once(db, clients, clock):
     clock.advance(61)
     driver = MagicMock()
     driver.download.return_value = HASH
-    with patch("plex_playlist_sync.acquisition_coordinator.get_acquisition_driver", return_value=driver):
+    with patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=driver):
         pending_worker.grab_pending(db, row, count_failure=False)  # endpoint wins
         stats = pending_worker.release_due(db, now=clock.now)  # tick's snapshot is empty now
     assert stats["released"] == 0
@@ -235,7 +235,7 @@ def test_manual_grab_without_request_id_clears_by_album_id(api, db, clients, clo
     }
     driver = MagicMock()
     driver.download.return_value = HASH
-    with patch("plex_playlist_sync.api.routes.acquisition.get_acquisition_driver", return_value=driver):
+    with patch("trackseerr.api.routes.acquisition.get_acquisition_driver", return_value=driver):
         r = client.post("/api/acquisition/grab", json=payload, headers=admin)
     assert r.status_code == 200
     assert db.list_pending_releases() == []

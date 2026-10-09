@@ -6,18 +6,18 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import library_manager
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.lidarr import LidarrClient, invalidate_add_defaults
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.lidarr_release import select_release_for_song
-from plex_playlist_sync.storage import Database
+from trackseerr import library_manager
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.lidarr import LidarrClient, invalidate_add_defaults
+from trackseerr.config import Config
+from trackseerr.lidarr_release import select_release_for_song
+from trackseerr.storage import Database
 from tests.lidarr_fake import FakeLidarr, metadata_profile
 
 API_KEY = "lidarr-secret-key-abcdef123456"
-HTTPX = "plex_playlist_sync.clients.lidarr.httpx.Client"
+HTTPX = "trackseerr.clients.lidarr.httpx.Client"
 SONG = "Bohemian Rhapsody"
 
 

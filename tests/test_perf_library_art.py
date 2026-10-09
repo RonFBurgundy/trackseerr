@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from plex_playlist_sync import lidarr_library
-from plex_playlist_sync.storage import Database
+from trackseerr import lidarr_library
+from trackseerr.storage import Database
 from tests.test_lidarr_library import (  # noqa: F401  (fixtures + helpers shared with the Lidarr library suite)
     API_KEY,
     Lidarr,

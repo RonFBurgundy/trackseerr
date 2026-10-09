@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from plex_playlist_sync.clients.import_lists import (
+from trackseerr.clients.import_lists import (
     PROVIDERS,
     SECRET_KEYS,
     ImportListError,
@@ -38,12 +38,12 @@ class FakeResp:
 @pytest.fixture(autouse=True)
 def _no_sleep():
     # base and musicbrainz_collection share the one ``time`` module, so a single patch covers both.
-    with patch("plex_playlist_sync.clients.import_lists.base.time.sleep") as sleep:
+    with patch("trackseerr.clients.import_lists.base.time.sleep") as sleep:
         yield sleep
 
 
 def _get(responses: list[FakeResp]):
-    return patch("plex_playlist_sync.clients.import_lists.base.requests.get", side_effect=responses)
+    return patch("trackseerr.clients.import_lists.base.requests.get", side_effect=responses)
 
 
 # ------------------------------------------------------------------ Last.fm
@@ -159,7 +159,7 @@ def test_timeouts_are_passed_and_network_errors_retried():
     import requests
 
     with patch(
-        "plex_playlist_sync.clients.import_lists.base.requests.get",
+        "trackseerr.clients.import_lists.base.requests.get",
         side_effect=[requests.ConnectionError("boom"), _lf_tracks([("T", "A", "")], 1, 1)],
     ) as get:
         lastfm.fetch({"username": "u", "api_key": "k", "source": "loved_tracks"})
@@ -364,7 +364,7 @@ def test_listenbrainz_rejects_path_traversal_usernames(name, source):
 
 def test_mb_collection_entity_probes_are_rate_limited_on_musicbrainz_org(_no_sleep):
     musicbrainz_collection._last_request_at = 0.0
-    with patch("plex_playlist_sync.clients.import_lists.musicbrainz_collection.time.monotonic", return_value=1000.0):
+    with patch("trackseerr.clients.import_lists.musicbrainz_collection.time.monotonic", return_value=1000.0):
         musicbrainz_collection._last_request_at = 1000.0  # a request was just made
         with _get([FakeResp(status=400), FakeResp(status=400), FakeResp({"release-count": 0, "releases": []})]):
             musicbrainz_collection.fetch({"collection_mbid": PL_1})

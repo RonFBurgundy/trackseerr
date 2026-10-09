@@ -13,25 +13,25 @@ import pytest
 from fastapi.testclient import TestClient
 import httpx
 
-from plex_playlist_sync.acquisition_coordinator import acquisition_coordinator
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_lidarr_client, get_plex_client
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.backlog_worker import (
+from trackseerr.acquisition_coordinator import acquisition_coordinator
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_lidarr_client, get_plex_client
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.backlog_worker import (
     WantedBacklogWorker,
     RSSSyncWorker,
     _matches_request,
 )
-from plex_playlist_sync.clients.acquisition.torznab import TorznabDriver
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import (
+from trackseerr.clients.acquisition.torznab import TorznabDriver
+from trackseerr.config import Config
+from trackseerr.models import (
     AcquisitionSearchResult,
     ActiveDownload,
     DownloadStatus,
     MusicRequest,
     RequestStatus,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 
 SAMPLE_TORZNAB_FEED_XML = """<?xml version="1.0" encoding="UTF-8"?>
@@ -421,8 +421,8 @@ class TestRSSSyncWorker:
         mock_client_driver = MagicMock()
         mock_client_driver.download.return_value = "daftpunkhash123"
 
-        with patch("plex_playlist_sync.backlog_worker.get_indexer_driver", return_value=mock_idx_driver), \
-             patch("plex_playlist_sync.backlog_worker.get_acquisition_driver", return_value=mock_client_driver):
+        with patch("trackseerr.backlog_worker.get_indexer_driver", return_value=mock_idx_driver), \
+             patch("trackseerr.backlog_worker.get_acquisition_driver", return_value=mock_client_driver):
 
             stats = worker.poll_once(test_db)
 
@@ -505,8 +505,8 @@ class TestRSSSyncWorker:
         mock_eval.is_acceptable = False
         mock_eval.rejection_reasons = ["MP3 192 not allowed in profile"]
 
-        with patch("plex_playlist_sync.backlog_worker.get_indexer_driver", return_value=mock_idx_driver), \
-             patch("plex_playlist_sync.backlog_worker.evaluate_release", return_value=mock_eval):
+        with patch("trackseerr.backlog_worker.get_indexer_driver", return_value=mock_idx_driver), \
+             patch("trackseerr.backlog_worker.evaluate_release", return_value=mock_eval):
 
             stats = worker.poll_once(test_db)
             assert stats["releases_scanned"] == 1
@@ -653,7 +653,7 @@ class TestRetryRequestEndpoint:
         test_db.create_request(req)
 
         with patch(
-            "plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle", return_value={"status": "started"}
+            "trackseerr.lidarr_queue.lidarr_worker.start_trickle", return_value={"status": "started"}
         ) as mock_trickle:
             resp = client.post("/api/requests/req-lidarr-retry/retry", headers=admin_headers)
 

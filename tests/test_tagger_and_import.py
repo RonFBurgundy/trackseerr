@@ -10,17 +10,17 @@ from fastapi.testclient import TestClient
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker, _is_safe_cover_url
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.library import (
+from trackseerr.acquisition_worker import AcquisitionWorker, _is_safe_cover_url
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.library import (
     embed_album_artwork,
     inspect_audio_file,
     write_audio_tags,
 )
-from plex_playlist_sync.models import (
+from trackseerr.models import (
     ActiveDownload,
     DownloadClientConfig,
     DownloadDriverType,
@@ -28,7 +28,7 @@ from plex_playlist_sync.models import (
     MusicRequest,
     RequestStatus,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 
 def _create_minimal_flac(path: Path) -> None:
@@ -223,7 +223,7 @@ class TestAudioTagWriter:
         mock_mp4_instance.tags = {}
         mock_mp4_instance.__setitem__ = MagicMock()
 
-        with patch("plex_playlist_sync.library.MP4", return_value=mock_mp4_instance):
+        with patch("trackseerr.library.MP4", return_value=mock_mp4_instance):
             tags = {
                 "title": "Get Lucky",
                 "artist": "Daft Punk",
@@ -259,7 +259,7 @@ class TestAudioTagWriter:
         mock_opus = MagicMock()
         mock_opus.tags = {}
 
-        with patch("plex_playlist_sync.library.OggVorbis", return_value=mock_ogg):
+        with patch("trackseerr.library.OggVorbis", return_value=mock_ogg):
             ok = write_audio_tags(
                 ogg_file,
                 tags={"title": "Song OGG", "artist": "Artist"},
@@ -268,7 +268,7 @@ class TestAudioTagWriter:
             assert ok is True
             mock_ogg.save.assert_called_once()
 
-        with patch("plex_playlist_sync.library.OggOpus", return_value=mock_opus):
+        with patch("trackseerr.library.OggOpus", return_value=mock_opus):
             ok = write_audio_tags(
                 opus_file,
                 tags={"title": "Song OPUS", "artist": "Artist"},
@@ -455,7 +455,7 @@ class TestAcquisitionWorkerTaggerImport:
 
         worker = AcquisitionWorker()
 
-        with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+        with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
             with patch("httpx.get", return_value=mock_resp) as mock_httpx:
                 stats = worker.poll_once(db=test_db, staging_dir=str(staging))
                 assert stats["imported"] == 1
@@ -551,7 +551,7 @@ class TestAcquisitionWorkerTaggerImport:
 
         worker = AcquisitionWorker()
 
-        with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+        with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
             with patch("httpx.get") as mock_httpx:
                 stats = worker.poll_once(db=test_db, staging_dir=str(staging))
                 assert stats["imported"] == 1

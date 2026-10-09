@@ -2,11 +2,11 @@
 
 from unittest.mock import patch
 
-from plex_playlist_sync.clients.lidarr import LidarrClient
+from trackseerr.clients.lidarr import LidarrClient
 from tests.lidarr_fake import FakeLidarr
 from tests.test_lidarr_add_options_race import SONG, WANT, _album, add, client_for, new_artist_fake
 
-HTTPX = "plex_playlist_sync.clients.lidarr.httpx.Client"
+HTTPX = "trackseerr.clients.lidarr.httpx.Client"
 
 
 def test_new_request_artist_added_with_monitor_new_items_none_then_monitored():
@@ -38,7 +38,7 @@ def test_existing_unmonitored_artist_becomes_monitored_other_albums_untouched():
     fake.lookup = [{"id": 5, "artistName": "Queen"}]
     fake.albums = [_album(1, "Greatest Hits"), _album(2, "Opera")]
     fake.tracks = [{"id": 2, "albumId": 2, "title": SONG}]
-    with patch(HTTPX, fake), patch("plex_playlist_sync.clients.lidarr.time.sleep"):
+    with patch(HTTPX, fake), patch("trackseerr.clients.lidarr.time.sleep"):
         res = client_for().add_artist_and_albums("Queen", wants=WANT, auto_search=True)
     assert res["status"] == "success" and res["added"] is False
     assert fake.artist_monitored is True
@@ -56,7 +56,7 @@ def test_already_monitored_artist_is_not_put_again():
     fake.lookup = [{"id": 5, "artistName": "Queen"}]
     fake.albums = [_album(2, "Opera")]
     fake.tracks = [{"id": 2, "albumId": 2, "title": SONG}]
-    with patch(HTTPX, fake), patch("plex_playlist_sync.clients.lidarr.time.sleep"):
+    with patch(HTTPX, fake), patch("trackseerr.clients.lidarr.time.sleep"):
         client_for().add_artist_and_albums("Queen", wants=WANT)
     assert fake.requests("PUT", "artist/") == []
 
@@ -67,7 +67,7 @@ def test_artist_not_touched_when_no_album_was_monitored():
     fake.lookup = [{"id": 5, "artistName": "Queen"}]
     fake.albums = [_album(1, "Greatest Hits")]
     fake.tracks = [{"id": 1, "albumId": 1, "title": "Other Song"}]
-    with patch(HTTPX, fake), patch("plex_playlist_sync.clients.lidarr.time.sleep"):
+    with patch(HTTPX, fake), patch("trackseerr.clients.lidarr.time.sleep"):
         res = client_for().add_artist_and_albums("Queen", wants=WANT)
     assert res["status"] != "success"
     assert fake.requests("PUT", "artist/") == [] and fake.artist_monitored is False
@@ -80,7 +80,7 @@ def test_artist_monitor_failure_does_not_fail_the_request():
     fake.albums = [_album(2, "Opera")]
     fake.tracks = [{"id": 2, "albumId": 2, "title": SONG}]
     fake.fail[("PUT", "artist/5")] = 500
-    with patch(HTTPX, fake), patch("plex_playlist_sync.clients.lidarr.time.sleep"):
+    with patch(HTTPX, fake), patch("trackseerr.clients.lidarr.time.sleep"):
         res = client_for().add_artist_and_albums("Queen", wants=WANT)
     assert res["status"] == "success" and res["matched_album_ids"] == [2]
 

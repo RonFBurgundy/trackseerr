@@ -7,7 +7,7 @@ import pytest
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 
-from plex_playlist_sync.library import (
+from trackseerr.library import (
     _extract_year,
     _parse_num_total,
     detect_path_collision,

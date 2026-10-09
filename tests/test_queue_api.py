@@ -4,11 +4,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.models import (
     ActiveDownload,
     DownloadClientConfig,
     DownloadDriverType,
@@ -16,7 +16,7 @@ from plex_playlist_sync.models import (
     IndexerConfig,
     MusicRequest,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -178,7 +178,7 @@ def test_download_clients_test_connection_endpoint(app_and_client, test_db, test
         "password": "pwd",
     }
 
-    with patch("plex_playlist_sync.api.routes.download_clients.get_acquisition_driver") as mock_factory:
+    with patch("trackseerr.api.routes.download_clients.get_acquisition_driver") as mock_factory:
         mock_driver = MagicMock()
         mock_driver.test_connection.return_value = (True, "slskd 0.20.0 connected")
         mock_factory.return_value = mock_driver
@@ -263,7 +263,7 @@ def test_indexers_test_endpoint(app_and_client, test_db, test_config, seeded_use
         "api_key": "secret",
     }
 
-    with patch("plex_playlist_sync.api.routes.indexers.get_indexer_driver") as mock_factory:
+    with patch("trackseerr.api.routes.indexers.get_indexer_driver") as mock_factory:
         mock_indexer = MagicMock()
         mock_indexer.test_connection.return_value = (True, "Torznab Indexer Online")
         mock_factory.return_value = mock_indexer
@@ -354,7 +354,7 @@ def test_queue_api(app_and_client, test_db, test_config, seeded_users):
     assert resp_cancel_own.status_code == 403
     assert test_db.get_active_download(alice_dl["id"]) is not None
 
-    with patch("plex_playlist_sync.api.routes.queue.get_acquisition_driver") as mock_factory:
+    with patch("trackseerr.api.routes.queue.get_acquisition_driver") as mock_factory:
         mock_driver = MagicMock()
         mock_driver.cancel.return_value = True
         mock_factory.return_value = mock_driver

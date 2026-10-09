@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import (
     get_config,
     get_current_user,
     get_current_user_or_api_key,
@@ -15,9 +15,9 @@ from plex_playlist_sync.api.dependencies import (
     get_lidarr_client,
     get_plex_client,
 )
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import Playlist, SyncResult, Track
-from plex_playlist_sync.storage import Database
+from trackseerr.config import Config
+from trackseerr.models import Playlist, SyncResult, Track
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -114,7 +114,7 @@ class TestMissingFeeds:
 class TestLidarrClientAndPush:
     """Tests for Lidarr API client and push integration."""
 
-    @patch("plex_playlist_sync.clients.lidarr.httpx.Client")
+    @patch("trackseerr.clients.lidarr.httpx.Client")
     def test_lidarr_status_endpoint(self, mock_client_cls, client, test_db):
         test_db.update_media_management_settings({"library_mode": "lidarr"})
         mock_http = MagicMock()
@@ -151,7 +151,7 @@ class TestLidarrClientAndPush:
             {"id": 1, "albumId": 5, "title": "Bohemian Rhapsody"},
             {"id": 2, "albumId": 6, "title": "Killer Queen"},
         ]
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client", fake):
+        with patch("trackseerr.clients.lidarr.httpx.Client", fake):
             data = client.post("/api/missing/lidarr/push", json={}).json()
         # two distinct songs (the remaster is the same song) -> two pushes, both tracks of the empty album covered
         assert data["total_requested"] == 3 and data["deduplicated_items"] == 2
@@ -164,14 +164,14 @@ class TestLidarrClientAndPush:
         fake = FakeLidarr()
         fake.albums = [{"id": 5, "title": "Opera", "albumType": "Album", "monitored": False}]
         fake.tracks = [{"id": 1, "albumId": 5, "title": "Love of My Life"}]
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client", fake):
+        with patch("trackseerr.clients.lidarr.httpx.Client", fake):
             client.post("/api/missing/lidarr/push", json={})
         row = test_db.get_missing_tracks()[0]
         assert row["lidarr_status"] == "unavailable" and row["attempts"] == 1 and row["next_attempt_at"]
 
         fake = FakeLidarr()
         fake.fail[("GET", "artist/lookup")] = 429
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client", fake):
+        with patch("trackseerr.clients.lidarr.httpx.Client", fake):
             client.post("/api/missing/lidarr/push", json={})
         row = test_db.get_missing_tracks()[0]
         assert row["lidarr_status"] == "rate_limited" and row["attempts"] == 2
@@ -193,7 +193,7 @@ class TestLidarrClientAndPush:
             ],
         )
 
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client", fake):
+        with patch("trackseerr.clients.lidarr.httpx.Client", fake):
             resp = client.post("/api/missing/lidarr/push", json={})
         assert resp.status_code == 200
         data = resp.json()
@@ -224,7 +224,7 @@ class TestWebhookAndSelfHealingSync:
 
     def test_self_healing_imported_playlist_resync(self, test_db, test_config):
         """Validates that imported playlists with stored tracks_json are re-evaluated and self-heal when songs are added to Plex."""
-        from plex_playlist_sync.api.routes.sync import sync_state
+        from trackseerr.api.routes.sync import sync_state
 
         # 1. Create imported playlist with tracks_json
         tracks = [
@@ -298,7 +298,7 @@ class TestLidarrTrickleWorkerAndEndpoints:
         assert "remaining_items" in data
 
         # 2. Pause when worker is running
-        from plex_playlist_sync.lidarr_queue import lidarr_worker
+        from trackseerr.lidarr_queue import lidarr_worker
         with lidarr_worker._lock:
             lidarr_worker._is_running = True
             lidarr_worker._total_items = 5
@@ -324,7 +324,7 @@ class TestLidarrTrickleWorkerAndEndpoints:
                 lidarr_worker._processed_items = 0
                 lidarr_worker._is_paused = False
 
-    @patch("plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle")
+    @patch("trackseerr.lidarr_queue.lidarr_worker.start_trickle")
     def test_lidarr_push_trickle_enqueues(self, mock_start, client, test_db):
         test_db.update_media_management_settings({"library_mode": "lidarr"})
         mock_start.return_value = {

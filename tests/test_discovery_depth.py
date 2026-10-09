@@ -4,25 +4,25 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import (
     get_config,
     get_db,
     get_discovery_client,
     get_lidarr_client,
     get_plex_client,
 )
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.discovery import DiscoveryClient
-from plex_playlist_sync.clients.lidarr import LidarrClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import (
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.discovery import DiscoveryClient
+from trackseerr.clients.lidarr import LidarrClient
+from trackseerr.config import Config
+from trackseerr.models import (
     DownloadClientConfig,
     IndexerConfig,
     MusicRequest,
     RequestStatus,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -816,9 +816,9 @@ class TestBatchRequestsAPI:
 
         # Mock acquisition coordinator to succeed on Track 1 and fail on Track 2
         with patch(
-            "plex_playlist_sync.api.routes.requests.acquisition_coordinator.search_and_grab"
+            "trackseerr.api.routes.requests.acquisition_coordinator.search_and_grab"
         ) as mock_grab, patch(
-            "plex_playlist_sync.lidarr_queue.lidarr_worker.start_trickle"
+            "trackseerr.lidarr_queue.lidarr_worker.start_trickle"
         ) as mock_trickle:
             def grab_side_effect(**kwargs):
                 if kwargs.get("title") == "Track 1":

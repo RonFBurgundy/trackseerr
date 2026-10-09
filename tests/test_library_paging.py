@@ -13,19 +13,19 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import library_paging
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.list_index import (
+from trackseerr import library_paging
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.list_index import (
     NULL_LABEL,
     format_size,
     group_label_for_key,
     group_label_for_name,
     library_sort_key,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 # ------------------------------------------------------------------------------------------------ fixtures
 
@@ -323,8 +323,8 @@ class TestWritePaths:
     def test_lidarr_importer_populates_keys(self, test_db):
         from unittest.mock import MagicMock
 
-        from plex_playlist_sync.clients.lidarr import LidarrClient
-        from plex_playlist_sync.lidarr_migration import LidarrMigrationJob
+        from trackseerr.clients.lidarr import LidarrClient
+        from trackseerr.lidarr_migration import LidarrMigrationJob
 
         client = MagicMock(spec=LidarrClient)
         client.get_all_artists.return_value = [
@@ -693,7 +693,7 @@ class TestGating:
         assert client.get(path, headers=_headers(users["admin"], test_db, cfg)).status_code == 404
 
     def test_not_in_gateway_allowlists(self):
-        from plex_playlist_sync.api import tier_middleware as tm
+        from trackseerr.api import tier_middleware as tm
 
         listed = [p for _m, p in (*tm.GATEWAY_LOCAL_ALLOWLIST, *tm.GATEWAY_FORWARD_SERVICE_ALLOWLIST,
                                   *tm.GATEWAY_FORWARD_ALLOWLIST)]
@@ -706,7 +706,7 @@ class TestGating:
     def test_core_tier_dependency_blocks_gateway_role(self, test_db, tmp_path, path):
         from fastapi import HTTPException
 
-        from plex_playlist_sync.api.dependencies import require_core_tier
+        from trackseerr.api.dependencies import require_core_tier
 
         cfg = Config(plex_url="http://p", plex_token="t", data_dir=str(tmp_path), role="gateway",
                      internal_core_secret="s" * 40, trackseerr_core_url="http://core.internal:5251")
@@ -725,7 +725,7 @@ class TestLidarrMode:
         "path", ["/api/wanted/missing/index", "/api/wanted/cutoff/index", "/api/activity/history/index"]
     )
     def test_empty_groups_and_no_lidarr_http(self, api, admin_h, lidarr_mode, path):
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as client_cls:
+        with patch("trackseerr.clients.lidarr.httpx.Client") as client_cls:
             res = api.get(path, headers=admin_h)
         assert res.status_code == 200
         assert res.json()["groups"] == [] and res.json()["total"] == 0
@@ -737,7 +737,7 @@ class TestLidarrMode:
 
     def test_library_lists_come_from_lidarr_not_native_tables(self, api, admin_h, lidarr_mode, test_db):
         test_db.upsert_library_artist({"id": "a", "name": "The Cure"})
-        with patch("plex_playlist_sync.clients.lidarr.httpx.Client") as client_cls:
+        with patch("trackseerr.clients.lidarr.httpx.Client") as client_cls:
             http = client_cls.return_value.__enter__.return_value
             http.get.return_value.status_code = 200
             http.get.return_value.json.return_value = [{"id": 7, "artistName": "Zebra"}]

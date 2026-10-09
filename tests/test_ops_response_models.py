@@ -11,12 +11,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_discovery_client
-from plex_playlist_sync.api.routes.sync import sync_state
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_discovery_client
+from trackseerr.api.routes.sync import sync_state
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.storage import Database
 from tests.test_activity_wanted import QUEUE_REC, _dl, _library, _lidarr_mode, _mock_http, _page, _resp
 
 
@@ -92,7 +92,7 @@ def test_discovery_lists_and_search(client, discovery, admin, alice):
         assert found["query"] == "air" and found["type"] == "all"
     # only admins get a library routing hint
     client.app.state  # noqa: B018
-    from plex_playlist_sync.api.routes import discovery as d
+    from trackseerr.api.routes import discovery as d
     with patch.object(d, "_library_artist_ids_by_name", return_value={"radiohead": "lib-1"}):
         assert _ok(client.get("/api/discovery/trending", headers=admin))["items"][0]["library_artist_id"] == "lib-1"
         assert "library_artist_id" not in _ok(client.get("/api/discovery/trending", headers=alice))["items"][0]
@@ -266,7 +266,7 @@ def test_system_routes(client, db, admin, alice):
     assert events["items"][0]["details"] == {"task_id": "x"} and events["total"] == 1
     assert client.get("/api/system/events", headers=alice).status_code == 403
     import logging
-    logging.getLogger("plex_playlist_sync.test").warning("hello logs")
+    logging.getLogger("trackseerr.test").warning("hello logs")
     logs = _ok(client.get("/api/system/logs?search=hello", headers=admin))
     assert logs and logs[-1]["level"] == "WARNING"
     assert _ok(client.get("/api/system/queue", headers=admin)).keys() == {"running", "queued", "recent"}
@@ -274,9 +274,9 @@ def test_system_routes(client, db, admin, alice):
         "mode": "native", "reachable": None, "version": None, "health": []}
     tasks = _ok(client.get("/api/system/tasks", headers=admin))
     assert tasks
-    with patch("plex_playlist_sync.api.routes.system.threading.Thread"):
+    with patch("trackseerr.api.routes.system.threading.Thread"):
         assert _ok(client.post("/api/system/tasks/filesystem_scan/run", headers=admin))["success"] is True
-    with patch("plex_playlist_sync.api.routes.system.library_scanner.cancel_scan"):
+    with patch("trackseerr.api.routes.system.library_scanner.cancel_scan"):
         assert _ok(client.post("/api/system/tasks/filesystem_scan/cancel", headers=admin))["message"]
     assert _ok(client.delete("/api/system/events", headers=admin)) == {"success": True}
     assert _ok(client.delete("/api/system/logs", headers=admin)) == {"success": True}

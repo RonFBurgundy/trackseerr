@@ -6,17 +6,17 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from plex_playlist_sync.api.routes.discovery import annotate_item_statuses
-from plex_playlist_sync.clients.plex import PlexClient
-from plex_playlist_sync.library_availability import get_item_availability
-from plex_playlist_sync.models import (
+from trackseerr.api.routes.discovery import annotate_item_statuses
+from trackseerr.clients.plex import PlexClient
+from trackseerr.library_availability import get_item_availability
+from trackseerr.models import (
     LibraryAlbum,
     LibraryArtist,
     LibraryFile,
     LibraryTrack,
     MusicRequest,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 
 @pytest.fixture

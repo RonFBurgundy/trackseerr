@@ -4,12 +4,12 @@ import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.security import mask_secret
-from plex_playlist_sync.storage import Database
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.security import mask_secret
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -397,7 +397,7 @@ class TestLidarrSettingsAPI:
         _, client = app_and_client
         admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
 
-        with patch("plex_playlist_sync.api.routes.settings.LidarrClient") as mock_client_cls:
+        with patch("trackseerr.api.routes.settings.LidarrClient") as mock_client_cls:
             mock_inst = MagicMock()
             mock_inst.test_connection.return_value = {"online": True, "version": "2.8.2.4233", "error": None}
             mock_client_cls.return_value = mock_inst
@@ -418,7 +418,7 @@ class TestLidarrSettingsAPI:
         admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
         test_db.update_lidarr_settings({"url": "http://192.168.1.50:8686", "api_key": "saved-database-secret"})
 
-        with patch("plex_playlist_sync.api.routes.settings.LidarrClient") as mock_client_cls:
+        with patch("trackseerr.api.routes.settings.LidarrClient") as mock_client_cls:
             mock_inst = MagicMock()
             mock_inst.test_connection.return_value = {"online": True, "version": "2.8.2"}
             mock_client_cls.return_value = mock_inst
@@ -435,7 +435,7 @@ class TestLidarrSettingsAPI:
         _, client = app_and_client
         h = _auth_headers(seeded_users["admin"], test_db, test_config)
         test_db.update_lidarr_settings({"url": "http://192.168.1.50:8686", "api_key": "saved-database-secret"})
-        with patch("plex_playlist_sync.api.routes.settings.LidarrClient") as cls:
+        with patch("trackseerr.api.routes.settings.LidarrClient") as cls:
             cls.return_value.test_connection.return_value = {"online": True, "version": "1"}
             for key in ("", mask_secret("saved-database-secret")):
                 r = client.post("/api/settings/lidarr/test", json={"url": "http://192.168.1.99:8686", "api_key": key}, headers=h)

@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from plex_playlist_sync.clients.lidarr import LidarrClient
-from plex_playlist_sync.lidarr_migration import LidarrMigrationJob
-from plex_playlist_sync.storage import Database
+from trackseerr.clients.lidarr import LidarrClient
+from trackseerr.lidarr_migration import LidarrMigrationJob
+from trackseerr.storage import Database
 
 
 @pytest.fixture

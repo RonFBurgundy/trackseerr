@@ -5,10 +5,10 @@ from unittest.mock import patch
 
 import pytest
 
-from plex_playlist_sync import acquisition_worker as aw
-from plex_playlist_sync.acquisition_worker import effective_import_mode, prepare_file_for_tagging
-from plex_playlist_sync.clients.acquisition import is_torrent_driver_type
-from plex_playlist_sync.storage import SCHEMA_VERSION
+from trackseerr import acquisition_worker as aw
+from trackseerr.acquisition_worker import effective_import_mode, prepare_file_for_tagging
+from trackseerr.clients.acquisition import is_torrent_driver_type
+from trackseerr.storage import SCHEMA_VERSION
 
 from tests.test_manual_import_hold import (  # noqa: F401  (fixtures + helpers)
     MATCHED, _as_torrent, _commit, _flac, _held_download, _run_worker, _seed, client, config, db, headers,
@@ -50,7 +50,7 @@ def test_worker_usenet_download_is_moved_and_tagged_despite_hardlink_setting(tmp
     music, staging, src = _worker_setup(tmp_path, db, write_audio_tags=True)
     db.conn.execute("UPDATE download_clients SET driver_type = 'sabnzbd' WHERE id = 'c1'")
     db.conn.commit()
-    with patch("plex_playlist_sync.acquisition_worker.write_audio_tags", side_effect=_fake_write_tags) as w:
+    with patch("trackseerr.acquisition_worker.write_audio_tags", side_effect=_fake_write_tags) as w:
         _run_worker(db, src.parent, staging, {"good.flac": MATCHED})
     placed = list(music.rglob("*.flac"))
     assert len(placed) == 1 and not src.exists()
@@ -68,7 +68,7 @@ def test_worker_torrent_keep_hardlink_skips_tags(tmp_path, db):
     music, staging, src = _worker_setup(tmp_path, db, write_audio_tags=True, torrent_hardlink_tags="keep_hardlink")
     _as_torrent(db)
     before = src.read_bytes()
-    with patch("plex_playlist_sync.acquisition_worker.write_audio_tags") as w:
+    with patch("trackseerr.acquisition_worker.write_audio_tags") as w:
         _run_worker(db, src.parent, staging, {"good.flac": MATCHED})
     placed = list(music.rglob("*.flac"))
     assert len(placed) == 1
@@ -81,7 +81,7 @@ def test_worker_torrent_copy_and_tag_leaves_torrent_untouched(tmp_path, db):
     music, staging, src = _worker_setup(tmp_path, db, write_audio_tags=True, torrent_hardlink_tags="copy_and_tag")
     _as_torrent(db)
     before, ino = src.read_bytes(), src.stat().st_ino
-    with patch("plex_playlist_sync.acquisition_worker.write_audio_tags", side_effect=_fake_write_tags):
+    with patch("trackseerr.acquisition_worker.write_audio_tags", side_effect=_fake_write_tags):
         _run_worker(db, src.parent, staging, {"good.flac": MATCHED})
     placed = list(music.rglob("*.flac"))
     assert src.read_bytes() == before and src.stat().st_ino == ino and src.stat().st_nlink == 1
@@ -94,7 +94,7 @@ def test_prepare_file_for_tagging_modes(tmp_path, caplog):
     solo.write_bytes(b"y")
     os.link(a, b)
     keep = {"torrent_hardlink_tags": "keep_hardlink"}
-    with caplog.at_level("INFO", logger="plex_playlist_sync.acquisition_worker"):
+    with caplog.at_level("INFO", logger="trackseerr.acquisition_worker"):
         assert prepare_file_for_tagging(b, keep) is False
     assert "Kept hardlink; skipped tag writing for" in caplog.text
     assert b.stat().st_nlink == 2
@@ -127,7 +127,7 @@ def test_manual_commit_torrent_keep_hardlink_skips_tags(tmp_path, db, client, he
     db.update_media_management_settings({"import_mode": "hardlink", "torrent_hardlink_tags": "keep_hardlink"})
     item = {"source_path": str(files[0]), "artist_id": "art-1", "album_id": "alb-1", "track_id": "trk-1",
             "track_title": "One More Time", "track_number": 1, "write_tags": True}
-    with patch("plex_playlist_sync.api.routes.library.manual_import.write_audio_tags") as w:
+    with patch("trackseerr.api.routes.library.manual_import.write_audio_tags") as w:
         out = _commit(client, headers, [item])
     assert out["imported_count"] == 1
     w.assert_not_called()

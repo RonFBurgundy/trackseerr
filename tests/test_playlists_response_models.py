@@ -2,7 +2,7 @@
 
 import pytest
 
-from plex_playlist_sync.api.dependencies import get_deezer_client, get_media_client, get_spotify_client
+from trackseerr.api.dependencies import get_deezer_client, get_media_client, get_spotify_client
 from tests._rm_helpers import admin, alice, client, config, db, ok  # noqa: F401
 
 P = "/api/playlists"

@@ -1,8 +1,8 @@
 from unittest.mock import MagicMock
 
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import Playlist, SyncResult, Track
-from plex_playlist_sync.sync import SyncCoordinator
+from trackseerr.config import Config
+from trackseerr.models import Playlist, SyncResult, Track
+from trackseerr.sync import SyncCoordinator
 
 
 def test_sync_coordinator_cycle():

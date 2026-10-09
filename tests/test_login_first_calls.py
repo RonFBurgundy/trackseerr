@@ -10,10 +10,10 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import Database
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.config import Config
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -29,10 +29,10 @@ def stack(tmp_path):
 
 def _verify(client):
     with (
-        patch("plex_playlist_sync.api.routes.auth.check_plex_pin", return_value="plex-tok"),
-        patch("plex_playlist_sync.api.routes.auth.verify_server_access", return_value=(True, True)),
+        patch("trackseerr.api.routes.auth.check_plex_pin", return_value="plex-tok"),
+        patch("trackseerr.api.routes.auth.verify_server_access", return_value=(True, True)),
         patch(
-            "plex_playlist_sync.api.routes.auth.get_plex_user",
+            "trackseerr.api.routes.auth.get_plex_user",
             return_value={"id": "u1", "username": "owner", "email": "o@x.tv"},
         ),
     ):

@@ -7,17 +7,17 @@ import pytest
 import requests
 from plexapi.exceptions import BadRequest, NotFound, Unauthorized
 
-from plex_playlist_sync.api.routes import auth as auth_routes
-from plex_playlist_sync.api.routes import plex_playlists as plex_playlists_routes
-from plex_playlist_sync.api.routes import users as users_routes
-from plex_playlist_sync.api.routes.sync import SyncState
-from plex_playlist_sync.auth import PlexAuthError, check_plex_pin
-from plex_playlist_sync.cli import RedactLogFilter, redact_sensitive_query
-from plex_playlist_sync.clients.plex import PlexClient
-from plex_playlist_sync.library_scanner import LibraryScanner
-from plex_playlist_sync.models import Playlist, Track
-from plex_playlist_sync.redaction import redact_text, safe_exc
-from plex_playlist_sync import tailored_mixes
+from trackseerr.api.routes import auth as auth_routes
+from trackseerr.api.routes import plex_playlists as plex_playlists_routes
+from trackseerr.api.routes import users as users_routes
+from trackseerr.api.routes.sync import SyncState
+from trackseerr.auth import PlexAuthError, check_plex_pin
+from trackseerr.cli import RedactLogFilter, redact_sensitive_query
+from trackseerr.clients.plex import PlexClient
+from trackseerr.library_scanner import LibraryScanner
+from trackseerr.models import Playlist, Track
+from trackseerr.redaction import redact_text, safe_exc
+from trackseerr import tailored_mixes
 
 SECRET = "SECRETPLEX"
 LEAKY_URL = f"http://plex:32400/library?X-Plex-Token={SECRET}"
@@ -90,7 +90,7 @@ def test_safe_exc_safe_types_opt_in_and_empty_message():
 
 
 def test_cli_reuses_shared_redaction_regex():
-    from plex_playlist_sync import redaction
+    from trackseerr import redaction
 
     assert redact_sensitive_query is redaction.redact_sensitive_query
     assert SECRET not in redact_sensitive_query(f"/p?X-Plex-Token={SECRET}")
@@ -101,7 +101,7 @@ def test_cli_reuses_shared_redaction_regex():
 
 
 def _client(server: MagicMock) -> PlexClient:
-    with patch("plex_playlist_sync.clients.plex.PlexServer", return_value=server):
+    with patch("trackseerr.clients.plex.PlexServer", return_value=server):
         return PlexClient("http://localhost:32400", "tok")
 
 
@@ -175,7 +175,7 @@ def test_test_connection_failure_message_has_no_token(redacted_caplog):
 
 
 def test_connect_failure_logs_no_token(redacted_caplog):
-    with patch("plex_playlist_sync.clients.plex.PlexServer", side_effect=requests.exceptions.ConnectionError(LEAKY_URL)):
+    with patch("trackseerr.clients.plex.PlexServer", side_effect=requests.exceptions.ConnectionError(LEAKY_URL)):
         with pytest.raises(requests.exceptions.ConnectionError):
             PlexClient("http://localhost:32400", "tok")
     _assert_clean(redacted_caplog)
@@ -191,13 +191,13 @@ def test_execute_sync_error_result_and_logs_have_no_token(redacted_caplog):
     try:
         result = state.execute_sync(db, MagicMock(), None, None, None)
     finally:
-        logging.getLogger("plex_playlist_sync").removeHandler(state.log_handler)
+        logging.getLogger("trackseerr").removeHandler(state.log_handler)
     assert result == {"status": "error", "error": "ConnectionError"}
     assert state.last_run_stats["success_count"] == 0
     _assert_clean(redacted_caplog)
 
 
-def test_execute_sync_with_failing_plex_playlist_sync_logs_no_token(redacted_caplog):
+def test_execute_sync_with_failing_trackseerr_logs_no_token(redacted_caplog):
     db = MagicMock()
     db.list_playlists.return_value = [
         {"id": "p1", "name": "PL", "service": "spotify", "enabled": 1, "service_id": "x", "tracks_json": "[]"}
@@ -208,13 +208,13 @@ def test_execute_sync_with_failing_plex_playlist_sync_logs_no_token(redacted_cap
     try:
         state.execute_sync(db, MagicMock(), plex, None, None)
     finally:
-        logging.getLogger("plex_playlist_sync").removeHandler(state.log_handler)
+        logging.getLogger("trackseerr").removeHandler(state.log_handler)
     _assert_clean(redacted_caplog)
     assert "NotFound" in redacted_caplog.text
 
 
 def test_broadcast_log_handler_redacts_tracebacks():
-    from plex_playlist_sync.api.routes.sync import BroadcastLogHandler
+    from trackseerr.api.routes.sync import BroadcastLogHandler
 
     handler = BroadcastLogHandler()
     handler.setFormatter(logging.Formatter("%(message)s"))
@@ -229,7 +229,7 @@ def test_broadcast_log_handler_redacts_tracebacks():
     except RuntimeError:
         import sys
 
-        record = logging.LogRecord("plex_playlist_sync", logging.DEBUG, __file__, 1, "boom", None, sys.exc_info())
+        record = logging.LogRecord("trackseerr", logging.DEBUG, __file__, 1, "boom", None, sys.exc_info())
     handler.emit(record)
     assert sent and SECRET not in sent[0]
 
@@ -290,7 +290,7 @@ def test_library_scanner_status_error_has_no_token(redacted_caplog):
 
 def test_plex_pin_check_error_has_no_token():
     err = requests.exceptions.ConnectionError(LEAKY_URL)
-    with patch("plex_playlist_sync.auth.requests.get", side_effect=err):
+    with patch("trackseerr.auth.requests.get", side_effect=err):
         with pytest.raises(PlexAuthError) as info:
             check_plex_pin(1)
     assert SECRET not in str(info.value)

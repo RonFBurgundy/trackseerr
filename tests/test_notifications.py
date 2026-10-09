@@ -14,15 +14,15 @@ from fastapi.testclient import TestClient
 import httpx
 import pytest
 
-from plex_playlist_sync.item_history import GrabTrigger
-from plex_playlist_sync.acquisition_coordinator import AcquisitionCoordinator
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.backlog_worker import RSSSyncWorker
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.models import (
+from trackseerr.item_history import GrabTrigger
+from trackseerr.acquisition_coordinator import AcquisitionCoordinator
+from trackseerr.acquisition_worker import AcquisitionWorker
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.backlog_worker import RSSSyncWorker
+from trackseerr.config import Config
+from trackseerr.models import (
     AcquisitionSearchResult,
     ActiveDownload,
     DownloadClientConfig,
@@ -36,13 +36,13 @@ from plex_playlist_sync.models import (
     QualityProfileItem,
     RequestStatus,
 )
-from plex_playlist_sync.notifications import (
+from trackseerr.notifications import (
     NotificationDispatcher,
     format_notification,
     notification_dispatcher,
 )
-from plex_playlist_sync.security import mask_secret
-from plex_playlist_sync.storage import Database
+from trackseerr.security import mask_secret
+from trackseerr.storage import Database
 
 
 @pytest.fixture
@@ -865,7 +865,7 @@ class TestNotificationEventTriggers:
             dispatched.append((event, data))
 
         with patch.object(coordinator, "search_all_indexers", return_value=[mock_candidate]), patch(
-            "plex_playlist_sync.acquisition_coordinator.get_acquisition_driver"
+            "trackseerr.acquisition_coordinator.get_acquisition_driver"
         ) as mock_get_driver, patch.object(notification_dispatcher, "dispatch", side_effect=track_dispatch):
             mock_driver = MagicMock()
             mock_driver.download.return_value = "hash123456"
@@ -929,11 +929,11 @@ class TestNotificationEventTriggers:
 
         target_file = music_root / "Artist" / "Album" / "01 - Song.flac"
 
-        with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver") as mock_drv, patch(
-            "plex_playlist_sync.acquisition_worker.inspect_audio_file",
+        with patch("trackseerr.acquisition_worker.get_acquisition_driver") as mock_drv, patch(
+            "trackseerr.acquisition_worker.inspect_audio_file",
             return_value={"artist": "Artist", "title": "Song", "album": "Album", "track_number": 1},
-        ), patch("plex_playlist_sync.acquisition_worker.place_audio_file", return_value=target_file), patch(
-            "plex_playlist_sync.acquisition_worker.resolve_collision", return_value=str(target_file)
+        ), patch("trackseerr.acquisition_worker.place_audio_file", return_value=target_file), patch(
+            "trackseerr.acquisition_worker.resolve_collision", return_value=str(target_file)
         ), patch.object(
             notification_dispatcher, "dispatch", side_effect=track_dispatch
         ):
@@ -972,7 +972,7 @@ class TestNotificationEventTriggers:
         def track_dispatch(event, data, db=None):
             dispatched.append((event, data))
 
-        with patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver") as mock_drv, patch.object(
+        with patch("trackseerr.acquisition_worker.get_acquisition_driver") as mock_drv, patch.object(
             notification_dispatcher, "dispatch", side_effect=track_dispatch
         ):
             driver = MagicMock()
@@ -1031,8 +1031,8 @@ class TestNotificationEventTriggers:
         def track_dispatch(event, data, db=None):
             dispatched.append((event, data))
 
-        with patch("plex_playlist_sync.backlog_worker.get_indexer_driver") as mock_idx_drv, patch(
-            "plex_playlist_sync.backlog_worker.get_acquisition_driver"
+        with patch("trackseerr.backlog_worker.get_indexer_driver") as mock_idx_drv, patch(
+            "trackseerr.backlog_worker.get_acquisition_driver"
         ) as mock_acq_drv, patch.object(notification_dispatcher, "dispatch", side_effect=track_dispatch):
             idx_driver = MagicMock()
             idx_driver.fetch_recent.return_value = [rss_candidate]
@@ -1060,7 +1060,7 @@ class TestWebhookUrlMasking:
         return res.json()
 
     def test_mask_helper_covers_url_and_webhook_url(self):
-        from plex_playlist_sync.security import mask_channel_config
+        from trackseerr.security import mask_channel_config
 
         for key in ("url", "webhook_url"):
             out = mask_channel_config("webhook", {key: self.RAW})
@@ -1126,7 +1126,7 @@ class TestWebhookUrlMasking:
         assert test_db.get_notification_channel(created["id"])["config"]["webhook_url"] == self.RAW
 
     def test_discord_mask_reveals_no_token_and_round_trips(self, app_and_client, test_db, test_config, seeded_users):
-        from plex_playlist_sync.security import mask_channel_config
+        from trackseerr.security import mask_channel_config
 
         raw = "https://discord.com/api/webhooks/12345/supersecrettoken"
         masked = mask_channel_config("discord", {"webhook_url": raw})["webhook_url"]
@@ -1147,7 +1147,7 @@ class TestWebhookUrlMasking:
         assert test_db.get_notification_channel(created["id"])["config"]["webhook_url"] == raw
 
     def test_masked_url_leaks_no_trailing_characters(self):
-        from plex_playlist_sync.security import mask_channel_config
+        from trackseerr.security import mask_channel_config
 
         out = mask_channel_config("webhook", {"url": "https://ntfy.example.com/topic/abcd1234"})["url"]
         assert out == "https://ntfy.example.com" + "•" * len("/topic/abcd1234")

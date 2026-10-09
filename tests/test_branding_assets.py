@@ -113,7 +113,7 @@ class TestStaticWebUIBrandingAssets:
 
     @property
     def static_dir(self) -> Path:
-        return REPO_ROOT / "plex_playlist_sync" / "static"
+        return REPO_ROOT / "trackseerr" / "static"
 
     def test_static_assets_exist(self) -> None:
         logo_svg = self.static_dir / "trackseerr-logo.svg"

@@ -12,19 +12,19 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import (
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import (
     get_config,
     get_current_user,
     get_current_user_or_api_key,
     get_db,
     get_plex_client,
 )
-from plex_playlist_sync.clients.plex import PlexClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.m3u import parse_m3u
-from plex_playlist_sync.models import Track
-from plex_playlist_sync.storage import Database
+from trackseerr.clients.plex import PlexClient
+from trackseerr.config import Config
+from trackseerr.m3u import parse_m3u
+from trackseerr.models import Track
+from trackseerr.storage import Database
 
 
 # ==============================================================================
@@ -32,7 +32,7 @@ from plex_playlist_sync.storage import Database
 # ==============================================================================
 
 class TestM3UParser:
-    """Tests for plex_playlist_sync/m3u.py."""
+    """Tests for trackseerr/m3u.py."""
 
     def test_parse_empty_content(self):
         assert parse_m3u("") == []
@@ -176,7 +176,7 @@ class TestDatabaseExpansion:
 class TestPlexClientExpansion:
     """Tests PlexClient Match Memory resolution and Smart Mix generation."""
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_match_track_uses_match_memory_override(self, mock_plex_server_cls):
         db = Database(":memory:")
         try:
@@ -212,7 +212,7 @@ class TestPlexClientExpansion:
         finally:
             db.close()
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_search_library_tracks(self, mock_plex_server_cls):
         mock_server_instance = MagicMock()
         mock_plex_server_cls.return_value = mock_server_instance
@@ -239,7 +239,7 @@ class TestPlexClientExpansion:
         assert results[0]["artist"] == "David Bowie"
         assert results[0]["album"] == "Ziggy Stardust"
 
-    @patch("plex_playlist_sync.clients.plex.PlexServer")
+    @patch("trackseerr.clients.plex.PlexServer")
     def test_get_smart_mix_tracks(self, mock_plex_server_cls):
         mock_server_instance = MagicMock()
         mock_plex_server_cls.return_value = mock_server_instance

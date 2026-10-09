@@ -9,14 +9,14 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import recycle_bin as rb
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.library_scanner import LibraryScanner
-from plex_playlist_sync.models import DownloadClientConfig, DownloadDriverType
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
+from trackseerr import recycle_bin as rb
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.library_scanner import LibraryScanner
+from trackseerr.models import DownloadClientConfig, DownloadDriverType
+from trackseerr.storage import SCHEMA_VERSION, Database
 
 TODAY = date(2026, 10, 6)
 
@@ -150,7 +150,7 @@ def test_task_is_registered_and_triggerable(db, config):
     h = _headers(db, config)
     tasks = {t["id"]: t for t in c.get("/api/system/tasks", headers=h).json()}
     assert tasks["recycle_bin_cleanup"]["name"] == "Recycle Bin cleanup"
-    with patch("plex_playlist_sync.recycle_bin.run_cleanup") as run:
+    with patch("trackseerr.recycle_bin.run_cleanup") as run:
         assert c.post("/api/system/tasks/recycle_bin_cleanup/run", headers=h).status_code == 200
         for _ in range(100):
             if run.called:
@@ -195,8 +195,8 @@ def test_settings_validation(db, config, tmp_path):
     dl.mkdir()
     db.create_download_client(DownloadClientConfig(
         id="c1", name="q", driver_type=DownloadDriverType.QBITTORRENT, host_url="http://q:8080", enabled=True))
-    with patch("plex_playlist_sync.api.routes.settings.allowed_roots_for_all_clients") as roots:
-        from plex_playlist_sync.download_roots import AllowedRoots
+    with patch("trackseerr.api.routes.settings.allowed_roots_for_all_clients") as roots:
+        from trackseerr.download_roots import AllowedRoots
         roots.return_value = AllowedRoots(roots=[dl.resolve()])
         assert _save(c, h, recycle_bin_path="relative/bin").status_code == 422
         assert _save(c, h, recycle_bin_path=str(music)).status_code == 422
@@ -226,7 +226,7 @@ def test_settings_cross_device_warning(db, config, tmp_path):
             return os.stat_result((st.st_mode, st.st_ino, st.st_dev + 1, *tuple(st)[3:]))
         return st
 
-    with patch("plex_playlist_sync.recycle_bin.os.stat", side_effect=fake_stat):
+    with patch("trackseerr.recycle_bin.os.stat", side_effect=fake_stat):
         res = _save(c, h, recycle_bin_path=str(other / "bin"))
     assert res.status_code == 200
     assert any("different filesystem" in w for w in res.json()["warnings"])
@@ -260,7 +260,7 @@ def test_scanner_skips_recycle_quarantine_and_legacy(db, tmp_path):
                 "duration": 1.0, "codec": "MP3", "bitrate": 1, "sample_rate": 44100, "bits_per_sample": 16,
                 "quality_full": "MP3", "file_path": str(path)}
 
-    with patch("plex_playlist_sync.library_scanner.inspect_audio_file", side_effect=fake_inspect):
+    with patch("trackseerr.library_scanner.inspect_audio_file", side_effect=fake_inspect):
         status = LibraryScanner().scan(db, root_folder=str(music))
     assert status["total_files_found"] == 1
 

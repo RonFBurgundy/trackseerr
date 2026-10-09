@@ -12,14 +12,14 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-import plex_playlist_sync
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, require_core_tier
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
-from plex_playlist_sync.task_manager import TASKS, WORKER_THREAD_TASKS
-from plex_playlist_sync.update_check import (
+import trackseerr
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, require_core_tier
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.config import Config
+from trackseerr.storage import SCHEMA_VERSION, Database
+from trackseerr.task_manager import TASKS, WORKER_THREAD_TASKS
+from trackseerr.update_check import (
     _fallback_parse_tuple,
     fetch_latest_release,
     is_newer_version,
@@ -155,7 +155,7 @@ class TestVersionComparison:
 
     def test_invalid_pep440_falls_back_to_heuristic(self, caplog):
         """Invalid PEP 440 version strings fall back to heuristic parser and log at DEBUG."""
-        with caplog.at_level(logging.DEBUG, logger="plex_playlist_sync.update_check"):
+        with caplog.at_level(logging.DEBUG, logger="trackseerr.update_check"):
             assert is_newer_version("1.2.0-hotfix", "1.1.0") is True
             assert is_newer_version("1.1.0", "1.2.0-hotfix") is False
 
@@ -171,9 +171,9 @@ class TestVersionComparison:
 
     def test_unparseable_pair_returns_false_and_logs(self, caplog):
         """When fallback parser raises ValueError or TypeError, returns False and logs WARNING."""
-        with caplog.at_level(logging.WARNING, logger="plex_playlist_sync.update_check"):
+        with caplog.at_level(logging.WARNING, logger="trackseerr.update_check"):
             with patch(
-                "plex_playlist_sync.update_check._fallback_parse_tuple",
+                "trackseerr.update_check._fallback_parse_tuple",
                 side_effect=ValueError("bad digits"),
             ):
                 assert is_newer_version("invalid-a", "invalid-b") is False
@@ -190,9 +190,9 @@ class TestVersionComparison:
         assert "bad digits" in rec.getMessage()
 
         caplog.clear()
-        with caplog.at_level(logging.WARNING, logger="plex_playlist_sync.update_check"):
+        with caplog.at_level(logging.WARNING, logger="trackseerr.update_check"):
             with patch(
-                "plex_playlist_sync.update_check._fallback_parse_tuple",
+                "trackseerr.update_check._fallback_parse_tuple",
                 side_effect=TypeError("incomparable"),
             ):
                 assert is_newer_version("bad-1", "bad-2") is False
@@ -209,7 +209,7 @@ class TestVersionComparison:
 
     def test_fallback_when_packaging_unavailable(self):
         """When packaging module is not available (pkg_version is None), fallback parser handles comparisons."""
-        with patch("plex_playlist_sync.update_check.pkg_version", None):
+        with patch("trackseerr.update_check.pkg_version", None):
             assert is_newer_version("1.2.0", "1.1.0") is True
             assert is_newer_version("1.0.0", "1.1.0") is False
             assert is_newer_version("1.1.0", "1.1.0") is False
@@ -331,7 +331,7 @@ class TestRunUpdateCheck:
             "published_at": "2026-10-05T00:00:00Z",
         }
 
-        with patch("plex_playlist_sync.update_check.fetch_latest_release", return_value=(mock_data, None)):
+        with patch("trackseerr.update_check.fetch_latest_release", return_value=(mock_data, None)):
             res = run_update_check(test_db, test_config)
 
             assert res["latest_version"] == "9.9.0"
@@ -349,7 +349,7 @@ class TestRunUpdateCheck:
             assert state["error"] is None
 
     def test_run_404_no_releases_persists_clean_state(self, test_db, test_config):
-        with patch("plex_playlist_sync.update_check.fetch_latest_release", return_value=(None, None)):
+        with patch("trackseerr.update_check.fetch_latest_release", return_value=(None, None)):
             res = run_update_check(test_db, test_config)
 
             assert res["latest_version"] is None
@@ -370,7 +370,7 @@ class TestRunUpdateCheck:
             checked_at="2026-09-01T00:00:00Z",
             error=None,
         )
-        with patch("plex_playlist_sync.update_check.fetch_latest_release", return_value=(None, None)):
+        with patch("trackseerr.update_check.fetch_latest_release", return_value=(None, None)):
             res = run_update_check(test_db, test_config)
             assert res["latest_version"] is None
             assert res["update_available"] is False
@@ -391,7 +391,7 @@ class TestRunUpdateCheck:
 
         # 2. Simulate 403 rate limit error
         err_msg = "GitHub API rate limit exceeded (HTTP 403)"
-        with patch("plex_playlist_sync.update_check.fetch_latest_release", return_value=(None, err_msg)):
+        with patch("trackseerr.update_check.fetch_latest_release", return_value=(None, err_msg)):
             res = run_update_check(test_db, test_config)
 
             # Last good result must be preserved
@@ -494,7 +494,7 @@ class TestUpdateApiEndpoints:
 
     def test_not_on_gateway_allowlists(self):
         """Endpoints under /api/system/update must never be present on any gateway allowlist."""
-        from plex_playlist_sync.api import tier_middleware
+        from trackseerr.api import tier_middleware
 
         for table in (
             tier_middleware.GATEWAY_LOCAL_ALLOWLIST,
@@ -611,7 +611,7 @@ class TestTaskRegistration:
     def test_manual_run_via_tasks_api(self, app_and_client, seeded_users, secret_key, test_db):
         _, client = app_and_client
         admin_cookies = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
-        with patch("plex_playlist_sync.update_check.run_update_check") as mock_run:
+        with patch("trackseerr.update_check.run_update_check") as mock_run:
             mock_run.return_value = {
                 "current_version": "1.0.0",
                 "latest_version": "1.1.0",

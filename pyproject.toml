@@ -42,15 +42,14 @@ dev = [
 ]
 
 [project.scripts]
-trackseerr = "plex_playlist_sync.cli:main"
-plex-playlist-hub = "plex_playlist_sync.cli:main"
+trackseerr = "trackseerr.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["plex_playlist_sync*"]
+include = ["trackseerr*"]
 
 [tool.setuptools.package-data]
-plex_playlist_sync = ["static/*", "data/*.txt"]
+trackseerr = ["static/*", "data/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

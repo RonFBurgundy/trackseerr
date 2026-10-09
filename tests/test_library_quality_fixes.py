@@ -5,7 +5,7 @@ behaviour is covered without a real music library.
 """
 
 from __future__ import annotations
-from plex_playlist_sync.storage import SCHEMA_VERSION
+from trackseerr.storage import SCHEMA_VERSION
 
 import logging
 import re
@@ -18,8 +18,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from mutagen import id3
 
-from plex_playlist_sync import library as library_mod
-from plex_playlist_sync.library import (
+from trackseerr import library as library_mod
+from trackseerr.library import (
     fingerprint_audio_file,
     find_folder_art,
     inspect_audio_file,
@@ -27,13 +27,13 @@ from plex_playlist_sync.library import (
     primary_artist,
     resolve_album_artist,
 )
-from plex_playlist_sync.library_monitoring import hydrated_track_monitored
-from plex_playlist_sync.library_scanner import LibraryScanner
-from plex_playlist_sync.m3u import parse_m3u
-from plex_playlist_sync.models import LibraryAlbum, LibraryArtist, LibraryFile, LibraryTrack
-from plex_playlist_sync.naming import sanitize_component
-from plex_playlist_sync.quality import parse_release_title
-from plex_playlist_sync.storage import Database, clean_library_name
+from trackseerr.library_monitoring import hydrated_track_monitored
+from trackseerr.library_scanner import LibraryScanner
+from trackseerr.m3u import parse_m3u
+from trackseerr.models import LibraryAlbum, LibraryArtist, LibraryFile, LibraryTrack
+from trackseerr.naming import sanitize_component
+from trackseerr.quality import parse_release_title
+from trackseerr.storage import Database, clean_library_name
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -63,7 +63,7 @@ def db(tmp_path: Path):
 
 
 def scan(db: Database, root: Path) -> dict:
-    from plex_playlist_sync.artist_refresh_worker import artist_refresh_worker
+    from trackseerr.artist_refresh_worker import artist_refresh_worker
 
     with patch.object(artist_refresh_worker, "refresh_once", lambda *a, **k: {}):
         return LibraryScanner().scan(db, root_folder=str(root))
@@ -452,8 +452,8 @@ def test_aac_is_classified_by_bitrate(text, expected):
 
 
 def test_low_bitrate_aac_does_not_meet_an_aac_256_cutoff():
-    from plex_playlist_sync.models import QualityProfile, QualityProfileItem
-    from plex_playlist_sync.quality import evaluate_release
+    from trackseerr.models import QualityProfile, QualityProfileItem
+    from trackseerr.quality import evaluate_release
 
     profile = QualityProfile(
         id="p",
@@ -517,10 +517,10 @@ def test_consecutive_extinf_entries_do_not_leak_orientation_state():
 def api(db, tmp_path: Path):
     from fastapi.testclient import TestClient
 
-    from plex_playlist_sync.api.app import create_app
-    from plex_playlist_sync.api.dependencies import get_config, get_db, get_plex_client
-    from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-    from plex_playlist_sync.config import Config
+    from trackseerr.api.app import create_app
+    from trackseerr.api.dependencies import get_config, get_db, get_plex_client
+    from trackseerr.auth import create_session_token, get_or_create_secret_key
+    from trackseerr.config import Config
 
     cfg_dir = tmp_path / "cfg"
     cfg_dir.mkdir()
@@ -543,7 +543,7 @@ def api(db, tmp_path: Path):
 def test_m3u_import_swaps_to_the_reading_whose_artist_the_library_knows(api):
     api.db.upsert_library_artist(LibraryArtist(id="kv", name="Kavinsky", monitored=True))
     content = "#EXTINF:1,The Crash - Kavinsky\nsomewhere/else/Unrelated.mp3\n"
-    with patch("plex_playlist_sync.api.routes.playlists.import_playlist_tracks") as imp:
+    with patch("trackseerr.api.routes.playlists.import_playlist_tracks") as imp:
         imp.return_value = {
             "id": "imp_abc", "name": "Imported M3U Playlist", "service": "m3u", "track_count": 1, "matched_count": 0,
             "missing_count": 0, "targets": ["admin-1"], "status": "imported",
@@ -655,9 +655,9 @@ def test_hydrated_track_monitored_rule():
 
 
 def _refresh(db: Database, option: str) -> list[dict]:
-    from plex_playlist_sync.artist_refresh import refresh_single_artist
-    from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
-    from plex_playlist_sync.mediacover import mediacover_service
+    from trackseerr.artist_refresh import refresh_single_artist
+    from trackseerr.clients.mbid_enricher import MbidEnricherClient
+    from trackseerr.mediacover import mediacover_service
 
     db.upsert_library_artist(LibraryArtist(id="ar", name="Daft Punk", mbid="mb-dp", monitored=True, monitor_option=option))
     db.upsert_library_album(

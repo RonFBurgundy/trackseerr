@@ -13,19 +13,19 @@ from fastapi.testclient import TestClient
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 
-from plex_playlist_sync.acquisition_worker import AcquisitionWorker, _is_safe_cover_url
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.clients.mbid_enricher import MbidEnricherClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.library import (
+from trackseerr.acquisition_worker import AcquisitionWorker, _is_safe_cover_url
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.config import Config
+from trackseerr.library import (
     fingerprint_audio_file,
     inspect_audio_file,
     write_audio_tags,
 )
-from plex_playlist_sync.library_scanner import LibraryScanner
-from plex_playlist_sync.models import (
+from trackseerr.library_scanner import LibraryScanner
+from trackseerr.models import (
     ActiveDownload,
     DownloadClientConfig,
     DownloadDriverType,
@@ -37,7 +37,7 @@ from plex_playlist_sync.models import (
     MusicRequest,
     RequestStatus,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 pytestmark = pytest.mark.real_mbid_enricher
 
@@ -477,8 +477,8 @@ class TestAcquisitionEnrichment:
         }
 
         with (
-            patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver),
-            patch("plex_playlist_sync.clients.mbid_enricher.MbidEnricherClient.lookup_track_mbids", return_value=resolved_mbids) as mock_lookup,
+            patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver),
+            patch("trackseerr.clients.mbid_enricher.MbidEnricherClient.lookup_track_mbids", return_value=resolved_mbids) as mock_lookup,
         ):
             worker = AcquisitionWorker()
             stats = worker.poll_once(db=test_db, staging_dir=str(staging_dir))
@@ -542,8 +542,8 @@ class TestAcquisitionEnrichment:
         }
 
         with (
-            patch("plex_playlist_sync.acquisition_worker.get_acquisition_driver", return_value=mock_driver),
-            patch("plex_playlist_sync.clients.mbid_enricher.MbidEnricherClient.lookup_track_mbids", side_effect=Exception("Mirror timed out")),
+            patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver),
+            patch("trackseerr.clients.mbid_enricher.MbidEnricherClient.lookup_track_mbids", side_effect=Exception("Mirror timed out")),
         ):
             worker = AcquisitionWorker()
             stats = worker.poll_once(db=test_db, staging_dir=str(staging_dir))
@@ -840,8 +840,8 @@ class TestCollectionsStorageAndAPI:
             },
         ]
 
-        with patch("plex_playlist_sync.clients.mbid_enricher.MbidEnricherClient.get_artist_details", return_value=mock_details), \
-             patch("plex_playlist_sync.clients.mbid_enricher.MbidEnricherClient.get_artist_discography_result", return_value=(mock_disco, True)):
+        with patch("trackseerr.clients.mbid_enricher.MbidEnricherClient.get_artist_details", return_value=mock_details), \
+             patch("trackseerr.clients.mbid_enricher.MbidEnricherClient.get_artist_discography_result", return_value=(mock_disco, True)):
             res = client.post(f"/api/library/artists/{art['id']}/refresh", headers=headers)
 
         assert res.status_code == 200
@@ -911,7 +911,7 @@ class TestAcoustIDEndpoint:
         _create_minimal_flac(flac_file)
 
         # When acoustid is not installed or returns None
-        with patch("plex_playlist_sync.api.routes.library.manual_import.fingerprint_audio_file", return_value=None):
+        with patch("trackseerr.api.routes.library.manual_import.fingerprint_audio_file", return_value=None):
             res = client.post(
                 "/api/library/manual-import/fingerprint",
                 json={"file_path": str(flac_file)},
@@ -939,7 +939,7 @@ class TestAcoustIDEndpoint:
             "artist": "Daft Punk",
         }
 
-        with patch("plex_playlist_sync.api.routes.library.manual_import.fingerprint_audio_file", return_value=matched_data):
+        with patch("trackseerr.api.routes.library.manual_import.fingerprint_audio_file", return_value=matched_data):
             res = client.post(
                 "/api/library/manual-import/fingerprint",
                 json={"file_path": str(flac_file)},

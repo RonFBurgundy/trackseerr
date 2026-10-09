@@ -6,7 +6,7 @@ Bug reports, fixes, and documentation changes are welcome. For a large feature, 
 
 | Path | Contents |
 |---|---|
-| `plex_playlist_sync/` | Python backend (FastAPI). Run with `python -m plex_playlist_sync`. |
+| `trackseerr/` | Python backend (FastAPI). Run with `python -m trackseerr`. |
 | `frontend/` | Web app (React, TypeScript, Vite). |
 | `tests/` | pytest suite. |
 | `unraid/` | Unraid templates and icons. |
@@ -20,7 +20,7 @@ Backend, Python 3.12:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
-python -m plex_playlist_sync
+python -m trackseerr
 ```
 
 Frontend, in a second terminal:
@@ -42,7 +42,7 @@ Run all four before you open a pull request. CI runs the same.
 cd frontend && npx tsc --noEmit && npm run build && cd ..
 
 # 2. Python syntax
-python3 -m py_compile plex_playlist_sync/**/*.py tests/**/*.py
+python3 -m py_compile trackseerr/**/*.py tests/**/*.py
 
 # 3. Test suite, in the test image
 docker build -f Dockerfile.test -t trackseerr:test .
@@ -83,8 +83,8 @@ In frontend code, take backend types from the contract with `Schema<'Name'>` (fr
 - **No silent failures.** No bare `except:`. Catch specific exceptions. If you must catch `Exception`, log the cause.
 - **SQL.** Parameterized queries only. Never build SQL from strings.
 - **No shell.** No `subprocess`, `os.system`, or shell calls.
-- **Outbound URLs.** Validate every address before connecting. Use the helpers in `plex_playlist_sync/security.py`.
-- **Secrets.** Never commit tokens or keys. New secrets come from environment variables or the database, are never returned by the API, and are redacted from logs. If a secret must not reach the gateway, add it to the list in `plex_playlist_sync/role_guard.py`.
+- **Outbound URLs.** Validate every address before connecting. Use the helpers in `trackseerr/security.py`.
+- **Secrets.** Never commit tokens or keys. New secrets come from environment variables or the database, are never returned by the API, and are redacted from logs. If a secret must not reach the gateway, add it to the list in `trackseerr/role_guard.py`.
 - **Types.** Type hints on all new Python functions. No `any` in TypeScript.
 - **Tests.** Every fix and feature comes with tests that exercise it, with outside APIs mocked.
 - **Docs.** If you add an environment variable, add it to [docs/CONFIGURATION.md](docs/CONFIGURATION.md). If you change how a feature is used, update its guide.

@@ -15,11 +15,11 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import __version__
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.backup import (
+from trackseerr import __version__
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.backup import (
     BACKUP_FILENAME_RE,
     DB_MEMBER_NAME,
     MANIFEST_MEMBER_NAME,
@@ -40,9 +40,9 @@ from plex_playlist_sync.backup import (
     stage_restore,
     validate_backup,
 )
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.storage import SCHEMA_VERSION, Database
-from plex_playlist_sync.task_manager import TASKS
+from trackseerr.config import Config
+from trackseerr.storage import SCHEMA_VERSION, Database
+from trackseerr.task_manager import TASKS
 
 
 @pytest.fixture
@@ -317,7 +317,7 @@ def test_failed_apply_leaves_original_db_intact(tmp_path: Path):
     (backup_dir / PENDING_RESTORE_MARKER_NAME).write_text("{}", encoding="utf-8")
 
     # Simulate failure during pre_restore creation
-    with patch("plex_playlist_sync.backup._create_pre_restore_backup", side_effect=OSError("Disk write failed")):
+    with patch("trackseerr.backup._create_pre_restore_backup", side_effect=OSError("Disk write failed")):
         applied = apply_pending_restore(db_file, backup_dir=backup_dir)
         assert applied is False
 
@@ -365,8 +365,8 @@ def test_routes_non_admin_forbidden(test_db: Database, test_config: Config, secr
 def test_routes_gateway_tier_rejected(test_db: Database, test_config: Config, secret_key: bytes):
     """Gateway tier rejects all backup routes via GatewayGuardMiddleware (404) and require_core_tier (403)."""
     from fastapi import HTTPException
-    from plex_playlist_sync.api.dependencies import require_core_tier
-    from plex_playlist_sync.api.routes.backups import router as backup_router
+    from trackseerr.api.dependencies import require_core_tier
+    from trackseerr.api.routes.backups import router as backup_router
 
     # 1. Backups router has require_core_tier in dependencies
     dep_calls = [d.dependency for d in backup_router.dependencies]

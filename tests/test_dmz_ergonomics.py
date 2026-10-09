@@ -1,6 +1,6 @@
 """DMZ ergonomics: startup guardrails, handshake/heartbeat, gateway status, init-dmz, role flips."""
 
-from plex_playlist_sync.storage import SCHEMA_VERSION
+from trackseerr.storage import SCHEMA_VERSION
 import io
 import json
 import logging
@@ -16,15 +16,15 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-import plex_playlist_sync
-from plex_playlist_sync import gateway_link, init_dmz, internal_auth
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.cli import main, run
-from plex_playlist_sync.clients.core_client import CoreClient
-from plex_playlist_sync.config import Config
-from plex_playlist_sync.gateway_link import (
+import trackseerr
+from trackseerr import gateway_link, init_dmz, internal_auth
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.cli import main, run
+from trackseerr.clients.core_client import CoreClient
+from trackseerr.config import Config
+from trackseerr.gateway_link import (
     HANDSHAKE_OK,
     HANDSHAKE_UNREACHABLE,
     GatewayLinkWorker,
@@ -33,9 +33,9 @@ from plex_playlist_sync.gateway_link import (
     perform_handshake,
     record_heartbeat,
 )
-from plex_playlist_sync.models import MusicRequest
-from plex_playlist_sync.role_change import current_notice, dismiss_notice, record_boot_role
-from plex_playlist_sync.role_guard import (
+from trackseerr.models import MusicRequest
+from trackseerr.role_change import current_notice, dismiss_notice, record_boot_role
+from trackseerr.role_guard import (
     CODE_APP_URL_MISSING,
     CODE_APP_URL_SELF,
     CODE_BIND_ALL,
@@ -47,7 +47,7 @@ from plex_playlist_sync.role_guard import (
     RealFs,
     check_role_environment,
 )
-from plex_playlist_sync.storage import Database
+from trackseerr.storage import Database
 
 SECRET = "s" * 40
 
@@ -325,7 +325,7 @@ def test_protocol_version_and_package_version_agree():
     import tomllib
 
     pyproject = tomllib.loads((Path(__file__).resolve().parent.parent / "pyproject.toml").read_text("utf-8"))
-    assert pyproject["project"]["version"] == plex_playlist_sync.__version__
+    assert pyproject["project"]["version"] == trackseerr.__version__
 
 
 # --------------------------------------------------------------------------- hello / heartbeat
@@ -393,7 +393,7 @@ def test_hello_service_principal_gets_handshake(core, db):
     body = res.json()
     assert body == {
         "protocol": 1,
-        "version": plex_playlist_sync.__version__,
+        "version": trackseerr.__version__,
         "role": "core",
         "instance_id": db.get_instance_id(),
     }
@@ -495,7 +495,7 @@ class Clock:
         self.now += seconds
 
 
-def _ok(version: str = plex_playlist_sync.__version__, protocol: int = 1):
+def _ok(version: str = trackseerr.__version__, protocol: int = 1):
     return 200, {"protocol": protocol, "version": version, "role": "core", "instance_id": "abc"}
 
 
@@ -562,8 +562,8 @@ def _gateway_cli_env(tmp_path: Path) -> dict[str, str]:
     }
 
 
-@patch("plex_playlist_sync.gateway_link.GatewayLinkWorker.start")
-@patch("plex_playlist_sync.cli.uvicorn.Server")
+@patch("trackseerr.gateway_link.GatewayLinkWorker.start")
+@patch("trackseerr.cli.uvicorn.Server")
 def test_cli_gateway_refuses_to_start_on_protocol_mismatch(mock_server, mock_worker, tmp_path, capsys):
     with patch.dict(os.environ, _gateway_cli_env(tmp_path), clear=True), patch.object(
         CoreClient, "hello", return_value=_ok(protocol=2)
@@ -574,8 +574,8 @@ def test_cli_gateway_refuses_to_start_on_protocol_mismatch(mock_server, mock_wor
     mock_worker.assert_not_called()
 
 
-@patch("plex_playlist_sync.gateway_link.GatewayLinkWorker.start")
-@patch("plex_playlist_sync.cli.uvicorn.Server")
+@patch("trackseerr.gateway_link.GatewayLinkWorker.start")
+@patch("trackseerr.cli.uvicorn.Server")
 def test_cli_gateway_starts_on_version_mismatch_and_starts_heartbeat(mock_server, mock_worker, tmp_path, caplog):
     with patch.dict(os.environ, _gateway_cli_env(tmp_path), clear=True), patch.object(
         CoreClient, "hello", return_value=_ok(version="9.9.9")
@@ -587,9 +587,9 @@ def test_cli_gateway_starts_on_version_mismatch_and_starts_heartbeat(mock_server
     assert any("9.9.9" in r.getMessage() for r in caplog.records)
 
 
-@patch("plex_playlist_sync.gateway_link.GatewayLinkWorker.stop")
-@patch("plex_playlist_sync.gateway_link.GatewayLinkWorker.start")
-@patch("plex_playlist_sync.cli.uvicorn.Server")
+@patch("trackseerr.gateway_link.GatewayLinkWorker.stop")
+@patch("trackseerr.gateway_link.GatewayLinkWorker.start")
+@patch("trackseerr.cli.uvicorn.Server")
 def test_cli_gateway_starts_failing_closed_when_core_is_unreachable(mock_server, mock_worker, mock_stop, tmp_path):
     clock = Clock()
     real = perform_handshake
@@ -599,7 +599,7 @@ def test_cli_gateway_starts_failing_closed_when_core_is_unreachable(mock_server,
 
     with patch.dict(os.environ, _gateway_cli_env(tmp_path), clear=True), patch.object(
         CoreClient, "hello", side_effect=httpx.ConnectError("refused")
-    ), patch("plex_playlist_sync.gateway_link.perform_handshake", fast):
+    ), patch("trackseerr.gateway_link.perform_handshake", fast):
         assert main() == 0
     mock_server.return_value.run.assert_called_once()
     assert mock_worker.call_args.kwargs["handshaken"] is False
@@ -609,8 +609,8 @@ def test_cli_gateway_starts_failing_closed_when_core_is_unreachable(mock_server,
 def test_gateway_database_records_its_own_role_so_a_restart_is_allowed(tmp_path):
     with patch.dict(os.environ, _gateway_cli_env(tmp_path), clear=True), patch.object(
         CoreClient, "hello", return_value=_ok()
-    ), patch("plex_playlist_sync.gateway_link.GatewayLinkWorker.start"), patch(
-        "plex_playlist_sync.cli.uvicorn.Server"
+    ), patch("trackseerr.gateway_link.GatewayLinkWorker.start"), patch(
+        "trackseerr.cli.uvicorn.Server"
     ):
         assert main() == 0
         assert main() == 0  # second boot: DB in CONFIG_DIR is the gateway's own
@@ -658,7 +658,7 @@ def test_core_client_hello_and_heartbeat_sign_as_service_principal():
 
     real_client = httpx.Client
     transport = httpx.MockTransport(handler)
-    with patch("plex_playlist_sync.clients.core_client.httpx.Client", lambda **kw: real_client(transport=transport, **kw)):
+    with patch("trackseerr.clients.core_client.httpx.Client", lambda **kw: real_client(transport=transport, **kw)):
         cc = CoreClient("http://core:5251", SECRET)
         assert cc.hello() == (200, {"protocol": 1})
         assert cc.heartbeat({"version": "1"}) == 200
@@ -923,17 +923,17 @@ def test_init_dmz_secret_is_fresh_each_run(tmp_path):
 
 
 def test_run_dispatches_init_dmz_and_defaults_to_the_server(tmp_path):
-    with patch("plex_playlist_sync.cli.main", return_value=7) as server:
+    with patch("trackseerr.cli.main", return_value=7) as server:
         assert run([]) == 7
         assert run(["something-else"]) == 7  # unknown args keep today's behaviour
         server.assert_called()
-    with patch("plex_playlist_sync.init_dmz.main", return_value=3) as sub:
+    with patch("trackseerr.init_dmz.main", return_value=3) as sub:
         assert run(["init-dmz", "--out", str(tmp_path)]) == 3
         sub.assert_called_once_with(["--out", str(tmp_path)])
 
 
 def test_main_module_entrypoint_calls_run():
-    src = (Path(plex_playlist_sync.__file__).parent / "__main__.py").read_text()
+    src = (Path(trackseerr.__file__).parent / "__main__.py").read_text()
     assert "run(sys.argv[1:])" in src
 
 
@@ -1121,7 +1121,7 @@ def _uvicorn_path_gateway_env(monkeypatch, tmp_path: Path) -> None:
 def test_uvicorn_path_gateway_restarts_fine_twice(tmp_path, monkeypatch):
     """get_db() lazily creates the gateway DB; it must not brick the next restart."""
     _uvicorn_path_gateway_env(monkeypatch, tmp_path)
-    from plex_playlist_sync.api import dependencies
+    from trackseerr.api import dependencies
 
     dependencies._db_instances.clear()
     try:

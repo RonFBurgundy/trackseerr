@@ -9,17 +9,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from plex_playlist_sync import local_auth, media_server
-from plex_playlist_sync.admin_bootstrap import ensure_bootstrap_admin
-from plex_playlist_sync.api.app import create_app
-from plex_playlist_sync.api.dependencies import get_config, get_db, get_plex_client
-from plex_playlist_sync.api.routes.sync import SyncState
-from plex_playlist_sync.auth import create_session_token, get_or_create_secret_key
-from plex_playlist_sync.cli import main
-from plex_playlist_sync.config import Config, ConfigError
-from plex_playlist_sync.models import Playlist, Track, UserPermission
-from plex_playlist_sync.storage import Database
-from plex_playlist_sync.sync import SyncCoordinator
+from trackseerr import local_auth, media_server
+from trackseerr.admin_bootstrap import ensure_bootstrap_admin
+from trackseerr.api.app import create_app
+from trackseerr.api.dependencies import get_config, get_db, get_plex_client
+from trackseerr.api.routes.sync import SyncState
+from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.cli import main
+from trackseerr.config import Config, ConfigError
+from trackseerr.models import Playlist, Track, UserPermission
+from trackseerr.storage import Database
+from trackseerr.sync import SyncCoordinator
 
 _ADMIN_PERMS = int(UserPermission.DEFAULT) | int(UserPermission.ADMIN)
 SECRET = "s" * 40
@@ -94,18 +94,18 @@ def test_from_env_reads_media_server():
 
 def _stub_workers():
     return [
-        patch("plex_playlist_sync.acquisition_worker.acquisition_worker.start"),
-        patch("plex_playlist_sync.backlog_worker.backlog_worker.start"),
-        patch("plex_playlist_sync.backlog_worker.rss_worker.start"),
-        patch("plex_playlist_sync.artist_refresh_worker.artist_refresh_worker.start"),
-        patch("plex_playlist_sync.scrobble_worker.scrobble_worker.start"),
-        patch("plex_playlist_sync.mix_worker.mix_worker.start"),
-        patch("plex_playlist_sync.cli._start_lidarr_trickle"),
+        patch("trackseerr.acquisition_worker.acquisition_worker.start"),
+        patch("trackseerr.backlog_worker.backlog_worker.start"),
+        patch("trackseerr.backlog_worker.rss_worker.start"),
+        patch("trackseerr.artist_refresh_worker.artist_refresh_worker.start"),
+        patch("trackseerr.scrobble_worker.scrobble_worker.start"),
+        patch("trackseerr.mix_worker.mix_worker.start"),
+        patch("trackseerr.cli._start_lidarr_trickle"),
     ]
 
 
 def _run_web(env):
-    patches = _stub_workers() + [patch("plex_playlist_sync.cli.uvicorn.Server"), patch("plex_playlist_sync.cli.PlexClient")]
+    patches = _stub_workers() + [patch("trackseerr.cli.uvicorn.Server"), patch("trackseerr.cli.PlexClient")]
     started = [p.start() for p in patches]
     plex_cls = started[-1]
     try:
@@ -147,7 +147,7 @@ def test_explicit_plex_without_credentials_fails_startup_loudly(tmp_path, caplog
 
 
 def test_run_once_without_plex_skips_push_and_succeeds():
-    with patch("plex_playlist_sync.cli.PlexClient") as plex_cls, patch("plex_playlist_sync.cli.SyncCoordinator") as coord_cls:
+    with patch("trackseerr.cli.PlexClient") as plex_cls, patch("trackseerr.cli.SyncCoordinator") as coord_cls:
         with patch.dict(os.environ, {"RUN_ONCE": "1"}, clear=True):
             code = main()
     assert code == 0
@@ -157,9 +157,9 @@ def test_run_once_without_plex_skips_push_and_succeeds():
 
 
 def test_headless_without_plex_runs_cycle_and_exits_cleanly():
-    with patch("plex_playlist_sync.cli.PlexClient") as plex_cls, patch("plex_playlist_sync.cli.SyncCoordinator") as coord_cls:
+    with patch("trackseerr.cli.PlexClient") as plex_cls, patch("trackseerr.cli.SyncCoordinator") as coord_cls:
         with patch.dict(os.environ, {"HEADLESS": "1", "SECONDS_TO_WAIT": "1"}, clear=True):
-            with patch("plex_playlist_sync.cli._shutdown_requested", True):
+            with patch("trackseerr.cli._shutdown_requested", True):
                 code = main()
     assert code == 0
     plex_cls.assert_not_called()
@@ -336,7 +336,7 @@ def test_media_server_endpoint_none(no_server):
 
 def test_media_server_endpoint_plex_connected(tmp_path):
     env = build_client(tmp_path, url="http://plex", token="tok", plex=MagicMock())
-    with patch("plex_playlist_sync.api.routes.system.get_plex_client", return_value=MagicMock()):
+    with patch("trackseerr.api.routes.system.get_plex_client", return_value=MagicMock()):
         body = env.tc.get("/api/system/media-server").json()
     assert body == {
         "type": "plex",
@@ -347,14 +347,14 @@ def test_media_server_endpoint_plex_connected(tmp_path):
 
 def test_media_server_endpoint_plex_unreachable_is_still_plex(tmp_path):
     env = build_client(tmp_path, url="http://plex", token="tok")
-    with patch("plex_playlist_sync.api.routes.system.get_plex_client", return_value=None):
+    with patch("trackseerr.api.routes.system.get_plex_client", return_value=None):
         body = env.tc.get("/api/system/media-server").json()
     assert body["type"] == "plex" and body["connected"] is False and body["capabilities"]["playlists"] is True
 
 
 def test_media_server_probe_is_cached_for_unauthenticated_callers(tmp_path):
     env = build_client(tmp_path, url="http://plex", token="tok")
-    with patch("plex_playlist_sync.api.routes.system.get_plex_client", return_value=MagicMock()) as connect:
+    with patch("trackseerr.api.routes.system.get_plex_client", return_value=MagicMock()) as connect:
         for _ in range(5):
             assert env.tc.get("/api/system/media-server").json()["connected"] is True
     assert connect.call_count == 1
@@ -393,7 +393,7 @@ def test_media_server_probe_never_blocks_concurrent_callers():
 
 def test_media_server_endpoint_never_leaks_credentials(tmp_path):
     env = build_client(tmp_path, url="http://plex.secret:32400", token="SECRETTOKEN")
-    with patch("plex_playlist_sync.api.routes.system.get_plex_client", return_value=MagicMock()):
+    with patch("trackseerr.api.routes.system.get_plex_client", return_value=MagicMock()):
         raw = env.tc.get("/api/system/media-server").text
     assert "SECRETTOKEN" not in raw and "plex.secret" not in raw
 
@@ -468,7 +468,7 @@ def test_sync_with_no_media_server_records_missing_via_native_library(tmp_path):
         db.conn.commit()
     matched_track = pl_tracks[0]
     with patch(
-        "plex_playlist_sync.api.routes.sync.match_playlist_tracks_native",
+        "trackseerr.api.routes.sync.match_playlist_tracks_native",
         return_value=([matched_track], [pl_tracks[1]]),
     ) as native:
         state = SyncState()
@@ -507,13 +507,13 @@ def test_coordinator_matches_natively_when_db_given_and_no_plex(tmp_path):
 
 
 def test_native_matcher_matches_indexed_library_track(tmp_path):
-    from plex_playlist_sync.native_match import match_playlist_tracks_native
+    from trackseerr.native_match import match_playlist_tracks_native
 
     db = Database(":memory:")
     found, gone = Track("Known Song", "Known Artist", "Known Album"), Track("Other", "Nobody", "X")
     fake = MagicMock()
     fake.match.side_effect = lambda entry: ("tid", "metadata") if entry["name"] == "Known Song" else None
-    with patch("plex_playlist_sync.native_match.TrackMatcher", return_value=fake):
+    with patch("trackseerr.native_match.TrackMatcher", return_value=fake):
         matched, missing = match_playlist_tracks_native(db, [found, gone])
     assert matched == [found] and missing == [gone]
     assert fake.match.call_args_list[0].args[0]["artist"] == "Known Artist"
@@ -522,7 +522,7 @@ def test_native_matcher_matches_indexed_library_track(tmp_path):
 def test_direct_import_without_media_server_records_missing(tmp_path):
     env = build_client(tmp_path)
     with patch(
-        "plex_playlist_sync.api.routes.playlists.match_playlist_tracks_native",
+        "trackseerr.api.routes.playlists.match_playlist_tracks_native",
         side_effect=lambda db, tracks: ([], list(tracks)),
     ):
         res = env.tc.post(

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from plex_playlist_sync.api.dependencies import get_discovery_client, get_media_client
+from trackseerr.api.dependencies import get_discovery_client, get_media_client
 from tests._rm_helpers import admin, alice, client, config, db, ok  # noqa: F401
 
 X = "/api/mixes"
@@ -46,10 +46,10 @@ def test_result_and_generate(api, db, alice):
 def test_preview_and_generate(api, db, alice):
     mix = ok(api.post(X, json={"mix_type": "artist_radio", "seed_artist": "Radiohead"}, headers=alice), 201)
     tracks = [SimpleNamespace(artist="Radiohead", title="Airbag", album=None, origin="discovery")]
-    with patch("plex_playlist_sync.api.routes.mixes.compile_user_mix", return_value=tracks):
+    with patch("trackseerr.api.routes.mixes.compile_user_mix", return_value=tracks):
         assert ok(api.post(f"{X}/{mix['id']}/preview", headers=alice)) == {
             "tracks": [{"artist": "Radiohead", "title": "Airbag", "album": None, "origin": "discovery"}]
         }
-    with patch("plex_playlist_sync.api.routes.mixes.generate_and_sync") as gen:
+    with patch("trackseerr.api.routes.mixes.generate_and_sync") as gen:
         assert ok(api.post(f"{X}/{mix['id']}/generate", headers=alice), 202) == {"status": "queued"}
         gen.assert_called_once()

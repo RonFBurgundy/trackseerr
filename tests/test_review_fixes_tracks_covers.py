@@ -7,10 +7,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from plex_playlist_sync import lidarr_library
-from plex_playlist_sync.clients.lidarr import LidarrApiError
-from plex_playlist_sync.mediacover import mediacover_service
-from plex_playlist_sync.storage import Database
+from trackseerr import lidarr_library
+from trackseerr.clients.lidarr import LidarrApiError
+from trackseerr.mediacover import mediacover_service
+from trackseerr.storage import Database
 from tests.test_monitoring_defaults_bulk_edit import _seed_album, _seed_artist
 
 
@@ -93,7 +93,7 @@ def test_dedupe_does_not_merge_empty_clean_titles(seeded):
 def test_dedupe_backfills_survivor_identifiers_and_logs_start(seeded, caplog):
     _insert(seeded, "a", foreign=None, mb=None, isrc=None)
     _insert(seeded, "b", foreign="f-1", mb="mb-1", isrc="ISRC1", created="2021-01-01")
-    with caplog.at_level(logging.INFO, logger="plex_playlist_sync.storage"):
+    with caplog.at_level(logging.INFO, logger="trackseerr.storage"):
         assert _dedupe(seeded) == 1
     assert any("scanning library_tracks" in r.getMessage() for r in caplog.records)
     row = seeded.conn.execute("SELECT foreign_track_id, mb_recording_id, isrc FROM library_tracks WHERE id='a'").fetchone()
@@ -234,7 +234,7 @@ def test_bulk_edit_partial_batch_failure_is_logged_and_raised(monkeypatch, caplo
     monkeypatch.setattr(lidarr_library, "_ALBUM_BATCH", 2)
     c = _client({1: [10, 11, 12, 13, 14]})
     c.set_albums_monitored.side_effect = [None, LidarrApiError("boom")]
-    with caplog.at_level(logging.WARNING, logger="plex_playlist_sync.lidarr_library"):
+    with caplog.at_level(logging.WARNING, logger="trackseerr.lidarr_library"):
         with pytest.raises(LidarrApiError, match="2 of 5 albums were updated"):
             lidarr_library.bulk_edit_artists(c, [1], False, None, None, apply_to_albums=True)
     assert any("batch 2 of 3" in r.getMessage() and "2 of 5" in r.getMessage() for r in caplog.records)

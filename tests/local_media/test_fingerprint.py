@@ -17,7 +17,7 @@ from pathlib import Path
 import mutagen
 import pytest
 
-from plex_playlist_sync.library import fingerprint_audio_file
+from trackseerr.library import fingerprint_audio_file
 
 from .conftest import configure_roots
 
