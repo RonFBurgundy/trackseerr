@@ -8,6 +8,7 @@ from spotipy.oauth2 import SpotifyClientCredentials
 from urllib3.util import Retry
 
 from ..models import Playlist, Track
+from .spotify_scraper import SpotifyWebScraper
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ class SpotifyClient:
     def __init__(self, client_id: str, client_secret: str, retries: int = 3, backoff_factor: float = 0.5):
         self.client_id = client_id
         self.client_secret = client_secret
+        self._scraper: Optional[SpotifyWebScraper] = None
 
         # Configure session with robust backoff for 429 rate limits and 5xx errors
         session = requests.Session()
@@ -37,6 +39,12 @@ class SpotifyClient:
         )
         self.sp = spotipy.Spotify(auth_manager=auth_manager, requests_session=session)
         logger.info("Configured Spotify API client with retry backoff adapter")
+
+    def _fallback(self) -> SpotifyWebScraper:
+        """Lazily create and return the keyless SpotifyWebScraper instance."""
+        if self._scraper is None:
+            self._scraper = SpotifyWebScraper()
+        return self._scraper
 
     def get_user_playlists(self, user_id: str, suffix: str = "") -> List[Playlist]:
         """Fetch all playlists owned or followed by the specified Spotify user ID, with pagination."""
@@ -86,6 +94,16 @@ class SpotifyClient:
                 description=data.get("description") or "",
                 poster=poster_url,
             )
+        except spotipy.exceptions.SpotifyException as e:
+            if e.http_status in (403, 404):
+                logger.info(
+                    "Spotify API refused playlist %s (HTTP %s); reading it through the public web player instead",
+                    playlist_id,
+                    e.http_status,
+                )
+                return self._fallback().get_playlist_by_id(playlist_id, suffix)
+            logger.error("Failed to fetch Spotify playlist with ID '%s': %s", playlist_id, e)
+            return None
         except Exception as e:
             logger.error("Failed to fetch Spotify playlist with ID '%s': %s", playlist_id, e)
             return None
@@ -100,7 +118,21 @@ class SpotifyClient:
                 additional_types=["track"],
                 limit=100,
             )
+        except spotipy.exceptions.SpotifyException as e:
+            if e.http_status in (403, 404):
+                logger.info(
+                    "Spotify API refused playlist %s (HTTP %s); reading it through the public web player instead",
+                    playlist_id,
+                    e.http_status,
+                )
+                return self._fallback().get_playlist_tracks(playlist_id)
+            logger.error("Failed to fetch tracks for Spotify playlist '%s': %s", playlist_id, e)
+            return []
+        except Exception as e:
+            logger.error("Failed to fetch tracks for Spotify playlist '%s': %s", playlist_id, e)
+            return []
 
+        try:
             while results:
                 for item in results.get("items", []):
                     track_data = item.get("track") if item else None
@@ -117,7 +149,17 @@ class SpotifyClient:
                     tracks.append(Track(title=title, artist=artist, album=album, url=url, duration_seconds=duration))
 
                 if results.get("next"):
-                    results = self.sp.next(results)
+                    try:
+                        results = self.sp.next(results)
+                    except spotipy.exceptions.SpotifyException as e:
+                        if e.http_status in (403, 404):
+                            logger.warning(
+                                "Spotify API refused next page for playlist %s (HTTP %s); returning collected tracks",
+                                playlist_id,
+                                e.http_status,
+                            )
+                            break
+                        raise
                 else:
                     results = None
 
