@@ -21,6 +21,9 @@ heading becomes the version and date.
 - Release calendar for monitored artists, with a private iCal feed for calendar apps.
 - Bulk retag: preview tag changes across many albums, then apply them in one step.
 - Update check: the System page shows when a newer TrackSeerr release is available, and the check can be turned off.
+- Library filters: narrow artists, albums and tracks by genre (include or exclude), decade or year range, country, release type, solo or group, band size, year formed, popularity and tags, with new Formed, Year and Popularity sorts.
+- Artist facts: band type, current member count, years active and Deezer fan count are fetched for library artists on refresh.
+- Smart collections: playlists built from library filters, previewed live and pushed to your media server, either auto-updated on every sync or one-time; build them from Playlists, from a filtered Library view, or under Library → Collections.
 
 ### Changed
 
