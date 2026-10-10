@@ -11,9 +11,10 @@ import type { CalendarItem } from '@/types/calendar';
 
 export interface CalendarViewProps {
   onNavigate?: (route: AppRoute, options?: NavigateOptions) => void;
+  tabs?: React.ReactNode;
 }
 
-export const CalendarView: React.FC<CalendarViewProps> = ({ onNavigate }) => {
+export const CalendarView: React.FC<CalendarViewProps> = ({ onNavigate, tabs }) => {
   const { toast } = useToast();
   const [isSubscribeOpen, setIsSubscribeOpen] = useState(false);
 
@@ -49,6 +50,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onNavigate }) => {
       bodyClassName="space-y-4"
       nav={
         <div className="space-y-2">
+          {tabs}
           {toast && <ToastBanner message={toast.message} tone={toast.tone} />}
           {error && <ToastBanner message={error} tone="error" />}
 

@@ -6,7 +6,6 @@ import {
   ListMusic,
   Activity,
   ListTodo,
-  Calendar,
   Settings,
   LogIn,
   LogOut,
@@ -95,7 +94,6 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'playlists', label: 'Playlists', icon: <ListMusic className="h-4 w-4" /> },
     { id: 'activity', label: 'Activity', icon: <Activity className="h-4 w-4" />, adminOnly: true },
     { id: 'wanted', label: 'Wanted', icon: <ListTodo className="h-4 w-4" />, adminOnly: true },
-    { id: 'calendar', label: 'Calendar', icon: <Calendar className="h-4 w-4" />, adminOnly: true },
     { id: 'settings', label: 'Settings', icon: <Settings className="h-4 w-4" /> },
   ];
   const mobileNavItems = navItems.filter((item) => item.id !== 'settings');
@@ -236,7 +234,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Mobile shortcut bay: icon-only keys inside the header; the hub stays the full navigator */}
         {user && activeTab && onTabChange && (
-          <div className="md:hidden flex flex-1 min-w-0 overflow-x-auto tab-strip">
+          <div className="md:hidden flex flex-1 min-w-0 justify-center">
             <TapeTransportBay className="p-[2px] mx-auto">
               <div className="flex items-stretch gap-1">
                 {mobileNavItems
@@ -324,36 +322,16 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* Hub key & Bell button (every viewport): right edge on phones, left edge on desktop. Sign In stands in when signed out. */}
+        {/* Hub key (every viewport): right edge on phones, left edge on desktop. Sign In stands in when signed out. */}
         {user ? (
           <div className="order-last md:order-first ml-auto md:ml-0 flex items-center gap-1.5 flex-shrink-0">
-            {onOpenInbox && (
-              <TapeDeckButton
-                size="sm"
-                variant="default"
-                onClick={onOpenInbox}
-                title="Notifications"
-                aria-label={`Notifications${unreadNotificationsCount > 0 ? ` (${unreadNotificationsCount} unread)` : ''}`}
-                icon={<Bell className="h-4 w-4 text-neutral-300" />}
-                className="md:hidden relative w-9 h-9 !min-h-0 p-0 rounded-[3px] shrink-0"
-              >
-                {unreadNotificationsCount > 0 && (
-                  <span
-                    className="absolute -top-1 -right-1 min-w-[14px] px-0.5 rounded-[3px] bg-[var(--accent-amber)] text-[9px] leading-[14px] font-mono font-bold text-black text-center"
-                    aria-hidden="true"
-                  >
-                    {unreadNotificationsCount}
-                  </span>
-                )}
-              </TapeDeckButton>
-            )}
             <TapeDeckButton
               size="sm"
               variant="default"
               active={isMenuOpen}
               onClick={onToggleMenu}
               title={isMenuOpen ? 'Close Menu' : 'Open Menu'}
-              aria-label={isMenuOpen ? 'Close Menu' : 'Open Menu'}
+              aria-label={`${isMenuOpen ? 'Close Menu' : 'Open Menu'}${unreadNotificationsCount > 0 ? ` (${unreadNotificationsCount} unread notifications)` : ''}`}
               aria-expanded={isMenuOpen}
               aria-haspopup="dialog"
               icon={
@@ -363,8 +341,15 @@ export const Header: React.FC<HeaderProps> = ({
                   <Menu className="h-4 w-4 text-neutral-300" />
                 )
               }
-              className="w-9 h-9 !min-h-0 p-0 rounded-[3px] shrink-0 md:w-11 md:h-11"
-            />
+              className="relative w-9 h-9 !min-h-0 p-0 rounded-[3px] shrink-0 md:w-11 md:h-11"
+            >
+              {unreadNotificationsCount > 0 && (
+                <span
+                  className="md:hidden absolute -top-1 -right-1 w-2 h-2 rounded-[2px] bg-[var(--accent-amber)]"
+                  aria-hidden="true"
+                />
+              )}
+            </TapeDeckButton>
           </div>
         ) : (
           <div className="md:hidden flex items-center flex-shrink-0">
