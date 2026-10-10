@@ -18,7 +18,7 @@ import {
 } from '@/components/lists';
 import { TactileSwitch } from '@/components/ui';
 import { LibrarySortControl } from './LibrarySortControl';
-import { LibrarySelectKey, LibraryToolbarPortal } from './LibraryToolbarPortal';
+import { LibraryToolbarPortal, type LibrarySelectAction } from './LibraryToolbarPortal';
 import { AlbumBulkBar } from './AlbumBulkBar';
 import { getQualityBadge } from './trackFormat';
 
@@ -44,6 +44,7 @@ export interface TracksPanelProps {
   /** Stats footer, rendered right after the list. */
   footer: React.ReactNode;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
+  onSelectActionChange: (action: LibrarySelectAction | null) => void;
 }
 
 /** Every track as a virtualized table with a scrubber (native library only). */
@@ -56,6 +57,7 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
   toolbarSlot,
   footer,
   onToast,
+  onSelectActionChange,
 }) => {
   const { list, index, sortKey, sortDir, changeSort } = useLibraryCatalog<TrackItem>({
     fetchPage: fetchTracks,
@@ -83,6 +85,15 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
   useEffect(() => {
     exitSelection();
   }, [query, monitoredOnly, exitSelection]);
+
+  useEffect(() => {
+    onSelectActionChange(
+      canBulkEdit ? { active: selecting, toggle: selecting ? exitSelection : selection.enter } : null
+    );
+    return () => {
+      onSelectActionChange(null);
+    };
+  }, [canBulkEdit, selecting, exitSelection, selection.enter, onSelectActionChange]);
 
   const handleSelectAll = useCallback(async (): Promise<void> => {
     const keys = await collectAllIds();
@@ -193,7 +204,6 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
   return (
     <section className="flex min-h-0 flex-col gap-2" aria-label="Tracks">
       <LibraryToolbarPortal slot={toolbarSlot}>
-        {canBulkEdit && <LibrarySelectKey active={selecting} onToggle={selecting ? exitSelection : selection.enter} />}
         <LibrarySortControl options={SORT_OPTIONS} sortKey={sortKey} sortDir={sortDir} onChange={changeSort} />
       </LibraryToolbarPortal>
       {canBulkEdit && selecting && (

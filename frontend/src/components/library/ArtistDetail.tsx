@@ -25,7 +25,7 @@ import { useDiscographyFilter } from '@/hooks/useDiscographyFilter';
 import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { useAlbumBulkEdit } from '@/hooks/useAlbumBulkEdit';
 import { errorMessage } from '@/services/apiClient';
-import { ConfirmDialog, MachinedCard, TactileSwitch, TapeDeckButton, TabStrip, CassetteLoader } from '@/components/ui';
+import { ConfirmDialog, MachinedCard, TactileSwitch, TapeDeckButton, TabStrip, CassetteLoader, OverflowMenu, type OverflowMenuItem } from '@/components/ui';
 import { DetailHeaderBar, PageFrame } from '@/components/layout';
 
 import { ArtistAlbumCard } from './ArtistAlbumCard';
@@ -246,6 +246,47 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
     { id: 'compilations', full: 'Compilations & Box Sets', short: 'Compilations', icon: <HardDrive className="h-3.5 w-3.5" /> },
   ];
 
+  const artistToolItems: OverflowMenuItem[] = [];
+  if (canBulkEdit && !loading && !selection.active) {
+    artistToolItems.push({
+      key: 'select',
+      label: 'Select albums',
+      icon: <CheckSquare className="h-3.5 w-3.5" />,
+      onSelect: selection.enter,
+    });
+  }
+  if (hasOutside) {
+    artistToolItems.push({
+      key: 'hide-outside',
+      label: 'Hide outside profile',
+      checked: hideOutside,
+      onSelect: () => setHideOutside((v) => !v),
+    });
+  }
+  artistToolItems.push({
+    key: 'refresh',
+    label: 'Refresh discography',
+    icon: refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />,
+    disabled: refreshing,
+    onSelect: () => void detail.refreshDiscography(),
+  });
+  if (!lidarrMode && onRenameFiles) {
+    artistToolItems.push({
+      key: 'rename',
+      label: 'Rename files…',
+      icon: <FileText className="h-3.5 w-3.5" />,
+      onSelect: onRenameFiles,
+    });
+  }
+  if (!lidarrMode && onRetagFiles) {
+    artistToolItems.push({
+      key: 'retag',
+      label: 'Retag files…',
+      icon: <Tag className="h-3.5 w-3.5" />,
+      onSelect: onRetagFiles,
+    });
+  }
+
   return (
     <PageFrame nav={<DetailHeaderBar parentLabel="Artists" title={artist?.name} onBack={onBack} />}>
     <div className="space-y-2 sm:space-y-4">
@@ -301,36 +342,9 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
                       title="Ask Lidarr to search for this artist's monitored missing albums"
                     />
                   )}
-                  {!lidarrMode && onRenameFiles && (
-                    <TapeDeckButton
-                      size="sm"
-                      className={ICON_KEY}
-                      onClick={onRenameFiles}
-                      icon={<FileText className="h-4 w-4" />}
-                      aria-label="Rename files for this artist"
-                      title="Rename files for this artist based on naming pattern"
-                    />
+                  {artistToolItems.length > 0 && (
+                    <OverflowMenu label="Artist tools" className="shrink-0" items={artistToolItems} />
                   )}
-                  {!lidarrMode && onRetagFiles && (
-                    <TapeDeckButton
-                      size="sm"
-                      className={ICON_KEY}
-                      onClick={onRetagFiles}
-                      icon={<Tag className="h-4 w-4" />}
-                      aria-label="Retag files for this artist"
-                      title="Retag library files for this artist"
-                    />
-                  )}
-                  <TapeDeckButton
-                    size="sm"
-                    variant="amber"
-                    className={ICON_KEY}
-                    disabled={refreshing}
-                    onClick={() => void detail.refreshDiscography()}
-                    icon={refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                    aria-label="Refresh discography"
-                    title="Refresh discography"
-                  />
                 </div>
               )}
             </div>
@@ -466,28 +480,6 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
             ))}
           </TabStrip>
           <DiscographyFilter value={filter.text} onChange={filter.setText} onClear={filter.clear} searching={filter.searching} />
-          {hasOutside && (
-            <TactileSwitch
-              checked={hideOutside}
-              onChange={setHideOutside}
-              label="Hide outside profile"
-              className="shrink-0 max-sm:[&>span]:sr-only"
-              title="Hide releases that are outside the metadata profile (they are never hidden by default)"
-            />
-          )}
-          {canBulkEdit && !loading && !selection.active && (
-            <TapeDeckButton
-              size="sm"
-              className="shrink-0"
-              icon={<CheckSquare className="h-3.5 w-3.5" />}
-              collapseLabel
-              onClick={selection.enter}
-              aria-label="Select albums"
-              title="Select albums"
-            >
-              Select albums
-            </TapeDeckButton>
-          )}
         </div>
         {canBulkEdit && !loading && selection.active && (
           <div className="relative z-10 border-t border-[#1f1f1f] p-1.5">
