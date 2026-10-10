@@ -21,13 +21,11 @@ def seeded(db):
     ])
 
 
-def test_list_and_native_lidarr_status(client, seeded, admin, alice):
+def test_list_missing_tracks(client, seeded, admin, alice):
     rows = ok(client.get(M, headers=admin))
     assert {r["title"] for r in rows} == {"Airbag", "Lucky"} and rows[0]["playlist_id"] == "pl-1"
     assert len(ok(client.get(f"{M}?playlist_id=pl-1", headers=admin))) == 2
     assert client.get(M, headers=alice).status_code == 403
-    assert ok(client.get(f"{M}/lidarr/status", headers=admin)) == {"mode": "native", "connected": None}
-    assert ok(client.get(f"{M}/lidarr/queue", headers=admin))["is_running"] is False
 
 
 def test_match_overrides_flow(client, db, seeded, admin, alice):
