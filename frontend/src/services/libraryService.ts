@@ -306,3 +306,9 @@ export interface IngestArtistInput {
 export async function ingestArtist(input: IngestArtistInput): Promise<void> {
   await apiRequest<void>('/api/library/artists/ingest', { method: 'POST', body: input });
 }
+
+export type LibraryFacetsResponse = Schema<'LibraryFacetsResponse'>;
+
+export async function getLibraryFacets(signal?: AbortSignal): Promise<Schema<'LibraryFacetsResponse'>> {
+  return apiRequest<Schema<'LibraryFacetsResponse'>>('/api/library/facets', { signal });
+}

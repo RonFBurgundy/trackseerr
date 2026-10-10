@@ -21,7 +21,7 @@ export interface UseLibraryCatalogOptions<T> {
   monitoredOnly: boolean;
   enabled?: boolean;
   /** Extra fixed filters, e.g. `artist_id`. */
-  extraFilters?: Readonly<Record<string, string>>;
+  extraFilters?: Readonly<Record<string, string | readonly string[]>>;
 }
 
 export interface UseLibraryCatalogReturn<T> {
@@ -41,9 +41,9 @@ export function useLibraryCatalog<T>(options: UseLibraryCatalogOptions<T>): UseL
     dir: sortOptions[0].defaultDir,
   });
   const extraJson = JSON.stringify(extraFilters ?? {});
-  const filters = useMemo<Record<string, string>>(
+  const filters = useMemo<Record<string, string | readonly string[]>>(
     () => ({
-      ...(JSON.parse(extraJson) as Record<string, string>),
+      ...(JSON.parse(extraJson) as Record<string, string | readonly string[]>),
       q: query.trim(),
       monitored_only: monitoredOnly ? 'true' : '',
     }),

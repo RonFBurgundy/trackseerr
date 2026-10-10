@@ -18,7 +18,7 @@ export interface UseSelectAllMatchingReturn {
 export function useSelectAllMatching<T>(
   fetchPage: (q: ListQuery, signal?: AbortSignal) => Promise<PagedResponse<T>>,
   getKey: (item: T) => ListKey,
-  filters: Readonly<Record<string, string>>,
+  filters: Readonly<Record<string, string | readonly string[]>>,
   sortKey: string,
   onToast: (msg: string, tone?: 'ok' | 'error') => void
 ): UseSelectAllMatchingReturn {

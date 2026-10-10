@@ -5,7 +5,7 @@ import { errorMessage } from '@/services/apiClient';
 export interface UseGroupIndexOptions {
   sortKey: string;
   sortDir: ListSortDir;
-  filters?: Readonly<Record<string, string>>;
+  filters?: Readonly<Record<string, string | readonly string[]>>;
   /** The list's current total; the index is refetched when it changes (rows were added or removed). */
   total: number;
   /** When false nothing is fetched. Default true. */
@@ -52,7 +52,7 @@ export function useGroupIndex(fetcher: IndexFetcher, options: UseGroupIndexOptio
     const controller = new AbortController();
     setLoading(true);
     fetcherRef.current(
-      { sortKey, sortDir, filters: JSON.parse(filtersJson) as Record<string, string> },
+      { sortKey, sortDir, filters: JSON.parse(filtersJson) as Record<string, string | readonly string[]> },
       controller.signal
     )
       .then((res) => {

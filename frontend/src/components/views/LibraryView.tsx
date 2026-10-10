@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { CheckSquare, Disc, Eye, FileText, FolderInput, Layers, Loader2, Music, RefreshCw, Tag, User } from 'lucide-react';
+import { CheckSquare, Disc, Eye, FileText, FolderInput, Layers, Loader2, Music, RefreshCw, SlidersHorizontal, Tag, User, X } from 'lucide-react';
 import type { UseLibraryReturn, LibraryTab } from '@/hooks/useLibrary';
 import type { AppRoute, LibraryRoute, NavigateOptions } from '@/hooks/useAppRoute';
 import { useLibraryDrilldown } from '@/hooks/useLibraryDrilldown';
@@ -7,6 +7,9 @@ import type { AlbumItem, ArtistDiscographyAlbum, AudioPreviewTrack, DiscoveryIte
 import { useAddToCollection } from '@/hooks/useAddToCollection';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useLibraryManager } from '@/hooks/useLibraryManager';
+import { useLibraryFacets } from '@/hooks/useLibraryFacets';
+import { useLibraryFilters } from '@/hooks/useLibraryFilters';
+import { useTags } from '@/hooks/useTags';
 import { useToast } from '@/hooks/useToast';
 import type { ManualImportScope } from '@/types/manualImport';
 import { deleteCollection } from '@/services/libraryService';
@@ -21,6 +24,7 @@ import {
   ArtistsPanel,
   CollectionDetail,
   CollectionsPanel,
+  LibraryFilterSheet,
   LibraryScanBanner,
   LibraryStatsBar,
   type LibrarySelectAction,
@@ -122,6 +126,25 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const lidarrMode = (manager.state?.mode ?? listMode) === 'lidarr';
   // Collections reference native album rows, so adding albums to them is a native-mode action.
   const canCollect = !lidarrMode;
+
+  const { tags } = useTags(Boolean(isAdmin && !lidarrMode));
+  const { facets } = useLibraryFacets(Boolean(isAdmin && !lidarrMode));
+  const {
+    filters,
+    setFilters,
+    removeChip,
+    clear: clearFilters,
+    activeCount,
+    query: filtersQuery,
+    chips,
+  } = useLibraryFilters(tags);
+  const [isFilterSheetOpen, setIsFilterSheetOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (lidarrMode) {
+      clearFilters();
+    }
+  }, [lidarrMode, clearFilters]);
 
   // Collections search is still resolved by the collections endpoint; the paged lists take `query` directly.
   // The paged catalog loads through the hook's tab; keep it in step with the route.
@@ -226,6 +249,14 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           void reloadCatalog();
         }}
       />
+      <LibraryFilterSheet
+        isOpen={isFilterSheetOpen}
+        onClose={() => setIsFilterSheetOpen(false)}
+        filters={filters}
+        onApply={setFilters}
+        facets={facets}
+        tags={tags}
+      />
     </>
   );
 
@@ -288,13 +319,21 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const pagedTab = activeTab !== 'collections';
 
   const toolItems: OverflowMenuItem[] = [];
+  if (pagedTab && isAdmin && !lidarrMode) {
+    toolItems.push({
+      key: 'filter',
+      label: activeCount ? `Filter (${activeCount})…` : 'Filter…',
+      icon: <SlidersHorizontal className="h-3.5 w-3.5" />,
+      onSelect: () => setIsFilterSheetOpen(true),
+    });
+  }
   if (pagedTab) {
     toolItems.push({
       key: 'monitored',
       label: 'Monitored only',
       icon: <Eye className="h-3.5 w-3.5" />,
       checked: monitoredOnly,
-      onSelect: () => setMonitoredOnly((v) => !v),
+      onSelect: () => setMonitoredOnly((v: boolean) => !v),
     });
   }
   if (selectAction) {
@@ -378,6 +417,37 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         {toastNode}
         {showScanBanner && <LibraryScanBanner scanStatus={scanStatus} onCancel={() => void cancelScan()} />}
         {lidarrStatus && lidarrStatus.is_migrating && <LidarrMigrationBanner status={lidarrStatus} />}
+        {chips.length > 0 && (
+          <div
+            role="region"
+            aria-label="Active filters"
+            className="flex items-center gap-1.5 overflow-x-auto overflow-y-hidden whitespace-nowrap pb-1 text-xs no-scrollbar shrink-0"
+          >
+            {chips.map((chip) => (
+              <span
+                key={chip.key}
+                className="inline-flex items-center gap-1 rounded-[3px] border border-[#2a2a2a] bg-[#181818] px-2 py-0.5 text-xs font-mono text-[var(--text-secondary)] shrink-0"
+              >
+                <span>{chip.label}</span>
+                <button
+                  type="button"
+                  onClick={() => removeChip(chip.key)}
+                  aria-label={`Remove filter ${chip.label}`}
+                  className="ml-0.5 text-neutral-400 hover:text-white focus-visible:outline-none focus-visible:text-[var(--accent-amber)]"
+                >
+                  <X className="h-3 w-3" aria-hidden="true" />
+                </button>
+              </span>
+            ))}
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="shrink-0 px-1.5 py-0.5 text-xs font-mono text-[var(--accent-amber)] hover:underline focus-visible:outline-none"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
         {error && !isLoading && (
           <div role="alert" title={error} className="px-3 py-2 bg-red-950/40 border border-red-800/50 rounded-[4px] text-xs text-red-300 font-mono truncate">
             {error}
@@ -388,6 +458,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         <ArtistsPanel
           query={query}
           monitoredOnly={monitoredOnly}
+          facets={filtersQuery}
           isAdmin={isAdmin}
           reloadToken={catalogVersion}
           onOpenArtist={drill.openArtist}
@@ -403,6 +474,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         <AlbumsPanel
           query={query}
           monitoredOnly={monitoredOnly}
+          facets={filtersQuery}
           isAdmin={isAdmin}
           reloadToken={catalogVersion}
           onOpenAlbum={drill.openAlbum}
@@ -423,6 +495,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           <TracksPanel
             query={query}
             monitoredOnly={monitoredOnly}
+            facets={filtersQuery}
             isAdmin={isAdmin}
             reloadToken={catalogVersion}
             onToggleMonitored={toggleTrackMonitored}

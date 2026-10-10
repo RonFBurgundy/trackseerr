@@ -30,3 +30,5 @@ export * from './ArtistTagsRow';
 export * from './DiscographyFilter';
 export * from './RenameModal';
 export * from './RetagModal';
+export * from './LibraryFilterFields';
+export * from './LibraryFilterSheet';

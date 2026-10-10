@@ -26,6 +26,8 @@ const SORT_OPTIONS: ReadonlyArray<LibrarySortOption> = [
   { key: 'title', label: 'Title', defaultDir: 'asc' },
   { key: 'artist', label: 'Artist', defaultDir: 'asc' },
   { key: 'album', label: 'Album', defaultDir: 'asc' },
+  { key: 'year', label: 'Year', defaultDir: 'desc' },
+  { key: 'popularity', label: 'Popularity', defaultDir: 'desc' },
   { key: 'added_at', label: 'Added', defaultDir: 'desc' },
   { key: 'size_bytes', label: 'Size', defaultDir: 'desc' },
 ];
@@ -45,6 +47,7 @@ export interface TracksPanelProps {
   footer: React.ReactNode;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
   onSelectActionChange: (action: LibrarySelectAction | null) => void;
+  facets?: Readonly<Record<string, string | readonly string[]>>;
 }
 
 /** Every track as a virtualized table with a scrubber (native library only). */
@@ -58,6 +61,7 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
   footer,
   onToast,
   onSelectActionChange,
+  facets,
 }) => {
   const { list, index, sortKey, sortDir, changeSort } = useLibraryCatalog<TrackItem>({
     fetchPage: fetchTracks,
@@ -66,25 +70,33 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
     sortOptions: SORT_OPTIONS,
     query,
     monitoredOnly,
+    extraFilters: facets,
   });
   const overrides = useMonitoredOverrides();
   const { refresh, reload } = list;
+
+  const hasActiveFacets = Boolean(facets && Object.keys(facets).length > 0);
+  const facetsJson = JSON.stringify(facets ?? {});
 
   // Track bulk edit is native-only: the route answers 409 when Lidarr manages the library.
   const canBulkEdit = isAdmin && list.mode !== 'lidarr';
   const selection = useBulkSelection();
   const { active: selecting, exit: exitSelection, selectKeys } = selection;
   const bulk = useTrackBulkEdit(onToast);
-  const filters = useMemo<Record<string, string>>(
-    () => ({ q: query.trim(), monitored_only: monitoredOnly ? 'true' : '' }),
-    [query, monitoredOnly]
+  const filters = useMemo<Record<string, string | readonly string[]>>(
+    () => ({
+      ...(facets ?? {}),
+      q: query.trim(),
+      monitored_only: monitoredOnly ? 'true' : '',
+    }),
+    [query, monitoredOnly, facets]
   );
   const selectAll = useSelectAllMatching<TrackItem>(getTracksPaged, getKey, filters, 'title', onToast);
   const { collect: collectAllIds } = selectAll;
 
   useEffect(() => {
     exitSelection();
-  }, [query, monitoredOnly, exitSelection]);
+  }, [query, monitoredOnly, facetsJson, exitSelection]);
 
   useEffect(() => {
     onSelectActionChange(
@@ -212,7 +224,11 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
           count={selection.selected.size}
           busy={bulk.busy}
           selectBusy={selectAll.busy}
-          selectLabel={`All ${list.total.toLocaleString()} tracks`}
+          selectLabel={
+            hasActiveFacets || query || monitoredOnly
+              ? `All ${list.total.toLocaleString()} matching tracks`
+              : `All ${list.total.toLocaleString()} tracks`
+          }
           onSelectAll={() => void handleSelectAll()}
           onClear={selection.clear}
           onDone={exitSelection}
@@ -234,7 +250,13 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
         actionsWidth="200px"
         mobileLayout="compact"
         hideMobileSortBar
-        emptyMessage={query ? 'No tracks match your search.' : 'No tracks found in library.'}
+        emptyMessage={
+          hasActiveFacets
+            ? 'Nothing in your library matches these filters.'
+            : query
+            ? 'No tracks match your search.'
+            : 'No tracks found in library.'
+        }
         rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
       />
       {footer}

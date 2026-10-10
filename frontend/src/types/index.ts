@@ -25,3 +25,4 @@ export * from './userNotifications';
 export * from './listening';
 export * from './backup';
 export * from './calendar';
+export * from './libraryFilters';
