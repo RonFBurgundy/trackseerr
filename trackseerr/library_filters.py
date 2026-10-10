@@ -125,94 +125,80 @@ def GENRE_MATCH_SQL(column: str) -> str:
     return f"(',' || lower(replace(COALESCE({column}, ''), ', ', ',')) || ',') LIKE ?"
 
 
-def facet_clauses(f: LibraryFacetFilter, kind: str) -> tuple[list[str], list[Any]]:
-    if f.is_empty():
-        return [], []
-    if kind not in ("artists", "albums", "tracks"):
-        raise ValueError(f"Unknown library kind: {kind!r}")
+def _genre_group(column_exprs: list[str], genres: tuple[str, ...]) -> tuple[str, list[str]]:
+    if len(column_exprs) == 1:
+        c = " OR ".join([GENRE_MATCH_SQL(column_exprs[0]) for _ in genres])
+        params = [f"%,{g},%" for g in genres]
+    else:
+        inner = " OR ".join([GENRE_MATCH_SQL(col) for col in column_exprs])
+        c = " OR ".join([f"({inner})" for _ in genres])
+        params = []
+        for g in genres:
+            for _ in column_exprs:
+                params.append(f"%,{g},%")
+    return c, params
 
-    artist_alias = "a" if kind == "artists" else "ar"
+
+def _genre_clauses(f: LibraryFacetFilter, kind: str) -> tuple[list[str], list[Any]]:
     clauses: list[str] = []
     params: list[Any] = []
+    col_exprs = ["a.genres"] if kind == "artists" else ["al.genres", "ar.genres"]
 
-    # 1. genres: artists -> a.genres; albums/tracks -> al.genres OR ar.genres (ANY match)
     if f.genres:
-        if kind == "artists":
-            c = " OR ".join([GENRE_MATCH_SQL("a.genres") for _ in f.genres])
-            clauses.append(f"({c})")
-            params.extend([f"%,{g},%" for g in f.genres])
-        else:
-            c = " OR ".join([f"({GENRE_MATCH_SQL('al.genres')} OR {GENRE_MATCH_SQL('ar.genres')})" for _ in f.genres])
-            clauses.append(f"({c})")
-            for g in f.genres:
-                params.extend([f"%,{g},%", f"%,{g},%"])
+        c, p = _genre_group(col_exprs, f.genres)
+        clauses.append(f"({c})")
+        params.extend(p)
 
-    # 2. exclude_genres: NOT (any match)
     if f.exclude_genres:
-        if kind == "artists":
-            c = " OR ".join([GENRE_MATCH_SQL("a.genres") for _ in f.exclude_genres])
-            clauses.append(f"NOT ({c})")
-            params.extend([f"%,{g},%" for g in f.exclude_genres])
-        else:
-            c = " OR ".join([f"({GENRE_MATCH_SQL('al.genres')} OR {GENRE_MATCH_SQL('ar.genres')})" for _ in f.exclude_genres])
-            clauses.append(f"NOT ({c})")
-            for g in f.exclude_genres:
-                params.extend([f"%,{g},%", f"%,{g},%"])
+        c, p = _genre_group(col_exprs, f.exclude_genres)
+        clauses.append(f"NOT ({c})")
+        params.extend(p)
 
-    # 3. countries: <artist>.country IN (...)
-    if f.countries:
-        placeholders = ", ".join("?" for _ in f.countries)
-        clauses.append(f"{artist_alias}.country IN ({placeholders})")
-        params.extend(f.countries)
+    return clauses, params
 
-    # 4. year_from/year_to: albums/tracks -> al.year; artists -> EXISTS album
+
+def _in_clause(column: str, values: tuple[Any, ...]) -> tuple[list[str], list[Any]]:
+    if not values:
+        return [], []
+    placeholders = ", ".join("?" for _ in values)
+    return [f"{column} IN ({placeholders})"], list(values)
+
+
+def _year_clauses(f: LibraryFacetFilter, kind: str) -> tuple[list[str], list[Any]]:
+    if f.year_from is None and f.year_to is None:
+        return [], []
+
     if f.year_from is not None and f.year_to is not None:
-        if kind in ("albums", "tracks"):
-            clauses.append("al.year BETWEEN ? AND ?")
-            params.extend([f.year_from, f.year_to])
-        else:
-            clauses.append(
-                "EXISTS (SELECT 1 FROM library_albums y WHERE y.artist_id = a.id AND y.year BETWEEN ? AND ?)"
-            )
-            params.extend([f.year_from, f.year_to])
+        expr = "year BETWEEN ? AND ?"
+        params: list[Any] = [f.year_from, f.year_to]
     elif f.year_from is not None:
-        if kind in ("albums", "tracks"):
-            clauses.append("al.year >= ?")
-            params.append(f.year_from)
-        else:
-            clauses.append(
-                "EXISTS (SELECT 1 FROM library_albums y WHERE y.artist_id = a.id AND y.year >= ?)"
-            )
-            params.append(f.year_from)
-    elif f.year_to is not None:
-        if kind in ("albums", "tracks"):
-            clauses.append("al.year <= ?")
-            params.append(f.year_to)
-        else:
-            clauses.append(
-                "EXISTS (SELECT 1 FROM library_albums y WHERE y.artist_id = a.id AND y.year <= ?)"
-            )
-            params.append(f.year_to)
+        expr = "year >= ?"
+        params = [f.year_from]
+    else:
+        expr = "year <= ?"
+        params = [f.year_to]
 
-    # 5. album_types: albums/tracks -> al.album_type IN (...); artists -> EXISTS album
-    if f.album_types:
-        placeholders = ", ".join("?" for _ in f.album_types)
-        if kind in ("albums", "tracks"):
-            clauses.append(f"al.album_type IN ({placeholders})")
-        else:
-            clauses.append(
-                f"EXISTS (SELECT 1 FROM library_albums y WHERE y.artist_id = a.id AND y.album_type IN ({placeholders}))"
-            )
-        params.extend(f.album_types)
+    if kind in ("albums", "tracks"):
+        clause = f"al.{expr}"
+    else:
+        clause = f"EXISTS (SELECT 1 FROM library_albums y WHERE y.artist_id = a.id AND y.{expr})"
+    return [clause], params
 
-    # 6. artist_types: <artist>.artist_type IN (...)
-    if f.artist_types:
-        placeholders = ", ".join("?" for _ in f.artist_types)
-        clauses.append(f"{artist_alias}.artist_type IN ({placeholders})")
-        params.extend(f.artist_types)
 
-    # 7. members_min/max, formed_from/to, popularity_min/max
-    # inclusive ranges on the artist columns; a NULL column never matches a bound
+def _album_type_clauses(f: LibraryFacetFilter, kind: str) -> tuple[list[str], list[Any]]:
+    if not f.album_types:
+        return [], []
+    placeholders = ", ".join("?" for _ in f.album_types)
+    if kind in ("albums", "tracks"):
+        clause = f"al.album_type IN ({placeholders})"
+    else:
+        clause = f"EXISTS (SELECT 1 FROM library_albums y WHERE y.artist_id = a.id AND y.album_type IN ({placeholders}))"
+    return [clause], list(f.album_types)
+
+
+def _range_clauses(f: LibraryFacetFilter, artist_alias: str) -> tuple[list[str], list[Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
     for col_name, val_min, val_max in (
         ("member_count", f.members_min, f.members_max),
         ("begin_year", f.formed_from, f.formed_to),
@@ -228,16 +214,41 @@ def facet_clauses(f: LibraryFacetFilter, kind: str) -> tuple[list[str], list[Any
         elif val_max is not None:
             clauses.append(f"{col_expr} IS NOT NULL AND {col_expr} <= ?")
             params.append(val_max)
+    return clauses, params
 
-    # 8. tag_ids: EXISTS (SELECT 1 FROM artist_tags t2 WHERE t2.artist_id = <artist>.id AND t2.tag_id IN (...))
-    if f.tag_ids:
-        placeholders = ", ".join("?" for _ in f.tag_ids)
-        clauses.append(
-            f"EXISTS (SELECT 1 FROM artist_tags t2 WHERE t2.artist_id = {artist_alias}.id AND t2.tag_id IN ({placeholders}))"
-        )
-        params.extend(f.tag_ids)
+
+def _tag_clauses(f: LibraryFacetFilter, artist_alias: str) -> tuple[list[str], list[Any]]:
+    if not f.tag_ids:
+        return [], []
+    placeholders = ", ".join("?" for _ in f.tag_ids)
+    clause = f"EXISTS (SELECT 1 FROM artist_tags t2 WHERE t2.artist_id = {artist_alias}.id AND t2.tag_id IN ({placeholders}))"
+    return [clause], list(f.tag_ids)
+
+
+def facet_clauses(f: LibraryFacetFilter, kind: str) -> tuple[list[str], list[Any]]:
+    if f.is_empty():
+        return [], []
+    if kind not in ("artists", "albums", "tracks"):
+        raise ValueError(f"Unknown library kind: {kind!r}")
+
+    artist_alias = "a" if kind == "artists" else "ar"
+    clauses: list[str] = []
+    params: list[Any] = []
+
+    for helper_clauses, helper_params in (
+        _genre_clauses(f, kind),
+        _in_clause(f"{artist_alias}.country", f.countries),
+        _year_clauses(f, kind),
+        _album_type_clauses(f, kind),
+        _in_clause(f"{artist_alias}.artist_type", f.artist_types),
+        _range_clauses(f, artist_alias),
+        _tag_clauses(f, artist_alias),
+    ):
+        clauses.extend(helper_clauses)
+        params.extend(helper_params)
 
     return clauses, params
+
 
 
 def library_facets(db: Any) -> dict[str, Any]:
