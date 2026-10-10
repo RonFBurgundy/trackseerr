@@ -372,7 +372,6 @@ class TestRequestRouting:
         _, client = app_and_client
         _configure_lidarr(test_db)
         headers = _headers(seeded_users["admin"], test_db, test_config)
-        assert client.post("/api/missing/lidarr/push", json={"trickle": True}, headers=headers).status_code == 409
         _set_mode(test_db, "lidarr")
         assert client.post("/api/missing/1/grab", headers=headers).status_code in (404, 409)
         test_db.upsert_playlist("pl-1", "P", service="spotify")

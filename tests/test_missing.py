@@ -1,7 +1,7 @@
 """Tests for Missing Tracks Feeds (RSS, Lidarr, Text), Webhook, and Self-Healing Sync."""
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,11 +12,9 @@ from trackseerr.api.dependencies import (
     get_current_user,
     get_current_user_or_api_key,
     get_db,
-    get_lidarr_client,
-    get_plex_client,
 )
 from trackseerr.config import Config
-from trackseerr.models import Playlist, SyncResult, Track
+from trackseerr.models import SyncResult, Track
 from trackseerr.storage import Database
 
 
@@ -111,99 +109,6 @@ class TestMissingFeeds:
         assert "Queen - Bohemian Rhapsody" in resp.text
 
 
-class TestLidarrClientAndPush:
-    """Tests for Lidarr API client and push integration."""
-
-    @patch("trackseerr.clients.lidarr.httpx.Client")
-    def test_lidarr_status_endpoint(self, mock_client_cls, client, test_db):
-        test_db.update_media_management_settings({"library_mode": "lidarr"})
-        mock_http = MagicMock()
-        mock_client_cls.return_value.__enter__.return_value = mock_http
-        mock_http.get.return_value.status_code = 200
-        mock_http.get.return_value.json.return_value = {"version": "2.4.3.4248", "appName": "Lidarr"}
-
-        resp = client.get("/api/missing/lidarr/status")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["configured"] is True
-        assert data["status"]["online"] is True
-        assert data["status"]["version"] == "2.4.3.4248"
-
-    def _push_setup(self, test_db, titles, album=""):
-        test_db.update_media_management_settings({"library_mode": "lidarr"})
-        test_db.upsert_playlist("pl_1", "Rock", service="spotify")
-        test_db.record_sync_result(
-            "pl_1",
-            status="partial",
-            missing_tracks=[{"title": t, "artist": "Queen", "album": album} for t in titles],
-        )
-
-    def test_push_dedupes_per_song_not_per_artist_and_album(self, client, test_db):
-        from tests.lidarr_fake import FakeLidarr
-
-        self._push_setup(test_db, ["Bohemian Rhapsody", "Bohemian Rhapsody (Remastered 2011)", "Killer Queen"])
-        fake = FakeLidarr()
-        fake.albums = [
-            {"id": 5, "title": "Opera", "albumType": "Album", "releaseDate": "1975-01-01", "monitored": False},
-            {"id": 6, "title": "Sheer", "albumType": "Album", "releaseDate": "1974-01-01", "monitored": False},
-        ]
-        fake.tracks = [
-            {"id": 1, "albumId": 5, "title": "Bohemian Rhapsody"},
-            {"id": 2, "albumId": 6, "title": "Killer Queen"},
-        ]
-        with patch("trackseerr.clients.lidarr.httpx.Client", fake):
-            data = client.post("/api/missing/lidarr/push", json={}).json()
-        # two distinct songs (the remaster is the same song) -> two pushes, both tracks of the empty album covered
-        assert data["total_requested"] == 3 and data["deduplicated_items"] == 2
-        assert sorted(a["id"] for a in fake.albums if a["monitored"]) == [5, 6]
-
-    def test_push_maps_outcomes_to_retryable_statuses(self, client, test_db):
-        from tests.lidarr_fake import FakeLidarr
-
-        self._push_setup(test_db, ["Some Deep Cut"])
-        fake = FakeLidarr()
-        fake.albums = [{"id": 5, "title": "Opera", "albumType": "Album", "monitored": False}]
-        fake.tracks = [{"id": 1, "albumId": 5, "title": "Love of My Life"}]
-        with patch("trackseerr.clients.lidarr.httpx.Client", fake):
-            client.post("/api/missing/lidarr/push", json={})
-        row = test_db.get_missing_tracks()[0]
-        assert row["lidarr_status"] == "unavailable" and row["attempts"] == 1 and row["next_attempt_at"]
-
-        fake = FakeLidarr()
-        fake.fail[("GET", "artist/lookup")] = 429
-        with patch("trackseerr.clients.lidarr.httpx.Client", fake):
-            client.post("/api/missing/lidarr/push", json={})
-        row = test_db.get_missing_tracks()[0]
-        assert row["lidarr_status"] == "rate_limited" and row["attempts"] == 2
-
-    def test_lidarr_push_endpoint(self, client, test_db):
-        from tests.lidarr_fake import FakeLidarr
-
-        test_db.update_media_management_settings({"library_mode": "lidarr"})
-        fake = FakeLidarr()
-        fake.albums = [{"id": 5, "title": "A Night at the Opera", "albumType": "Album", "monitored": False}]
-        fake.tracks = [{"id": 1, "albumId": 5, "title": "Bohemian Rhapsody"}]
-
-        test_db.upsert_playlist("pl_1", "Rock", service="spotify")
-        test_db.record_sync_result(
-            "pl_1",
-            status="partial",
-            missing_tracks=[
-                {"title": "Bohemian Rhapsody", "artist": "Queen", "album": "A Night at the Opera"},
-            ],
-        )
-
-        with patch("trackseerr.clients.lidarr.httpx.Client", fake):
-            resp = client.post("/api/missing/lidarr/push", json={})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["total_requested"] == 1
-        assert data["added"] == 1
-        assert data["results"][0]["status"] == "added"
-        assert data["results"][0]["artist"] == "Queen"
-        posted = fake.requests("POST", "artist")[0]
-        assert posted["addOptions"] == {"monitor": "none", "searchForMissingAlbums": False}
-        assert fake.requests("PUT", "album/monitor") == [{"albumIds": [5], "monitored": True}]
 
 
 class TestWebhookAndSelfHealingSync:
@@ -285,68 +190,5 @@ class TestWebhookAndSelfHealingSync:
         assert pl["sync_status"] == "success"
 
 
-class TestLidarrTrickleWorkerAndEndpoints:
-    """Tests for Lidarr trickle background worker, pacing, and queue endpoints."""
-
-    def test_queue_endpoints(self, client):
-        # 1. GET queue status
-        resp = client.get("/api/missing/lidarr/queue")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "is_running" in data
-        assert "is_paused" in data
-        assert "remaining_items" in data
-
-        # 2. Pause when worker is running
-        from trackseerr.lidarr_queue import lidarr_worker
-        with lidarr_worker._lock:
-            lidarr_worker._is_running = True
-            lidarr_worker._total_items = 5
-            lidarr_worker._processed_items = 1
-
-        try:
-            resp_pause = client.post("/api/missing/lidarr/queue/pause")
-            assert resp_pause.status_code == 200
-            assert resp_pause.json()["is_paused"] is True
-
-            # 3. Resume
-            resp_resume = client.post("/api/missing/lidarr/queue/resume")
-            assert resp_resume.status_code == 200
-            assert resp_resume.json()["is_paused"] is False
-
-            # 4. Cancel
-            resp_cancel = client.post("/api/missing/lidarr/queue/cancel")
-            assert resp_cancel.status_code == 200
-        finally:
-            with lidarr_worker._lock:
-                lidarr_worker._is_running = False
-                lidarr_worker._total_items = 0
-                lidarr_worker._processed_items = 0
-                lidarr_worker._is_paused = False
-
-    @patch("trackseerr.lidarr_queue.lidarr_worker.start_trickle")
-    def test_lidarr_push_trickle_enqueues(self, mock_start, client, test_db):
-        test_db.update_media_management_settings({"library_mode": "lidarr"})
-        mock_start.return_value = {
-            "status": "started",
-            "message": "Enqueued 2 tracks",
-            "queued_count": 2,
-        }
-        test_db.upsert_playlist("pl_trickle", "Synthwave", service="spotify")
-        test_db.record_sync_result(
-            "pl_trickle",
-            status="partial",
-            missing_tracks=[
-                {"title": "Track 1", "artist": "Artist A", "album": "Album 1"},
-                {"title": "Track 2", "artist": "Artist B", "album": "Album 2"},
-            ],
-        )
-
-        resp = client.post("/api/missing/lidarr/push", json={"trickle": True, "batch_size": 25})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["trickle"] is True
-        assert data["queued_count"] == 2
-        assert mock_start.called
 
 

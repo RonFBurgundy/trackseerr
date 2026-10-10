@@ -408,7 +408,6 @@ PLEX_ONLY_ROUTES = [
     ("get", "/api/plex-playlists/mixes/snapshots"),
     ("post", "/api/users/refresh"),
     ("get", "/api/missing/search?query=abc"),
-    ("post", "/api/playlists/smart-mix"),
 ]
 
 

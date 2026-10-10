@@ -15,7 +15,6 @@ from trackseerr.api.dependencies import (
     get_db,
     get_deezer_client,
     get_media_client,
-    require_media_server,
     get_spotify_client,
     has_permission,
 )
@@ -29,13 +28,11 @@ from trackseerr.api.schemas.playlists import (
     PlaylistMonitorModeResponse,
     PlaylistRecord,
     PlaylistTargetsResponse,
-    SmartMixPreset,
 )
 from trackseerr.clients.deezer import DeezerClient
 from trackseerr.clients.import_lists import listenbrainz as lb_provider
 from trackseerr.clients.import_lists.base import ImportListError
-from trackseerr.clients.plex import PlexClient
-from trackseerr.media_servers import PlaylistSyncOptions, as_media_server, describe_error, plex_extras
+from trackseerr.media_servers import PlaylistSyncOptions, as_media_server, describe_error
 from trackseerr.clients.spotify import SpotifyClient
 from trackseerr.clients.spotify_scraper import SpotifyWebScraper
 from trackseerr.config import MEDIA_SERVER_NONE, Config
@@ -204,12 +201,6 @@ class PlaylistAutoRequestRequest(BaseModel):
     auto_request: bool
 
 
-class SmartMixRequest(BaseModel):
-    mix_type: str = Field(..., description="One of: 'heavy_rotation', 'forgotten_favorites', 'deep_cuts'")
-    name: Optional[str] = Field(default=None, max_length=200, description="Custom playlist name")
-    targets: Optional[list[str]] = Field(default=None, description="Optional target user IDs")
-
-
 class M3UImportRequest(BaseModel):
     content: str = Field(..., min_length=1, description="Raw M3U/M3U8 file contents")
     name: Optional[str] = Field(default="Imported M3U Playlist", max_length=200, description="Playlist title")
@@ -271,27 +262,6 @@ FEATURED_CHARTS = [
         "description": "The top streamed music tracks globally on Deezer.",
         "poster_url": "https://e-cdns-images.dzcdn.net/images/cover/9082ebca4314c1d76378e9b049d53c73/500x500-000000-80-0-0.jpg",
         "category": "Charts",
-    },
-]
-
-SMART_MIX_PRESETS = [
-    {
-        "mix_type": "heavy_rotation",
-        "name": "Heavy Rotation",
-        "description": "Your most played tracks on Plexamp over recent weeks.",
-        "icon": "fire",
-    },
-    {
-        "mix_type": "forgotten_favorites",
-        "name": "Forgotten Favorites",
-        "description": "Loved and heavily played songs you haven't listened to in the last 6 months.",
-        "icon": "clock",
-    },
-    {
-        "mix_type": "deep_cuts",
-        "name": "Deep Cuts",
-        "description": "Rare and unplayed hidden gems from your favorite library artists.",
-        "icon": "sparkles",
     },
 ]
 
@@ -566,77 +536,6 @@ def list_featured_charts(
     """Returns curated popular charts for 1-click subscription."""
     return FEATURED_CHARTS
 
-
-@router.get("/smart-mix/presets", response_model=list[SmartMixPreset], response_model_exclude_unset=True)
-def get_smart_mix_presets(
-    current_user: dict[str, Any] = Depends(get_current_user),
-) -> list[dict[str, Any]]:
-    """Returns available local Smart Mix recipes."""
-    return SMART_MIX_PRESETS
-
-
-@router.post("/smart-mix", response_model=PlaylistImportResponse, response_model_exclude_unset=True, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_media_server)])
-def create_smart_mix(
-    req: SmartMixRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    db: Database = Depends(get_db),
-    config: Config = Depends(get_config),
-    plex_client: Optional[Any] = Depends(get_media_client),
-) -> dict[str, Any]:
-    """Generates a smart playlist in Plex from local listening history."""
-    server = as_media_server(plex_client)
-    if not server:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Plex Media Server client is not configured",
-        )
-    mix_client = plex_extras(server)
-    if not server.capabilities.mixes or mix_client is None:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Smart mixes are not supported by the connected media server",
-        )
-
-    valid_types = {p["mix_type"]: p for p in SMART_MIX_PRESETS}
-    if req.mix_type not in valid_types:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid mix_type '{req.mix_type}'. Must be one of: {list(valid_types.keys())}",
-        )
-
-    preset_info = valid_types[req.mix_type]
-    pl_name = sanitize_text(req.name or preset_info["name"])
-
-    tracks = mix_client.get_smart_mix_tracks(req.mix_type, limit=50)
-    if not tracks:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"No eligible tracks found in Plex library for '{preset_info['name']}'. Listen to more music in Plexamp to generate this mix!",
-        )
-
-    import_items = [
-        TrackImportItem(
-            title=t["title"],
-            artist=t["artist"],
-            album=t.get("album", ""),
-        )
-        for t in tracks
-    ]
-
-    import_req = PlaylistDirectImportRequest(
-        name=pl_name,
-        service="plex",
-        description=preset_info["description"],
-        tracks=import_items,
-        targets=req.targets,
-    )
-    return import_playlist_tracks(
-        req=import_req,
-        current_user=current_user,
-        db=db,
-        config=config,
-        plex_client=plex_client,
-    )
 
 
 @router.put("/{playlist_id}/targets", response_model=PlaylistTargetsResponse, response_model_exclude_unset=True)

@@ -239,35 +239,6 @@ class TestPlexClientExpansion:
         assert results[0]["artist"] == "David Bowie"
         assert results[0]["album"] == "Ziggy Stardust"
 
-    @patch("trackseerr.clients.plex.PlexServer")
-    def test_get_smart_mix_tracks(self, mock_plex_server_cls):
-        mock_server_instance = MagicMock()
-        mock_plex_server_cls.return_value = mock_server_instance
-
-        plex = PlexClient("http://fake-plex:32400", "token")
-        mock_music_section = MagicMock()
-        mock_music_section.type = "artist"
-        mock_server_instance.library.sections.return_value = [mock_music_section]
-
-        track1 = MagicMock(ratingKey=1, title="Track 1", viewCount=10)
-        track1.artist.return_value = MagicMock(title="Artist 1")
-        track1.album.return_value = MagicMock(title="Album 1")
-        track1.grandparentTitle = "Artist 1"
-        track1.parentTitle = "Album 1"
-
-        track2 = MagicMock(ratingKey=2, title="Track 2", viewCount=8)
-        track2.artist.return_value = MagicMock(title="Artist 2")
-        track2.album.return_value = MagicMock(title="Album 2")
-        track2.grandparentTitle = "Artist 2"
-        track2.parentTitle = "Album 2"
-
-        mock_music_section.searchTracks.return_value = [track1, track2]
-
-        # Test heavy_rotation
-        hr_tracks = plex.get_smart_mix_tracks("heavy_rotation", limit=20)
-        assert len(hr_tracks) == 2
-        assert hr_tracks[0]["title"] == "Track 1"
-        assert hr_tracks[1]["artist"] == "Artist 2"
 
 
 # ==============================================================================
@@ -303,10 +274,6 @@ def api_test_env(tmp_path):
     mock_plex = MagicMock(spec=PlexClient)
     mock_plex.search_library_tracks.return_value = [
         {"rating_key": "555", "title": "Life on Mars", "artist": "David Bowie", "album": "Hunky Dory", "duration": 220000}
-    ]
-    mock_plex.get_smart_mix_tracks.return_value = [
-        {"rating_key": "1", "title": "Song 1", "artist": "Artist 1", "album": "Album 1"},
-        {"rating_key": "2", "title": "Song 2", "artist": "Artist 2", "album": "Album 2"},
     ]
     mock_plex.match_playlist_tracks.return_value = (
         [MagicMock(ratingKey=1, title="Song 1", grandparentTitle="Artist 1", parentTitle="Album 1")],
@@ -347,38 +314,6 @@ class TestEndpointsExpansion:
         assert "chart-billboard-hot-100" in chart_ids
         assert "chart-todays-top-hits" in chart_ids
         assert "chart-deezer-top-worldwide" in chart_ids
-
-    def test_get_smart_mix_presets(self, api_test_env):
-        client = api_test_env["client"]
-        resp = client.get("/api/playlists/smart-mix/presets")
-        assert resp.status_code == 200
-        presets = resp.json()
-        assert len(presets) == 3
-        mix_types = [p["mix_type"] for p in presets]
-        assert "heavy_rotation" in mix_types
-        assert "forgotten_favorites" in mix_types
-        assert "deep_cuts" in mix_types
-
-    def test_create_smart_mix(self, api_test_env):
-        client = api_test_env["client"]
-        payload = {
-            "mix_type": "heavy_rotation",
-            "name": "My Heavy Rotation Mix",
-            "targets": ["1"],
-        }
-        resp = client.post("/api/playlists/smart-mix", json=payload)
-        assert resp.status_code == 201
-        data = resp.json()
-        assert data["name"] == "My Heavy Rotation Mix"
-        assert data["service"] == "plex"
-        assert data["track_count"] == 2
-
-    def test_create_smart_mix_invalid_type(self, api_test_env):
-        client = api_test_env["client"]
-        payload = {"mix_type": "nonexistent_mix", "targets": ["1"]}
-        resp = client.post("/api/playlists/smart-mix", json=payload)
-        assert resp.status_code == 400
-        assert "Invalid mix_type" in resp.json()["detail"]
 
     def test_set_playlist_enabled_toggle(self, api_test_env):
         client = api_test_env["client"]

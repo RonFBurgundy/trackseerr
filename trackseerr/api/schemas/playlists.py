@@ -37,13 +37,6 @@ class FeaturedChart(ApiModel):
     category: str
 
 
-class SmartMixPreset(ApiModel):
-    mix_type: str
-    name: str
-    description: str
-    icon: str
-
-
 class PlaylistTargetsResponse(ApiModel):
     id: str
     targets: list[str]

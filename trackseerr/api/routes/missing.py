@@ -14,9 +14,7 @@ from pydantic import BaseModel, Field
 from trackseerr.item_history import TRIGGER_PLAYLIST, GrabTrigger
 from trackseerr.acquisition_coordinator import acquisition_coordinator
 from trackseerr.api.dependencies import (
-    get_config,
     get_db,
-    get_lidarr_client,
     get_media_client,
     require_media_server,
     require_admin,
@@ -24,43 +22,19 @@ from trackseerr.api.dependencies import (
 )
 from trackseerr.api.schemas.missing import (
     GrabResult,
-    LidarrPushResponse,
-    LidarrQueueAction,
-    LidarrQueueStatus,
-    LidarrStatusResponse,
     MatchCreatedResponse,
     MatchDeletedResponse,
     MatchOverride,
     MediaTrackHit,
     MissingTrack,
 )
-from trackseerr.clients.lidarr import LidarrClient
-from trackseerr.clients.plex import PlexClient
 from trackseerr.media_servers import as_media_server
-from trackseerr.config import Config
-from trackseerr.lidarr_queue import lidarr_worker
-from trackseerr.lidarr_release import norm_title
-from trackseerr.library_manager import MODE_LIDARR, MODE_NATIVE, ModeChanged, get_library_mode, work_guard
+from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.storage import Database
-
-# Lidarr outcome -> missing_tracks.lidarr_status for a synchronous push that did not monitor the item.
-_PUSH_FAILURE_STATUS = {
-    "not_found": "not_found",
-    "not_in_metadata_profile": "unavailable",
-    "rate_limited": "rate_limited",
-}
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-class LidarrPushRequest(BaseModel):
-    track_ids: Optional[list[int]] = Field(default=None, description="Optional list of specific missing track IDs to push")
-    auto_search: Optional[bool] = Field(default=None, description="Override auto_search setting")
-    batch_size: Optional[int] = Field(default=None, description="Maximum number of tracks to queue (e.g. 25, 50)")
-    trickle: bool = Field(default=False, description="Process asynchronously via paced background trickle worker")
-    delay_seconds: Optional[float] = Field(default=None, description="Delay pacing in seconds between lookups")
 
 
 class MatchOverrideRequest(BaseModel):
@@ -249,224 +223,6 @@ def feed_missing_text(
     return Response(content="\n".join(lines) + ("\n" if lines else ""), media_type="text/plain; charset=utf-8")
 
 
-@router.get("/lidarr/status", response_model=LidarrStatusResponse, response_model_exclude_unset=True)
-def get_lidarr_status(
-    _current_user: dict[str, Any] = Depends(require_admin),
-    config: Config = Depends(get_config),
-    db: Database = Depends(get_db),
-    lidarr_client: Optional[LidarrClient] = Depends(get_lidarr_client),
-) -> dict[str, Any]:
-    """Returns Lidarr connection and configuration status from DB or config.
-
-    In native mode Lidarr is not contacted at all: the mode is reported with ``connected`` null.
-    """
-    if get_library_mode(db) != MODE_LIDARR:
-        return {"mode": MODE_NATIVE, "connected": None}
-    db_settings = db.get_lidarr_settings()
-    url = db_settings.get("url") or config.lidarr_url
-    auto_search = (
-        db_settings.get("auto_search")
-        if db_settings.get("url")
-        else config.lidarr_auto_search
-    )
-
-    if lidarr_client is None:
-        return {
-            "configured": False,
-            "url": url,
-            "auto_search": False,
-            "status": {
-                "online": False,
-                "message": "Lidarr is not configured (configure in Settings -> Lidarr Automation or set LIDARR_URL and LIDARR_API_KEY)",
-            },
-        }
-    conn_result = lidarr_client.test_connection()
-    return {
-        "configured": True,
-        "url": url,
-        "auto_search": bool(auto_search),
-        "status": conn_result,
-    }
-
-
-@router.post("/lidarr/push", response_model=LidarrPushResponse, response_model_exclude_unset=True)
-def push_missing_to_lidarr(
-    req: Optional[LidarrPushRequest] = None,
-    current_user: dict[str, Any] = Depends(require_admin),
-    config: Config = Depends(get_config),
-    db: Database = Depends(get_db),
-    lidarr_client: Optional[LidarrClient] = Depends(get_lidarr_client),
-) -> dict[str, Any]:
-    """Pushes missing tracks directly into Lidarr to queue download and monitoring.
-
-    Supports:
-    - Background trickle mode (`trickle=True`) with delay pacing and rate-limit backoff.
-    - Synchronous push (`trickle=False`) for targeted or immediate single-item updates.
-    """
-    try:
-        with work_guard(db, MODE_LIDARR):
-            return _push_missing_to_lidarr(req, current_user, config, db, lidarr_client)
-    except ModeChanged as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Library manager is set to TrackSeerr; switch it to Lidarr to push items to Lidarr.",
-        ) from exc
-
-
-def _push_missing_to_lidarr(
-    req: Optional[LidarrPushRequest],
-    current_user: dict[str, Any],
-    config: Config,
-    db: Database,
-    lidarr_client: Optional[LidarrClient],
-) -> dict[str, Any]:
-    if lidarr_client is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Lidarr is not configured. Configure in Settings or set LIDARR_URL and LIDARR_API_KEY.",
-        )
-
-    all_tracks = db.get_missing_tracks()
-    filtered = _filter_missing_for_user(all_tracks, current_user, db)
-
-    target_ids = set(req.track_ids) if (req and req.track_ids is not None) else None
-    if target_ids is not None:
-        filtered = [t for t in filtered if t.get("id") in target_ids]
-    else:
-        # If pushing all without explicit IDs, prioritize unmonitored tracks
-        unmonitored = [t for t in filtered if t.get("lidarr_status") != "monitored"]
-        if unmonitored:
-            filtered = unmonitored
-
-    lidarr_settings = db.get_lidarr_settings()
-    default_auto_search = lidarr_settings.get("auto_search", config.lidarr_auto_search)
-    default_trickle_rate = lidarr_settings.get("trickle_rate_seconds", config.lidarr_trickle_rate_seconds)
-    default_batch_size = lidarr_settings.get("trickle_batch_size", config.lidarr_trickle_batch_size)
-
-    batch_size = req.batch_size if (req and req.batch_size is not None) else default_batch_size
-    if batch_size and batch_size > 0:
-        filtered = filtered[:batch_size]
-
-    should_search = req.auto_search if (req and req.auto_search is not None) else default_auto_search
-    use_trickle = req.trickle if (req and req.trickle is not None) else False
-    delay = req.delay_seconds if (req and req.delay_seconds is not None) else default_trickle_rate
-
-    # Background trickle mode
-    if use_trickle:
-        queue_res = lidarr_worker.start_trickle(
-            items=filtered,
-            client=lidarr_client,
-            db=db,
-            delay_seconds=delay,
-            auto_search=should_search,
-            batch_size=batch_size,
-        )
-        return {
-            "status": "queued",
-            "trickle": True,
-            "queued_count": len(filtered),
-            "auto_search": should_search,
-            "delay_seconds": delay,
-            "message": queue_res.get("message", f"Queued {len(filtered)} tracks into Lidarr background worker"),
-            "queue_status": lidarr_worker.get_status(),
-        }
-
-    # Synchronous push (for backwards compatibility / single track requests)
-    seen = set()
-    deduped = []
-    for t in filtered:
-        key = (
-            (t.get("artist") or "").strip().lower(),
-            (t.get("album") or "").strip().lower(),
-            norm_title(t.get("title")),
-        )
-        if key not in seen:
-            seen.add(key)
-            deduped.append(t)
-
-    results = []
-    added_count = 0
-    monitored_count = 0
-    failed_count = 0
-
-    for item in deduped:
-        artist = item.get("artist", "").strip()
-        album = item.get("album", "").strip()
-        title = item.get("title", "").strip()
-        res = lidarr_client.search_and_add_track(
-            artist_name=artist,
-            album_name=album,
-            title=title,
-            auto_search=should_search,
-            album_wait_attempts=1,  # request thread: never sleep waiting for a new artist's albums; a re-push finishes it
-        )
-        results.append(res)
-        track_id = item.get("id")
-        if res.get("status") == "added":
-            added_count += 1
-            if track_id:
-                db.update_missing_track_lidarr_status(track_id, "monitored")
-        elif res.get("status") == "already_monitored":
-            monitored_count += 1
-            if track_id:
-                db.update_missing_track_lidarr_status(track_id, "monitored")
-        else:
-            failed_count += 1
-            if track_id:
-                # unavailable (not in the metadata profile) and not_found are re-checked weekly; rate_limited and
-                # error back off (see storage.lidarr_retry_delay).
-                db.update_missing_track_lidarr_status(
-                    track_id, _PUSH_FAILURE_STATUS.get(str(res.get("status")), "error")
-                )
-
-    return {
-        "status": "completed",
-        "trickle": False,
-        "total_requested": len(filtered),
-        "deduplicated_items": len(deduped),
-        "added": added_count,
-        "already_monitored": monitored_count,
-        "failed": failed_count,
-        "results": results,
-    }
-
-
-@router.get("/lidarr/queue", response_model=LidarrQueueStatus, response_model_exclude_unset=True)
-def get_lidarr_queue_status(
-    _current_user: dict[str, Any] = Depends(require_admin),
-) -> dict[str, Any]:
-    """Returns the live status of the Lidarr background trickle worker."""
-    return lidarr_worker.get_status()
-
-
-@router.post("/lidarr/queue/pause", response_model=LidarrQueueAction, response_model_exclude_unset=True)
-def pause_lidarr_queue(
-    _current_user: dict[str, Any] = Depends(require_admin),
-) -> dict[str, Any]:
-    """Pauses the Lidarr background trickle worker."""
-    res = lidarr_worker.pause()
-    status = lidarr_worker.get_status()
-    return {**status, "action_status": res.get("status"), "action_message": res.get("message")}
-
-
-@router.post("/lidarr/queue/resume", response_model=LidarrQueueAction, response_model_exclude_unset=True)
-def resume_lidarr_queue(
-    _current_user: dict[str, Any] = Depends(require_admin),
-) -> dict[str, Any]:
-    """Resumes the Lidarr background trickle worker."""
-    res = lidarr_worker.resume()
-    status = lidarr_worker.get_status()
-    return {**status, "action_status": res.get("status"), "action_message": res.get("message")}
-
-
-@router.post("/lidarr/queue/cancel", response_model=LidarrQueueAction, response_model_exclude_unset=True)
-def cancel_lidarr_queue(
-    _current_user: dict[str, Any] = Depends(require_admin),
-) -> dict[str, Any]:
-    """Cancels and stops the Lidarr background trickle worker."""
-    res = lidarr_worker.cancel()
-    status = lidarr_worker.get_status()
-    return {**status, "action_status": res.get("status"), "action_message": res.get("message")}
 
 
 @router.get("/search", response_model=list[MediaTrackHit], response_model_exclude_unset=True, dependencies=[Depends(require_media_server)])

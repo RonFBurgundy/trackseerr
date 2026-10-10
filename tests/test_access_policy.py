@@ -116,8 +116,6 @@ ADMIN_ONLY = [
     ("GET", "/api/missing/csv"),
     ("GET", "/api/missing/rss"),
     ("GET", "/api/missing/text"),
-    ("POST", "/api/missing/lidarr/push"),
-    ("GET", "/api/missing/lidarr/queue"),
     ("POST", "/api/missing/match"),
     ("POST", "/api/sync"),
     ("GET", "/api/sync/status"),
@@ -369,7 +367,6 @@ def test_user_import_sets_creator_and_ignores_foreign_targets(env):
 
 def test_featured_and_presets_open_to_users(env):
     assert env["client"].get("/api/playlists/featured", headers=env["alice"]).status_code == 200
-    assert env["client"].get("/api/playlists/smart-mix/presets", headers=env["alice"]).status_code == 200
 
 
 # --------------------------------------------------------------------------- gateway
