@@ -214,6 +214,15 @@ class CoreClient:
             data = {}
         return resp.status_code, data if isinstance(data, dict) else {}
 
+    def plex_identity(self) -> tuple[int, dict[str, Any]]:
+        """Queries core's Plex machine identifier (service principal). Returns ``(status_code, json_body)``."""
+        resp = self._json_call("GET", "/api/internal/plex/identity")
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {}
+        return resp.status_code, data if isinstance(data, dict) else {}
+
     def heartbeat(self, payload: dict[str, Any]) -> int:
         """Reports gateway liveness to core (service principal). Returns the HTTP status code."""
         return self._json_call("POST", "/api/internal/gateway-heartbeat", payload).status_code

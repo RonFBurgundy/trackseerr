@@ -58,7 +58,8 @@ class Env:
         self.bob_id = user["id"]
         self.gw_db = Database(":memory:")
         self.core = _app_client(self.core_db, _config(tmp_path, "core"))
-        self.gateway = _app_client(self.gw_db, _config(tmp_path, "gateway"))
+        self.gw_cfg = _config(tmp_path, "gateway")
+        self.gateway = _app_client(self.gw_db, self.gw_cfg)
         self.core_calls: list[tuple[str, str]] = []
         self.real_client = httpx.Client
 
@@ -134,6 +135,12 @@ def test_forwarded_account_route_end_to_end(env):
     res = env.gateway.get("/api/account")
     assert res.status_code == 200, res.text
     assert ("GET", "/api/account") in env.core_calls
+
+
+def test_gateway_plex_identity_real_signed_call(env, monkeypatch):
+    monkeypatch.setenv("PLEX_MACHINE_IDENTIFIER", "e2e-mid")
+    assert dependencies.core_plex_machine_id(env.gw_cfg) == "e2e-mid"
+    assert ("GET", "/api/internal/plex/identity") in env.core_calls
 
 
 def test_core_unreachable_gives_503(env, monkeypatch):

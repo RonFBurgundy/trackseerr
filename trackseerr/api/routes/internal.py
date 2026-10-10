@@ -1,15 +1,17 @@
 """Internal gateway-to-core endpoints. Only the signed service principal may call these; everyone else gets 404."""
 
 import logging
+import os
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from trackseerr import __version__
-from trackseerr.api.dependencies import get_config, get_db, require_service_principal, tier_of
+from trackseerr.api.dependencies import get_config, get_db, get_plex_client, require_service_principal, tier_of
 from trackseerr.api.schemas.internal import (
     HeartbeatResponse,
     HelloResponse,
+    PlexIdentityResponse,
     SessionStatusResponse,
     VerifyLocalResponse,
 )
@@ -106,6 +108,19 @@ def hello(
         "role": tier_of(config),
         "instance_id": db.get_instance_id(),
     }
+
+
+@router.get("/plex/identity", response_model=PlexIdentityResponse, response_model_exclude_unset=True)
+def plex_identity(
+    config: Config = Depends(get_config),
+    _principal: dict[str, Any] = Depends(require_service_principal),
+) -> dict[str, Any]:
+    """Returns core's Plex machine identifier. Service principal only; 404 for everyone else."""
+    machine_id = os.getenv("PLEX_MACHINE_IDENTIFIER", "").strip()
+    if not machine_id:
+        client = get_plex_client(config)
+        machine_id = client.machine_identifier if client else ""
+    return {"machine_identifier": machine_id or None}
 
 
 class GatewayHeartbeat(BaseModel):

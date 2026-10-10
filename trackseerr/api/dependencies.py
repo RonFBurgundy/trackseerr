@@ -313,6 +313,53 @@ def core_session_status(
     return result
 
 
+PLEX_IDENTITY_TTL_SECONDS = 300.0
+_plex_identity_lock = threading.Lock()
+# (expires_at_monotonic, machine_identifier). Gateway-only, in memory.
+_plex_identity_cache: Optional[tuple[float, str]] = None
+
+
+def clear_plex_identity_cache() -> None:
+    global _plex_identity_cache
+    with _plex_identity_lock:
+        _plex_identity_cache = None
+
+
+def core_plex_machine_id(config: Config) -> Optional[str]:
+    """Core's Plex machine identifier for the gateway, cached for 300 s.
+
+    Returns the machine identifier if configured on core, or None if core has no Plex machine id.
+    Fails CLOSED: if core is unconfigured, unreachable or answers non-200, raises 503.
+    """
+    global _plex_identity_cache
+    now = _monotonic()
+    with _plex_identity_lock:
+        if _plex_identity_cache is not None and _plex_identity_cache[0] > now:
+            return _plex_identity_cache[1]
+
+    unavailable = HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=CORE_UNAVAILABLE_DETAIL)
+    if not config.trackseerr_core_url or not config.internal_core_secret:
+        logger.error("Gateway cannot check Plex identity: TRACKSEERR_CORE_URL / INTERNAL_CORE_SECRET not set")
+        raise unavailable
+    client = CoreClient(core_url=config.trackseerr_core_url, secret=config.internal_core_secret)
+    try:
+        code, body = client.plex_identity()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.error("Gateway plex-identity check failed: %s", type(exc).__name__)
+        raise unavailable from exc
+    if code != 200:
+        logger.error("Core returned unexpected status %s for plex-identity", code)
+        raise unavailable
+
+    machine_id = body.get("machine_identifier")
+    if isinstance(machine_id, str) and machine_id.strip():
+        val = machine_id.strip()
+        with _plex_identity_lock:
+            _plex_identity_cache = (now + PLEX_IDENTITY_TTL_SECONDS, val)
+        return val
+    return None
+
+
 def _enforce_core_session_status(
     request: Request, db: Database, config: Config, token: str, user_id: str, issued_us: int
 ) -> None:

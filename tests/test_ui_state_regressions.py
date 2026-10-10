@@ -4,6 +4,7 @@ import json
 from typing import Any
 from unittest.mock import patch
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -152,6 +153,76 @@ def test_gateway_plex_sign_in_asks_core_to_record_login(db, tmp_path, monkeypatc
     dependencies.clear_session_status_cache()
     assert _plex_login(_client(db, _cfg(tmp_path, "gateway"))).status_code == 200
     assert calls[-1] == {"user_id": "5005", "record_login": True, "username": "plexuser"}
+
+
+def _plex_login_no_target(client: TestClient, recorder: list[tuple[str, str]]):
+    def fake_access(token, machine_id):
+        recorder.append((token, machine_id))
+        return True, False
+
+    with patch("trackseerr.api.routes.auth.check_plex_pin", return_value="tok"), patch(
+        "trackseerr.api.routes.auth.verify_server_access", side_effect=fake_access
+    ), patch(
+        "trackseerr.api.routes.auth.get_plex_user",
+        return_value={"id": "5005", "username": "plexuser", "email": "p@x.tv"},
+    ):
+        return client.post("/api/auth/plex/verify", json={"pin_id": 1})
+
+
+def test_gateway_plex_sign_in_uses_core_machine_id(db, tmp_path, monkeypatch):
+    monkeypatch.delenv("PLEX_MACHINE_IDENTIFIER", raising=False)
+    monkeypatch.setattr(CoreClient, "plex_identity", lambda self: (200, {"machine_identifier": "core-mid"}))
+    seen: list[tuple[str, str]] = []
+    res = _plex_login_no_target(_client(db, _cfg(tmp_path, "gateway")), seen)
+    assert res.status_code == 200, res.text
+    assert seen == [("tok", "core-mid")]
+
+
+def test_gateway_plex_sign_in_core_has_no_plex(db, tmp_path, monkeypatch):
+    monkeypatch.delenv("PLEX_MACHINE_IDENTIFIER", raising=False)
+    monkeypatch.setattr(CoreClient, "plex_identity", lambda self: (200, {"machine_identifier": None}))
+    seen: list[tuple[str, str]] = []
+    res = _plex_login_no_target(_client(db, _cfg(tmp_path, "gateway")), seen)
+    assert res.status_code == 409  # MediaServerUnavailable
+    assert seen == []
+
+
+def test_gateway_plex_sign_in_core_unreachable(db, tmp_path, monkeypatch):
+    monkeypatch.delenv("PLEX_MACHINE_IDENTIFIER", raising=False)
+
+    def boom(self):
+        raise httpx.ConnectError("x")
+
+    monkeypatch.setattr(CoreClient, "plex_identity", boom)
+    res = _plex_login_no_target(_client(db, _cfg(tmp_path, "gateway")), [])
+    assert res.status_code == 503
+
+
+def test_gateway_machine_id_is_cached(db, tmp_path, monkeypatch):
+    monkeypatch.delenv("PLEX_MACHINE_IDENTIFIER", raising=False)
+    calls: list[int] = []
+
+    def fake(self):
+        calls.append(1)
+        return 200, {"machine_identifier": "core-mid"}
+
+    monkeypatch.setattr(CoreClient, "plex_identity", fake)
+    client = _client(db, _cfg(tmp_path, "gateway"))
+    assert _plex_login_no_target(client, []).status_code == 200
+    assert _plex_login_no_target(client, []).status_code == 200
+    assert len(calls) == 1
+
+
+def test_core_plex_identity_endpoint(db, tmp_path, monkeypatch):
+    monkeypatch.setenv("PLEX_MACHINE_IDENTIFIER", "env-mid")
+    client = _client(db, _cfg(tmp_path, "core"))
+    url = "/api/internal/plex/identity"
+    internal_auth._nonce_cache.clear()
+    headers = internal_auth.sign_assertion(SECRET, "GET", url, "", "", b"")
+    res = client.get(url, headers=headers)
+    assert res.status_code == 200, res.text
+    assert res.json() == {"machine_identifier": "env-mid"}
+    assert client.get(url).status_code == 404
 
 
 def test_core_session_status_records_login_only_when_asked_and_valid(db, tmp_path):

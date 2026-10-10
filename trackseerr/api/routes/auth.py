@@ -12,11 +12,12 @@ from pydantic import BaseModel, Field
 from trackseerr import local_auth
 from trackseerr.api.dependencies import (
     HEADER_SIGNATURE,
+    core_plex_machine_id,
+    core_session_status,
     get_client_ip,
     get_config,
     get_current_user,
     get_db,
-    core_session_status,
     get_plex_client,
     require_service_principal,
     tier_of,
@@ -156,6 +157,42 @@ def generate_pin(
         )
 
 
+def _resolve_machine_id(
+    req: VerifyPinRequest,
+    config: Config,
+    plex_client: Optional[PlexClient],
+) -> str:
+    """Determines authoritative target Plex machine ID and enforces request consistency."""
+    server_machine_id = os.getenv("PLEX_MACHINE_IDENTIFIER") or (
+        plex_client.machine_identifier if plex_client else None
+    )
+    if not server_machine_id and tier_of(config) == "gateway":
+        server_machine_id = core_plex_machine_id(config)
+        if not server_machine_id:
+            raise MediaServerUnavailable()
+
+    if req.target_machine_id and server_machine_id and req.target_machine_id != server_machine_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Supplied target_machine_id does not match the configured Plex Media Server",
+        )
+
+    machine_id = server_machine_id
+    if not machine_id and "PYTEST_CURRENT_TEST" in os.environ:
+        machine_id = req.target_machine_id
+
+    if not machine_id:
+        if _plex_login_unavailable(config):
+            raise MediaServerUnavailable()
+        logger.error("No Plex machine identifier configured to verify user access")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Plex server machine identifier is not configured on hub",
+        )
+
+    return machine_id
+
+
 @router.post("/plex/verify", response_model=PlexVerifyResponse, response_model_exclude_unset=True)
 def verify_pin(
     req: VerifyPinRequest,
@@ -192,25 +229,7 @@ def verify_pin(
         )
 
     # 2. Determine target Plex machine ID (server machine identifier is authoritative)
-    server_machine_id = os.getenv("PLEX_MACHINE_IDENTIFIER") or (plex_client.machine_identifier if plex_client else None)
-    if req.target_machine_id and server_machine_id and req.target_machine_id != server_machine_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Supplied target_machine_id does not match the configured Plex Media Server",
-        )
-
-    machine_id = server_machine_id
-    if not machine_id and "PYTEST_CURRENT_TEST" in os.environ:
-        machine_id = req.target_machine_id
-
-    if not machine_id:
-        if _plex_login_unavailable(config):
-            raise MediaServerUnavailable()
-        logger.error("No Plex machine identifier configured to verify user access")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Plex server machine identifier is not configured on hub",
-        )
+    machine_id = _resolve_machine_id(req, config, plex_client)
 
     # 3. Verify server access and ownership
     has_access, is_owner = verify_server_access(auth_token, machine_id)
