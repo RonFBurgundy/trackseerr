@@ -459,7 +459,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
         <div className="relative z-10 flex items-center justify-start gap-2 sm:gap-3 border-t border-[#1f1f1f] bg-black/30 px-2 sm:px-4 py-0.5 sm:py-1 text-[11px] leading-4 whitespace-nowrap overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden font-mono text-neutral-400">
           <span>{artist?.albums?.length || artist?.album_count || 0} Releases</span>
           <span aria-hidden="true">&bull;</span>
-          <span>{artist?.track_count || 0} Tracks in Library</span>
+          <span>{artist?.track_file_count ?? 0} Tracks in Library</span>
           {profilePreview.preview && (
             <>
               <span aria-hidden="true">&bull;</span>

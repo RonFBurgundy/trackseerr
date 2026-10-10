@@ -74,7 +74,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-from ._shared import (validate_media_path, NATIVE_ONLY_DETAIL, _is_lidarr, native_only, _lidarr_fetch, _lidarr_mutation, _lidarr_image, _versioned_art_url, _art_media_type, _native_art, _with_discovery_ids, _enrich_artists, _unlink_library_file)
+from ._shared import (validate_media_path, NATIVE_ONLY_DETAIL, _is_lidarr, native_only, _lidarr_fetch, _lidarr_mutation, _lidarr_image, _versioned_art_url, _art_media_type, _native_art, _with_discovery_ids, _enrich_artists, _unlink_library_file, _artist_track_counts)
 from .models import (IngestArtistRequest, ArtistMonitoredRequest, MetadataProfileBody, ArtistBulkEditRequest, ArtistTagsRequest, ArtistTagsResponse)
 from trackseerr.artist_refresh import _store_total_tracks, _album_track_counts, refresh_single_artist
 
@@ -467,6 +467,11 @@ def get_artist(
     result["genres"] = artist.get("genres")
     result["country"] = artist.get("country")
     albums = db.list_library_albums(artist_id=artist_id, limit=500)
+    result["album_count"] = len(albums)
+    tc, ttc, tfc = _artist_track_counts(db, [artist_id]).get(artist_id, (0, 0, 0))
+    result["track_count"] = tc
+    result["total_track_count"] = ttc
+    result["track_file_count"] = tfc
     profile = db.get_metadata_profile(artist["metadata_profile_id"]) if artist.get("metadata_profile_id") else None
     stored, with_files = _album_track_counts(db, artist_id)
     for alb in albums:

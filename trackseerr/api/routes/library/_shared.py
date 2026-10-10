@@ -512,6 +512,26 @@ def _with_discovery_ids(db: Database, records: list[dict[str, Any]]) -> list[dic
         linked = {}
     return [{**r, "discovery_id": linked.get(str(r.get("id")))} for r in records]
 
+def _artist_track_counts(db: Database, artist_ids: list[str]) -> dict[str, tuple[int, int, int]]:
+    """Per artist: monitored track count, total track count, and track file count."""
+    if not artist_ids:
+        return {}
+    placeholders = ",".join("?" for _ in artist_ids)
+    query = (
+        "SELECT t.artist_id, "
+        "SUM(CASE WHEN al.monitored = 1 THEN 1 ELSE 0 END), "
+        "COUNT(*), "
+        "SUM(CASE WHEN EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) THEN 1 ELSE 0 END) "
+        "FROM library_tracks t LEFT JOIN library_albums al ON al.id = t.album_id "
+        f"WHERE t.artist_id IN ({placeholders}) GROUP BY t.artist_id"
+    )
+    with db._lock:
+        rows = db.conn.execute(query, artist_ids).fetchall()
+    return {
+        r[0]: (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0))
+        for r in rows
+    }
+
 def _enrich_artists(db: Database, artists: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Attaches album/track counts and a resolved image URL to library artists."""
     artist_ids = [a["id"] for a in artists]
@@ -522,16 +542,12 @@ def _enrich_artists(db: Database, artists: list[dict[str, Any]]) -> list[dict[st
             artist_ids,
         )
         album_counts = dict(album_cur.fetchall())
-        track_cur = db.conn.execute(
-            f"SELECT artist_id, COUNT(*) FROM library_tracks WHERE artist_id IN ({placeholders}) GROUP BY artist_id",
-            artist_ids,
-        )
-        track_counts = dict(track_cur.fetchall())
         cover_cur = db.conn.execute(
             f"SELECT artist_id, cover_url FROM library_albums WHERE artist_id IN ({placeholders}) AND cover_url IS NOT NULL AND cover_url != '' GROUP BY artist_id",
             artist_ids,
         )
         cover_urls = dict(cover_cur.fetchall())
+    track_counts = _artist_track_counts(db, artist_ids)
     tag_ids = db.get_artist_tags_map(artist_ids)
 
     results: list[dict[str, Any]] = []
@@ -539,7 +555,10 @@ def _enrich_artists(db: Database, artists: list[dict[str, Any]]) -> list[dict[st
         a_dict = dict(artist)
         a_dict["tags"] = tag_ids.get(str(artist["id"]), [])
         a_dict["album_count"] = album_counts.get(artist["id"], 0)
-        a_dict["track_count"] = track_counts.get(artist["id"], 0)
+        tc, ttc, tfc = track_counts.get(artist["id"], (0, 0, 0))
+        a_dict["track_count"] = tc
+        a_dict["total_track_count"] = ttc
+        a_dict["track_file_count"] = tfc
 
         # Image resolution: parsed metadata_json image_url or first album cover_url
         img: Optional[str] = None
