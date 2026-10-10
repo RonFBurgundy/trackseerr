@@ -182,7 +182,7 @@ Rules for the two containers:
 - Put secrets on the core only: media server tokens, download client passwords, Last.fm secrets. The gateway refuses to start if it finds them.
 - The gateway joins the internal network and your reverse proxy's network (`proxynet` above, set with `PROXY_NETWORK`).
 - The core joins the internal network and a normal network so it can reach your media server and download clients.
-- If you use Cloudflare Tunnel, `cloudflared` must share a network with the gateway, never with the core. Point the tunnel at `http://trackseerr-gateway:5250`.
+- If you use Cloudflare Tunnel in a container, `cloudflared` must share a network with the gateway, never with the core. Point the tunnel at `http://trackseerr-gateway:5250`. If `cloudflared` runs on the host network instead, network separation doesn't protect the core from it; what does is giving the tunnel a hostname for the gateway only.
 - Set `TRUSTED_PROXIES` on the gateway to your proxy's IP or subnet. Without it, every user appears to come from the proxy's IP, and login rate limits apply to everyone at once.
 
 ## First sign-in

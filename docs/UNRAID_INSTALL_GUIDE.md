@@ -58,14 +58,25 @@ Next, follow the setup order in [Install guide: first sign-in](INSTALL.md#first-
 
 ## Two containers
 
+### Choose the core's network
+
+The core must never be reachable from whatever receives internet traffic, other than through Requests. Which network the core joins depends on where that entry point runs.
+
+- **Cloudflare Tunnel on the host network** (`cloudflared` uses Network Type **Host**): put the core on your app network (for example `proxynet`) alongside Plex and your *arr apps. The tunnel only forwards what its public hostnames point at, so give it a hostname for Requests and none for the core. The core can then reach Plex and your downloaders by container name.
+- **A reverse proxy or `cloudflared` running as a container on your app network** (SWAG, Nginx Proxy Manager, Traefik, Caddy): keep the core off that network and give it its own `trackseerr-core-lan` network. Any container on a network can reach every other container on it, so a compromised or misconfigured proxy could reach the core directly. Traefik and other auto-discovering proxies can also expose every container on their network without being told to. Reach Plex and your downloaders by LAN IP instead.
+
+Below, `<core network>` means `proxynet` (first case) or `trackseerr-core-lan` (second case).
+
+### Set up
+
 1. Create the networks once, in the Unraid terminal:
 
    ```bash
    docker network create --internal trackseerr-internal
-   docker network create trackseerr-core-lan
+   docker network create trackseerr-core-lan   # second case only
    ```
 
-   `trackseerr-internal` links the two containers and has no internet access. `trackseerr-core-lan` is a normal bridge that lets the core reach Plex, your downloaders and the internet.
+   `trackseerr-internal` links the two containers and has no internet access. `trackseerr-core-lan` is a normal bridge that lets the core reach Plex, your downloaders and the internet without sharing a network with your proxy.
 
 2. Generate a secret and copy it:
 
@@ -87,26 +98,25 @@ Next, follow the setup order in [Install guide: first sign-in](INSTALL.md#first-
    - **Internal Core Secret**: the secret from step 2.
    - **LAN Bind IP**: your Unraid server's LAN IP.
    - **Application URL**: the public URL users will use.
-   - Plex fields as in the single container. Use LAN IPs for Plex and your downloaders.
+   - Plex fields as in the single container.
    - Leave **Network Type** on **Bridge**, so Unraid still publishes the admin port.
-   - In **Extra Parameters**, add `--network=trackseerr-core-lan --network=trackseerr-internal`.
-   - Never put the core on your reverse-proxy or Cloudflare Tunnel network.
+   - In **Extra Parameters**, add `--network=<core network> --network=trackseerr-internal`.
 
 5. Add **TrackSeerr-Requests** from its template:
    - **Internal Core Secret**: the same secret.
    - **Core URL**: leave it as `http://TrackSeerr-Core:5251`. If you renamed the core container, use the new name.
    - **Application URL**: the same public URL.
    - **Trusted Proxies**: the IP or subnet of your reverse proxy.
-   - Set **Network Type** to your reverse-proxy network, for example `proxynet`.
-   - In **Extra Parameters**, add `--network=proxynet --network=trackseerr-internal`, replacing `proxynet` with your reverse-proxy network.
+   - Set **Network Type** to your app or reverse-proxy network, for example `proxynet`.
+   - In **Extra Parameters**, add `--network=proxynet --network=trackseerr-internal`, replacing `proxynet` with that network.
 
-6. Point your reverse proxy or Cloudflare Tunnel at `TrackSeerr-Requests` on port 5250. Never at the core.
+6. Point your reverse proxy or Cloudflare Tunnel at `TrackSeerr-Requests` on port 5250. Never give the core a public hostname or proxy host.
 
 Admins use the core at `http://<unraid-ip>:5251`. Everyone else uses the public URL.
 
 Both networks go in **Extra Parameters** because Unraid ignores the **Network Type** dropdown once Extra Parameters contain a `--network` flag. With only `--network=trackseerr-internal`, the container ends up on the internal network alone: Requests can't see your tunnel or proxy, and the core can't reach Plex.
 
-Multiple `--network` flags need Unraid 7 (Docker 25 or later). On older versions, leave Extra Parameters empty, pick the network in the dropdown (your proxy network for Requests; for the core, Bridge or `trackseerr-core-lan`), start the container, then run:
+Multiple `--network` flags need Unraid 7 (Docker 25 or later). On older versions, leave Extra Parameters empty, pick the network in the dropdown (your proxy network for Requests; your core network for the core), start the container, then run:
 
 ```bash
 docker network connect trackseerr-internal TrackSeerr-Core
