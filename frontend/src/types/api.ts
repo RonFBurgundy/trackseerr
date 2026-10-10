@@ -2377,6 +2377,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Library Facets
+         * @description Summary of library facets: genres, countries, decades, types, and value bounds.
+         */
+        get: operations["get_library_facets_api_library_facets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/files/{file_id}": {
         parameters: {
             query?: never;
@@ -6887,6 +6907,13 @@ export interface components {
                 [key: string]: number;
             };
         };
+        /** DecadeCount */
+        DecadeCount: {
+            /** Count */
+            count: number;
+            /** Value */
+            value: number;
+        };
         /** DelayProfilePayload */
         DelayProfilePayload: {
             /** Bypass If Above Score */
@@ -7389,6 +7416,13 @@ export interface components {
             negate: boolean;
             /** Required */
             required: boolean;
+        };
+        /** FacetCount */
+        FacetCount: {
+            /** Count */
+            count: number;
+            /** Value */
+            value: string;
         };
         /** FeaturedChart */
         FeaturedChart: {
@@ -8020,8 +8054,12 @@ export interface components {
             art_version?: string | null;
             /** Artist Name */
             artist_name?: string | null;
+            /** Artist Type */
+            artist_type?: string | null;
             /** Banner Url */
             banner_url?: string | null;
+            /** Begin Year */
+            begin_year?: number | null;
             /** Bio */
             bio?: string | null;
             /** Clean Name */
@@ -8032,6 +8070,8 @@ export interface components {
             created_at?: string | null;
             /** Discovery Id */
             discovery_id?: string | null;
+            /** End Year */
+            end_year?: number | null;
             /** Foreign Artist Id */
             foreign_artist_id?: string | null;
             /** Genres */
@@ -8042,6 +8082,8 @@ export interface components {
             image_url?: string | null;
             /** Mbid */
             mbid?: string | null;
+            /** Member Count */
+            member_count?: number | null;
             /** Metadata Json */
             metadata_json?: string | null;
             /** Metadata Profile Id */
@@ -8058,6 +8100,8 @@ export interface components {
             path?: string | null;
             /** Pending Profile Recompute */
             pending_profile_recompute?: number | null;
+            /** Popularity */
+            popularity?: number | null;
             /** Quality Profile Id */
             quality_profile_id?: string | null;
             /** Size Bytes */
@@ -8574,8 +8618,12 @@ export interface components {
             albums?: components["schemas"]["LibraryAlbumRecord"][] | null;
             /** Art Version */
             art_version?: string | null;
+            /** Artist Type */
+            artist_type?: string | null;
             /** Banner Url */
             banner_url?: string | null;
+            /** Begin Year */
+            begin_year?: number | null;
             /** Bio */
             bio?: string | null;
             /** Clean Name */
@@ -8586,6 +8634,8 @@ export interface components {
             created_at?: string | null;
             /** Discovery Id */
             discovery_id?: string | null;
+            /** End Year */
+            end_year?: number | null;
             /** Foreign Artist Id */
             foreign_artist_id?: string | null;
             /** Genres */
@@ -8596,6 +8646,8 @@ export interface components {
             image_url?: string | null;
             /** Mbid */
             mbid?: string | null;
+            /** Member Count */
+            member_count?: number | null;
             /** Metadata Json */
             metadata_json?: string | null;
             /** Metadata Profile Id */
@@ -8610,6 +8662,8 @@ export interface components {
             path?: string | null;
             /** Pending Profile Recompute */
             pending_profile_recompute?: number | null;
+            /** Popularity */
+            popularity?: number | null;
             /** Quality Profile Id */
             quality_profile_id?: string | null;
             /** Size Bytes */
@@ -8663,6 +8717,31 @@ export interface components {
             summary?: string | null;
             /** Updated At */
             updated_at?: string | null;
+        };
+        /** LibraryFacetsResponse */
+        LibraryFacetsResponse: {
+            /** Album Types */
+            album_types: components["schemas"]["FacetCount"][];
+            /** Artist Types */
+            artist_types: components["schemas"]["FacetCount"][];
+            /** Countries */
+            countries: components["schemas"]["FacetCount"][];
+            /** Decades */
+            decades: components["schemas"]["DecadeCount"][];
+            /** Formed Max */
+            formed_max?: number | null;
+            /** Formed Min */
+            formed_min?: number | null;
+            /** Genres */
+            genres: components["schemas"]["FacetCount"][];
+            /** Members Max */
+            members_max?: number | null;
+            /** Popularity Max */
+            popularity_max?: number | null;
+            /** Year Max */
+            year_max?: number | null;
+            /** Year Min */
+            year_min?: number | null;
         };
         /**
          * LibraryFileRecord
@@ -16521,6 +16600,20 @@ export interface operations {
                 q?: string | null;
                 monitored_only?: boolean;
                 artist_id?: string | null;
+                genre?: string[];
+                exclude_genre?: string[];
+                country?: string[];
+                year_from?: number | null;
+                year_to?: number | null;
+                album_type?: string[];
+                artist_type?: string[];
+                members_min?: number | null;
+                members_max?: number | null;
+                formed_from?: number | null;
+                formed_to?: number | null;
+                popularity_min?: number | null;
+                popularity_max?: number | null;
+                tag?: number[];
             };
             header?: never;
             path?: never;
@@ -16558,6 +16651,20 @@ export interface operations {
                 q?: string | null;
                 monitored_only?: boolean;
                 artist_id?: string | null;
+                genre?: string[];
+                exclude_genre?: string[];
+                country?: string[];
+                year_from?: number | null;
+                year_to?: number | null;
+                album_type?: string[];
+                artist_type?: string[];
+                members_min?: number | null;
+                members_max?: number | null;
+                formed_from?: number | null;
+                formed_to?: number | null;
+                popularity_min?: number | null;
+                popularity_max?: number | null;
+                tag?: number[];
             };
             header?: never;
             path?: never;
@@ -16827,6 +16934,20 @@ export interface operations {
                 sort_dir?: string;
                 q?: string | null;
                 monitored_only?: boolean;
+                genre?: string[];
+                exclude_genre?: string[];
+                country?: string[];
+                year_from?: number | null;
+                year_to?: number | null;
+                album_type?: string[];
+                artist_type?: string[];
+                members_min?: number | null;
+                members_max?: number | null;
+                formed_from?: number | null;
+                formed_to?: number | null;
+                popularity_min?: number | null;
+                popularity_max?: number | null;
+                tag?: number[];
             };
             header?: never;
             path?: never;
@@ -16896,6 +17017,20 @@ export interface operations {
                 sort_dir?: string;
                 q?: string | null;
                 monitored_only?: boolean;
+                genre?: string[];
+                exclude_genre?: string[];
+                country?: string[];
+                year_from?: number | null;
+                year_to?: number | null;
+                album_type?: string[];
+                artist_type?: string[];
+                members_min?: number | null;
+                members_max?: number | null;
+                formed_from?: number | null;
+                formed_to?: number | null;
+                popularity_min?: number | null;
+                popularity_max?: number | null;
+                tag?: number[];
             };
             header?: never;
             path?: never;
@@ -17481,6 +17616,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_library_facets_api_library_facets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryFacetsResponse"];
                 };
             };
         };
@@ -18262,6 +18417,20 @@ export interface operations {
                 monitored_only?: boolean;
                 artist_id?: string | null;
                 album_id?: string | null;
+                genre?: string[];
+                exclude_genre?: string[];
+                country?: string[];
+                year_from?: number | null;
+                year_to?: number | null;
+                album_type?: string[];
+                artist_type?: string[];
+                members_min?: number | null;
+                members_max?: number | null;
+                formed_from?: number | null;
+                formed_to?: number | null;
+                popularity_min?: number | null;
+                popularity_max?: number | null;
+                tag?: number[];
             };
             header?: never;
             path?: never;
@@ -18300,6 +18469,20 @@ export interface operations {
                 monitored_only?: boolean;
                 artist_id?: string | null;
                 album_id?: string | null;
+                genre?: string[];
+                exclude_genre?: string[];
+                country?: string[];
+                year_from?: number | null;
+                year_to?: number | null;
+                album_type?: string[];
+                artist_type?: string[];
+                members_min?: number | null;
+                members_max?: number | null;
+                formed_from?: number | null;
+                formed_to?: number | null;
+                popularity_min?: number | null;
+                popularity_max?: number | null;
+                tag?: number[];
             };
             header?: never;
             path?: never;

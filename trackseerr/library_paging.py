@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+from trackseerr.library_filters import LibraryFacetFilter, facet_clauses
 from trackseerr.list_index import SortDef, build_index, escape_like, fold_search_text, order_clause
 from trackseerr.storage import Database, clean_library_name
 
@@ -42,6 +43,8 @@ LIBRARY_LISTS: dict[str, LibraryListSpec] = {
             "album_count": SortDef(
                 "(SELECT COUNT(*) FROM library_albums x WHERE x.artist_id = a.id)", "count", "albums"
             ),
+            "formed": SortDef("COALESCE(CAST(a.begin_year AS TEXT), '')", "date"),
+            "popularity": SortDef("COALESCE(a.popularity, 0)", "count", "fans"),
         },
         default_sort="name",
         clean_columns=("a.search_clean",),
@@ -59,6 +62,7 @@ LIBRARY_LISTS: dict[str, LibraryListSpec] = {
             "artist": SortDef("COALESCE(ar.sort_name, '')", "name"),
             "release_date": SortDef(_ALBUM_DATE, "date"),
             "added_at": SortDef("al.created_at", "date"),
+            "popularity": SortDef("COALESCE(ar.popularity, 0)", "count", "fans"),
         },
         default_sort="title",
         clean_columns=("al.search_clean", "ar.search_clean"),
@@ -80,6 +84,8 @@ LIBRARY_LISTS: dict[str, LibraryListSpec] = {
             "album": SortDef("COALESCE(al.sort_title, '')", "name"),
             "added_at": SortDef("t.created_at", "date"),
             "size_bytes": SortDef(_TRACK_SIZE, "size"),
+            "year": SortDef(_ALBUM_DATE, "date"),
+            "popularity": SortDef("COALESCE(ar.popularity, 0)", "count", "fans"),
         },
         default_sort="title",
         clean_columns=("t.search_clean", "al.search_clean", "ar.search_clean"),
@@ -104,6 +110,8 @@ def _where(
     query: Optional[str],
     monitored_only: bool,
     filters: dict[str, Optional[str]],
+    facets: Optional[LibraryFacetFilter] = None,
+    kind: Optional[str] = None,
 ) -> tuple[str, list[Any]]:
     clauses: list[str] = []
     params: list[Any] = []
@@ -114,6 +122,10 @@ def _where(
         if column is not None and value:
             clauses.append(f"{column} = ?")
             params.append(str(value))
+    if facets is not None and not facets.is_empty() and kind is not None:
+        facet_c, facet_p = facet_clauses(facets, kind)
+        clauses.extend(facet_c)
+        params.extend(facet_p)
     text = (query or "").strip()
     if text:
         likes: list[str] = []
@@ -142,11 +154,12 @@ def page_queries(
     query: Optional[str] = None,
     monitored_only: bool = False,
     filters: Optional[dict[str, Optional[str]]] = None,
+    facets: Optional[LibraryFacetFilter] = None,
 ) -> tuple[tuple[str, list[Any]], tuple[str, list[Any]]]:
     """``((page_sql, params), (count_sql, params))`` for one page of ``kind``."""
     spec = LIBRARY_LISTS[kind]
     sort = spec.sorts[sort_key]  # KeyError for an unknown key: the route validates against the whitelist first
-    where, params = _where(spec, query, monitored_only, filters or {})
+    where, params = _where(spec, query, monitored_only, filters or {}, facets=facets, kind=kind)
     order = order_clause(sort, sort_dir, spec.tiebreak)
     offset = (int(page) - 1) * int(page_size)
     page_sql = f"{spec.select} {spec.frm}{where} {order} LIMIT ? OFFSET ?"
@@ -163,10 +176,11 @@ def page_library(
     query: Optional[str] = None,
     monitored_only: bool = False,
     filters: Optional[dict[str, Optional[str]]] = None,
+    facets: Optional[LibraryFacetFilter] = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """One page of ``kind`` (``artists``/``albums``/``tracks``) plus the filtered total."""
     (page_sql, page_params), (count_sql, count_params) = page_queries(
-        kind, page, page_size, sort_key, sort_dir, query, monitored_only, filters
+        kind, page, page_size, sort_key, sort_dir, query, monitored_only, filters, facets=facets
     )
     mapper = LIBRARY_LISTS[kind].mapper(db)
     with db._lock:
@@ -183,10 +197,11 @@ def index_library(
     query: Optional[str] = None,
     monitored_only: bool = False,
     filters: Optional[dict[str, Optional[str]]] = None,
+    facets: Optional[LibraryFacetFilter] = None,
 ) -> tuple[int, list[dict[str, Any]]]:
     """``(total, groups)`` for the same ordering and filters ``page_library`` uses."""
     spec = LIBRARY_LISTS[kind]
     sort = spec.sorts[sort_key]
-    where, params = _where(spec, query, monitored_only, filters or {})
+    where, params = _where(spec, query, monitored_only, filters or {}, facets=facets, kind=kind)
     with db._lock:
         return build_index(db.conn, f"{spec.frm}{where}", params, sort, sort_dir)

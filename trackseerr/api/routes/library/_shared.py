@@ -6,11 +6,12 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
 
 from trackseerr import library_paging as paging
+from trackseerr.library_filters import LibraryFacetFilter
 from trackseerr import art_thumbs
 from trackseerr import lidarr_library
 from trackseerr.download_roots import allowed_roots_for_all_clients
@@ -315,10 +316,20 @@ def _paged(
     album_id: Optional[str],
     db: Database,
     enrich: Callable[[Database, list[dict[str, Any]]], list[dict[str, Any]]],
+    facets: Optional[LibraryFacetFilter] = None,
 ) -> dict[str, Any]:
     key = _library_sort_key(kind, sort_key)
     rows, total = paging.page_library(
-        db, kind, page, page_size, key, sort_dir, q, monitored_only, _library_filters(kind, artist_id, album_id)
+        db,
+        kind,
+        page,
+        page_size,
+        key,
+        sort_dir,
+        q,
+        monitored_only,
+        _library_filters(kind, artist_id, album_id),
+        facets=facets,
     )
     return {
         "mode": "native",
@@ -339,12 +350,73 @@ def _index(
     artist_id: Optional[str],
     album_id: Optional[str],
     db: Database,
+    facets: Optional[LibraryFacetFilter] = None,
 ) -> dict[str, Any]:
     key = _library_sort_key(kind, sort_key)
     total, groups = paging.index_library(
-        db, kind, key, sort_dir, q, monitored_only, _library_filters(kind, artist_id, album_id)
+        db,
+        kind,
+        key,
+        sort_dir,
+        q,
+        monitored_only,
+        _library_filters(kind, artist_id, album_id),
+        facets=facets,
     )
     return {"sort_key": key, "sort_dir": sort_dir, "total": total, "groups": groups}
+
+def facet_query(
+    genre: list[str] = Query(default=[]),
+    exclude_genre: list[str] = Query(default=[]),
+    country: list[str] = Query(default=[]),
+    year_from: Optional[int] = Query(default=None, ge=1000, le=3000),
+    year_to: Optional[int] = Query(default=None, ge=1000, le=3000),
+    album_type: list[str] = Query(default=[]),
+    artist_type: list[str] = Query(default=[]),
+    members_min: Optional[int] = Query(default=None, ge=1, le=500),
+    members_max: Optional[int] = Query(default=None, ge=1, le=500),
+    formed_from: Optional[int] = Query(default=None),
+    formed_to: Optional[int] = Query(default=None),
+    popularity_min: Optional[int] = Query(default=None, ge=0),
+    popularity_max: Optional[int] = Query(default=None, ge=0),
+    tag: list[int] = Query(default=[]),
+) -> LibraryFacetFilter:
+    repeatable_fields = (
+        ("genre", genre),
+        ("exclude_genre", exclude_genre),
+        ("country", country),
+        ("album_type", album_type),
+        ("artist_type", artist_type),
+        ("tag", tag),
+    )
+    for name, items in repeatable_fields:
+        if len(items) > 20:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"At most 20 {name} parameters allowed",
+            )
+    try:
+        return LibraryFacetFilter(
+            genres=tuple(genre),
+            exclude_genres=tuple(exclude_genre),
+            countries=tuple(country),
+            year_from=year_from,
+            year_to=year_to,
+            album_types=tuple(album_type),
+            artist_types=tuple(artist_type),
+            members_min=members_min,
+            members_max=members_max,
+            formed_from=formed_from,
+            formed_to=formed_to,
+            popularity_min=popularity_min,
+            popularity_max=popularity_max,
+            tag_ids=tuple(tag),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        )
 
 def _lidarr_paged(
     db: Database,

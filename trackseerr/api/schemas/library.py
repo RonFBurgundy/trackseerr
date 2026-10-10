@@ -173,6 +173,30 @@ class LibraryIndexResponse(ApiModel):
     groups: list[IndexGroup]
 
 
+class FacetCount(ApiModel):
+    value: str
+    count: int
+
+
+class DecadeCount(ApiModel):
+    value: int
+    count: int
+
+
+class LibraryFacetsResponse(ApiModel):
+    genres: list[FacetCount]
+    countries: list[FacetCount]
+    decades: list[DecadeCount]
+    album_types: list[FacetCount]
+    artist_types: list[FacetCount]
+    year_min: Optional[int] = None
+    year_max: Optional[int] = None
+    formed_min: Optional[int] = None
+    formed_max: Optional[int] = None
+    members_max: Optional[int] = None
+    popularity_max: Optional[int] = None
+
+
 class _PageBase(ApiModel):
     mode: str
     page: int
