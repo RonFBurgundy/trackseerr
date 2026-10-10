@@ -11,6 +11,8 @@ import {
   AlertCircle,
   History,
   Sparkles,
+  TrendingUp,
+  FileUp,
 } from 'lucide-react';
 import type { Playlist, User } from '@/types/models';
 import type { ImportPlaylistPayload } from '@/services/playlistService';
@@ -41,6 +43,8 @@ import {
   MatchOverridesModal,
   SmartCollectionModal,
   SmartCollectionCardActions,
+  FeaturedChartsTab,
+  M3uImportTab,
 } from '@/components/playlists';
 import { useMissingTracks } from '@/hooks/useMissingTracks';
 import { useToast } from '@/hooks/useToast';
@@ -107,7 +111,9 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   const [editingCollectionId, setEditingCollectionId] = useState<string | undefined>(undefined);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
-  const [importTab, setImportTab] = useState<'link' | 'paste' | 'listening' | 'helper'>('link');
+  const [importTab, setImportTab] = useState<
+    'link' | 'featured' | 'paste' | 'm3u' | 'listening' | 'helper'
+  >('link');
   const [isListeningModalOpen, setIsListeningModalOpen] = useState<boolean>(false);
   const [playlistName, setPlaylistName] = useState<string>('');
   const [playlistUrl, setPlaylistUrl] = useState<string>('');
@@ -466,11 +472,27 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
             </TapeDeckButton>
             <TapeDeckButton
               size="sm"
+              active={importTab === 'featured'}
+              onClick={() => setImportTab('featured')}
+              icon={<TrendingUp className="h-3.5 w-3.5" />}
+            >
+              Featured
+            </TapeDeckButton>
+            <TapeDeckButton
+              size="sm"
               active={importTab === 'paste'}
               onClick={() => setImportTab('paste')}
               icon={<FileText className="h-3.5 w-3.5" />}
             >
               Paste Tracks
+            </TapeDeckButton>
+            <TapeDeckButton
+              size="sm"
+              active={importTab === 'm3u'}
+              onClick={() => setImportTab('m3u')}
+              icon={<FileUp className="h-3.5 w-3.5" />}
+            >
+              Upload .m3u
             </TapeDeckButton>
             <TapeDeckButton
               size="sm"
@@ -490,7 +512,27 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
             </TapeDeckButton>
           </TabStrip>
 
-          <form onSubmit={handleImportSubmit} className="space-y-4">
+          {importTab === 'featured' && (
+            <FeaturedChartsTab
+              enabled={importTab === 'featured'}
+              onSubscribe={async (chart) => {
+                await onImport({ source: 'link', url: chart.url_or_id, service: chart.service });
+                setIsImportModalOpen(false);
+              }}
+            />
+          )}
+
+          {importTab === 'm3u' && (
+            <M3uImportTab
+              onSubmit={async (name, content) => {
+                await onImport({ source: 'm3u', name, content });
+                setIsImportModalOpen(false);
+              }}
+            />
+          )}
+
+          {importTab !== 'featured' && importTab !== 'm3u' && (
+            <form onSubmit={handleImportSubmit} className="space-y-4">
             {importTab === 'paste' && (
               <div>
               <label
@@ -643,6 +685,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
               </ActionBar>
             )}
           </form>
+        )}
         </div>
       </ObsidianModal>
 
