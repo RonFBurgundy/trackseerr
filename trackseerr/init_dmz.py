@@ -364,18 +364,19 @@ Shown ONCE (not logged anywhere else): INTERNAL_CORE_SECRET
 
 Unraid values (both templates)
   INTERNAL_CORE_SECRET      the secret above (same on both)
-  Internal network          {args.network}   (docker network create {args.network})
-  Extra Parameters          --network={args.network}
+  Internal network          {args.network}   (docker network create --internal {args.network})
 
 TrackSeerr Requests (gateway)
   ROLE                      gateway
   TRACKSEERR_CORE_URL       http://trackseerr-core:{CORE_PORT}
   APPLICATION_URL           {public_url}
+  Extra Parameters          --network=proxynet --network={args.network}   (proxynet = your reverse-proxy network)
 
 TrackSeerr Core
   ROLE                      core
   APPLICATION_URL           {public_url}
   Port                      {CORE_PORT} (publish on {bind} only)
+  Extra Parameters          --network=trackseerr-core-lan --network={args.network}   (docker network create trackseerr-core-lan; Network Type stays Bridge)
 
 Next: docker compose -f {compose_path.name} --env-file {env_path.name} up -d
 See the README "Two-tier deployment" section.""",

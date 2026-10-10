@@ -819,7 +819,10 @@ def test_init_dmz_writes_files_with_secure_env(tmp_path):
     assert secret not in text and "ROLE=gateway" in text and 'ROLE: "core"' in text
     # secret shown exactly once on stdout
     assert out.count(secret) == 1
-    assert "--network=dmz-net" in out and "http://trackseerr-core:5251" in out
+    assert "--network=proxynet --network=dmz-net" in out
+    assert "--network=trackseerr-core-lan --network=dmz-net" in out
+    assert "docker network create --internal dmz-net" in out
+    assert "http://trackseerr-core:5251" in out
 
 
 def test_init_dmz_compose_is_valid_yaml_and_keeps_gateway_free_of_volumes(tmp_path):

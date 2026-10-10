@@ -21,11 +21,14 @@ Keep this container's name as TrackSeerr-Core (Docker DNS resolves containers by
 Unraid publishes the admin port on all host interfaces. Never forward this port on your router; restrict it to your LAN or VPN with your firewall. Set LAN Bind IP to the LAN IP you use.
 
 Network setup (one time):
-1. In the Unraid terminal run: docker network create trackseerr-internal
-2. In this container's Extra Parameters (Advanced view) add: --network=trackseerr-internal
-   This second --network flag needs Docker 25+ (Unraid 7). On older versions, leave it out and run after the container starts: docker network connect trackseerr-internal TrackSeerr-Core
+1. In the Unraid terminal run:
+   docker network create --internal trackseerr-internal
+   docker network create trackseerr-core-lan
+2. Leave Network Type on Bridge (so Unraid still publishes the admin port) and in Extra Parameters (Advanced view) add:
+   --network=trackseerr-core-lan --network=trackseerr-internal
+   Unraid ignores the Network Type dropdown once Extra Parameters contain a --network flag, so both networks must be listed here. Never add your reverse-proxy/cloudflared network to Core. Needs Docker 25+ (Unraid 7); on older versions leave Extra Parameters empty and after each start run: docker network connect trackseerr-internal TrackSeerr-Core
 3. Use the same INTERNAL_CORE_SECRET on TrackSeerr Requests (generate with: openssl rand -hex 32).
-The network name is your choice; keep it identical on both containers. Core keeps its normal bridge/br0 network so it can reach Plex and your downloaders, and its admin port stays on your LAN.
+The internal network name is your choice; keep it identical on both containers. Reach Plex and downloaders by LAN IP.
 
 Migrating from all-in-one: edit your existing TrackSeerr container, set ROLE to core, add INTERNAL_CORE_SECRET and set APPLICATION_URL, then apply. Or install this template pointing at the same appdata path. No data migration is needed. Users sign in once more on TrackSeerr Requests. The Plex webhook URL is unchanged.
   </Overview>
