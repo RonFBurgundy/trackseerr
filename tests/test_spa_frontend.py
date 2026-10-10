@@ -143,69 +143,57 @@ class TestSPAFastAPIIntegration:
         self, memory_db: Database, mock_config: Config, tmp_path: Path
     ) -> None:
         dist_index = Path("frontend/dist/index.html")
-        with patch.dict(os.environ, {"TRACKSEERR_LEGACY_UI": "0"}):
-            if dist_index.is_file():
+        if dist_index.is_file():
+            app = create_app(db=memory_db, config=mock_config)
+            with TestClient(app) as client:
+                resp = client.get("/")
+                assert resp.status_code == 200
+                assert "text/html" in resp.headers.get("content-type", "")
+                _assert_spa_index_html(resp.text)
+        else:
+            mock_dist = _create_mock_dist(tmp_path)
+            with _patch_app_dist(mock_dist):
                 app = create_app(db=memory_db, config=mock_config)
                 with TestClient(app) as client:
                     resp = client.get("/")
                     assert resp.status_code == 200
                     assert "text/html" in resp.headers.get("content-type", "")
                     _assert_spa_index_html(resp.text)
-            else:
-                mock_dist = _create_mock_dist(tmp_path)
-                with _patch_app_dist(mock_dist):
-                    app = create_app(db=memory_db, config=mock_config)
-                    with TestClient(app) as client:
-                        resp = client.get("/")
-                        assert resp.status_code == 200
-                        assert "text/html" in resp.headers.get("content-type", "")
-                        _assert_spa_index_html(resp.text)
 
-    def test_legacy_index_served_when_legacy_env_is_enabled(
-        self, memory_db: Database, mock_config: Config
+    def test_placeholder_when_dist_index_missing(
+        self, memory_db: Database, mock_config: Config, tmp_path: Path
     ) -> None:
-        with patch.dict(os.environ, {"TRACKSEERR_LEGACY_UI": "1"}):
+        empty_dist = tmp_path / "empty_dist"
+        empty_dist.mkdir()
+        with _patch_app_dist(empty_dist):
             app = create_app(db=memory_db, config=mock_config)
             with TestClient(app) as client:
                 resp = client.get("/")
                 assert resp.status_code == 200
-                html = resp.text
-                assert "plexHubApp()" in html
-                assert "x-data" in html
+                assert "text/html" in resp.headers.get("content-type", "")
+                assert "web UI is not built" in resp.text
 
-    def test_fallback_to_static_when_dist_index_missing(
-        self, memory_db: Database, mock_config: Config
-    ) -> None:
-        with patch.dict(os.environ, {"TRACKSEERR_LEGACY_UI": "0"}):
-            original_is_file = Path.is_file
-
-            def mock_is_file(self: Path) -> bool:
-                if "dist" in str(self) and self.name == "index.html":
-                    return False
-                return original_is_file(self)
-
-            with patch.object(Path, "is_file", mock_is_file):
-                app = create_app(db=memory_db, config=mock_config)
-                with TestClient(app) as client:
-                    resp = client.get("/")
-                    assert resp.status_code == 200
-                    assert "plexHubApp()" in resp.text
+                tok = "a1B2" * 11
+                resp_invite = client.get(f"/invite/{tok}")
+                assert resp_invite.status_code == 200
+                assert "text/html" in resp_invite.headers.get("content-type", "")
+                assert resp_invite.headers.get("cache-control") == "no-store"
+                assert resp_invite.text == resp.text
 
     def test_public_pwa_assets_served_at_root(
         self, memory_db: Database, mock_config: Config
     ) -> None:
-        with patch.dict(os.environ, {"TRACKSEERR_LEGACY_UI": "0"}):
-            app = create_app(db=memory_db, config=mock_config)
-            with TestClient(app) as client:
-                resp_manifest = client.get("/manifest.json")
-                assert resp_manifest.status_code == 200
-                assert "TrackSeerr" in resp_manifest.text
+        app = create_app(db=memory_db, config=mock_config)
+        with TestClient(app) as client:
+            resp_manifest = client.get("/manifest.json")
+            assert resp_manifest.status_code == 200
+            assert "TrackSeerr" in resp_manifest.text
 
-                resp_favicon = client.get("/favicon.svg")
-                assert resp_favicon.status_code == 200
+            resp_favicon = client.get("/favicon.svg")
+            assert resp_favicon.status_code == 200
 
-                resp_logo = client.get("/trackseerr-logo.svg")
-                assert resp_logo.status_code == 200
+            resp_logo = client.get("/trackseerr-logo.svg")
+            assert resp_logo.status_code == 200
 
     def test_static_assets_chunk_served(
         self, memory_db: Database, mock_config: Config, tmp_path: Path

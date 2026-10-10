@@ -9,7 +9,6 @@ from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.config import Config
 from trackseerr.models import (
     AudioQuality,
-    EvaluationResult,
     ParsedRelease,
     QualityProfile,
     QualityProfileItem,
@@ -503,42 +502,4 @@ def test_api_evaluate_title_rejection_and_custom_profile(app_and_client, test_db
     body_custom = resp_custom.json()
     assert body_custom["evaluation"]["is_acceptable"] is True
     assert body_custom["evaluation"]["meets_cutoff"] is True
-
-
-# =============================================================================
-# 5. Frontend HTML & JavaScript Integration Tests
-# =============================================================================
-
-
-def test_frontend_quality_profiles_ui(app_and_client):
-    _, client = app_and_client
-
-    # Verify root index.html serves quality profiles sub-tab and modal
-    resp = client.get("/")
-    assert resp.status_code == 200
-    html = resp.text
-
-    assert "settingsSubTab = 'profiles'" in html
-    assert "settingsSubTab === 'profiles'" in html
-    assert "Quality Profiles" in html
-    assert "Live Release Title Tester" in html
-    assert "isProfileModalOpen" in html
-    assert "openAddProfileModal()" in html
-    assert "openEditProfileModal" in html
-    assert "testReleaseTitle()" in html
-
-    # Verify static/app.js serves quality profiles state and methods
-    resp_js = client.get("/static/app.js")
-    assert resp_js.status_code == 200
-    js = resp_js.text
-
-    assert "qualityProfiles:" in js
-    assert "isProfileModalOpen:" in js
-    assert "loadQualityProfiles()" in js
-    assert "openAddProfileModal()" in js
-    assert "openEditProfileModal" in js
-    assert "saveQualityProfile()" in js
-    assert "deleteQualityProfile" in js
-    assert "testReleaseTitle()" in js
-    assert "/api/settings/quality-profiles" in js
 
