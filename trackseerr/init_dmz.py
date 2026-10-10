@@ -376,7 +376,8 @@ TrackSeerr Core
   ROLE                      core
   APPLICATION_URL           {public_url}
   Port                      {CORE_PORT} (publish on {bind} only)
-  Extra Parameters          --network=trackseerr-core-lan --network={args.network}   (docker network create trackseerr-core-lan; Network Type stays Bridge)
+  Extra Parameters          --network=proxynet --network={args.network}   (cloudflared on host network; Network Type stays Bridge)
+                            --network=trackseerr-core-lan --network={args.network}   (proxy/cloudflared container on proxynet; docker network create trackseerr-core-lan)
 
 Next: docker compose -f {compose_path.name} --env-file {env_path.name} up -d
 See the README "Two-tier deployment" section.""",

@@ -821,6 +821,7 @@ def test_init_dmz_writes_files_with_secure_env(tmp_path):
     assert out.count(secret) == 1
     assert "--network=proxynet --network=dmz-net" in out
     assert "--network=trackseerr-core-lan --network=dmz-net" in out
+    assert out.count("--network=proxynet --network=dmz-net") == 2
     assert "docker network create --internal dmz-net" in out
     assert "http://trackseerr-core:5251" in out
 

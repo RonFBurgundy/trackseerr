@@ -14,7 +14,7 @@ TrackSeerr Requests: the public, stateless request portal. Pair with TrackSeerr 
 
 Requests has no volumes, no Plex token and no download credentials. It signs every call to Core with INTERNAL_CORE_SECRET and can only perform requester actions (discover, request, sign in), so a compromised Requests container can never act as admin. Settings are managed in TrackSeerr Core.
 
-Networking: put this container on the same network as your reverse proxy or cloudflared (e.g. proxynet or a custom bridge), and ALSO on the internal network shared with Core. Cloudflare Tunnel's cloudflared must share a network with Requests, never with Core.
+Networking: put this container on the same network as your reverse proxy or cloudflared (e.g. proxynet or a custom bridge), and ALSO on the internal network shared with Core. If cloudflared or a reverse proxy runs as a container, it must share a network with Requests, never with Core. If cloudflared runs on the host network, give the tunnel a hostname for Requests only.
 
 Network setup (one time):
 1. In the Unraid terminal run: docker network create --internal trackseerr-internal
