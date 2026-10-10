@@ -1526,6 +1526,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/internal/plex/identity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Plex Identity
+         * @description Returns core's Plex machine identifier. Service principal only; 404 for everyone else.
+         */
+        get: operations["plex_identity_api_internal_plex_identity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/issues": {
         parameters: {
             query?: never;
@@ -10804,6 +10824,11 @@ export interface components {
             /** Targets */
             targets: string[];
         };
+        /** PlexIdentityResponse */
+        PlexIdentityResponse: {
+            /** Machine Identifier */
+            machine_identifier?: string | null;
+        };
         /** PlexMix */
         PlexMix: {
             /** Hub Title */
@@ -15810,6 +15835,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HelloResponse"];
+                };
+            };
+        };
+    };
+    plex_identity_api_internal_plex_identity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlexIdentityResponse"];
                 };
             };
         };
