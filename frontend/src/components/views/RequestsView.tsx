@@ -14,12 +14,14 @@ import {
   CassetteLoader,
 } from '@/components/ui';
 import { PageFrame } from '@/components/layout';
-import { IssueReportButton, MyIssuesList, untilTime } from '@/components/issues';
+import { AdminIssuesPanel, IssueReportButton, MyIssuesList, untilTime } from '@/components/issues';
 import { useToast } from '@/hooks/useToast';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
 import type { AccountInfo } from '@/types/account';
 import { QuotaBars } from '@/components/account';
 import type { RequestsSub, NavigateOptions } from '@/hooks/useAppRoute';
+
+const noop = (): void => undefined;
 
 export interface RequestsViewProps {
   /** Route sub-page: a request filter, or 'issues'. */
@@ -29,8 +31,14 @@ export interface RequestsViewProps {
   isAdmin?: boolean;
   canManageRequests?: boolean;
   issuesHook: UseIssuesReturn;
-  /** Own issues with unseen admin activity; badge on the My issues key. */
+  /** Open + in-progress issue count, shown on the Issues key for admins. */
+  issuesOpenCount?: number;
+  /** Own issues with unseen admin activity; badge on the My issues key for non-admins. */
   issuesUnreadCount?: number;
+  /** Issue open on top of the queue (`#/requests/issues/<id>`). */
+  issueId?: string;
+  onOpenIssue?: (id: string) => void;
+  onCloseIssue?: () => void;
   currentUserId?: string;
   /** From GET /api/account; drives the per-type remaining-quota panel. */
   account?: AccountInfo | null;
@@ -43,7 +51,11 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
   isAdmin = false,
   canManageRequests = false,
   issuesHook,
+  issuesOpenCount = 0,
   issuesUnreadCount = 0,
+  issueId,
+  onOpenIssue = noop,
+  onCloseIssue = noop,
   currentUserId,
   account = null,
 }) => {
@@ -168,15 +180,24 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
           active={section === 'issues'}
           onClick={() => onSubChange('issues')}
         >
-          My issues
-          {issuesUnreadCount > 0 && (
-            <span
-              className="ml-1.5 px-1 rounded-[3px] bg-[var(--accent-amber)] text-[10px] font-mono font-bold text-black"
-              aria-label={`${issuesUnreadCount} with new activity`}
-            >
-              {issuesUnreadCount}
-            </span>
-          )}
+          {isAdmin ? 'Issues' : 'My issues'}
+          {isAdmin
+            ? issuesOpenCount > 0 && (
+                <span
+                  className="ml-1.5 px-1 rounded-[3px] bg-[var(--accent-amber)] text-[10px] font-mono font-bold text-black"
+                  aria-label={`${issuesOpenCount} open issues`}
+                >
+                  {issuesOpenCount}
+                </span>
+              )
+            : issuesUnreadCount > 0 && (
+                <span
+                  className="ml-1.5 px-1 rounded-[3px] bg-[var(--accent-amber)] text-[10px] font-mono font-bold text-black"
+                  aria-label={`${issuesUnreadCount} with new activity`}
+                >
+                  {issuesUnreadCount}
+                </span>
+              )}
         </TapeDeckButton>
       </TabStrip>
       }
@@ -193,7 +214,17 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
         </MachinedCard>
       )}
 
-      {section === 'issues' && <MyIssuesList issuesHook={issuesHook} currentUserId={currentUserId} />}
+      {section === 'issues' &&
+        (isAdmin ? (
+          <AdminIssuesPanel
+            issueId={issueId}
+            onOpenIssue={onOpenIssue}
+            onCloseIssue={onCloseIssue}
+            onToast={showToast}
+          />
+        ) : (
+          <MyIssuesList issuesHook={issuesHook} currentUserId={currentUserId} />
+        ))}
 
       {/* Loading state */}
       {section === 'requests' && isLoading && (

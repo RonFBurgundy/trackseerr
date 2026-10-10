@@ -33,7 +33,7 @@ export interface HeaderProps {
   isAdmin?: boolean;
   /** Library-health findings awaiting review, shown on the Activity key (admin only). */
   reviewCount?: number;
-  /** Open issues awaiting an admin, added to the Activity key's badge (admin only). */
+  /** Open issues awaiting an admin, added to the Requests key's badge (admin only). */
   issuesOpenCount?: number;
   /** The user's own issues with unseen admin activity, shown on the Requests key. */
   issuesUnreadCount?: number;
@@ -81,10 +81,10 @@ export const Header: React.FC<HeaderProps> = ({
         Core
       </span>
     ) : null;
-  /** Count chip per main key: Activity = review findings + open issues (admin), Requests = unseen issue replies. */
+  /** Count chip per main key: Activity = review findings, Requests = open issues (admin) or unseen issue replies (user). */
   const badgeFor = (id: MainTab): number => {
-    if (id === 'activity') return reviewCount + issuesOpenCount;
-    if (id === 'requests') return issuesUnreadCount;
+    if (id === 'activity') return reviewCount;
+    if (id === 'requests') return isAdmin ? issuesOpenCount : issuesUnreadCount;
     return 0;
   };
   const navItems: Array<{ id: MainTab; label: string; icon: React.ReactNode; adminOnly?: boolean }> = [

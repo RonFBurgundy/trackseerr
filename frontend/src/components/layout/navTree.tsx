@@ -30,7 +30,7 @@ export interface RouteAccess {
 }
 
 /** Nav entries match a page, not the issue open on top of it. */
-const withoutIssue = (r: AppRoute): AppRoute => (r.tab === 'activity' && r.issueId !== undefined ? { tab: 'activity', sub: r.sub } : r);
+const withoutIssue = (r: AppRoute): AppRoute => (r.tab === 'requests' && r.issueId !== undefined ? { tab: 'requests', sub: r.sub } : r);
 
 export const routesEqual = (a: AppRoute, b: AppRoute): boolean => routeToHash(withoutIssue(a)) === routeToHash(withoutIssue(b));
 
@@ -97,14 +97,17 @@ export function buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount = 0, 
       label: 'Requests',
       description: 'Manage & monitor your queue',
       icon: <Inbox className={ico} />,
-      badge: issuesUnreadCount,
+      badge: isAdmin ? issuesOpenCount : issuesUnreadCount,
       children: [
         leaf('requests/all', 'All', { tab: 'requests', sub: 'all' }),
         leaf('requests/pending', 'Pending', { tab: 'requests', sub: 'pending' }),
         leaf('requests/approved', 'Approved', { tab: 'requests', sub: 'approved' }),
         leaf('requests/fulfilled', 'Fulfilled', { tab: 'requests', sub: 'fulfilled' }),
         leaf('requests/rejected', 'Rejected', { tab: 'requests', sub: 'rejected' }),
-        { ...leaf('requests/issues', 'My issues', { tab: 'requests', sub: 'issues' }), badge: issuesUnreadCount },
+        {
+          ...leaf('requests/issues', isAdmin ? 'Issues' : 'My issues', { tab: 'requests', sub: 'issues' }),
+          badge: isAdmin ? issuesOpenCount : issuesUnreadCount,
+        },
       ],
     },
   ];
@@ -136,13 +139,12 @@ export function buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount = 0, 
         label: 'Activity',
         description: 'Lidarr & download deck status',
         icon: <Activity className={ico} />,
-        badge: reviewCount + issuesOpenCount,
+        badge: reviewCount,
         children: [
           leaf('activity/queue', 'Queue', { tab: 'activity', sub: 'queue' }),
           leaf('activity/history', 'History', { tab: 'activity', sub: 'history' }),
           leaf('activity/blocklist', 'Blocklist', { tab: 'activity', sub: 'blocklist' }),
           { ...leaf('activity/review', 'Needs review', { tab: 'activity', sub: 'review' }), badge: reviewCount },
-          { ...leaf('activity/issues', 'Issues', { tab: 'activity', sub: 'issues' }), badge: issuesOpenCount },
         ],
       },
       {

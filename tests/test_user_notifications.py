@@ -219,6 +219,28 @@ class TestNotificationDispatcherRouting:
         bob_inbox, _, _ = test_db.list_user_notifications(bob_id)
         assert len(bob_inbox) == 0
 
+    def test_issue_notification_links_to_requests_issues(self, test_db, seeded_users):
+        """Dispatching an issue event with issue_id and no link creates an inbox row pointing to #/requests/issues/<id>."""
+        alice_id = seeded_users["alice"]["id"]
+        dispatcher = NotificationDispatcher()
+
+        with patch.object(dispatcher, "_send_to_channel", return_value=None), \
+             patch.object(dispatcher, "_send_web_push", return_value=None):
+            dispatcher._run_dispatch(
+                "issue_updated",
+                {
+                    "issue_id": "issue-42",
+                    "user_id": alice_id,
+                    "title": "Bad audio quality",
+                    "artist": "Radiohead",
+                },
+                db=test_db,
+            )
+
+        alice_inbox, _, _ = test_db.list_user_notifications(alice_id)
+        assert len(alice_inbox) == 1
+        assert alice_inbox[0]["link"] == "#/requests/issues/issue-42"
+
     def test_admin_only_event_does_not_leak_to_user_inbox_or_channels(self, test_db, seeded_users):
         """request_created and issue_reported stay admin-only even if user_id is in payload."""
         alice_id = seeded_users["alice"]["id"]

@@ -413,7 +413,7 @@ class NotificationDispatcher:
         if not link:
             if "issue" in event or data.get("issue_id"):
                 iid = data.get("issue_id") or data.get("id")
-                link = f"#/activity/issues/{iid}" if iid else "#/requests"
+                link = f"#/requests/issues/{iid}" if iid else "#/requests"
             else:
                 link = "#/requests"
 
@@ -640,7 +640,7 @@ class NotificationDispatcher:
                 if not link:
                     if "issue" in event or data.get("issue_id"):
                         iid = data.get("issue_id") or data.get("id")
-                        link = f"#/activity/issues/{iid}" if iid else "#/requests"
+                        link = f"#/requests/issues/{iid}" if iid else "#/requests"
                     else:
                         link = "#/requests"
                 try:

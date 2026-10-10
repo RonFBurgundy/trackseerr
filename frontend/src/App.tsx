@@ -479,7 +479,11 @@ const MainApp: React.FC = () => {
                 isAdmin={auth.canUseAdminUi}
                 canManageRequests={auth.canManageRequests}
                 issuesHook={issuesHook}
+                issuesOpenCount={issueCounts.open}
                 issuesUnreadCount={issueCounts.unread}
+                issueId={activeRoute.issueId}
+                onOpenIssue={(id) => handleNavigate({ tab: 'requests', sub: 'issues', issueId: id })}
+                onCloseIssue={() => navigateUp({ tab: 'requests', sub: 'issues' })}
                 currentUserId={auth.user?.id}
                 account={accountHook.account}
               />
@@ -532,10 +536,6 @@ const MainApp: React.FC = () => {
                 onSubChange={(sub, o) => handleNavigate({ tab: 'activity', sub }, o)}
                 reviewCount={reviewHealth.count}
                 onReviewChanged={() => void reviewHealth.refresh()}
-                issuesOpenCount={issueCounts.open}
-                issueId={activeRoute.issueId}
-                onOpenIssue={(id) => handleNavigate({ tab: 'activity', sub: 'issues', issueId: id })}
-                onCloseIssue={() => navigateUp({ tab: 'activity', sub: 'issues' })}
               />
             )}
 
