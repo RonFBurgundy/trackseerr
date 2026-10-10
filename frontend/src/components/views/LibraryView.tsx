@@ -3,7 +3,7 @@ import { CheckSquare, Disc, Eye, FileText, FolderInput, Layers, Loader2, Music, 
 import type { UseLibraryReturn, LibraryTab } from '@/hooks/useLibrary';
 import type { AppRoute, LibraryRoute, NavigateOptions } from '@/hooks/useAppRoute';
 import { useLibraryDrilldown } from '@/hooks/useLibraryDrilldown';
-import type { AlbumItem, ArtistDiscographyAlbum, AudioPreviewTrack, DiscoveryItem } from '@/types/models';
+import type { AlbumItem, ArtistDiscographyAlbum, AudioPreviewTrack, DiscoveryItem, User as UserModel } from '@/types/models';
 import { useAddToCollection } from '@/hooks/useAddToCollection';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useLibraryManager } from '@/hooks/useLibraryManager';
@@ -35,6 +35,7 @@ import {
   type RetagScope,
   TracksPanel,
 } from '@/components/library';
+import { SmartCollectionModal } from '@/components/playlists';
 import { ManualImportModal } from '@/components/manualImport';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
 
@@ -57,6 +58,10 @@ export interface LibraryViewProps {
   currentPreviewTrackId?: string;
   isPreviewPlaying?: boolean;
   requestedIds: ReadonlySet<string>;
+  users?: UserModel[];
+  currentUserId?: string;
+  canTargetUsers?: boolean;
+  serverLabel?: string;
 }
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -81,8 +86,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   currentPreviewTrackId,
   isPreviewPlaying = false,
   requestedIds,
+  users = [],
+  currentUserId,
+  canTargetUsers = false,
+  serverLabel = 'Plex',
 }) => {
   const activeTab = route.sub;
+  const [isSmartModalOpen, setIsSmartModalOpen] = useState<boolean>(false);
   const {
     collections,
     stats,
@@ -257,6 +267,18 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         facets={facets}
         tags={tags}
       />
+      {isAdmin && (
+        <SmartCollectionModal
+          open={isSmartModalOpen}
+          onClose={() => setIsSmartModalOpen(false)}
+          initialFilters={filters}
+          onSaved={() => showToast('Smart collection created — find it under Playlists')}
+          users={users}
+          currentUserId={currentUserId}
+          canTargetUsers={canTargetUsers}
+          serverLabel={serverLabel}
+        />
+      )}
     </>
   );
 
@@ -446,6 +468,15 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             >
               Clear all
             </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setIsSmartModalOpen(true)}
+                className="shrink-0 px-1.5 py-0.5 text-xs font-mono text-[var(--accent-amber)] hover:underline focus-visible:outline-none"
+              >
+                Save as smart collection
+              </button>
+            )}
           </div>
         )}
         {error && !isLoading && (
