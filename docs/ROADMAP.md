@@ -7,6 +7,7 @@ To ask for something, [open a feature request](https://github.com/RonFBurgundy/t
 ## Planned
 
 - **First tagged release.** Stable settings, a stable API, and versioned images.
+- **Spotify account sign-in.** With your own Spotify API keys, sign in to Spotify to sync your private and collaborative playlists and Liked Songs. Public playlists already work with or without keys.
 - **Emby.** Emby shares most of its API with Jellyfin, so support will reuse the Jellyfin adapter: per-user playlists, user import, rescans, and library health.
 
 ## Being considered

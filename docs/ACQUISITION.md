@@ -197,7 +197,7 @@ To update playlists as soon as Lidarr imports something, add a webhook in Lidarr
 TrackSeerr can copy your Lidarr library: artists, albums, tracks, files, monitoring, and MusicBrainz IDs. Your files are not moved.
 
 1. Connect Lidarr in **Settings > Lidarr** as above.
-2. Open **Library** and click **Import from Lidarr**.
-3. Wait for the import to finish. Progress is shown on the page.
+2. In **Settings**, switch the library manager to TrackSeerr, then click **Import from Lidarr and switch**. **Switch without importing** skips the copy.
+3. Wait for the import to finish. Progress shows on the **Library** page, where **Stop** cancels it.
 
 When it finishes, TrackSeerr becomes the library manager. You can then stop Lidarr. Do not let both manage the same folder.

@@ -38,6 +38,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Import from Lidarr is back: switching the library manager from Lidarr to TrackSeerr offers to copy your Lidarr library first, and the Library page shows live progress with a Stop button.
 - Tapping a tab on a phone no longer lands on a different tab because the row jumped back while you were scrolling it.
 - Artists with more than 100 releases now show their complete discography.
 - Albums and artists whose MusicBrainz IDs were merged or changed are relinked automatically.
