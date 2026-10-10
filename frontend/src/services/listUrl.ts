@@ -1,8 +1,17 @@
 import type { IndexQuery, ListQuery } from '@/types/activity';
 
-function appendFilters(params: URLSearchParams, filters: Readonly<Record<string, string>> | undefined): void {
+function appendFilters(
+  params: URLSearchParams,
+  filters: Readonly<Record<string, string | readonly string[]>> | undefined
+): void {
   for (const [key, value] of Object.entries(filters ?? {})) {
-    if (value) params.set(key, value);
+    if (Array.isArray(value)) {
+      for (const v of value) {
+        if (v) params.append(key, v);
+      }
+    } else if (typeof value === 'string' && value) {
+      params.set(key, value);
+    }
   }
 }
 

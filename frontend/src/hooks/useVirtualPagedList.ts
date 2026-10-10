@@ -10,7 +10,7 @@ export interface FetchPageRequest {
   pageSize: number;
   sortKey: string;
   sortDir: ListSortDir;
-  filters: Readonly<Record<string, string>>;
+  filters: Readonly<Record<string, string | readonly string[]>>;
   signal: AbortSignal;
 }
 
@@ -27,7 +27,7 @@ export interface UseVirtualPagedListOptions<T> {
   pageSize?: number;
   sortKey: string;
   sortDir: ListSortDir;
-  filters?: Readonly<Record<string, string>>;
+  filters?: Readonly<Record<string, string | readonly string[]>>;
   /** Stable identity per item; used for tombstones and to keep unchanged row objects across refreshes. */
   getKey: (item: T) => ListKey;
   /** When false nothing is fetched (e.g. non-admin). Default true. */
@@ -237,7 +237,7 @@ export function useVirtualPagedList<T>(
           pageSize: p.pageSize,
           sortKey: p.sortKey,
           sortDir: p.sortDir,
-          filters: JSON.parse(p.filtersJson) as Record<string, string>,
+          filters: JSON.parse(p.filtersJson) as Record<string, string | readonly string[]>,
           signal: controller.signal,
         });
         if (generationAtStart !== generationRef.current) return;

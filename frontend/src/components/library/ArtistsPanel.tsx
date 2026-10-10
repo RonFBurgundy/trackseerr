@@ -18,6 +18,8 @@ const SORT_OPTIONS: ReadonlyArray<LibrarySortOption> = [
   { key: 'name', label: 'Name', defaultDir: 'asc' },
   { key: 'added_at', label: 'Added', defaultDir: 'desc' },
   { key: 'album_count', label: 'Albums', defaultDir: 'desc' },
+  { key: 'formed', label: 'Formed', defaultDir: 'asc' },
+  { key: 'popularity', label: 'Popularity', defaultDir: 'desc' },
 ];
 
 /** Exact height under the square art: p-1.5 padding, 16px title, 2px gap, 14px detail line, 2px borders. */
@@ -40,6 +42,7 @@ export interface ArtistsPanelProps {
   onModeChange: (mode: string | null) => void;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
   onSelectActionChange: (action: LibrarySelectAction | null) => void;
+  facets?: Readonly<Record<string, string | readonly string[]>>;
 }
 
 /** Artists as a virtualized cover grid with a scrubber; search and sort are server-side. */
@@ -54,6 +57,7 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
   onModeChange,
   onToast,
   onSelectActionChange,
+  facets,
 }) => {
   const { list, index, sortKey, sortDir, changeSort } = useLibraryCatalog<ArtistItem>({
     fetchPage: fetchArtists,
@@ -62,23 +66,27 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
     sortOptions: SORT_OPTIONS,
     query,
     monitoredOnly,
+    extraFilters: facets,
   });
   const phone = useMediaQuery('(max-width: 639px)');
   const { reload, mode } = list;
+
+  const hasActiveFacets = Boolean(facets && Object.keys(facets).length > 0);
+  const facetsJson = JSON.stringify(facets ?? {});
 
   // Bulk editing is a native-library, admin-only action; Lidarr owns monitoring in its own mode.
   const canBulkEdit = isAdmin && mode !== 'lidarr';
   const selection = useBulkSelection();
   const { toggle: toggleSelected, isSelected, allMatching, active: selecting, exit: exitSelection } = selection;
-  const bulk = useArtistBulkEdit(selection, list.total, onToast, reload, JSON.stringify([query, monitoredOnly]));
+  const bulk = useArtistBulkEdit(selection, list.total, onToast, reload, JSON.stringify([query, monitoredOnly, facetsJson]));
   const profiles = useQualityProfiles(selecting, onToast);
   const metadataProfiles = useMetadataProfiles(selecting && canBulkEdit, onToast);
-  const unfiltered = !query && !monitoredOnly;
+  const unfiltered = !query && !monitoredOnly && !hasActiveFacets;
 
   // Filters change what "all" would mean in the user's head; drop the selection rather than act on a stale view.
   useEffect(() => {
     exitSelection();
-  }, [query, monitoredOnly, exitSelection]);
+  }, [query, monitoredOnly, facetsJson, exitSelection]);
 
   useEffect(() => {
     onSelectActionChange(
@@ -135,7 +143,13 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
         minTileWidth={128}
         gap={phone ? 8 : 12}
         captionHeight={CAPTION_HEIGHT}
-        emptyMessage={query ? 'No artists match your search.' : 'No artists found in library.'}
+        emptyMessage={
+          hasActiveFacets
+            ? 'Nothing in your library matches these filters.'
+            : query
+            ? 'No artists match your search.'
+            : 'No artists found in library.'
+        }
         ariaLabel="Artists"
         rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
         footer={footer}

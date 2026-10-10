@@ -114,3 +114,5 @@ export * from './useBackups';
 export * from './useUpdateCheck';
 export * from './useCalendar';
 export * from './useRetagPreview';
+export * from './useLibraryFacets';
+export * from './useLibraryFilters';

@@ -18,6 +18,7 @@ const SORT_OPTIONS: ReadonlyArray<LibrarySortOption> = [
   { key: 'artist', label: 'Artist', defaultDir: 'asc' },
   { key: 'release_date', label: 'Released', defaultDir: 'desc' },
   { key: 'added_at', label: 'Added', defaultDir: 'desc' },
+  { key: 'popularity', label: 'Popularity', defaultDir: 'desc' },
 ];
 
 /** Exact height under the square art: p-1.5 padding, 16px title, 2px gap, 14px detail line, 2px borders. */
@@ -39,6 +40,7 @@ export interface AlbumsPanelProps {
   onModeChange: (mode: string | null) => void;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
   onSelectActionChange: (action: LibrarySelectAction | null) => void;
+  facets?: Readonly<Record<string, string | readonly string[]>>;
 }
 
 /** Albums as a virtualized cover grid with a scrubber; search and sort are server-side. */
@@ -53,6 +55,7 @@ export const AlbumsPanel: React.FC<AlbumsPanelProps> = ({
   onModeChange,
   onToast,
   onSelectActionChange,
+  facets,
 }) => {
   const { list, index, sortKey, sortDir, changeSort } = useLibraryCatalog<AlbumItem>({
     fetchPage: fetchAlbums,
@@ -61,17 +64,25 @@ export const AlbumsPanel: React.FC<AlbumsPanelProps> = ({
     sortOptions: SORT_OPTIONS,
     query,
     monitoredOnly,
+    extraFilters: facets,
   });
   const phone = useMediaQuery('(max-width: 639px)');
   const { reload, mode } = list;
+
+  const hasActiveFacets = Boolean(facets && Object.keys(facets).length > 0);
+  const facetsJson = JSON.stringify(facets ?? {});
 
   const canBulkEdit = isAdmin && mode !== 'lidarr';
   const selection = useBulkSelection();
   const { toggle: toggleSelected, isSelected, active: selecting, exit: exitSelection, selectKeys } = selection;
   const bulk = useAlbumBulkEdit(onToast);
-  const filters = useMemo<Record<string, string>>(
-    () => ({ q: query.trim(), monitored_only: monitoredOnly ? 'true' : '' }),
-    [query, monitoredOnly]
+  const filters = useMemo<Record<string, string | readonly string[]>>(
+    () => ({
+      ...(facets ?? {}),
+      q: query.trim(),
+      monitored_only: monitoredOnly ? 'true' : '',
+    }),
+    [query, monitoredOnly, facets]
   );
   const selectAll = useSelectAllMatching<AlbumItem>(getAlbumsPaged, getKey, filters, 'title', onToast);
   const { collect: collectAllIds } = selectAll;
@@ -83,7 +94,7 @@ export const AlbumsPanel: React.FC<AlbumsPanelProps> = ({
 
   useEffect(() => {
     exitSelection();
-  }, [query, monitoredOnly, exitSelection]);
+  }, [query, monitoredOnly, facetsJson, exitSelection]);
 
   useEffect(() => {
     onSelectActionChange(
@@ -132,7 +143,11 @@ export const AlbumsPanel: React.FC<AlbumsPanelProps> = ({
           count={selection.selected.size}
           busy={bulk.busy}
           selectBusy={selectAll.busy}
-          selectLabel={`All ${list.total.toLocaleString()} albums`}
+          selectLabel={
+            hasActiveFacets || query || monitoredOnly
+              ? `All ${list.total.toLocaleString()} matching albums`
+              : `All ${list.total.toLocaleString()} albums`
+          }
           onSelectAll={() => void handleSelectAll()}
           onClear={selection.clear}
           onDone={exitSelection}
@@ -147,7 +162,13 @@ export const AlbumsPanel: React.FC<AlbumsPanelProps> = ({
         minTileWidth={128}
         gap={phone ? 8 : 12}
         captionHeight={CAPTION_HEIGHT}
-        emptyMessage={query ? 'No albums match your search.' : 'No albums found in library.'}
+        emptyMessage={
+          hasActiveFacets
+            ? 'Nothing in your library matches these filters.'
+            : query
+            ? 'No albums match your search.'
+            : 'No albums found in library.'
+        }
         ariaLabel="Albums"
         rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
         footer={footer}

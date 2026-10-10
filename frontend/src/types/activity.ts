@@ -14,7 +14,7 @@ export interface ListQuery {
   sortKey: string;
   sortDir: ListSortDir;
   /** Extra query params, e.g. `{ event: 'grabbed' }`. Empty values are omitted. */
-  filters?: Readonly<Record<string, string>>;
+  filters?: Readonly<Record<string, string | readonly string[]>>;
 }
 
 export type ActivitySource = 'native' | 'lidarr';
@@ -65,7 +65,7 @@ export type GroupIndexResponse = Schema<'LibraryIndexResponse'>;
 export interface IndexQuery {
   sortKey: string;
   sortDir: ListSortDir;
-  filters?: Readonly<Record<string, string>>;
+  filters?: Readonly<Record<string, string | readonly string[]>>;
 }
 
 export type IndexFetcher = (q: IndexQuery, signal?: AbortSignal) => Promise<GroupIndexResponse>;
