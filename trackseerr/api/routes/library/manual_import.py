@@ -398,13 +398,9 @@ def _resolve_commit_catalog(
     run: _CommitRun,
     item: ManualImportItem,
     inspected: dict[str, Any],
-    source_path: Optional[Path] = None,
+    source_path: Path,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], int]:
     """1-3. Resolve or create artist, album, and track catalog entries."""
-    if source_path is None:
-        source_str = item.source_path or item.file_path or inspected.get("file_path") or ""
-        source_path = Path(source_str)
-
     # 1. Resolve or Create Artist
     artist_id = item.artist_id
     artist = run.db.get_library_artist(artist_id) if artist_id else None

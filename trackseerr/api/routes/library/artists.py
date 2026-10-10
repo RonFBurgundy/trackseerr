@@ -1,5 +1,6 @@
 """Endpoints for artist management, metadata profiles, and ingestion."""
 
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 import logging
@@ -171,8 +172,160 @@ def _defer_profile_recompute_after_ingest(
         "ProfileRecomputeAfterIngest",
     )
 
+@dataclass
+class _IngestRun:
+    """State across artist ingest phases."""
+
+    db: Database
+    discovery_client: DiscoveryClient
+    artist_id: str
+    artist_folder: str
+    artist_monitored: bool
+    monitor_option: str
+    artist_added_at: str
+    metadata_profile: Optional[dict[str, Any]]
+    seen_album_ids: set[str] = field(default_factory=set)
+    albums_ingested: int = 0
+    tracks_ingested: int = 0
+
+
+def _ingest_album_tracks(
+    run: _IngestRun,
+    album_id: str,
+    foreign_album_id: str,
+) -> None:
+    """Fetches album details from discovery client and upserts library tracks."""
+    album_details = None
+    try:
+        time.sleep(0.01)
+        album_details = run.discovery_client.get_album_details(foreign_album_id)
+    except Exception as exc:
+        logger.warning(
+            "Discovery client get_album_details failed for %s: %s",
+            foreign_album_id,
+            exc,
+        )
+
+    if album_details:
+        _store_total_tracks(run.db, album_id, album_details.get("track_count"))
+    if album_details and isinstance(album_details.get("tracks"), list):
+        for trk in album_details["tracks"]:
+            foreign_track_id = trk.get("id")
+            existing_trk = None
+            if foreign_track_id:
+                existing_trk = run.db.get_library_track_by_foreign_id(
+                    foreign_track_id, album_id=album_id
+                )
+            if not existing_trk:
+                existing_trk = run.db.get_library_track_by_title(
+                    album_id,
+                    trk.get("title", ""),
+                    track_number=trk.get("track_number"),
+                )
+            track_id = existing_trk["id"] if existing_trk else str(uuid.uuid4())
+            trk_title = trk.get("title") or "Unknown Track"
+            trk_num = int(trk.get("track_number") or 1)
+            disc_num = int(trk.get("disc_number") or 1)
+            dur = (
+                float(trk["duration_seconds"])
+                if trk.get("duration_seconds") is not None
+                else None
+            )
+
+            run.db.upsert_library_track(
+                LibraryTrack(
+                    id=track_id,
+                    album_id=album_id,
+                    artist_id=run.artist_id,
+                    title=trk_title,
+                    clean_title=clean_library_name(trk_title),
+                    track_number=trk_num,
+                    disc_number=disc_num,
+                    duration_seconds=dur,
+                    monitored=(
+                        bool(existing_trk["monitored"])
+                        if existing_trk and run.monitor_option == "existing"
+                        else hydrated_track_monitored(run.monitor_option)
+                    ),
+                    foreign_track_id=foreign_track_id,
+                )
+            )
+            run.tracks_ingested += 1
+
+
+def _ingest_album(
+    run: _IngestRun,
+    section_name: str,
+    album: dict[str, Any],
+) -> None:
+    """Ingests a single album from discovery metadata into the native catalog."""
+    foreign_album_id = album.get("id")
+    if foreign_album_id and foreign_album_id in run.seen_album_ids:
+        return
+    if foreign_album_id:
+        run.seen_album_ids.add(foreign_album_id)
+
+    alb_monitored = album_monitored_for_option(
+        run.monitor_option,
+        artist_monitored=run.artist_monitored,
+        album_type=section_to_album_type(section_name),
+        has_files=False,
+        release_date=album.get("release_date"),
+        year=album.get("year"),
+        artist_added_at=run.artist_added_at,
+        profile=run.metadata_profile,
+    )
+    album_title = album.get("title") or "Unknown Album"
+    year_val: Optional[int] = None
+    if album.get("year") is not None:
+        try:
+            year_val = int(album["year"])
+        except (ValueError, TypeError):
+            pass
+    if year_val is None and album.get("release_date"):
+        rdate = str(album["release_date"]).strip()
+        if len(rdate) >= 4 and rdate[:4].isdigit():
+            year_val = int(rdate[:4])
+
+    album_type = album.get("record_type") or (
+        "single" if section_name == "singles_eps" else (
+            "compilation" if section_name == "compilations" else "album"
+        )
+    )
+
+    existing_alb = None
+    if foreign_album_id:
+        existing_alb = run.db.get_library_album_by_foreign_id(foreign_album_id)
+    if not existing_alb:
+        existing_alb = run.db.get_library_album_by_title(run.artist_id, album_title)
+
+    album_id = existing_alb["id"] if existing_alb else str(uuid.uuid4())
+    album_path = str(Path(run.artist_folder) / album_title)
+
+    run.db.upsert_library_album(
+        LibraryAlbum(
+            id=album_id,
+            artist_id=run.artist_id,
+            title=album_title,
+            clean_title=clean_library_name(album_title),
+            foreign_album_id=foreign_album_id,
+            release_date=album.get("release_date"),
+            year=year_val,
+            album_type=album_type,
+            monitored=alb_monitored,
+            path=album_path,
+            cover_url=album.get("cover_url"),
+            total_tracks=_positive_int(album.get("track_count")),
+        )
+    )
+    run.albums_ingested += 1
+
+    if alb_monitored and foreign_album_id:
+        _ingest_album_tracks(run, album_id, foreign_album_id)
+
+
 @router.post("/artists/ingest", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=IngestArtistResponse, response_model_exclude_unset=True)
-def ingest_artist(  # noqa: C901, PLR0915
+def ingest_artist(
     body: IngestArtistRequest,
     db: Database = Depends(get_db),
     discovery_client: DiscoveryClient = Depends(get_discovery_client),
@@ -241,9 +394,6 @@ def ingest_artist(  # noqa: C901, PLR0915
         )
     )
 
-    albums_ingested = 0
-    tracks_ingested = 0
-
     artist_details: Optional[dict[str, Any]] = None
     try:
         artist_details = discovery_client.get_artist_details(body.foreign_artist_id)
@@ -254,6 +404,17 @@ def ingest_artist(  # noqa: C901, PLR0915
             exc,
         )
 
+    run = _IngestRun(
+        db=db,
+        discovery_client=discovery_client,
+        artist_id=artist_id,
+        artist_folder=artist_folder,
+        artist_monitored=body.monitored,
+        monitor_option=monitor_option,
+        artist_added_at=artist_added_at,
+        metadata_profile=metadata_profile,
+    )
+
     if artist_details:
         sections = [
             ("albums", artist_details.get("albums") or []),
@@ -261,129 +422,11 @@ def ingest_artist(  # noqa: C901, PLR0915
             ("compilations", artist_details.get("compilations") or []),
         ]
 
-        seen_album_ids: set[str] = set()
         for section_name, album_list in sections:
             for album in album_list:
-                foreign_album_id = album.get("id")
-                if foreign_album_id and foreign_album_id in seen_album_ids:
-                    continue
-                if foreign_album_id:
-                    seen_album_ids.add(foreign_album_id)
+                _ingest_album(run, section_name, album)
 
-                alb_monitored = album_monitored_for_option(
-                    monitor_option,
-                    artist_monitored=body.monitored,
-                    album_type=section_to_album_type(section_name),
-                    has_files=False,
-                    release_date=album.get("release_date"),
-                    year=album.get("year"),
-                    artist_added_at=artist_added_at,
-                    profile=metadata_profile,
-                )
-                album_title = album.get("title") or "Unknown Album"
-                year_val: Optional[int] = None
-                if album.get("year") is not None:
-                    try:
-                        year_val = int(album["year"])
-                    except (ValueError, TypeError):
-                        pass
-                if year_val is None and album.get("release_date"):
-                    rdate = str(album["release_date"]).strip()
-                    if len(rdate) >= 4 and rdate[:4].isdigit():
-                        year_val = int(rdate[:4])
-
-                album_type = album.get("record_type") or (
-                    "single" if section_name == "singles_eps" else (
-                        "compilation" if section_name == "compilations" else "album"
-                    )
-                )
-
-                existing_alb = None
-                if foreign_album_id:
-                    existing_alb = db.get_library_album_by_foreign_id(foreign_album_id)
-                if not existing_alb:
-                    existing_alb = db.get_library_album_by_title(artist_id, album_title)
-
-                album_id = existing_alb["id"] if existing_alb else str(uuid.uuid4())
-                album_path = str(Path(artist_folder) / album_title)
-
-                db.upsert_library_album(
-                    LibraryAlbum(
-                        id=album_id,
-                        artist_id=artist_id,
-                        title=album_title,
-                        clean_title=clean_library_name(album_title),
-                        foreign_album_id=foreign_album_id,
-                        release_date=album.get("release_date"),
-                        year=year_val,
-                        album_type=album_type,
-                        monitored=alb_monitored,
-                        path=album_path,
-                        cover_url=album.get("cover_url"),
-                        total_tracks=_positive_int(album.get("track_count")),
-                    )
-                )
-                albums_ingested += 1
-
-                if alb_monitored and foreign_album_id:
-                    album_details = None
-                    try:
-                        time.sleep(0.01)
-                        album_details = discovery_client.get_album_details(foreign_album_id)
-                    except Exception as exc:
-                        logger.warning(
-                            "Discovery client get_album_details failed for %s: %s",
-                            foreign_album_id,
-                            exc,
-                        )
-
-                    if album_details:
-                        _store_total_tracks(db, album_id, album_details.get("track_count"))
-                    if album_details and isinstance(album_details.get("tracks"), list):
-                        for trk in album_details["tracks"]:
-                            foreign_track_id = trk.get("id")
-                            existing_trk = None
-                            if foreign_track_id:
-                                existing_trk = db.get_library_track_by_foreign_id(
-                                    foreign_track_id, album_id=album_id
-                                )
-                            if not existing_trk:
-                                existing_trk = db.get_library_track_by_title(
-                                    album_id,
-                                    trk.get("title", ""),
-                                    track_number=trk.get("track_number"),
-                                )
-                            track_id = existing_trk["id"] if existing_trk else str(uuid.uuid4())
-                            trk_title = trk.get("title") or "Unknown Track"
-                            trk_num = int(trk.get("track_number") or 1)
-                            disc_num = int(trk.get("disc_number") or 1)
-                            dur = (
-                                float(trk["duration_seconds"])
-                                if trk.get("duration_seconds") is not None
-                                else None
-                            )
-
-                            db.upsert_library_track(
-                                LibraryTrack(
-                                    id=track_id,
-                                    album_id=album_id,
-                                    artist_id=artist_id,
-                                    title=trk_title,
-                                    clean_title=clean_library_name(trk_title),
-                                    track_number=trk_num,
-                                    disc_number=disc_num,
-                                    duration_seconds=dur,
-                                    monitored=(
-                                        bool(existing_trk["monitored"])
-                                        if existing_trk and monitor_option == "existing"
-                                        else hydrated_track_monitored(monitor_option)
-                                    ),
-                                    foreign_track_id=foreign_track_id,
-                                )
-                            )
-                            tracks_ingested += 1
-
-    if metadata_profile is not None and body.monitored and monitor_option not in ("existing", "none") and albums_ingested:
+    if metadata_profile is not None and body.monitored and monitor_option not in ("existing", "none") and run.albums_ingested:
         _defer_profile_recompute_after_ingest(db, enricher, discovery_client, artist_id, body.artist_name)
 
     if monitor_option == "existing":
@@ -397,8 +440,8 @@ def ingest_artist(  # noqa: C901, PLR0915
     result = db.get_library_artist(artist_id) or artist_dict
     return {
         **result,
-        "albums_ingested": albums_ingested,
-        "tracks_ingested": tracks_ingested,
+        "albums_ingested": run.albums_ingested,
+        "tracks_ingested": run.tracks_ingested,
     }
 
 @router.get("/artists/{artist_id}", dependencies=[Depends(require_core_tier)], response_model=LibraryArtistRecord, response_model_exclude_unset=True)
