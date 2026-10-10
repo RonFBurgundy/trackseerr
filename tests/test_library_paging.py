@@ -274,14 +274,20 @@ class TestWritePaths:
         client.get_all_artists.return_value = [
             {"id": 1, "artistName": "The Cure", "foreignArtistId": "m-1", "path": "/m/Cure", "monitored": True}
         ]
-        client.get_all_albums.return_value = [
+        albums = [
             {"id": 2, "artistId": 1, "title": "A Forest", "foreignAlbumId": "m-2", "year": 1980, "monitored": True}
         ]
-        client.get_all_tracks.return_value = [
+        tracks = [
             {"id": 3, "artistId": 1, "albumId": 2, "title": "The Hanging Garden", "trackNumber": 1, "discNumber": 1,
              "duration": 1000, "monitored": True, "foreignTrackId": "m-3"}
         ]
-        client.get_all_track_files.return_value = []
+        client.fetch_artist_albums.side_effect = lambda artist_id, **kw: [
+            a for a in albums if a["artistId"] == artist_id
+        ]
+        client.fetch_album_tracks.side_effect = lambda album_id, **kw: [
+            t for t in tracks if t["albumId"] == album_id
+        ]
+        client.fetch_artist_track_files.side_effect = lambda artist_id, **kw: []
         res = LidarrMigrationJob().run_migration(test_db, client, auto_switch_mode=False)
         assert res["status"] == "completed"
         artist = test_db.get_library_artist_by_name("The Cure")
