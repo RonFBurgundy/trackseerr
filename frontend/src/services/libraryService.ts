@@ -141,10 +141,18 @@ export async function getLidarrStatus(): Promise<LidarrStatus> {
   return apiRequest<LidarrStatus>('/api/library/migrate-lidarr/status');
 }
 
-export async function startLidarrMigration(autoSwitch: boolean = true): Promise<void> {
-  await apiRequest<void>('/api/library/migrate-lidarr', {
+export async function startLidarrMigration(
+  autoSwitch: boolean = true
+): Promise<Schema<'MigrationTriggerResponse'>> {
+  return apiRequest<Schema<'MigrationTriggerResponse'>>('/api/library/migrate-lidarr', {
     method: 'POST',
-    body: { auto_switch: autoSwitch },
+    body: { auto_switch_mode: autoSwitch },
+  });
+}
+
+export async function cancelLidarrMigration(): Promise<LidarrStatus> {
+  return apiRequest<LidarrStatus>('/api/library/migrate-lidarr/cancel', {
+    method: 'POST',
   });
 }
 

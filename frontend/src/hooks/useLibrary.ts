@@ -12,6 +12,7 @@ import {
   getScanStatus as apiGetScanStatus,
   cancelScan as apiCancelScan,
   getLidarrStatus as apiGetLidarrStatus,
+  cancelLidarrMigration as apiCancelLidarrMigration,
   toggleArtistMonitored as apiToggleArtistMonitored,
   toggleAlbumMonitored as apiToggleAlbumMonitored,
   toggleTrackMonitored as apiToggleTrackMonitored,
@@ -35,6 +36,7 @@ export interface UseLibraryReturn {
   setSearch: (query: string) => void;
   triggerScan: (pruneMissing?: boolean) => Promise<void>;
   cancelScan: () => Promise<void>;
+  cancelLidarrImport: () => Promise<void>;
   toggleArtistMonitored: (artistId: number | string, monitored: boolean) => Promise<void>;
   toggleAlbumMonitored: (albumId: number | string, monitored: boolean) => Promise<void>;
   toggleTrackMonitored: (trackId: number | string, monitored: boolean) => Promise<void>;
@@ -57,11 +59,19 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
   const [catalogVersion, setCatalogVersion] = useState<number>(0);
 
   const scanPollRef = useRef<number | null>(null);
+  const lidarrPollRef = useRef<number | null>(null);
 
   const stopScanPolling = useCallback(() => {
     if (scanPollRef.current !== null) {
       window.clearInterval(scanPollRef.current);
       scanPollRef.current = null;
+    }
+  }, []);
+
+  const stopLidarrPolling = useCallback(() => {
+    if (lidarrPollRef.current !== null) {
+      window.clearInterval(lidarrPollRef.current);
+      lidarrPollRef.current = null;
     }
   }, []);
 
@@ -97,6 +107,50 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
   useEffect(() => {
     loadDataRef.current = loadData;
   }, [loadData]);
+
+  const reloadCatalog = useCallback(async () => {
+    setCatalogVersion((v) => v + 1);
+    await loadData();
+  }, [loadData]);
+
+  const reloadCatalogRef = useRef(reloadCatalog);
+  useEffect(() => {
+    reloadCatalogRef.current = reloadCatalog;
+  }, [reloadCatalog]);
+
+  const startLidarrPolling = useCallback(() => {
+    stopLidarrPolling();
+    lidarrPollRef.current = window.setInterval(async () => {
+      try {
+        const nextStatus = await apiGetLidarrStatus();
+        setLidarrStatus(nextStatus);
+        if (!nextStatus.is_migrating) {
+          stopLidarrPolling();
+          await reloadCatalogRef.current();
+          const statsData = await getLibraryStats().catch(() => null);
+          if (statsData) setStats(statsData);
+        }
+      } catch {
+        stopLidarrPolling();
+      }
+    }, 3000);
+  }, [stopLidarrPolling]);
+
+  useEffect(() => {
+    if (lidarrStatus?.is_migrating) {
+      if (lidarrPollRef.current === null) {
+        startLidarrPolling();
+      }
+    } else {
+      stopLidarrPolling();
+    }
+  }, [lidarrStatus?.is_migrating, startLidarrPolling, stopLidarrPolling]);
+
+  useEffect(() => {
+    return () => {
+      stopLidarrPolling();
+    };
+  }, [stopLidarrPolling]);
 
   const startScanPolling = useCallback(() => {
     stopScanPolling();
@@ -178,11 +232,6 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
     [startScanPolling]
   );
 
-  const reloadCatalog = useCallback(async () => {
-    setCatalogVersion((v) => v + 1);
-    await loadData();
-  }, [loadData]);
-
   const cancelScan = useCallback(async () => {
     try {
       await apiCancelScan();
@@ -193,6 +242,16 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
       await loadData();
     }
   }, [loadData, stopScanPolling]);
+
+  const cancelLidarrImport = useCallback(async () => {
+    try {
+      const res = await apiCancelLidarrMigration();
+      setLidarrStatus(res);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to cancel Lidarr import';
+      setError(msg);
+    }
+  }, []);
 
   const toggleArtistMonitored = useCallback(
     async (artistId: number | string, monitored: boolean) => {
@@ -230,6 +289,7 @@ export function useLibrary(enabled: boolean = false): UseLibraryReturn {
     setSearch: setSearchQuery,
     triggerScan,
     cancelScan,
+    cancelLidarrImport,
     toggleArtistMonitored,
     toggleAlbumMonitored,
     toggleTrackMonitored,
