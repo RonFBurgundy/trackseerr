@@ -45,6 +45,7 @@ from trackseerr.api.routes import (
     notifications,
     plex_playlists,
     playlists,
+    smart_collections,
     quality_catalog,
     delay_profiles,
     quality_profiles,
@@ -233,6 +234,9 @@ def _build_api_router(app: FastAPI) -> APIRouter:
     api_router.include_router(admin_users.router, prefix="/admin", tags=["admin-users"])
     api_router.include_router(deployment.router, prefix="/admin", tags=["deployment"])
     api_router.include_router(playlists.router, prefix="/playlists", tags=["playlists"])
+    api_router.include_router(
+        smart_collections.router, prefix="/smart-collections", tags=["smart-collections"]
+    )
     api_router.include_router(import_lists.router, prefix="/import-lists", tags=["import-lists"])
     api_router.include_router(plex_playlists.router, prefix="/plex-playlists", tags=["plex_playlists"])
     api_router.include_router(sync.router, prefix="/sync", tags=["sync"])

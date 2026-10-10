@@ -55,7 +55,7 @@ from trackseerr.listening_playlists import (
     validate_source,
 )
 from trackseerr.models import Playlist, Track, UserPermission
-from trackseerr.playlist_policy import initial_monitor_mode_forced, is_listening_playlist
+from trackseerr.playlist_policy import initial_monitor_mode_forced, is_listening_playlist, is_smart_collection
 from trackseerr.redaction import safe_exc
 from trackseerr.security import (
     extract_deezer_id,
@@ -99,8 +99,14 @@ def _require_auto_request_allowed(current_user: dict[str, Any]) -> None:
 
 
 def _reject_listening_mode(playlist: dict[str, Any], mode: Optional[str]) -> None:
-    if mode not in (None, "none") and is_listening_playlist(playlist):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=LISTENING_MODE_DETAIL)
+    if mode not in (None, "none"):
+        if is_smart_collection(playlist):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Smart collections only list tracks already in your library",
+            )
+        if is_listening_playlist(playlist):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=LISTENING_MODE_DETAIL)
 
 
 def _force_list_only_if_not_allowed(db: Database, playlist_id: str, current_user: dict[str, Any]) -> None:
@@ -538,6 +544,11 @@ def set_playlist_auto_request(
     is_creator = bool(playlist) and str(playlist.get("creator_id")) == str(current_user["id"])
     if not playlist or not (is_admin or is_creator):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
+    if is_smart_collection(playlist):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Smart collections only list tracks already in your library",
+        )
     if not is_listening_playlist(playlist):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Only listening playlists can auto-request missing tracks"

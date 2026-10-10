@@ -46,7 +46,7 @@ class LibraryFacetFilter:
             self, "album_types", tuple(str(t).strip().lower() for t in self.album_types if str(t).strip())
         )
         object.__setattr__(
-            self, "artist_types", tuple(str(t).strip() for t in self.artist_types if str(t).strip())
+            self, "artist_types", tuple(str(t).strip().lower() for t in self.artist_types if str(t).strip())
         )
         object.__setattr__(self, "tag_ids", tuple(int(t) for t in self.tag_ids))
 
