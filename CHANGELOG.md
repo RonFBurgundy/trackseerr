@@ -39,6 +39,7 @@ heading becomes the version and date.
 ### Fixed
 
 - Import from Lidarr is back: switching the library manager from Lidarr to TrackSeerr offers to copy your Lidarr library first, and the Library page shows live progress with a Stop button.
+- Import from Lidarr now works on large libraries: it copies albums, tracks and files artist by artist, so your Wanted list carries over, and if Lidarr fails partway it stops without switching the library manager.
 - Featured Charts and .m3u upload are back in Add Playlist.
 - With Spotify API keys set, Spotify's own playlists (such as Today's Top Hits) now sync instead of coming back empty.
 - Tapping a tab on a phone no longer lands on a different tab because the row jumped back while you were scrolling it.
