@@ -177,11 +177,7 @@ def _resolve_machine_id(
             detail="Supplied target_machine_id does not match the configured Plex Media Server",
         )
 
-    machine_id = server_machine_id
-    if not machine_id and "PYTEST_CURRENT_TEST" in os.environ:
-        machine_id = req.target_machine_id
-
-    if not machine_id:
+    if not server_machine_id:
         if _plex_login_unavailable(config):
             raise MediaServerUnavailable()
         logger.error("No Plex machine identifier configured to verify user access")
@@ -190,7 +186,7 @@ def _resolve_machine_id(
             detail="Plex server machine identifier is not configured on hub",
         )
 
-    return machine_id
+    return server_machine_id
 
 
 @router.post("/plex/verify", response_model=PlexVerifyResponse, response_model_exclude_unset=True)

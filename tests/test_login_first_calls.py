@@ -17,7 +17,8 @@ from trackseerr.storage import Database
 
 
 @pytest.fixture
-def stack(tmp_path):
+def stack(tmp_path, monkeypatch):
+    monkeypatch.setenv("PLEX_MACHINE_IDENTIFIER", "m")
     db = Database(":memory:")
     cfg = Config(plex_url="http://127.0.0.1:32400", plex_token="t", data_dir=str(tmp_path))
     app = create_app(db=db, config=cfg)
