@@ -42,6 +42,9 @@ class LibraryArtistStoreMixin:
         res.pop("search_clean", None)
         res["monitored"] = bool(res.get("monitored", 1))
         res["monitor_option"] = str(res.get("monitor_option") or "all")
+        for int_field in ("member_count", "begin_year", "end_year", "popularity"):
+            if res.get(int_field) is not None:
+                res[int_field] = int(res[int_field])
         return res
 
     @staticmethod

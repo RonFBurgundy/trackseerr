@@ -278,6 +278,13 @@ def _apply_mb_artist_details(st: _RefreshState) -> None:
             art_params.append(bio)
             st.artist["bio"] = bio
 
+        for key in ("artist_type", "member_count", "begin_year", "end_year"):
+            if key in mb_details:
+                val = mb_details[key]
+                art_updates.append(f"{key} = ?")
+                art_params.append(val)
+                st.artist[key] = val
+
         if art_updates:
             art_updates.append("updated_at = CURRENT_TIMESTAMP")
             sql = f"UPDATE library_artists SET {', '.join(art_updates)} WHERE id = ?"
@@ -651,6 +658,19 @@ def _apply_deezer_artist_art(st: _RefreshState, artist_details: dict[str, Any]) 
             st.db.conn.commit()
 
 
+def _apply_deezer_popularity(st: _RefreshState, artist_details: dict[str, Any]) -> None:
+    """Update artist popularity from Deezer nb_fan if available and positive."""
+    nb_fan = artist_details.get("nb_fan")
+    if isinstance(nb_fan, int) and not isinstance(nb_fan, bool) and nb_fan > 0:
+        st.artist["popularity"] = nb_fan
+        with st.db._lock:
+            st.db.conn.execute(
+                "UPDATE library_artists SET popularity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (nb_fan, st.artist_id),
+            )
+            st.db.conn.commit()
+
+
 def _upsert_deezer_album(
     st: _RefreshState,
     section_name: str,
@@ -797,6 +817,7 @@ def _sync_deezer_discography(st: _RefreshState) -> None:
         artist_details = st.discovery_client.get_artist_details(st.foreign_artist_id, force=st.force)
         if artist_details:
             _apply_deezer_artist_art(st, artist_details)
+            _apply_deezer_popularity(st, artist_details)
 
             sections = [
                 ("albums", artist_details.get("albums") or []),

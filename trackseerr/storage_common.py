@@ -23,7 +23,8 @@ def clean_library_name(text: str) -> str:
 _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number confirm "same track"
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
 SEED_COMPLETE_ACTIONS = ("keep", "remove", "remove_and_delete")
-SCHEMA_VERSION = 71  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+BASELINE_VERSION = 71  # the squashed baseline storage_schema.sql was cut at; older databases cannot upgrade
+SCHEMA_VERSION = 72  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:

@@ -117,6 +117,11 @@ class LibraryArtistFields(ApiModel):
     bio: Optional[str] = None
     genres: Optional[str | list[str]] = None  # native: stored text; Lidarr: a list
     country: Optional[str] = None
+    artist_type: Optional[str] = None
+    member_count: Optional[int] = None
+    begin_year: Optional[int] = None
+    end_year: Optional[int] = None
+    popularity: Optional[int] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     sort_name: Optional[str] = None

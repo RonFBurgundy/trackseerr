@@ -32,6 +32,7 @@ from trackseerr.tag_store import TagMixin
 
 # Re-exported: callers import these from trackseerr.storage.
 from trackseerr.storage_common import (  # noqa: F401
+    BASELINE_VERSION,
     LIDARR_BACKOFF_STATUSES,
     LIDARR_ERROR_BACKOFF,
     LIDARR_WEEKLY_RETRY,

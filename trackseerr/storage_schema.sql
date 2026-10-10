@@ -399,7 +399,7 @@ CREATE TABLE library_artists (
                 metadata_json TEXT,
                 created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
-            , mbid TEXT, image_url TEXT, banner_url TEXT, bio TEXT, genres TEXT, country TEXT, monitor_option TEXT NOT NULL DEFAULT 'all', sort_name TEXT NOT NULL DEFAULT '', search_text TEXT NOT NULL DEFAULT '', search_clean TEXT NOT NULL DEFAULT '', metadata_profile_id INTEGER REFERENCES "native_metadata_profiles"(id) ON DELETE SET NULL, pending_profile_recompute INTEGER NOT NULL DEFAULT 0, art_version TEXT);
+            , mbid TEXT, image_url TEXT, banner_url TEXT, bio TEXT, genres TEXT, country TEXT, monitor_option TEXT NOT NULL DEFAULT 'all', sort_name TEXT NOT NULL DEFAULT '', search_text TEXT NOT NULL DEFAULT '', search_clean TEXT NOT NULL DEFAULT '', metadata_profile_id INTEGER REFERENCES "native_metadata_profiles"(id) ON DELETE SET NULL, pending_profile_recompute INTEGER NOT NULL DEFAULT 0, art_version TEXT, artist_type TEXT, member_count INTEGER, begin_year INTEGER, end_year INTEGER, popularity INTEGER);
 CREATE TABLE lastfm_auth_states (
                 state TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -685,6 +685,8 @@ CREATE INDEX idx_lib_artists_mbid ON library_artists(mbid);
 CREATE INDEX idx_lib_albums_mb_rg ON library_albums(mb_release_group_id);
 CREATE INDEX idx_lib_tracks_mb_rec ON library_tracks(mb_recording_id);
 CREATE INDEX idx_lib_collections_clean_name ON library_collections(clean_name);
+CREATE INDEX idx_lib_artists_begin_year ON library_artists(begin_year);
+CREATE INDEX idx_lib_artists_popularity ON library_artists(popularity);
 CREATE INDEX idx_system_events_created_at ON system_events (created_at DESC);
 CREATE INDEX idx_system_events_type ON system_events (event_type);
 CREATE INDEX idx_lib_artists_monitored ON library_artists(monitored);
