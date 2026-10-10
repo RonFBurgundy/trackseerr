@@ -44,7 +44,7 @@ both the album *In the Aeroplane Over the Sea* and its own single; "Unborn" exis
 3. Whole-artist add: profiles, tag, root folder, `monitorNewItems`, `addOptions.monitor` from the root folder; `future` leaves nothing monitored.
 4. Song request for a new artist: `monitor: none` add, `artist_refresh_state` observed `running` then `done`, exactly one album monitored (the Single), Lidarr's re-read confirms, `AlbumSearch` command shape accepted.
 5. Release selection on real album/track lists: `prefer_singles` True picks the Single, False the album. `GET /track?artistId=` works (no per-album fallback was needed).
-6. Request against an existing artist: no POST/PUT/DELETE on the artist, artist unchanged (unmonitored stays unmonitored).
+6. Request against an existing artist: an unmonitored existing artist is set monitored (one `PUT artist/<id>`, no POST/DELETE/editor call) and nothing else about it changes.
 7. `not_in_metadata_profile`: no-singles profile, song only on a single, nothing monitored.
 8. `GET /api/settings/lidarr/defaults` through the FastAPI TestClient against the real Lidarr, same shape as `tests/test_lidarr_follow_settings.py::TestDefaultsEndpoint::test_shape`.
 

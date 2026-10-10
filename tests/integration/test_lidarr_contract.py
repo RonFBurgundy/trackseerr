@@ -199,11 +199,11 @@ def test_release_selection_uses_the_real_album_and_track_lists(
 # ---------------------------------------------------------------------------------- 6. existing artist
 
 
-def test_request_against_existing_artist_never_writes_the_artist(
+def test_request_against_existing_artist_only_sets_it_monitored(
     lidarr_target, lidarr_admin, settled_artist, recorded_calls
 ):
     artist_id = settled_artist["id"]
-    # A state different from every default: an unmonitored artist must stay unmonitored.
+    # An unmonitored existing artist is set monitored (Lidarr does not search an unmonitored artist's albums), nothing else.
     current = lidarr_admin.get(f"artist/{artist_id}")
     lidarr_admin.put(f"artist/{artist_id}", {**current, "monitored": False})
     before = lidarr_admin.get(f"artist/{artist_id}")
@@ -214,11 +214,14 @@ def test_request_against_existing_artist_never_writes_the_artist(
     result = client.add_artist_and_albums(ARTIST_NAME, wants=song_want(SONG_ON_SINGLE_AND_ALBUM))
 
     assert result["status"] == "success" and result["added"] is False
-    assert artist_writes(recorded_calls) == [], artist_writes(recorded_calls)
-    assert [c[:2] for c in recorded_calls if c[0] == "PUT"] == [("PUT", "album/monitor")]
+    writes = artist_writes(recorded_calls)
+    assert len(writes) == 1, writes
+    assert writes[0][:2] == ("PUT", f"artist/{artist_id}")
+    assert writes[0][2]["monitored"] is True
+    assert sorted(c[1] for c in recorded_calls if c[0] == "PUT") == sorted([f"artist/{artist_id}", "album/monitor"])
     after = lidarr_admin.get(f"artist/{artist_id}")
-    assert after["monitored"] is False
-    derived = {"lastAlbum", "nextAlbum", "statistics"}  # recomputed by Lidarr when an album's monitoring changes
+    assert after["monitored"] is True
+    derived = {"lastAlbum", "nextAlbum", "statistics", "monitored"}  # recomputed by Lidarr when an album's monitoring changes
     assert {k: v for k, v in after.items() if k not in derived} == {k: v for k, v in before.items() if k not in derived}
     assert lidarr_admin.monitored_album_ids(artist_id) == sorted(result["matched_album_ids"])
 
