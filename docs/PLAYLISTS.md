@@ -3,6 +3,7 @@
 TrackSeerr imports playlists from outside sources, matches each track to your library, and writes the playlist to your media server for each user who wants it. It keeps the playlists in sync and can request the tracks you do not have yet.
 
 - [Add a playlist](#add-a-playlist)
+- [Smart collections](#smart-collections)
 - [Choose who gets a playlist](#choose-who-gets-a-playlist)
 - [Missing tracks](#missing-tracks)
 - [Syncing](#syncing)
@@ -45,6 +46,15 @@ On the **1-Click Helper** tab, drag **Send to TrackSeerr** to your browser's boo
 ### My Listening
 
 Build a playlist from your own Last.fm or ListenBrainz account: loved tracks, top tracks, or generated playlists such as Weekly Jams. Connect your account first in **Settings > Requests > Scrobbling**.
+
+## Smart collections
+
+Smart collections are rule-based library playlists evaluated from your own local tracks using library facet filters (genres, release years, artist country, artist type, member count, formed year, popularity, and tags). They sync to target media server users just like any other playlist:
+
+- **Admin-only & Native library only**: Smart collections require admin privileges and operate only when TrackSeerr manages the native library (not available in Lidarr mode).
+- **Auto-update vs One-time**: Smart collections created with *keep in sync* enabled (`enabled = 1`) are re-evaluated and re-pushed automatically on every background sync cycle. One-time collections (`enabled = 0`) are evaluated on creation and on explicit "sync now", never on background sync cycles.
+- **Library tracks only**: Because every track is already present in your local files, smart collections use monitor mode `none` and cannot auto-request tracks.
+- **Empty result keeps last snapshot**: If a scheduled sync evaluation returns 0 matching tracks, TrackSeerr logs a skip and keeps the last good snapshot to prevent clearing the playlist on the media server.
 
 ## Choose who gets a playlist
 

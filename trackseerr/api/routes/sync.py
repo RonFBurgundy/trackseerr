@@ -29,7 +29,8 @@ from trackseerr.config import MEDIA_SERVER_NONE, Config
 from trackseerr.job_tracker import tracked
 from trackseerr.list_monitoring import apply_playlist_missing_safely
 from trackseerr.listening_playlists import fetch_listening_tracks
-from trackseerr.playlist_policy import is_listening_playlist
+from trackseerr.playlist_policy import is_listening_playlist, is_smart_collection
+from trackseerr.smart_collections import SmartCollectionError, refresh_tracks
 from trackseerr.models import Playlist, RequestStatus, Track
 from trackseerr.native_match import match_playlist_tracks_native
 from trackseerr.storage import Database
@@ -191,7 +192,9 @@ class SyncState:
                 if service == "plex":
                     skip_rating_keys = self._refresh_adopted_playlist(db, plex_client, pl)
                 try:
-                    if is_listening_playlist(pl):
+                    if is_smart_collection(pl):
+                        tracks = refresh_tracks(db, pl)
+                    elif is_listening_playlist(pl):
                         # Re-fetched every sync with the owner's linked account (a created-for playlist
                         # re-resolves to its newest edition); the snapshot keeps the last good list.
                         tracks = fetch_listening_tracks(db, config, pl)
@@ -216,6 +219,10 @@ class SyncState:
                         tracks = spotify_client.get_playlist_tracks(pl_id)
                     elif service == "deezer" and deezer_client:
                         tracks = deezer_client.get_playlist_tracks(pl_id)
+                except SmartCollectionError as e:
+                    logger.info("Smart collection '%s' skipped: %s", pl["name"], e)
+                    db.record_sync_result(pl_id, status="error")
+                    continue
                 except Exception as e:
                     logger.error("Failed to fetch tracks for playlist '%s' (%s): %s", pl["name"], pl_id, safe_exc(e))
                     db.record_sync_result(pl_id, status="error")

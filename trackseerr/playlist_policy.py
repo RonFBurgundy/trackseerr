@@ -16,9 +16,19 @@ logger = logging.getLogger(__name__)
 # Playlists whose tracks come from a user's own scrobbling account. They never use a monitor mode.
 LISTENING_SERVICES = ("lastfm", "listenbrainz")
 
+SMART_SERVICE = "trackseerr"
+SMART_KIND = "smart"
+
 
 def is_listening_playlist(playlist: dict[str, Any]) -> bool:
     return str(playlist.get("service") or "") in LISTENING_SERVICES
+
+
+def is_smart_collection(playlist: dict[str, Any]) -> bool:
+    return (
+        str(playlist.get("service") or "") == SMART_SERVICE
+        and str(playlist.get("source_kind") or "") == SMART_KIND
+    )
 
 
 def user_may_auto_request(user: Optional[dict[str, Any]]) -> bool:

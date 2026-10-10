@@ -19,8 +19,8 @@ class PlaylistRecord(ApiModel):
     last_synced_at: Optional[str] = None
     sync_status: str
     monitor_mode: str
-    source_kind: Optional[str] = None  # listening playlists: loved, top_tracks, playlist or created_for
-    source_ref: Optional[str] = None  # listening playlists: Last.fm period, ListenBrainz playlist id or created-for kind
+    source_kind: Optional[str] = None  # listening playlists (loved, top_tracks, playlist, created_for) or smart collections (smart)
+    source_ref: Optional[str] = None  # listening playlists: Last.fm period, ListenBrainz playlist id or created-for kind; smart: rules JSON
     auto_request: bool = False  # listening playlists: request missing tracks automatically (needs permission)
     created_at: str
     updated_at: str

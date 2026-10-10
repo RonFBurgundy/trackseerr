@@ -5132,6 +5132,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/smart-collections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Smart Collection
+         * @description Creates a rule-based smart collection playlist.
+         */
+        post: operations["create_smart_collection_api_smart_collections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/smart-collections/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Smart Collection
+         * @description Previews matching tracks and total count for given smart collection rules.
+         */
+        post: operations["preview_smart_collection_api_smart_collections_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/smart-collections/{playlist_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Smart Collection
+         * @description Gets details of an existing smart collection.
+         */
+        get: operations["get_smart_collection_api_smart_collections__playlist_id__get"];
+        /**
+         * Update Smart Collection
+         * @description Updates a smart collection's name, description, or rules, re-evaluates, and pushes sync.
+         */
+        put: operations["update_smart_collection_api_smart_collections__playlist_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/smart-collections/{playlist_id}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync Smart Collection
+         * @description Forces a one-time evaluation and push for a smart collection.
+         */
+        post: operations["sync_smart_collection_api_smart_collections__playlist_id__sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sync": {
         parameters: {
             query?: never;
@@ -12532,6 +12616,55 @@ export interface components {
             /** Valid */
             valid: boolean;
         };
+        /** SmartCollectionCreateRequest */
+        SmartCollectionCreateRequest: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Keep In Sync
+             * @default false
+             */
+            keep_in_sync: boolean;
+            /** Name */
+            name: string;
+            rules: components["schemas"]["SmartRulesBody"];
+            /** Targets */
+            targets?: string[];
+        };
+        /** SmartCollectionRecord */
+        SmartCollectionRecord: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Id */
+            id: string;
+            /** Last Synced At */
+            last_synced_at?: string | null;
+            /** Name */
+            name: string;
+            rules: components["schemas"]["SmartRulesBody"];
+            /** Sync Status */
+            sync_status: string;
+            /** Targets */
+            targets: string[];
+            /** Track Count */
+            track_count: number;
+        };
+        /** SmartCollectionUpdateRequest */
+        SmartCollectionUpdateRequest: {
+            /** Description */
+            description?: string | null;
+            /** Name */
+            name?: string | null;
+            rules?: components["schemas"]["SmartRulesBody"] | null;
+        };
         /** SmartMixPreset */
         SmartMixPreset: {
             /** Description */
@@ -12560,6 +12693,66 @@ export interface components {
              * @description Optional target user IDs
              */
             targets?: string[] | null;
+        };
+        /** SmartPreviewResponse */
+        SmartPreviewResponse: {
+            /** Track Count */
+            track_count: number;
+            /** Tracks */
+            tracks: components["schemas"]["SmartPreviewTrack"][];
+        };
+        /** SmartPreviewTrack */
+        SmartPreviewTrack: {
+            /** Album */
+            album: string;
+            /** Artist */
+            artist: string;
+            /** Title */
+            title: string;
+            /** Year */
+            year?: number | null;
+        };
+        /** SmartRulesBody */
+        SmartRulesBody: {
+            /** Album Types */
+            album_types?: string[];
+            /** Artist Types */
+            artist_types?: string[];
+            /** Countries */
+            countries?: string[];
+            /** Exclude Genres */
+            exclude_genres?: string[];
+            /** Formed From */
+            formed_from?: number | null;
+            /** Formed To */
+            formed_to?: number | null;
+            /** Genres */
+            genres?: string[];
+            /**
+             * Limit
+             * @default 100
+             */
+            limit: number;
+            /** Members Max */
+            members_max?: number | null;
+            /** Members Min */
+            members_min?: number | null;
+            /** Popularity Max */
+            popularity_max?: number | null;
+            /** Popularity Min */
+            popularity_min?: number | null;
+            /**
+             * Sort
+             * @default random
+             * @enum {string}
+             */
+            sort: "random" | "year_desc" | "year_asc" | "popularity_desc" | "added_desc" | "artist";
+            /** Tag Ids */
+            tag_ids?: number[];
+            /** Year From */
+            year_from?: number | null;
+            /** Year To */
+            year_to?: number | null;
         };
         /** SpecificationModel */
         SpecificationModel: {
@@ -22702,6 +22895,169 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FormatDeletedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_smart_collection_api_smart_collections_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmartCollectionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_smart_collection_api_smart_collections_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmartRulesBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmartPreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_smart_collection_api_smart_collections__playlist_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmartCollectionRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_smart_collection_api_smart_collections__playlist_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmartCollectionUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmartCollectionRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_smart_collection_api_smart_collections__playlist_id__sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistImportResponse"];
                 };
             };
             /** @description Validation Error */
