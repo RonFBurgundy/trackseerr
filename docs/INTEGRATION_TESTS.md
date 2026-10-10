@@ -44,16 +44,18 @@ both the album *In the Aeroplane Over the Sea* and its own single; "Unborn" exis
 3. Whole-artist add: profiles, tag, root folder, `monitorNewItems`, `addOptions.monitor` from the root folder; `future` leaves nothing monitored.
 4. Song request for a new artist: `monitor: none` add, `artist_refresh_state` observed `running` then `done`, exactly one album monitored (the Single), Lidarr's re-read confirms, `AlbumSearch` command shape accepted.
 5. Release selection on real album/track lists: `prefer_singles` True picks the Single, False the album. `GET /track?artistId=` works (no per-album fallback was needed).
-6. Request against an existing artist: no POST/PUT/DELETE on the artist, artist unchanged (unmonitored stays unmonitored).
+6. Request against an existing artist: an unmonitored existing artist is set monitored (one `PUT artist/<id>`, no POST/DELETE/editor call) and nothing else about it changes.
 7. `not_in_metadata_profile`: no-singles profile, song only on a single, nothing monitored.
 8. `GET /api/settings/lidarr/defaults` through the FastAPI TestClient against the real Lidarr, same shape as `tests/test_lidarr_follow_settings.py::TestDefaultsEndpoint::test_shape`.
+
+9. Import from Lidarr (`tests/integration/test_lidarr_import_contract.py`): unfiltered `GET /track` and `GET /trackfile` are 400; the strict per-artist / per-album fetchers return only that artist's / album's rows (and `fetch_artist_track_files` returns a list); `LidarrMigrationJob` end to end (counts match Lidarr, library mode switches to native, native Wanted holds exactly the tracks of the one monitored album); an unreachable Lidarr ends `failed` with the library mode still `lidarr`.
 
 ## Findings against real Lidarr 3.1.0.4875
 
 Confirmed as the client and the fake assume: rootfolder `default*` field names; `primaryAlbumTypes[].albumType.name` /
 `allowed`; `GET /command` rows `{name: "RefreshArtist", status: lowercase, body.artistIds: [id]}` with statuses
 `started` then `completed`; `POST /artist` 201 with the artist; `PUT /album/monitor` 202; `POST /command` 201;
-`/track?artistId=` and `/track?albumId=` both work; `GET /track` without a filter is 400; unknown metadata profile 404.
+`/track?artistId=` and `/track?albumId=` both work; `GET /track` and `GET /trackfile` without a filter are 400, so the import uses per-artist (`album?artistId=`, `trackfile?artistId=`) and per-album (`track?albumId=`) calls only; unknown metadata profile 404.
 
 1. **Race in the song-request flow (fixed).** For a new artist added with
    `addOptions.monitor = "none"`, `GET /album?artistId=` lists *every* album as `monitored: true` while RefreshArtist
