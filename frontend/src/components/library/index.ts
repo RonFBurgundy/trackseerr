@@ -32,3 +32,5 @@ export * from './RenameModal';
 export * from './RetagModal';
 export * from './LibraryFilterFields';
 export * from './LibraryFilterSheet';
+export * from './SmartCollectionsSection';
+export * from './SmartCollectionDetail';

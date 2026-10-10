@@ -117,3 +117,4 @@ export * from './useRetagPreview';
 export * from './useLibraryFacets';
 export * from './useLibraryFilters';
 export * from './useSmartCollectionEditor';
+export * from './useSmartCollections';
