@@ -33,6 +33,10 @@ class HelloResponse(ApiModel):
     instance_id: str
 
 
+class PlexIdentityResponse(ApiModel):
+    machine_identifier: Optional[str] = None
+
+
 class HeartbeatResponse(ApiModel):
     ok: bool
     protocol: int

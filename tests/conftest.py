@@ -53,10 +53,13 @@ def _gateway_session_status_allows_by_default(request, monkeypatch):
     from trackseerr.clients.core_client import CoreClient
 
     dependencies.clear_session_status_cache()
+    dependencies.clear_plex_identity_cache()
     if request.node.get_closest_marker("real_core_client") is None:
         monkeypatch.setattr(CoreClient, "session_status", lambda self, user_id, issued, **kw: (200, {"valid": True}))
+        monkeypatch.setattr(CoreClient, "plex_identity", lambda self: (200, {"machine_identifier": "m1"}))
     yield
     dependencies.clear_session_status_cache()
+    dependencies.clear_plex_identity_cache()
 
 
 @pytest.fixture(autouse=True)
