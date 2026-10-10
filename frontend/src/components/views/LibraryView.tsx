@@ -101,6 +101,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     isScanning,
     scanStatus,
     lidarrStatus,
+    cancelLidarrImport,
     isLoading,
     error,
     catalogVersion,
@@ -475,7 +476,9 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       <div className="space-y-2 pb-2 empty:hidden">
         {toastNode}
         {showScanBanner && <LibraryScanBanner scanStatus={scanStatus} onCancel={() => void cancelScan()} />}
-        {lidarrStatus && lidarrStatus.is_migrating && <LidarrMigrationBanner status={lidarrStatus} />}
+        {lidarrStatus && lidarrStatus.is_migrating && (
+          <LidarrMigrationBanner status={lidarrStatus} onCancel={() => void cancelLidarrImport()} />
+        )}
         {chips.length > 0 && (
           <div
             role="region"

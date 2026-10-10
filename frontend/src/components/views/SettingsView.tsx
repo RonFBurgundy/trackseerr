@@ -36,6 +36,8 @@ import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useSettingsData } from '@/hooks/useSettingsData';
 import { useLibraryManager } from '@/hooks/useLibraryManager';
 import { useLibraryModeSwitch } from '@/hooks/useLibraryModeSwitch';
+import { startLidarrMigration } from '@/services/libraryService';
+import { errorMessage } from '@/services/apiClient';
 
 export type { SettingsTab } from '@/components/settings';
 
@@ -88,6 +90,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const modeSwitch = useLibraryModeSwitch(libraryManager, showToast);
   const { request: requestSwitch } = modeSwitch;
+  const [isImporting, setIsImporting] = useState<boolean>(false);
+
+  const importAndSwitch = useCallback(async () => {
+    setIsImporting(true);
+    try {
+      const res = await startLidarrMigration(true);
+      if (res.success) {
+        showToast(
+          'Importing from Lidarr. Progress shows on the Library page; TrackSeerr becomes the library manager when it finishes.'
+        );
+        modeSwitch.cancel();
+        await libraryManager.refresh();
+      } else {
+        showToast('A Lidarr import is already running', 'error');
+      }
+    } catch (err: unknown) {
+      showToast(errorMessage(err, 'Failed to start Lidarr import'), 'error');
+    } finally {
+      setIsImporting(false);
+    }
+  }, [libraryManager, modeSwitch, showToast]);
 
   useEffect(
     () => () => {
@@ -176,6 +199,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           isSwitching={libraryManager.isSwitching}
           onCancel={modeSwitch.cancel}
           onConfirm={() => void modeSwitch.confirm()}
+          onImportAndSwitch={() => void importAndSwitch()}
+          isImporting={isImporting}
         />
       )}
 

@@ -48,16 +48,31 @@ export const LibraryScanBanner: React.FC<LibraryScanBannerProps> = ({ scanStatus
 
 export interface LidarrMigrationBannerProps {
   status: LidarrStatus;
+  onCancel?: () => void;
 }
 
-export const LidarrMigrationBanner: React.FC<LidarrMigrationBannerProps> = ({ status }) => {
-  const summary = `Lidarr Migration Active: ${status.artists_migrated} artists, ${status.albums_migrated} albums, ${status.tracks_migrated} tracks migrated`;
+export const LidarrMigrationBanner: React.FC<LidarrMigrationBannerProps> = ({ status, onCancel }) => {
+  const summary = `Importing from Lidarr: ${status.artists_migrated} artists, ${status.albums_migrated} albums, ${status.tracks_migrated} tracks, ${status.files_migrated} files`;
   return (
     <div className="px-3 py-2 bg-[#151515] border border-blue-800/60 rounded-[4px] flex items-center gap-3 text-xs font-mono min-w-0">
-      <HardDrive className="h-4 w-4 text-blue-400 animate-spin" />
-      <span className="text-blue-300 truncate" title={summary}>
+      <HardDrive className="h-4 w-4 text-blue-400 animate-spin shrink-0" />
+      <span className="text-blue-300 truncate flex-1 min-w-0" title={summary}>
         {summary}
       </span>
+      {onCancel && (
+        <TapeDeckButton
+          size="sm"
+          variant="danger"
+          onClick={onCancel}
+          className="shrink-0"
+          aria-label="Stop Lidarr import"
+          title="Stop Lidarr import"
+          icon={<X className="h-3.5 w-3.5" />}
+          collapseLabel
+        >
+          Stop
+        </TapeDeckButton>
+      )}
     </div>
   );
 };
