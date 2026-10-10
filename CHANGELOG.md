@@ -42,6 +42,7 @@ heading becomes the version and date.
 - Artists with more than 100 releases now show their complete discography.
 - Albums and artists whose MusicBrainz IDs were merged or changed are relinked automatically.
 - The MusicBrainz mirror setting is now used everywhere; some background tasks ignored it.
+- The artist page now shows how many of the artist's tracks are actually in your library (it read 0 for local libraries), and artist status lights show complete or missing tracks for local libraries.
 
 ## [1.0.0] - first TrackSeerr release (not yet tagged)
 
