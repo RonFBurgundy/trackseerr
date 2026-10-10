@@ -73,7 +73,10 @@ class FakeLidarr:
         # A real lookup row for an artist not yet in Lidarr carries no "id" key (the client treats that as new).
         self.lookup: list[dict[str, Any]] = [{"artistName": "Queen", "foreignArtistId": "mb-queen"}]
         self.albums: list[dict[str, Any]] = []  # what Lidarr lists for the artist once loaded
+        self.artists: list[dict[str, Any]] = []  # GET artist (the library listing the migration walks)
         self.tracks: list[dict[str, Any]] = []
+        self.track_files: list[dict[str, Any]] = []
+        self.raise_on: dict[tuple[str, str], Exception] = {}  # (METHOD, path prefix) -> transport error to raise
         self.empty_album_polls = 0  # album?artistId= answers [] this many times first (async load after an add)
         self.monitor_sticks = True  # False: PUT album/monitor is accepted but the album stays unmonitored
         self.fail: dict[tuple[str, str], int] = {}  # (METHOD, path prefix) -> HTTP status to answer
@@ -126,12 +129,26 @@ class FakeLidarr:
     def _album(self, album_id: int) -> Optional[dict[str, Any]]:
         return next((a for a in self.albums if a.get("id") == album_id), None)
 
+    def _file_album_id(self, track_file: dict[str, Any]) -> Optional[int]:
+        if track_file.get("albumId") is not None:
+            return track_file["albumId"]
+        track_id = track_file.get("trackId") or (track_file.get("trackIds") or [None])[0]
+        track = next((t for t in self.tracks if t.get("id") == track_id), None)
+        return track.get("albumId") if track else None
+
+    def _file_artist_id(self, track_file: dict[str, Any]) -> Optional[int]:
+        album = self._album(self._file_album_id(track_file))
+        return album.get("artistId") if album else None
+
     def _respond(self, method: str, url: str, body: Any = None) -> httpx.Response:
         parts = urlsplit(url)
         path = parts.path.split("/api/v1/", 1)[1]
         full = path + (f"?{parts.query}" if parts.query else "")
         query = parse_qs(parts.query)
         self.calls.append((method, full, copy.deepcopy(body)))
+        for (m, prefix), exc in self.raise_on.items():
+            if m == method and full.startswith(prefix):
+                raise exc
         for (m, prefix), code in self.fail.items():
             if m == method and full.startswith(prefix):
                 return httpx.Response(code, json={"message": "boom"}, headers={"Retry-After": "7"})
@@ -177,9 +194,13 @@ class FakeLidarr:
                     snapshot = self.album_snapshots.pop(0) if len(self.album_snapshots) > 1 else self.album_snapshots[0]
                     self._visible_album_ids = {int(a["id"]) for a in snapshot}
                     return httpx.Response(200, json=copy.deepcopy(snapshot))
+                wanted_artist = int(query["artistId"][0])
+                mine = [a for a in self.albums if a.get("artistId", wanted_artist) == wanted_artist]
                 if self.add_window_open:
-                    return httpx.Response(200, json=[{**copy.deepcopy(a), "monitored": True} for a in self.albums])
-                return httpx.Response(200, json=copy.deepcopy(self.albums))
+                    return httpx.Response(200, json=[{**copy.deepcopy(a), "monitored": True} for a in mine])
+                return httpx.Response(200, json=copy.deepcopy(mine))
+            if path == "artist":
+                return httpx.Response(200, json=copy.deepcopy(self.artists))
             if path == "command":
                 if not self.command_list_supported:
                     return httpx.Response(404, json={})
@@ -196,7 +217,18 @@ class FakeLidarr:
                 if album is not None and self.add_window_open:
                     album = {**album, "monitored": True}
                 return httpx.Response(200 if album else 404, json=copy.deepcopy(album) if album else {})
+            if path == "trackfile":
+                if not any(k in query for k in ("artistId", "albumId", "trackFileIds", "unmapped")):
+                    return httpx.Response(400, json={"message": "artistId, albumId, trackFileIds or unmapped required"})
+                rows = self.track_files
+                if "artistId" in query:
+                    rows = [f for f in rows if self._file_artist_id(f) == int(query["artistId"][0])]
+                if "albumId" in query:
+                    rows = [f for f in rows if self._file_album_id(f) == int(query["albumId"][0])]
+                return httpx.Response(200, json=copy.deepcopy(rows))
             if path == "track":
+                if not any(k in query for k in ("artistId", "albumId", "albumReleaseId", "trackIds")):
+                    return httpx.Response(400, json={"message": "artistId, albumId, albumReleaseId or trackIds required"})
                 if "artistId" in query:
                     rows = [
                         t

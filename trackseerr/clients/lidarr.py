@@ -188,6 +188,35 @@ class LidarrClient:
         except ValueError as exc:
             raise LidarrApiError(f"Lidarr returned invalid JSON for {path}") from exc
 
+    def _get_list(self, path: str, params: dict[str, Any], timeout: float) -> list[dict[str, Any]]:
+        """GET ``/api/v1/<path>`` with query ``params``; raises LidarrApiError on any failure or a non-list body."""
+        label = f"{path}?{urlencode(params)}" if params else path
+        url = f"{self.base_url}/api/v1/{label}"
+        try:
+            with httpx.Client(verify=self.verify_ssl, timeout=timeout) as client:
+                resp = client.get(url, headers=self._get_headers())
+        except httpx.HTTPError as exc:
+            raise LidarrApiError(f"Could not reach Lidarr for {label} ({type(exc).__name__})") from exc
+        if resp.status_code in (401, 403):
+            raise LidarrApiError("Lidarr rejected the API key")
+        if resp.status_code == 404:
+            raise LidarrNotFound(f"Lidarr could not find the item for {label}")
+        if resp.status_code in _RETRYABLE_STATUS:
+            raise LidarrRateLimited(f"Lidarr returned HTTP {resp.status_code} for {label}", _retry_after(resp))
+        if resp.status_code != 200:
+            raise LidarrApiError(f"Lidarr returned HTTP {resp.status_code} for {label}")
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise LidarrApiError(f"Lidarr returned invalid JSON for {label}") from exc
+        if not isinstance(data, list):
+            raise LidarrApiError(f"Lidarr returned a non-list body for {label}")
+        return data
+
+    def fetch_artist_track_files(self, artist_id: int, timeout: float = 60.0) -> list[dict[str, Any]]:
+        """Every track file of one artist; raises LidarrApiError instead of returning [] on failure."""
+        return self._get_list("trackfile", {"artistId": artist_id}, timeout)
+
     def get_options(self) -> dict[str, list[dict[str, Any]]]:
         """Live root folders, quality profiles, metadata profiles and tags (for the settings pickers)."""
         roots = self._get_json("rootfolder")
@@ -971,17 +1000,15 @@ class LidarrClient:
             raise LidarrApiError("Lidarr returned an unexpected response shape for album")
         return data
 
-    def fetch_artist_albums(self, artist_id: int) -> list[dict[str, Any]]:
-        data = self._get_json(f"album?artistId={int(artist_id)}")
-        if not isinstance(data, list):
-            raise LidarrApiError("Lidarr returned an unexpected response shape for album")
-        return [row for row in data if isinstance(row, dict)]
+    def fetch_artist_albums(self, artist_id: int, timeout: Optional[float] = None) -> list[dict[str, Any]]:
+        """Every album of one artist; raises LidarrApiError instead of returning [] on failure."""
+        rows = self._get_list("album", {"artistId": int(artist_id)}, self.timeout if timeout is None else timeout)
+        return [row for row in rows if isinstance(row, dict)]
 
-    def fetch_album_tracks(self, album_id: int) -> list[dict[str, Any]]:
-        data = self._get_json(f"track?albumId={int(album_id)}")
-        if not isinstance(data, list):
-            raise LidarrApiError("Lidarr returned an unexpected response shape for track")
-        return [row for row in data if isinstance(row, dict)]
+    def fetch_album_tracks(self, album_id: int, timeout: Optional[float] = None) -> list[dict[str, Any]]:
+        """Every track of one album; raises LidarrApiError instead of returning [] on failure."""
+        rows = self._get_list("track", {"albumId": int(album_id)}, self.timeout if timeout is None else timeout)
+        return [row for row in rows if isinstance(row, dict)]
 
     def lookup_artist(self, term: str) -> list[dict[str, Any]]:
         """``GET /artist/lookup``. ``term`` may be a name or ``lidarr:<musicbrainz id>``; raises LidarrApiError."""
