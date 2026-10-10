@@ -38,6 +38,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Plex sign-in now works through TrackSeerr Requests in the two-container setup; it gets your Plex server's identity from Core instead of failing with "No Plex machine identifier configured".
 - Unraid two-container setup: the templates, install guide and `init-dmz` now list both networks in Extra Parameters (Unraid ignores the Network Type dropdown once a `--network` flag is there), so Requests can reach your tunnel/proxy and Core can reach Plex. The docs now explain which network Core should join: your app network when Cloudflare Tunnel runs on the host, or its own `trackseerr-core-lan` network when a reverse proxy or tunnel runs as a container. The internal network is created with `--internal`.
 - Import from Lidarr is back: switching the library manager from Lidarr to TrackSeerr offers to copy your Lidarr library first, and the Library page shows live progress with a Stop button.
 - Import from Lidarr now works on large libraries: it copies albums, tracks and files artist by artist, so your Wanted list carries over, and if Lidarr fails partway it stops without switching the library manager.
