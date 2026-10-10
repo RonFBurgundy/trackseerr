@@ -21,7 +21,7 @@ from typing import Any, Callable, Optional, Sequence, Union
 
 from trackseerr import __version__
 from trackseerr.redaction import safe_exc
-from trackseerr.storage import SCHEMA_VERSION, Database
+from trackseerr.storage import BASELINE_VERSION, SCHEMA_VERSION, Database
 from trackseerr.task_manager import (
     TRIGGER_SCHEDULED,
     TaskCancelled,
@@ -439,9 +439,9 @@ def validate_backup(path: Union[str, Path]) -> dict[str, Any]:  # noqa: C901
                     f"Backup schema version ({schema_version}) is newer than current application schema version ({SCHEMA_VERSION})"
                 )
 
-            if schema_version < SCHEMA_VERSION:
+            if schema_version < BASELINE_VERSION:
                 raise BackupValidationError(
-                    f"Backup schema version ({schema_version}) predates the v{SCHEMA_VERSION} baseline and cannot be restored by this build"
+                    f"Backup schema version ({schema_version}) predates the v{BASELINE_VERSION} baseline and cannot be restored by this build"
                 )
 
             # Extract SQLite database to temporary location and test PRAGMA integrity_check == ok

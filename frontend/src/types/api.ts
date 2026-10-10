@@ -12649,7 +12649,7 @@ export interface components {
             last_synced_at?: string | null;
             /** Name */
             name: string;
-            rules: components["schemas"]["SmartRulesBody"];
+            rules: components["schemas"]["SmartRulesRecord"];
             /** Sync Status */
             sync_status: string;
             /** Targets */
@@ -12714,6 +12714,48 @@ export interface components {
         };
         /** SmartRulesBody */
         SmartRulesBody: {
+            /** Album Types */
+            album_types?: string[];
+            /** Artist Types */
+            artist_types?: string[];
+            /** Countries */
+            countries?: string[];
+            /** Exclude Genres */
+            exclude_genres?: string[];
+            /** Formed From */
+            formed_from?: number | null;
+            /** Formed To */
+            formed_to?: number | null;
+            /** Genres */
+            genres?: string[];
+            /**
+             * Limit
+             * @default 100
+             */
+            limit: number;
+            /** Members Max */
+            members_max?: number | null;
+            /** Members Min */
+            members_min?: number | null;
+            /** Popularity Max */
+            popularity_max?: number | null;
+            /** Popularity Min */
+            popularity_min?: number | null;
+            /**
+             * Sort
+             * @default random
+             * @enum {string}
+             */
+            sort: "random" | "year_desc" | "year_asc" | "popularity_desc" | "added_desc" | "artist";
+            /** Tag Ids */
+            tag_ids?: number[];
+            /** Year From */
+            year_from?: number | null;
+            /** Year To */
+            year_to?: number | null;
+        };
+        /** SmartRulesRecord */
+        SmartRulesRecord: {
             /** Album Types */
             album_types?: string[];
             /** Artist Types */
