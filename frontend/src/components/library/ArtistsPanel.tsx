@@ -10,7 +10,7 @@ import { useQualityProfiles } from '@/hooks/useQualityProfiles';
 import { useMetadataProfiles } from '@/hooks/useMetadataProfiles';
 import { ScrubberRail, VirtualGrid } from '@/components/lists';
 import { LibrarySortControl } from './LibrarySortControl';
-import { LibrarySelectKey, LibraryToolbarPortal } from './LibraryToolbarPortal';
+import { LibraryToolbarPortal, type LibrarySelectAction } from './LibraryToolbarPortal';
 import { ArtistTile } from './ArtistTile';
 import { ArtistBulkBar } from './ArtistBulkBar';
 
@@ -39,6 +39,7 @@ export interface ArtistsPanelProps {
   footer: React.ReactNode;
   onModeChange: (mode: string | null) => void;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
+  onSelectActionChange: (action: LibrarySelectAction | null) => void;
 }
 
 /** Artists as a virtualized cover grid with a scrubber; search and sort are server-side. */
@@ -52,6 +53,7 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
   footer,
   onModeChange,
   onToast,
+  onSelectActionChange,
 }) => {
   const { list, index, sortKey, sortDir, changeSort } = useLibraryCatalog<ArtistItem>({
     fetchPage: fetchArtists,
@@ -78,6 +80,15 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
     exitSelection();
   }, [query, monitoredOnly, exitSelection]);
 
+  useEffect(() => {
+    onSelectActionChange(
+      canBulkEdit ? { active: selecting, toggle: selecting ? exitSelection : selection.enter } : null
+    );
+    return () => {
+      onSelectActionChange(null);
+    };
+  }, [canBulkEdit, selecting, exitSelection, selection.enter, onSelectActionChange]);
+
   useEffect(() => onModeChange(mode), [mode, onModeChange]);
   useEffect(() => {
     if (reloadToken > 0) reload();
@@ -102,7 +113,6 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
   return (
     <section className="flex min-h-0 flex-col gap-2" aria-label="Artists">
       <LibraryToolbarPortal slot={toolbarSlot}>
-        {canBulkEdit && <LibrarySelectKey active={selecting} onToggle={selecting ? exitSelection : selection.enter} />}
         <LibrarySortControl options={SORT_OPTIONS} sortKey={sortKey} sortDir={sortDir} onChange={changeSort} />
       </LibraryToolbarPortal>
       {canBulkEdit && selecting && (

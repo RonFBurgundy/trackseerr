@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Disc, Eye, FileText, FolderInput, Layers, Loader2, Music, RefreshCw, Tag, User } from 'lucide-react';
+import { CheckSquare, Disc, Eye, FileText, FolderInput, Layers, Loader2, Music, RefreshCw, Tag, User } from 'lucide-react';
 import type { UseLibraryReturn, LibraryTab } from '@/hooks/useLibrary';
 import type { AppRoute, LibraryRoute, NavigateOptions } from '@/hooks/useAppRoute';
 import { useLibraryDrilldown } from '@/hooks/useLibraryDrilldown';
@@ -12,7 +12,7 @@ import type { ManualImportScope } from '@/types/manualImport';
 import { deleteCollection } from '@/services/libraryService';
 import { errorMessage } from '@/services/apiClient';
 import { PageFrame } from '@/components/layout';
-import { SearchBar, TapeDeckButton, TabStrip, ToastBanner, CassetteLoader } from '@/components/ui';
+import { SearchBar, TapeDeckButton, TabStrip, ToastBanner, CassetteLoader, OverflowMenu, type OverflowMenuItem } from '@/components/ui';
 import {
   AddToCollectionModal,
   AlbumDetailModal,
@@ -23,6 +23,7 @@ import {
   CollectionsPanel,
   LibraryScanBanner,
   LibraryStatsBar,
+  type LibrarySelectAction,
   LidarrMigrationBanner,
   RenameModal,
   type RenameScope,
@@ -108,6 +109,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   );
 
   const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null);
+  const [selectAction, setSelectAction] = useState<LibrarySelectAction | null>(null);
   const [searchInput, setSearchInput] = useState<string>('');
   const query = useDebouncedValue(searchInput, SEARCH_DEBOUNCE_MS);
   const [monitoredOnly, setMonitoredOnly] = useState<boolean>(false);
@@ -285,6 +287,58 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const showScanBanner = !lidarrMode && (isScanning || Boolean(scanStatus?.is_scanning));
   const pagedTab = activeTab !== 'collections';
 
+  const toolItems: OverflowMenuItem[] = [];
+  if (pagedTab) {
+    toolItems.push({
+      key: 'monitored',
+      label: 'Monitored only',
+      icon: <Eye className="h-3.5 w-3.5" />,
+      checked: monitoredOnly,
+      onSelect: () => setMonitoredOnly((v) => !v),
+    });
+  }
+  if (selectAction) {
+    toolItems.push({
+      key: 'select',
+      label: 'Select items',
+      icon: <CheckSquare className="h-3.5 w-3.5" />,
+      checked: selectAction.active,
+      onSelect: selectAction.toggle,
+    });
+  }
+  if (isAdmin && !lidarrMode) {
+    toolItems.push({
+      key: 'import',
+      label: 'Manual import…',
+      icon: <FolderInput className="h-3.5 w-3.5" />,
+      onSelect: () => setImportScope({ kind: 'folder' }),
+    });
+    toolItems.push({
+      key: 'rename',
+      label: 'Rename files…',
+      icon: <FileText className="h-3.5 w-3.5" />,
+      onSelect: () => setRenameScope({}),
+    });
+    toolItems.push({
+      key: 'retag',
+      label: 'Retag files…',
+      icon: <Tag className="h-3.5 w-3.5" />,
+      onSelect: () => setRetagScope({}),
+    });
+    toolItems.push({
+      key: 'scan',
+      label: isScanning ? 'Cancel scan' : 'Scan library',
+      icon: isScanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />,
+      onSelect: () => {
+        if (isScanning) {
+          void cancelScan();
+        } else {
+          void triggerScan(false);
+        }
+      },
+    });
+  }
+
   const statsFooter = <LibraryStatsBar stats={stats} showLegend={activeTab === 'artists'} />;
 
   return (
@@ -311,86 +365,10 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             placeholder={`Filter ${activeTab}...`}
             className="flex-1 min-w-0"
           />
-          {pagedTab && (
-            <TapeDeckButton
-              size="sm"
-              className="shrink-0"
-              active={monitoredOnly}
-              aria-pressed={monitoredOnly}
-              aria-label="Monitored only"
-              title="Monitored only"
-              icon={<Eye className="h-3.5 w-3.5" />}
-              collapseLabel="xl"
-              onClick={() => setMonitoredOnly((v) => !v)}
-            >
-              Monitored
-            </TapeDeckButton>
-          )}
           {/* Select and sort controls from the active panel are portaled here. */}
           <div ref={setToolbarSlot} className="contents" />
-          {isAdmin && !lidarrMode && (
-            <TapeDeckButton
-              size="sm"
-              className="shrink-0"
-              onClick={() => setImportScope({ kind: 'folder' })}
-              icon={<FolderInput className="h-3.5 w-3.5" />}
-              collapseLabel="xl"
-              title="Manual import"
-            >
-              Manual import&hellip;
-            </TapeDeckButton>
-          )}
-          {isAdmin && !lidarrMode && (
-            <TapeDeckButton
-              size="sm"
-              className="shrink-0"
-              onClick={() => setRenameScope({})}
-              icon={<FileText className="h-3.5 w-3.5" />}
-              collapseLabel="xl"
-              title="Rename files"
-            >
-              Rename files&hellip;
-            </TapeDeckButton>
-          )}
-          {isAdmin && !lidarrMode && (
-            <TapeDeckButton
-              size="sm"
-              className="shrink-0"
-              onClick={() => setRetagScope({})}
-              icon={<Tag className="h-3.5 w-3.5" />}
-              collapseLabel="xl"
-              title="Retag files"
-            >
-              Retag files&hellip;
-            </TapeDeckButton>
-          )}
-          {/* Scanning is a native-library action; Lidarr manages its own files. */}
-          {isAdmin && !lidarrMode && (
-            isScanning ? (
-              <TapeDeckButton
-                size="sm"
-                variant="danger"
-                className="shrink-0"
-                onClick={() => void cancelScan()}
-                icon={<Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                collapseLabel="xl"
-                title="Cancel scan"
-              >
-                Cancel Scan
-              </TapeDeckButton>
-            ) : (
-              <TapeDeckButton
-                size="sm"
-                variant="amber"
-                className="shrink-0"
-                onClick={() => void triggerScan(false)}
-                icon={<RefreshCw className="h-3.5 w-3.5" />}
-                collapseLabel="xl"
-                title="Scan library"
-              >
-                Scan Library
-              </TapeDeckButton>
-            )
+          {toolItems.length > 0 && (
+            <OverflowMenu label="Library tools" className="shrink-0" items={toolItems} />
           )}
         </div>
       }
@@ -417,6 +395,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           footer={statsFooter}
           onModeChange={setListMode}
           onToast={showToast}
+          onSelectActionChange={setSelectAction}
         />
       )}
 
@@ -431,6 +410,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           footer={statsFooter}
           onModeChange={setListMode}
           onToast={showToast}
+          onSelectActionChange={setSelectAction}
         />
       )}
 
@@ -449,6 +429,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             toolbarSlot={toolbarSlot}
             footer={statsFooter}
             onToast={showToast}
+            onSelectActionChange={setSelectAction}
           />
         ))}
 
