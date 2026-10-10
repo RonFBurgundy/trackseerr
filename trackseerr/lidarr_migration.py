@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from trackseerr.clients.lidarr import LidarrClient
+from trackseerr.clients.lidarr import LidarrApiError, LidarrClient
 from trackseerr.models import (
     LibraryAlbum,
     LibraryArtist,
@@ -26,6 +26,10 @@ from trackseerr.redaction import safe_exc
 from trackseerr.storage import Database
 
 logger = logging.getLogger(__name__)
+
+
+class _MigrationCancelled(Exception):
+    """Raised inside the per-artist loop when the cancel event is set."""
 
 
 @dataclass
@@ -254,21 +258,6 @@ class LidarrMigrationJob:
         with self._lock:
             self._status["albums_migrated"] += 1
 
-    def _migrate_albums(self, run: _MigrationRun, raw_albums: list[dict[str, Any]]) -> bool:
-        """Ingests raw Lidarr albums into the native catalog."""
-        for album in raw_albums:
-            if self._stop_event.is_set():
-                logger.info("LidarrMigration: Cancellation requested during album ingestion.")
-                with self._lock:
-                    self._status["status"] = "cancelled"
-                    self._status["is_migrating"] = False
-                    self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
-                return False
-
-            self._migrate_one_album(run, album)
-
-        return True
-
     def _migrate_one_track(self, run: _MigrationRun, track: dict[str, Any]) -> None:
         """Ingests a single raw Lidarr track dictionary."""
         lidarr_track_id = track.get("id")
@@ -339,21 +328,6 @@ class LidarrMigrationJob:
 
         with self._lock:
             self._status["tracks_migrated"] += 1
-
-    def _migrate_tracks(self, run: _MigrationRun, raw_tracks: list[dict[str, Any]]) -> bool:
-        """Ingests raw Lidarr tracks into the native catalog."""
-        for track in raw_tracks:
-            if self._stop_event.is_set():
-                logger.info("LidarrMigration: Cancellation requested during track ingestion.")
-                with self._lock:
-                    self._status["status"] = "cancelled"
-                    self._status["is_migrating"] = False
-                    self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
-                return False
-
-            self._migrate_one_track(run, track)
-
-        return True
 
     def _migrate_one_track_file(self, run: _MigrationRun, tf: dict[str, Any]) -> None:
         """Ingests a single raw Lidarr track file dictionary."""
@@ -429,21 +403,6 @@ class LidarrMigrationJob:
         with self._lock:
             self._status["files_migrated"] += 1
 
-    def _migrate_track_files(self, run: _MigrationRun, raw_track_files: list[dict[str, Any]]) -> bool:
-        """Ingests raw Lidarr track files into the native catalog."""
-        for tf in raw_track_files:
-            if self._stop_event.is_set():
-                logger.info("LidarrMigration: Cancellation requested during track file ingestion.")
-                with self._lock:
-                    self._status["status"] = "cancelled"
-                    self._status["is_migrating"] = False
-                    self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
-                return False
-
-            self._migrate_one_track_file(run, tf)
-
-        return True
-
     def run_migration(
         self,
         db: Database,
@@ -479,91 +438,84 @@ class LidarrMigrationJob:
         )
 
         try:
-            # -------------------------------------------------------------
-            # 1. Fetch & ingest artists
-            # -------------------------------------------------------------
             logger.info("LidarrMigration: Fetching artists from Lidarr...")
             raw_artists = lidarr_client.get_all_artists()
+            if not raw_artists:
+                # get_all_artists() swallows failures into [], so confirm with a strict call: an outage must fail the run.
+                raw_artists = lidarr_client._get_list("artist", {}, 60.0)
             if not self._migrate_artists(run, raw_artists):
                 return dict(self._status)
 
-            if self._stop_event.is_set():
-                with self._lock:
-                    self._status["status"] = "cancelled"
-                    self._status["is_migrating"] = False
-                    self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
-                return dict(self._status)
-
-            # -------------------------------------------------------------
-            # 2. Fetch & ingest albums
-            # -------------------------------------------------------------
-            logger.info("LidarrMigration: Fetching albums from Lidarr...")
-            raw_albums = lidarr_client.get_all_albums()
-            if not self._migrate_albums(run, raw_albums):
-                return dict(self._status)
+            for lidarr_artist in raw_artists:
+                if self._stop_event.is_set():
+                    return self._mark("cancelled")
+                self._migrate_artist_catalog(run, lidarr_artist)
 
             if self._stop_event.is_set():
-                with self._lock:
-                    self._status["status"] = "cancelled"
-                    self._status["is_migrating"] = False
-                    self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
-                return dict(self._status)
-
-            # -------------------------------------------------------------
-            # 3. Fetch & ingest tracks
-            # -------------------------------------------------------------
-            logger.info("LidarrMigration: Fetching tracks from Lidarr...")
-            raw_tracks = lidarr_client.get_all_tracks()
-            if not self._migrate_tracks(run, raw_tracks):
-                return dict(self._status)
-
-            if self._stop_event.is_set():
-                with self._lock:
-                    self._status["status"] = "cancelled"
-                    self._status["is_migrating"] = False
-                    self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
-                return dict(self._status)
-
-            # -------------------------------------------------------------
-            # 4. Fetch & ingest physical track files
-            # -------------------------------------------------------------
-            logger.info("LidarrMigration: Fetching track files from Lidarr...")
-            raw_track_files = lidarr_client.get_all_track_files()
-            if not self._migrate_track_files(run, raw_track_files):
-                return dict(self._status)
-
-            # -------------------------------------------------------------
-            # 5. Finalize migration & optional mode switch
-            # -------------------------------------------------------------
-            if self._stop_event.is_set():
-                with self._lock:
-                    self._status["status"] = "cancelled"
-                    self._status["is_migrating"] = False
-                    self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
-                return dict(self._status)
+                return self._mark("cancelled")
 
             if auto_switch_mode:
                 logger.info("LidarrMigration: Automatically switching library_mode to 'native'.")
                 self._switch_to_native(db)
 
-            with self._lock:
-                self._status["status"] = "completed"
-                self._status["is_migrating"] = False
-                self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
+            self._mark("completed")
             # Imported artists and albums have no thumbnails yet; generate them now instead of at the next daily pass.
             from trackseerr import art_pipeline
 
             art_pipeline.request_backfill_after_event(db, "Lidarr library import")
             return dict(self._status)
 
+        except _MigrationCancelled:
+            return self._mark("cancelled")
+        except LidarrApiError as exc:
+            logger.error("LidarrMigration: aborted, library manager left unchanged: %s", safe_exc(exc))
+            return self._mark("failed", str(exc))
         except Exception as exc:
             logger.exception("LidarrMigration: Unhandled exception during migration: %s", exc)
-            with self._lock:
-                self._status["status"] = "failed"
-                self._status["error"] = str(exc)
-                self._status["is_migrating"] = False
-                self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
+            return self._mark("failed", str(exc))
+
+    def _mark(self, status: str, error: Optional[str] = None) -> dict[str, Any]:
+        """Records a terminal status (completed, cancelled or failed) and returns a copy of the status dict."""
+        with self._lock:
+            self._status["status"] = status
+            if error is not None:
+                self._status["error"] = error
+            self._status["is_migrating"] = False
+            self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
             return dict(self._status)
+
+    def _migrate_artist_catalog(self, run: _MigrationRun, lidarr_artist: dict[str, Any]) -> None:
+        """Fetches and ingests one artist's albums, their tracks and the artist's files; LidarrApiError on a failed fetch."""
+        artist_id = lidarr_artist.get("id")
+        if artist_id is None:
+            return
+        artist_name = lidarr_artist.get("artistName") or "Unknown Artist"
+        client = run.lidarr_client
+        try:
+            albums = client.fetch_artist_albums(artist_id, timeout=60.0)
+            for album in albums:
+                if self._stop_event.is_set():
+                    raise _MigrationCancelled()
+                self._migrate_one_album(run, album)
+                album_id = album.get("id")
+                if album_id is None:
+                    continue
+                try:
+                    tracks = client.fetch_album_tracks(album_id, timeout=60.0)
+                except LidarrApiError as exc:
+                    raise LidarrApiError(f"{exc} (album {album_id}, artist '{artist_name}')") from exc
+                for track in tracks:
+                    self._migrate_one_track(run, track)
+            if self._stop_event.is_set():
+                raise _MigrationCancelled()
+            for track_file in client.fetch_artist_track_files(artist_id):
+                self._migrate_one_track_file(run, track_file)
+        except _MigrationCancelled:
+            raise
+        except LidarrApiError as exc:
+            if f"artist '{artist_name}'" in str(exc):
+                raise
+            raise LidarrApiError(f"{exc} (artist '{artist_name}')") from exc
 
 
     @staticmethod

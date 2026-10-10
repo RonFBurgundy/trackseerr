@@ -1,15 +1,18 @@
 """Unit tests for Lidarr REST API client extensions and LidarrMigrationJob."""
 
-import threading
 import time
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from trackseerr.clients.lidarr import LidarrClient
 from trackseerr.lidarr_migration import LidarrMigrationJob
 from trackseerr.storage import Database
+from tests.lidarr_fake import FakeLidarr
+
+HTTPX = "trackseerr.clients.lidarr.httpx.Client"
 
 
 @pytest.fixture
@@ -130,6 +133,24 @@ def sample_lidarr_data() -> dict[str, list[dict[str, Any]]]:
     }
 
 
+def loaded_fake(data: dict[str, list[dict[str, Any]]]) -> FakeLidarr:
+    """A FakeLidarr (strict about unfiltered track/trackfile calls) serving the given payload."""
+    fake = FakeLidarr()
+    fake.artists = data["artists"]
+    fake.albums = data["albums"]
+    fake.tracks = data["tracks"]
+    fake.track_files = data["track_files"]
+    return fake
+
+
+def real_client() -> LidarrClient:
+    return LidarrClient(base_url="http://lidarr:8686", api_key="test-key")
+
+
+def count(db: Database, table: str) -> int:
+    return db.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+
+
 class TestLidarrClientExtensions:
     """Verifies the new REST API helper endpoints added to LidarrClient."""
 
@@ -196,18 +217,15 @@ class TestLidarrMigrationJob:
         assert status["artists_migrated"] == 0
 
     def test_run_migration_full_ingestion(self, db: Database, sample_lidarr_data):
-        mock_client = MagicMock(spec=LidarrClient)
-        mock_client.get_all_artists.return_value = sample_lidarr_data["artists"]
-        mock_client.get_all_albums.return_value = sample_lidarr_data["albums"]
-        mock_client.get_all_tracks.return_value = sample_lidarr_data["tracks"]
-        mock_client.get_all_track_files.return_value = sample_lidarr_data["track_files"]
+        fake = loaded_fake(sample_lidarr_data)
 
         # Ensure starting mode is lidarr
         db.update_media_management_settings({"library_mode": "lidarr"})
         assert db.get_media_management_settings()["library_mode"] == "lidarr"
 
         job = LidarrMigrationJob()
-        res = job.run_migration(db, mock_client, auto_switch_mode=True)
+        with patch(HTTPX, fake):
+            res = job.run_migration(db, real_client(), auto_switch_mode=True)
 
         assert res["status"] == "completed"
         assert res["is_migrating"] is False
@@ -264,42 +282,44 @@ class TestLidarrMigrationJob:
         assert db.get_library_file_for_track(trk3["id"]) is None
 
     def test_run_migration_auto_switch_mode_false(self, db: Database, sample_lidarr_data):
-        mock_client = MagicMock(spec=LidarrClient)
-        mock_client.get_all_artists.return_value = [sample_lidarr_data["artists"][0]]
-        mock_client.get_all_albums.return_value = []
-        mock_client.get_all_tracks.return_value = []
-        mock_client.get_all_track_files.return_value = []
+        fake = loaded_fake(sample_lidarr_data)
 
         db.update_media_management_settings({"library_mode": "lidarr"})
         job = LidarrMigrationJob()
-        res = job.run_migration(db, mock_client, auto_switch_mode=False)
+        with patch(HTTPX, fake):
+            res = job.run_migration(db, real_client(), auto_switch_mode=False)
 
         assert res["status"] == "completed"
         # Mode should remain lidarr
         assert db.get_media_management_settings()["library_mode"] == "lidarr"
 
     def test_migration_cancellation(self, db: Database, sample_lidarr_data):
-        mock_client = MagicMock(spec=LidarrClient)
-        mock_client.get_all_artists.return_value = sample_lidarr_data["artists"]
-        mock_client.get_all_albums.return_value = sample_lidarr_data["albums"]
+        db.update_media_management_settings({"library_mode": "lidarr"})
 
         # 1. Pre-set cancel event
         job = LidarrMigrationJob()
         job.cancel()
-        res = job.run_migration(db, mock_client, auto_switch_mode=True)
+        with patch(HTTPX, loaded_fake(sample_lidarr_data)):
+            res = job.run_migration(db, real_client(), auto_switch_mode=True)
         assert res["status"] == "cancelled"
         assert res["is_migrating"] is False
 
-        # 2. Mid-migration cancel: signal during album fetch
+        # 2. Mid-migration cancel: signal while the first artist's albums are fetched
         job2 = LidarrMigrationJob()
-        def cancel_on_albums():
-            job2.cancel()
-            return sample_lidarr_data["albums"]
+        fake = loaded_fake(sample_lidarr_data)
+        original = fake._respond
 
-        mock_client.get_all_albums.side_effect = cancel_on_albums
-        res2 = job2.run_migration(db, mock_client, auto_switch_mode=True)
+        def cancelling(method: str, url: str, body: Any = None) -> httpx.Response:
+            if "/album?" in url:
+                job2.cancel()
+            return original(method, url, body)
+
+        fake._respond = cancelling  # type: ignore[method-assign]
+        with patch(HTTPX, fake):
+            res2 = job2.run_migration(db, real_client(), auto_switch_mode=True)
         assert res2["status"] == "cancelled"
         assert res2["is_migrating"] is False
+        assert db.get_media_management_settings()["library_mode"] == "lidarr"
 
     def test_migration_job_start_background_and_prevent_concurrency(self, db: Database):
         mock_client = MagicMock(spec=LidarrClient)
@@ -309,9 +329,7 @@ class TestLidarrMigrationJob:
             return []
 
         mock_client.get_all_artists.side_effect = slow_artists
-        mock_client.get_all_albums.return_value = []
-        mock_client.get_all_tracks.return_value = []
-        mock_client.get_all_track_files.return_value = []
+        mock_client._get_list.return_value = []
 
         job = LidarrMigrationJob()
         started = job.start_migration(db, mock_client)
@@ -339,3 +357,127 @@ class TestLidarrMigrationJob:
         assert res["status"] == "failed"
         assert "Network timeout" in str(res["error"])
         assert res["is_migrating"] is False
+
+
+def two_artist_payload() -> dict[str, list[dict[str, Any]]]:
+    """Two artists, each with two albums, two tracks per album and a file per track."""
+    data: dict[str, list[dict[str, Any]]] = {"artists": [], "albums": [], "tracks": [], "track_files": []}
+    for a_idx, name in enumerate(("Radiohead", "Daft Punk")):
+        artist_id = 101 + a_idx
+        data["artists"].append(
+            {"id": artist_id, "artistName": name, "foreignArtistId": f"mbid-art-{artist_id}", "monitored": True}
+        )
+        for b_idx in range(2):
+            album_id = 201 + a_idx * 10 + b_idx
+            data["albums"].append(
+                {"id": album_id, "artistId": artist_id, "title": f"{name} Album {b_idx}", "monitored": True}
+            )
+            for t_idx in range(2):
+                track_id = 300 + a_idx * 100 + b_idx * 10 + t_idx
+                data["tracks"].append(
+                    {"id": track_id, "artistId": artist_id, "albumId": album_id,
+                     "title": f"{name} {b_idx}-{t_idx}", "trackNumber": t_idx + 1}
+                )
+                data["track_files"].append(
+                    {"id": track_id + 1000, "trackId": track_id, "path": f"/music/{name}/{b_idx}/{t_idx}.flac",
+                     "size": 1, "mediaInfo": {"audioCodec": "FLAC"}}
+                )
+    return data
+
+
+class TestPerArtistImport:
+    """The import walks Lidarr artist by artist, as a real Lidarr only answers filtered track/trackfile calls."""
+
+    def test_migration_imports_tracks_and_files_per_artist(self, db: Database):
+        fake = loaded_fake(two_artist_payload())
+        db.update_media_management_settings({"library_mode": "lidarr"})
+
+        with patch(HTTPX, fake):
+            res = LidarrMigrationJob().run_migration(db, real_client())
+
+        assert res["status"] == "completed"
+        assert (res["artists_migrated"], res["albums_migrated"], res["tracks_migrated"], res["files_migrated"]) == (
+            2, 4, 8, 8,
+        )
+        assert count(db, "library_albums") == 4
+        assert count(db, "library_tracks") == 8
+        assert count(db, "library_files") == 8
+        assert db.get_media_management_settings()["library_mode"] == "native"
+
+    def test_unfiltered_track_call_is_never_made(self, db: Database):
+        fake = loaded_fake(two_artist_payload())
+        with patch(HTTPX, fake):
+            res = LidarrMigrationJob().run_migration(db, real_client())
+
+        assert res["status"] == "completed"
+        paths = fake.paths("GET")
+        for path in paths:
+            if path.split("?")[0] in ("track", "trackfile"):
+                assert "?" in path and path.split("?")[1].split("=")[0] in ("albumId", "artistId"), path
+        assert not [p for p in paths if p in ("track", "trackfile", "album")]
+        assert any(p.startswith("track?albumId=") for p in paths)
+        assert any(p.startswith("trackfile?artistId=") for p in paths)
+
+    def test_album_fetch_timeout_fails_without_switching(self, db: Database):
+        fake = loaded_fake(two_artist_payload())
+        fake.raise_on[("GET", "album?artistId=102")] = httpx.ReadTimeout("slow")
+        db.update_media_management_settings({"library_mode": "lidarr"})
+
+        with patch(HTTPX, fake):
+            res = LidarrMigrationJob().run_migration(db, real_client())
+
+        assert res["status"] == "failed"
+        assert res["is_migrating"] is False
+        assert "Daft Punk" in res["error"]
+        assert "album?artistId=102" in res["error"]
+        assert db.get_media_management_settings()["library_mode"] == "lidarr"
+        radiohead = db.get_library_artist_by_name("Radiohead")
+        assert db.get_library_album_by_title(radiohead["id"], "Radiohead Album 0") is not None
+
+    def test_trackfile_400_fails_without_switching(self, db: Database):
+        fake = loaded_fake(two_artist_payload())
+        fake.fail[("GET", "trackfile?artistId=102")] = 400
+        db.update_media_management_settings({"library_mode": "lidarr"})
+
+        with patch(HTTPX, fake):
+            res = LidarrMigrationJob().run_migration(db, real_client())
+
+        assert res["status"] == "failed"
+        assert "HTTP 400" in res["error"]
+        assert "trackfile?artistId=102" in res["error"]
+        assert "Daft Punk" in res["error"]
+        assert db.get_media_management_settings()["library_mode"] == "lidarr"
+        radiohead = db.get_library_artist_by_name("Radiohead")
+        album = db.get_library_album_by_title(radiohead["id"], "Radiohead Album 0")
+        assert db.get_library_track_by_title(album["id"], "Radiohead 0-0", track_number=1) is not None
+
+    def test_rerun_after_failure_is_idempotent(self, db: Database):
+        fake = loaded_fake(two_artist_payload())
+        fake.fail[("GET", "trackfile?artistId=102")] = 400
+        db.update_media_management_settings({"library_mode": "lidarr"})
+
+        with patch(HTTPX, fake):
+            first = LidarrMigrationJob().run_migration(db, real_client())
+            assert first["status"] == "failed"
+            fake.fail.clear()
+            second = LidarrMigrationJob().run_migration(db, real_client())
+
+        assert second["status"] == "completed"
+        assert second["error"] is None
+        assert count(db, "library_artists") == 2
+        assert count(db, "library_albums") == 4
+        assert count(db, "library_tracks") == 8
+        assert count(db, "library_files") == 8
+        assert db.get_media_management_settings()["library_mode"] == "native"
+
+    def test_empty_artist_list_is_rechecked_and_fails_on_outage(self, db: Database):
+        fake = FakeLidarr()
+        fake.fail[("GET", "artist")] = 500
+        db.update_media_management_settings({"library_mode": "lidarr"})
+
+        with patch(HTTPX, fake):
+            res = LidarrMigrationJob().run_migration(db, real_client())
+
+        assert res["status"] == "failed"
+        assert "HTTP 500" in res["error"]
+        assert db.get_media_management_settings()["library_mode"] == "lidarr"
