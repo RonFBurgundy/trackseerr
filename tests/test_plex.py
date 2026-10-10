@@ -218,23 +218,6 @@ def test_plex_media_server_honors_preferred_section(mock_server):
     assert sections == [sec2, sec1]
 
 
-@patch("trackseerr.clients.plex.PlexServer")
-def test_plex_client_smart_mix_tracks_honors_preferred_section(mock_server):
-    client = PlexClient("http://localhost:32400", "token", music_section="Special")
-    sec1 = MagicMock(title="General", type="artist")
-    sec2 = MagicMock(title="Special", type="artist")
-    mock_track = MagicMock(ratingKey="123", title="Track 1", viewCount=5, lastViewedAt=None)
-    mock_track.artist.return_value.title = "Artist 1"
-    mock_track.album.return_value.title = "Album 1"
-    sec2.searchTracks.return_value = [mock_track]
-    client.server.library.sections.return_value = [sec1, sec2]
-
-    tracks = client.get_smart_mix_tracks("heavy_rotation")
-    assert len(tracks) == 1
-    assert tracks[0]["title"] == "Track 1"
-    sec2.searchTracks.assert_called_once()
-    sec1.searchTracks.assert_not_called()
-
 
 @patch("trackseerr.clients.plex.PlexServer")
 def test_get_media_server_honors_plex_music_section(mock_server):

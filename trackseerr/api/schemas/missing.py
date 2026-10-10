@@ -3,7 +3,7 @@
 Skipped (file / plain-text / XML bodies): ``/csv``, ``/rss``, ``/text``. Everything here is admin only.
 """
 
-from typing import Any, Optional
+from typing import Optional
 
 from trackseerr.api.response_models import ApiModel
 
@@ -21,91 +21,6 @@ class MissingTrack(ApiModel):
     attempts: int = 0
     next_attempt_at: Optional[str] = None
     created_at: str
-
-
-class LidarrConnectionStatus(ApiModel):
-    """``LidarrClient.test_connection()`` or the "not configured" stub."""
-
-    online: bool
-    message: Optional[str] = None
-    version: Optional[str] = None
-    app_name: Optional[str] = None
-    error: Optional[str] = None
-
-
-class LidarrStatusResponse(ApiModel):
-    """Native mode: only ``mode`` and ``connected`` (null). Lidarr mode: the rest."""
-
-    mode: Optional[str] = None
-    connected: Optional[bool] = None
-    configured: Optional[bool] = None
-    url: Optional[str] = None
-    auto_search: Optional[bool] = None
-    status: Optional[LidarrConnectionStatus] = None
-
-
-class LidarrQueueStatus(ApiModel):
-    is_running: bool
-    is_paused: bool
-    total_items: int
-    processed_items: int
-    remaining_items: int
-    successful_items: int
-    failed_items: int
-    current_artist: Optional[str] = None
-    current_album: Optional[str] = None
-    delay_seconds: float
-    auto_search: bool
-    started_at: Optional[str] = None
-    last_processed_at: Optional[str] = None
-    is_rate_limited: bool
-    rate_limit_seconds_remaining: int
-    message: str
-
-
-class LidarrQueueAction(LidarrQueueStatus):
-    action_status: Optional[str] = None
-    action_message: Optional[str] = None
-
-
-class LidarrOutcome(ApiModel):
-    status: str
-    album_id: Optional[int] = None
-    message: str
-
-
-class LidarrPushItemResult(ApiModel):
-    """One ``LidarrClient.search_and_add_track`` result: ``added``/``already_monitored`` or a raw failure dict."""
-
-    status: str
-    artist: Optional[str] = None
-    album: Optional[str] = None
-    lidarr_id: Optional[int] = None
-    artist_id: Optional[int] = None
-    added: Optional[bool] = None
-    matched_album_ids: Optional[list[int]] = None
-    searched: Optional[bool] = None
-    outcomes: Optional[list[LidarrOutcome]] = None
-    retry_after: Optional[int] = None
-    message: Optional[str] = None
-
-
-class LidarrPushResponse(ApiModel):
-    """Trickle mode reports the queue; synchronous mode reports counts and per-item results."""
-
-    status: str
-    trickle: bool
-    queued_count: Optional[int] = None
-    auto_search: Optional[bool] = None
-    delay_seconds: Optional[float] = None
-    message: Optional[str] = None
-    queue_status: Optional[LidarrQueueStatus] = None
-    total_requested: Optional[int] = None
-    deduplicated_items: Optional[int] = None
-    added: Optional[int] = None
-    already_monitored: Optional[int] = None
-    failed: Optional[int] = None
-    results: Optional[list[LidarrPushItemResult]] = None
 
 
 class MediaTrackHit(ApiModel):

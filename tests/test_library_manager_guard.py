@@ -8,7 +8,6 @@ import time
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -370,25 +369,6 @@ class TestImporterSwitch:
         _set_mode(test_db, "lidarr")
         LidarrMigrationJob._switch_to_native(test_db)
         assert _mode(test_db) == "native"
-
-
-# --------------------------------------------------------------------------- F4: missing status in native mode
-
-
-class TestMissingStatusNative:
-    def test_native_mode_does_not_contact_lidarr(self, app_and_client, test_db, test_config, seeded_users):
-        _, client = app_and_client
-        test_db.update_lidarr_settings({"url": "http://lidarr.test:8686", "api_key": API_KEY})
-        with patch("trackseerr.clients.lidarr.httpx.Client") as cls, patch.object(
-            httpx, "get"
-        ) as raw_get:
-            resp = client.get(
-                "/api/missing/lidarr/status", headers=_headers(seeded_users["admin"], test_db, test_config)
-            )
-        assert resp.status_code == 200
-        assert resp.json() == {"mode": "native", "connected": None}
-        cls.assert_not_called()
-        raw_get.assert_not_called()
 
 
 # --------------------------------------------------------------------------- F5: pending cap / stranded events
