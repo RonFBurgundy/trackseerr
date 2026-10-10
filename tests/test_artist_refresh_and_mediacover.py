@@ -611,7 +611,7 @@ def test_lidarr_migration_maps_artist_and_album_artwork(test_db: Database):
             ],
         }
     ]
-    mock_lidarr.get_all_albums.return_value = [
+    okc_albums = [
         {
             "id": 201,
             "artistId": 101,
@@ -624,8 +624,11 @@ def test_lidarr_migration_maps_artist_and_album_artwork(test_db: Database):
             ],
         }
     ]
-    mock_lidarr.get_all_tracks.return_value = []
-    mock_lidarr.get_all_track_files.return_value = []
+    mock_lidarr.fetch_artist_albums.side_effect = lambda artist_id, **kw: [
+        a for a in okc_albums if a["artistId"] == artist_id
+    ]
+    mock_lidarr.fetch_album_tracks.side_effect = lambda album_id, **kw: []
+    mock_lidarr.fetch_artist_track_files.side_effect = lambda artist_id, **kw: []
 
     res = job.run_migration(db=test_db, lidarr_client=mock_lidarr, auto_switch_mode=False)
     assert res["status"] == "completed"
