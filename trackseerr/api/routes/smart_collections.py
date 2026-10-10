@@ -26,6 +26,7 @@ from trackseerr.api.schemas.smart_collections import (
     SmartPreviewResponse,
     SmartPreviewTrack,
     SmartRulesBody,
+    SmartRulesRecord,
 )
 from trackseerr.config import Config
 from trackseerr.playlist_policy import SMART_KIND, SMART_SERVICE, is_smart_collection
@@ -194,7 +195,7 @@ def get_smart_collection(
         "name": pl["name"],
         "description": pl.get("description", ""),
         "enabled": bool(pl.get("enabled")),
-        "rules": SmartRulesBody.from_smart_rules(rules),
+        "rules": SmartRulesRecord.from_smart_rules(rules),
         "targets": targets,
         "last_synced_at": pl.get("last_synced_at"),
         "sync_status": pl.get("sync_status", "never_synced"),
@@ -274,7 +275,7 @@ def update_smart_collection(
         "name": new_name,
         "description": new_desc,
         "enabled": bool(updated_pl.get("enabled")),
-        "rules": SmartRulesBody.from_smart_rules(rules),
+        "rules": SmartRulesRecord.from_smart_rules(rules),
         "targets": targets,
         "last_synced_at": updated_pl.get("last_synced_at"),
         "sync_status": updated_pl.get("sync_status", "never_synced"),

@@ -41,7 +41,7 @@ from trackseerr.backup import (
     validate_backup,
 )
 from trackseerr.config import Config
-from trackseerr.storage import SCHEMA_VERSION, Database
+from trackseerr.storage import BASELINE_VERSION, SCHEMA_VERSION, Database
 from trackseerr.task_manager import TASKS
 
 
@@ -252,9 +252,9 @@ def test_validate_backup_rejections(test_db: Database, tmp_path: Path):
     # 4b. Older schema_version (predates baseline)
     older_zip = tmp_path / "older.zip"
     with zipfile.ZipFile(older_zip, "w") as zf:
-        zf.writestr(MANIFEST_MEMBER_NAME, json.dumps({"schema_version": SCHEMA_VERSION - 1}))
+        zf.writestr(MANIFEST_MEMBER_NAME, json.dumps({"schema_version": BASELINE_VERSION - 1}))
         zf.writestr(DB_MEMBER_NAME, b"")
-    with pytest.raises(BackupValidationError, match="predates the v71 baseline"):
+    with pytest.raises(BackupValidationError, match=f"predates the v{BASELINE_VERSION} baseline"):
         validate_backup(older_zip)
 
     # 5. Corrupt database (integrity check failure)
@@ -264,6 +264,28 @@ def test_validate_backup_rejections(test_db: Database, tmp_path: Path):
         zf.writestr(DB_MEMBER_NAME, b"not a valid sqlite database header at all")
     with pytest.raises(BackupValidationError, match="integrity check failed"):
         validate_backup(corrupt_zip)
+
+
+def test_validate_backup_accepts_baseline_version_backup(tmp_path: Path):
+    """Valid backup with manifest schema_version at BASELINE_VERSION passes validation without raising."""
+    db_file = tmp_path / "baseline_raw.sqlite"
+    db = Database(db_file)
+    db.close()
+
+    baseline_zip = tmp_path / "trackseerr_backup_20260101_000000_manual.zip"
+    manifest_data = {
+        "app_version": __version__,
+        "schema_version": BASELINE_VERSION,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "kind": "manual",
+    }
+    with zipfile.ZipFile(baseline_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.write(db_file, arcname=DB_MEMBER_NAME)
+        zf.writestr(MANIFEST_MEMBER_NAME, json.dumps(manifest_data, indent=2))
+
+    validated_manifest = validate_backup(baseline_zip)
+    assert validated_manifest["schema_version"] == BASELINE_VERSION
+    assert validated_manifest["kind"] == "manual"
 
 
 def test_staged_restore_and_apply_pending_restore(tmp_path: Path):

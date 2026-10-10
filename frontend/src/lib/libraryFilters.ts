@@ -81,7 +81,7 @@ export function libraryFiltersToRules(
   };
 }
 
-export function rulesToLibraryFilters(r: Schema<'SmartRulesBody'>): {
+export function rulesToLibraryFilters(r: Schema<'SmartRulesBody'> | Schema<'SmartRulesRecord'>): {
   filters: LibraryFilters;
   sort: Schema<'SmartRulesBody'>['sort'];
   limit: number;

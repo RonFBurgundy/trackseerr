@@ -650,11 +650,11 @@ def test_pre_baseline_database_is_refused(tmp_path: Path) -> None:
         Database(db_file)
 
 
-def test_fresh_database_records_baseline_version(tmp_path: Path) -> None:
+def test_fresh_database_records_head_version(tmp_path: Path) -> None:
     db = Database(tmp_path / "fresh.sqlite")
     try:
         cur = db.conn.execute("SELECT version FROM schema_migrations")
-        assert [tuple(row) for row in cur.fetchall()] == [(71,)]
+        assert [tuple(row) for row in cur.fetchall()] == [(SCHEMA_VERSION,)]
     finally:
         db.close()
 

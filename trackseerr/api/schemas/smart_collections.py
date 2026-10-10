@@ -72,6 +72,47 @@ class SmartRulesBody(BaseModel):
         )
 
 
+class SmartRulesRecord(ApiModel):
+    genres: list[str] = Field(default_factory=list)
+    exclude_genres: list[str] = Field(default_factory=list)
+    countries: list[str] = Field(default_factory=list)
+    year_from: Optional[int] = None
+    year_to: Optional[int] = None
+    album_types: list[str] = Field(default_factory=list)
+    artist_types: list[str] = Field(default_factory=list)
+    members_min: Optional[int] = None
+    members_max: Optional[int] = None
+    formed_from: Optional[int] = None
+    formed_to: Optional[int] = None
+    popularity_min: Optional[int] = None
+    popularity_max: Optional[int] = None
+    tag_ids: list[int] = Field(default_factory=list)
+    sort: SortOption = "random"
+    limit: int = 100
+
+    @classmethod
+    def from_smart_rules(cls, rules: SmartRules) -> SmartRulesRecord:
+        f = rules.filter
+        return cls(
+            genres=list(f.genres),
+            exclude_genres=list(f.exclude_genres),
+            countries=list(f.countries),
+            year_from=f.year_from,
+            year_to=f.year_to,
+            album_types=list(f.album_types),
+            artist_types=list(f.artist_types),
+            members_min=f.members_min,
+            members_max=f.members_max,
+            formed_from=f.formed_from,
+            formed_to=f.formed_to,
+            popularity_min=f.popularity_min,
+            popularity_max=f.popularity_max,
+            tag_ids=list(f.tag_ids),
+            sort=rules.sort,  # type: ignore[arg-type]
+            limit=rules.limit,
+        )
+
+
 class SmartPreviewTrack(ApiModel):
     title: str
     artist: str
@@ -103,8 +144,9 @@ class SmartCollectionRecord(ApiModel):
     name: str
     description: str = ""
     enabled: bool
-    rules: SmartRulesBody
+    rules: SmartRulesRecord
     targets: list[str]
     last_synced_at: Optional[str] = None
     sync_status: str
     track_count: int
+
