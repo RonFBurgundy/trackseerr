@@ -26,6 +26,20 @@ def _sanitize_lucene_query(text: str) -> str:
     return re.sub(r'["\\/]', " ", text).strip()
 
 
+def _year_of(value: Any) -> Optional[int]:
+    """Parse leading 4-digit year from MusicBrainz date string (YYYY, YYYY-MM, YYYY-MM-DD)."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    m = re.match(r"^(\d{4})(?:\D|$)", s)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except (ValueError, TypeError):
+        return None
+
+
 class _CircuitBreaker:
     """Thread-safe circuit breaker tracking consecutive failures per host."""
 
@@ -697,14 +711,14 @@ class MbidEnricherClient:
         if self._store is not None:
             clean_mbid = self._store.resolve_redirect(clean_mbid)
 
-        cache_key = f"artist_details:{clean_mbid.lower()}"
+        cache_key = f"artist_details:v2:{clean_mbid.lower()}"
         hit, cached_data = self._lookup(cache_key, force=force)
         if hit:
             return cached_data
 
         try:
             url = f"{self.base_url}/ws/2/artist/{clean_mbid}"
-            params = {"inc": "genres+tags+url-rels", "fmt": "json"}
+            params = {"inc": "genres+tags+url-rels+artist-rels", "fmt": "json"}
             resp = self._request(url, params=params)
             if resp is None or resp.status_code != 200:
                 if resp is not None and resp.status_code == 404:
@@ -748,6 +762,7 @@ class MbidEnricherClient:
                     genre_names.append(t)
 
             urls: dict[str, str] = {}
+            current_members: set[str] = set()
             relations = data.get("relations") or []
             if isinstance(relations, list):
                 for rel in relations:
@@ -758,6 +773,28 @@ class MbidEnricherClient:
                             resource = url_obj.get("resource")
                             if resource and rel_type:
                                 urls[rel_type] = str(resource)
+                        direction = str(rel.get("direction") or "").strip().lower()
+                        ended = rel.get("ended")
+                        if rel_type == "member of band" and direction == "backward" and not ended:
+                            artist_dict = rel.get("artist")
+                            if isinstance(artist_dict, dict):
+                                member_id = artist_dict.get("id")
+                                if member_id and str(member_id).strip():
+                                    current_members.add(str(member_id).strip())
+
+            raw_type = data.get("type")
+            artist_type = str(raw_type).strip().lower() if raw_type and str(raw_type).strip() else None
+
+            if artist_type == "person":
+                member_count: Optional[int] = 1
+            elif artist_type in ("group", "orchestra", "choir") and len(current_members) > 0:
+                member_count = len(current_members)
+            else:
+                member_count = None
+
+            life_span = data.get("life-span") if isinstance(data.get("life-span"), dict) else {}
+            begin_year = _year_of(life_span.get("begin"))
+            end_year = _year_of(life_span.get("end"))
 
             result: dict[str, Any] = {
                 "id": data.get("id") or clean_mbid,
@@ -767,9 +804,13 @@ class MbidEnricherClient:
                 "bio": data.get("disambiguation"),
                 "genres": genre_names,
                 "urls": urls,
+                "artist_type": artist_type,
+                "member_count": member_count,
+                "begin_year": begin_year,
+                "end_year": end_year,
             }
             if resp_id and str(resp_id).lower() != clean_mbid.lower():
-                self._remember(f"artist_details:{str(resp_id).lower()}", "artist_details", result)
+                self._remember(f"artist_details:v2:{str(resp_id).lower()}", "artist_details", result)
             self._remember(cache_key, "artist_details", result)
             return result
 

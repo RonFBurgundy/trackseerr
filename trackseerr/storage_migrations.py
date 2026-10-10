@@ -1,7 +1,7 @@
 """Schema migrations for Trackseerr storage.
 
 Mixed into storage.Database (uses self._lock / self.conn).
-SCHEMA_VERSION (in storage_common) is the baseline version (v71) or the head of the migration list in _migrate.
+BASELINE_VERSION (v71 in storage_common) is the baseline version; SCHEMA_VERSION (v72) is the head of the migration list in _migrate.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import sqlite3
 from typing import Any, Optional
 
 from trackseerr.storage_common import (
+    BASELINE_VERSION,
     _TRACK_DURATION_TOLERANCE,
     SCHEMA_VERSION,
 )
@@ -47,16 +48,16 @@ class MigrationsMixin:
                 )
                 logger.info("[boot] migrations: initialized fresh database at baseline v%d", SCHEMA_VERSION)
                 current_version = SCHEMA_VERSION
-            elif 0 < current_version < SCHEMA_VERSION:
+            elif 0 < current_version < BASELINE_VERSION:
                 msg = (
-                    f"Database schema v{current_version} predates the v{SCHEMA_VERSION} baseline; "
+                    f"Database schema v{current_version} predates the v{BASELINE_VERSION} baseline; "
                     "this build cannot upgrade it. Delete the database file and start fresh."
                 )
                 logger.error(msg)
                 raise RuntimeError(msg)
 
             migrations: list[tuple[int, Any]] = [
-                # Append (72, self._migration_v72) here for future versions.
+                (72, self._migration_v72),
             ]
 
             applied = 0
@@ -80,6 +81,23 @@ class MigrationsMixin:
             # Idempotent (column-existence guarded), so it is deliberately not version-numbered.
             self._ensure_naming_formats(cur)
             self.conn.commit()
+
+    def _migration_v72(self, cur: sqlite3.Cursor) -> None:
+        """v72: Add artist metadata columns and indexes to library_artists."""
+        cur.execute("PRAGMA table_info(library_artists)")
+        existing_cols = {row[1] for row in cur.fetchall()}
+        columns = [
+            ("artist_type", "TEXT"),
+            ("member_count", "INTEGER"),
+            ("begin_year", "INTEGER"),
+            ("end_year", "INTEGER"),
+            ("popularity", "INTEGER"),
+        ]
+        for col, col_type in columns:
+            if col not in existing_cols:
+                cur.execute(f"ALTER TABLE library_artists ADD COLUMN {col} {col_type}")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_artists_begin_year ON library_artists(begin_year)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_artists_popularity ON library_artists(popularity)")
 
     def _seed_baseline(self, cur: sqlite3.Cursor) -> None:
         """Seed reference rows and runtime settings for the v71 baseline database."""
