@@ -24,6 +24,9 @@ heading becomes the version and date.
 
 ### Changed
 
+- Phone navigation is tidier: the header shows only the essential shortcuts and no longer scrolls, the Calendar now lives under Wanted, and the notification bell is in the menu drawer (desktop keeps its header bell too).
+- Issues now live under Requests → Issues for admins as well as users; Activity no longer has an Issues tab and notification links open the new page.
+- Library and artist-page tools (select, manual import, rename, retag, scan, refresh, monitored and profile filters) are grouped in a single ⋯ tools menu on every screen size.
 - Databases and backups from before this release can no longer be upgraded or restored: TrackSeerr now starts from a single v71 schema. Start with a fresh database.
 - The app now runs as `python -m trackseerr` (was `python -m plex_playlist_sync`), including the `init-dmz` command.
 - Artist and album metadata from MusicBrainz and Deezer is now stored locally and refreshed on a schedule, so artist refreshes make far fewer requests to those services. Refreshing an artist by hand always fetches fresh data.
@@ -32,6 +35,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Tapping a tab on a phone no longer lands on a different tab because the row jumped back while you were scrolling it.
 - Artists with more than 100 releases now show their complete discography.
 - Albums and artists whose MusicBrainz IDs were merged or changed are relinked automatically.
 - The MusicBrainz mirror setting is now used everywhere; some background tasks ignored it.
