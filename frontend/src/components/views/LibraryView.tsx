@@ -9,6 +9,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useLibraryManager } from '@/hooks/useLibraryManager';
 import { useLibraryFacets } from '@/hooks/useLibraryFacets';
 import { useLibraryFilters } from '@/hooks/useLibraryFilters';
+import { useSmartCollections } from '@/hooks/useSmartCollections';
 import { useTags } from '@/hooks/useTags';
 import { useToast } from '@/hooks/useToast';
 import type { ManualImportScope } from '@/types/manualImport';
@@ -33,6 +34,7 @@ import {
   type RenameScope,
   RetagModal,
   type RetagScope,
+  SmartCollectionDetail,
   TracksPanel,
 } from '@/components/library';
 import { SmartCollectionModal } from '@/components/playlists';
@@ -117,6 +119,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const manager = useLibraryManager(isAdmin);
   const drill = useLibraryDrilldown(route, onNavigate, onNavigateUp, showToast);
   const { artistId: selectedArtistId, collectionId: selectedCollectionId, closeDetail } = drill;
+  const [selectedSmartCollectionId, setSelectedSmartCollectionId] = useState<string | null>(null);
+
   const onSubChange = useCallback(
     (sub: LibraryTab, options?: NavigateOptions): void => onNavigate({ tab: 'library', sub }, options),
     [onNavigate]
@@ -136,6 +140,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const lidarrMode = (manager.state?.mode ?? listMode) === 'lidarr';
   // Collections reference native album rows, so adding albums to them is a native-mode action.
   const canCollect = !lidarrMode;
+
+  const smartCollectionsHook = useSmartCollections(!lidarrMode);
+  const {
+    collections: smartCollections,
+    loading: smartCollectionsLoading,
+    reload: reloadSmartCollections,
+  } = smartCollectionsHook;
 
   const { tags } = useTags(Boolean(isAdmin && !lidarrMode));
   const { facets } = useLibraryFacets(Boolean(isAdmin && !lidarrMode));
@@ -272,7 +283,10 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           open={isSmartModalOpen}
           onClose={() => setIsSmartModalOpen(false)}
           initialFilters={filters}
-          onSaved={() => showToast('Smart collection created — find it under Playlists')}
+          onSaved={() => {
+            showToast('Smart collection created — find it under Playlists');
+            void reloadSmartCollections();
+          }}
           users={users}
           currentUserId={currentUserId}
           canTargetUsers={canTargetUsers}
@@ -330,6 +344,29 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             onDelete={(id, name) => void handleDeleteCollection(id, name)}
             onChanged={refresh}
             onToast={showToast}
+          />
+        </PageFrame>
+        {overlays}
+      </>
+    );
+  }
+
+  if (selectedSmartCollectionId !== null) {
+    return (
+      <>
+        <PageFrame nav={toastNode} scroll={false}>
+          <SmartCollectionDetail
+            collectionId={selectedSmartCollectionId}
+            isAdmin={isAdmin}
+            onBack={() => setSelectedSmartCollectionId(null)}
+            onDeleted={() => {
+              void reloadSmartCollections();
+            }}
+            onToast={showToast}
+            users={users}
+            currentUserId={currentUserId}
+            canTargetUsers={canTargetUsers}
+            serverLabel={serverLabel}
           />
         </PageFrame>
         {overlays}
@@ -557,6 +594,14 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             onDelete={(id, name) => void handleDeleteCollection(id, name)}
             onCreated={handleCollectionCreated}
             onToast={showToast}
+            smartCollections={smartCollections}
+            smartLoading={smartCollectionsLoading}
+            onOpenSmartCollection={(id) => setSelectedSmartCollectionId(id)}
+            onReloadSmartCollections={reloadSmartCollections}
+            users={users}
+            currentUserId={currentUserId}
+            canTargetUsers={canTargetUsers}
+            serverLabel={serverLabel}
           />
         ))}
     </PageFrame>

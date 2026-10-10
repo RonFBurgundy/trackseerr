@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import type { CollectionItem } from '@/types/models';
+import type { CollectionItem, Playlist, User } from '@/types/models';
 import { MachinedCard, TapeDeckButton } from '@/components/ui';
 import { CollectionArt } from './CollectionArt';
 import { CreateCollectionModal } from './CreateCollectionModal';
+import { SmartCollectionsSection } from './SmartCollectionsSection';
 
 export interface CollectionsPanelProps {
   collections: CollectionItem[];
@@ -12,6 +13,14 @@ export interface CollectionsPanelProps {
   onDelete: (collectionId: string, name: string) => void;
   onCreated: (name: string) => void | Promise<void>;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
+  smartCollections?: Playlist[];
+  smartLoading?: boolean;
+  onOpenSmartCollection?: (id: string) => void;
+  onReloadSmartCollections?: () => Promise<void> | void;
+  users?: User[];
+  currentUserId?: string;
+  canTargetUsers?: boolean;
+  serverLabel?: string;
 }
 
 /** Collections are a short, user-curated list, so they render as a plain grid (no paging). */
@@ -22,20 +31,43 @@ export const CollectionsPanel: React.FC<CollectionsPanelProps> = ({
   onDelete,
   onCreated,
   onToast,
+  smartCollections = [],
+  smartLoading = false,
+  onOpenSmartCollection,
+  onReloadSmartCollections,
+  users = [],
+  currentUserId,
+  canTargetUsers = false,
+  serverLabel = 'Plex',
 }) => {
   const [createOpen, setCreateOpen] = useState<boolean>(false);
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between pb-2 border-b border-[#1f1f1f]">
-        <span className="text-xs font-mono uppercase tracking-wider text-neutral-400">
-          Custom Collections ({collections.length})
-        </span>
-        {isAdmin && (
-          <TapeDeckButton size="sm" variant="amber" onClick={() => setCreateOpen(true)} icon={<Plus className="h-3.5 w-3.5" />}>
-            New Collection
-          </TapeDeckButton>
-        )}
-      </div>
+    <div className="space-y-8">
+      {onOpenSmartCollection && onReloadSmartCollections && (
+        <SmartCollectionsSection
+          collections={smartCollections}
+          loading={smartLoading}
+          isAdmin={isAdmin}
+          onOpen={onOpenSmartCollection}
+          onReload={onReloadSmartCollections}
+          users={users}
+          currentUserId={currentUserId}
+          canTargetUsers={canTargetUsers}
+          serverLabel={serverLabel}
+        />
+      )}
+
+      <div className="space-y-4">
+        <div className="flex items-center justify-between pb-2 border-b border-[#1f1f1f]">
+          <span className="text-xs font-mono uppercase tracking-wider text-neutral-400">
+            Album collections ({collections.length})
+          </span>
+          {isAdmin && (
+            <TapeDeckButton size="sm" variant="amber" onClick={() => setCreateOpen(true)} icon={<Plus className="h-3.5 w-3.5" />}>
+              New Collection
+            </TapeDeckButton>
+          )}
+        </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
         {collections.map((col) => (
@@ -95,6 +127,7 @@ export const CollectionsPanel: React.FC<CollectionsPanelProps> = ({
         onCreated={onCreated}
         onToast={onToast}
       />
+      </div>
     </div>
   );
 };
