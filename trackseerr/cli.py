@@ -726,9 +726,8 @@ def _run_without_web(config: Config, clients: _Clients) -> int:
     return 0
 
 
-def _open_database(config: Config, role: str, db_base_dir: str | None = None) -> Database | None:
-    if db_base_dir is None:
-        db_base_dir = _db_base_dir(config)
+def _open_database(config: Config, role: str) -> Database | None:
+    db_base_dir = _db_base_dir(config)
     with boot_state.step_timer("database open + migrations", publish=False):
         if role == "gateway":
             try:

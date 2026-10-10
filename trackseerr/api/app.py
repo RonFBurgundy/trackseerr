@@ -163,22 +163,7 @@ def response_validation_error_response(request: Request, exc: Exception) -> JSON
     return JSONResponse(status_code=500, content={"detail": "Internal response error"})
 
 
-def create_app(  # noqa: C901, PLR0915
-    db: Optional[Database] = None,
-    config: Optional[Config] = None,
-) -> FastAPI:
-    """Creates and configures a FastAPI application instance."""
-    _enforce_internal_secret(config)
-    _enforce_role_environment(config)
-    docs_enabled = os.getenv("ENABLE_API_DOCS", "").strip() == "1"
-    app = FastAPI(
-        title="TrackSeerr API",
-        version=__version__,
-        docs_url="/api/docs" if docs_enabled else None,
-        redoc_url="/api/redoc" if docs_enabled else None,
-        openapi_url="/api/openapi.json" if docs_enabled else None,
-    )
-
+def _attach_state(app: FastAPI, db: Optional[Database], config: Optional[Config]) -> None:
     # Attach instances to app state if provided
     if db is not None:
         app.state.db = db
@@ -193,6 +178,8 @@ def create_app(  # noqa: C901, PLR0915
         app.state.config = config
         _setup_logging_or_fail(config)
 
+
+def _install_middleware(app: FastAPI) -> None:
     # 0. Two-tier security: hash signed bodies (all roles); deny-by-default guard (gateway role only, checked per request)
     # Added last = outermost: forged X-TS-* headers are refused on a gateway before the guard forwards anything.
     app.add_middleware(GatewayGuardMiddleware)
@@ -232,6 +219,8 @@ def create_app(  # noqa: C901, PLR0915
     app.add_exception_handler(MediaServerUnavailable, media_server_unavailable_response)
     app.add_exception_handler(ResponseValidationError, response_validation_error_response)
 
+
+def _build_api_router(app: FastAPI) -> APIRouter:
     # 3. Mount Routers under /api
     api_router = APIRouter(prefix="/api")
     api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -308,11 +297,10 @@ def create_app(  # noqa: C901, PLR0915
             return JSONResponse(body)
         return JSONResponse(body, status_code=503, headers={"Retry-After": "5"})
 
-    app.include_router(api_router)
+    return api_router
 
-    # Outermost: while the process is still booting, every /api route except health answers 503.
-    app.add_middleware(StartupGateMiddleware)
 
+def _mount_frontend(app: FastAPI) -> None:
     # 4. Mount Static Directory & SPA Assets & Serve Root
     static_dir = Path(__file__).resolve().parent.parent / "static"
     static_dir.mkdir(parents=True, exist_ok=True)
@@ -396,6 +384,29 @@ def create_app(  # noqa: C901, PLR0915
         # The URL carries a secret: keep the page out of caches.
         return FileResponse(str(target), media_type="text/html", headers={"Cache-Control": "no-store"})
 
+
+def create_app(
+    db: Optional[Database] = None,
+    config: Optional[Config] = None,
+) -> FastAPI:
+    """Creates and configures a FastAPI application instance."""
+    _enforce_internal_secret(config)
+    _enforce_role_environment(config)
+    docs_enabled = os.getenv("ENABLE_API_DOCS", "").strip() == "1"
+    app = FastAPI(
+        title="TrackSeerr API",
+        version=__version__,
+        docs_url="/api/docs" if docs_enabled else None,
+        redoc_url="/api/redoc" if docs_enabled else None,
+        openapi_url="/api/openapi.json" if docs_enabled else None,
+    )
+
+    _attach_state(app, db, config)
+    _install_middleware(app)
+    api_router = _build_api_router(app)
+    app.include_router(api_router)
+    app.add_middleware(StartupGateMiddleware)
+    _mount_frontend(app)
     return app
 
 
