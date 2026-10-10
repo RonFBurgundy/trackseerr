@@ -21,14 +21,13 @@ Keep this container's name as TrackSeerr-Core (Docker DNS resolves containers by
 Unraid publishes the admin port on all host interfaces. Never forward this port on your router; restrict it to your LAN or VPN with your firewall. Set LAN Bind IP to the LAN IP you use.
 
 Network setup (one time):
-1. In the Unraid terminal run:
-   docker network create --internal trackseerr-internal
-   docker network create trackseerr-core-lan
-2. Leave Network Type on Bridge (so Unraid still publishes the admin port) and in Extra Parameters (Advanced view) add:
-   --network=trackseerr-core-lan --network=trackseerr-internal
-   Unraid ignores the Network Type dropdown once Extra Parameters contain a --network flag, so both networks must be listed here. Never add your reverse-proxy/cloudflared network to Core. Needs Docker 25+ (Unraid 7); on older versions leave Extra Parameters empty and after each start run: docker network connect trackseerr-internal TrackSeerr-Core
-3. Use the same INTERNAL_CORE_SECRET on TrackSeerr Requests (generate with: openssl rand -hex 32).
-The internal network name is your choice; keep it identical on both containers. Reach Plex and downloaders by LAN IP.
+1. Pick Core's network. If cloudflared runs on the host network (Network Type Host), use your app network (e.g. proxynet) so Core reaches Plex and your downloaders by container name. If a reverse proxy or cloudflared runs as a container on your app network (SWAG, NPM, Traefik, Caddy), keep Core off it: run docker network create trackseerr-core-lan and use that, reaching Plex and downloaders by LAN IP.
+2. In the Unraid terminal run: docker network create --internal trackseerr-internal
+3. Leave Network Type on Bridge (so Unraid still publishes the admin port) and in Extra Parameters (Advanced view) add both networks:
+   --network=proxynet --network=trackseerr-internal   (or --network=trackseerr-core-lan --network=trackseerr-internal)
+   Unraid ignores the Network Type dropdown once Extra Parameters contain a --network flag. Needs Docker 25+ (Unraid 7); on older versions leave Extra Parameters empty and after each start run: docker network connect trackseerr-internal TrackSeerr-Core
+4. Use the same INTERNAL_CORE_SECRET on TrackSeerr Requests (generate with: openssl rand -hex 32).
+Never give Core a public hostname or proxy host; point the tunnel or proxy at TrackSeerr Requests only. The internal network name is your choice; keep it identical on both containers.
 
 Migrating from all-in-one: edit your existing TrackSeerr container, set ROLE to core, add INTERNAL_CORE_SECRET and set APPLICATION_URL, then apply. Or install this template pointing at the same appdata path. No data migration is needed. Users sign in once more on TrackSeerr Requests. The Plex webhook URL is unchanged.
   </Overview>
