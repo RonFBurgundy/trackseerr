@@ -182,8 +182,9 @@ class TestAuthEndpoints:
     @patch("trackseerr.api.routes.auth.verify_server_access")
     @patch("trackseerr.api.routes.auth.check_plex_pin")
     def test_verify_pin_outsider_403_rejection(
-        self, mock_check_pin, mock_verify_access, app_and_client
+        self, mock_check_pin, mock_verify_access, app_and_client, monkeypatch
     ):
+        monkeypatch.setenv("PLEX_MACHINE_IDENTIFIER", "target-server-123")
         mock_check_pin.return_value = "plex-token-xyz"
         mock_verify_access.return_value = (False, False)  # has_access = False
 
@@ -199,8 +200,9 @@ class TestAuthEndpoints:
     @patch("trackseerr.api.routes.auth.verify_server_access")
     @patch("trackseerr.api.routes.auth.check_plex_pin")
     def test_verify_pin_success_admin_and_cookie_set(
-        self, mock_check_pin, mock_verify_access, mock_get_user, app_and_client, test_db
+        self, mock_check_pin, mock_verify_access, mock_get_user, app_and_client, test_db, monkeypatch
     ):
+        monkeypatch.setenv("PLEX_MACHINE_IDENTIFIER", "target-server-123")
         mock_check_pin.return_value = "plex-token-admin"
         mock_verify_access.return_value = (True, True)  # has_access=True, is_owner=True
         mock_get_user.return_value = {
@@ -238,8 +240,9 @@ class TestAuthEndpoints:
     @patch("trackseerr.api.routes.auth.verify_server_access")
     @patch("trackseerr.api.routes.auth.check_plex_pin")
     def test_verify_pin_success_regular_user(
-        self, mock_check_pin, mock_verify_access, mock_get_user, app_and_client, test_db
+        self, mock_check_pin, mock_verify_access, mock_get_user, app_and_client, test_db, monkeypatch
     ):
+        monkeypatch.setenv("PLEX_MACHINE_IDENTIFIER", "target-server-123")
         mock_check_pin.return_value = "plex-token-friend"
         mock_verify_access.return_value = (True, False)  # has_access=True, is_owner=False
         mock_get_user.return_value = {
@@ -791,7 +794,8 @@ class TestEdgeCasesAndBranchCoverage:
             assert resp.status_code == 500
             assert "machine identifier is not configured" in resp.json()["detail"]
 
-    def test_verify_pin_get_user_plex_auth_error(self, app_and_client):
+    def test_verify_pin_get_user_plex_auth_error(self, app_and_client, monkeypatch):
+        monkeypatch.setenv("PLEX_MACHINE_IDENTIFIER", "machine-1")
         with patch("trackseerr.api.routes.auth.check_plex_pin") as mock_check, \
              patch("trackseerr.api.routes.auth.verify_server_access") as mock_access, \
              patch("trackseerr.api.routes.auth.get_plex_user") as mock_get_user:

@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from trackseerr import internal_auth
 from trackseerr.api import dependencies
 from trackseerr.api.app import create_app
-from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.api.dependencies import get_config, get_db, get_plex_client
 from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.clients.core_client import CoreClient
 from trackseerr.config import Config
@@ -124,7 +124,8 @@ def _plex_login(client: TestClient, user_id: str = "5005"):
         return client.post("/api/auth/plex/verify", json={"pin_id": 1, "target_machine_id": "m1"})
 
 
-def test_plex_sign_in_records_last_login(db, tmp_path):
+def test_plex_sign_in_records_last_login(db, tmp_path, monkeypatch):
+    monkeypatch.setenv("PLEX_MACHINE_IDENTIFIER", "m1")
     client = _client(db, _cfg(tmp_path))
     assert _plex_login(client).status_code == 200
     first = _last_login(db, "5005")
@@ -134,12 +135,28 @@ def test_plex_sign_in_records_last_login(db, tmp_path):
     assert _last_login(db, "5005") == first
 
 
-def test_refused_plex_sign_in_does_not_record_login(db, tmp_path):
+def test_refused_plex_sign_in_does_not_record_login(db, tmp_path, monkeypatch):
+    monkeypatch.setenv("PLEX_MACHINE_IDENTIFIER", "m1")
     db.upsert_user("5005", "plexuser", "p@x.tv", is_admin=False)
     db.set_disabled("5005", True)
     client = _client(db, _cfg(tmp_path))
     assert _plex_login(client).status_code == 403
     assert not _last_login(db, "5005")
+
+
+def test_plex_sign_in_never_trusts_client_machine_id(db, tmp_path, monkeypatch):
+    monkeypatch.delenv("PLEX_MACHINE_IDENTIFIER", raising=False)
+    client = _client(db, _cfg(tmp_path))
+    client.app.dependency_overrides[get_plex_client] = lambda: None
+    with patch("trackseerr.api.routes.auth.check_plex_pin", return_value="tok"), patch(
+        "trackseerr.api.routes.auth.verify_server_access", return_value=(True, False)
+    ) as access, patch(
+        "trackseerr.api.routes.auth.get_plex_user",
+        return_value={"id": "5005", "username": "plexuser", "email": "p@x.tv"},
+    ):
+        resp = client.post("/api/auth/plex/verify", json={"pin_id": 1, "target_machine_id": "m1"})
+    assert resp.status_code != 200
+    access.assert_not_called()
 
 
 def test_gateway_plex_sign_in_asks_core_to_record_login(db, tmp_path, monkeypatch):

@@ -93,7 +93,8 @@ def _local_user(db: Database, username: str = "bob") -> dict[str, Any]:
 # ----------------------------------------------------------------------------------------------------------- auth
 
 
-def test_plex_pin_and_verify(client, db):
+def test_plex_pin_and_verify(client, db, monkeypatch):
+    monkeypatch.setenv("PLEX_MACHINE_IDENTIFIER", "m1")
     pin = {"id": 99, "code": "ABCD", "auth_url": "https://app.plex.tv/auth#?code=ABCD"}
     with patch("trackseerr.api.routes.auth.create_plex_pin", return_value=pin):
         assert _ok(client.post("/api/auth/plex/pin", json={})) == pin
