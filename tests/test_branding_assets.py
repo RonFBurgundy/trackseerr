@@ -142,17 +142,15 @@ class TestStaticWebUIBrandingAssets:
         assert height == 64
 
     def test_index_html_branding_references(self) -> None:
-        index_path = self.static_dir / "index.html"
+        index_path = REPO_ROOT / "frontend" / "index.html"
         assert index_path.is_file(), f"Missing {index_path}"
         html = index_path.read_text(encoding="utf-8")
 
-        # Favicons in <head>
-        assert '<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">' in html
-        assert '<link rel="alternate icon" type="image/png" href="/static/favicon.png">' in html
-
-        # Logo in navigation brand header
-        assert 'src="/static/trackseerr-logo.svg"' in html
-        assert 'alt="TrackSeerr"' in html
+        # Favicons, apple-touch-icon, and manifest in <head>
+        assert '<link rel="manifest" href="/manifest.json" />' in html
+        assert '<link rel="apple-touch-icon" href="/apple-touch-icon.png" />' in html
+        assert '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />' in html
+        assert '<link rel="icon" type="image/png" href="/favicon.png" />' in html
 
 
 class TestReadmeHeroBranding:

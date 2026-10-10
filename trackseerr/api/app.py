@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi.exceptions import ResponseValidationError
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
 
 from trackseerr import __version__
@@ -304,6 +304,17 @@ def _build_api_router(app: FastAPI) -> APIRouter:
     return api_router
 
 
+def _spa_index(dist_dir: Path, headers: Optional[dict[str, str]] = None) -> Response:
+    dist_index = dist_dir / "index.html"
+    if dist_index.is_file():
+        return FileResponse(str(dist_index), media_type="text/html", headers=headers)
+    return HTMLResponse(
+        content="<!doctype html><title>TrackSeerr</title><p>The TrackSeerr web UI is not built. Run <code>npm run build</code> in <code>frontend/</code>.</p>",
+        status_code=200,
+        headers=headers,
+    )
+
+
 def _mount_frontend(app: FastAPI) -> None:
     # 4. Mount Static Directory & SPA Assets & Serve Root
     static_dir = Path(__file__).resolve().parent.parent / "static"
@@ -315,6 +326,12 @@ def _mount_frontend(app: FastAPI) -> None:
     dist_dir = project_root / "frontend" / "dist"
     if not dist_dir.is_dir():
         dist_dir = static_dir / "dist"
+
+    if not (dist_dir / "index.html").is_file():
+        logger.warning(
+            "Web UI bundle not found at %s; serving a placeholder page",
+            dist_dir,
+        )
 
     assets_dir = dist_dir / "assets"
     if assets_dir.is_dir():
@@ -364,29 +381,22 @@ def _mount_frontend(app: FastAPI) -> None:
             include_in_schema=False,
         )
 
-    @app.api_route("/", methods=["GET", "HEAD"], response_class=FileResponse, include_in_schema=False)
-    def serve_index() -> FileResponse:
-        dist_index = dist_dir / "index.html"
-        use_legacy = os.environ.get("TRACKSEERR_LEGACY_UI") == "1"
-        if not use_legacy and dist_index.is_file():
-            return FileResponse(str(dist_index), media_type="text/html")
-        return FileResponse(str(static_dir / "index.html"), media_type="text/html")
+    @app.api_route("/", methods=["GET", "HEAD"], response_class=Response, include_in_schema=False)
+    def serve_index() -> Response:
+        return _spa_index(dist_dir)
 
     @app.api_route(
         "/invite/{token}",
         methods=["GET", "HEAD"],
-        response_class=FileResponse,
+        response_class=Response,
         include_in_schema=False,
     )
-    def serve_invite_page(token: str) -> FileResponse:
+    def serve_invite_page(token: str) -> Response:
         """SPA entry for the invite / password-reset link. Only the exact ``/invite/<urlsafe token>`` shape."""
         if not INVITE_TOKEN_PATH_RE.fullmatch(token):
             raise HTTPException(status_code=404, detail="Not Found")
-        dist_index = dist_dir / "index.html"
-        use_legacy = os.environ.get("TRACKSEERR_LEGACY_UI") == "1"
-        target = dist_index if (not use_legacy and dist_index.is_file()) else static_dir / "index.html"
         # The URL carries a secret: keep the page out of caches.
-        return FileResponse(str(target), media_type="text/html", headers={"Cache-Control": "no-store"})
+        return _spa_index(dist_dir, headers={"Cache-Control": "no-store"})
 
 
 def create_app(

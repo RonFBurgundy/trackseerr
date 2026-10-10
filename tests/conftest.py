@@ -8,12 +8,8 @@ import socket
 # trackseerr import because ApiModel reads it at import time.
 os.environ.setdefault("TRACKSEERR_STRICT_RESPONSES", "1")
 
-# Default to legacy UI for backwards compatibility with existing frontend tests.
-# New React SPA tests explicitly unset or set TRACKSEERR_LEGACY_UI to '0'.
-os.environ["TRACKSEERR_LEGACY_UI"] = "1"
 
 import pytest
-from unittest.mock import patch
 
 # The Lidarr contract tests need a real Lidarr: not even collected unless RUN_INTEGRATION=1 (docs/INTEGRATION_TESTS.md).
 collect_ignore_glob = [] if os.environ.get("RUN_INTEGRATION") == "1" else ["integration/*"]
