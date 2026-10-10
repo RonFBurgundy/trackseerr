@@ -61,6 +61,8 @@ export type RequestItem = Schema<'RequestRecord'>;
 /** A playlist row as `/api/playlists` returns it (`service`, `enabled`, `targets`, `last_synced_at`, `sync_status`). */
 export type Playlist = Narrow<Schema<'PlaylistRecord'>, { monitor_mode: ListMonitorMode }>;
 
+export type FeaturedChart = Schema<'FeaturedChart'>;
+
 export type MissingTrack = Schema<'MissingTrack'>;
 
 export type CollectionItem = Schema<'LibraryCollectionRecord'>;

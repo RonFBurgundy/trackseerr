@@ -1,6 +1,6 @@
 import type { Schema } from '@/types/apiSchema';
 import { apiRequest } from './apiClient';
-import type { Playlist } from '@/types/models';
+import type { Playlist, FeaturedChart } from '@/types/models';
 import type { ListMonitorMode } from '@/types/importLists';
 
 export async function getPlaylists(): Promise<Playlist[]> {
@@ -45,10 +45,16 @@ export async function triggerSync(): Promise<Schema<'SyncTriggerResponse'>> {
   });
 }
 
-/** A Spotify or Deezer playlist by link, or a pasted list of `Artist - Title` lines with a name of the user's choosing. */
+export async function getFeaturedCharts(): Promise<FeaturedChart[]> {
+  const res = await apiRequest<FeaturedChart[]>('/api/playlists/featured');
+  return res || [];
+}
+
+/** A Spotify or Deezer playlist by link, a pasted list of `Artist - Title` lines, or an M3U file upload. */
 export type ImportPlaylistPayload =
-  | { source: 'link'; url: string }
-  | { source: 'tracks'; name: string; tracks: string[] };
+  | { source: 'link'; url: string; service?: string }
+  | { source: 'tracks'; name: string; tracks: string[] }
+  | { source: 'm3u'; name: string; content: string };
 
 /** `Artist - Title` (first separator wins); a line with no separator is taken as a bare title. */
 function parseTrackLine(line: string): { title: string; artist: string } {
@@ -61,7 +67,14 @@ export async function importPlaylist(payload: ImportPlaylistPayload): Promise<vo
   if (payload.source === 'link') {
     await apiRequest<Schema<'PlaylistRecord'>>('/api/playlists', {
       method: 'POST',
-      body: { url_or_id: payload.url },
+      body: { url_or_id: payload.url, ...(payload.service ? { service: payload.service } : {}) },
+    });
+    return;
+  }
+  if (payload.source === 'm3u') {
+    await apiRequest<Schema<'PlaylistImportResponse'>>('/api/playlists/import/m3u', {
+      method: 'POST',
+      body: { name: payload.name, content: payload.content },
     });
     return;
   }
