@@ -29,14 +29,14 @@ const TYPE_FILTERS: readonly IssueType[] = [
 ];
 
 export interface AdminIssuesPanelProps {
-  /** Issue open on top of the queue, from the route (`#/activity/issues/<id>`). */
+  /** Issue open on top of the queue, from the route (`#/requests/issues/<id>`). */
   issueId?: string;
   onOpenIssue: (id: string) => void;
   onCloseIssue: () => void;
   onToast: (message: string, tone?: 'ok' | 'error') => void;
 }
 
-/** Admin issue queue (Activity > Issues). The open issue lives in the URL so Back closes it. */
+/** Admin issue queue (Requests > Issues). The open issue lives in the URL so Back closes it. */
 export const AdminIssuesPanel: React.FC<AdminIssuesPanelProps> = ({ issueId, onOpenIssue, onCloseIssue, onToast }) => {
   const queue = useIssueQueue(true);
   const statusId = useId();

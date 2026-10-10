@@ -7,7 +7,7 @@ import { parseImportHash, storePendingImport, peekPendingImport } from '@/servic
 export type MainTab = 'discover' | 'requests' | 'library' | 'playlists' | 'activity' | 'wanted' | 'settings';
 
 export type RequestsSub = RequestFilter | 'issues';
-export type ActivitySub = 'queue' | 'history' | 'blocklist' | 'review' | 'issues';
+export type ActivitySub = 'queue' | 'history' | 'blocklist' | 'review';
 export type WantedSub = WantedListName | 'calendar';
 
 export type SettingsSection = 'general' | 'media-management' | 'lidarr' | 'requests' | 'system' | 'account';
@@ -35,11 +35,17 @@ export interface DiscoverRoute {
   artistId?: string;
 }
 
-/** Activity sub-page; `issueId` opens one issue on `#/activity/issues/<id>`. */
+/** Requests sub-page; `issueId` opens one issue on `#/requests/issues/<id>`. */
+export interface RequestsRoute {
+  tab: 'requests';
+  sub: RequestsSub;
+  issueId?: string;
+}
+
+/** Activity sub-page. */
 export interface ActivityRoute {
   tab: 'activity';
   sub: ActivitySub;
-  issueId?: string;
 }
 
 export interface LibraryRoute {
@@ -48,11 +54,11 @@ export interface LibraryRoute {
   detail?: LibraryDetail;
 }
 
-/** Current location. `sub` is always present for tabs that have sub-pages; `leaf` only under settings sections with children. */
+/** Current location. `sub` is always present for tabs that have sub-page; `leaf` only under settings sections with children. */
 export type AppRoute =
   | DiscoverRoute
   | { tab: 'playlists' }
-  | { tab: 'requests'; sub: RequestsSub }
+  | RequestsRoute
   | LibraryRoute
   | ActivityRoute
   | { tab: 'wanted'; sub: WantedSub }
@@ -79,7 +85,7 @@ function prevHashOf(state: unknown): string | undefined {
 export const MAIN_TABS: readonly MainTab[] = ['discover', 'requests', 'library', 'playlists', 'activity', 'wanted', 'settings'];
 export const REQUESTS_SUBS: readonly RequestsSub[] = ['all', 'pending', 'approved', 'fulfilled', 'rejected', 'issues'];
 export const LIBRARY_SUBS: readonly LibraryTab[] = ['artists', 'albums', 'tracks', 'collections'];
-export const ACTIVITY_SUBS: readonly ActivitySub[] = ['queue', 'history', 'blocklist', 'review', 'issues'];
+export const ACTIVITY_SUBS: readonly ActivitySub[] = ['queue', 'history', 'blocklist', 'review'];
 export const WANTED_SUBS: readonly WantedSub[] = ['missing', 'cutoff', 'calendar'];
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   'general',
@@ -157,7 +163,7 @@ export function routeToHash(route: AppRoute): string {
   if ('sub' in route) parts.push(route.sub);
   if ('leaf' in route) parts.push(route.leaf);
   if (route.tab === 'library') parts.push(...libraryDetailSegments(route.detail));
-  if (route.tab === 'activity' && route.sub === 'issues' && route.issueId) parts.push(encodeURIComponent(route.issueId));
+  if (route.tab === 'requests' && route.sub === 'issues' && route.issueId) parts.push(encodeURIComponent(route.issueId));
   if (route.tab === 'discover' && route.artistId) parts.push('artist', encodeURIComponent(route.artistId));
   return `#/${parts.join('/')}`;
 }
@@ -219,18 +225,18 @@ export function parseRouteHash(hash: string): AppRoute | null {
       const artistId = sub === 'artist' ? decodeSegment(segments[2]) : undefined;
       return artistId === undefined ? { tab } : { tab, artistId };
     }
-    case 'requests':
-      return { tab, sub: pick(REQUESTS_SUBS, sub) ?? 'all' };
+    case 'requests': {
+      const requestsSub = pick(REQUESTS_SUBS, sub) ?? 'all';
+      const issueId = requestsSub === 'issues' ? decodeSegment(segments[2]) : undefined;
+      return issueId === undefined ? { tab, sub: requestsSub } : { tab, sub: requestsSub, issueId };
+    }
     case 'library': {
       const librarySub = pick(LIBRARY_SUBS, sub) ?? 'artists';
       const detail = parseLibraryDetail(segments.slice(2));
       return detail ? { tab, sub: librarySub, detail } : { tab, sub: librarySub };
     }
-    case 'activity': {
-      const activitySub = pick(ACTIVITY_SUBS, sub) ?? 'queue';
-      const issueId = activitySub === 'issues' ? decodeSegment(segments[2]) : undefined;
-      return issueId === undefined ? { tab, sub: activitySub } : { tab, sub: activitySub, issueId };
-    }
+    case 'activity':
+      return { tab, sub: pick(ACTIVITY_SUBS, sub) ?? 'queue' };
     case 'wanted':
       return { tab, sub: pick(WANTED_SUBS, sub) ?? 'missing' };
     case 'settings':

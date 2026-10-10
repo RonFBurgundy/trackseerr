@@ -130,9 +130,9 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({
   const openExisting = (): void => {
     if (!duplicateId) return;
     if (isAdmin) {
-      // Admins manage it in the Activity queue.
+      // Admins manage it in the Requests queue.
       onClose();
-      window.location.hash = `#/activity/issues/${encodeURIComponent(duplicateId)}`;
+      window.location.hash = `#/requests/issues/${encodeURIComponent(duplicateId)}`;
       return;
     }
     setViewingId(duplicateId);
