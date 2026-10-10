@@ -14,7 +14,7 @@ TrackSeerr imports playlists from outside sources, matches each track to your li
 
 ## Add a playlist
 
-Open **Playlists** and click **Add Playlist**. There are four ways to add one.
+Open **Playlists** and click **Add Playlist**. There are six ways to add one.
 
 ### By Link
 
@@ -27,6 +27,10 @@ https://www.deezer.com/playlist/1313621735
 
 No Spotify API key is needed. TrackSeerr reads the public playlist page. Private playlists and Spotify Liked Songs cannot be read this way; use **Paste Tracks** for those.
 
+### Featured
+
+The **Featured** tab lists popular charts, such as Billboard Hot 100 and Deezer Top Worldwide. Click **Add** to sync one like any linked playlist.
+
 ### Paste Tracks
 
 Give the playlist a name and paste one track per line, in the form `Artist - Title`:
@@ -38,6 +42,10 @@ Carpenter Brut - Turbo Killer
 ```
 
 This works for any source you can copy text from.
+
+### Upload .m3u
+
+Pick an `.m3u` or `.m3u8` file (up to 2 MB) and give the playlist a name. Tracks are matched by the `#EXTINF` artist and title, or by file path against your library. Use this for playlists exported from a media player or another library manager.
 
 ### 1-Click Helper
 
