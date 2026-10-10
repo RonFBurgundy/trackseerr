@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, X, LogOut, Shield, User as UserIcon } from 'lucide-react';
+import { ChevronDown, X, LogOut, Shield, User as UserIcon, Bell } from 'lucide-react';
 import type { AppRoute, Navigate } from '@/hooks/useAppRoute';
 import type { DeploymentTier, User, UserQuota } from '@/types/models';
 import { TapeDeckButton, QuotaBadge } from '@/components/ui';
@@ -21,6 +21,8 @@ export interface NavHubProps {
   reviewCount?: number;
   issuesOpenCount?: number;
   issuesUnreadCount?: number;
+  unreadNotificationsCount?: number;
+  onOpenInbox?: () => void;
   /** Admin only: software update available. */
   updateAvailable?: boolean;
   onLogout?: () => void;
@@ -153,6 +155,8 @@ const HubPanel: React.FC<NavHubProps> = ({
   reviewCount = 0,
   issuesOpenCount = 0,
   issuesUnreadCount = 0,
+  unreadNotificationsCount = 0,
+  onOpenInbox,
   updateAvailable = false,
   onLogout,
   tier = 'all-in-one',
@@ -274,6 +278,29 @@ const HubPanel: React.FC<NavHubProps> = ({
                   </span>
                 </div>
               </div>
+              {onOpenInbox && (
+                <TapeDeckButton
+                  size="sm"
+                  variant="default"
+                  onClick={() => {
+                    onClose();
+                    onOpenInbox();
+                  }}
+                  title="Notifications"
+                  aria-label={`Notifications${unreadNotificationsCount > 0 ? ` (${unreadNotificationsCount} unread)` : ''}`}
+                  icon={<Bell className="h-4 w-4 text-neutral-300" />}
+                  className="relative w-9 h-9 !min-h-0 p-0 rounded-[3px] shrink-0"
+                >
+                  {unreadNotificationsCount > 0 && (
+                    <span
+                      className="absolute -top-1 -right-1 min-w-[14px] px-0.5 rounded-[3px] bg-[var(--accent-amber)] text-[9px] leading-[14px] font-mono font-bold text-black text-center"
+                      aria-hidden="true"
+                    >
+                      {unreadNotificationsCount}
+                    </span>
+                  )}
+                </TapeDeckButton>
+              )}
             </div>
             <QuotaBadge quota={quota} className="w-full justify-between" />
           </div>

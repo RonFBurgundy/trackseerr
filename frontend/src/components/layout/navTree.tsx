@@ -1,5 +1,5 @@
 import React from 'react';
-import { Compass, Inbox, Library, ListMusic, Activity, ListTodo, Calendar, Settings } from 'lucide-react';
+import { Compass, Inbox, Library, ListMusic, Activity, ListTodo, Settings } from 'lucide-react';
 import { defaultRoute, routeToHash, settingsRouteFor } from '@/hooks/useAppRoute';
 import type { AppRoute } from '@/hooks/useAppRoute';
 import { buildSettingsTree, hasChildRow, resolveSettingsRoute } from '@/components/settings/settingsTabs';
@@ -37,7 +37,7 @@ export const routesEqual = (a: AppRoute, b: AppRoute): boolean => routeToHash(wi
 /** Clamp a location to what this user may open (MFA enrollment, admin-only tabs, hidden settings pages). */
 export function gateRoute(route: AppRoute, access: RouteAccess): AppRoute {
   if (access.mfaEnrollmentRequired) return resolveSettingsRoute(settingsRouteFor('account'), false, true);
-  if (!access.isAdmin && (route.tab === 'library' || route.tab === 'activity' || route.tab === 'wanted' || route.tab === 'calendar')) {
+  if (!access.isAdmin && (route.tab === 'library' || route.tab === 'activity' || route.tab === 'wanted')) {
     return defaultRoute('discover');
   }
   if (route.tab === 'settings') return resolveSettingsRoute(route, access.isAdmin, false);
@@ -153,14 +153,8 @@ export function buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount = 0, 
         children: [
           leaf('wanted/missing', 'Missing', { tab: 'wanted', sub: 'missing' }),
           leaf('wanted/cutoff', 'Cutoff Unmet', { tab: 'wanted', sub: 'cutoff' }),
+          leaf('wanted/calendar', 'Calendar', { tab: 'wanted', sub: 'calendar' }),
         ],
-      },
-      {
-        key: 'calendar',
-        label: 'Calendar',
-        description: 'Upcoming & recent album releases',
-        icon: <Calendar className={ico} />,
-        route: defaultRoute('calendar'),
       }
     );
   }

@@ -44,7 +44,6 @@ import {
   PlaylistsView,
   ActivityView,
   WantedView,
-  CalendarView,
   SettingsView,
   ObsidianModal,
   TapeDeckButton,
@@ -308,6 +307,8 @@ const MainApp: React.FC = () => {
         reviewCount={reviewHealth.count}
         issuesOpenCount={issueCounts.open}
         issuesUnreadCount={issueCounts.unread}
+        unreadNotificationsCount={userNotifications.unreadCount}
+        onOpenInbox={() => setIsInboxOpen(true)}
         tier={identity.tier}
         onLogout={auth.logout}
         onHighlight={highlight}
@@ -542,11 +543,6 @@ const MainApp: React.FC = () => {
               <WantedView
                 sub={activeRoute.sub}
                 onSubChange={(sub, o) => handleNavigate({ tab: 'wanted', sub }, o)}
-              />
-            )}
-
-            {activeRoute.tab === 'calendar' && auth.canUseAdminUi && (
-              <CalendarView
                 onNavigate={handleNavigate}
               />
             )}
