@@ -254,3 +254,90 @@ def test_deezer_artist_albums_survive_non_numeric_nb_tracks(bad):
     assert d is not None
     counts = {a["title"]: a["track_count"] for a in d["albums"]}
     assert counts == {"Bad": None, "Str": 9}
+
+
+def test_native_artist_detail_reports_artist_track_and_file_counts(db: Database):
+    from trackseerr.models import LibraryFile, LibraryTrack
+
+    db.upsert_library_artist(LibraryArtist(id="ar1", name="Artist 1", monitored=True, monitor_option="none"))
+    # Album A is monitored with 3 tracks, 2 of which have a library_files row.
+    db.upsert_library_album(
+        LibraryAlbum(id="alb_a", artist_id="ar1", title="Album A", clean_title="album a", monitored=True)
+    )
+    for i in range(1, 4):
+        db.upsert_library_track(
+            LibraryTrack(id=f"t_a_{i}", album_id="alb_a", artist_id="ar1", title=f"Track A{i}", track_number=i)
+        )
+    db.upsert_library_file(
+        LibraryFile(id="f_a_1", track_id="t_a_1", file_path="/music/a1.mp3", relative_path="a1.mp3", codec="mp3")
+    )
+    db.upsert_library_file(
+        LibraryFile(id="f_a_2", track_id="t_a_2", file_path="/music/a2.mp3", relative_path="a2.mp3", codec="mp3")
+    )
+
+    # Album B is unmonitored with 2 tracks, 1 with a file.
+    db.upsert_library_album(
+        LibraryAlbum(id="alb_b", artist_id="ar1", title="Album B", clean_title="album b", monitored=False)
+    )
+    for i in range(1, 3):
+        db.upsert_library_track(
+            LibraryTrack(id=f"t_b_{i}", album_id="alb_b", artist_id="ar1", title=f"Track B{i}", track_number=i)
+        )
+    db.upsert_library_file(
+        LibraryFile(id="f_b_1", track_id="t_b_1", file_path="/music/b1.mp3", relative_path="b1.mp3", codec="mp3")
+    )
+
+    detail = get_artist("ar1", db=db, client=None, _admin={})
+    assert detail["track_count"] == 3
+    assert detail["total_track_count"] == 5
+    assert detail["track_file_count"] == 3
+    assert detail["album_count"] == 2
+
+
+def test_enrich_artists_reports_track_and_file_counts(db: Database):
+    from trackseerr.api.routes.library._shared import _enrich_artists
+    from trackseerr.models import LibraryFile, LibraryTrack
+
+    db.upsert_library_artist(LibraryArtist(id="ar2", name="Artist 2", monitored=True, monitor_option="none"))
+    # Album A is monitored with 3 tracks, 2 of which have a library_files row.
+    db.upsert_library_album(
+        LibraryAlbum(id="alb_a2", artist_id="ar2", title="Album A2", clean_title="album a2", monitored=True)
+    )
+    for i in range(1, 4):
+        db.upsert_library_track(
+            LibraryTrack(id=f"t_a2_{i}", album_id="alb_a2", artist_id="ar2", title=f"Track A2_{i}", track_number=i)
+        )
+    db.upsert_library_file(
+        LibraryFile(id="f_a2_1", track_id="t_a2_1", file_path="/music/a2_1.mp3", relative_path="a2_1.mp3", codec="mp3")
+    )
+    db.upsert_library_file(
+        LibraryFile(id="f_a2_2", track_id="t_a2_2", file_path="/music/a2_2.mp3", relative_path="a2_2.mp3", codec="mp3")
+    )
+
+    # Album B is unmonitored with 2 tracks, 1 with a file.
+    db.upsert_library_album(
+        LibraryAlbum(id="alb_b2", artist_id="ar2", title="Album B2", clean_title="album b2", monitored=False)
+    )
+    for i in range(1, 3):
+        db.upsert_library_track(
+            LibraryTrack(id=f"t_b2_{i}", album_id="alb_b2", artist_id="ar2", title=f"Track B2_{i}", track_number=i)
+        )
+    db.upsert_library_file(
+        LibraryFile(id="f_b2_1", track_id="t_b2_1", file_path="/music/b2_1.mp3", relative_path="b2_1.mp3", codec="mp3")
+    )
+
+    enriched = _enrich_artists(db, [db.get_library_artist("ar2")])[0]
+    assert enriched["track_count"] == 3
+    assert enriched["total_track_count"] == 5
+    assert enriched["track_file_count"] == 3
+
+
+def test_enrich_artists_artist_without_tracks_reports_zeros(db: Database):
+    from trackseerr.api.routes.library._shared import _enrich_artists
+
+    db.upsert_library_artist(LibraryArtist(id="ar_empty", name="Empty Artist", monitored=True, monitor_option="none"))
+    enriched = _enrich_artists(db, [db.get_library_artist("ar_empty")])[0]
+    assert enriched["track_count"] == 0
+    assert enriched["total_track_count"] == 0
+    assert enriched["track_file_count"] == 0
+
