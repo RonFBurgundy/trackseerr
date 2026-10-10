@@ -17,9 +17,10 @@ Requests has no volumes, no Plex token and no download credentials. It signs eve
 Networking: put this container on the same network as your reverse proxy or cloudflared (e.g. proxynet or a custom bridge), and ALSO on the internal network shared with Core. Cloudflare Tunnel's cloudflared must share a network with Requests, never with Core.
 
 Network setup (one time):
-1. In the Unraid terminal run: docker network create trackseerr-internal
-2. In this container's Extra Parameters (Advanced view) add: --network=trackseerr-internal
-   This second --network flag needs Docker 25+ (Unraid 7). On older versions, remove it and run after the container starts: docker network connect trackseerr-internal TrackSeerr-Requests
+1. In the Unraid terminal run: docker network create --internal trackseerr-internal
+2. In Extra Parameters (Advanced view) add BOTH networks, your proxy network first:
+   --network=proxynet --network=trackseerr-internal
+   (replace proxynet with your reverse-proxy/cloudflared network). Unraid ignores the Network Type dropdown once Extra Parameters contain a --network flag; set the dropdown to the same proxy network anyway so the Docker tab shows it. Needs Docker 25+ (Unraid 7); on older versions pick your proxy network in the dropdown, leave Extra Parameters empty, and after each start run: docker network connect trackseerr-internal TrackSeerr-Requests
 3. Set TRACKSEERR_CORE_URL to Core's container name on that network (the Docker name of the Core container, default http://TrackSeerr-Core:5251; if you rename Core, change this) and use the same INTERNAL_CORE_SECRET as Core.
 The network name is your choice; keep it identical on both containers.
 
