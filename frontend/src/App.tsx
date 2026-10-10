@@ -503,6 +503,10 @@ const MainApp: React.FC = () => {
                 currentPreviewTrackId={audioPlayer.currentTrack?.id}
                 isPreviewPlaying={audioPlayer.isPlaying}
                 requestedIds={requestedIds}
+                users={users}
+                currentUserId={auth.user?.id}
+                canTargetUsers={mediaServer.capabilities.users}
+                serverLabel={mediaServer.label}
               />
             )}
 
@@ -518,7 +522,7 @@ const MainApp: React.FC = () => {
                 onSetMonitorMode={handleSetPlaylistMonitorMode}
                 canAutoRequest={canAutoRequestPlaylists}
                 onSetAutoRequest={handleSetPlaylistAutoRequest}
-                onListeningCreated={loadPlaylistsAndUsers}
+                onPlaylistsChanged={loadPlaylistsAndUsers}
                 onDelete={handleDeletePlaylist}
                 isLoading={isPlaylistsLoading}
                 isAdmin={auth.canUseAdminUi}

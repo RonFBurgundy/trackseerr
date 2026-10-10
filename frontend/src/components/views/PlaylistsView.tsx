@@ -10,6 +10,7 @@ import {
   Headphones,
   AlertCircle,
   History,
+  Sparkles,
 } from 'lucide-react';
 import type { Playlist, User } from '@/types/models';
 import type { ImportPlaylistPayload } from '@/services/playlistService';
@@ -24,6 +25,7 @@ import {
   ConfirmDangerButton,
   MonitorModeSelect,
   CassetteLoader,
+  ToastBanner,
 } from '@/components/ui';
 import { PageFrame } from '@/components/layout';
 import { LIST_MONITOR_MODES, type ListMonitorMode } from '@/types/importLists';
@@ -34,14 +36,21 @@ const NON_ADMIN_MONITOR_MODES: ReadonlyArray<ListMonitorMode> = ['track', 'none'
 const LIST_ONLY_MODES: ReadonlyArray<ListMonitorMode> = ['none'];
 import { PlexPlaylistsSection } from '@/components/plex';
 import { ListeningPlaylistModal } from '@/components/listening';
-import { MissingTracksModal, MatchOverridesModal } from '@/components/playlists';
+import {
+  MissingTracksModal,
+  MatchOverridesModal,
+  SmartCollectionModal,
+  SmartCollectionCardActions,
+} from '@/components/playlists';
 import { useMissingTracks } from '@/hooks/useMissingTracks';
+import { useToast } from '@/hooks/useToast';
 import { consumePendingImport, buildBookmarkletCode } from '@/services/bookmarkletImport';
 import {
   AUTO_REQUEST_DENIED_REASON,
   LISTENING_PROVIDER_LABELS,
   isListeningService,
 } from '@/types/listening';
+import { isSmartCollection } from '@/types/smartCollections';
 import { TailoredMixesSection } from '@/components/mixes';
 import { NoMediaServerNote } from '@/components/mediaServer';
 
@@ -57,8 +66,8 @@ export interface PlaylistsViewProps {
   /** Admin or holder of the auto-request permission: may pick track mode and turn on auto-request. */
   canAutoRequest?: boolean;
   onSetAutoRequest?: (playlist: Playlist, autoRequest: boolean) => Promise<void>;
-  /** Reload the playlists after one was created from the user's listening. */
-  onListeningCreated?: () => Promise<void>;
+  /** Reload the playlists after one was created or synced. */
+  onPlaylistsChanged?: () => Promise<void>;
   onDelete?: (playlistId: number | string) => Promise<void>;
   isLoading?: boolean;
   isAdmin?: boolean;
@@ -85,7 +94,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   onSetMonitorMode,
   canAutoRequest = false,
   onSetAutoRequest,
-  onListeningCreated,
+  onPlaylistsChanged,
   onDelete,
   isLoading = false,
   isAdmin = false,
@@ -93,6 +102,9 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   serverLabel = 'Plex',
   canTargetUsers = true,
 }) => {
+  const { toast, showToast } = useToast();
+  const [isSmartModalOpen, setIsSmartModalOpen] = useState<boolean>(false);
+  const [editingCollectionId, setEditingCollectionId] = useState<string | undefined>(undefined);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [importTab, setImportTab] = useState<'link' | 'paste' | 'listening' | 'helper'>('link');
@@ -200,6 +212,22 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
               </TapeDeckButton>
             )}
 
+            {isAdmin && (
+              <TapeDeckButton
+                size="sm"
+                onClick={() => {
+                  setEditingCollectionId(undefined);
+                  setIsSmartModalOpen(true);
+                }}
+                aria-label="Create smart collection"
+                title="Create smart collection"
+                collapseLabel
+                icon={<Sparkles className="h-3.5 w-3.5 text-[#e5a00d]" />}
+              >
+                Smart collection
+              </TapeDeckButton>
+            )}
+
             <TapeDeckButton
               size="sm"
               onClick={() => setIsImportModalOpen(true)}
@@ -232,6 +260,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
         </div>
       }
     >
+      {toast && <ToastBanner message={toast.message} tone={toast.tone} />}
 
       {/* Loading state */}
       {isLoading && (
@@ -254,14 +283,30 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
               <div>
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <span className="px-2 py-0.5 rounded-[2px] bg-[#1a1a1a] border border-[#2a2a2a] text-[10px] font-mono uppercase text-neutral-300">
-                    {isListeningService(pl.service) ? LISTENING_PROVIDER_LABELS[pl.service] : pl.service}
+                    {isSmartCollection(pl)
+                      ? 'Smart collection'
+                      : isListeningService(pl.service)
+                      ? LISTENING_PROVIDER_LABELS[pl.service]
+                      : pl.service}
                   </span>
                   {onToggleActive && (
-                    <TactileSwitch
-                      checked={pl.enabled}
-                      onChange={(val) => onToggleActive(pl.id, val)}
-                      ariaLabel={`Playlist ${pl.name} active`}
-                    />
+                    <div className="flex items-center gap-2">
+                      {isSmartCollection(pl) && (
+                        <span className="text-[10px] font-mono text-neutral-400">
+                          {pl.enabled ? 'Auto-update' : 'One-time'}
+                        </span>
+                      )}
+                      <TactileSwitch
+                        checked={pl.enabled}
+                        onChange={(val) => onToggleActive(pl.id, val)}
+                        ariaLabel={
+                          isSmartCollection(pl)
+                            ? `Auto-update ${pl.name}`
+                            : `Playlist ${pl.name} active`
+                        }
+                        title={isSmartCollection(pl) ? `Auto-update ${pl.name}` : undefined}
+                      />
+                    </div>
                   )}
                 </div>
 
@@ -296,7 +341,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                     </p>
                   )}
                 </div>
-              ) : (
+              ) : isSmartCollection(pl) ? null : (
                 onSetMonitorMode && (
                   <div className="space-y-1.5 pt-3 border-t border-[#1f1f1f]">
                     <label
@@ -358,7 +403,21 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
 
               {/* Actions */}
               <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
-                {isAdmin && (missingHook.missingCountByPlaylist[pl.id] || 0) > 0 ? (
+                {isSmartCollection(pl) ? (
+                  isAdmin ? (
+                    <SmartCollectionCardActions
+                      playlist={pl}
+                      onEdit={(id) => {
+                        setEditingCollectionId(id);
+                        setIsSmartModalOpen(true);
+                      }}
+                      onPlaylistsChanged={onPlaylistsChanged ?? onSync}
+                      onToast={showToast}
+                    />
+                  ) : (
+                    <span />
+                  )
+                ) : isAdmin && (missingHook.missingCountByPlaylist[pl.id] || 0) > 0 ? (
                   <TapeDeckButton
                     size="sm"
                     variant="amber"
@@ -591,7 +650,21 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
         isOpen={isListeningModalOpen}
         onClose={() => setIsListeningModalOpen(false)}
         canAutoRequest={canAutoRequest}
-        onCreated={onListeningCreated ?? onSync}
+        onCreated={onPlaylistsChanged ?? onSync}
+      />
+
+      <SmartCollectionModal
+        open={isSmartModalOpen}
+        onClose={() => {
+          setIsSmartModalOpen(false);
+          setEditingCollectionId(undefined);
+        }}
+        onSaved={onPlaylistsChanged ?? onSync}
+        collectionId={editingCollectionId}
+        users={users}
+        currentUserId={currentUserId}
+        canTargetUsers={canTargetUsers}
+        serverLabel={serverLabel}
       />
 
       <MissingTracksModal
