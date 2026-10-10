@@ -1,6 +1,7 @@
 """Endpoints for token preview, batch renaming, and audio retagging."""
 
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -475,13 +476,222 @@ def retag_preview(  # noqa: C901, PLR0915
 
     return preview_items
 
+
+@dataclass
+class _RetagRun:
+    db: Database
+    plex_client: Optional[Any]
+    body: RetagApplyRequest
+    media_settings: dict[str, Any]
+    write_tags_setting: bool
+    embed_art_requested: bool
+    total: int
+    results: list[dict[str, Any]] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    retagged_count: int = 0
+    skipped_count: int = 0
+    error_count: int = 0
+    album_retagged_files: dict[str, list[str]] = field(default_factory=dict)
+
+
+def _update_retag_progress(
+    run: _RetagRun,
+    idx: int,
+    job_handle: Optional[Any] = None,
+    run_handle: Optional[Any] = None,
+) -> None:
+    if job_handle is not None and (idx % 5 == 0 or idx == run.total - 1):
+        msg = f"Retagging: {idx + 1}/{run.total} processed ({run.retagged_count} retagged, {run.skipped_count} skipped, {run.error_count} errors)"
+        job_handle.update_message(msg)
+        if run_handle is not None:
+            run_handle.message = msg
+
+
+def _retag_one_file(
+    run: _RetagRun,
+    idx: int,
+    fid: str,
+    job_handle: Optional[Any] = None,
+    run_handle: Optional[Any] = None,
+) -> None:
+    _update_retag_progress(run, idx, job_handle, run_handle)
+
+    f = run.db.get_library_file(fid)
+    if not f:
+        err = f"Library file ID '{fid}' not found"
+        run.results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
+        run.errors.append(err)
+        run.error_count += 1
+        return
+
+    current_path_str = f.get("file_path")
+    if not current_path_str:
+        err = f"Library file '{fid}' has no recorded file path"
+        run.results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
+        run.errors.append(err)
+        run.error_count += 1
+        return
+
+    try:
+        p = validate_media_path(current_path_str, db=run.db)
+        if not p.exists() or not p.is_file():
+            err = f"File '{current_path_str}' does not exist on disk"
+            run.results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
+            run.errors.append(err)
+            run.error_count += 1
+            return
+
+        if p.suffix.lower() not in (".flac", ".mp3", ".m4a", ".aac", ".mp4", ".ogg", ".opus"):
+            skip_msg = f"unsupported format ({p.suffix.lower()})"
+            run.results.append({"file_id": fid, "status": "skipped", "message": skip_msg, "reason": skip_msg})
+            run.skipped_count += 1
+            return
+
+        track = run.db.get_library_track(f["track_id"])
+        if not track:
+            err = f"Track '{f['track_id']}' not found for file '{fid}'"
+            run.results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
+            run.errors.append(err)
+            run.error_count += 1
+            return
+
+        album = run.db.get_library_album(track["album_id"])
+        artist = run.db.get_library_artist(track["artist_id"])
+        if not album or not artist:
+            err = f"Album or artist not found for track '{track['id']}'"
+            run.results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
+            run.errors.append(err)
+            run.error_count += 1
+            return
+
+        # Hard rule: Seeding safety check
+        # Call prepare_file_for_tagging(path, media_settings) and skip if False
+        if not prepare_file_for_tagging(p, run.media_settings):
+            skip_msg = "hardlink keep"
+            run.results.append({"file_id": fid, "status": "skipped", "message": skip_msg, "reason": skip_msg})
+            run.skipped_count += 1
+            return
+
+        # Check write tags vs embed art settings
+        if not run.write_tags_setting and not run.embed_art_requested:
+            skip_msg = "write_audio_tags disabled in media management settings"
+            run.results.append({"file_id": fid, "status": "skipped", "message": skip_msg, "reason": skip_msg})
+            run.skipped_count += 1
+            return
+
+        # Recompute proposed tags server-side (never trust client values)
+        total_discs = _album_total_discs(run.db, track["album_id"])
+        tags_to_write = build_tags_to_write(
+            artist=artist["name"],
+            album=album["title"],
+            title=track["title"],
+            date=album.get("release_date") or album.get("year"),
+            track_number=track.get("track_number"),
+            total_tracks=album.get("total_tracks"),
+            disc_number=track.get("disc_number"),
+            total_discs=total_discs,
+            musicbrainz_artistid=artist.get("mbid"),
+            musicbrainz_albumid=album.get("mb_release_id"),
+            musicbrainz_releasegroupid=album.get("mb_release_group_id"),
+            musicbrainz_trackid=track.get("mb_recording_id"),
+        )
+
+        cover_bytes = _album_cover_bytes(album, file_path=p) if run.embed_art_requested else None
+
+        if not run.write_tags_setting and run.embed_art_requested and not cover_bytes:
+            skip_msg = "no album cover art available to embed"
+            run.results.append({"file_id": fid, "status": "skipped", "message": skip_msg, "reason": skip_msg})
+            run.skipped_count += 1
+            return
+
+        ok = False
+        if run.write_tags_setting:
+            ok = write_audio_tags(p, tags=tags_to_write, cover_art_bytes=cover_bytes)
+        elif run.embed_art_requested and cover_bytes:
+            ok = embed_album_artwork(p, cover_bytes)
+
+        if not ok:
+            err = f"Failed to write audio tags to {p.name}"
+            logger.warning("Retag apply failed for file %s: write_audio_tags returned False", p)
+            run.results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
+            run.errors.append(err)
+            run.error_count += 1
+            return
+
+        # Update size on catalog file
+        try:
+            run.db.upsert_library_file({
+                "id": fid,
+                "track_id": f["track_id"],
+                "file_path": str(p),
+                "relative_path": f.get("relative_path"),
+                "codec": f.get("codec"),
+                "bitrate": f.get("bitrate"),
+                "sample_rate": f.get("sample_rate"),
+                "bits_per_sample": f.get("bits_per_sample"),
+                "quality_name": f.get("quality_name"),
+                "size_bytes": p.stat().st_size if p.exists() else f.get("size_bytes", 0),
+                "cutoff_met": f.get("cutoff_met", True),
+            })
+        except Exception as exc:
+            logger.warning("Could not update library file stats after retag for %s: %s", fid, exc)
+
+        run.album_retagged_files.setdefault(str(album["id"]), []).append(str(p))
+        run.retagged_count += 1
+        run.results.append({"file_id": fid, "status": "ok", "message": None, "reason": None})
+
+    except Exception as exc:
+        logger.exception("Failed to retag file ID %s (%s): %s", fid, current_path_str, redact_text(str(exc)))
+        err = f"Error retagging file '{fid}': {redact_text(str(exc))}"
+        run.results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
+        run.errors.append(err)
+        run.error_count += 1
+
+
+def _finish_retag(
+    run: _RetagRun,
+    run_handle: Optional[Any] = None,
+    job_handle: Optional[Any] = None,
+) -> dict[str, Any]:
+    # Emit an item-history event per album
+    for alb_id, file_paths in run.album_retagged_files.items():
+        emit(
+            run.db,
+            "retagged",
+            album_id=str(alb_id),
+            message=f"Retagged {len(file_paths)} file(s)",
+            details={"count": len(file_paths), "files": file_paths},
+        )
+
+    if run.plex_client and run.retagged_count > 0:
+        try:
+            as_media_server(run.plex_client).refresh_library()
+        except Exception as exc:
+            logger.warning("Error refreshing media-server library after retag: %s", exc)
+
+    summary = f"Retagged {run.retagged_count} file(s), {run.skipped_count} skipped, {run.error_count} error(s)"
+    if job_handle is not None:
+        job_handle.message = summary
+    if run_handle is not None:
+        run_handle.message = summary
+
+    return {
+        "results": run.results,
+        "retagged_count": run.retagged_count,
+        "applied_count": run.retagged_count,
+        "skipped_count": run.skipped_count,
+        "error_count": run.error_count,
+        "errors": run.errors,
+    }
+
+
 @router.post(
     "/retag/apply",
     dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)],
     response_model=RetagApplyResponse,
     response_model_exclude_unset=True,
 )
-def retag_apply(  # noqa: C901, PLR0915
+def retag_apply(
     body: RetagApplyRequest,
     db: Database = Depends(get_db),
     plex_client: Optional[Any] = Depends(get_media_client),
@@ -505,192 +715,27 @@ def retag_apply(  # noqa: C901, PLR0915
             "errors": [],
         }
 
-    def _execute_apply(job_handle: Optional[Any] = None, run_handle: Optional[Any] = None) -> dict[str, Any]:  # noqa: C901, PLR0915
+    def _execute_apply(job_handle: Optional[Any] = None, run_handle: Optional[Any] = None) -> dict[str, Any]:
         media_settings = db.get_media_management_settings()
-        write_tags_setting = bool(media_settings.get("write_audio_tags", True))
-        embed_art_requested = bool(body.embed_art)
-
-        results: list[dict[str, Any]] = []
-        errors: list[str] = []
-        retagged_count = 0
-        skipped_count = 0
-        error_count = 0
-
-        album_retagged_files: dict[str, list[str]] = {}
-        total = len(file_ids)
+        run = _RetagRun(
+            db=db,
+            plex_client=plex_client,
+            body=body,
+            media_settings=media_settings,
+            write_tags_setting=bool(media_settings.get("write_audio_tags", True)),
+            embed_art_requested=bool(body.embed_art),
+            total=len(file_ids),
+        )
 
         for idx, fid in enumerate(file_ids):
-            if job_handle is not None and (idx % 5 == 0 or idx == total - 1):
-                msg = f"Retagging: {idx + 1}/{total} processed ({retagged_count} retagged, {skipped_count} skipped, {error_count} errors)"
-                job_handle.update_message(msg)
-                if run_handle is not None:
-                    run_handle.message = msg
+            _retag_one_file(run, idx, fid, job_handle, run_handle)
 
-            f = db.get_library_file(fid)
-            if not f:
-                err = f"Library file ID '{fid}' not found"
-                results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
-                errors.append(err)
-                error_count += 1
-                continue
-
-            current_path_str = f.get("file_path")
-            if not current_path_str:
-                err = f"Library file '{fid}' has no recorded file path"
-                results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
-                errors.append(err)
-                error_count += 1
-                continue
-
-            try:
-                p = validate_media_path(current_path_str, db=db)
-                if not p.exists() or not p.is_file():
-                    err = f"File '{current_path_str}' does not exist on disk"
-                    results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
-                    errors.append(err)
-                    error_count += 1
-                    continue
-
-                if p.suffix.lower() not in (".flac", ".mp3", ".m4a", ".aac", ".mp4", ".ogg", ".opus"):
-                    skip_msg = f"unsupported format ({p.suffix.lower()})"
-                    results.append({"file_id": fid, "status": "skipped", "message": skip_msg, "reason": skip_msg})
-                    skipped_count += 1
-                    continue
-
-                track = db.get_library_track(f["track_id"])
-                if not track:
-                    err = f"Track '{f['track_id']}' not found for file '{fid}'"
-                    results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
-                    errors.append(err)
-                    error_count += 1
-                    continue
-
-                album = db.get_library_album(track["album_id"])
-                artist = db.get_library_artist(track["artist_id"])
-                if not album or not artist:
-                    err = f"Album or artist not found for track '{track['id']}'"
-                    results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
-                    errors.append(err)
-                    error_count += 1
-                    continue
-
-                # Hard rule: Seeding safety check
-                # Call prepare_file_for_tagging(path, media_settings) and skip if False
-                if not prepare_file_for_tagging(p, media_settings):
-                    skip_msg = "hardlink keep"
-                    results.append({"file_id": fid, "status": "skipped", "message": skip_msg, "reason": skip_msg})
-                    skipped_count += 1
-                    continue
-
-                # Check write tags vs embed art settings
-                if not write_tags_setting and not embed_art_requested:
-                    skip_msg = "write_audio_tags disabled in media management settings"
-                    results.append({"file_id": fid, "status": "skipped", "message": skip_msg, "reason": skip_msg})
-                    skipped_count += 1
-                    continue
-
-                # Recompute proposed tags server-side (never trust client values)
-                total_discs = _album_total_discs(db, track["album_id"])
-                tags_to_write = build_tags_to_write(
-                    artist=artist["name"],
-                    album=album["title"],
-                    title=track["title"],
-                    date=album.get("release_date") or album.get("year"),
-                    track_number=track.get("track_number"),
-                    total_tracks=album.get("total_tracks"),
-                    disc_number=track.get("disc_number"),
-                    total_discs=total_discs,
-                    musicbrainz_artistid=artist.get("mbid"),
-                    musicbrainz_albumid=album.get("mb_release_id"),
-                    musicbrainz_releasegroupid=album.get("mb_release_group_id"),
-                    musicbrainz_trackid=track.get("mb_recording_id"),
-                )
-
-                cover_bytes = _album_cover_bytes(album, file_path=p) if embed_art_requested else None
-
-                if not write_tags_setting and embed_art_requested and not cover_bytes:
-                    skip_msg = "no album cover art available to embed"
-                    results.append({"file_id": fid, "status": "skipped", "message": skip_msg, "reason": skip_msg})
-                    skipped_count += 1
-                    continue
-
-                ok = False
-                if write_tags_setting:
-                    ok = write_audio_tags(p, tags=tags_to_write, cover_art_bytes=cover_bytes)
-                elif embed_art_requested and cover_bytes:
-                    ok = embed_album_artwork(p, cover_bytes)
-
-                if not ok:
-                    err = f"Failed to write audio tags to {p.name}"
-                    logger.warning("Retag apply failed for file %s: write_audio_tags returned False", p)
-                    results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
-                    errors.append(err)
-                    error_count += 1
-                    continue
-
-                # Update size on catalog file
-                try:
-                    db.upsert_library_file({
-                        "id": fid,
-                        "track_id": f["track_id"],
-                        "file_path": str(p),
-                        "relative_path": f.get("relative_path"),
-                        "codec": f.get("codec"),
-                        "bitrate": f.get("bitrate"),
-                        "sample_rate": f.get("sample_rate"),
-                        "bits_per_sample": f.get("bits_per_sample"),
-                        "quality_name": f.get("quality_name"),
-                        "size_bytes": p.stat().st_size if p.exists() else f.get("size_bytes", 0),
-                        "cutoff_met": f.get("cutoff_met", True),
-                    })
-                except Exception as exc:
-                    logger.warning("Could not update library file stats after retag for %s: %s", fid, exc)
-
-                album_retagged_files.setdefault(str(album["id"]), []).append(str(p))
-                retagged_count += 1
-                results.append({"file_id": fid, "status": "ok", "message": None, "reason": None})
-
-            except Exception as exc:
-                logger.exception("Failed to retag file ID %s (%s): %s", fid, current_path_str, redact_text(str(exc)))
-                err = f"Error retagging file '{fid}': {redact_text(str(exc))}"
-                results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
-                errors.append(err)
-                error_count += 1
-
-        # Emit an item-history event per album
-        for alb_id, file_paths in album_retagged_files.items():
-            emit(
-                db,
-                "retagged",
-                album_id=str(alb_id),
-                message=f"Retagged {len(file_paths)} file(s)",
-                details={"count": len(file_paths), "files": file_paths},
-            )
-
-        if plex_client and retagged_count > 0:
-            try:
-                as_media_server(plex_client).refresh_library()
-            except Exception as exc:
-                logger.warning("Error refreshing media-server library after retag: %s", exc)
-
-        summary = f"Retagged {retagged_count} file(s), {skipped_count} skipped, {error_count} error(s)"
-        if job_handle is not None:
-            job_handle.message = summary
-        if run_handle is not None:
-            run_handle.message = summary
-
-        return {
-            "results": results,
-            "retagged_count": retagged_count,
-            "applied_count": retagged_count,
-            "skipped_count": skipped_count,
-            "error_count": error_count,
-            "errors": errors,
-        }
+        return _finish_retag(run, run_handle, job_handle)
 
     if len(file_ids) > 50:
         with track_job("bulk_retag", "Bulk Retag") as job, record_task_run(db, "bulk_retag", TRIGGER_MANUAL) as run:
             return _execute_apply(job_handle=job, run_handle=run)
     else:
         return _execute_apply()
+
 
