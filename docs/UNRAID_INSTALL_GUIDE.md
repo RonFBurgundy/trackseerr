@@ -58,11 +58,14 @@ Next, follow the setup order in [Install guide: first sign-in](INSTALL.md#first-
 
 ## Two containers
 
-1. Create the internal network once, in the Unraid terminal:
+1. Create the networks once, in the Unraid terminal:
 
    ```bash
    docker network create --internal trackseerr-internal
+   docker network create trackseerr-core-lan
    ```
+
+   `trackseerr-internal` links the two containers and has no internet access. `trackseerr-core-lan` is a normal bridge that lets the core reach Plex, your downloaders and the internet.
 
 2. Generate a secret and copy it:
 
@@ -84,22 +87,26 @@ Next, follow the setup order in [Install guide: first sign-in](INSTALL.md#first-
    - **Internal Core Secret**: the secret from step 2.
    - **LAN Bind IP**: your Unraid server's LAN IP.
    - **Application URL**: the public URL users will use.
-   - Plex fields as in the single container.
-   - In **Extra Parameters**, add `--network=trackseerr-internal`.
+   - Plex fields as in the single container. Use LAN IPs for Plex and your downloaders.
+   - Leave **Network Type** on **Bridge**, so Unraid still publishes the admin port.
+   - In **Extra Parameters**, add `--network=trackseerr-core-lan --network=trackseerr-internal`.
+   - Never put the core on your reverse-proxy or Cloudflare Tunnel network.
 
 5. Add **TrackSeerr-Requests** from its template:
    - **Internal Core Secret**: the same secret.
    - **Core URL**: leave it as `http://TrackSeerr-Core:5251`. If you renamed the core container, use the new name.
    - **Application URL**: the same public URL.
    - **Trusted Proxies**: the IP or subnet of your reverse proxy.
-   - Put it on the same network as your reverse proxy.
-   - In **Extra Parameters**, add `--network=trackseerr-internal`.
+   - Set **Network Type** to your reverse-proxy network, for example `proxynet`.
+   - In **Extra Parameters**, add `--network=proxynet --network=trackseerr-internal`, replacing `proxynet` with your reverse-proxy network.
 
 6. Point your reverse proxy or Cloudflare Tunnel at `TrackSeerr-Requests` on port 5250. Never at the core.
 
 Admins use the core at `http://<unraid-ip>:5251`. Everyone else uses the public URL.
 
-Adding a second network in **Extra Parameters** needs Unraid 7 (Docker 25 or later). On older versions, start the container, then run:
+Both networks go in **Extra Parameters** because Unraid ignores the **Network Type** dropdown once Extra Parameters contain a `--network` flag. With only `--network=trackseerr-internal`, the container ends up on the internal network alone: Requests can't see your tunnel or proxy, and the core can't reach Plex.
+
+Multiple `--network` flags need Unraid 7 (Docker 25 or later). On older versions, leave Extra Parameters empty, pick the network in the dropdown (your proxy network for Requests; for the core, Bridge or `trackseerr-core-lan`), start the container, then run:
 
 ```bash
 docker network connect trackseerr-internal TrackSeerr-Core
