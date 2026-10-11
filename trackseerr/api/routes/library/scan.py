@@ -106,12 +106,18 @@ def trigger_lidarr_migration(
 
 @router.get("/migrate-lidarr/status", response_model=MigrationStatus, response_model_exclude_unset=True)
 def get_lidarr_migration_status(
+    config: Config = Depends(get_config),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
-    """Retrieves current Lidarr migration job status."""
-    return lidarr_migration_job.get_status()
+    """Retrieves current Lidarr migration job status (report name falls back to the newest report on disk)."""
+    current = dict(lidarr_migration_job.get_status())
+    if not current.get("report_name"):
+        latest = latest_report_path(config.config_dir)
+        if latest is not None:
+            current["report_name"] = latest.name
+    return current
 
-@router.get("/migrate-lidarr/report")
+@router.get("/migrate-lidarr/report", dependencies=[Depends(require_core_tier)])
 def download_lidarr_import_report(
     config: Config = Depends(get_config),
     _admin: dict[str, Any] = Depends(require_admin),

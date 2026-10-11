@@ -141,6 +141,10 @@ export async function getLidarrStatus(): Promise<LidarrStatus> {
   return apiRequest<LidarrStatus>('/api/library/migrate-lidarr/status');
 }
 
+export function getLidarrImportReportUrl(): string {
+  return '/api/library/migrate-lidarr/report';
+}
+
 export async function startLidarrMigration(
   autoSwitch: boolean = true
 ): Promise<Schema<'MigrationTriggerResponse'>> {
