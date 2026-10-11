@@ -210,3 +210,158 @@ def _embed_artists(scraper, subtitles):
 def test_embed_joined_artists_use_primary_only(scraper):
     artists = _embed_artists(scraper, ["The Offspring,\u00a0Redman", "Tyler, The Creator", "Taylor Swift"])
     assert artists == ["The Offspring", "Tyler, The Creator", "Taylor Swift"]
+
+
+# --- pathfinder paging past the embed's 100-track cap -------------------------------------------
+
+import logging  # noqa: E402
+import urllib.error  # noqa: E402
+
+from trackseerr.clients import spotify_scraper as ss  # noqa: E402
+
+
+def _resp(body):
+    r = MagicMock()
+    r.read.return_value = body if isinstance(body, bytes) else body.encode("utf-8")
+    r.__enter__.return_value = r
+    return r
+
+
+def _embed_html(n, token="TOK123"):
+    entity = {"title": "Big", "trackList": [{"title": f"E{i}", "subtitle": "Art"} for i in range(n)]}
+    payload = {"props": {"pageProps": {"status": 200, "state": {"data": {"entity": entity}}}}}
+    tok = f'"accessToken":"{token}","accessTokenExpirationTimestampMs":1999999999999' if token else ""
+    return f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(payload)}</script><script>{{{tok}}}</script>'
+
+
+def _pf_page(start, count, total):
+    items = [
+        {
+            "itemV2": {
+                "data": {
+                    "name": f"P{start + i}",
+                    "artists": {"items": [{"profile": {"name": "Page Artist"}}]},
+                    "albumOfTrack": {"name": "Page Album"},
+                    "trackDuration": {"totalMilliseconds": 200000},
+                    "uri": f"spotify:track:{start + i}",
+                }
+            }
+        }
+        for i in range(count)
+    ]
+    return json.dumps({"data": {"playlistV2": {"content": {"totalCount": total, "items": items}}}})
+
+
+def _router(embed_html, pathfinder, hash_pages=None):
+    calls = {"pf": [], "other": []}
+
+    def side(req, *a, **k):
+        url = req.full_url
+        if "pathfinder" in url:
+            calls["pf"].append(json.loads(req.data))
+            out = pathfinder(len(calls["pf"]))
+            if isinstance(out, Exception):
+                raise out
+            return _resp(out)
+        calls["other"].append(url)
+        if "/embed/" in url:
+            return _resp(embed_html)
+        if hash_pages and url in hash_pages:
+            return _resp(hash_pages[url])
+        raise urllib.error.URLError("no network")
+
+    return side, calls
+
+
+def _http(code):
+    return urllib.error.HTTPError("u", code, "err", {}, None)
+
+
+def test_pages_past_embed_cap(scraper):
+    side, calls = _router(_embed_html(100), lambda n: _pf_page(100, 50, 150))
+    with patch("urllib.request.urlopen", side_effect=side):
+        tracks = scraper.get_playlist_tracks("big")
+    assert len(tracks) == 150
+    assert calls["pf"][0]["variables"] == {"uri": "spotify:playlist:big", "offset": 100, "limit": 100}
+    assert tracks[0].title == "E0" and tracks[0].album == ""
+    assert (tracks[100].title, tracks[100].artist, tracks[100].album) == ("P100", "Page Artist", "Page Album")
+    assert tracks[100].duration_seconds == 200.0
+
+
+def test_short_embed_skips_pathfinder(scraper):
+    side, calls = _router(_embed_html(40), lambda n: _pf_page(100, 50, 150))
+    with patch("urllib.request.urlopen", side_effect=side):
+        assert len(scraper.get_playlist_tracks("small")) == 40
+    assert calls["pf"] == []
+
+
+def test_no_token_skips_pathfinder(scraper):
+    side, calls = _router(_embed_html(100, token=None), lambda n: _pf_page(100, 50, 150))
+    with patch("urllib.request.urlopen", side_effect=side):
+        assert len(scraper.get_playlist_tracks("notok")) == 100
+    assert calls["pf"] == []
+
+
+def test_pathfinder_429_keeps_embed_tracks_and_warns(scraper, caplog):
+    side, _ = _router(_embed_html(100), lambda n: _http(429))
+    with patch("urllib.request.urlopen", side_effect=side), caplog.at_level(logging.WARNING):
+        assert len(scraper.get_playlist_tracks("rl")) == 100
+    assert "first 100 tracks only" in caplog.text
+
+
+def test_pathfinder_412_rediscovers_hash_once(scraper):
+    new_hash = "a" * 64
+    pages = {
+        "https://open.spotify.com/": '<script src="https://open.spotifycdn.com/cdn/build/web-player/web-player.abc123.js">',
+        "https://open.spotifycdn.com/cdn/build/web-player/web-player.abc123.js": f'x"fetchPlaylistContents","query","{new_hash}"y',
+    }
+    side, calls = _router(_embed_html(100), lambda n: _http(412) if n == 1 else _pf_page(100, 50, 150), pages)
+    with patch("urllib.request.urlopen", side_effect=side):
+        tracks = scraper.get_playlist_tracks("stale")
+    assert len(tracks) == 150
+    assert calls["pf"][-1]["extensions"]["persistedQuery"]["sha256Hash"] == new_hash
+    assert calls["other"].count("https://open.spotify.com/") == 2  # initial discovery + one rediscovery
+
+
+def test_412_twice_gives_up(scraper, caplog):
+    side, calls = _router(_embed_html(100), lambda n: _http(412))
+    with patch("urllib.request.urlopen", side_effect=side), caplog.at_level(logging.WARNING):
+        assert len(scraper.get_playlist_tracks("stale2")) == 100
+    assert len(calls["pf"]) == 2
+    assert "first 100 tracks only" in caplog.text
+
+
+def test_hash_discovery_extracts_from_bundle(scraper):
+    h = "b" * 64
+    pages = {
+        "https://open.spotify.com/": 'a https://open.spotifycdn.com/cdn/build/web-player/web-player.0f9e.js b',
+        "https://open.spotifycdn.com/cdn/build/web-player/web-player.0f9e.js": f'"fetchPlaylist","query","{h}"',
+    }
+    side, _ = _router("", lambda n: "", pages)
+    with patch("urllib.request.urlopen", side_effect=side):
+        assert scraper._pathfinder_hash() == h
+
+
+def test_hash_discovery_failure_uses_default_and_caches(scraper):
+    side, calls = _router("", lambda n: "")
+    with patch("urllib.request.urlopen", side_effect=side):
+        assert scraper._pathfinder_hash() == ss.DEFAULT_PATHFINDER_HASH
+        assert scraper._pathfinder_hash() == ss.DEFAULT_PATHFINDER_HASH
+    assert len(calls["other"]) == 1
+
+
+def test_max_tracks_stops_paging(scraper):
+    side, calls = _router("", lambda n: _pf_page(100 * n, 100, 5000))
+    with patch("urllib.request.urlopen", side_effect=side):
+        out = scraper._fetch_remaining("pl", "tok", 100, max_tracks=300)
+    assert len(out) == 200
+    assert len(calls["pf"]) == 2
+
+
+def test_empty_page_stops_and_blank_names_skipped(scraper):
+    pages = [_pf_page(100, 2, 500), _pf_page(0, 0, 500)]
+    side, calls = _router("", lambda n: pages[n - 1])
+    with patch("urllib.request.urlopen", side_effect=side):
+        out = scraper._fetch_remaining("pl", "tok", 100)
+    assert len(out) == 2 and len(calls["pf"]) == 2
+    assert scraper._parse_pathfinder_items([{"itemV2": {"data": {"name": ""}}}, {}]) == []
