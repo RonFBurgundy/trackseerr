@@ -52,6 +52,7 @@ def _assert_clean(resp_text: str, caplog) -> None:
         assert secret not in caplog.text
 
 
+@pytest.mark.real_client_verify
 def test_download_client_test_redacts(client_and_headers, caplog):
     client, headers = client_and_headers
     caplog.set_level(logging.DEBUG)
