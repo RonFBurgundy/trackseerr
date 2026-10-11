@@ -29,6 +29,7 @@ from trackseerr.quality_store import QualityCatalogMixin
 from trackseerr.delay_store import DelayProfileMixin
 from trackseerr.item_history import ItemHistoryMixin
 from trackseerr.tag_store import TagMixin
+from trackseerr.track_alias_store import TrackAliasStoreMixin
 
 # Re-exported: callers import these from trackseerr.storage.
 from trackseerr.storage_common import (  # noqa: F401
@@ -85,6 +86,7 @@ class Database(
     DelayProfileMixin,
     ItemHistoryMixin,
     TagMixin,
+    TrackAliasStoreMixin,
 ):
     """Thread-safe SQLite database wrapper with WAL mode, foreign keys, and migrations."""
     def __init__(self, db_path: Optional[Union[str, Path]] = None) -> None:

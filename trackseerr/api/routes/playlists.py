@@ -65,6 +65,7 @@ from trackseerr.security import (
     sanitize_text,
 )
 from trackseerr.storage import Database
+from trackseerr.track_alias_store import track_alias_key
 
 logger = logging.getLogger(__name__)
 
@@ -345,6 +346,13 @@ def _track_key(artist: Any, title: Any) -> tuple[str, str]:
     return (str(artist or "").casefold().strip(), str(title or "").casefold().strip())
 
 
+def _alias_suggestion(alias: Optional[dict[str, Any]]) -> Optional[Literal["pending", "approved"]]:
+    """The state of a suggested-match ``alias`` row for a track, or None (ignore rows are not suggestions)."""
+    if alias is None or alias["kind"] != "alias":
+        return None
+    return "approved" if alias["status"] == "approved" else "pending"
+
+
 def _snapshot_entries(playlist: dict[str, Any]) -> list[dict[str, Any]]:
     raw = playlist.get("tracks_json")
     if not raw:
@@ -607,13 +615,20 @@ def get_playlist_tracks_status(
     for row in missing_rows:
         missing_by_key.setdefault(_track_key(row["artist"], row["title"]), row)
 
+    aliases = {a["source_key"]: a for a in db.list_track_aliases() if a["status"] in ("pending", "approved")}
+
     items: list[PlaylistTrackItem] = []
     used: set[int] = set()
     for entry in _snapshot_entries(playlist):
         title = str(entry.get("title") or "")
         artist = str(entry.get("artist") or "")
+        alias = aliases.get(track_alias_key(artist, title))
         row = missing_by_key.get(_track_key(artist, title)) if synced else None
-        if row is not None:
+        if alias is not None and alias["kind"] == "ignore" and alias["status"] == "approved":
+            state, missing_id = "ignored", None
+            if row is not None:
+                used.add(int(row["id"]))
+        elif row is not None:
             used.add(int(row["id"]))
             state, missing_id = "missing", int(row["id"])
         else:
@@ -626,6 +641,7 @@ def get_playlist_tracks_status(
                 album=str(entry.get("album") or ""),
                 status=state,
                 missing_track_id=missing_id,
+                suggestion=_alias_suggestion(alias),
             )
         )
     for row in missing_rows:

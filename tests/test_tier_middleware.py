@@ -75,3 +75,15 @@ def test_gateway_tier_denies_lidarr_compat_routes(gateway_client: TestClient):
     ]:
         resp = gateway_client.request(method, path)
         assert resp.status_code in (403, 404), f"Gateway failed to deny {method} {path}: {resp.status_code}"
+
+
+def test_gateway_tier_denies_track_alias_routes(gateway_client: TestClient):
+    """Track alias management is admin/core-only: the gateway neither serves nor forwards it."""
+    for method, path in [
+        ("GET", "/api/missing/aliases"),
+        ("POST", "/api/missing/aliases"),
+        ("POST", "/api/missing/aliases/1/approve"),
+        ("POST", "/api/missing/aliases/1/reject"),
+        ("DELETE", "/api/missing/aliases/1"),
+    ]:
+        assert gateway_client.request(method, path).status_code in (401, 403, 404), (method, path)

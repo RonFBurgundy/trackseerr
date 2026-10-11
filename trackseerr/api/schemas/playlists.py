@@ -100,8 +100,9 @@ class PlaylistTrackItem(ApiModel):
     title: str
     artist: str
     album: str = ""
-    status: Literal["pending", "matched", "missing"]
+    status: Literal["pending", "matched", "missing", "ignored"]
     missing_track_id: Optional[int] = None
+    suggestion: Optional[Literal["pending", "approved"]] = None
 
 
 class PlaylistTracksResponse(ApiModel):
