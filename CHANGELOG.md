@@ -43,6 +43,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Signing in to the Requests site with an admin account now says to use TrackSeerr Core instead of letting you in to a page where nothing loads.
 - Keyless Spotify playlists match more songs: tracks with several artists match on the main artist, and titles Spotify censors with asterisks ("F**k You") still match the uncensored song in your library or Plex.
 - Scheduled syncs pick up tracks added to or removed from public Spotify playlists when no Spotify API keys are set; before, the first fetched list was reused until restart.
 - Admins can connect Last.fm from the Core admin interface; the connection no longer bounces to the public Requests site and fails with "Authentication required".
