@@ -464,6 +464,112 @@ def test_evaluate_and_rank_quality_and_seeder_tiebreaker():
     assert ranked[2][0].download_id == "c1"
 
 
+def _slsk_profile():
+    return QualityProfile(
+        id="p-slsk",
+        name="Slsk",
+        cutoff="FLAC 16bit",
+        items=[
+            QualityProfileItem(quality="FLAC 16bit", allowed=True, weight=900),
+            QualityProfileItem(quality="MP3 320", allowed=True, weight=800),
+        ],
+    )
+
+
+def _slsk(cid, title, free=True, queue=0, speed=1000, length=None):
+    extra = {"peer": {"has_free_slot": free, "queue_length": queue, "upload_speed": speed}}
+    if length is not None:
+        extra["length_seconds"] = length
+    return AcquisitionSearchResult(
+        download_id=cid, title=title, artist="A", source="slskd", protocol="slskd", extra=extra
+    )
+
+
+_FLAC = "03 Song [FLAC 16bit 44.1kHz]"
+_MP3 = "03 Song [MP3 320]"
+
+
+def _ids(ranked):
+    return [c.download_id for c, _ in ranked]
+
+
+def test_slskd_free_slot_beats_queued_peer_same_quality():
+    cands = [
+        _slsk("queued", _FLAC, free=False, queue=0, speed=9_000_000),
+        _slsk("free", _FLAC, free=True, queue=5, speed=10),
+    ]
+    ranked = AcquisitionCoordinator().evaluate_and_rank(cands, _slsk_profile())
+    assert _ids(ranked) == ["free", "queued"]
+
+
+def test_slskd_shorter_queue_wins_when_no_free_slots():
+    cands = [
+        _slsk("long", _FLAC, free=False, queue=40),
+        _slsk("short", _FLAC, free=False, queue=2),
+    ]
+    ranked = AcquisitionCoordinator().evaluate_and_rank(cands, _slsk_profile())
+    assert _ids(ranked) == ["short", "long"]
+
+
+def test_slskd_quality_still_beats_peer():
+    cands = [
+        _slsk("mp3-free", _MP3, free=True, queue=0),
+        _slsk("flac-queued", _FLAC, free=False, queue=99),
+    ]
+    ranked = AcquisitionCoordinator().evaluate_and_rank(cands, _slsk_profile())
+    assert _ids(ranked) == ["flac-queued", "mp3-free"]
+
+
+def test_non_slskd_ranking_unchanged():
+    def tor(cid, seeders):
+        return AcquisitionSearchResult(
+            download_id=cid, title=_FLAC, artist="A", source="torznab", protocol="torrent", seeders=seeders
+        )
+
+    ranked = AcquisitionCoordinator().evaluate_and_rank([tor("few", 3), tor("many", 30)], _slsk_profile())
+    assert _ids(ranked) == ["many", "few"]
+
+
+def test_slskd_length_mismatch_rejected(test_db):
+    from trackseerr.decision_engine import DurationInfo
+
+    cands = [_slsk("long", _FLAC, length=420), _slsk("ok", _FLAC, length=214)]
+    with patch("trackseerr.acquisition_coordinator.resolve_duration", return_value=DurationInfo(210.0)):
+        ranked = AcquisitionCoordinator().evaluate_and_rank(
+            cands, _slsk_profile(), db=test_db, track_id="t1", item_type="track"
+        )
+    assert _ids(ranked) == ["ok"]
+
+
+def test_length_check_skipped_for_estimated_or_album(test_db):
+    from trackseerr.decision_engine import DurationInfo
+
+    cands = [_slsk("long", _FLAC, length=420)]
+    with patch(
+        "trackseerr.acquisition_coordinator.resolve_duration",
+        return_value=DurationInfo(210.0, estimated=True, source="estimate"),
+    ):
+        est = AcquisitionCoordinator().evaluate_and_rank(
+            cands, _slsk_profile(), db=test_db, track_id="t1", item_type="track"
+        )
+    with patch("trackseerr.acquisition_coordinator.resolve_duration", return_value=DurationInfo(210.0)):
+        alb = AcquisitionCoordinator().evaluate_and_rank(
+            cands, _slsk_profile(), db=test_db, album_id="a1", item_type="album"
+        )
+    assert _ids(est) == ["long"]
+    assert _ids(alb) == ["long"]
+
+
+def test_length_check_skipped_without_length(test_db):
+    from trackseerr.decision_engine import DurationInfo
+
+    with patch("trackseerr.acquisition_coordinator.resolve_duration", return_value=DurationInfo(210.0)):
+        ranked = AcquisitionCoordinator().evaluate_and_rank(
+            [_slsk("nolen", _FLAC)], _slsk_profile(), db=test_db, track_id="t1", item_type="track"
+        )
+    assert _ids(ranked) == ["nolen"]
+
+
 # ---------------------------------------------------------------------------
 # 3. find_client_for_protocol Tests
 # ---------------------------------------------------------------------------
