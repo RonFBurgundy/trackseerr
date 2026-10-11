@@ -37,11 +37,10 @@ def _reset_enricher_fixture():
 
 
 def test_migration_creates_tables_and_version(test_db: Database) -> None:
-    """Fresh Database reaches SCHEMA_VERSION 72 and creates mb cache and redirect tables and indexes."""
-    assert SCHEMA_VERSION == 72
+    """Fresh Database reaches SCHEMA_VERSION and creates mb cache and redirect tables and indexes."""
     cur = test_db.conn.cursor()
     cur.execute("SELECT MAX(version) FROM schema_migrations")
-    assert cur.fetchone()[0] == 72
+    assert cur.fetchone()[0] == SCHEMA_VERSION
 
     cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
     tables = {r[0] for r in cur.fetchall()}
