@@ -552,12 +552,13 @@ def test_length_check_skipped_for_estimated_or_album(test_db):
         est = AcquisitionCoordinator().evaluate_and_rank(
             cands, _slsk_profile(), db=test_db, track_id="t1", item_type="track"
         )
+    folder = _folder("long-folder", ["x.flac"], track_count=1, total=420)
     with patch("trackseerr.acquisition_coordinator.resolve_duration", return_value=DurationInfo(210.0)):
         alb = AcquisitionCoordinator().evaluate_and_rank(
-            cands, _slsk_profile(), db=test_db, album_id="a1", item_type="album"
+            [folder], _slsk_profile(), db=test_db, album_id="a1", item_type="album"
         )
     assert _ids(est) == ["long"]
-    assert _ids(alb) == ["long"]
+    assert _ids(alb) == ["long-folder"]
 
 
 def test_length_check_skipped_without_length(test_db):
@@ -568,6 +569,106 @@ def test_length_check_skipped_without_length(test_db):
             [_slsk("nolen", _FLAC)], _slsk_profile(), db=test_db, track_id="t1", item_type="track"
         )
     assert _ids(ranked) == ["nolen"]
+
+
+# --- Soulseek album folders ------------------------------------------------
+
+_TITLES = ["Title One", "Title Two", "Title Three", "Title Four", "Title Five"]
+
+
+def _folder(cid, names, track_count=None, total=None, title="Album (2011) [FLAC 16bit 44.1kHz]"):
+    extra = {
+        "directory": f"@@u\\Music\\{cid}",
+        "filename": f"@@u\\Music\\{cid}",
+        "files": [{"filename": f"@@u\\Music\\{cid}\\{n}", "size": 1000, "length_seconds": 200} for n in names],
+        "track_count": len(names) if track_count is None else track_count,
+        "total_length_seconds": total,
+        "peer": {"has_free_slot": True, "queue_length": 0, "upload_speed": 1000},
+    }
+    return AcquisitionSearchResult(
+        download_id=cid, title=title, artist="A", source="slskd", protocol="slskd",
+        item_type="album", size_bytes=5000, extra=extra,
+    )
+
+
+def _good_names(n=5):
+    return [f"{i + 1:02d} - {_TITLES[i]}.flac" for i in range(n)]
+
+
+def _seed_tracks(db, titles=_TITLES, discs=1, album_id="alb"):
+    db.upsert_library_artist({"id": "A1", "name": "A1"})
+    db.upsert_library_album({"id": album_id, "artist_id": "A1", "title": album_id})
+    for i, t in enumerate(titles):
+        db.upsert_library_track(
+            {"id": f"{album_id}-t{i}", "album_id": album_id, "artist_id": "A1", "title": t,
+             "track_number": i + 1, "disc_number": 1 + (i % discs), "duration_seconds": 200.0}
+        )
+
+
+def _rank_album(db, cands):
+    return AcquisitionCoordinator().evaluate_and_rank(
+        cands, _slsk_profile(), db=db, album_id="alb", item_type="album"
+    )
+
+
+def test_album_request_ignores_slskd_track_files(test_db):
+    ranked = _rank_album(test_db, [_slsk("file", _FLAC), _folder("dir", _good_names())])
+    assert _ids(ranked) == ["dir"]
+
+
+def test_track_request_ignores_slskd_folders(test_db):
+    ranked = AcquisitionCoordinator().evaluate_and_rank(
+        [_slsk("file", _FLAC), _folder("dir", _good_names())], _slsk_profile(), db=test_db, track_id="t1", item_type="track"
+    )
+    assert _ids(ranked) == ["file"]
+
+
+def test_non_slskd_album_unaffected(test_db):
+    _seed_tracks(test_db)
+    tor = AcquisitionSearchResult(
+        download_id="tor", title="Album [FLAC 16bit 44.1kHz]", artist="A", source="torznab",
+        protocol="torrent", item_type="track", seeders=5,
+    )
+    assert _ids(_rank_album(test_db, [tor])) == ["tor"]
+
+
+def test_slskd_folder_track_count_short_rejected(test_db):
+    _seed_tracks(test_db)
+    assert _rank_album(test_db, [_folder("short", _good_names(4))]) == []
+
+
+def test_slskd_folder_bonus_tracks_tolerated(test_db):
+    _seed_tracks(test_db)
+    ok = _folder("bonus2", _good_names() + ["06 - Extra A.flac", "07 - Extra B.flac"])
+    too_many = _folder("bonus3", _good_names() + ["06 - Extra A.flac", "07 - Extra B.flac", "08 - Extra C.flac"])
+    assert _ids(_rank_album(test_db, [ok, too_many])) == ["bonus2"]
+
+
+def test_slskd_folder_titles_must_match(test_db):
+    _seed_tracks(test_db)
+    wrong = _folder("wrong", [f"{i:02d} - Completely Different {i}.flac" for i in range(1, 6)])
+    ranked = _rank_album(test_db, [wrong, _folder("right", _good_names())])
+    assert _ids(ranked) == ["right"]
+
+
+def test_slskd_folder_multi_disc_rejected(test_db):
+    _seed_tracks(test_db, discs=2)
+    assert _rank_album(test_db, [_folder("multi", _good_names())]) == []
+
+
+def test_slskd_folder_total_length_checked(test_db):
+    _seed_tracks(test_db)
+    from trackseerr.decision_engine import DurationInfo
+
+    cands = [_folder("long", _good_names(), total=1500), _folder("ok", _good_names(), total=1010)]
+    with patch("trackseerr.acquisition_coordinator.resolve_duration", return_value=DurationInfo(1000.0)):
+        ranked = _rank_album(test_db, cands)
+    assert _ids(ranked) == ["ok"]
+
+
+def test_slskd_folder_no_library_tracks_accepted(test_db):
+    ranked = _rank_album(test_db, [_slsk("file", _FLAC), _folder("dir", ["a.flac"])])
+    assert _ids(ranked) == ["dir"]
 
 
 # ---------------------------------------------------------------------------

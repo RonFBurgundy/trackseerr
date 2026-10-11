@@ -24,7 +24,7 @@ from trackseerr.clients.acquisition.base import AcquisitionRetryableError, Acqui
 from trackseerr.item_history import GrabTrigger, emit, emit_named, trigger_kwargs
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.redaction import redact_text
-from trackseerr.search_terms import build_query_ladder, matches_request
+from trackseerr.search_terms import build_query_ladder, matches_request, title_core
 from trackseerr.models import (
     AcquisitionSearchResult,
     ActiveDownload,
@@ -42,6 +42,7 @@ from trackseerr.decision_engine import (
     evaluate_prepared,
     prepare_profile,
     DEFAULT_INDEXER_PRIORITY,
+    phrase_score,
     rank_key,
     resolve_durations,
 )
@@ -84,6 +85,55 @@ def _length_mismatch(
     if abs(actual - expected) <= max(15.0, 0.10 * expected):
         return None
     return f"length {actual}s vs expected {expected:.0f}s"
+
+
+def _slskd_kind_mismatch(cand: AcquisitionSearchResult, item_type: Optional[str]) -> bool:
+    """True when a Soulseek result is the wrong kind: album requests take folders, everything else takes files."""
+    if cand.protocol != "slskd":
+        return False
+    return cand.item_type != ("album" if item_type == "album" else "track")
+
+
+def _folder_mismatch(
+    cand: AcquisitionSearchResult, tracks: list[tuple[int, int, str]], duration: Optional[DurationInfo]
+) -> Optional[str]:
+    """Reason a Soulseek album folder does not match the album's tracklist, else ``None``."""
+    if cand.protocol != "slskd" or cand.item_type != "album" or not tracks:
+        return None
+    extra = _slskd_extra(cand)
+    wanted = len(tracks)
+    count = extra.get("track_count")
+    count = count if isinstance(count, int) and not isinstance(count, bool) else 0
+    if count < wanted or count > wanted + 2:
+        return f"folder has {count} tracks, album has {wanted}"
+    if len({disc for disc, _, _ in tracks}) > 1:
+        return "multi-disc album; Soulseek folder grabs are single-disc only"
+    names = []
+    for f in extra.get("files") or []:
+        if isinstance(f, dict):
+            names.append(str(f.get("filename") or "").replace("\\", "/").rsplit("/", 1)[-1])
+    found = sum(
+        1 for _, _, title in tracks if any(phrase_score(title_core(title), name) >= 80 for name in names)
+    )
+    if found < 0.8 * wanted:
+        return f"only {found}/{wanted} track titles found in folder"
+    total = extra.get("total_length_seconds")
+    if duration is not None and not duration.estimated and isinstance(total, int) and not isinstance(total, bool):
+        if abs(total - duration.seconds) > max(30.0, 0.05 * duration.seconds):
+            return f"folder length {total}s vs album {duration.seconds:.0f}s"
+    return None
+
+
+def _skip_reason(
+    cand: AcquisitionSearchResult,
+    item_type: Optional[str],
+    duration: Optional[DurationInfo],
+    tracks: list[tuple[int, int, str]],
+) -> Optional[str]:
+    """Why a Soulseek candidate must be skipped (wrong kind, folder off the tracklist, wrong length), else ``None``."""
+    if _slskd_kind_mismatch(cand, item_type):
+        return f"{cand.item_type} result does not fit a {item_type or 'track'} request"
+    return _folder_mismatch(cand, tracks, duration) or _length_mismatch(cand, duration, item_type)
 
 
 def candidate_rank(
@@ -430,6 +480,12 @@ class AcquisitionCoordinator:
         prof = _to_quality_profile(profile)
         prepared = prepare_profile(prof)
         duration = resolve_duration(db, album_id, track_id, item_type) if db is not None else None
+        tracks: list[tuple[int, int, str]] = []
+        if item_type == "album" and album_id and db is not None:
+            try:
+                tracks = db.get_album_track_titles(str(album_id))
+            except sqlite3.Error as e:
+                logger.warning("Could not load tracklist for album %s: %s", album_id, e)
         ranked: list[tuple[AcquisitionSearchResult, EvaluationResult]] = []
 
         for candidate in candidates:
@@ -443,9 +499,14 @@ class AcquisitionCoordinator:
                     logger.info("Skipping blocklisted release candidate during evaluation: '%s'", candidate.title)
                     continue
 
-            mismatch = _length_mismatch(candidate, duration, item_type)
-            if mismatch:
-                logger.info("Skipping Soulseek file '%s': %s", candidate.title, mismatch)
+            skip = _skip_reason(candidate, item_type, duration, tracks)
+            if skip:
+                if _slskd_kind_mismatch(candidate, item_type):
+                    logger.debug("Skipping Soulseek result '%s': %s", candidate.title, skip)
+                elif candidate.item_type == "album":
+                    logger.info("Skipping Soulseek folder '%s': %s", candidate.title, skip)
+                else:
+                    logger.info("Skipping Soulseek file '%s': %s", candidate.title, skip)
                 continue
 
             parsed = parse_release_title(candidate.title)
