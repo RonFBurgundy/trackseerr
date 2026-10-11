@@ -103,25 +103,37 @@ class SlskdDriver(AcquisitionDriver):
         parts.append(name)
         return posixpath.join(*parts)
 
+    def _test_failed(self, reason: str, status: Optional[int] = None) -> tuple[bool, str]:
+        """Logs one warning for a failed connection test (never the API key) and returns the failure tuple."""
+        logger.warning(
+            "slskd connection test failed: host=%s status=%s reason=%s",
+            self.host_url,
+            status if status is not None else "n/a",
+            reason,
+        )
+        return False, reason
+
     def test_connection(self) -> tuple[bool, str]:
         """Validates slskd connectivity and API credentials."""
         if not is_safe_service_url(self.host_url):
             return False, "Invalid or prohibited host URL (SSRF defense)"
 
-        auth_failed = "Authentication failed: invalid API key or credentials"
         try:
             with httpx.Client(timeout=5.0) as client:
                 resp = client.get(f"{self.host_url}/api/v0/application", headers=self._headers())
                 if resp.status_code in (401, 403):
-                    return False, auth_failed
+                    return self._test_failed(
+                        "Authentication failed: invalid API key or credentials", resp.status_code
+                    )
                 if resp.status_code != 200:
-                    return False, f"HTTP {resp.status_code}: {resp.text[:120]}"
+                    return self._test_failed(f"HTTP {resp.status_code}: {resp.text[:120]}", resp.status_code)
                 data = resp.json() if resp.text else {}
         except httpx.TimeoutException:
-            return False, "Connection timed out (5s)"
+            return self._test_failed("Connection timed out (5s)")
+        except httpx.TransportError as e:
+            return self._test_failed(f"Could not reach slskd at {self.host_url}: {type(e).__name__}: {e}")
         except (httpx.HTTPError, ValueError) as e:
-            logger.warning("slskd connection test failed at %s: %s", self.host_url, e)
-            return False, f"Connection error: {str(e)}"
+            return self._test_failed(f"Connection error: {type(e).__name__}: {e}")
 
         info = data.get("version") if isinstance(data, dict) else None
         if isinstance(info, dict):

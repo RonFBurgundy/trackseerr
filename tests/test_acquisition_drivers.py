@@ -120,6 +120,26 @@ def test_slskd_test_connection_404_reports_http():
     assert msg.startswith("HTTP 404")
 
 
+def test_slskd_connect_error_message():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with patch("httpx.Client.get", side_effect=httpx.ConnectError("Connection refused")):
+        ok, msg = driver.test_connection()
+    assert ok is False
+    assert msg == "Could not reach slskd at http://slskd.local:5030: ConnectError: Connection refused"
+
+
+def test_slskd_failed_test_logs_warning(caplog):
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with caplog.at_level("WARNING", logger="trackseerr.clients.acquisition.slskd"):
+        with patch("httpx.Client.get", return_value=_slskd_resp(404, text="Not Found")):
+            driver.test_connection()
+    records = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(records) == 1
+    text = records[0].getMessage()
+    assert "http://slskd.local:5030" in text and "404" in text and "Not Found" in text
+    assert "secretkey" not in text
+
+
 def test_slskd_search_music():
     driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
 
