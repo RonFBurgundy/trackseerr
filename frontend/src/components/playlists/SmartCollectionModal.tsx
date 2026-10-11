@@ -46,6 +46,12 @@ export const SmartCollectionModal: React.FC<SmartCollectionModalProps> = ({
 
   const { facets } = useLibraryFacets(open);
   const { tags } = useTags(open);
+  const catalogEmpty =
+    facets !== null &&
+    [facets.genres, facets.decades, facets.countries, facets.album_types, facets.artist_types].every(
+      (list) => list.every((f) => f.count <= 0)
+    ) &&
+    tags.length === 0;
 
   useEffect(() => {
     if (!open) {
@@ -136,6 +142,11 @@ export const SmartCollectionModal: React.FC<SmartCollectionModalProps> = ({
 
         {/* 2. Library Filter Fields */}
         <div className="border-t border-[#222222] pt-4">
+          {catalogEmpty && (
+            <p className="mb-3 text-xs font-mono text-neutral-500">
+              Your library catalog is empty — scan your library before building a smart collection.
+            </p>
+          )}
           <LibraryFilterFields
             filters={editor.filters}
             onChange={editor.setFilters}

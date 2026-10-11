@@ -98,7 +98,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       const res = await startLidarrMigration(true);
       if (res.success) {
         showToast(
-          'Importing from Lidarr. Progress shows on the Library page; TrackSeerr becomes the library manager when it finishes.'
+          'Lidarr import started \u2014 follow it in the task drawer (tap the logo). TrackSeerr becomes the library manager when it finishes.'
         );
         modeSwitch.cancel();
         await libraryManager.refresh();
