@@ -9,6 +9,8 @@ import type {
 // Exact 401 details from trackseerr/local_login.py.
 const DETAIL_MFA_REQUIRED = 'mfa_required';
 const DETAIL_INVALID_CODE = 'Invalid authentication code';
+// Exact 403 detail from trackseerr/api/dependencies.py (DETAIL_ADMIN_USE_CORE).
+const DETAIL_ADMIN_USE_CORE = 'Admin accounts sign in on TrackSeerr Core, not the Requests site';
 
 export const INVALID_LINK_MESSAGE = 'This link is invalid or has expired';
 
@@ -35,6 +37,9 @@ export async function localLogin(payload: LocalLoginPayload): Promise<LocalLogin
       }
       if (err.status === 401) {
         return { kind: 'error', message: 'Invalid username or password' };
+      }
+      if (err.status === 403 && err.message === DETAIL_ADMIN_USE_CORE) {
+        return { kind: 'error', message: DETAIL_ADMIN_USE_CORE };
       }
       if (err.status === 423) {
         return { kind: 'error', message: 'Account temporarily locked. Try again later.' };

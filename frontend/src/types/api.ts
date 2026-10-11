@@ -13269,6 +13269,11 @@ export interface components {
         VerifiedUser: {
             /** Id */
             id: string;
+            /**
+             * Is Admin
+             * @default false
+             */
+            is_admin: boolean;
             /** Username */
             username: string;
         };

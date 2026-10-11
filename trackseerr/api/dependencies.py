@@ -216,6 +216,7 @@ def _forwarded_principal(user: dict[str, Any]) -> dict[str, Any]:
 
 REVOKED_DETAIL = "Session has expired or was revoked"
 MFA_ENROLLMENT_DETAIL = "mfa_enrollment_required"
+DETAIL_ADMIN_USE_CORE = "Admin accounts sign in on TrackSeerr Core, not the Requests site"
 
 
 def get_client_ip(request: Request, config: Config) -> str:
@@ -300,7 +301,7 @@ def core_session_status(
     result: dict[str, Any] = {"valid": body["valid"]}
     if not body["valid"]:
         reason = body.get("reason")
-        result["reason"] = reason if reason in ("disabled", "deleted", "revoked", "mfa_enrollment_required") else "revoked"
+        result["reason"] = reason if reason in ("disabled", "deleted", "revoked", "mfa_enrollment_required", "admin") else "revoked"
     if not use_cache:
         return result
     with _session_status_lock:
@@ -429,8 +430,8 @@ def resolve_signed_principal(
         known.get("is_admin") or int(known.get("permissions") or 0) & int(UserPermission.ADMIN)
     ):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin accounts must use the TrackSeerr Core admin interface",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=DETAIL_ADMIN_USE_CORE,
         )
     try:
         # ensure_user returns the stored row, so the asserted name never renames an existing user.

@@ -7,7 +7,10 @@ import {
   verifyPin,
   logout as apiLogout,
 } from '@/services/authService';
-import { getAuthToken, setAuthToken } from '@/services/apiClient';
+import { ApiError, getAuthToken, setAuthToken } from '@/services/apiClient';
+
+// Exact 403 detail from trackseerr/api/dependencies.py (DETAIL_ADMIN_USE_CORE).
+const DETAIL_ADMIN_USE_CORE = 'Admin accounts sign in on TrackSeerr Core, not the Requests site';
 
 export type PlexAuthPhase = 'idle' | 'starting' | 'popup' | 'blocked' | 'redirecting';
 
@@ -137,7 +140,12 @@ export function useAuth(): UseAuthReturn {
             setUser(verifyRes.user);
             setToken(verifyRes.token);
           }
-        } catch {
+        } catch (err: unknown) {
+          if (err instanceof ApiError && err.status === 403 && err.message === DETAIL_ADMIN_USE_CORE) {
+            cancelLogin();
+            setAuthError(DETAIL_ADMIN_USE_CORE);
+            return;
+          }
           // Still waiting for user authorization or transient network delay
         }
       }, POLL_INTERVAL_MS);
