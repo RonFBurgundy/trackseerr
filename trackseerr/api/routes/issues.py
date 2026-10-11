@@ -8,7 +8,7 @@ user-scoped and forwarded gateway -> core as the signed-in user (never admin). `
 import logging
 import re
 import uuid
-from typing import Annotated, Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
@@ -434,6 +434,69 @@ def open_count(
     }
 
 
+def file_issue(db: Database, current_user: dict[str, Any], fields: dict[str, Any]) -> Union[dict[str, Any], JSONResponse]:
+    """Creates an issue for ``current_user`` after the duplicate and daily-limit checks, then notifies and records it.
+
+    ``fields`` holds media_title, artist, issue_type (a string value), problem_details and the optional request_id /
+    album_id / track_id / discovery_id / item_type. Returns the created row, or the 409 ``_conflict_response`` when
+    the user already has an open duplicate; raises 429 past the 24h cap (admins exempt).
+    """
+    is_admin = _is_admin(current_user)
+    user_id = str(current_user["id"])
+    issue_type = fields["issue_type"]
+
+    with user_request_lock(user_id):
+        duplicate = db.find_active_duplicate_issue(
+            user_id,
+            fields["media_title"],
+            fields["artist"],
+            issue_type,
+            request_id=fields.get("request_id"),
+            album_id=fields.get("album_id"),
+            track_id=fields.get("track_id"),
+            discovery_id=fields.get("discovery_id"),
+        )
+        if duplicate:
+            return _conflict_response(
+                f"You already have an open issue for this item (issue {duplicate['id']})", str(duplicate["id"])
+            )
+        if not is_admin and db.count_recent_issues(user_id, hours=24) >= ISSUE_DAILY_LIMIT:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Issue limit reached: at most {ISSUE_DAILY_LIMIT} issues per 24 hours",
+            )
+        created = db.create_issue(
+            {
+                "id": f"issue-{uuid.uuid4().hex[:12]}",
+                "user_id": user_id,
+                "media_title": fields["media_title"],
+                "artist": fields["artist"],
+                "issue_type": issue_type,
+                "problem_details": fields["problem_details"],
+                "request_id": fields.get("request_id"),
+                "album_id": fields.get("album_id"),
+                "track_id": fields.get("track_id"),
+                "discovery_id": fields.get("discovery_id"),
+                "item_type": fields.get("item_type"),
+                "status": IssueStatus.OPEN.value,
+            }
+        )
+
+    notification_data = dict(created)
+    notification_data["problem_details"] = str(created.get("problem_details") or "")[
+        :ISSUE_NOTIFICATION_DETAILS_MAX
+    ]
+    if not notification_data.get("username"):
+        notification_data["username"] = current_user.get("username")
+    notification_data.setdefault("title", created.get("media_title"))
+    if current_user.get("id"):
+        notification_data["actor_user_id"] = str(current_user["id"])
+    notification_dispatcher.dispatch(NotificationEvent.ISSUE_REPORTED, notification_data, db)
+    _record_issue_event(db, "issue_opened", created, current_user, f"Issue opened: {issue_type}")
+
+    return created
+
+
 @router.post(
     "",
     response_model=IssueResponse,
@@ -486,55 +549,24 @@ def create_issue(
                 detail=f"Request {body.request_id} is already {request.get('status')}; it cannot be stuck",
             )
 
-    with user_request_lock(user_id):
-        duplicate = db.find_active_duplicate_issue(
-            user_id,
-            body.media_title,
-            body.artist,
-            issue_type,
-            request_id=body.request_id,
-            album_id=body.album_id,
-            track_id=body.track_id,
-            discovery_id=body.discovery_id,
-        )
-        if duplicate:
-            return _conflict_response(
-                f"You already have an open issue for this item (issue {duplicate['id']})", str(duplicate["id"])
-            )
-        if not is_admin and db.count_recent_issues(user_id, hours=24) >= ISSUE_DAILY_LIMIT:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Issue limit reached: at most {ISSUE_DAILY_LIMIT} issues per 24 hours",
-            )
-        created = db.create_issue(
-            {
-                "id": f"issue-{uuid.uuid4().hex[:12]}",
-                "user_id": user_id,
-                "media_title": body.media_title,
-                "artist": body.artist,
-                "issue_type": issue_type,
-                "problem_details": body.problem_details,
-                "request_id": body.request_id,
-                "album_id": body.album_id,
-                "track_id": body.track_id,
-                "discovery_id": body.discovery_id,
-                "item_type": body.item_type,
-                "status": IssueStatus.OPEN.value,
-            }
-        )
-
-    notification_data = dict(created)
-    notification_data["problem_details"] = str(created.get("problem_details") or "")[
-        :ISSUE_NOTIFICATION_DETAILS_MAX
-    ]
-    if not notification_data.get("username"):
-        notification_data["username"] = current_user.get("username")
-    notification_data.setdefault("title", created.get("media_title"))
-    if current_user.get("id"):
-        notification_data["actor_user_id"] = str(current_user["id"])
-    notification_dispatcher.dispatch(NotificationEvent.ISSUE_REPORTED, notification_data, db)
-    _record_issue_event(db, "issue_opened", created, current_user, f"Issue opened: {issue_type}")
-
+    outcome = file_issue(
+        db,
+        current_user,
+        {
+            "media_title": body.media_title,
+            "artist": body.artist,
+            "issue_type": issue_type,
+            "problem_details": body.problem_details,
+            "request_id": body.request_id,
+            "album_id": body.album_id,
+            "track_id": body.track_id,
+            "discovery_id": body.discovery_id,
+            "item_type": body.item_type,
+        },
+    )
+    if isinstance(outcome, JSONResponse):
+        return outcome
+    created = outcome
     return _present_issue(db, created, current_user, is_admin)
 
 

@@ -9,6 +9,7 @@ from typing import Any, Literal, Optional, Union
 import requests
 import spotipy
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from trackseerr.api.dependencies import (
@@ -19,7 +20,9 @@ from trackseerr.api.dependencies import (
     get_media_client,
     get_spotify_client,
     has_permission,
+    require_permission,
 )
+from trackseerr.api.routes.issues import _Stripped, _is_admin, _reject_control_chars, file_issue
 from trackseerr.api.schemas.playlists import (
     FeaturedChart,
     ListeningSourcesResponse,
@@ -32,6 +35,7 @@ from trackseerr.api.schemas.playlists import (
     PlaylistTargetsResponse,
     PlaylistTrackItem,
     PlaylistTracksResponse,
+    TrackAliasSuggestion,
 )
 from trackseerr.clients.deezer import DeezerClient
 from trackseerr.clients.import_lists import listenbrainz as lb_provider
@@ -55,7 +59,7 @@ from trackseerr.listening_playlists import (
     resolve_created_for_slug,
     validate_source,
 )
-from trackseerr.models import Playlist, Track, UserPermission
+from trackseerr.models import IssueType, Playlist, Track, UserPermission
 from trackseerr.playlist_policy import initial_monitor_mode_forced, is_listening_playlist, is_smart_collection
 from trackseerr.redaction import safe_exc
 from trackseerr.security import (
@@ -74,6 +78,7 @@ router = APIRouter()
 # Album and artist modes add to the library with no quota or approval, so only admins may pick them. Track mode
 # searches every missing track on its own, so it needs admin or the AUTO_REQUEST_PLAYLISTS permission.
 NON_ADMIN_MONITOR_MODES = ("track", "none")
+SUGGESTION_DETAILS_MAX = 2000
 LISTENING_MODE_DETAIL = "Listening playlists only list missing tracks; use auto-request instead"
 
 
@@ -591,13 +596,8 @@ def list_featured_charts(
 
 
 
-@router.get("/{playlist_id}/tracks", response_model=PlaylistTracksResponse, response_model_exclude_unset=True)
-def get_playlist_tracks_status(
-    playlist_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    db: Database = Depends(get_db),
-) -> dict[str, Any]:
-    """Every track of a playlist with its sync status. Admins, the creator and target users only (404 otherwise)."""
+def _require_visible_playlist(db: Database, playlist_id: str, current_user: dict[str, Any]) -> dict[str, Any]:
+    """The playlist row when ``current_user`` is an admin, its creator or a target user; 404 otherwise."""
     not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
     playlist = db.get_playlist(playlist_id)
     if not playlist:
@@ -608,6 +608,17 @@ def get_playlist_tracks_status(
         visible = {p["id"] for p in db.list_playlists(user_id=str(current_user["id"]))}
         if playlist_id not in visible:
             raise not_found
+    return playlist
+
+
+@router.get("/{playlist_id}/tracks", response_model=PlaylistTracksResponse, response_model_exclude_unset=True)
+def get_playlist_tracks_status(
+    playlist_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    db: Database = Depends(get_db),
+) -> dict[str, Any]:
+    """Every track of a playlist with its sync status. Admins, the creator and target users only (404 otherwise)."""
+    playlist = _require_visible_playlist(db, playlist_id, current_user)
 
     synced = playlist.get("last_synced_at") is not None
     missing_rows = db.get_missing_tracks(playlist_id=playlist_id)
@@ -663,6 +674,94 @@ def get_playlist_tracks_status(
         "missing": sum(1 for i in items if i.status == "missing"),
         "synced": synced,
     }
+
+
+class TrackSuggestBody(BaseModel):
+    source_title: _Stripped = Field(min_length=1, max_length=300)
+    source_artist: _Stripped = Field(min_length=1, max_length=300)
+    discovery_id: _Stripped = Field(min_length=1, max_length=200)
+    target_title: _Stripped = Field(min_length=1, max_length=300)
+    target_artist: _Stripped = Field(min_length=1, max_length=300)
+    target_album: Optional[_Stripped] = Field(default=None, max_length=300)
+    note: Optional[_Stripped] = Field(default=None, max_length=1000)
+
+    @field_validator(
+        "source_title", "source_artist", "discovery_id", "target_title", "target_artist", "target_album", "note"
+    )
+    @classmethod
+    def _no_control_chars(cls, value: Optional[str]) -> Optional[str]:
+        return _reject_control_chars(value) if value is not None else None
+
+
+def _suggestion_details(playlist_name: str, body: TrackSuggestBody) -> str:
+    text = f"Suggested match in playlist '{playlist_name}': {body.target_artist} \u2013 {body.target_title}"
+    if body.target_album:
+        text += f" ({body.target_album})"
+    if body.note:
+        text += f"\nNote: {body.note}"
+    return text[:SUGGESTION_DETAILS_MAX]
+
+
+@router.post(
+    "/{playlist_id}/tracks/suggest",
+    response_model=TrackAliasSuggestion,
+    response_model_exclude_unset=True,
+    status_code=status.HTTP_201_CREATED,
+)
+def suggest_track_match(
+    playlist_id: str,
+    body: TrackSuggestBody,
+    current_user: dict[str, Any] = Depends(require_permission(UserPermission.REPORT_ISSUE)),
+    db: Database = Depends(get_db),
+) -> Any:
+    """Suggests the catalog song a missing playlist track really is.
+
+    Admins' suggestions apply at once; everyone else's become a pending alias plus a ``playlist_match`` issue for
+    an admin to approve. 404 when the playlist is not visible or the track is not missing; 409 when an approved
+    alias already exists (or the user already has an open issue for it).
+    """
+    playlist = _require_visible_playlist(db, playlist_id, current_user)
+    key = track_alias_key(body.source_artist, body.source_title)
+    if not any(track_alias_key(r["artist"], r["title"]) == key for r in db.get_missing_tracks(playlist_id=playlist_id)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track is not missing from this playlist")
+    existing = next((a for a in db.list_track_aliases(status="approved") if a["source_key"] == key), None)
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This track already has an approved match")
+
+    user_id = str(current_user["id"])
+    targets = {
+        "target_title": body.target_title,
+        "target_artist": body.target_artist,
+        "target_album": body.target_album,
+        "discovery_id": body.discovery_id,
+        "playlist_id": playlist_id,
+    }
+    if _is_admin(current_user):
+        alias = db.upsert_track_alias(
+            body.source_title, body.source_artist, "alias", "approved",
+            suggested_by=user_id, decided_by=user_id, **targets,
+        )
+        return {"alias_id": alias["id"], "status": "approved"}
+
+    outcome = file_issue(
+        db,
+        current_user,
+        {
+            "media_title": body.source_title,
+            "artist": body.source_artist,
+            "issue_type": IssueType.PLAYLIST_MATCH.value,
+            "problem_details": _suggestion_details(str(playlist.get("name") or playlist_id), body),
+            "discovery_id": body.discovery_id,
+            "item_type": "track",
+        },
+    )
+    if isinstance(outcome, JSONResponse):
+        return outcome
+    alias = db.upsert_track_alias(
+        body.source_title, body.source_artist, "alias", "pending",
+        issue_id=outcome["id"], suggested_by=user_id, **targets,
+    )
+    return {"alias_id": alias["id"], "status": "pending", "issue_id": outcome["id"]}
 
 
 @router.put("/{playlist_id}/targets", response_model=PlaylistTargetsResponse, response_model_exclude_unset=True)

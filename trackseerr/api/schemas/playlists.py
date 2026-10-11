@@ -110,3 +110,11 @@ class PlaylistTracksResponse(ApiModel):
     total: int
     missing: int
     synced: bool
+
+
+class TrackAliasSuggestion(ApiModel):
+    """Result of suggesting the right catalog song for a missing playlist track."""
+
+    alias_id: int
+    status: Literal["pending", "approved"]
+    issue_id: Optional[str] = None

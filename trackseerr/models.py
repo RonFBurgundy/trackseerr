@@ -33,6 +33,7 @@ class IssueType(StrEnum):
     MISSING_TRACKS = "missing_tracks"
     INCORRECT_TAGS = "incorrect_tags"
     REQUEST_STUCK = "request_stuck"
+    PLAYLIST_MATCH = "playlist_match"
     OTHER = "other"
 
 
