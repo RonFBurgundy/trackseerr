@@ -150,3 +150,29 @@ Findings on Jellyfin 12.1.0:
 8. `Policy.IsHidden` is **true** for ordinary accounts (it only hides them from the login screen), so it cannot filter
    users; only `Policy.IsDisabled` does.
 
+
+# slskd (Soulseek driver) integration tests
+
+`tests/integration/test_slskd_contract.py` checks the connection test and download-root discovery against a real slskd.
+It is skipped unless `SLSKD_IT_URL` is set. Start a throwaway container with a minimal `slskd.yml`:
+
+```yaml
+web:
+  authentication:
+    username: webuser
+    password: webpass123
+    api_keys:
+      it:
+        key: testapikey0123456789abcdef
+        role: readwrite
+```
+
+```bash
+docker run -d --rm --name slskd-it -p 127.0.0.1:15030:5030 -v $PWD/slskd.yml:/app/slskd.yml:ro slskd/slskd:latest
+export SLSKD_IT_URL=http://127.0.0.1:15030 SLSKD_IT_API_KEY=testapikey0123456789abcdef \
+       SLSKD_IT_USER=webuser SLSKD_IT_PASSWORD=webpass123
+RUN_INTEGRATION=1 pytest tests/integration/test_slskd_contract.py -q
+docker stop slskd-it
+```
+
+Finding on slskd 0.26.1: there is no `/api/v0/version`; the driver probes the authenticated `GET /api/v0/application`.

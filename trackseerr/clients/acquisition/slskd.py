@@ -145,22 +145,29 @@ class SlskdDriver(AcquisitionDriver):
         auth_failed = "Authentication failed: invalid API key or credentials"
         try:
             with httpx.Client(timeout=5.0) as client:
-                resp = client.get(f"{self.host_url}/api/v0/version", headers=self._headers())
+                resp = client.get(f"{self.host_url}/api/v0/application", headers=self._headers())
                 if resp.status_code in (401, 403):
                     return False, auth_failed
                 if resp.status_code != 200:
                     return False, f"HTTP {resp.status_code}: {resp.text[:120]}"
                 data = resp.json() if resp.text else {}
-                version = data.get("version", "connected") if isinstance(data, dict) else "connected"
-                # /version is unauthenticated on some slskd releases; probe an authenticated endpoint too.
-                probe = client.get(f"{self.host_url}/api/v0/application", headers=self._headers())
-                if probe.status_code in (401, 403):
-                    return False, auth_failed
-                return True, f"slskd {version}"
         except httpx.TimeoutException:
             return False, "Connection timed out (5s)"
-        except Exception as e:
+        except (httpx.HTTPError, ValueError) as e:
+            logger.warning("slskd connection test failed at %s: %s", self.host_url, e)
             return False, f"Connection error: {str(e)}"
+
+        info = data.get("version") if isinstance(data, dict) else None
+        if isinstance(info, dict):
+            version = str(info.get("current") or "connected")
+        elif isinstance(info, str) and info:
+            version = info
+        else:
+            version = "connected"
+        server = data.get("server") if isinstance(data, dict) else None
+        if isinstance(server, dict) and server.get("isLoggedIn") is False:
+            return True, f"slskd {version} (connected; not logged in to the Soulseek network yet)"
+        return True, f"slskd {version}"
 
     def search(
         self,

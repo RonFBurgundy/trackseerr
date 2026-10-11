@@ -10,6 +10,7 @@ Covers:
 - SSRF defense rejection across all drivers and indexers
 """
 
+import json
 from unittest.mock import MagicMock, patch
 import pytest
 import httpx
@@ -69,29 +70,65 @@ def test_driver_ssrf_rejection(unsafe_url: str):
 # ---------------------------------------------------------------------------
 # slskd Driver Tests
 # ---------------------------------------------------------------------------
+_SLSKD_APP = {
+    "version": {"full": "0.26.1.0 (0.26.1.0+71dcc7a6)", "current": "0.26.1.0", "latest": "0.26.1.0", "isUpdateAvailable": False},
+    "server": {"state": "None", "isConnected": False, "isLoggedIn": True},
+}
+
+
+def _slskd_resp(status: int, payload=None, text: str = ""):
+    resp = MagicMock()
+    resp.status_code = status
+    resp.text = text or (json.dumps(payload) if payload is not None else "")
+    resp.json.return_value = payload
+    return resp
+
+
 def test_slskd_test_connection_success():
     driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.text = '{"version": "0.20.0"}'
-    mock_resp.json.return_value = {"version": "0.20.0"}
-
-    with patch("httpx.Client.get", return_value=mock_resp):
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, _SLSKD_APP)) as get:
         ok, msg = driver.test_connection()
-        assert ok is True
-        assert "0.20.0" in msg
+    assert ok is True
+    assert msg == "slskd 0.26.1.0"
+    assert get.call_args.args[0] == "http://slskd.local:5030/api/v0/application"
+    assert get.call_args.kwargs["headers"]["X-API-KEY"] == "secretkey"
 
 
 def test_slskd_test_connection_failure():
     driver = SlskdDriver("http://slskd.local:5030", api_key="wrongkey")
-    mock_resp = MagicMock()
-    mock_resp.status_code = 401
-    mock_resp.text = "Unauthorized"
-
-    with patch("httpx.Client.get", return_value=mock_resp):
+    with patch("httpx.Client.get", return_value=_slskd_resp(401, text="Unauthorized")):
         ok, msg = driver.test_connection()
         assert ok is False
         assert "Authentication failed" in msg
+
+
+def test_slskd_test_connection_not_logged_in_still_ok():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    payload = {**_SLSKD_APP, "server": {"state": "None", "isConnected": False, "isLoggedIn": False}}
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, payload)):
+        ok, msg = driver.test_connection()
+    assert ok is True
+    assert "slskd 0.26.1.0" in msg
+    assert "not logged in" in msg
+
+
+def test_slskd_test_connection_404_reports_http():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with patch("httpx.Client.get", return_value=_slskd_resp(404, text="Not Found")):
+        ok, msg = driver.test_connection()
+    assert ok is False
+    assert msg.startswith("HTTP 404")
+
+
+def test_slskd_test_connection_uses_bearer_when_no_key():
+    driver = SlskdDriver("http://slskd.local:5030", username="u", password="p")
+    with patch("httpx.Client.post", return_value=_slskd_resp(200, {"token": "jwt123"})), patch(
+        "httpx.Client.get", return_value=_slskd_resp(200, _SLSKD_APP)
+    ) as get:
+        ok, msg = driver.test_connection()
+    assert ok is True
+    assert get.call_args.args[0].endswith("/api/v0/application")
+    assert get.call_args.kwargs["headers"]["Authorization"] == "Bearer jwt123"
 
 
 def test_slskd_search_music():
