@@ -590,3 +590,12 @@ class CollectionAlbumResponse(ApiModel):
     success: bool
     collection_id: str
     album_id: str
+
+
+class RejectCurrentResponse(ApiModel):
+    """Result of rejecting the release behind an album's or track's current files."""
+
+    blocklisted: bool
+    release: Optional[str] = None
+    queued: int = 0
+    message: str

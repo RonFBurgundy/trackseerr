@@ -42,11 +42,22 @@ class SearchRelease(ApiModel):
     breakdown: Optional[dict[str, Any]] = None
     # Free-form: whatever extra metadata each indexer driver attaches to a result (guid, files, publish date...).
     extra: dict[str, Any] = {}
+    # Blocklist row behind a rejected release: ``reason``, ``indexer``, ``created_at``.
+    blocklist: Optional[dict[str, Any]] = None
+    in_queue: bool = False
+    pending_until: Optional[str] = None
 
 
 class IndexerSearchError(ApiModel):
     source: str
     error: str
+
+
+class LastSearch(ApiModel):
+    """The newest automatic/manual search recorded for the queried item."""
+
+    at: str
+    message: str
 
 
 class SearchResponse(ApiModel):
@@ -55,6 +66,7 @@ class SearchResponse(ApiModel):
     results: list[SearchRelease]
     count: int
     indexer_errors: list[IndexerSearchError] = []
+    last_search: Optional[LastSearch] = None
 
 
 class GrabResponse(ApiModel):

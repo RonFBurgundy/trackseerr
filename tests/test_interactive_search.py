@@ -732,7 +732,7 @@ def test_search_shows_blocklisted_release_as_rejected(app_and_client, test_db, t
     results = resp.json()["results"]
     assert len(results) == 1
     assert results[0]["is_acceptable"] is False
-    assert results[0]["rejection_reasons"][0] == "Blocklisted"
+    assert results[0]["rejection_reasons"][0].startswith("Blocklisted")
 
 
 def test_search_reports_indexer_errors(app_and_client, test_db, test_config, seeded_users):
@@ -753,3 +753,89 @@ def test_search_reports_indexer_errors(app_and_client, test_db, test_config, see
     assert [e["source"] for e in data["indexer_errors"]] == ["Broken Indexer"]
     assert "Connection refused" in data["indexer_errors"][0]["error"]
     assert data["count"] >= 1
+
+
+def _one_candidate(title="Radiohead - OK Computer [FLAC 16bit]", download_id="rel-1"):
+    return AcquisitionSearchResult(
+        download_id=download_id, title=title, artist="Radiohead", item_type="album",
+        size_bytes=300 * 1024 * 1024, source="torznab",
+    )
+
+
+def _search_one(client, headers, cand, body=None):
+    with _patched_drivers([cand]):
+        return client.post(
+            "/api/acquisition/search", headers=headers,
+            json=body or {"artist": "Radiohead", "album": "OK Computer"},
+        )
+
+
+def test_blocklisted_reason_and_date_in_rejection(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _make_indexer(test_db, "idx-ok", "Good Indexer")
+    cand = _one_candidate()
+    test_db.add_to_blocklist(source_title=cand.title, reason="Wrong release", indexer="ix")
+    item = _search_one(client, headers, cand).json()["results"][0]
+    assert item["is_acceptable"] is False
+    first = item["rejection_reasons"][0]
+    assert first.startswith("Blocklisted: Wrong release (") and first.endswith(")")
+    assert len(first.split("(")[1].rstrip(")")) == 10
+    assert item["blocklist"]["reason"] == "Wrong release" and item["blocklist"]["indexer"] == "ix"
+
+
+def test_in_queue_release_flagged(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _make_indexer(test_db, "idx-ok", "Good Indexer")
+    cand = _one_candidate()
+    test_db.create_download_client(
+        DownloadClientConfig(
+            id="c1", name="qbit", driver_type="qbittorrent", host_url="http://127.0.0.1:8080", enabled=True, priority=1
+        )
+    )
+    test_db.create_active_download(
+        {"id": "dl-1", "client_id": "c1", "title": cand.title, "artist": "Radiohead", "status": "downloading"}
+    )
+    item = _search_one(client, headers, cand).json()["results"][0]
+    assert item["in_queue"] is True and item["is_acceptable"] is False
+    assert item["rejection_reasons"][0] == "Already downloading"
+
+    other = _one_candidate(title="Radiohead - Kid A [FLAC]", download_id="rel-2")
+    assert _search_one(client, headers, other).json()["results"][0]["in_queue"] is False
+
+
+def test_pending_release_has_pending_until(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _make_indexer(test_db, "idx-ok", "Good Indexer")
+    cand = _one_candidate()
+    test_db.upsert_pending_release(
+        {"item_key": "album:x", "title": cand.title, "added_at": "2026-10-11T10:00:00+00:00",
+         "release_at": "2026-10-12T10:00:00+00:00"}
+    )
+    item = _search_one(client, headers, cand).json()["results"][0]
+    assert item["pending_until"] == "2026-10-12T10:00:00+00:00"
+    assert "Held by delay profile until 2026-10-12T10:00:00+00:00" in item["rejection_reasons"]
+    assert item["in_queue"] is False
+
+
+def test_last_search_from_item_events(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _make_indexer(test_db, "idx-ok", "Good Indexer")
+    test_db.upsert_library_artist({"id": "ar-1", "name": "Radiohead"})
+    test_db.upsert_library_album({"id": "alb-1", "artist_id": "ar-1", "title": "OK Computer"})
+    test_db.upsert_library_track(
+        {"id": "trk-1", "album_id": "alb-1", "artist_id": "ar-1", "title": "Airbag", "track_number": 1}
+    )
+    cand = _one_candidate()
+    body = {"artist": "Radiohead", "album": "OK Computer", "album_id": "alb-1", "track_id": "trk-1"}
+    assert _search_one(client, headers, cand, body).json().get("last_search") is None
+
+    test_db.record_item_event("searched", album_id="alb-1")
+    test_db.record_item_event("searched", track_id="trk-1")
+    last = _search_one(client, headers, cand, body).json()["last_search"]
+    assert last["at"].endswith("Z") and last["message"]
+    album_only = _search_one(client, headers, cand, {**body, "track_id": None}).json()["last_search"]
+    assert album_only["at"]

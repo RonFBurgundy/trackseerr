@@ -28,6 +28,7 @@ from trackseerr.clients.acquisition import (
 )
 from trackseerr.item_history import (
     TRIGGER_ISSUE,
+    TRIGGER_MANUAL,
     TRIGGER_RSS,
     TRIGGER_UPGRADE,
     TRIGGER_WANTED,
@@ -177,14 +178,14 @@ RECENT_SEARCH_WINDOW = timedelta(minutes=10)
 
 @dataclass(frozen=True)
 class ReplacementSpec:
-    """An admin-driven replacement search for tracks that already have files (issue fix actions only).
+    """An admin-driven replacement search for tracks that already have files (issue fix actions and rejecting an item's current release).
 
     ``require_better`` keeps the "strictly better than the current file" rule (``audio_quality`` issues); otherwise a
     same-quality release is accepted (``corrupted_file`` / ``wrong_release``). ``issue_id`` is recorded on the grab so
     the import can comment on the issue.
     """
 
-    issue_id: str
+    issue_id: Optional[str] = None
     require_better: bool = False
 
 
@@ -192,6 +193,8 @@ def _search_trigger(
     replacement: Optional[ReplacementSpec], min_score: Optional[int], actor_user_id: Optional[str] = None
 ) -> GrabTrigger:
     """Why a Wanted search grabs: an issue's replacement, a below-cutoff upgrade, or plain wanted."""
+    if replacement is not None and replacement.issue_id is None:
+        return GrabTrigger(TRIGGER_MANUAL, label="Rejected release replacement", actor_user_id=actor_user_id)
     if replacement is not None:
         return GrabTrigger(TRIGGER_ISSUE, ref=replacement.issue_id, label="Issue replacement", actor_user_id=actor_user_id)
     if min_score is not None:
