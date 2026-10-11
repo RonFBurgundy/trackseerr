@@ -36,6 +36,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Soulseek: among files of the same quality, peers with a free upload slot, then a shorter queue, then a faster connection are preferred; peers with a queue over 50 are skipped; files whose length is far from the track's known length are skipped (catches the wrong mix or edit); searches to slskd are spaced at least 5 seconds apart.
 - Automatic searches that find nothing retry with simpler queries: the main artist only, without "feat." credits, then the bare title with any remix name kept. Results from these retries must match the artist, title and remixer, so a remix request never grabs the original mix. Every indexer and Soulseek search is now logged with its query, result count and time.
 - Download clients must pass a connection test before they can be saved, and the add/edit form has its own Test button.
 - The Lidarr library import is much faster: it asks Lidarr for each artist's tracks in one go instead of album by album, and database writes are quicker everywhere.
@@ -53,6 +54,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Soulseek results now show their real quality (FLAC 16/24-bit, MP3 320/V0/V2, AAC, ALAC, OGG, Opus) instead of Unknown, so quality profiles rank and accept them properly.
 - Soulseek downloads that a peer never starts ("Queued, Remotely") for 30 minutes, that stop moving for 15 minutes, or that vanish from slskd for 10 minutes are now cancelled and blocklisted, so the next search tries another peer (adjustable with `SLSKD_QUEUE_TIMEOUT_MINUTES`, `SLSKD_STALL_MINUTES`, `SLSKD_MISSING_MINUTES`). Failed Soulseek transfers (errored, rejected, timed out) are no longer treated as finished downloads, and cancelling a Soulseek download works again.
 - Soulseek searches now wait for peers to answer before reading results (they almost always came back empty), and each finished search is removed from slskd instead of piling up in its Searches list.
 - Editing a download client or indexer no longer resets its priority or re-enables it.
