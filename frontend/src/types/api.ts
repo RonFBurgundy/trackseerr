@@ -3006,6 +3006,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/{entity}/{entity_id}/reject-current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Blocklist the release behind an album's or track's files and search for a replacement
+         * @description Native mode only. The current files stay until the replacement imports (and records ``upgraded``).
+         *
+         *     404 when the album/track does not exist, 409 when it has no files or Lidarr manages the library.
+         */
+        post: operations["reject_current_api_library__entity___entity_id__reject_current_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/missing": {
         parameters: {
             query?: never;
@@ -8223,6 +8245,10 @@ export interface components {
          * @description Candidate release item enriched with quality evaluation, scoring, and source metadata.
          */
         InteractiveReleaseItem: {
+            /** Blocklist */
+            blocklist?: {
+                [key: string]: unknown;
+            } | null;
             /** Breakdown */
             breakdown?: {
                 [key: string]: unknown;
@@ -8243,6 +8269,11 @@ export interface components {
             format_score: number;
             /** Id */
             id: string;
+            /**
+             * In Queue
+             * @default false
+             */
+            in_queue: boolean;
             /** Indexer Name */
             indexer_name: string;
             /** Is Acceptable */
@@ -8253,6 +8284,8 @@ export interface components {
             meets_cutoff: boolean;
             /** Parsed Quality */
             parsed_quality: string;
+            /** Pending Until */
+            pending_until?: string | null;
             /** Protocol */
             protocol: string;
             /** Publish Date */
@@ -8620,6 +8653,16 @@ export interface components {
             state: string;
             /** Task Id */
             task_id: string;
+        };
+        /**
+         * LastSearch
+         * @description The newest automatic/manual search recorded for the queried item.
+         */
+        LastSearch: {
+            /** At */
+            at: string;
+            /** Message */
+            message: string;
         };
         /** LastfmComplete */
         LastfmComplete: {
@@ -11786,6 +11829,23 @@ export interface components {
             /** Running */
             running: boolean;
         };
+        /**
+         * RejectCurrentResponse
+         * @description Result of rejecting the release behind an album's or track's current files.
+         */
+        RejectCurrentResponse: {
+            /** Blocklisted */
+            blocklisted: boolean;
+            /** Message */
+            message: string;
+            /**
+             * Queued
+             * @default 0
+             */
+            queued: number;
+            /** Release */
+            release?: string | null;
+        };
         /** ReleaseProfilePayload */
         ReleaseProfilePayload: {
             /**
@@ -12288,6 +12348,10 @@ export interface components {
          * @description A candidate release with its quality evaluation.
          */
         SearchRelease: {
+            /** Blocklist */
+            blocklist?: {
+                [key: string]: unknown;
+            } | null;
             /** Breakdown */
             breakdown?: {
                 [key: string]: unknown;
@@ -12308,6 +12372,11 @@ export interface components {
             format_score: number;
             /** Id */
             id: string;
+            /**
+             * In Queue
+             * @default false
+             */
+            in_queue: boolean;
             /** Indexer Name */
             indexer_name: string;
             /** Is Acceptable */
@@ -12318,6 +12387,8 @@ export interface components {
             meets_cutoff: boolean;
             /** Parsed Quality */
             parsed_quality: string;
+            /** Pending Until */
+            pending_until?: string | null;
             /** Protocol */
             protocol: string;
             /** Publish Date */
@@ -12352,6 +12423,7 @@ export interface components {
              * @default []
              */
             indexer_errors: components["schemas"]["IndexerSearchError"][];
+            last_search?: components["schemas"]["LastSearch"] | null;
             /** Profile Name */
             profile_name: string;
             query: components["schemas"]["SearchQueryEcho"];
@@ -18828,6 +18900,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ItemHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_current_api_library__entity___entity_id__reject_current_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entity: "album" | "track";
+                entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RejectCurrentResponse"];
                 };
             };
             /** @description Validation Error */
