@@ -40,6 +40,11 @@ def pytest_configure(config):
         "real_scanner_hydration: opt out of autouse scanner hydration suppression so AutoArtistHydrationThread "
         "runs in tests that specifically test it",
     )
+    config.addinivalue_line(
+        "markers",
+        "real_client_verify: opt out of the autouse download-client connection-verification stub so the real "
+        "_verify_connection runs",
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -63,9 +68,12 @@ def _gateway_session_status_allows_by_default(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _download_client_connection_ok(monkeypatch):
+def _download_client_connection_ok(monkeypatch, request):
     """Saving an enabled download client now requires a passing connection test; existing tests create clients
-    against unreachable hosts, so the verification seam reports success. Tests asserting rejection override it."""
+    against unreachable hosts, so the verification seam reports success. Tests asserting rejection override it;
+    tests that need the real check use @pytest.mark.real_client_verify."""
+    if request.node.get_closest_marker("real_client_verify"):
+        return
     monkeypatch.setattr(
         "trackseerr.api.routes.download_clients._verify_connection", lambda cfg: (True, "ok")
     )
