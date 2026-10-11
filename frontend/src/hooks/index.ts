@@ -77,6 +77,7 @@ export * from './useCustomFormatExport';
 export * from './useImportBitrateCheck';
 export * from './useManualImport';
 export * from './useIndexerDraft';
+export * from './useClientDraft';
 export * from './useLibraryHealth';
 export * from './useLibraryHealthCount';
 export * from './useSeedCleanup';

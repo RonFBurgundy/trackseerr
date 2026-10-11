@@ -12892,6 +12892,8 @@ export interface components {
             extra_settings_json?: string | null;
             /** Host Url */
             host_url: string;
+            /** Id */
+            id?: string | null;
             /** Password */
             password?: string | null;
             /** Remote Path Mappings */
