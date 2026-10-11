@@ -2635,7 +2635,7 @@ export interface paths {
         };
         /**
          * Get Lidarr Migration Status
-         * @description Retrieves current Lidarr migration job status.
+         * @description Retrieves current Lidarr migration job status (report name falls back to the newest report on disk).
          */
         get: operations["get_lidarr_migration_status_api_library_migrate_lidarr_status_get"];
         put?: never;
