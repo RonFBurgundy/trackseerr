@@ -4,9 +4,11 @@ import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 
 
 from trackseerr.api.dependencies import (
+    get_config,
     get_db,
     get_lidarr_client,
     get_media_client,
@@ -23,6 +25,8 @@ from trackseerr.api.schemas.library import (
 from trackseerr.clients.lidarr import (
     LidarrClient,
 )
+from trackseerr.config import Config
+from trackseerr.lidarr_import_report import latest_report_path
 from trackseerr.library_scanner import library_scanner
 from trackseerr.lidarr_migration import lidarr_migration_job
 from trackseerr.storage import Database
@@ -74,6 +78,7 @@ def trigger_lidarr_migration(
     body: Optional[MigrateLidarrRequest] = None,
     db: Database = Depends(get_db),
     lidarr_client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    config: Config = Depends(get_config),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Triggers an asynchronous background Lidarr migration job."""
@@ -95,6 +100,7 @@ def trigger_lidarr_migration(
         db=db,
         lidarr_client=lidarr_client,
         auto_switch_mode=req.auto_switch_mode,
+        config_dir=config.config_dir,
     )
     return {"success": success, "status": lidarr_migration_job.get_status()}
 
@@ -104,6 +110,17 @@ def get_lidarr_migration_status(
 ) -> dict[str, Any]:
     """Retrieves current Lidarr migration job status."""
     return lidarr_migration_job.get_status()
+
+@router.get("/migrate-lidarr/report")
+def download_lidarr_import_report(
+    config: Config = Depends(get_config),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> FileResponse:
+    """Downloads the reconciliation report of the latest Lidarr import (Lidarr's numbers versus what was imported)."""
+    path = latest_report_path(config.config_dir)
+    if path is None:
+        raise HTTPException(status_code=404, detail="No Lidarr import report exists yet")
+    return FileResponse(path, filename=path.name, media_type="application/json")
 
 @router.post("/migrate-lidarr/cancel", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=MigrationStatus, response_model_exclude_unset=True)
 def cancel_lidarr_migration(
