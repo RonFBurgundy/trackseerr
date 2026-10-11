@@ -19,6 +19,7 @@ from trackseerr.clients.acquisition import (
 from trackseerr.clients.acquisition.base import AcquisitionRetryableError, AcquisitionUnavailableError
 from trackseerr.item_history import GrabTrigger, emit, emit_named, trigger_kwargs
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
+from trackseerr.redaction import redact_text
 from trackseerr.models import (
     AcquisitionSearchResult,
     ActiveDownload,
@@ -56,6 +57,25 @@ def candidate_rank(
 
 
 _BTIH_RE = re.compile(r"urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})", re.IGNORECASE)
+
+
+def _apply_blocklist(
+    db: Database, candidates: list[AcquisitionSearchResult], include_blocklisted: bool
+) -> list[AcquisitionSearchResult]:
+    """Drops blocklisted candidates, or keeps them flagged ``extra["blocklisted"]`` when ``include_blocklisted``."""
+    kept: list[AcquisitionSearchResult] = []
+    for candidate in candidates:
+        if db.is_blocklisted(
+            release_title=candidate.title,
+            release_guid=candidate.download_id,
+            info_hash=_extract_info_hash(candidate),
+        ):
+            if not include_blocklisted:
+                logger.info("Skipping blocklisted release candidate during search: '%s'", candidate.title)
+                continue
+            candidate.extra = {**(candidate.extra or {}), "blocklisted": True}
+        kept.append(candidate)
+    return kept
 
 
 def _extract_info_hash(candidate: AcquisitionSearchResult) -> Optional[str]:
@@ -161,10 +181,14 @@ class AcquisitionCoordinator:
         title: Optional[str] = None,
         album: Optional[str] = None,
         db: Optional[Database] = None,
+        include_blocklisted: bool = False,
+        errors: Optional[list[dict[str, str]]] = None,
     ) -> list[AcquisitionSearchResult]:
         """Queries all enabled Torznab/Newznab indexers and slskd clients.
 
-        Errors on individual indexers or clients are logged without aborting others.
+        Errors on individual indexers or clients are logged without aborting others; when ``errors`` is given each
+        failure is also appended to it as ``{"source", "error"}`` (redacted). Blocklisted releases are dropped unless
+        ``include_blocklisted`` is set, in which case they are kept with ``extra["blocklisted"] = True``.
         """
         if db is None:
             logger.warning("No database supplied to search_all_indexers")
@@ -195,6 +219,8 @@ class AcquisitionCoordinator:
                     all_results.extend(res)
             except Exception as e:
                 logger.warning("Error searching indexer '%s' (%s): %s", idx_name, idx_cfg.get("host_url"), e)
+                if errors is not None:
+                    errors.append({"source": str(idx_name), "error": redact_text(str(e))})
 
         # 2. Query enabled slskd download clients if present
         try:
@@ -216,22 +242,10 @@ class AcquisitionCoordinator:
                     all_results.extend(res)
             except Exception as e:
                 logger.warning("Error searching slskd client '%s' (%s): %s", s_name, s_cfg.get("host_url"), e)
+                if errors is not None:
+                    errors.append({"source": str(s_name), "error": redact_text(str(e))})
 
-        if db is not None:
-            filtered_results: list[AcquisitionSearchResult] = []
-            for candidate in all_results:
-                btih = _extract_info_hash(candidate)
-                if db.is_blocklisted(
-                    release_title=candidate.title,
-                    release_guid=candidate.download_id,
-                    info_hash=btih,
-                ):
-                    logger.info("Skipping blocklisted release candidate during search: '%s'", candidate.title)
-                    continue
-                filtered_results.append(candidate)
-            return filtered_results
-
-        return all_results
+        return _apply_blocklist(db, all_results, include_blocklisted)
 
     def evaluate_and_rank(
         self,

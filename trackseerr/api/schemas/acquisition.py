@@ -44,11 +44,17 @@ class SearchRelease(ApiModel):
     extra: dict[str, Any] = {}
 
 
+class IndexerSearchError(ApiModel):
+    source: str
+    error: str
+
+
 class SearchResponse(ApiModel):
     query: SearchQueryEcho
     profile_name: str
     results: list[SearchRelease]
     count: int
+    indexer_errors: list[IndexerSearchError] = []
 
 
 class GrabResponse(ApiModel):

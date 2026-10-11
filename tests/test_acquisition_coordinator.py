@@ -245,6 +245,62 @@ def test_search_all_indexers_error_isolation(test_db):
     assert results[0].download_id == "h1"
 
 
+def _blocklist_setup(test_db):
+    test_db.create_indexer(
+        IndexerConfig(
+            id="idx-bl", name="BL Indexer", indexer_type="torznab", host_url="http://bl:9696", enabled=True
+        )
+    )
+    test_db.add_to_blocklist(source_title="Bad - Release [FLAC]")
+    res = [
+        AcquisitionSearchResult(
+            download_id="b1", title="Bad - Release [FLAC]", artist="Bad", item_type="album",
+            source="torznab", protocol="torrent",
+        ),
+        AcquisitionSearchResult(
+            download_id="g1", title="Good - Release [FLAC]", artist="Good", item_type="album",
+            source="torznab", protocol="torrent",
+        ),
+    ]
+    driver = MagicMock()
+    driver.search.return_value = res
+    return driver
+
+
+def test_search_all_indexers_drops_blocklisted_by_default(test_db):
+    driver = _blocklist_setup(test_db)
+    with patch("trackseerr.acquisition_coordinator.get_indexer_driver", return_value=driver):
+        results = AcquisitionCoordinator().search_all_indexers("Bad", "Release", db=test_db)
+    assert [r.download_id for r in results] == ["g1"]
+
+
+def test_search_all_indexers_include_blocklisted_marks_extra(test_db):
+    driver = _blocklist_setup(test_db)
+    with patch("trackseerr.acquisition_coordinator.get_indexer_driver", return_value=driver):
+        results = AcquisitionCoordinator().search_all_indexers(
+            "Bad", "Release", db=test_db, include_blocklisted=True
+        )
+    by_id = {r.download_id: r for r in results}
+    assert set(by_id) == {"b1", "g1"}
+    assert by_id["b1"].extra["blocklisted"] is True
+    assert not (by_id["g1"].extra or {}).get("blocklisted")
+
+
+def test_search_all_indexers_collects_errors(test_db):
+    test_db.create_indexer(
+        IndexerConfig(
+            id="idx-x", name="Down Indexer", indexer_type="torznab", host_url="http://down:9696", enabled=True
+        )
+    )
+    driver = MagicMock()
+    driver.search.side_effect = RuntimeError("boom")
+    errors: list = []
+    with patch("trackseerr.acquisition_coordinator.get_indexer_driver", return_value=driver):
+        results = AcquisitionCoordinator().search_all_indexers("A", "B", db=test_db, errors=errors)
+    assert results == []
+    assert errors == [{"source": "Down Indexer", "error": "boom"}]
+
+
 # ---------------------------------------------------------------------------
 # 2. evaluate_and_rank Tests
 # ---------------------------------------------------------------------------

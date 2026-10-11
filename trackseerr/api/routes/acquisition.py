@@ -96,6 +96,90 @@ class ManualGrabPayload(BaseModel):
     track_id: Optional[str] = None
 
 
+def _artist_profile_id_for(db: Database, query: InteractiveSearchQuery) -> Optional[str]:
+    """The quality profile id of the artist owning the queried album/track, if any (missing rows fall through)."""
+    artist_id: Optional[str] = None
+    try:
+        if query.album_id:
+            album = db.get_library_album(query.album_id)
+            artist_id = album.get("artist_id") if album else None
+        if not artist_id and query.track_id:
+            track = db.get_library_track(query.track_id)
+            if track:
+                artist_id = track.get("artist_id")
+                if not artist_id and track.get("album_id"):
+                    album = db.get_library_album(track["album_id"])
+                    artist_id = album.get("artist_id") if album else None
+        artist = db.get_library_artist(str(artist_id)) if artist_id else None
+    except sqlite3.Error as e:
+        logger.warning("Could not resolve the artist profile for manual search: %s", redact_text(str(e)))
+        return None
+    return str(artist["quality_profile_id"]) if artist and artist.get("quality_profile_id") else None
+
+
+def _resolve_search_profile(db: Database, query: InteractiveSearchQuery) -> dict[str, Any]:
+    """Explicit ``quality_profile_id`` -> the item's artist profile -> the default profile (400 if none resolves)."""
+    for profile_id in (query.quality_profile_id, _artist_profile_id_for(db, query)):
+        if not profile_id:
+            continue
+        try:
+            found = db.get_quality_profile(profile_id)
+        except sqlite3.Error as e:
+            logger.warning(
+                "Error retrieving quality profile '%s': %s; falling back", profile_id, redact_text(str(e))
+            )
+            continue
+        if found:
+            return found
+    try:
+        default = db.get_default_quality_profile()
+    except Exception as e:
+        logger.error("Failed to retrieve default quality profile: %s", redact_text(str(e)))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"No valid quality profile configured: {redact_text(str(e))}",
+        )
+    if not default:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid quality profile configured")
+    return default
+
+
+def _build_release_item(r: AcquisitionSearchResult, eval_res: Any, parsed: Any) -> InteractiveReleaseItem:
+    """Shapes one evaluated candidate; blocklisted releases are shown as rejected with reason "Blocklisted"."""
+    proto = str(r.protocol or "torrent").lower()
+    if proto in ("slskd", "soulseek"):
+        proto = "p2p"
+    extra_data = dict(r.extra or {})
+    indexer_name = extra_data.get("indexer_name") or r.source or ("slskd" if proto == "p2p" else "Indexer")
+    pub_date = extra_data.get("publish_date") or extra_data.get("pub_date") or extra_data.get("pubDate")
+    reasons = list(eval_res.rejection_reasons)
+    acceptable = eval_res.is_acceptable
+    if extra_data.get("blocklisted"):
+        acceptable = False
+        reasons = ["Blocklisted", *reasons]
+    return InteractiveReleaseItem(
+        id=str(r.download_id or f"rel-{uuid.uuid4().hex[:12]}"),
+        title=r.title,
+        indexer_name=indexer_name,
+        protocol=proto,
+        size_bytes=int(r.size_bytes or 0),
+        seeders=r.seeders,
+        publish_date=str(pub_date) if pub_date is not None else None,
+        download_url=r.download_url,
+        magnet_url=r.magnet_url,
+        parsed_quality=eval_res.parsed_quality,
+        source=parsed.source or r.source,
+        tags=list(parsed.tags),
+        is_acceptable=acceptable,
+        score=eval_res.score,
+        meets_cutoff=eval_res.meets_cutoff,
+        rejection_reasons=reasons,
+        format_score=eval_res.format_score,
+        breakdown=eval_res.breakdown.to_dict() if eval_res.breakdown else None,
+        extra=extra_data,
+    )
+
+
 @router.post("/search", response_model=SearchResponse, response_model_exclude_unset=True, summary="Interactive multi-indexer search with quality evaluation")
 def search_releases(
     query: InteractiveSearchQuery,
@@ -111,37 +195,19 @@ def search_releases(
     clean_title = query.title.strip() if query.title else None
     clean_album = query.album.strip() if query.album else None
 
-    # 1. Retrieve Quality Profile
-    profile_dict: Optional[dict[str, Any]] = None
-    if query.quality_profile_id:
-        try:
-            profile_dict = db.get_quality_profile(query.quality_profile_id)
-        except Exception as e:
-            logger.warning(
-                "Error retrieving quality profile '%s': %s; falling back to default",
-                query.quality_profile_id,
-                redact_text(str(e)),
-            )
-
-    if not profile_dict:
-        try:
-            profile_dict = db.get_default_quality_profile()
-        except Exception as e:
-            logger.error("Failed to retrieve default quality profile: %s", redact_text(str(e)))
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"No valid quality profile configured: {redact_text(str(e))}",
-            )
-
-    profile: QualityProfile = _to_quality_profile(profile_dict)
+    # 1. Retrieve Quality Profile (explicit id -> the item's artist profile -> default)
+    profile: QualityProfile = _to_quality_profile(_resolve_search_profile(db, query))
 
     # 2. Query all enabled indexers and slskd clients
+    indexer_errors: list[dict[str, str]] = []
     try:
         candidates = acquisition_coordinator.search_all_indexers(
             artist=clean_artist,
             title=clean_title,
             album=clean_album,
             db=db,
+            include_blocklisted=True,
+            errors=indexer_errors,
         )
     except Exception as e:
         logger.error(
@@ -173,44 +239,7 @@ def search_releases(
                 **candidate_context(r),
             )
 
-            # Determine protocol badge
-            proto = str(r.protocol or "torrent").lower()
-            if proto in ("slskd", "soulseek"):
-                proto = "p2p"
-
-            extra_data = dict(r.extra or {})
-            indexer_name = (
-                extra_data.get("indexer_name")
-                or r.source
-                or ("slskd" if proto == "p2p" else "Indexer")
-            )
-            pub_date = (
-                extra_data.get("publish_date")
-                or extra_data.get("pub_date")
-                or extra_data.get("pubDate")
-            )
-
-            release_item = InteractiveReleaseItem(
-                id=str(r.download_id or f"rel-{uuid.uuid4().hex[:12]}"),
-                title=r.title,
-                indexer_name=indexer_name,
-                protocol=proto,
-                size_bytes=int(r.size_bytes or 0),
-                seeders=r.seeders,
-                publish_date=str(pub_date) if pub_date is not None else None,
-                download_url=r.download_url,
-                magnet_url=r.magnet_url,
-                parsed_quality=eval_res.parsed_quality,
-                source=parsed.source or r.source,
-                tags=list(parsed.tags),
-                is_acceptable=eval_res.is_acceptable,
-                score=eval_res.score,
-                meets_cutoff=eval_res.meets_cutoff,
-                rejection_reasons=list(eval_res.rejection_reasons),
-                format_score=eval_res.format_score,
-                breakdown=eval_res.breakdown.to_dict() if eval_res.breakdown else None,
-                extra=extra_data,
-            )
+            release_item = _build_release_item(r, eval_res, parsed)
             results.append(release_item)
             ranks[id(release_item)] = candidate_rank(r, eval_res, preferred_protocol)
         except Exception as e:
@@ -225,6 +254,7 @@ def search_releases(
         "profile_name": profile.name,
         "results": [item.model_dump() for item in results],
         "count": len(results),
+        "indexer_errors": indexer_errors,
     }
 
 

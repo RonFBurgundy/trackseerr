@@ -634,3 +634,122 @@ def test_manual_grab_driver_error_handling(app_and_client, test_db, test_config,
         resp_500 = client.post("/api/acquisition/grab", headers=admin_headers, json=grab_payload)
     assert resp_500.status_code == 500
     assert "qBittorrent connection refused" in resp_500.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Manual-search readiness: item profile, blocklisted releases, indexer errors
+# ---------------------------------------------------------------------------
+
+def _seed_artist_profile(test_db):
+    test_db.upsert_quality_profile(
+        QualityProfile(
+            id="profile-artist",
+            name="Artist Profile",
+            cutoff="MP3 320",
+            items=[QualityProfileItem(quality="MP3 320", allowed=True, weight=1000)],
+            preferred_tags=[],
+            ignored_tags=[],
+            is_default=False,
+        )
+    )
+    test_db.upsert_library_artist({"id": "art-p", "name": "Radiohead", "quality_profile_id": "profile-artist"})
+    test_db.upsert_library_album({"id": "alb-p", "artist_id": "art-p", "title": "OK Computer"})
+    test_db.upsert_library_track(
+        {"id": "trk-p", "album_id": "alb-p", "artist_id": "art-p", "title": "Karma Police"}
+    )
+
+
+def _search(client, headers, body, candidates=None):
+    with patch(
+        "trackseerr.api.routes.acquisition.acquisition_coordinator.search_all_indexers",
+        return_value=candidates or [],
+    ):
+        return client.post("/api/acquisition/search", headers=headers, json=body)
+
+
+def test_search_uses_artist_profile_from_album_id(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _seed_artist_profile(test_db)
+    resp = _search(client, headers, {"artist": "Radiohead", "album": "OK Computer", "album_id": "alb-p"})
+    assert resp.status_code == 200
+    assert resp.json()["profile_name"] == "Artist Profile"
+
+
+def test_search_uses_artist_profile_from_track_id(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _seed_artist_profile(test_db)
+    resp = _search(client, headers, {"artist": "Radiohead", "title": "Karma Police", "track_id": "trk-p"})
+    assert resp.status_code == 200
+    assert resp.json()["profile_name"] == "Artist Profile"
+
+
+def test_search_falls_back_to_default_profile_for_unknown_album(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _seed_artist_profile(test_db)
+    resp = _search(client, headers, {"artist": "Radiohead", "album_id": "does-not-exist"})
+    assert resp.status_code == 200
+    assert resp.json()["profile_name"] == test_db.get_default_quality_profile()["name"]
+
+
+def _patched_drivers(healthy_results, failing=False):
+    healthy = MagicMock()
+    healthy.search.return_value = healthy_results
+    broken = MagicMock()
+    broken.search.side_effect = RuntimeError("Connection refused")
+
+    def factory(cfg):
+        return broken if failing and cfg.get("id") == "idx-bad" else healthy
+
+    return patch("trackseerr.acquisition_coordinator.get_indexer_driver", side_effect=factory)
+
+
+def _make_indexer(test_db, idx_id, name):
+    from trackseerr.models import IndexerConfig
+
+    test_db.create_indexer(
+        IndexerConfig(id=idx_id, name=name, indexer_type="torznab", host_url=f"http://{idx_id}:9696", enabled=True)
+    )
+
+
+def test_search_shows_blocklisted_release_as_rejected(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _make_indexer(test_db, "idx-ok", "Good Indexer")
+    title = "Radiohead - OK Computer [FLAC 16bit]"
+    test_db.add_to_blocklist(source_title=title)
+    cand = AcquisitionSearchResult(
+        download_id="bl-1", title=title, artist="Radiohead", item_type="album",
+        size_bytes=300 * 1024 * 1024, source="torznab",
+    )
+    with _patched_drivers([cand]):
+        resp = client.post(
+            "/api/acquisition/search", headers=headers, json={"artist": "Radiohead", "album": "OK Computer"}
+        )
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert len(results) == 1
+    assert results[0]["is_acceptable"] is False
+    assert results[0]["rejection_reasons"][0] == "Blocklisted"
+
+
+def test_search_reports_indexer_errors(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _make_indexer(test_db, "idx-bad", "Broken Indexer")
+    _make_indexer(test_db, "idx-ok", "Good Indexer")
+    cand = AcquisitionSearchResult(
+        download_id="ok-1", title="Radiohead - OK Computer [FLAC 16bit]", artist="Radiohead",
+        item_type="album", size_bytes=300 * 1024 * 1024, source="torznab",
+    )
+    with _patched_drivers([cand], failing=True):
+        resp = client.post(
+            "/api/acquisition/search", headers=headers, json={"artist": "Radiohead", "album": "OK Computer"}
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert [e["source"] for e in data["indexer_errors"]] == ["Broken Indexer"]
+    assert "Connection refused" in data["indexer_errors"][0]["error"]
+    assert data["count"] >= 1
