@@ -364,18 +364,26 @@ class TestClientCleanupCompleted:
         assert unsafe_driver.cleanup_completed("nzo_ssrf") is False
 
     def test_slskd_cleanup_completed_user_and_file(self) -> None:
-        """Verifies SlskdDriver.cleanup_completed deletes download by user and path."""
+        """Verifies SlskdDriver.cleanup_completed looks up the transfer id and deletes it by id."""
         driver = SlskdDriver("http://slskd.local:5030", api_key="slskdkey")
 
-        mock_resp = MagicMock(status_code=200)
-        with patch("httpx.Client.request", return_value=mock_resp) as mock_req:
+        user = {
+            "username": "peeruser",
+            "directories": [{
+                "directory": "music/album",
+                "files": [{"id": "t1", "filename": "music/album/song.flac", "state": "Completed, Succeeded"}],
+            }],
+        }
+        get_resp = MagicMock(status_code=200)
+        get_resp.json.return_value = user
+        del_resp = MagicMock(status_code=204)
+        with patch("httpx.Client.get", return_value=get_resp), \
+                patch("httpx.Client.delete", return_value=del_resp) as mock_del:
             res = driver.cleanup_completed("peeruser::music/album/song.flac", delete_files=False)
-            assert res is True
-            mock_req.assert_called_once()
-            args, kwargs = mock_req.call_args
-            assert args[0] == "DELETE"
-            assert args[1] == "http://slskd.local:5030/api/v0/transfers/downloads/peeruser"
-            assert kwargs["json"] == [{"filename": "music/album/song.flac"}]
+        assert res is True
+        mock_del.assert_called_once()
+        assert mock_del.call_args.args[0] == "http://slskd.local:5030/api/v0/transfers/downloads/peeruser/t1"
+        assert mock_del.call_args.kwargs["params"] == {"remove": "true"}
 
     def test_slskd_cleanup_completed_no_separator_returns_true(self) -> None:
         """Verifies SlskdDriver.cleanup_completed returns True without request when '::' is absent."""
@@ -386,10 +394,10 @@ class TestClientCleanupCompleted:
             mock_req.assert_not_called()
 
     def test_slskd_cleanup_completed_exception_and_ssrf(self) -> None:
-        """Verifies SlskdDriver.cleanup_completed returns True on request error and False on SSRF."""
+        """Verifies SlskdDriver.cleanup_completed returns False on request error and on SSRF."""
         driver = SlskdDriver("http://slskd.local:5030", api_key="slskdkey")
-        with patch("httpx.Client.request", side_effect=httpx.ConnectError("Transfer gone")):
-            assert driver.cleanup_completed("user::file.mp3") is True
+        with patch("httpx.Client.get", side_effect=httpx.ConnectError("Transfer gone")):
+            assert driver.cleanup_completed("user::file.mp3") is False
 
         unsafe_driver = SlskdDriver("http://169.254.169.254:5030", api_key="slskdkey")
         assert unsafe_driver.cleanup_completed("user::file.mp3") is False
