@@ -17,7 +17,7 @@ heading becomes the version and date.
 - Manual Search has a History tab for the album or track, shows when the automatic search last ran and what it found, and flags releases that are blocklisted (with the reason and date), already downloading, or held by a delay profile.
 - Album and track history shows each release's name and quality, says what an upgrade replaced, and has a Releases filter for the download, import, replacement and blocklist trail.
 - Manual search: search every indexer for an album or track from the album view or the Missing and Cutoff Unmet pages, see each release's quality, size, seeders, age and score with the reasons it would be rejected, and download the one you want.
-- Download clients can be edited, and slskd accepts an API key or its web UI username and password.
+- Download clients can be edited.
 - Fix unmatched playlist songs from the tracklist: users search the catalog for the right song and suggest it (an admin approves it from the Issue in one click), request it if it's not in the library, or report it. Admins can also mark a song unmatchable so it stops counting as missing. Approved fixes apply to every playlist on the next sync, for the TrackSeerr library, Plex and Jellyfin.
 - Backup and restore: scheduled and on-demand backups of the database and settings, with restore from the System page.
 - Changelog: a "What's new" section on the System page and a one-time notice for admins after an upgrade.
@@ -50,6 +50,9 @@ heading becomes the version and date.
 
 ### Fixed
 
+- slskd connection tests failed with HTTP 404 even with a valid API key; slskd now connects with its URL and API key only.
+- qBittorrent 5 logins were reported as invalid credentials; a rejected login now also mentions the URL port, which must match qBittorrent's own WebUI port.
+- Download client tests say when the client could not be reached at all, instead of blaming the credentials, and failed tests are written to the TrackSeerr log.
 - Testing a saved download client used the masked password, so qBittorrent, Transmission, Deluge and NZBGet reported invalid credentials; SABnzbd's test now actually checks the API key, and qBittorrent says when it has banned the IP after failed logins.
 - Users can delete playlists they added themselves.
 - Copy buttons (API key, feed and webhook links, recovery codes) work over plain HTTP, and the revealed API key can be selected on phones.
