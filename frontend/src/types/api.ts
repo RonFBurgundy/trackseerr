@@ -688,6 +688,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/activity/searches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Log of indexer and Soulseek searches with their triggers */
+        get: operations["list_searches_api_activity_searches_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/gateway-status": {
         parameters: {
             query?: never;
@@ -11742,12 +11759,19 @@ export interface components {
             id: string;
             /** Indexer */
             indexer?: string | null;
+            /**
+             * Is Folder
+             * @default false
+             */
+            is_folder: boolean;
             /** Item Type */
             item_type: string;
             /** Messages */
             messages: string[];
             /** Needs Manual Import */
             needs_manual_import: boolean;
+            /** Peer */
+            peer?: string | null;
             /** Progress */
             progress: number;
             /** Protocol */
@@ -11756,6 +11780,8 @@ export interface components {
             quality?: string | null;
             /** Release Title */
             release_title?: string | null;
+            /** Remote State */
+            remote_state?: string | null;
             /** Request Id */
             request_id?: string | null;
             seeding?: components["schemas"]["Seeding"] | null;
@@ -12324,6 +12350,54 @@ export interface components {
              * @default false
              */
             unlink_lastfm: boolean;
+        };
+        /** SearchLogPage */
+        SearchLogPage: {
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Records */
+            records: components["schemas"]["SearchLogRecord"][];
+            /** Total */
+            total: number;
+        };
+        /** SearchLogRecord */
+        SearchLogRecord: {
+            /** Album Id */
+            album_id?: string | null;
+            /** Created At */
+            created_at: string;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Id */
+            id: number;
+            /** Query Album */
+            query_album?: string | null;
+            /** Query Artist */
+            query_artist?: string | null;
+            /** Query Title */
+            query_title?: string | null;
+            /** Request Id */
+            request_id?: string | null;
+            /** Result Count */
+            result_count?: number | null;
+            /** Rung */
+            rung?: number | null;
+            /** Source Name */
+            source_name?: string | null;
+            /** Source Type */
+            source_type?: string | null;
+            /** Track Id */
+            track_id?: string | null;
+            /** Trigger Kind */
+            trigger_kind?: string | null;
+            /** Trigger Label */
+            trigger_label?: string | null;
+            /** Trigger Ref */
+            trigger_ref?: string | null;
         };
         /** SearchQueryEcho */
         SearchQueryEcho: {
@@ -14755,7 +14829,9 @@ export interface operations {
     };
     retry_queue_item_api_activity_queue__queue_id__retry_post: {
         parameters: {
-            query?: never;
+            query?: {
+                blocklist?: boolean;
+            };
             header?: never;
             path: {
                 queue_id: string;
@@ -14771,6 +14847,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActionResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_searches_api_activity_searches_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                source_type?: string | null;
+                request_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchLogPage"];
                 };
             };
             /** @description Validation Error */
