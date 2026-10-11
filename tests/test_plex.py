@@ -262,7 +262,7 @@ def test_match_track_censored_title(mock_server):
     other = MockPlexTrack("Fun Times", "Lily Allen", "Alright, Still")
 
     def search(query, mediatype=None, limit=None):
-        return [other, real] if query == "k You" else []
+        return [other, real] if query == "You" else []
 
     client.server.search.side_effect = search
     t = Track(title="F**k You", artist="Lily Allen", album="Alright, Still")

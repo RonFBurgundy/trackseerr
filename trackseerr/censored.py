@@ -39,6 +39,14 @@ def censored_pattern(title: str) -> Optional["re.Pattern[str]"]:
 
 
 def search_text(title: str) -> str:
-    """The longest uncensored stretch of the title, for media-server search queries."""
-    segments = [s.strip() for s in CENSOR_RUN.split(title or "")]
-    return max(segments, key=len, default="")
+    """Longest run of consecutive unmasked words, for media-server search queries ('' when all are masked)."""
+    best: list[str] = []
+    run: list[str] = []
+    for tok in (title or "").split():
+        if CENSOR_RUN.search(tok):
+            run = []
+            continue
+        run.append(tok)
+        if len(run) > len(best):
+            best = list(run)
+    return " ".join(best)

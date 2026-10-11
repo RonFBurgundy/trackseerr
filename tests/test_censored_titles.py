@@ -33,3 +33,8 @@ def test_uncensored_and_all_asterisk_titles():
 def test_search_text_longest_uncensored_segment():
     assert is_censored(CENSORED)
     assert search_text(CENSORED) == "Grab The Devil By The Horns And"
+
+
+def test_search_text_drops_masked_tokens():
+    assert search_text("F**k You") == "You"
+    assert search_text("****") == ""
