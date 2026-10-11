@@ -197,6 +197,7 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
             error={error}
             isAdmin={isAdmin}
             canMonitorTracks={!lidarrMode}
+            albumMonitored={album.monitored === true}
             renderRowAction={
               isAdmin
                 ? (t) => (
