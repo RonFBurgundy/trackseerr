@@ -128,6 +128,8 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
                 title: r.item_type === 'album' ? null : r.title,
                 itemType: r.item_type === 'album' ? 'album' : 'track',
                 albumId: r.album_id,
+                // Native wanted rows are tracks; r.id is the library track id.
+                trackId: r.item_type === 'track' ? r.id : undefined,
               })
             }
             icon={<ListFilter className="h-3.5 w-3.5" />}
