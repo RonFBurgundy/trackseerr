@@ -4,6 +4,7 @@ import type {
   ActivityActionResult,
   ActivityBlocklistRecord,
   ActivityHistoryRecord,
+  ActivitySearchPage,
   ActivityQueueRecord,
   GroupIndexResponse,
   IndexQuery,
@@ -48,8 +49,26 @@ export function removeActivityQueueItem(id: string | number, opts: QueueRemoveOp
   });
 }
 
-export function retryActivityQueueItem(id: string | number): Promise<ActivityActionResult> {
-  return apiRequest<ActivityActionResult>(`/api/activity/queue/${encodeURIComponent(String(id))}/retry`, {
+export interface ActivitySearchQuery {
+  page: number;
+  pageSize: number;
+  /** `torznab` | `newznab` | `slskd`; omitted for all sources. */
+  sourceType?: string;
+}
+
+export function getActivitySearches(q: ActivitySearchQuery, signal?: AbortSignal): Promise<ActivitySearchPage> {
+  const params = new URLSearchParams({ page: String(q.page), page_size: String(q.pageSize) });
+  if (q.sourceType) params.set('source_type', q.sourceType);
+  return apiRequest<ActivitySearchPage>(`/api/activity/searches?${params.toString()}`, { signal });
+}
+
+/** `blocklist` also blocklists the current release (Soulseek: that peer's file/folder) before searching again. */
+export function retryActivityQueueItem(
+  id: string | number,
+  opts?: { blocklist?: boolean }
+): Promise<ActivityActionResult> {
+  const qs = opts?.blocklist ? '?blocklist=true' : '';
+  return apiRequest<ActivityActionResult>(`/api/activity/queue/${encodeURIComponent(String(id))}/retry${qs}`, {
     method: 'POST',
   });
 }

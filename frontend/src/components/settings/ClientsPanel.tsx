@@ -4,7 +4,7 @@ import { TapeDeckButton, MachinedCard, TactileSwitch, ConfirmDangerButton, Actio
 import type { DownloadClientItem } from '@/types/models';
 import { saveClientSettings, deleteClientSettings, testClientConnection } from '@/services/settingsService';
 import { ApiError } from '@/services/apiClient';
-import { useClientDraft, toDriverType } from '@/hooks/useClientDraft';
+import { useClientDraft, toDriverType, type SlskdNumericKey } from '@/hooks/useClientDraft';
 import { compactInputClass, compactLabelClass } from './formClasses';
 
 export interface ClientsPanelProps {
@@ -21,6 +21,16 @@ interface TestStatus {
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
 }
+
+const SLSKD_NUMERIC_FIELDS: ReadonlyArray<{ key: SlskdNumericKey; label: string; hint: string }> = [
+  { key: 'max_peer_queue', label: 'Max peer queue', hint: 'Skip peers with a longer queue; 0 = off. Default 50.' },
+  { key: 'min_upload_speed_kbps', label: 'Min upload speed (KB/s)', hint: 'Skip slower peers. Default 0.' },
+  { key: 'search_timeout', label: 'Search timeout (s)', hint: 'How long a search collects results. Default 12.' },
+  { key: 'min_search_interval', label: 'Min search interval (s)', hint: 'Pause between searches. Default 5.' },
+  { key: 'queue_timeout_minutes', label: 'Queue timeout (min)', hint: 'Give up on a download still queued remotely. Default 30.' },
+  { key: 'stall_minutes', label: 'Stall time (min)', hint: 'Flag a download with no progress. Default 15.' },
+  { key: 'missing_minutes', label: 'Missing time (min)', hint: 'Give up when slskd no longer lists it. Default 10.' },
+];
 
 export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onToast }) => {
   const draft = useClientDraft();
@@ -241,6 +251,45 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
                 </p>
               )}
             </div>
+          )}
+
+          {type === 'slskd' && (
+            <fieldset className="space-y-2 border border-[#2a2a2a] rounded-[4px] p-2.5 sm:col-span-2">
+              <legend className="px-1 text-[10px] font-mono uppercase tracking-wider text-neutral-400">Soulseek tuning</legend>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {SLSKD_NUMERIC_FIELDS.map((f) => (
+                  <div key={f.key}>
+                    <label htmlFor={`client-slskd-${f.key}`} className={compactLabelClass}>{f.label}</label>
+                    <input
+                      id={`client-slskd-${f.key}`}
+                      name={f.key}
+                      type="number"
+                      min={0}
+                      step={1}
+                      inputMode="numeric"
+                      value={draft.slskd[f.key]}
+                      onChange={(e) => draft.setSlskdField(f.key, e.target.value)}
+                      className={compactInputClass}
+                    />
+                    <p className="text-[10px] font-mono text-neutral-500 mt-1">{f.hint}</p>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <label htmlFor="client-slskd-ignored-users" className={compactLabelClass}>Ignored users</label>
+                <input
+                  id="client-slskd-ignored-users"
+                  name="ignored_users"
+                  type="text"
+                  value={draft.slskd.ignored_users}
+                  onChange={(e) => draft.setSlskdField('ignored_users', e.target.value)}
+                  placeholder="user1, user2"
+                  autoComplete="off"
+                  className={compactInputClass}
+                />
+                <p className="text-[10px] font-mono text-neutral-500 mt-1">Comma-separated Soulseek usernames never downloaded from. Default none.</p>
+              </div>
+            </fieldset>
           )}
 
           {(type === 'qbittorrent' || type === 'transmission' || type === 'nzbget') && (

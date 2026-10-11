@@ -35,6 +35,10 @@ export type ActivityHistoryRecord = Schema<'HistoryRecord'>;
 
 export type ActivityBlocklistRecord = Schema<'BlocklistRecord'>;
 
+export type ActivitySearchRecord = Schema<'SearchLogRecord'>;
+
+export type ActivitySearchPage = Schema<'SearchLogPage'>;
+
 export type WantedRecord = Omit<Schema<'WantedRecord'>, 'current_quality' | 'cutoff_quality'>;
 
 export type WantedCutoffRecord = Schema<'WantedRecord'>;
