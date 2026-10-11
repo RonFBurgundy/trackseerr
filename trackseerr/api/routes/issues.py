@@ -29,6 +29,7 @@ from trackseerr.api.schemas.issues import IssueCount, IssueDeleted, IssueSeen
 from trackseerr.api.routes.library.manual_import import manual_import_album_tracks
 from trackseerr.api.routes import requests as requests_routes
 from trackseerr.api.routes import wanted as wanted_routes
+from trackseerr.release_reject import blocklist_current_release
 from trackseerr.clients.lidarr import LidarrClient
 from trackseerr.config import Config
 from trackseerr.item_history import TRIGGER_USER, emit, emit_named
@@ -752,24 +753,16 @@ def _queue_album_search(
 def _blocklist_current_release(db: Database, issue: dict[str, Any], album_id: str) -> dict[str, Any]:
     """Blocklists the release behind the album's current files; 409 when the import history does not name one."""
     track_ids = [str(t["id"]) for t in db.list_library_tracks(album_id=album_id, limit=1000)]
-    source = db.get_imported_release_source(album_id, track_ids, issue.get("request_id"))
-    if source is None:
+    result = blocklist_current_release(
+        db, album_id, track_ids, issue.get("request_id"), f"Wrong release reported in issue {issue['id']}"
+    )
+    if result is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="The release that produced this album's files is not on record, so it cannot be blocklisted. "
             "Use manual import to replace the files instead.",
         )
-    item = db.add_to_blocklist(
-        source_title=str(source["release_title"]),
-        artist=source.get("artist"),
-        album=source.get("album"),
-        release_guid=source.get("release_guid"),
-        info_hash=source.get("info_hash"),
-        protocol=source.get("protocol"),
-        indexer=source.get("indexer"),
-        reason=f"Wrong release reported in issue {issue['id']}",
-    )
-    return {"blocklist_id": item["id"], "release": item["source_title"]}
+    return result
 
 
 @router.post(

@@ -11,6 +11,7 @@ from trackseerr.api.response_models import ApiModel
 
 from trackseerr.acquisition_coordinator import (
     _to_quality_profile,
+    _extract_info_hash,
     candidate_rank,
     resolve_duration,
     acquisition_coordinator,
@@ -25,7 +26,7 @@ from trackseerr.api.schemas.acquisition import (
     PendingGrabResponse,
     SearchResponse,
 )
-from trackseerr.item_history import TRIGGER_MANUAL, GrabTrigger
+from trackseerr.item_history import TRIGGER_MANUAL, GrabTrigger, _iso
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.redaction import redact_text
 from trackseerr.clients.acquisition import get_acquisition_driver
@@ -68,6 +69,9 @@ class InteractiveReleaseItem(BaseModel):
     format_score: int = 0
     breakdown: Optional[dict[str, Any]] = None
     extra: dict[str, Any] = {}
+    blocklist: Optional[dict[str, Any]] = None
+    in_queue: bool = False
+    pending_until: Optional[str] = None
 
 
 class InteractiveSearchQuery(BaseModel):
@@ -144,8 +148,50 @@ def _resolve_search_profile(db: Database, query: InteractiveSearchQuery) -> dict
     return default
 
 
-def _build_release_item(r: AcquisitionSearchResult, eval_res: Any, parsed: Any) -> InteractiveReleaseItem:
-    """Shapes one evaluated candidate; blocklisted releases are shown as rejected with reason "Blocklisted"."""
+def _blocklist_reason(entry: dict[str, Any]) -> str:
+    """``Blocklisted: <reason> (<YYYY-MM-DD>)`` with missing parts omitted."""
+    text = "Blocklisted"
+    if entry.get("reason"):
+        text += f": {entry['reason']}"
+    if entry.get("created_at"):
+        text += f" ({str(entry['created_at'])[:10]})"
+    return text
+
+
+def _release_flags(db: Database, r: AcquisitionSearchResult) -> tuple[bool, Optional[str]]:
+    """(already in the download queue, delay-profile hold ``release_at`` or None) for a candidate."""
+    try:
+        in_queue = db.find_active_download_by_release(r.title, _extract_info_hash(r)) is not None
+        pending = db.find_pending_release(r.title)
+    except sqlite3.Error as e:
+        logger.warning("Could not look up queue/pending state for '%s': %s", r.title, redact_text(str(e)))
+        return False, None
+    return in_queue, (str(pending["release_at"]) if pending and pending.get("release_at") else None)
+
+
+def _last_search(db: Database, query: "InteractiveSearchQuery") -> Optional[dict[str, str]]:
+    """The newest ``searched`` item event for the track, else the album."""
+    try:
+        for entity, entity_id in (("track", query.track_id), ("album", query.album_id)):
+            if not entity_id:
+                continue
+            row = db.latest_item_event(entity, entity_id, "searched")  # type: ignore[arg-type]
+            if row:
+                return {"at": _iso(row.get("created_at")) or "", "message": str(row.get("message") or "Searched for a release")}
+    except sqlite3.Error as e:
+        logger.warning("Could not read the last search event: %s", redact_text(str(e)))
+    return None
+
+
+def _build_release_item(
+    r: AcquisitionSearchResult,
+    eval_res: Any,
+    parsed: Any,
+    in_queue: bool = False,
+    pending_until: Optional[str] = None,
+) -> InteractiveReleaseItem:
+    """Shapes one evaluated candidate: blocklisted releases are rejected with the blocklist reason and date,
+    releases already downloading are rejected as such, and delay-profile holds carry ``pending_until``."""
     proto = str(r.protocol or "torrent").lower()
     if proto in ("slskd", "soulseek"):
         proto = "p2p"
@@ -156,7 +202,12 @@ def _build_release_item(r: AcquisitionSearchResult, eval_res: Any, parsed: Any) 
     acceptable = eval_res.is_acceptable
     if extra_data.get("blocklisted"):
         acceptable = False
-        reasons = ["Blocklisted", *reasons]
+        reasons = [_blocklist_reason(extra_data.get("blocklist") or {}), *reasons]
+    if pending_until:
+        reasons = [f"Held by delay profile until {pending_until}", *reasons]
+    if in_queue:
+        acceptable = False
+        reasons = ["Already downloading", *reasons]
     return InteractiveReleaseItem(
         id=str(r.download_id or f"rel-{uuid.uuid4().hex[:12]}"),
         title=r.title,
@@ -177,6 +228,9 @@ def _build_release_item(r: AcquisitionSearchResult, eval_res: Any, parsed: Any) 
         format_score=eval_res.format_score,
         breakdown=eval_res.breakdown.to_dict() if eval_res.breakdown else None,
         extra=extra_data,
+        blocklist=extra_data.get("blocklist") if extra_data.get("blocklisted") else None,
+        in_queue=in_queue,
+        pending_until=pending_until,
     )
 
 
@@ -239,7 +293,8 @@ def search_releases(
                 **candidate_context(r),
             )
 
-            release_item = _build_release_item(r, eval_res, parsed)
+            in_queue, pending_until = _release_flags(db, r)
+            release_item = _build_release_item(r, eval_res, parsed, in_queue, pending_until)
             results.append(release_item)
             ranks[id(release_item)] = candidate_rank(r, eval_res, preferred_protocol)
         except Exception as e:
@@ -255,6 +310,7 @@ def search_releases(
         "results": [item.model_dump() for item in results],
         "count": len(results),
         "indexer_errors": indexer_errors,
+        "last_search": _last_search(db, query),
     }
 
 

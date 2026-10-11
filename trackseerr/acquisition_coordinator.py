@@ -65,15 +65,24 @@ def _apply_blocklist(
     """Drops blocklisted candidates, or keeps them flagged ``extra["blocklisted"]`` when ``include_blocklisted``."""
     kept: list[AcquisitionSearchResult] = []
     for candidate in candidates:
-        if db.is_blocklisted(
+        entry = db.find_blocklist_entry(
             release_title=candidate.title,
             release_guid=candidate.download_id,
             info_hash=_extract_info_hash(candidate),
-        ):
+        )
+        if entry is not None:
             if not include_blocklisted:
                 logger.info("Skipping blocklisted release candidate during search: '%s'", candidate.title)
                 continue
-            candidate.extra = {**(candidate.extra or {}), "blocklisted": True}
+            candidate.extra = {
+                **(candidate.extra or {}),
+                "blocklisted": True,
+                "blocklist": {
+                    "reason": entry.get("reason"),
+                    "indexer": entry.get("indexer"),
+                    "created_at": entry.get("created_at"),
+                },
+            }
         kept.append(candidate)
     return kept
 

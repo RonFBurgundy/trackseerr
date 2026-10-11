@@ -21,15 +21,18 @@ from trackseerr.api.schemas.library import (
     AvailabilityResponse,
     ItemHistoryResponse,
     LibraryTrackRecord,
+    RejectCurrentResponse,
     SuccessResponse,
     TracksUpdatedResponse,
 )
 from trackseerr.clients.core_client import CoreClient
 from trackseerr.config import Config
 from trackseerr.library_availability import get_item_availability
+from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.models import (
     UserPermission,
 )
+from trackseerr.release_reject import reject_current_release
 from trackseerr.storage import Database
 
 
@@ -166,6 +169,42 @@ def get_item_history(
         "events": [presenter.present(row) for row in page],
         "next_before": int(page[-1]["id"]) if len(rows) > limit and page else None,
     }
+
+@router.post(
+    "/{entity}/{entity_id}/reject-current",
+    dependencies=[Depends(require_core_tier)],
+    summary="Blocklist the release behind an album's or track's files and search for a replacement",
+    response_model=RejectCurrentResponse,
+    response_model_exclude_unset=True,
+)
+def reject_current(
+    entity: Literal["album", "track"],
+    entity_id: str,
+    db: Database = Depends(get_db),
+    admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Native mode only. The current files stay until the replacement imports (and records ``upgraded``).
+
+    404 when the album/track does not exist, 409 when it has no files or Lidarr manages the library.
+    """
+    try:
+        with work_guard(db, MODE_NATIVE):
+            if entity == "album":
+                if db.get_library_album(entity_id) is None:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+                track_ids = [str(t["id"]) for t in db.list_library_tracks(album_id=entity_id, limit=1000)]
+            else:
+                if db.get_library_track(entity_id) is None:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
+                track_ids = [entity_id]
+            if not any(db.list_library_files_for_track(t) for t in track_ids):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This item has no files to reject")
+            return reject_current_release(db, entity, entity_id, str(admin["id"]))
+    except ModeChanged as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Library manager is set to Lidarr"
+        ) from exc
+
 
 def _is_admin_principal(user: dict[str, Any]) -> bool:
     """True only for a real admin session or API key; gateway-forwarded principals never qualify."""

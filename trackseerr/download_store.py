@@ -688,10 +688,13 @@ class DownloadStoreMixin:
         indexer: Optional[str] = None,
         reason: Optional[str] = None,
         download_id: Optional[str] = None,
+        track_id: Optional[str] = None,
+        album_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Adds a release to the persistent download blocklist.
 
-        ``download_id`` (the download the release came from) lets the ``blocklisted`` item event name the item.
+        ``download_id`` (the download the release came from) lets the ``blocklisted`` item event name the item;
+        ``track_id`` / ``album_id`` name it directly when the download is gone (the download wins when it resolves).
         """
         item_id = f"bl-{uuid.uuid4().hex[:12]}"
         clean_hash = info_hash.strip().lower() if info_hash else None
@@ -748,10 +751,11 @@ class DownloadStoreMixin:
         if recorded is None:
             try:
                 ids = self.find_library_ids_by_name(item.get("artist"), item.get("album"))
-                if ids["album_id"] or ids["artist_id"]:
+                target_album = album_id or ids["album_id"]
+                if track_id or target_album or ids["artist_id"]:
                     self.record_item_event(
-                        "blocklisted", album_id=ids["album_id"], artist_id=ids["artist_id"], message=message,
-                        details=details,
+                        "blocklisted", track_id=track_id, album_id=target_album, artist_id=ids["artist_id"],
+                        message=message, details=details,
                     )
             except sqlite3.Error:
                 logger.exception("Could not record the blocklisted item event")
@@ -767,6 +771,49 @@ class DownloadStoreMixin:
             row = cur.fetchone()
             return dict(row) if row else None
 
+    def find_blocklist_entry(
+        self,
+        release_title: Optional[str] = None,
+        release_guid: Optional[str] = None,
+        info_hash: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """The blocklist row matching a release by info_hash (case-insensitive), guid, exact title, then cleaned title."""
+        cols = "id, source_title, reason, indexer, created_at"
+        with self._lock:
+            if info_hash:
+                row = self.conn.execute(
+                    f"SELECT {cols} FROM download_blocklist WHERE LOWER(info_hash) = LOWER(?) LIMIT 1",
+                    (str(info_hash).strip(),),
+                ).fetchone()
+                if row:
+                    return dict(row)
+
+            if release_guid:
+                row = self.conn.execute(
+                    f"SELECT {cols} FROM download_blocklist WHERE release_guid = ? LIMIT 1",
+                    (str(release_guid).strip(),),
+                ).fetchone()
+                if row:
+                    return dict(row)
+
+            if release_title:
+                clean_rt = str(release_title).strip()
+                row = self.conn.execute(
+                    f"SELECT {cols} FROM download_blocklist WHERE LOWER(source_title) = LOWER(?) LIMIT 1",
+                    (clean_rt,),
+                ).fetchone()
+                if row:
+                    return dict(row)
+
+                target_clean = clean_library_name(clean_rt)
+                if target_clean:
+                    for cand in self.conn.execute(
+                        f"SELECT {cols} FROM download_blocklist WHERE source_title IS NOT NULL"
+                    ).fetchall():
+                        if clean_library_name(cand["source_title"] or "") == target_clean:
+                            return dict(cand)
+        return None
+
     def is_blocklisted(
         self,
         release_title: Optional[str] = None,
@@ -774,45 +821,37 @@ class DownloadStoreMixin:
         info_hash: Optional[str] = None,
     ) -> bool:
         """Checks if a release matches blocklist by info_hash (case-insensitive), guid, or title."""
+        return self.find_blocklist_entry(release_title, release_guid, info_hash) is not None
+
+    def find_active_download_by_release(self, title: str, info_hash: Optional[str]) -> Optional[dict[str, Any]]:
+        """A live (not failed/imported) download of this release: same hash (case-insensitive), else same title."""
         with self._lock:
+            row = None
             if info_hash:
-                clean_hash = str(info_hash).strip()
-                cur = self.conn.execute(
-                    "SELECT 1 FROM download_blocklist WHERE LOWER(info_hash) = LOWER(?) LIMIT 1",
-                    (clean_hash,),
-                )
-                if cur.fetchone():
-                    return True
+                row = self.conn.execute(
+                    "SELECT id, title, status FROM active_downloads WHERE status NOT IN ('failed', 'imported') "
+                    "AND LOWER(download_hash) = LOWER(?) LIMIT 1",
+                    (str(info_hash).strip(),),
+                ).fetchone()
+            if row is None and title:
+                row = self.conn.execute(
+                    "SELECT id, title, status FROM active_downloads WHERE status NOT IN ('failed', 'imported') "
+                    "AND LOWER(title) = LOWER(?) LIMIT 1",
+                    (str(title).strip(),),
+                ).fetchone()
+        return dict(row) if row else None
 
-            if release_guid:
-                clean_guid = str(release_guid).strip()
-                cur = self.conn.execute(
-                    "SELECT 1 FROM download_blocklist WHERE release_guid = ? LIMIT 1",
-                    (clean_guid,),
-                )
-                if cur.fetchone():
-                    return True
-
-            if release_title:
-                clean_rt = str(release_title).strip()
-                cur = self.conn.execute(
-                    "SELECT 1 FROM download_blocklist WHERE LOWER(source_title) = LOWER(?) LIMIT 1",
-                    (clean_rt,),
-                )
-                if cur.fetchone():
-                    return True
-
-                target_clean = clean_library_name(clean_rt)
-                if target_clean:
-                    cur = self.conn.execute(
-                        "SELECT source_title FROM download_blocklist WHERE source_title IS NOT NULL"
-                    )
-                    for row in cur.fetchall():
-                        st = row["source_title"] or ""
-                        if clean_library_name(st) == target_clean:
-                            return True
-
-        return False
+    def find_pending_release(self, title: str) -> Optional[dict[str, Any]]:
+        """The delay-profile hold on a release with this title, if any (``release_at`` is when it will be grabbed)."""
+        if not title:
+            return None
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT id, release_at, reason FROM pending_releases WHERE LOWER(title) = LOWER(?) "
+                "ORDER BY release_at LIMIT 1",
+                (str(title).strip(),),
+            ).fetchone()
+        return dict(row) if row else None
 
     def list_blocklist(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
         """Returns paginated download blocklist items ordered by created_at DESC."""

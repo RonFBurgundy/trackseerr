@@ -763,6 +763,19 @@ class ItemHistoryMixin:
             ).fetchone()
         return self._item_event_row(row) if row is not None else None
 
+    def latest_item_event(
+        self, entity: Literal["artist", "album", "track"], entity_id: str, event: str
+    ) -> Optional[dict[str, Any]]:
+        """The newest event of one kind for an entity (whole scope), or None."""
+        if entity not in ("artist", "album", "track"):
+            raise ValueError(f"Unknown history entity: {entity!r}")
+        with self._lock:
+            row = self.conn.execute(
+                f"SELECT * FROM item_events WHERE {entity}_id = ? AND event = ? ORDER BY id DESC LIMIT 1",
+                (str(entity_id), str(event)),
+            ).fetchone()
+        return self._item_event_row(row) if row is not None else None
+
     def has_item_events(self, entity: Literal["artist", "album", "track"], entity_id: str) -> bool:
         if entity not in ("artist", "album", "track"):
             raise ValueError(f"Unknown history entity: {entity!r}")

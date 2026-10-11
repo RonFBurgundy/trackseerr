@@ -898,3 +898,16 @@ def test_download_client_category_and_mappings_payload(app_and_client, test_db, 
         {"remote_path": "/downloads/torrents", "local_path": "/local/downloads"}
     ]
 
+
+
+def test_find_blocklist_entry_matches_hash_guid_title(test_db):
+    test_db.add_to_blocklist(source_title="Hash Rel", info_hash="ABCDEF0123", reason="r-hash", indexer="i1")
+    test_db.add_to_blocklist(source_title="Guid Rel", release_guid="guid-1", reason="r-guid")
+    test_db.add_to_blocklist(source_title="Artist - Title [FLAC]", reason="r-title")
+    by_hash = test_db.find_blocklist_entry(info_hash="abcdef0123")
+    assert by_hash["reason"] == "r-hash" and by_hash["indexer"] == "i1" and by_hash["created_at"]
+    assert test_db.find_blocklist_entry(release_guid="guid-1")["reason"] == "r-guid"
+    assert test_db.find_blocklist_entry(release_title="artist - title [flac]")["reason"] == "r-title"
+    assert test_db.find_blocklist_entry(release_title="Nope", release_guid="x", info_hash="y") is None
+    assert test_db.is_blocklisted(release_guid="guid-1") is True
+    assert test_db.is_blocklisted(release_title="Nope") is False
