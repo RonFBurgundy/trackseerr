@@ -253,3 +253,18 @@ def test_plex_client_refresh_music_library_honors_preferred_section(mock_server)
     sec1.update.assert_not_called()
 
 
+
+
+@patch("trackseerr.clients.plex.PlexServer")
+def test_match_track_censored_title(mock_server):
+    client = PlexClient("http://localhost:32400", "token")
+    real = MockPlexTrack("Fuck You", "Lily Allen", "Alright, Still")
+    other = MockPlexTrack("Fun Times", "Lily Allen", "Alright, Still")
+
+    def search(query, mediatype=None, limit=None):
+        return [other, real] if query == "You" else []
+
+    client.server.search.side_effect = search
+    t = Track(title="F**k You", artist="Lily Allen", album="Alright, Still")
+    assert client.match_track(t) is real
+    assert client.match_track(Track(title="F**k Off", artist="Lily Allen", album="Alright, Still")) is None

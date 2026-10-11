@@ -13,10 +13,12 @@ import urllib3
 from plexapi.exceptions import BadRequest, NotFound, Unauthorized
 from plexapi.server import PlexServer
 
+from ..censored import censored_pattern, search_text
 from ..models import Playlist, SyncResult, Track
 from ..security import is_safe_image_url, safe_data_path
 from ..missing_csv import delete_missing_csv, write_missing_csv
 from ..redaction import redact_text, safe_exc
+from ..storage_common import clean_library_name
 
 logger = logging.getLogger(__name__)
 
@@ -299,7 +301,21 @@ class PlexClient:
             except BadRequest as e:
                 logger.debug("BadRequest searching for sanitized title %s: %s", stripped_title, safe_exc(e))
 
-        return None
+        return self._match_censored(track, threshold)
+
+    def _match_censored(self, track: Track, threshold: float) -> Optional[object]:
+        """Fallback for masked titles ("F**k"): search the uncensored text and filter by the mask pattern."""
+        pattern = censored_pattern(track.title)
+        query = search_text(track.title)
+        if pattern is None or not query:
+            return None
+        try:
+            found = self.server.search(query, mediatype="track", limit=10)
+        except BadRequest as e:
+            logger.debug("BadRequest searching for censored title %s: %s", query, safe_exc(e))
+            return None
+        kept = [c for c in found if pattern.fullmatch(clean_library_name(str(getattr(c, "title", "") or "")))]
+        return self._eval_candidates(kept, track, threshold)
 
     def _eval_candidates(self, candidates: List[object], track: Track, threshold: float) -> Optional[object]:
         target_artist = track.artist.lower().strip()

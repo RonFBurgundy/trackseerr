@@ -27,6 +27,7 @@ from typing import Any, BinaryIO, Callable, Optional
 from urllib.parse import unquote, urlsplit
 from xml.parsers.expat import ExpatError
 
+from trackseerr.censored import censored_pattern
 from trackseerr.job_tracker import track_job
 from trackseerr.library import primary_artist, resolve_album_artist
 from trackseerr.list_monitoring import apply_playlist_missing_safely
@@ -486,6 +487,7 @@ class TrackMatcher:
         number = entry.get("track_number") or None
         seconds = (entry.get("total_time_ms") or 0) / 1000.0
         squashed = title.replace(" ", "")
+        pattern = censored_pattern(entry.get("name") or "")
         for artist in self._artist_rows(entry):
             if album_clean:
                 album = self._db.get_library_album_by_title(artist["id"], entry["album"])
@@ -499,6 +501,8 @@ class TrackMatcher:
                 if t["has_file"]
                 and (t["clean_title"] == title or (squashed and str(t["clean_title"]).replace(" ", "") == squashed))
             ]
+            if not candidates and pattern is not None:
+                candidates = [t for t in self._index(artist["id"]) if t["has_file"] and pattern.fullmatch(str(t["clean_title"]))]
             if not candidates:
                 continue
 

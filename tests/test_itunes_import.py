@@ -578,3 +578,12 @@ def test_reimport_preserves_user_edits(env):
     assert pl["name"] == "My Renamed" and pl["poster_url"] == "http://x/p.jpg" and not pl["enabled"]
     assert len(env.db.get_missing_tracks(fav_id)) == 2  # missing refreshed
     assert len(__import__("json").loads(pl["tracks_json"])) == 6  # tracks refreshed
+
+
+def test_censored_title_matches_uncensored_library_track(db):
+    _add(db, "s1", "Sum 41", "sal1", "Chuck", "st1", "Grab The Devil By The Horns And Fuck Him Up The Ass",
+         "/music/Sum 41/Chuck/01.mp3", 150.0)
+    m = imp.TrackMatcher(db, [])
+    censored = "Grab The Devil By The Horns And **** Him Up The ***"
+    assert m.match(_entry(name=censored, artist="Sum 41")) == ("st1", "metadata")
+    assert m.match(_entry(name="Grab The Devil By The **** Of It", artist="Sum 41")) is None
