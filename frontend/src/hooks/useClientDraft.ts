@@ -121,7 +121,7 @@ export function useClientDraft(): ClientDraft {
     if (type === 'transmission' && rpcPath.trim()) extraSettings.rpc_path = rpcPath.trim();
     if (category.trim()) extraSettings.category = category.trim();
 
-    const usesUsername = type === 'slskd' || type === 'qbittorrent' || type === 'transmission' || type === 'nzbget';
+    const usesUsername = type === 'qbittorrent' || type === 'transmission' || type === 'nzbget';
     const usesPassword = usesUsername || type === 'deluge';
     const usesApiKey = type === 'slskd' || type === 'sabnzbd';
 
