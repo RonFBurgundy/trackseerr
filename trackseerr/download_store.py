@@ -688,10 +688,13 @@ class DownloadStoreMixin:
         indexer: Optional[str] = None,
         reason: Optional[str] = None,
         download_id: Optional[str] = None,
+        track_id: Optional[str] = None,
+        album_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Adds a release to the persistent download blocklist.
 
-        ``download_id`` (the download the release came from) lets the ``blocklisted`` item event name the item.
+        ``download_id`` (the download the release came from) lets the ``blocklisted`` item event name the item;
+        ``track_id`` / ``album_id`` name it directly when the download is gone (the download wins when it resolves).
         """
         item_id = f"bl-{uuid.uuid4().hex[:12]}"
         clean_hash = info_hash.strip().lower() if info_hash else None
@@ -748,10 +751,11 @@ class DownloadStoreMixin:
         if recorded is None:
             try:
                 ids = self.find_library_ids_by_name(item.get("artist"), item.get("album"))
-                if ids["album_id"] or ids["artist_id"]:
+                target_album = album_id or ids["album_id"]
+                if track_id or target_album or ids["artist_id"]:
                     self.record_item_event(
-                        "blocklisted", album_id=ids["album_id"], artist_id=ids["artist_id"], message=message,
-                        details=details,
+                        "blocklisted", track_id=track_id, album_id=target_album, artist_id=ids["artist_id"],
+                        message=message, details=details,
                     )
             except sqlite3.Error:
                 logger.exception("Could not record the blocklisted item event")

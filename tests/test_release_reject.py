@@ -102,6 +102,15 @@ def test_reject_track_blocklists_the_tracks_own_release(client, hdr, library, te
     assert test_db.find_blocklist_entry(release_title="Release.A") is None
 
 
+def test_reject_records_blocklisted_item_event(client, hdr, library, test_db):
+    _record_import(test_db)
+    with patch.object(backlog_worker, "queue_wanted_search", return_value={"queued": 1}):
+        assert _reject(client, hdr["admin"], "track", "trk-1").status_code == 200
+    events = [e for e in test_db.list_item_events("track", "trk-1", limit=10) if e["event"] == "blocklisted"]
+    assert events, "no blocklisted event on the track's history"
+    assert "Rejected from the library" in (events[0]["message"] + str(events[0]["details"]))
+
+
 def test_reject_without_source_still_searches(client, hdr, library, test_db):
     with patch.object(backlog_worker, "queue_wanted_search", return_value={"queued": 2}) as queue:
         res = _reject(client, hdr["admin"], "album", "alb-1")

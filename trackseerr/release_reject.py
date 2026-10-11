@@ -18,6 +18,7 @@ REJECT_REASON = "Rejected from the library"
 def blocklist_current_release(
     db: Database, album_id: str, track_ids: list[str], request_id: Optional[str], reason: str,
     track_first: bool = False,
+    track_id: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """Blocklists the release whose import produced the album's/tracks' files.
 
@@ -35,6 +36,9 @@ def blocklist_current_release(
         protocol=source.get("protocol"),
         indexer=source.get("indexer"),
         reason=reason,
+        download_id=source.get("download_id"),
+        track_id=track_id,
+        album_id=album_id if track_id else None,
     )
     return {"blocklist_id": item["id"], "release": item["source_title"]}
 
@@ -60,7 +64,10 @@ def reject_current_release(
         track_ids = [str(entity_id)]
 
     blocklisted = (
-        blocklist_current_release(db, album_id, track_ids, None, REJECT_REASON, track_first=entity == "track")
+        blocklist_current_release(
+            db, album_id, track_ids, None, REJECT_REASON,
+            track_first=entity == "track", track_id=str(entity_id) if entity == "track" else None,
+        )
         if album_id
         else None
     )
