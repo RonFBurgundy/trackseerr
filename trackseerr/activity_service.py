@@ -163,6 +163,25 @@ def native_seeding(row: dict[str, Any], media_settings: Optional[dict[str, Any]]
     }
 
 
+def _soulseek_details(row: dict[str, Any]) -> dict[str, Any]:
+    """Peer, remote transfer state and folder flag for a Soulseek row; empty values for every other protocol."""
+    download_hash = str(row.get("download_hash") or "")
+    if row.get("protocol") == "slskd" and "::" in download_hash:
+        return {
+            "peer": download_hash.split("::", 1)[0],
+            "remote_state": row.get("remote_state"),
+            "is_folder": "::dir::" in download_hash,
+        }
+    return {"peer": None, "remote_state": None, "is_folder": False}
+
+
+def _blocklist_guid(row: dict[str, Any]) -> str:
+    """Soulseek candidates are identified by their download hash, so that is what must be blocklisted."""
+    if row.get("protocol") == "slskd":
+        return str(row.get("download_hash") or row["id"])
+    return str(row["id"])
+
+
 def native_queue_record(
     row: dict[str, Any], now: datetime, media_settings: Optional[dict[str, Any]] = None
 ) -> dict[str, Any]:
@@ -197,6 +216,7 @@ def native_queue_record(
         "needs_manual_import": bool(unmatched),
         "unmatched_count": len(unmatched),
         "seeding": native_seeding(row, media_settings),
+        **_soulseek_details(row),
     }
 
 
@@ -345,7 +365,7 @@ def native_delete_queue_item(db: Database, download_id: str, remove_from_client:
             title=str(row.get("title") or ""),
             artist=row.get("artist"),
             album=row.get("album_title"),
-            guid=str(row["id"]),
+            guid=_blocklist_guid(row),
             info_hash=row.get("download_hash"),
             protocol=row.get("protocol"),
             indexer=row.get("indexer"),
@@ -398,17 +418,58 @@ def _search_again(
     return False, redact_text(str(res.get("message") or "No release found")), res
 
 
+def _blocklist_and_search_again(
+    db: Database, row: dict[str, Any], actor_user_id: Optional[str]
+) -> dict[str, Any]:
+    """Cancels, blocklists and removes a queue row, then searches for a replacement release."""
+    _stop_at_client(db, row)
+    _blocklist_release(
+        db,
+        title=str(row.get("title") or ""),
+        artist=row.get("artist"),
+        album=row.get("album_title"),
+        guid=_blocklist_guid(row),
+        info_hash=row.get("download_hash"),
+        protocol=row.get("protocol"),
+        indexer=row.get("indexer"),
+        reason="Blocklisted by an administrator; searching for another release",
+        download_id=str(row["id"]),
+    )
+    db.record_download_event(
+        "deleted", download_id=str(row["id"]), message="Blocklisted; searching for another release"
+    )
+    db.delete_active_download(str(row["id"]))
+    grabbed, message, _res = _search_again(
+        db,
+        artist=row.get("artist"),
+        title=row.get("item_title") or row.get("title"),
+        album=row.get("album_title"),
+        item_type=row.get("item_type"),
+        request_id=row.get("request_id"),
+        track_id=row.get("track_id"),
+        album_id=row.get("album_id"),
+        actor_user_id=actor_user_id,
+    )
+    suffix = "a replacement was grabbed" if grabbed else f"no replacement found ({message})"
+    return {"success": grabbed, "message": f"Blocklisted; {suffix}"}
+
+
 def native_retry_queue_item(
-    db: Database, download_id: str, actor_user_id: Optional[str] = None
+    db: Database, download_id: str, actor_user_id: Optional[str] = None, blocklist: bool = False
 ) -> Optional[dict[str, Any]]:
     """Searches again for the item behind a queue row; None when the row does not exist.
 
     The stuck row is only dropped once the new search actually grabbed a release. When nothing is found the row is
     left in place (and the client keeps its download) and the result is ``{success: false, message}``.
+
+    With ``blocklist`` the row is instead cancelled at its client, blocklisted and removed first, so the search can
+    never pick the same release again; the row is gone even when nothing else is found.
     """
     row = db.get_native_queue_item(download_id)
     if row is None:
         return None
+    if blocklist:
+        return _blocklist_and_search_again(db, row, actor_user_id)
     grabbed, message, res = _search_again(
         db,
         artist=row.get("artist"),

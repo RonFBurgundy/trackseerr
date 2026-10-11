@@ -131,12 +131,13 @@ def delete_queue_item(
 @router.post("/queue/{queue_id}/retry", response_model=ActionResult, response_model_exclude_unset=True, summary="Search again for a queue item")
 def retry_queue_item(
     queue_id: str,
+    blocklist: bool = Query(False),
     db: Database = Depends(get_db),
     client: Optional[LidarrClient] = Depends(get_lidarr_client),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     def native() -> dict[str, Any]:
-        result = svc.native_retry_queue_item(db, queue_id, _actor_id(_admin))
+        result = svc.native_retry_queue_item(db, queue_id, _actor_id(_admin), blocklist)
         if result is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Queue item not found")
         return result

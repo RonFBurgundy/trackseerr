@@ -45,6 +45,9 @@ class QueueRecord(ApiModel):
     needs_manual_import: bool
     unmatched_count: int
     seeding: Optional[Seeding] = None
+    peer: Optional[str] = None
+    remote_state: Optional[str] = None
+    is_folder: bool = False
 
 
 class HistoryRecord(ApiModel):

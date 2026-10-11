@@ -206,6 +206,7 @@ class TestNativeQueue:
             "id", "source", "artist", "album", "title", "release_title", "item_type", "quality", "protocol", "indexer",
             "client", "status", "progress", "size_bytes", "sizeleft_bytes", "eta_seconds", "added_at", "stalled",
             "stalled_reason", "messages", "request_id", "download_id", "needs_manual_import", "unmatched_count", "seeding",
+            "peer", "remote_state", "is_folder",
         }
         assert rec["source"] == "native" and rec["sizeleft_bytes"] == 150 and rec["progress"] == 0.5
         assert rec["added_at"] == "2026-10-01T10:00:00Z"
@@ -334,6 +335,49 @@ class TestNativeQueue:
         assert kwargs["artist"] == "Nirvana" and kwargs["title"] == "In Bloom" and kwargs["request_id"] == "req-1"
         assert test_db.get_active_download("dl-r") is None
         assert [r["event"] for r in test_db.list_download_history(1, 10, "asc")[0]] == ["deleted"]
+
+    def _slsk_row(self, db, did, download_hash, remote_state=None):
+        _dl(db, did, artist="Art", title="Art - Song", download_hash=download_hash)
+        db.set_download_release_meta(did, indexer="Soulseek", quality=None, protocol="slskd")
+        if remote_state:
+            db.set_download_remote_state(did, remote_state)
+
+    def test_queue_record_has_soulseek_peer_and_state(self, test_db):
+        self._slsk_row(test_db, "dl-s", "peerbob::Music%2Fsong.flac", "Queued, Remotely")
+        rec = activity_service.native_queue_record(test_db.get_native_queue_item("dl-s"), datetime.now(timezone.utc))
+        assert rec["peer"] == "peerbob" and rec["remote_state"] == "Queued, Remotely" and rec["is_folder"] is False
+
+    def test_queue_record_soulseek_folder_flag(self, test_db):
+        self._slsk_row(test_db, "dl-f", "peerbob::dir::Music%2FAlbum")
+        rec = activity_service.native_queue_record(test_db.get_native_queue_item("dl-f"), datetime.now(timezone.utc))
+        assert rec["peer"] == "peerbob" and rec["is_folder"] is True
+
+    def test_queue_record_non_soulseek_details_empty(self, test_db):
+        _dl(test_db, "dl-t", download_hash="abc::def")
+        test_db.set_download_release_meta("dl-t", indexer="X", quality=None, protocol="torrent")
+        rec = activity_service.native_queue_record(test_db.get_native_queue_item("dl-t"), datetime.now(timezone.utc))
+        assert rec["peer"] is None and rec["remote_state"] is None and rec["is_folder"] is False
+
+    def test_retry_with_blocklist_blocklists_cancels_and_searches(self, api, test_db, admin_h):
+        self._slsk_row(test_db, "dl-b", "peerbob::Music%2Fsong.flac")
+        driver = MagicMock()
+        with patch.object(activity_service, "get_acquisition_driver", return_value=driver), patch(
+            "trackseerr.acquisition_coordinator.acquisition_coordinator.search_and_grab",
+            return_value={"success": False, "message": "No acceptable releases found"},
+        ):
+            res = api.post("/api/activity/queue/dl-b/retry?blocklist=true", headers=admin_h)
+        body = res.json()
+        assert res.status_code == 200 and body["success"] is False and "Blocklisted" in body["message"]
+        driver.cancel.assert_called_once_with("peerbob::Music%2Fsong.flac")
+        assert test_db.get_active_download("dl-b") is None
+        assert [e["release_guid"] for e in test_db.list_blocklist()] == ["peerbob::Music%2Fsong.flac"]
+
+    def test_delete_with_blocklist_uses_soulseek_hash_as_guid(self, api, test_db, admin_h):
+        self._slsk_row(test_db, "dl-d", "peerbob::dir::Music%2FAlbum")
+        with patch.object(activity_service, "get_acquisition_driver", return_value=MagicMock()):
+            res = api.delete("/api/activity/queue/dl-d?blocklist=true", headers=admin_h)
+        assert res.status_code == 200
+        assert [e["release_guid"] for e in test_db.list_blocklist()] == ["peerbob::dir::Music%2FAlbum"]
 
     def test_retry_same_hash_does_not_cancel_the_new_download(self, api, test_db, admin_h):
         _dl(test_db, "dl-same", artist="A", title="A - T", download_hash="samehash")
