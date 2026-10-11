@@ -18,6 +18,8 @@ export interface AlbumTrackListProps {
   scrollClass?: string;
   /** Default true: a track's title is a text link that opens that track's history. */
   trackHistory?: boolean;
+  /** The album's monitored flag; file-less tracks on an unmonitored album read "Unmonitored". */
+  albumMonitored?: boolean;
 }
 
 /** One album's tracks (from the paged endpoint) with quality badge and monitoring switch. */
@@ -31,6 +33,7 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
   renderRowAction,
   scrollClass = '',
   trackHistory = true,
+  albumMonitored,
 }) => {
   const [historyTrack, setHistoryTrack] = useState<TrackItem | null>(null);
   if (loading) {
@@ -58,7 +61,7 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
       }`}
     >
       {tracks.map((t) => {
-        const badge = getQualityBadge(t);
+        const badge = getQualityBadge(t, albumMonitored);
         return (
           <div key={t.id} className="p-2.5 flex items-center justify-between gap-3 hover:bg-[#141414] transition-colors">
             <div className="flex items-center gap-3 min-w-0 flex-1">

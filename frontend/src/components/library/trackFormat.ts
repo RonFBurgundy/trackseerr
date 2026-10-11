@@ -23,9 +23,18 @@ export function formatTrackDuration(seconds?: number): string {
   return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
-export function getQualityBadge(track: TrackItem): QualityBadge {
+const UNMONITORED = 'bg-transparent text-neutral-500 border border-neutral-800';
+
+/**
+ * Badge for a track's file state. A file-less track reads "Missing" only when it is wanted:
+ * explicitly unmonitored tracks, or tracks on an unmonitored album (Lidarr tracks carry
+ * `monitored: null`, so the album's flag decides), read "Unmonitored" instead.
+ */
+export function getQualityBadge(track: TrackItem, albumMonitored?: boolean): QualityBadge {
   const file = track.file;
+  const wanted = track.monitored !== false && albumMonitored !== false;
   if (!file && !track.has_file) {
+    if (!wanted) return { label: 'Unmonitored', className: UNMONITORED };
     return { label: 'Missing', className: 'bg-red-950/30 text-red-400 border border-red-800/40' };
   }
   if (file?.quality) {
@@ -47,5 +56,6 @@ export function getQualityBadge(track: TrackItem): QualityBadge {
     return { label: 'Available', className: LOSSLESS };
   }
   if (track.has_file) return { label: 'Available', className: LOSSLESS };
+  if (!wanted) return { label: 'Unmonitored', className: UNMONITORED };
   return { label: 'Missing', className: 'bg-neutral-800 text-neutral-400 border border-neutral-700' };
 }
