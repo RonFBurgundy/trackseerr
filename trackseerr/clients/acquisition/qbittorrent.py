@@ -36,7 +36,15 @@ class QbittorrentDriver(AcquisitionDriver):
         self._cookie: Optional[str] = None
         self.last_login_status: Optional[int] = None
 
-    def _login(self, client: httpx.Client) -> bool:
+    @staticmethod
+    def _sid_cookie(cookies: Any) -> Optional[tuple[str, str]]:
+        """Return the (name, value) of the session cookie: ``SID`` (<=4.x) or ``QBT_SID_<port>`` (5.x)."""
+        for name, value in cookies.items():
+            if name == "SID" or name.startswith("QBT_SID"):
+                return name, value
+        return None
+
+    def _login(self, client: httpx.Client, raise_transport: bool = False) -> bool:
         """Authenticates with qBittorrent and caches the SID cookie."""
         if not self.username and not self.password:
             return True
@@ -48,26 +56,48 @@ class QbittorrentDriver(AcquisitionDriver):
                 headers={"Referer": self.host_url, "Origin": self.host_url},
             )
             self.last_login_status = resp.status_code
-            has_sid = "SID" in resp.cookies or "SID" in client.cookies
-            if 200 <= resp.status_code < 300 and ("Ok." in resp.text or has_sid):
-                self._cookie = resp.headers.get("set-cookie")
+            if not 200 <= resp.status_code < 300 or "Fails." in resp.text:
+                return False
+            sid = self._sid_cookie(resp.cookies) or self._sid_cookie(client.cookies)
+            if "Ok." in resp.text or resp.status_code == 204 or sid:
+                self._cookie = f"{sid[0]}={sid[1]}" if sid else None
                 return True
             return False
         except httpx.HTTPError as e:
+            if raise_transport and isinstance(e, httpx.TransportError):
+                raise
             logger.warning("qBittorrent login exception: %s", e)
             return False
 
     def test_connection(self) -> tuple[bool, str]:
-        """Validates connectivity and authentication against qBittorrent."""
+        """Validates connectivity and authentication against qBittorrent; logs one warning on failure."""
+        self.last_login_status = None
+        ok, msg = self._test_connection()
+        if not ok:
+            logger.warning(
+                "qBittorrent connection test failed for %s (login HTTP status: %s): %s",
+                self.host_url,
+                self.last_login_status if self.last_login_status is not None else "none",
+                msg,
+            )
+        return ok, msg
+
+    def _test_connection(self) -> tuple[bool, str]:
         if not is_safe_service_url(self.host_url):
             return False, "Invalid or prohibited host URL (SSRF defense)"
 
         try:
             with httpx.Client(timeout=5.0) as client:
                 if self.username or self.password:
-                    if not self._login(client):
+                    if not self._login(client, raise_transport=True):
                         if self.last_login_status == 403:
                             return False, "qBittorrent banned this IP after too many failed logins; wait or restart qBittorrent"
+                        if self.last_login_status == 401:
+                            return False, (
+                                "qBittorrent rejected the login: check the username/password, and that the port in the "
+                                "URL is qBittorrent's own WebUI port (qBittorrent rejects remapped ports unless Host "
+                                "header validation is off)"
+                            )
                         return False, "Authentication failed (invalid credentials)"
                 version_url = f"{self.host_url}/api/v2/app/version"
                 headers = {"Cookie": self._cookie} if self._cookie else {}
@@ -77,6 +107,8 @@ class QbittorrentDriver(AcquisitionDriver):
                 return False, f"HTTP {resp.status_code}: {resp.text[:100]}"
         except httpx.TimeoutException:
             return False, "Connection timed out (5s)"
+        except httpx.TransportError as e:
+            return False, f"Could not reach qBittorrent at {self.host_url}: {type(e).__name__}: {e}"
         except Exception as e:
             return False, f"Connection error: {str(e)}"
 

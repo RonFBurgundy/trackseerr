@@ -175,3 +175,20 @@ docker stop slskd-it
 ```
 
 Finding on slskd 0.26.1: there is no `/api/v0/version`; the driver probes the authenticated `GET /api/v0/application`.
+
+## qBittorrent (`tests/integration/test_qbittorrent_contract.py`)
+
+Opt-in: skipped unless `QBIT_IT_URL` is set. The tests log in, read the version and the download roots; they never add torrents.
+
+```bash
+docker run -d --rm --name qbit-it -e WEBUI_PORT=8080 lscr.io/linuxserver/qbittorrent:latest
+docker logs qbit-it 2>&1 | grep -i password      # temporary admin password
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' qbit-it
+QBIT_IT_URL=http://<container-ip>:8080 QBIT_IT_USER=admin QBIT_IT_PASSWORD=<pw> \
+  pytest tests/integration/test_qbittorrent_contract.py
+```
+
+Connect to the container IP on port 8080, not a remapped host port: qBittorrent validates the Host header's port and
+answers `401 Unauthorized` (log: "Invalid Host header, port mismatch") on a mismatch, which looks like a wrong password.
+qBittorrent 5 answers a good login with `204` and an empty body plus a `QBT_SID_<port>` cookie; repeated failures get the
+IP banned (`403`).
