@@ -12,6 +12,7 @@ from trackseerr.api.response_models import ApiModel
 class VerifiedUser(ApiModel):
     id: str
     username: str
+    is_admin: bool = False
 
 
 class VerifyLocalResponse(ApiModel):

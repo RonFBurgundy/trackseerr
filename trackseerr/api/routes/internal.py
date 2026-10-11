@@ -18,6 +18,7 @@ from trackseerr.api.schemas.internal import (
 from trackseerr.config import Config
 from trackseerr.gateway_link import record_heartbeat
 from trackseerr.internal_auth import PROTOCOL_VERSION
+from trackseerr.models import UserPermission
 from trackseerr.api.routes.auth import LocalLoginRequest, _login_http_error
 from trackseerr.local_login import LoginError, verify_local_login
 from trackseerr.storage import Database
@@ -30,6 +31,13 @@ router = APIRouter()
 
 class VerifyLocalRequest(LocalLoginRequest):
     client_ip: str = Field(default="unknown", max_length=64)
+
+
+def _is_admin_row(row: Optional[dict[str, Any]]) -> bool:
+    """True for an admin account (flag or ADMIN permission bit)."""
+    if row is None:
+        return False
+    return bool(row.get("is_admin")) or bool(int(row.get("permissions") or 0) & int(UserPermission.ADMIN))
 
 
 @router.post("/auth/local/verify", response_model=VerifyLocalResponse, response_model_exclude_unset=True)
@@ -51,8 +59,9 @@ def verify_local(
         )
     except LoginError as exc:
         raise _login_http_error(exc) from exc
+    core_user = db.get_user(result.user_id)
     return {
-        "user": {"id": result.user_id, "username": result.username},
+        "user": {"id": result.user_id, "username": result.username, "is_admin": _is_admin_row(core_user)},
         "mfa_required": False,
         "mfa_enrollment_required": result.mfa_enrollment_required,
         "session_floor_us": result.session_floor_us,
@@ -80,6 +89,8 @@ def session_status(
         reason = "deleted"
     elif state["disabled"]:
         reason = "disabled"
+    elif _is_admin_row(db.get_user(req.user_id)):
+        reason = "admin"
     elif int(state["sessions_revoked_at_us"]) > req.session_issued_at:
         reason = "revoked"
     elif state["auth_type"] == "local" and not state["mfa_enabled"] and db.get_account_settings()["require_mfa_local"]:

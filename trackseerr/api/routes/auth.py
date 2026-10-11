@@ -3,7 +3,7 @@
 import logging
 import os
 import time
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from trackseerr import local_auth
 from trackseerr.api.dependencies import (
+    DETAIL_ADMIN_USE_CORE,
     HEADER_SIGNATURE,
     core_plex_machine_id,
     core_session_status,
@@ -189,6 +190,12 @@ def _resolve_machine_id(
     return server_machine_id
 
 
+def _refuse_gateway_admin(who: str) -> NoReturn:
+    """Admins sign in on Core only: the Requests site refuses them before any user row or session exists."""
+    logger.info("Refused Requests-site sign-in for %s", who)
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=DETAIL_ADMIN_USE_CORE)
+
+
 @router.post("/plex/verify", response_model=PlexVerifyResponse, response_model_exclude_unset=True)
 def verify_pin(
     req: VerifyPinRequest,
@@ -236,6 +243,9 @@ def verify_pin(
             detail="Forbidden: User does not have access to this Plex Media Server",
         )
 
+    if is_owner and tier_of(config) == "gateway":
+        _refuse_gateway_admin("Plex server owner")
+
     # 4. Fetch Plex user profile
     try:
         plex_user = get_plex_user(auth_token)
@@ -275,6 +285,8 @@ def verify_pin(
             record_login=True,
             username=username,
         )
+        if not verdict["valid"] and verdict.get("reason") == "admin":
+            _refuse_gateway_admin("admin account (per core)")
         if not verdict["valid"] and verdict.get("reason") in ("disabled", "deleted"):
             logger.warning("Refused Plex login for a disabled or removed account (per core)")
             raise HTTPException(
@@ -404,6 +416,8 @@ def local_login(
         core_id, core_name = str(core_user.get("id") or ""), str(core_user.get("username") or "")
         if not core_id or not core_name:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to sign in right now")
+        if core_user.get("is_admin"):
+            _refuse_gateway_admin("local admin account")
         try:
             user = db.mirror_local_user(core_id, core_name)
         except PermissionError as exc:

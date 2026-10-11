@@ -100,12 +100,12 @@ def test_valid_signature_yields_nonadmin_user(core):
     assert body["is_admin"] is False
 
 
-def test_asserted_admin_is_rejected_403_everywhere(core):
+def test_asserted_admin_is_rejected_401_everywhere(core):
     client, _ = core
     for target in ("/api/users/me", "/api/settings/api-key", "/api/scrobbles/users"):
         res = client.get(target, headers=_signed("GET", target, user_id="admin-1", user_name="root"))
-        assert res.status_code == 403, target
-        assert res.json()["detail"] == "Admin accounts must use the TrackSeerr Core admin interface"
+        assert res.status_code == 401, target
+        assert res.json()["detail"] == "Admin accounts sign in on TrackSeerr Core, not the Requests site"
 
 
 def test_asserted_user_with_admin_permission_bit_is_rejected(core, db):
@@ -114,7 +114,7 @@ def test_asserted_user_with_admin_permission_bit_is_rejected(core, db):
     db.conn.execute("UPDATE users SET permissions = ? WHERE id = '5005'", (int(UserPermission.ADMIN),))
     db.conn.commit()
     res = client.get("/api/users/me", headers=_signed("GET", "/api/users/me", user_id="5005", user_name="bit-admin"))
-    assert res.status_code == 403
+    assert res.status_code == 401
 
 
 def test_signature_works_on_get_current_user_endpoint(core):
@@ -250,9 +250,9 @@ def test_unknown_user_upserted_nonadmin_and_existing_admin_untouched(core, db):
     assert not row["is_admin"]
     assert int(row["permissions"]) == int(UserPermission.DEFAULT)
 
-    # asserting the existing admin (rejected 403) must not touch the row
+    # asserting the existing admin (rejected 401) must not touch the row
     res = client.get("/api/users/me", headers=_signed("GET", "/api/users/me", user_id="admin-1", user_name="evil"))
-    assert res.status_code == 403
+    assert res.status_code == 401
     admin = db.get_user("admin-1")
     assert admin["is_admin"]
     assert int(admin["permissions"]) & int(UserPermission.ADMIN)
@@ -369,7 +369,7 @@ def test_scrobble_admin_routes_require_admin_for_forwarded(core):
         ("POST", "/api/scrobbles/webhook-secret/rotate"),
     ):
         res = client.request(method, path, headers=_signed(method, path, user_id="admin-1", user_name="root"))
-        assert res.status_code == 403, path
+        assert res.status_code == 401, path
 
 
 # --------------------------------------------------------------------------- tier field
