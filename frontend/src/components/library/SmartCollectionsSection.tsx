@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Plus, Sparkles } from 'lucide-react';
 import type { Playlist, User } from '@/types/models';
 import { MachinedCard, TapeDeckButton, CassetteLoader } from '@/components/ui';
+import { parseTrackCount } from '@/lib/trackCount';
 import { SmartCollectionModal } from '@/components/playlists/SmartCollectionModal';
 
 export interface SmartCollectionsSectionProps {
@@ -14,16 +15,6 @@ export interface SmartCollectionsSectionProps {
   currentUserId?: string;
   canTargetUsers?: boolean;
   serverLabel?: string;
-}
-
-function parseTrackCount(tracksJson: string | null | undefined): number | null {
-  if (!tracksJson) return null;
-  try {
-    const parsed = JSON.parse(tracksJson);
-    return Array.isArray(parsed) ? parsed.length : null;
-  } catch {
-    return null;
-  }
 }
 
 export const SmartCollectionsSection: React.FC<SmartCollectionsSectionProps> = ({

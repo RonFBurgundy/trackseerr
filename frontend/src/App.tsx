@@ -259,8 +259,9 @@ const MainApp: React.FC = () => {
   };
 
   const handleImportPlaylist = async (payload: ImportPlaylistPayload) => {
-    await importPlaylist(payload);
+    const created = await importPlaylist(payload);
     await loadPlaylistsAndUsers();
+    return created;
   };
 
   return (

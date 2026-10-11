@@ -119,3 +119,4 @@ export * from './useLibraryFilters';
 export * from './useSmartCollectionEditor';
 export * from './useSmartCollections';
 export * from './useFeaturedCharts';
+export * from './usePlaylistTracks';

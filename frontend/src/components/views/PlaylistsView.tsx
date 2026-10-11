@@ -13,8 +13,11 @@ import {
   Sparkles,
   TrendingUp,
   FileUp,
+  ListMusic,
 } from 'lucide-react';
+import type { Schema } from '@/types/apiSchema';
 import type { Playlist, User } from '@/types/models';
+import { parseTrackCount } from '@/lib/trackCount';
 import type { ImportPlaylistPayload } from '@/services/playlistService';
 import type { MediaServerType } from '@/types/mediaServer';
 import {
@@ -29,6 +32,7 @@ import {
   CassetteLoader,
   ToastBanner,
 } from '@/components/ui';
+import { PlaylistTracksModal } from '@/components/playlists/PlaylistTracksModal';
 import { PageFrame } from '@/components/layout';
 import { LIST_MONITOR_MODES, type ListMonitorMode } from '@/types/importLists';
 
@@ -67,7 +71,7 @@ export interface PlaylistsViewProps {
   currentUserId?: string;
   onSync: () => Promise<void>;
   onToggleTarget: (playlistId: number | string, userIds: string[]) => Promise<void>;
-  onImport: (payload: ImportPlaylistPayload) => Promise<void>;
+  onImport: (payload: ImportPlaylistPayload) => Promise<Schema<'PlaylistRecord'> | null>;
   onToggleActive?: (playlistId: number | string, active: boolean) => Promise<void>;
   onSetMonitorMode?: (playlist: Playlist, mode: ListMonitorMode) => Promise<void>;
   /** Admin or holder of the auto-request permission: may pick track mode and turn on auto-request. */
@@ -130,6 +134,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   const missingHook = useMissingTracks({ isAdmin });
   const [selectedMissingPlaylistId, setSelectedMissingPlaylistId] = useState<string | null>(null);
   const [selectedMissingPlaylistName, setSelectedMissingPlaylistName] = useState<string>('');
+  const [tracksModalPlaylist, setTracksModalPlaylist] = useState<{ id: string; name: string } | null>(null);
   const [isOverridesModalOpen, setIsOverridesModalOpen] = useState<boolean>(false);
 
   const selectedMissingTracks = useMemo(
@@ -172,6 +177,12 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
     await onToggleTarget(playlist.id, updated);
   };
 
+  const openTracksForCreated = (created: Schema<'PlaylistRecord'> | null) => {
+    if (created && parseTrackCount(created.tracks_json)) {
+      setTracksModalPlaylist({ id: created.id, name: created.name });
+    }
+  };
+
   const handleImportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (importTab === 'paste' && !playlistName.trim()) return;
@@ -179,7 +190,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
     setIsSubmittingImport(true);
     try {
       if (importTab === 'link') {
-        await onImport({ source: 'link', url: playlistUrl.trim() });
+        openTracksForCreated(await onImport({ source: 'link', url: playlistUrl.trim() }));
       } else {
         const tracks = pastedTracks
           .split('\n')
@@ -328,6 +339,12 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
 
                 <div className="flex items-center gap-3 text-xs text-neutral-400 font-mono mt-2">
                   <span>{pl.sync_status}</span>
+                  {parseTrackCount(pl.tracks_json) !== null && (
+                    <span>{`\u00b7 ${parseTrackCount(pl.tracks_json)} tracks`}</span>
+                  )}
+                  {isAdmin && (missingHook.missingCountByPlaylist[pl.id] || 0) > 0 && (
+                    <span className="text-[#e5a00d]">{`\u00b7 ${missingHook.missingCountByPlaylist[pl.id]} missing`}</span>
+                  )}
                 </div>
 
                 {pl.last_synced_at && (
@@ -430,21 +447,33 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                   ) : (
                     <span />
                   )
-                ) : isAdmin && (missingHook.missingCountByPlaylist[pl.id] || 0) > 0 ? (
-                  <TapeDeckButton
-                    size="sm"
-                    variant="amber"
-                    onClick={() => {
-                      setSelectedMissingPlaylistId(pl.id);
-                      setSelectedMissingPlaylistName(pl.name);
-                    }}
-                    icon={<AlertCircle className="h-3.5 w-3.5" />}
-                    title={`View ${missingHook.missingCountByPlaylist[pl.id]} missing track${missingHook.missingCountByPlaylist[pl.id] === 1 ? '' : 's'}`}
-                  >
-                    Missing ({missingHook.missingCountByPlaylist[pl.id]})
-                  </TapeDeckButton>
                 ) : (
-                  <span />
+                  <div className="flex items-center gap-2">
+                    {!isListeningService(pl.service) && (
+                      <TapeDeckButton
+                        size="sm"
+                        onClick={() => setTracksModalPlaylist({ id: pl.id, name: pl.name })}
+                        icon={<ListMusic className="h-3.5 w-3.5" />}
+                        title={`View the tracks in ${pl.name}`}
+                      >
+                        Tracks
+                      </TapeDeckButton>
+                    )}
+                    {isAdmin && (missingHook.missingCountByPlaylist[pl.id] || 0) > 0 && (
+                      <TapeDeckButton
+                        size="sm"
+                        variant="amber"
+                        onClick={() => {
+                          setSelectedMissingPlaylistId(pl.id);
+                          setSelectedMissingPlaylistName(pl.name);
+                        }}
+                        icon={<AlertCircle className="h-3.5 w-3.5" />}
+                        title={`View ${missingHook.missingCountByPlaylist[pl.id]} missing track${missingHook.missingCountByPlaylist[pl.id] === 1 ? '' : 's'}`}
+                      >
+                        Missing ({missingHook.missingCountByPlaylist[pl.id]})
+                      </TapeDeckButton>
+                    )}
+                  </div>
                 )}
                 {isAdmin && onDelete && (
                   <ConfirmDangerButton
@@ -523,7 +552,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
             <FeaturedChartsTab
               enabled={importTab === 'featured'}
               onSubscribe={async (chart) => {
-                await onImport({ source: 'link', url: chart.url_or_id, service: chart.service });
+                openTracksForCreated(await onImport({ source: 'link', url: chart.url_or_id, service: chart.service }));
                 setIsImportModalOpen(false);
               }}
             />
@@ -715,6 +744,23 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
         currentUserId={currentUserId}
         canTargetUsers={canTargetUsers}
         serverLabel={serverLabel}
+      />
+
+      <PlaylistTracksModal
+        isOpen={tracksModalPlaylist !== null}
+        onClose={() => setTracksModalPlaylist(null)}
+        playlistId={tracksModalPlaylist?.id ?? null}
+        playlistName={tracksModalPlaylist?.name ?? ''}
+        onOpenMissing={
+          isAdmin
+            ? () => {
+                if (!tracksModalPlaylist) return;
+                setSelectedMissingPlaylistId(tracksModalPlaylist.id);
+                setSelectedMissingPlaylistName(tracksModalPlaylist.name);
+                setTracksModalPlaylist(null);
+              }
+            : undefined
+        }
       />
 
       <MissingTracksModal
