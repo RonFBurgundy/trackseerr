@@ -27,6 +27,8 @@ heading becomes the version and date.
 
 ### Changed
 
+- The Lidarr library import now shows as a running task in the task drawer, with progress and a cancel button, and the logo animates while it runs.
+- The "Smart collection" button is greyed out in Lidarr mode, since smart collections need TrackSeerr as the library manager.
 - Phone navigation is tidier: the header shows only the essential shortcuts and no longer scrolls, the Calendar now lives under Wanted, and the notification bell is in the menu drawer (desktop keeps its header bell too).
 - Issues now live under Requests → Issues for admins as well as users; Activity no longer has an Issues tab and notification links open the new page.
 - Library and artist-page tools (select, manual import, rename, retag, scan, refresh, monitored and profile filters) are grouped in a single ⋯ tools menu on every screen size.
@@ -38,6 +40,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- The download queue table is readable on desktop: artist, album and title no longer break letter by letter.
 - Plex sign-in now works through TrackSeerr Requests in the two-container setup; it gets your Plex server's identity from Core instead of failing with "No Plex machine identifier configured".
 - Unraid two-container setup: the templates, install guide and `init-dmz` now list both networks in Extra Parameters (Unraid ignores the Network Type dropdown once a `--network` flag is there), so Requests can reach your tunnel/proxy and Core can reach Plex. The docs now explain which network Core should join: your app network when Cloudflare Tunnel runs on the host, or its own `trackseerr-core-lan` network when a reverse proxy or tunnel runs as a container. The internal network is created with `--internal`.
 - Import from Lidarr is back: switching the library manager from Lidarr to TrackSeerr offers to copy your Lidarr library first, and the Library page shows live progress with a Stop button.
