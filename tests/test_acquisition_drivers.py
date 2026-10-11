@@ -295,6 +295,78 @@ def test_qbittorrent_test_connection_success():
             assert "v4.6.3" in msg
 
 
+def test_qbittorrent5_login_204_qbt_sid_cookie():
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
+    login_resp = MagicMock()
+    login_resp.status_code = 204
+    login_resp.text = ""
+    login_resp.cookies = {"QBT_SID_8080": "abc123"}
+    ver_resp = MagicMock()
+    ver_resp.status_code = 200
+    ver_resp.text = "v5.0.1"
+    with patch("httpx.Client.post", return_value=login_resp):
+        with patch("httpx.Client.get", return_value=ver_resp):
+            ok, msg = driver.test_connection()
+    assert ok is True
+    assert msg == "qBittorrent v5.0.1"
+    assert driver._cookie == "QBT_SID_8080=abc123"
+
+
+def test_qbittorrent_login_fails_body():
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "wrong")
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.text = "Fails."
+    resp.cookies = {}
+    with patch("httpx.Client.post", return_value=resp):
+        ok, msg = driver.test_connection()
+    assert ok is False
+    assert "invalid credentials" in msg
+
+
+def test_qbittorrent_401_message_mentions_port():
+    driver = QbittorrentDriver("http://qbittorrent:8081", "admin", "x")
+    resp = MagicMock()
+    resp.status_code = 401
+    resp.text = "Unauthorized"
+    resp.cookies = {}
+    with patch("httpx.Client.post", return_value=resp):
+        ok, msg = driver.test_connection()
+    assert ok is False
+    assert "WebUI port" in msg
+
+
+def test_qbittorrent_connect_error_not_reported_as_auth():
+    import httpx
+
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "x")
+    with patch("httpx.Client.post", side_effect=httpx.ConnectError("refused")):
+        ok, msg = driver.test_connection()
+    assert ok is False
+    assert "Could not reach" in msg
+    assert "ConnectError" in msg
+    assert "credentials" not in msg
+
+
+def test_qbittorrent_failed_test_logs_warning(caplog):
+    import logging
+
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "s3cretpw")
+    resp = MagicMock()
+    resp.status_code = 401
+    resp.text = "Unauthorized"
+    resp.cookies = {}
+    with caplog.at_level(logging.WARNING):
+        with patch("httpx.Client.post", return_value=resp):
+            driver.test_connection()
+    records = [r for r in caplog.records if "connection test failed" in r.getMessage()]
+    assert len(records) == 1
+    text = records[0].getMessage()
+    assert "http://qbittorrent:8080" in text
+    assert "401" in text
+    assert "s3cretpw" not in text
+
+
 def test_qbittorrent_download_and_status():
     driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
 
