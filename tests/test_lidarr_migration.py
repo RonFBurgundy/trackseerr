@@ -610,6 +610,77 @@ class TestTrackFileLinking:
         assert (row["disc_number"], row["track_number"]) == (2, 5)
 
 
+class TestTrackMonitoringFollowsLidarr:
+    """Lidarr tracks have no monitored flag; imported tracks follow their album and artist."""
+
+    def _run(self, db: Database, payload: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+        for trk in payload["tracks"]:
+            trk.pop("monitored", None)
+        fake = loaded_fake(payload)
+        with patch(HTTPX, fake):
+            return LidarrMigrationJob().run_migration(db, real_client())
+
+    @staticmethod
+    def _strip_files(payload: dict[str, list[dict[str, Any]]], album_id: int) -> None:
+        for trk in payload["tracks"]:
+            if trk["albumId"] == album_id:
+                trk["trackFileId"] = 0
+        payload["track_files"] = [f for f in payload["track_files"] if f["albumId"] != album_id]
+
+    @staticmethod
+    def _flags(db: Database, title_prefix: str) -> list[int]:
+        rows = db.conn.execute(
+            "SELECT monitored FROM library_tracks WHERE title LIKE ?", (title_prefix + "%",)
+        ).fetchall()
+        return [r["monitored"] for r in rows]
+
+    def test_tracks_on_unmonitored_album_are_unmonitored(self, db: Database):
+        payload = two_artist_payload()
+        payload["albums"][0]["monitored"] = False
+        self._strip_files(payload, payload["albums"][0]["id"])
+        self._run(db, payload)
+
+        assert self._flags(db, "Radiohead 0-") == [0, 0]
+        assert self._flags(db, "Radiohead 1-") == [1, 1]
+        wanted, total = db.list_wanted("missing", 1, 500, "artist", "asc")
+        assert total == 0 and wanted == []
+
+    def test_unmonitored_artist_tracks_are_unmonitored(self, db: Database):
+        payload = two_artist_payload()
+        payload["artists"][0]["monitored"] = False
+        self._run(db, payload)
+
+        assert self._flags(db, "Radiohead ") == [0, 0, 0, 0]
+        assert self._flags(db, "Daft Punk ") == [1, 1, 1, 1]
+
+    def test_missing_count_only_counts_monitored_albums(self, db: Database):
+        payload = two_artist_payload()
+        payload["artists"] = payload["artists"][:1]
+        payload["albums"] = payload["albums"][:2]
+        payload["tracks"] = [t for t in payload["tracks"] if t["artistId"] == 101]
+        payload["track_files"] = [f for f in payload["track_files"] if f["artistId"] == 101]
+        payload["albums"][1]["monitored"] = False
+        self._strip_files(payload, payload["albums"][1]["id"])
+        dropped = payload["tracks"][0]["trackFileId"]
+        payload["tracks"][0]["trackFileId"] = 0
+        payload["track_files"] = [f for f in payload["track_files"] if f["id"] != dropped]
+        self._run(db, payload)
+
+        assert db.get_library_stats()["missing_track_count"] == 1
+        _, total = db.list_wanted("missing", 1, 500, "artist", "asc")
+        assert total == 1
+
+    def test_reimport_resyncs_track_monitoring(self, db: Database):
+        payload = two_artist_payload()
+        self._run(db, payload)
+        assert self._flags(db, "Radiohead 0-") == [1, 1]
+
+        payload["albums"][0]["monitored"] = False
+        self._run(db, payload)
+        assert self._flags(db, "Radiohead 0-") == [0, 0]
+        assert self._flags(db, "Radiohead 1-") == [1, 1]
+
+
 class TestImportMonitoring:
     """Imported artists must not monitor the whole discography."""
 
