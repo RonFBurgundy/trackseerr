@@ -43,6 +43,7 @@ class _MigrationRun:
     lidarr_artist_map: dict[Any, str] = field(default_factory=dict)
     lidarr_album_map: dict[Any, str] = field(default_factory=dict)
     lidarr_track_map: dict[Any, str] = field(default_factory=dict)
+    lidarr_trackfile_map: dict[Any, str] = field(default_factory=dict)
 
 
 class LidarrMigrationJob:
@@ -187,8 +188,9 @@ class LidarrMigrationJob:
             foreign_artist_id=foreign_artist_id,
             path=path,
             monitored=monitored,
-            # Lidarr's per-album/track flags are copied as-is, so never reinterpret them under "existing".
-            monitor_option="all",
+            # Per-album/track flags are copied as-is; "future" keeps the later artist refresh from monitoring the
+            # back catalog, while Lidarr's own "none" is honoured.
+            monitor_option="none" if artist.get("monitorNewItems") == "none" else "future",
             image_url=image_url,
             banner_url=banner_url,
         )
@@ -261,7 +263,9 @@ class LidarrMigrationJob:
         monitored = bool(album.get("monitored", True))
         album_path = album.get("path")
 
-        existing_album = run.db.get_library_album_by_title(mapped_artist_id, album_title)
+        existing_album = (
+            run.db.get_library_album_by_release_group_id(foreign_album_id) if foreign_album_id else None
+        ) or run.db.get_library_album_by_title(mapped_artist_id, album_title)
         album_id = str(existing_album["id"]) if existing_album else str(uuid.uuid4())
 
         cover_url: Optional[str] = None
@@ -279,6 +283,7 @@ class LidarrMigrationJob:
             artist_id=mapped_artist_id,
             title=album_title,
             foreign_album_id=foreign_album_id,
+            mb_release_group_id=foreign_album_id,
             release_date=release_date,
             year=year,
             monitored=monitored,
@@ -318,12 +323,15 @@ class LidarrMigrationJob:
             return
 
         track_title = (track.get("title") or "Unknown Track").strip()
+        track_number = 1
+        for raw_number in (track.get("trackNumber"), track.get("absoluteTrackNumber")):
+            try:
+                track_number = int(raw_number)
+                break
+            except (ValueError, TypeError):
+                continue
         try:
-            track_number = int(track.get("trackNumber", 1))
-        except (ValueError, TypeError):
-            track_number = 1
-        try:
-            disc_number = int(track.get("discNumber", 1))
+            disc_number = int(track.get("mediumNumber") or track.get("discNumber") or 1)
         except (ValueError, TypeError):
             disc_number = 1
 
@@ -355,6 +363,9 @@ class LidarrMigrationJob:
             duration_seconds=duration_seconds,
             monitored=monitored,
             foreign_track_id=foreign_track_id,
+            mb_recording_id=(
+                str(track["foreignRecordingId"]) if track.get("foreignRecordingId") is not None else None
+            ),
         )
         upserted_track = run.db.upsert_library_track(track_model)
         new_track_id = str(upserted_track["id"])
@@ -362,21 +373,21 @@ class LidarrMigrationJob:
         if lidarr_track_id is not None:
             run.lidarr_track_map[lidarr_track_id] = new_track_id
 
+        lidarr_trackfile_id = track.get("trackFileId")
+        if isinstance(lidarr_trackfile_id, int) and lidarr_trackfile_id:
+            run.lidarr_trackfile_map[lidarr_trackfile_id] = new_track_id
+
         with self._lock:
             self._status["tracks_migrated"] += 1
 
     def _migrate_one_track_file(self, run: _MigrationRun, tf: dict[str, Any]) -> None:
         """Ingests a single raw Lidarr track file dictionary."""
-        lidarr_track_id_raw = tf.get("trackId")
-        if lidarr_track_id_raw is None and tf.get("trackIds"):
-            lidarr_track_id_raw = tf["trackIds"][0]
-
-        mapped_track_id = run.lidarr_track_map.get(lidarr_track_id_raw)
+        mapped_track_id = run.lidarr_trackfile_map.get(tf.get("id"))
         if not mapped_track_id:
             logger.debug(
-                "LidarrMigration: Track file '%s' has unresolved trackId %s, skipping.",
+                "LidarrMigration: Track file %s ('%s') matches no imported track, skipping.",
+                tf.get("id"),
                 tf.get("path"),
-                lidarr_track_id_raw,
             )
             return
 
@@ -523,6 +534,25 @@ class LidarrMigrationJob:
             self._status["completed_at"] = datetime.now(timezone.utc).isoformat()
             return dict(self._status)
 
+    @staticmethod
+    def _unmonitor_albums_not_in_lidarr(
+        run: _MigrationRun, lidarr_artist_id: Any, lidarr_albums: list[dict[str, Any]]
+    ) -> None:
+        """Unmonitors the artist's monitored albums that Lidarr does not have (never deletes)."""
+        mapped_artist_id = run.lidarr_artist_map.get(lidarr_artist_id)
+        if not mapped_artist_id:
+            return
+        imported = {
+            run.lidarr_album_map[a.get("id")] for a in lidarr_albums if a.get("id") in run.lidarr_album_map
+        }
+        extra = [
+            str(row["id"])
+            for row in run.db.list_library_albums(artist_id=mapped_artist_id, monitored_only=True, limit=100000)
+            if str(row["id"]) not in imported
+        ]
+        if extra:
+            run.db.bulk_set_albums_monitored(extra, False, cascade_tracks=True)
+
     def _migrate_artist_catalog(self, run: _MigrationRun, lidarr_artist: dict[str, Any]) -> None:
         """Fetches and ingests one artist's albums, their tracks and the artist's files; LidarrApiError on a failed fetch."""
         artist_id = lidarr_artist.get("id")
@@ -536,6 +566,7 @@ class LidarrMigrationJob:
                 if self._stop_event.is_set():
                     raise _MigrationCancelled()
                 self._migrate_one_album(run, album)
+            self._unmonitor_albums_not_in_lidarr(run, artist_id, albums)
             if self._stop_event.is_set():
                 raise _MigrationCancelled()
             # One call returns every track of the artist (each row carries its albumId) instead of one per album.
