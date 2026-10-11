@@ -355,7 +355,7 @@ class TestCoordinatorRecordsOutcome:
             profile = {"id": "p", "name": "p"}
             with patch.object(coordinator, "search_all_indexers", return_value=[candidate]), patch.object(
                 coordinator, "evaluate_and_rank", return_value=[(candidate, MagicMock(score=10))]
-            ), patch.object(coordinator, "find_client_for_protocol", return_value={"id": 1, "name": "lidarr"}), patch(
+            ), patch.object(coordinator, "clients_for_protocol", return_value=[{"id": 1, "name": "lidarr"}]), patch(
                 "trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=driver
             ), patch.object(db, "get_default_quality_profile", return_value=profile), patch(
                 "trackseerr.acquisition_coordinator._to_quality_profile", return_value=MagicMock()

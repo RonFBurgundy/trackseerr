@@ -12,6 +12,7 @@ from trackseerr.api.response_models import ApiModel
 from trackseerr.acquisition_coordinator import (
     _to_quality_profile,
     _extract_info_hash,
+    NoClientAvailable,
     candidate_rank,
     resolve_duration,
     acquisition_coordinator,
@@ -53,6 +54,7 @@ class InteractiveReleaseItem(BaseModel):
     id: str
     title: str
     indexer_name: str
+    indexer_priority: Optional[int] = None
     protocol: str  # "torrent", "usenet", "p2p"
     size_bytes: int
     seeders: Optional[int] = None
@@ -212,6 +214,7 @@ def _build_release_item(
         id=str(r.download_id or f"rel-{uuid.uuid4().hex[:12]}"),
         title=r.title,
         indexer_name=indexer_name,
+        indexer_priority=extra_data.get("indexer_priority") if isinstance(extra_data.get("indexer_priority"), int) else None,
         protocol=proto,
         size_bytes=int(r.size_bytes or 0),
         seeders=r.seeders,
@@ -343,25 +346,13 @@ def _grab_release(payload: ManualGrabPayload, db: Database, admin: dict[str, Any
     Creates an active download tracking record in the activity queue and transitions
     associated requests to 'processing'.
     """
-    # 1. Resolve target download client
+    # 1. An explicit client targets exactly that client (no failover); otherwise the best client for the protocol
     client: Optional[dict[str, Any]] = None
     if payload.client_id:
         try:
             client = db.get_download_client(payload.client_id)
         except Exception as e:
             logger.warning("Failed to fetch download client '%s': %s", payload.client_id, e)
-
-    if not client:
-        client = acquisition_coordinator.find_client_for_protocol(
-            protocol=payload.release.protocol,
-            db=db,
-        )
-
-    if not client:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No download client configured or available for protocol",
-        )
 
     # 2. Reconstruct canonical AcquisitionSearchResult
     search_result = AcquisitionSearchResult(
@@ -383,12 +374,23 @@ def _grab_release(payload: ManualGrabPayload, db: Database, admin: dict[str, Any
 
     # 3. Dispatch download to client driver
     try:
-        client_driver = get_acquisition_driver(client)
-        download_hash = client_driver.download(search_result)
+        if client is not None:
+            client_driver = get_acquisition_driver(client)
+            download_hash = client_driver.download(search_result)
+        else:
+            client, download_hash = acquisition_coordinator.dispatch_with_failover(
+                db, search_result, get_acquisition_driver
+            )
+            client_driver = get_acquisition_driver(client)
+    except NoClientAvailable:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No download client configured or available for protocol",
+        )
     except ValueError as e:
         logger.error(
-            "Validation error dispatching download to '%s': %s",
-            client.get("name"),
+            "Validation error dispatching download for '%s': %s",
+            payload.release.title,
             redact_text(str(e)),
         )
         raise HTTPException(
@@ -397,8 +399,7 @@ def _grab_release(payload: ManualGrabPayload, db: Database, admin: dict[str, Any
         )
     except Exception as e:
         logger.error(
-            "Failed dispatching download on client '%s' for '%s': %s",
-            client.get("name"),
+            "Failed dispatching download for '%s': %s",
             payload.release.title,
             redact_text(str(e)),
         )

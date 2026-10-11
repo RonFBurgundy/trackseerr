@@ -844,6 +844,7 @@ def candidate_context(candidate: AcquisitionSearchResult) -> dict[str, Any]:
 # --------------------------------------------------------------------------------------------------------------------
 
 _NO_DISTANCE = 1e12
+DEFAULT_INDEXER_PRIORITY = 25
 
 
 def rank_key(
@@ -851,14 +852,23 @@ def rank_key(
     seeders: Optional[int],
     result: EvaluationResult,
     preferred_protocol: Optional[str] = None,
+    indexer_priority: Optional[int] = None,
 ) -> tuple[Any, ...]:
-    """Sort key (sort descending): quality order > format score > preferred-kbps distance > protocol > seeders.
+    """Sort key (sort descending): quality order > format score > preferred-kbps distance > protocol >
+    indexer priority (1-50, lower is better, default 25) > seeders.
 
     ``preferred_protocol`` is the applicable delay profile's preference; without it ``PROTOCOL_PREFERENCE`` applies.
     """
     tier = result.tier if result.tier is not None else 10**9
     distance = result.kbps_distance if result.kbps_distance is not None else _NO_DISTANCE
-    return (-tier, result.format_score, -distance, -protocol_rank(protocol, preferred_protocol), int(seeders or 0))
+    return (
+        -tier,
+        result.format_score,
+        -distance,
+        -protocol_rank(protocol, preferred_protocol),
+        -(indexer_priority if indexer_priority is not None else DEFAULT_INDEXER_PRIORITY),
+        int(seeders or 0),
+    )
 
 
 @dataclass

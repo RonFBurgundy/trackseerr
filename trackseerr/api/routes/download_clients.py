@@ -50,7 +50,7 @@ class DownloadClientPayload(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     enabled: bool = True
-    priority: int = 1
+    priority: int = Field(1, ge=1, le=50)
     category: Optional[str] = None
     remote_path_mappings: Optional[list[dict[str, str]]] = None
     extra_settings_json: Optional[str] = None

@@ -46,7 +46,7 @@ class IndexerPayload(BaseModel):
     api_key: Optional[str] = None
     categories: str = "3000,3010,3020,3030,3040"
     enabled: bool = True
-    priority: int = 1
+    priority: int = Field(25, ge=1, le=50)
     # None = inherit the global limit, 0 = no requirement.
     seed_ratio: Optional[float] = Field(default=None, ge=0)
     seed_time_minutes: Optional[int] = Field(default=None, ge=0)
