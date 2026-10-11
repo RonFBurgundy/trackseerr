@@ -131,6 +131,60 @@ class SyncState:
         pl["tracks_json"] = payload
         return skip
 
+    @staticmethod
+    def _tracks_to_json(tracks: list[Track]) -> str:
+        return json.dumps([{"title": t.title, "artist": t.artist, "album": t.album, "url": t.url} for t in tracks])
+
+    @staticmethod
+    def _stored_tracks(pl: dict[str, Any]) -> list[Track]:
+        raw = pl.get("tracks_json")
+        if not raw:
+            return []
+        return [
+            Track(
+                title=t.get("title", ""),
+                artist=t.get("artist", ""),
+                album=t.get("album", ""),
+                url=t.get("url", ""),
+            )
+            for t in json.loads(raw)
+            if t.get("title")
+        ]
+
+    def _load_source_tracks(
+        self,
+        db: Database,
+        config: Config,
+        pl: dict[str, Any],
+        spotify_client: Optional[SpotifyClient],
+        deezer_client: Optional[DeezerClient],
+    ) -> list[Track]:
+        """The playlist's current tracks: smart/listening rebuild, live Spotify/Deezer fetch (snapshotted), else stored list."""
+        pl_id = pl["id"]
+        service = pl.get("service", "spotify")
+        if is_smart_collection(pl):
+            return refresh_tracks(db, pl)
+        if is_listening_playlist(pl):
+            # Re-fetched every sync with the owner's linked account (a created-for playlist
+            # re-resolves to its newest edition); the snapshot keeps the last good list.
+            tracks = fetch_listening_tracks(db, config, pl)
+            db.set_playlist_tracks_json(pl_id, self._tracks_to_json(tracks))
+            return tracks
+        client = spotify_client if service == "spotify" else deezer_client if service == "deezer" else None
+        if client is not None and not pl_id.startswith("imp_"):
+            live = client.get_playlist_tracks(pl_id)
+            if live:
+                db.set_playlist_tracks_json(pl_id, self._tracks_to_json(live))
+                return live
+            stored = self._stored_tracks(pl)
+            if stored:
+                logger.warning(
+                    "Live fetch for playlist '%s' returned no tracks; matching against the stored snapshot", pl["name"]
+                )
+                return stored
+            return live or []
+        return self._stored_tracks(pl)
+
     @tracked("playlist_sync", "Plex Playlist Sync")
     def execute_sync(  # noqa: C901, PLR0915
         self,
@@ -192,33 +246,7 @@ class SyncState:
                 if service == "plex":
                     skip_rating_keys = self._refresh_adopted_playlist(db, plex_client, pl)
                 try:
-                    if is_smart_collection(pl):
-                        tracks = refresh_tracks(db, pl)
-                    elif is_listening_playlist(pl):
-                        # Re-fetched every sync with the owner's linked account (a created-for playlist
-                        # re-resolves to its newest edition); the snapshot keeps the last good list.
-                        tracks = fetch_listening_tracks(db, config, pl)
-                        db.set_playlist_tracks_json(
-                            pl_id, json.dumps([{"title": t.title, "artist": t.artist, "album": t.album} for t in tracks])
-                        )
-                    elif pl_id.startswith("imp_") or pl.get("tracks_json"):
-                        raw_tracks_json = pl.get("tracks_json")
-                        if raw_tracks_json:
-                            t_dicts = json.loads(raw_tracks_json)
-                            tracks = [
-                                Track(
-                                    title=t.get("title", ""),
-                                    artist=t.get("artist", ""),
-                                    album=t.get("album", ""),
-                                    url=t.get("url", ""),
-                                )
-                                for t in t_dicts
-                                if t.get("title")
-                            ]
-                    elif service == "spotify" and spotify_client:
-                        tracks = spotify_client.get_playlist_tracks(pl_id)
-                    elif service == "deezer" and deezer_client:
-                        tracks = deezer_client.get_playlist_tracks(pl_id)
+                    tracks = self._load_source_tracks(db, config, pl, spotify_client, deezer_client)
                 except SmartCollectionError as e:
                     logger.info("Smart collection '%s' skipped: %s", pl["name"], e)
                     db.record_sync_result(pl_id, status="error")

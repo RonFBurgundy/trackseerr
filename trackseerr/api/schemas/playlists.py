@@ -1,6 +1,6 @@
 """Response models for ``/api/playlists`` (``api/routes/playlists.py``)."""
 
-from typing import Optional
+from typing import Literal, Optional
 
 from trackseerr.api.response_models import ApiModel
 
@@ -15,7 +15,7 @@ class PlaylistRecord(ApiModel):
     poster_url: str = ""
     enabled: bool
     creator_id: Optional[str] = None
-    tracks_json: Optional[str] = None  # JSON text of the stored track list (direct imports); null for service playlists
+    tracks_json: Optional[str] = None  # stored track list: direct imports, or the last fetched snapshot for service playlists
     last_synced_at: Optional[str] = None
     sync_status: str
     monitor_mode: str
@@ -93,3 +93,19 @@ class ListeningSourcesResponse(ApiModel):
 class PlaylistAutoRequestResponse(ApiModel):
     id: str
     auto_request: bool
+
+
+class PlaylistTrackItem(ApiModel):
+    position: int
+    title: str
+    artist: str
+    album: str = ""
+    status: Literal["pending", "matched", "missing"]
+    missing_track_id: Optional[int] = None
+
+
+class PlaylistTracksResponse(ApiModel):
+    tracks: list[PlaylistTrackItem]
+    total: int
+    missing: int
+    synced: bool

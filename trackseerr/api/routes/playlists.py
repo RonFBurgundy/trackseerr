@@ -6,6 +6,8 @@ import logging
 import threading
 from typing import Any, Literal, Optional, Union
 
+import requests
+import spotipy
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -28,6 +30,8 @@ from trackseerr.api.schemas.playlists import (
     PlaylistMonitorModeResponse,
     PlaylistRecord,
     PlaylistTargetsResponse,
+    PlaylistTrackItem,
+    PlaylistTracksResponse,
 )
 from trackseerr.clients.deezer import DeezerClient
 from trackseerr.clients.import_lists import listenbrainz as lb_provider
@@ -315,6 +319,44 @@ def list_playlists(
     return playlists
 
 
+def _fetch_tracks_snapshot(
+    service: str,
+    pl_id: str,
+    spotify_client: Optional[Union[SpotifyClient, SpotifyWebScraper]],
+    deezer_client: Optional[DeezerClient],
+) -> Optional[str]:
+    """JSON snapshot of the playlist's source tracks, or None when unavailable (a failed fetch never fails the add)."""
+    client = spotify_client if service == "spotify" else deezer_client if service == "deezer" else None
+    if client is None:
+        return None
+    try:
+        fetched = client.get_playlist_tracks(pl_id)
+    except (spotipy.exceptions.SpotifyException, requests.RequestException, ValueError, KeyError) as e:
+        logger.warning("Could not load %s tracks for %s: %s", service, pl_id, e)
+        return None
+    if not isinstance(fetched, list) or not fetched:
+        return None
+    return json.dumps(
+        [{"title": t.title, "artist": t.artist, "album": t.album, "url": t.url} for t in fetched]
+    )
+
+
+def _track_key(artist: Any, title: Any) -> tuple[str, str]:
+    return (str(artist or "").casefold().strip(), str(title or "").casefold().strip())
+
+
+def _snapshot_entries(playlist: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = playlist.get("tracks_json")
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        logger.warning("Playlist %s has invalid tracks_json; showing no stored tracks", playlist.get("id"))
+        return []
+    return [t for t in data if isinstance(t, dict)] if isinstance(data, list) else []
+
+
 @router.post("", response_model=PlaylistRecord, response_model_exclude_unset=True, status_code=status.HTTP_201_CREATED)
 def create_playlist(
     req: PlaylistCreateRequest,
@@ -383,6 +425,8 @@ def create_playlist(
     clean_title = sanitize_text(title) or f"{service.title()} Playlist {pl_id}"
     clean_desc = sanitize_text(description)
 
+    snapshot_json = _fetch_tracks_snapshot(service, pl_id, spotify_client, deezer_client)
+
     # Upsert playlist into DB with creator_id
     creator_id = str(current_user["id"])
     playlist = db.upsert_playlist(
@@ -392,6 +436,7 @@ def create_playlist(
         description=clean_desc,
         poster_url=poster_url,
         creator_id=creator_id,
+        **({"tracks_json": snapshot_json} if snapshot_json else {}),
     )
 
     if existing is None:
@@ -536,6 +581,72 @@ def list_featured_charts(
     """Returns curated popular charts for 1-click subscription."""
     return FEATURED_CHARTS
 
+
+
+@router.get("/{playlist_id}/tracks", response_model=PlaylistTracksResponse, response_model_exclude_unset=True)
+def get_playlist_tracks_status(
+    playlist_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    db: Database = Depends(get_db),
+) -> dict[str, Any]:
+    """Every track of a playlist with its sync status. Admins, the creator and target users only (404 otherwise)."""
+    not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
+    playlist = db.get_playlist(playlist_id)
+    if not playlist:
+        raise not_found
+    perms = int(current_user.get("permissions") if current_user.get("permissions") is not None else 0)
+    is_admin = bool(current_user.get("is_admin") or (perms & int(UserPermission.ADMIN)))
+    if not is_admin:
+        visible = {p["id"] for p in db.list_playlists(user_id=str(current_user["id"]))}
+        if playlist_id not in visible:
+            raise not_found
+
+    synced = playlist.get("last_synced_at") is not None
+    missing_rows = db.get_missing_tracks(playlist_id=playlist_id)
+    missing_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in missing_rows:
+        missing_by_key.setdefault(_track_key(row["artist"], row["title"]), row)
+
+    items: list[PlaylistTrackItem] = []
+    used: set[int] = set()
+    for entry in _snapshot_entries(playlist):
+        title = str(entry.get("title") or "")
+        artist = str(entry.get("artist") or "")
+        row = missing_by_key.get(_track_key(artist, title)) if synced else None
+        if row is not None:
+            used.add(int(row["id"]))
+            state, missing_id = "missing", int(row["id"])
+        else:
+            state, missing_id = ("matched" if synced else "pending"), None
+        items.append(
+            PlaylistTrackItem(
+                position=len(items) + 1,
+                title=title,
+                artist=artist,
+                album=str(entry.get("album") or ""),
+                status=state,
+                missing_track_id=missing_id,
+            )
+        )
+    for row in missing_rows:
+        if int(row["id"]) in used:
+            continue
+        items.append(
+            PlaylistTrackItem(
+                position=len(items) + 1,
+                title=str(row["title"] or ""),
+                artist=str(row["artist"] or ""),
+                album=str(row["album"] or ""),
+                status="missing",
+                missing_track_id=int(row["id"]),
+            )
+        )
+    return {
+        "tracks": items,
+        "total": len(items),
+        "missing": sum(1 for i in items if i.status == "missing"),
+        "synced": synced,
+    }
 
 
 @router.put("/{playlist_id}/targets", response_model=PlaylistTargetsResponse, response_model_exclude_unset=True)
