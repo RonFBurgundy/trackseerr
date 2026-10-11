@@ -194,3 +194,19 @@ def test_cache_expires_after_ttl(scraper):
     assert fetch.call_count == 2
     assert [t.title for t in first["tracks"]] == ["A"]
     assert [t.title for t in second["tracks"]] == ["New"]
+
+
+def _embed_artists(scraper, subtitles):
+    entity = {"title": "P", "subtitle": "", "trackList": [{"title": f"T{i}", "subtitle": sub} for i, sub in enumerate(subtitles)]}
+    payload = {"props": {"pageProps": {"status": 200, "state": {"data": {"entity": entity}}}}}
+    html = f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(payload)}</script>'.encode("utf-8")
+    resp = MagicMock()
+    resp.read.return_value = html
+    resp.__enter__.return_value = resp
+    with patch("urllib.request.urlopen", return_value=resp):
+        return [t.artist for t in scraper.get_playlist_tracks("pl-artists")]
+
+
+def test_embed_joined_artists_use_primary_only(scraper):
+    artists = _embed_artists(scraper, ["The Offspring,\u00a0Redman", "Tyler, The Creator", "Taylor Swift"])
+    assert artists == ["The Offspring", "Tyler, The Creator", "Taylor Swift"]

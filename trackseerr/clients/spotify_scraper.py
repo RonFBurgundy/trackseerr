@@ -23,6 +23,13 @@ USER_AGENT = (
 )
 
 
+def _primary_embed_artist(subtitle: str) -> str:
+    """First artist of an embed subtitle. The embed joins artists with a comma + NO-BREAK SPACE; a plain
+    ", " belongs to a band name ("Tyler, The Creator") and is left alone."""
+    first = subtitle.split(",\u00a0", 1)[0]
+    return first.replace("\u00a0", " ").strip()
+
+
 class SpotifyWebScraper:
     """Scrapes public Spotify playlist metadata and tracks without requiring API credentials."""
 
@@ -109,7 +116,7 @@ class SpotifyWebScraper:
 
             for item in embed_entity.get("trackList", []):
                 t_title = (item.get("title") or "").strip()
-                t_artist = (item.get("subtitle") or "").strip()
+                t_artist = _primary_embed_artist(item.get("subtitle") or "")
                 if t_title:
                     tracks.append(
                         Track(
