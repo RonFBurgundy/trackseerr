@@ -212,11 +212,14 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
 
           {(type === 'sabnzbd' || type === 'slskd') && (
             <div>
-              <label htmlFor="client-api-key" className={compactLabelClass}>API Key</label>
+              <label htmlFor="client-api-key" className={compactLabelClass}>
+                API Key {type === 'slskd' && <span className="text-[#e5a00d]">*</span>}
+              </label>
               <input
                 id="client-api-key"
                 name="api_key"
                 type="password"
+                required={type === 'slskd'}
                 value={draft.apiKey}
                 onChange={(e) => draft.setApiKey(e.target.value)}
                 placeholder={type === 'slskd' ? 'slskd API key' : 'SABnzbd API key'}
@@ -225,13 +228,13 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
               />
               {type === 'slskd' && (
                 <p className="text-[10px] font-mono text-neutral-500 mt-1">
-                  API key, or the web UI username and password
+                  slskd → Options → web.authentication.api_keys (role readwrite)
                 </p>
               )}
             </div>
           )}
 
-          {(type === 'slskd' || type === 'qbittorrent' || type === 'transmission' || type === 'nzbget') && (
+          {(type === 'qbittorrent' || type === 'transmission' || type === 'nzbget') && (
             <div>
               <label htmlFor="client-username" className={compactLabelClass}>
                 Username {type === 'nzbget' && <span className="text-[#e5a00d]">*</span>}
@@ -250,8 +253,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
             </div>
           )}
 
-          {(type === 'slskd' ||
-            type === 'qbittorrent' ||
+          {(type === 'qbittorrent' ||
             type === 'transmission' ||
             type === 'deluge' ||
             type === 'nzbget') && (
