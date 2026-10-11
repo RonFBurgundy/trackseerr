@@ -54,6 +54,38 @@ from trackseerr.storage import Database
 logger = logging.getLogger(__name__)
 
 
+def _slskd_extra(cand: AcquisitionSearchResult) -> dict[str, Any]:
+    return (cand.extra or {}) if cand.protocol == "slskd" else {}
+
+
+def _peer_rank(cand: AcquisitionSearchResult) -> tuple[int, ...]:
+    """Soulseek peer availability: free slot first, then shortest queue, then fastest upload."""
+    peer = _slskd_extra(cand).get("peer")
+    if not isinstance(peer, dict):
+        return ()
+    try:
+        queue = int(peer.get("queue_length") or 0)
+        speed = int(peer.get("upload_speed") or 0)
+    except (TypeError, ValueError):
+        return ()
+    return (1 if peer.get("has_free_slot") else 0, -queue, speed)
+
+
+def _length_mismatch(
+    cand: AcquisitionSearchResult, duration: Optional[DurationInfo], item_type: Optional[str]
+) -> Optional[str]:
+    """Reason a Soulseek file's length is too far from the expected track length, else ``None``."""
+    if item_type != "track" or duration is None or duration.estimated:
+        return None
+    actual = _slskd_extra(cand).get("length_seconds")
+    if isinstance(actual, bool) or not isinstance(actual, int) or actual <= 0:
+        return None
+    expected = duration.seconds
+    if abs(actual - expected) <= max(15.0, 0.10 * expected):
+        return None
+    return f"length {actual}s vs expected {expected:.0f}s"
+
+
 def candidate_rank(
     cand: AcquisitionSearchResult, res: EvaluationResult, preferred_protocol: Optional[str] = None
 ) -> tuple[Any, ...]:
@@ -62,7 +94,12 @@ def candidate_rank(
     raw_priority = (cand.extra or {}).get("indexer_priority")
     indexer_priority = raw_priority if isinstance(raw_priority, int) and not isinstance(raw_priority, bool) else None
     return rank_key(
-        cand.protocol, int(cand.seeders or 0) if is_torrent else 0, res, preferred_protocol, indexer_priority
+        cand.protocol,
+        int(cand.seeders or 0) if is_torrent else 0,
+        res,
+        preferred_protocol,
+        indexer_priority,
+        peer=_peer_rank(cand),
     )
 
 
@@ -405,6 +442,11 @@ class AcquisitionCoordinator:
                 ):
                     logger.info("Skipping blocklisted release candidate during evaluation: '%s'", candidate.title)
                     continue
+
+            mismatch = _length_mismatch(candidate, duration, item_type)
+            if mismatch:
+                logger.info("Skipping Soulseek file '%s': %s", candidate.title, mismatch)
+                continue
 
             parsed = parse_release_title(candidate.title)
             eval_res = evaluate_prepared(

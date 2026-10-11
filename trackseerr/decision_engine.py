@@ -853,9 +853,10 @@ def rank_key(
     result: EvaluationResult,
     preferred_protocol: Optional[str] = None,
     indexer_priority: Optional[int] = None,
+    peer: tuple[int, ...] = (),
 ) -> tuple[Any, ...]:
     """Sort key (sort descending): quality order > format score > preferred-kbps distance > protocol >
-    indexer priority (1-50, lower is better, default 25) > seeders.
+    indexer priority (1-50, lower is better, default 25) > seeders > peer availability (Soulseek only).
 
     ``preferred_protocol`` is the applicable delay profile's preference; without it ``PROTOCOL_PREFERENCE`` applies.
     """
@@ -868,6 +869,7 @@ def rank_key(
         -protocol_rank(protocol, preferred_protocol),
         -(indexer_priority if indexer_priority is not None else DEFAULT_INDEXER_PRIORITY),
         int(seeders or 0),
+        *peer,
     )
 
 
