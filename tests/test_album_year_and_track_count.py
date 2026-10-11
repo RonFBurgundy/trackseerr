@@ -288,7 +288,7 @@ def test_native_artist_detail_reports_artist_track_and_file_counts(db: Database)
     )
 
     detail = get_artist("ar1", db=db, client=None, _admin={})
-    assert detail["track_count"] == 3
+    assert detail["track_count"] == 4  # 3 on the monitored album + 1 filed track on the unmonitored album (Lidarr trackCount)
     assert detail["total_track_count"] == 5
     assert detail["track_file_count"] == 3
     assert detail["album_count"] == 2
@@ -327,7 +327,7 @@ def test_enrich_artists_reports_track_and_file_counts(db: Database):
     )
 
     enriched = _enrich_artists(db, [db.get_library_artist("ar2")])[0]
-    assert enriched["track_count"] == 3
+    assert enriched["track_count"] == 4  # 3 on the monitored album + 1 filed track on the unmonitored album (Lidarr trackCount)
     assert enriched["total_track_count"] == 5
     assert enriched["track_file_count"] == 3
 
