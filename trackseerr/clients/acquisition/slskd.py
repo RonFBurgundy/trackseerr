@@ -4,6 +4,7 @@ import logging
 import posixpath
 import threading
 import time
+from collections import Counter
 from typing import Any, Optional
 from urllib.parse import quote, unquote
 
@@ -341,11 +342,79 @@ class SlskdDriver(AcquisitionDriver):
                 "bit_depth": f.get("bitDepth"),
                 "sample_rate": f.get("sampleRate"),
                 "length_seconds": f.get("length"),
-                "peer": {
-                    "has_free_slot": bool(user_resp.get("hasFreeUploadSlot")),
-                    "queue_length": int(user_resp.get("queueLength") or 0),
-                    "upload_speed": int(user_resp.get("uploadSpeed") or 0),
-                },
+                "peer": self._peer_info(user_resp),
+            },
+        )
+
+    @staticmethod
+    def _peer_info(user_resp: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "has_free_slot": bool(user_resp.get("hasFreeUploadSlot")),
+            "queue_length": int(user_resp.get("queueLength") or 0),
+            "upload_speed": int(user_resp.get("uploadSpeed") or 0),
+        }
+
+    @staticmethod
+    def _is_folder_id(download_id: str) -> bool:
+        return "::dir::" in (download_id or "")
+
+    @staticmethod
+    def _split_folder_id(download_id: str) -> tuple[str, str]:
+        """(username, unquoted remote directory) from a folder download id."""
+        user, _, rest = download_id.partition("::dir::")
+        return user, unquote(rest)
+
+    def _build_folder_result(
+        self,
+        user_resp: dict[str, Any],
+        directory: str,
+        files: list[tuple[dict[str, Any], str]],
+        artist: str,
+        album: Optional[str],
+    ) -> AcquisitionSearchResult:
+        """One album candidate for a peer's directory; ``files`` is [(file dict, lowercase extension)]."""
+        uname = user_resp.get("username", "")
+        tags = Counter(self._quality_tag(f) for f, _ in files)
+        top_tag = tags.most_common(1)[0][0]
+        rep, rep_ext = next((f, e) for f, e in files if self._quality_tag(f) == top_tag)
+        ordered = sorted(files, key=lambda fe: str(fe[0].get("filename", "")))
+        entries = [
+            {
+                "filename": f.get("filename", ""),
+                "size": int(f.get("size", 0)),
+                "length_seconds": f.get("length"),
+            }
+            for f, _ in ordered
+        ]
+        lengths = [e["length_seconds"] for e in entries]
+        total_length = None if any(v is None for v in lengths) else sum(lengths)
+        total_size = sum(e["size"] for e in entries)
+        bitrate = rep.get("bitRate")
+        quality_desc = rep_ext.upper() + (f" {bitrate}kbps" if bitrate else "")
+        name = self._last_component(directory)
+        dl_id = f"{uname}::dir::{quote(directory)}"
+        return AcquisitionSearchResult(
+            download_id=dl_id,
+            title=f"{name} [{top_tag}]" if top_tag else name,
+            artist=artist,
+            album=album,
+            item_type="album",
+            size_bytes=total_size,
+            bit_rate=int(bitrate) if bitrate else None,
+            format=rep_ext,
+            quality_str=quality_desc,
+            download_url=dl_id,
+            source="slskd",
+            extra={
+                "username": uname,
+                "directory": directory,
+                "filename": directory,
+                "files": entries,
+                "track_count": len(entries),
+                "total_length_seconds": total_length,
+                "bit_depth": rep.get("bitDepth"),
+                "sample_rate": rep.get("sampleRate"),
+                "peer": self._peer_info(user_resp),
             },
         )
 
@@ -361,11 +430,19 @@ class SlskdDriver(AcquisitionDriver):
             if self._peer_rejected(user_resp):
                 self.peers_filtered += 1
                 continue
+            by_dir: dict[str, list[tuple[dict[str, Any], str]]] = {}
             for f in user_resp.get("files", []):
                 ext = f.get("extension", "").lower().lstrip(".")
                 if ext not in ("mp3", "flac", "m4a", "aac", "ogg", "opus"):
                     continue
                 results.append(self._build_result(user_resp, f, ext, artist, album))
+                fname = str(f.get("filename", ""))
+                cut = max(fname.rfind("\\"), fname.rfind("/"))
+                if cut > 0:
+                    by_dir.setdefault(fname[:cut], []).append((f, ext))
+            for directory, dir_files in by_dir.items():
+                if len(dir_files) >= 2:
+                    results.append(self._build_folder_result(user_resp, directory, dir_files, artist, album))
         return results
 
     def download(self, result: AcquisitionSearchResult) -> str:
@@ -374,6 +451,8 @@ class SlskdDriver(AcquisitionDriver):
             raise ValueError("Prohibited host URL")
 
         extra = result.extra or {}
+        if self._is_folder_id(result.download_id):
+            return self._download_folder(result, extra)
         username = extra.get("username")
         filename = extra.get("filename")
         size = extra.get("size", result.size_bytes)
@@ -396,6 +475,85 @@ class SlskdDriver(AcquisitionDriver):
                 raise RuntimeError(f"slskd download queue failed ({resp.status_code}): {resp.text[:120]}")
 
         return f"{username}::{quote(filename)}"
+
+    def _download_folder(self, result: AcquisitionSearchResult, extra: dict[str, Any]) -> str:
+        """Queue every file of a folder candidate in one slskd request; returns the folder id."""
+        files = extra.get("files") or []
+        if not files:
+            raise ValueError("slskd folder candidate has no files")
+        username = extra.get("username") or self._split_folder_id(result.download_id)[0]
+        url = f"{self.host_url}/api/v0/transfers/downloads/{quote(username)}"
+        payload = [{"filename": f["filename"], "size": f["size"]} for f in files]
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.post(url, headers=self._headers(), json=payload)
+            if resp.status_code not in (200, 201, 202):
+                raise RuntimeError(f"slskd folder queue failed ({resp.status_code}): {resp.text[:120]}")
+        return result.download_id
+
+    @staticmethod
+    def _find_directory(data: Any, username: str, directory: str) -> Optional[dict[str, Any]]:
+        """The downloads-list directory object for one user's remote directory."""
+        if isinstance(data, dict):
+            data = [data]
+        if not isinstance(data, list):
+            return None
+        for item in data:
+            if not isinstance(item, dict) or item.get("username", "") != username:
+                continue
+            for d in item.get("directories", []):
+                if d.get("directory") == directory:
+                    return d
+        return None
+
+    def _folder_local_path(self, dir_obj: dict[str, Any], files: list[dict[str, Any]]) -> Optional[str]:
+        """Local folder holding a completed directory transfer."""
+        for f in files:
+            reported = str(f.get("localFilename") or "").strip()
+            if reported and posixpath.isabs(reported.replace("\\", "/")):
+                return posixpath.dirname(reported.replace("\\", "/"))
+            break
+        base = self.download_dir or self._read_downloads_root()
+        folder = self._last_component(str(dir_obj.get("directory") or ""))
+        if not base or not folder or folder in (".", ".."):
+            return None
+        return posixpath.join(base.rstrip("/") or "/", folder)
+
+    def _folder_status(self, dir_obj: dict[str, Any]) -> dict[str, Any]:
+        """Aggregate the per-file transfers of one directory into a single status dict."""
+        files = [f for f in dir_obj.get("files", []) if isinstance(f, dict)]
+        states = [self._map_state(str(f.get("state", ""))) for f in files]
+        total_size = sum(int(f.get("size", 0) or 0) for f in files)
+        transferred = sum(int(f.get("bytesTransferred", 0) or 0) for f in files)
+        speed = sum(int(f.get("averageSpeed", 0) or f.get("speed", 0) or 0) for f in files)
+        failed = [(s, e) for s, e in states if s == DownloadStatus.FAILED.value]
+        done = sum(1 for s, _ in states if s == DownloadStatus.COMPLETED.value)
+        in_flight = any(s == DownloadStatus.DOWNLOADING.value for s, _ in states)
+        source_path = None
+        error = None
+        if files and done == len(files):
+            status = DownloadStatus.COMPLETED.value
+            source_path = self._folder_local_path(dir_obj, files)
+        elif failed and not in_flight:
+            status = DownloadStatus.FAILED.value
+            first = next((f.get("error") for f in files if f.get("error")), None) or failed[0][1]
+            error = f"{len(failed)} of {len(files)} files failed: {first}"
+        elif in_flight or done:
+            status = DownloadStatus.DOWNLOADING.value
+        else:
+            status = DownloadStatus.QUEUED.value
+        progress = 100.0 if status == DownloadStatus.COMPLETED.value else (
+            transferred / total_size * 100.0 if total_size > 0 else 0.0
+        )
+        return {
+            "status": status,
+            "progress": round(progress, 1),
+            "size_bytes": total_size,
+            "speed_bps": speed,
+            "eta_seconds": int((total_size - transferred) / speed) if speed > 0 and total_size > transferred else 0,
+            "source_path": source_path,
+            "error_message": error,
+            "remote_state": files[0].get("state") if files else None,
+        }
 
     @staticmethod
     def _find_transfer(
@@ -434,6 +592,20 @@ class SlskdDriver(AcquisitionDriver):
             return DownloadStatus.QUEUED.value, None
         return DownloadStatus.DOWNLOADING.value, None
 
+    @staticmethod
+    def _missing_status() -> dict[str, Any]:
+        """Not in slskd's list: the worker decides how long to tolerate this."""
+        return {
+            "status": DownloadStatus.QUEUED.value,
+            "progress": 0.0,
+            "size_bytes": 0,
+            "speed_bps": 0,
+            "eta_seconds": 0,
+            "source_path": None,
+            "error_message": None,
+            "missing": True,
+        }
+
     def get_status(self, download_id: str) -> dict[str, Any]:
         """Inspects transfer status across all slskd downloads."""
         if not is_safe_service_url(self.host_url):
@@ -441,7 +613,8 @@ class SlskdDriver(AcquisitionDriver):
 
         target_user = None
         target_file = None
-        if "::" in download_id:
+        folder = self._split_folder_id(download_id) if self._is_folder_id(download_id) else None
+        if not folder and "::" in download_id:
             parts = download_id.split("::", 1)
             target_user = parts[0]
             target_file = unquote(parts[1])
@@ -457,20 +630,14 @@ class SlskdDriver(AcquisitionDriver):
                     }
                 data = resp.json()
 
+            if folder:
+                dir_obj = self._find_directory(data, folder[0], folder[1])
+                return self._folder_status(dir_obj) if dir_obj else self._missing_status()
+
             transfer, transfer_dir = self._find_transfer(data, target_user, target_file, download_id)
 
             if not transfer:
-                # Not in slskd's list: the worker decides how long to tolerate this.
-                return {
-                    "status": DownloadStatus.QUEUED.value,
-                    "progress": 0.0,
-                    "size_bytes": 0,
-                    "speed_bps": 0,
-                    "eta_seconds": 0,
-                    "source_path": None,
-                    "error_message": None,
-                    "missing": True,
-                }
+                return self._missing_status()
 
             size = int(transfer.get("size", 0))
             transferred = int(transfer.get("bytesTransferred", 0))
@@ -512,51 +679,63 @@ class SlskdDriver(AcquisitionDriver):
                 "error_message": str(e),
             }
 
-    def cancel(self, download_id: str) -> bool:
-        """Cancels a transfer in slskd (DELETE by transfer id, removing it from the list)."""
-        if not is_safe_service_url(self.host_url):
-            return False
+    def _remove_transfers(self, download_id: str, ok_codes: tuple[int, ...]) -> Optional[bool]:
+        """DELETE the transfer(s) behind a track or folder id from slskd's list.
 
-        target_user = ""
-        target_file = ""
-        if "::" in download_id:
-            parts = download_id.split("::", 1)
-            target_user = parts[0]
-            target_file = unquote(parts[1])
+        Returns None when nothing matches, else True only if every delete returned one of ``ok_codes``.
+        Raises ``httpx.HTTPError`` / ``ValueError`` on transport or decode failures.
+        """
+        folder = self._split_folder_id(download_id) if self._is_folder_id(download_id) else None
+        target_user, target_file = "", ""
+        if folder:
+            target_user = folder[0]
+        elif "::" in download_id:
+            target_user, _, raw = download_id.partition("::")
+            target_file = unquote(raw)
 
         base = f"{self.host_url}/api/v0/transfers/downloads/{quote(target_user)}"
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.get(base, headers=self._headers())
+            if resp.status_code == 404:
+                return None
+            if resp.status_code != 200:
+                return False
+            data = resp.json()
+            if folder:
+                dir_obj = self._find_directory(data, folder[0], folder[1])
+                ids = [f.get("id") for f in (dir_obj or {}).get("files", []) if f.get("id")]
+            else:
+                transfer, _ = self._find_transfer([data], target_user, target_file, download_id)
+                ids = [transfer["id"]] if transfer and transfer.get("id") else []
+            if not ids:
+                return None
+            ok = True
+            for tid in ids:
+                r = client.delete(f"{base}/{quote(str(tid))}", headers=self._headers(), params={"remove": "true"})
+                ok = ok and r.status_code in ok_codes
+            return ok
+
+    def cancel(self, download_id: str) -> bool:
+        """Cancels a track or folder transfer in slskd (DELETE by transfer id, removing it from the list)."""
+        if not is_safe_service_url(self.host_url):
+            return False
         try:
-            with httpx.Client(timeout=self.timeout) as client:
-                resp = client.get(base, headers=self._headers())
-                if resp.status_code != 200:
-                    return False
-                transfer, _ = self._find_transfer([resp.json()], target_user, target_file, download_id)
-                transfer_id = transfer.get("id") if transfer else None
-                if not transfer_id:
-                    return False
-                resp = client.delete(f"{base}/{quote(str(transfer_id))}", headers=self._headers(), params={"remove": "true"})
-                return resp.status_code in (200, 204)
+            return bool(self._remove_transfers(download_id, (200, 204)))
         except (httpx.HTTPError, ValueError) as e:
-            logger.error("Failed to cancel slskd transfer %s: %s", download_id, e)
+            logger.error("Failed to cancel slskd transfer %s: %s: %s", download_id, type(e).__name__, e)
             return False
 
     def cleanup_completed(self, download_id: str, delete_files: bool = False) -> bool:
-        """Removes completed transfer from slskd or returns True."""
+        """Removes finished transfer(s) from slskd's list; True when all gone or nothing was found."""
         if not is_safe_service_url(self.host_url):
             return False
-
         if "::" not in download_id:
             return True
-
-        parts = download_id.split("::", 1)
-        target_user = parts[0]
-        target_file = unquote(parts[1])
-
-        url = f"{self.host_url}/api/v0/transfers/downloads/{quote(target_user)}"
+        if delete_files:
+            logger.debug("slskd cannot delete downloaded files via its API; ignoring delete_files for %s", download_id)
         try:
-            with httpx.Client(timeout=self.timeout) as client:
-                resp = client.request("DELETE", url, headers=self._headers(), json=[{"filename": target_file}])
-                return resp.status_code in (200, 204, 404)
-        except Exception as e:
-            logger.warning("Error cleaning up slskd completed transfer %s: %s", download_id, e)
-            return True
+            result = self._remove_transfers(download_id, (200, 204, 404))
+        except (httpx.HTTPError, ValueError) as e:
+            logger.warning("Error cleaning up slskd transfer %s: %s: %s", download_id, type(e).__name__, e)
+            return False
+        return result is not False

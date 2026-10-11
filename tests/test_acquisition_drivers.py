@@ -462,6 +462,163 @@ def test_slskd_cancel_not_found_returns_false():
     d.assert_not_called()
 
 
+# --- slskd folder candidates -------------------------------------------------
+_FOLDER_DIR = "Music\\Artist\\Album (2011)"
+
+
+def _folder_files(n=3, directory=_FOLDER_DIR):
+    return [
+        {"filename": f"{directory}\\{i:02d} Track.flac", "size": 1000 * i, "bitRate": 900,
+         "extension": "flac", "bitDepth": 16, "sampleRate": 44100, "length": 100 + i}
+        for i in range(1, n + 1)
+    ]
+
+
+def _folder_id(directory=_FOLDER_DIR):
+    from urllib.parse import quote
+    return f"user1::dir::{quote(directory)}"
+
+
+def test_slskd_search_emits_folder_candidate():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    files = _folder_files(3) + _folder_files(1, "Music\\Artist\\Other")
+    payload = [{"username": "user1", "files": files}]
+    results, _, _, _, _ = _slskd_search(driver, [_slskd_resp(200, _SLSKD_DONE), _slskd_resp(200, payload)])
+    assert len([r for r in results if r.item_type == "track"]) == 4
+    folders = [r for r in results if r.item_type == "album"]
+    assert len(folders) == 1
+    r = folders[0]
+    assert r.download_id == r.download_url == _folder_id()
+    assert r.title.startswith("Album (2011) [FLAC")
+    assert r.size_bytes == 6000
+    assert r.extra["track_count"] == 3
+    assert r.extra["filename"] == r.extra["directory"] == _FOLDER_DIR
+    assert r.extra["total_length_seconds"] == 306
+    assert [f["filename"] for f in r.extra["files"]] == sorted(f["filename"] for f in r.extra["files"])
+    assert set(r.extra["peer"]) == {"has_free_slot", "queue_length", "upload_speed"}
+
+
+def test_slskd_folder_candidate_needs_two_files():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    payload = [{"username": "user1", "files": _folder_files(1)}]
+    results, _, _, _, _ = _slskd_search(driver, [_slskd_resp(200, _SLSKD_DONE), _slskd_resp(200, payload)])
+    assert [r.item_type for r in results] == ["track"]
+
+
+def test_slskd_download_folder_queues_all_files():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    entries = [{"filename": f["filename"], "size": f["size"], "length_seconds": f["length"]} for f in _folder_files(3)]
+    item = AcquisitionSearchResult(
+        download_id=_folder_id(), title="Album", artist="A", item_type="album", source="slskd",
+        extra={"username": "user1", "directory": _FOLDER_DIR, "files": entries},
+    )
+    with patch("httpx.Client.post", return_value=_slskd_resp(201)) as post:
+        assert driver.download(item) == _folder_id()
+    assert post.call_count == 1
+    assert post.call_args.args[0] == "http://slskd.local:5030/api/v0/transfers/downloads/user1"
+    assert post.call_args.kwargs["json"] == [{"filename": e["filename"], "size": e["size"]} for e in entries]
+
+
+def _folder_downloads(*files):
+    return [{"username": "user1", "directories": [
+        {"directory": "Other", "files": []},
+        {"directory": _FOLDER_DIR, "files": list(files)},
+    ]}]
+
+
+def _tf(i, state, size=1000, done=0, **kw):
+    f = {"id": f"t{i}", "filename": f"{_FOLDER_DIR}\\{i:02d}.flac", "state": state, "size": size, "bytesTransferred": done}
+    f.update(kw)
+    return f
+
+
+def _folder_status(*files, root="/downloads"):
+    driver = SlskdDriver("http://slskd.local:5030", api_key="k", download_dir=root)
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, _folder_downloads(*files))):
+        return driver.get_status(_folder_id())
+
+
+def test_slskd_folder_status_all_succeeded_gives_folder_path():
+    st = _folder_status(*[_tf(i, "Completed, Succeeded", done=1000) for i in (1, 2)])
+    assert st["status"] == DownloadStatus.COMPLETED.value
+    assert st["progress"] == 100.0
+    assert st["source_path"] == "/downloads/Album (2011)"
+
+
+def test_slskd_folder_status_partial_progress():
+    st = _folder_status(
+        _tf(1, "Completed, Succeeded", done=1000), _tf(2, "InProgress", done=500), _tf(3, "Queued, Remotely"),
+    )
+    assert st["status"] == DownloadStatus.DOWNLOADING.value
+    assert st["progress"] == 50.0
+    assert st["size_bytes"] == 3000
+
+
+def test_slskd_folder_status_failed_when_one_errored_and_rest_done():
+    st = _folder_status(_tf(1, "Completed, Succeeded", done=1000), _tf(2, "Completed, Errored"))
+    assert st["status"] == DownloadStatus.FAILED.value
+    assert st["error_message"].startswith("1 of 2 files failed:")
+
+
+def test_slskd_folder_status_all_queued_remotely():
+    st = _folder_status(_tf(1, "Queued, Remotely"), _tf(2, "Queued, Locally"))
+    assert st["status"] == DownloadStatus.QUEUED.value
+    assert st["remote_state"] == "Queued, Remotely"
+
+
+def test_slskd_folder_status_missing():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="k")
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, [])):
+        st = driver.get_status(_folder_id())
+    assert st["status"] == DownloadStatus.QUEUED.value
+    assert st["missing"] is True
+
+
+def test_slskd_cancel_folder_deletes_each_transfer():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="k")
+    user = _folder_downloads(_tf(1, "InProgress"), _tf(2, "Queued, Remotely"))[0]
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, user)), \
+            patch("httpx.Client.delete", return_value=_slskd_resp(204)) as d:
+        assert driver.cancel(_folder_id()) is True
+    urls = [c.args[0] for c in d.call_args_list]
+    assert urls == [
+        "http://slskd.local:5030/api/v0/transfers/downloads/user1/t1",
+        "http://slskd.local:5030/api/v0/transfers/downloads/user1/t2",
+    ]
+    assert all(c.kwargs["params"] == {"remove": "true"} for c in d.call_args_list)
+
+
+def test_slskd_folder_status_done_plus_queued_is_downloading():
+    st = _folder_status(_tf(1, "Completed, Succeeded", done=1000), _tf(2, "Queued, Remotely"))
+    assert st["status"] == DownloadStatus.DOWNLOADING.value
+
+
+def test_slskd_cleanup_completed_track_by_id():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="k")
+    user = _slskd_downloads("Completed, Succeeded")[0]
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, user)), \
+            patch("httpx.Client.delete", return_value=_slskd_resp(204)) as d:
+        assert driver.cleanup_completed(_SLSKD_DL_ID, delete_files=True) is True
+    assert d.call_args.args[0] == "http://slskd.local:5030/api/v0/transfers/downloads/user1/abc"
+    assert d.call_args.kwargs["params"] == {"remove": "true"}
+    assert "json" not in d.call_args.kwargs
+
+
+def test_slskd_cleanup_completed_folder():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="k")
+    user = _folder_downloads(_tf(1, "Completed, Succeeded"), _tf(2, "Completed, Succeeded"))[0]
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, user)), \
+            patch("httpx.Client.delete", side_effect=[_slskd_resp(204), _slskd_resp(404)]) as d:
+        assert driver.cleanup_completed(_folder_id()) is True
+    assert d.call_count == 2
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, {"username": "user1", "directories": []})), \
+            patch("httpx.Client.delete") as d2:
+        assert driver.cleanup_completed(_folder_id()) is True
+    d2.assert_not_called()
+    with patch("httpx.Client.get", side_effect=httpx.ConnectError("boom")):
+        assert driver.cleanup_completed(_folder_id()) is False
+
+
 # ---------------------------------------------------------------------------
 # SABnzbd Driver Tests
 # ---------------------------------------------------------------------------

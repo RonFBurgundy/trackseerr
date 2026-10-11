@@ -606,3 +606,20 @@ def test_non_slskd_queued_download_not_stall_checked(test_db, tmp_path):
     driver, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0, "missing": True})
     assert row["status"] != DownloadStatus.FAILED.value
     driver.cancel.assert_not_called()
+
+
+def test_slskd_failed_folder_cancels_remaining(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.SLSKD, 5, progress=30.0, status="downloading")
+    driver, row = _poll_slskd(
+        test_db, tmp_path, {"status": "failed", "progress": 30.0, "error_message": "1 of 3 files failed: x"}
+    )
+    assert row["status"] == DownloadStatus.FAILED.value
+    driver.cancel.assert_called_once_with("user1::Music%2Fsong.flac")
+    assert len(test_db.list_blocklist()) == 1
+
+
+def test_slskd_stalled_not_cancelled_twice(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.SLSKD, 45)
+    driver, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0})
+    assert row["status"] == DownloadStatus.FAILED.value
+    assert driver.cancel.call_count == 1

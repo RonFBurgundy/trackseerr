@@ -129,7 +129,7 @@ def _fail_if_slskd_stalled(driver: Any, item: dict[str, Any], status_dict: dict[
     logger.info("slskd download %s stalled: %s", item["id"], reason)
     if not driver.cancel(lookup):
         logger.warning("Could not cancel stalled slskd transfer %s", lookup)
-    return {**status_dict, "status": DownloadStatus.FAILED.value, "error_message": reason}
+    return {**status_dict, "status": DownloadStatus.FAILED.value, "error_message": reason, "cancelled": True}
 
 
 class AcquisitionWorker(ImportPipelineMixin):
@@ -597,6 +597,8 @@ class AcquisitionWorker(ImportPipelineMixin):
             err_msg = status_dict.get("error_message") or "Download failed"
             db.update_download_status(download_id, status=DownloadStatus.FAILED.value, error_message=err_msg)
             self._notify_download_failed(db, item, err_msg)
+            if is_slskd and not status_dict.get("cancelled") and not driver.cancel(target_lookup):
+                logger.warning("Could not cancel remaining slskd transfers for failed download %s", target_lookup)
             try:
                 db.add_to_blocklist(
                     source_title=item.get("title", ""),
