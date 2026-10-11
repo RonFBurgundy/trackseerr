@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from trackseerr.clients.lidarr import LidarrClient
+from trackseerr.clients.lidarr import LidarrApiError, LidarrClient
 from trackseerr.lidarr_migration import LidarrMigrationJob
 from trackseerr.storage import Database
 from tests.lidarr_fake import FakeLidarr
@@ -215,6 +215,33 @@ class TestLidarrMigrationJob:
         assert status["status"] == "idle"
         assert status["is_migrating"] is False
         assert status["artists_migrated"] == 0
+
+    def test_start_migration_records_task_run(self, db: Database, sample_lidarr_data):
+        job = LidarrMigrationJob()
+        with patch(HTTPX, loaded_fake(sample_lidarr_data)):
+            assert job.start_migration(db, real_client(), auto_switch_mode=False) is True
+            assert job._thread is not None
+            job._thread.join(timeout=10)
+        row = db.latest_task_runs()["lidarr_migration"]
+        assert row["status"] == "success"
+        assert "artists" in row["message"]
+
+    def test_failed_migration_records_failed_run(self, db: Database):
+        job = LidarrMigrationJob()
+        client = real_client()
+        with patch.object(LidarrClient, "get_all_artists", side_effect=LidarrApiError("lidarr down")):
+            assert job.start_migration(db, client, auto_switch_mode=False) is True
+            assert job._thread is not None
+            job._thread.join(timeout=10)
+        assert db.latest_task_runs()["lidarr_migration"]["status"] == "failed"
+
+    def test_progress_snapshot_counts(self, db: Database, sample_lidarr_data):
+        job = LidarrMigrationJob()
+        with patch(HTTPX, loaded_fake(sample_lidarr_data)):
+            job.run_migration(db, real_client(), auto_switch_mode=False)
+        processed, total, message = job.progress_snapshot()
+        assert processed == total == len(sample_lidarr_data["artists"])
+        assert "artists" in message
 
     def test_run_migration_full_ingestion(self, db: Database, sample_lidarr_data):
         fake = loaded_fake(sample_lidarr_data)

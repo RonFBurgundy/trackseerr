@@ -60,6 +60,7 @@ from trackseerr.job_tracker import job_tracker, summarize_result, track_job
 from trackseerr import library_manager
 from trackseerr.library_manager import MODE_LIDARR, MODE_NATIVE, build_lidarr_client, get_library_mode
 from trackseerr.library_scanner import library_scanner
+from trackseerr.lidarr_migration import lidarr_migration_job
 from trackseerr.lidarr_queue import lidarr_worker
 from trackseerr.mix_worker import mix_worker
 from trackseerr.scrobble_worker import scrobble_worker
@@ -180,6 +181,9 @@ def _task_progress(task_id: str, running: bool) -> Optional[TaskProgress]:
                 total=int(stat.get("total_items") or 0) or None,
                 message=str(stat.get("message")) if stat.get("message") else None,
             )
+    if task_id == "lidarr_migration" and lidarr_migration_job.is_running():
+        processed, total, mig_message = lidarr_migration_job.progress_snapshot()
+        return TaskProgress(current=processed, total=total or None, message=mig_message)
     message = job_tracker.running_message(task_id)
     return TaskProgress(message=redact_text(message)) if message else None
 
@@ -205,6 +209,7 @@ def get_all_scheduled_tasks(
     ar_stat = artist_refresh_worker.get_status()
     sc_stat = seed_cleanup.get_status(db)
     rb_stat = recycle_bin.get_status()
+    mig_stat = lidarr_migration_job.get_status()
     try:
         lh_run = db.get_last_library_health_run() or {}
     except sqlite3.Error as exc:
@@ -215,6 +220,13 @@ def get_all_scheduled_tasks(
 
     # status, last run known to the worker itself (for runs from before the history existed or not recorded), cancel
     runtime: dict[str, tuple[str, Optional[str], bool]] = {
+        "lidarr_migration": (
+            "running"
+            if lidarr_migration_job.is_running()
+            else ("failed" if mig_stat.get("status") == "failed" else "idle"),
+            mig_stat.get("completed_at") or mig_stat.get("started_at"),
+            True,
+        ),
         "filesystem_scan": (
             "running"
             if (scan_stat.get("is_scanning") or scan_stat.get("status") == "scanning" or "filesystem_scan" in _running_tasks)
@@ -299,6 +311,8 @@ def get_all_scheduled_tasks(
         db_running = bool(latest_row and latest_row.get("status") == "running")
         if db_running and status_val == "idle":
             status_val = "running"
+        if spec.id == "lidarr_migration" and not lidarr_mode and status_val != "running" and spec.id not in latest:
+            continue  # only relevant while importing from Lidarr or once it has run
 
         # The persisted history is the source; the worker's own timestamp only covers a task that has no recorded run.
         last_run = (
@@ -790,6 +804,20 @@ def cancel_scheduled_task(
         except Exception as ev_err:
             logger.warning("Failed to record task_cancelled event: %s", ev_err)
         return {"success": True, "message": "Backup task cancelled"}
+
+    elif task_id == "lidarr_migration":
+        lidarr_migration_job.cancel()
+        try:
+            db.record_event(
+                "task_cancelled",
+                "Scheduled task 'lidarr_migration' cancelled by admin",
+                source="TaskManager",
+                severity="info",
+                details={"task_id": "lidarr_migration"},
+            )
+        except Exception as ev_err:
+            logger.warning("Failed to record task_cancelled event: %s", ev_err)
+        return {"success": True, "message": "Lidarr import cancelled"}
 
     else:
         raise HTTPException(
