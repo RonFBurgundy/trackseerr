@@ -13,6 +13,8 @@ heading becomes the version and date.
 
 ### Added
 
+- Manual search: search every indexer for an album or track from the album view or the Missing and Cutoff Unmet pages, see each release's quality, size, seeders, age and score with the reasons it would be rejected, and download the one you want.
+- Download clients can be edited, and slskd accepts an API key or its web UI username and password.
 - Fix unmatched playlist songs from the tracklist: users search the catalog for the right song and suggest it (an admin approves it from the Issue in one click), request it if it's not in the library, or report it. Admins can also mark a song unmatchable so it stops counting as missing. Approved fixes apply to every playlist on the next sync, for the TrackSeerr library, Plex and Jellyfin.
 - Backup and restore: scheduled and on-demand backups of the database and settings, with restore from the System page.
 - Changelog: a "What's new" section on the System page and a one-time notice for admins after an upgrade.
@@ -29,6 +31,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Download clients must pass a connection test before they can be saved, and the add/edit form has its own Test button.
 - The Lidarr library import is much faster: it asks Lidarr for each artist's tracks in one go instead of album by album, and database writes are quicker everywhere.
 - Adding a Spotify or Deezer playlist loads its tracks right away. Each playlist on the Sync tab shows its track count and a Tracks button listing every song, with missing tracks highlighted after a sync.
 - The Lidarr library import now shows as a running task in the task drawer, with progress and a cancel button, and the logo animates while it runs.
@@ -44,6 +47,9 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Testing a saved download client used the masked password, so qBittorrent, Transmission, Deluge and NZBGet reported invalid credentials; SABnzbd's test now actually checks the API key, and qBittorrent says when it has banned the IP after failed logins.
+- Users can delete playlists they added themselves.
+- Copy buttons (API key, feed and webhook links, recovery codes) work over plain HTTP, and the revealed API key can be selected on phones.
 - Lidarr import: tracks are only monitored when their album and artist are monitored in Lidarr, so unmonitored albums no longer show up as missing after switching.
 - Missing-track counts skip unmonitored artists and match Lidarr's numbers, and artists with files on unmonitored albums no longer look complete when monitored tracks are missing.
 - Artist refresh no longer adds duplicate tracks when MusicBrainz spells a title differently from an imported track.
