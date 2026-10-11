@@ -8101,6 +8101,13 @@ export interface components {
             /** Seed Time Minutes */
             seed_time_minutes?: number | null;
         };
+        /** IndexerSearchError */
+        IndexerSearchError: {
+            /** Error */
+            error: string;
+            /** Source */
+            source: string;
+        };
         /** IngestArtistRequest */
         IngestArtistRequest: {
             /** Artist Name */
@@ -12340,6 +12347,11 @@ export interface components {
         SearchResponse: {
             /** Count */
             count: number;
+            /**
+             * Indexer Errors
+             * @default []
+             */
+            indexer_errors: components["schemas"]["IndexerSearchError"][];
             /** Profile Name */
             profile_name: string;
             query: components["schemas"]["SearchQueryEcho"];
