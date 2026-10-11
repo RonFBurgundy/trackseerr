@@ -513,13 +513,14 @@ def _with_discovery_ids(db: Database, records: list[dict[str, Any]]) -> list[dic
     return [{**r, "discovery_id": linked.get(str(r.get("id")))} for r in records]
 
 def _artist_track_counts(db: Database, artist_ids: list[str]) -> dict[str, tuple[int, int, int]]:
-    """Per artist: monitored track count, total track count, and track file count."""
+    """Per artist: Lidarr-style track count (monitored albums or with a file), total track count, track file count."""
     if not artist_ids:
         return {}
     placeholders = ",".join("?" for _ in artist_ids)
     query = (
         "SELECT t.artist_id, "
-        "SUM(CASE WHEN al.monitored = 1 THEN 1 ELSE 0 END), "
+        "SUM(CASE WHEN al.monitored = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) "
+        "THEN 1 ELSE 0 END), "
         "COUNT(*), "
         "SUM(CASE WHEN EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) THEN 1 ELSE 0 END) "
         "FROM library_tracks t LEFT JOIN library_albums al ON al.id = t.album_id "

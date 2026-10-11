@@ -437,11 +437,15 @@ def _hydrate_release_group_tracks(
                 dur = trk.get("duration_seconds")
                 mb_rec_id = trk.get("mb_recording_id")
 
-                existing_trk = st.db.get_library_track_by_title(
-                    album_id,
-                    trk_title,
-                    track_number=trk_num,
-                )
+                existing_trk = None
+                if mb_rec_id:
+                    existing_trk = st.db.get_library_track_by_mb_recording_id(mb_rec_id, album_id=album_id)
+                if not existing_trk:
+                    existing_trk = st.db.get_library_track_by_title(
+                        album_id,
+                        trk_title,
+                        track_number=trk_num,
+                    )
                 if existing_trk:
                     trk_id = existing_trk["id"]
                     t_monitored = bool(existing_trk["monitored"])
