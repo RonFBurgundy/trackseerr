@@ -395,6 +395,8 @@ class MigrationStatus(ApiModel):
     albums_migrated: int = 0
     tracks_migrated: int = 0
     files_migrated: int = 0
+    artists_total: int = 0
+    artists_processed: int = 0
     status: str  # idle | running | completed | cancelled | failed
     error: Optional[str] = None
     started_at: Optional[str] = None
