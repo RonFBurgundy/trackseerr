@@ -48,6 +48,7 @@ import {
 } from '@/components/playlists';
 import { useMissingTracks } from '@/hooks/useMissingTracks';
 import { useToast } from '@/hooks/useToast';
+import { useLibraryManager } from '@/hooks/useLibraryManager';
 import { consumePendingImport, buildBookmarkletCode } from '@/services/bookmarkletImport';
 import {
   AUTO_REQUEST_DENIED_REASON,
@@ -55,6 +56,8 @@ import {
   isListeningService,
 } from '@/types/listening';
 import { isSmartCollection } from '@/types/smartCollections';
+
+const SMART_LIDARR_HINT = 'Smart collections need TrackSeerr as the library manager (Settings \u2192 Library)';
 import { TailoredMixesSection } from '@/components/mixes';
 import { NoMediaServerNote } from '@/components/mediaServer';
 
@@ -122,6 +125,8 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   const [importError, setImportError] = useState<string | null>(null);
   const bookmarkletCode = buildBookmarkletCode();
 
+  const libraryManager = useLibraryManager(Boolean(isAdmin));
+  const lidarrMode = libraryManager.state?.mode === 'lidarr';
   const missingHook = useMissingTracks({ isAdmin });
   const [selectedMissingPlaylistId, setSelectedMissingPlaylistId] = useState<string | null>(null);
   const [selectedMissingPlaylistName, setSelectedMissingPlaylistName] = useState<string>('');
@@ -225,8 +230,9 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                   setEditingCollectionId(undefined);
                   setIsSmartModalOpen(true);
                 }}
-                aria-label="Create smart collection"
-                title="Create smart collection"
+                disabled={lidarrMode}
+                aria-label={lidarrMode ? SMART_LIDARR_HINT : 'Create smart collection'}
+                title={lidarrMode ? SMART_LIDARR_HINT : 'Create smart collection'}
                 collapseLabel
                 icon={<Sparkles className="h-3.5 w-3.5 text-[#e5a00d]" />}
               >
@@ -417,6 +423,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                         setEditingCollectionId(id);
                         setIsSmartModalOpen(true);
                       }}
+                      editDisabled={lidarrMode}
                       onPlaylistsChanged={onPlaylistsChanged ?? onSync}
                       onToast={showToast}
                     />

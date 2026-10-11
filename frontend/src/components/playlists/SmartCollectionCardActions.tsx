@@ -8,6 +8,8 @@ import { errorMessage } from '@/services/apiClient';
 export interface SmartCollectionCardActionsProps {
   playlist: Playlist;
   onEdit: (collectionId: string) => void;
+  /** Editing needs the native catalog; disabled in Lidarr mode. */
+  editDisabled?: boolean;
   onPlaylistsChanged?: () => Promise<void>;
   onToast: (message: string, tone?: 'ok' | 'error') => void;
 }
@@ -15,6 +17,7 @@ export interface SmartCollectionCardActionsProps {
 export const SmartCollectionCardActions: React.FC<SmartCollectionCardActionsProps> = ({
   playlist,
   onEdit,
+  editDisabled = false,
   onPlaylistsChanged,
   onToast,
 }) => {
@@ -54,6 +57,7 @@ export const SmartCollectionCardActions: React.FC<SmartCollectionCardActionsProp
       <TapeDeckButton
         size="sm"
         onClick={() => onEdit(playlist.id)}
+        disabled={editDisabled}
         aria-label={`Edit smart collection ${playlist.name}`}
         title={`Edit ${playlist.name}`}
         icon={<Pencil className="h-3.5 w-3.5" />}
