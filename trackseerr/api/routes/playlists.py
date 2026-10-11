@@ -291,6 +291,28 @@ def _guard_existing_playlist(
     return existing
 
 
+def _subscribe_to_existing(
+    db: Database,
+    playlist_id: str,
+    existing: Optional[dict[str, Any]],
+    current_user: dict[str, Any],
+    requested: Optional[list[str]],
+) -> Optional[dict[str, Any]]:
+    """When a non-admin adds a playlist another user owns, subscribe them to it and return the row; else None."""
+    if existing is None or current_user.get("is_admin"):
+        return None
+    owner = existing.get("creator_id")
+    uid = str(current_user["id"])
+    if owner is not None and str(owner) == uid:
+        return None
+    db.set_playlist_targets(playlist_id, _resolve_targets(db, playlist_id, existing, current_user, requested))
+    logger.info("User %s subscribed to existing playlist %s", uid, playlist_id)
+    playlist = db.get_playlist(playlist_id) or existing
+    playlist["targets"] = db.get_playlist_targets(playlist_id)
+    playlist["subscribed"] = True
+    return playlist
+
+
 def _resolve_targets(
     db: Database,
     playlist_id: str,
@@ -409,7 +431,10 @@ def create_playlist(
             detail="Invalid Spotify or Deezer playlist URL or ID (SSRF validation failed)",
         )
 
-    existing = _guard_existing_playlist(db, pl_id, current_user)
+    existing = db.get_playlist(pl_id)
+    subscribed = _subscribe_to_existing(db, pl_id, existing, current_user, req.targets)
+    if subscribed is not None:
+        return subscribed
 
     # Extract metadata using verified client
     title = f"{service.title()} Playlist {pl_id}"

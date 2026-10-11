@@ -10938,6 +10938,11 @@ export interface components {
             source_kind?: string | null;
             /** Source Ref */
             source_ref?: string | null;
+            /**
+             * Subscribed
+             * @default false
+             */
+            subscribed: boolean;
             /** Sync Status */
             sync_status: string;
             /** Targets */

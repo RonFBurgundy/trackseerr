@@ -181,6 +181,9 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   };
 
   const openTracksForCreated = (created: Schema<'PlaylistRecord'> | null) => {
+    if (created?.subscribed) {
+      showToast('Added to your playlists (already synced by another user)');
+    }
     if (created && parseTrackCount(created.tracks_json)) {
       setTracksModalPlaylist({ id: created.id, name: created.name });
     }
