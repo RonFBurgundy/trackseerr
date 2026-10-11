@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Trash2, Plus } from 'lucide-react';
+import { Trash2, Plus, Save, X } from 'lucide-react';
 import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar } from '@/components/ui';
-import type { DownloadClientItem, DownloadDriverType } from '@/types/models';
-import type { Schema } from '@/types/apiSchema';
+import type { DownloadClientItem } from '@/types/models';
 import { saveClientSettings, deleteClientSettings, testClientConnection } from '@/services/settingsService';
+import { ApiError } from '@/services/apiClient';
+import { useClientDraft, toDriverType } from '@/hooks/useClientDraft';
 import { compactInputClass, compactLabelClass } from './formClasses';
 
 export interface ClientsPanelProps {
@@ -12,102 +13,72 @@ export interface ClientsPanelProps {
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
 }
 
-const DRIVER_TYPES: ReadonlyArray<DownloadDriverType> = [
-  'slskd',
-  'sabnzbd',
-  'qbittorrent',
-  'transmission',
-  'deluge',
-  'nzbget',
-];
+interface TestStatus {
+  ok: boolean;
+  message: string;
+}
 
-const DEFAULT_URLS: Record<DownloadDriverType, string> = {
-  slskd: 'http://localhost:5030',
-  sabnzbd: 'http://localhost:8080',
-  qbittorrent: 'http://localhost:8080',
-  transmission: 'http://localhost:9091',
-  deluge: 'http://localhost:8112',
-  nzbget: 'http://localhost:6789',
-  lidarr: 'http://localhost:8686',
-};
-
-const DEFAULT_CATEGORIES: Partial<Record<DownloadDriverType, string>> = {
-  sabnzbd: 'music',
-  qbittorrent: 'trackseerr',
-  transmission: 'trackseerr',
-  deluge: 'trackseerr',
-  nzbget: 'music',
-};
-
-function toDriverType(value: string): DownloadDriverType {
-  return DRIVER_TYPES.find((t) => t === value) ?? 'slskd';
+function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback;
 }
 
 export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onToast }) => {
-  const [name, setName] = useState<string>('');
-  const [type, setType] = useState<DownloadDriverType>('slskd');
-  const [hostUrl, setHostUrl] = useState<string>(DEFAULT_URLS.slskd);
-  const [rpcPath, setRpcPath] = useState<string>('/transmission/rpc');
-  const [username, setUsername] = useState<string>('');
-  const [password, setPassword] = useState<string>('');
-  const [apiKey, setApiKey] = useState<string>('');
-  const [category, setCategory] = useState<string>('');
+  const draft = useClientDraft();
+  const { type } = draft;
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [isTesting, setIsTesting] = useState<boolean>(false);
+  // The serialized payload that last passed a form Test; any field change makes it stale.
+  const [testedKey, setTestedKey] = useState<string | null>(null);
+  const [status, setStatus] = useState<TestStatus | null>(null);
 
-  const handleTypeChange = (newType: DownloadDriverType) => {
-    setType(newType);
-    setHostUrl(DEFAULT_URLS[newType]);
-    setCategory(DEFAULT_CATEGORIES[newType] ?? '');
+  const payload = draft.toPayload();
+  const payloadKey = JSON.stringify(payload);
+  const testPassed = testedKey !== null && testedKey === payloadKey;
+  const editing = draft.editingId ? clients.find((c) => c.id === draft.editingId) : undefined;
+
+  const resetForm = () => {
+    draft.reset();
+    setTestedKey(null);
+    setStatus(null);
   };
 
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setIsSaving(true);
+  const handleStartEdit = (client: DownloadClientItem) => {
+    draft.startEdit(client);
+    setTestedKey(null);
+    setStatus(null);
+  };
+
+  const handleFormTest = async () => {
+    setIsTesting(true);
+    const key = payloadKey;
     try {
-      const extraSettings: Record<string, string> = {};
-      if (type === 'transmission' && rpcPath.trim()) {
-        extraSettings.rpc_path = rpcPath.trim();
-      }
-      if (category.trim()) {
-        extraSettings.category = category.trim();
-      }
+      const res = await testClientConnection(payload);
+      const message = res.success ? 'Connection verified' : `Connection failed: ${res.message}`;
+      setStatus({ ok: res.success, message });
+      setTestedKey(res.success ? key : null);
+      onToast(res.success ? 'Connection verified!' : message, res.success ? 'ok' : 'error');
+    } catch (err) {
+      const message = errorMessage(err, 'Connection test error');
+      setStatus({ ok: false, message });
+      setTestedKey(null);
+      onToast(message, 'error');
+    } finally {
+      setIsTesting(false);
+    }
+  };
 
-      const payload: Schema<'DownloadClientPayload'> = {
-        name: name.trim(),
-        driver_type: type,
-        host_url: hostUrl.trim(),
-        enabled: true,
-        priority: 1,
-        username:
-          (type === 'transmission' || type === 'nzbget' || type === 'qbittorrent' || type === 'slskd') &&
-          username.trim()
-            ? username.trim()
-            : undefined,
-        password:
-          (type === 'deluge' ||
-            type === 'transmission' ||
-            type === 'nzbget' ||
-            type === 'qbittorrent' ||
-            type === 'slskd') &&
-          password.trim()
-            ? password.trim()
-            : undefined,
-        api_key: type === 'sabnzbd' && apiKey.trim() ? apiKey.trim() : undefined,
-        category: category.trim() || undefined,
-        extra_settings_json: Object.keys(extraSettings).length > 0 ? JSON.stringify(extraSettings) : undefined,
-      };
-
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!draft.name.trim() || !testPassed) return;
+    setIsSaving(true);
+    const wasEditing = draft.editingId !== null;
+    try {
       await saveClientSettings(payload);
-      setName('');
-      setUsername('');
-      setPassword('');
-      setApiKey('');
-      setCategory(DEFAULT_CATEGORIES[type] ?? '');
+      resetForm();
       await reload();
-      onToast('Download client added');
-    } catch {
-      onToast('Failed to add client', 'error');
+      onToast(wasEditing ? 'Download client saved' : 'Download client added');
+    } catch (err) {
+      onToast(errorMessage(err, wasEditing ? 'Failed to save client' : 'Failed to add client'), 'error');
     } finally {
       setIsSaving(false);
     }
@@ -116,6 +87,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
   const handleDelete = async (id: string) => {
     try {
       await deleteClientSettings(id);
+      if (draft.editingId === id) resetForm();
       await reload();
       onToast('Client deleted');
     } catch {
@@ -123,12 +95,12 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
     }
   };
 
-  const handleTest = async (client: DownloadClientItem) => {
+  const handleCardTest = async (client: DownloadClientItem) => {
     try {
-      const res = await testClientConnection(client);
+      const res = await testClientConnection({ ...client, id: client.id });
       onToast(res.success ? 'Connection verified!' : `Connection failed: ${res.message}`, res.success ? 'ok' : 'error');
-    } catch {
-      onToast('Connection test error', 'error');
+    } catch (err) {
+      onToast(errorMessage(err, 'Connection test error'), 'error');
     }
   };
 
@@ -152,7 +124,10 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <TapeDeckButton size="sm" onClick={() => void handleTest(c)}>
+                <TapeDeckButton size="sm" onClick={() => handleStartEdit(c)}>
+                  Edit
+                </TapeDeckButton>
+                <TapeDeckButton size="sm" onClick={() => void handleCardTest(c)}>
                   Test
                 </TapeDeckButton>
                 <ConfirmDangerButton
@@ -168,8 +143,10 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
       )}
 
       <MachinedCard className="p-3 sm:p-5 max-w-xl">
-        <h4 className="text-xs font-bold uppercase font-mono text-white mb-4">Add Download Client</h4>
-        <form onSubmit={handleAdd} className="space-y-4">
+        <h4 className="text-xs font-bold uppercase font-mono text-white mb-4">
+          {draft.editingId ? `Edit Download Client (${editing?.name ?? draft.name})` : 'Add Download Client'}
+        </h4>
+        <form onSubmit={handleSave} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label htmlFor="client-name" className={compactLabelClass}>Name</label>
@@ -178,8 +155,8 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
                 name="name"
                 type="text"
                 required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
+                value={draft.name}
+                onChange={(e) => draft.setName(e.target.value)}
                 placeholder="e.g. Local BitTorrent"
                 className={compactInputClass}
               />
@@ -190,7 +167,8 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
                 id="client-type"
                 name="type"
                 value={type}
-                onChange={(e) => handleTypeChange(toDriverType(e.target.value))}
+                disabled={draft.editingId !== null}
+                onChange={(e) => draft.setType(toDriverType(e.target.value))}
                 className={compactInputClass}
               >
                 <option value="slskd">slskd</option>
@@ -210,8 +188,8 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
               name="host_url"
               type="url"
               required
-              value={hostUrl}
-              onChange={(e) => setHostUrl(e.target.value)}
+              value={draft.hostUrl}
+              onChange={(e) => draft.setHostUrl(e.target.value)}
               placeholder="http://localhost:8080"
               className={compactInputClass}
             />
@@ -224,27 +202,32 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
                 id="client-rpc-path"
                 name="rpc_path"
                 type="text"
-                value={rpcPath}
-                onChange={(e) => setRpcPath(e.target.value)}
+                value={draft.rpcPath}
+                onChange={(e) => draft.setRpcPath(e.target.value)}
                 placeholder="/transmission/rpc"
                 className={compactInputClass}
               />
             </div>
           )}
 
-          {type === 'sabnzbd' && (
+          {(type === 'sabnzbd' || type === 'slskd') && (
             <div>
               <label htmlFor="client-api-key" className={compactLabelClass}>API Key</label>
               <input
                 id="client-api-key"
                 name="api_key"
                 type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="SABnzbd API key"
+                value={draft.apiKey}
+                onChange={(e) => draft.setApiKey(e.target.value)}
+                placeholder={type === 'slskd' ? 'slskd API key' : 'SABnzbd API key'}
                 autoComplete="new-password"
                 className={compactInputClass}
               />
+              {type === 'slskd' && (
+                <p className="text-[10px] font-mono text-neutral-500 mt-1">
+                  API key, or the web UI username and password
+                </p>
+              )}
             </div>
           )}
 
@@ -258,8 +241,8 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
                 name="username"
                 type="text"
                 required={type === 'nzbget'}
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                value={draft.username}
+                onChange={(e) => draft.setUsername(e.target.value)}
                 placeholder="Username"
                 autoComplete="username"
                 className={compactInputClass}
@@ -281,8 +264,8 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
                 name="password"
                 type="password"
                 required={type === 'deluge' || type === 'nzbget'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                value={draft.password}
+                onChange={(e) => draft.setPassword(e.target.value)}
                 placeholder="Password"
                 autoComplete="current-password"
                 className={compactInputClass}
@@ -303,8 +286,8 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
                 id="client-category"
                 name="category"
                 type="text"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
+                value={draft.category}
+                onChange={(e) => draft.setCategory(e.target.value)}
                 placeholder="e.g. trackseerr"
                 className={compactInputClass}
               />
@@ -312,16 +295,32 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
           )}
 
           <ActionBar align="end" className="pt-2">
+            {draft.editingId && (
+              <TapeDeckButton type="button" size="sm" onClick={resetForm} icon={<X className="h-3.5 w-3.5" />}>
+                Cancel
+              </TapeDeckButton>
+            )}
+            <TapeDeckButton type="button" size="sm" disabled={isTesting || isSaving} onClick={() => void handleFormTest()}>
+              {isTesting ? 'Testing...' : 'Test'}
+            </TapeDeckButton>
             <TapeDeckButton
               type="submit"
               size="sm"
               variant="amber"
-              disabled={isSaving}
-              icon={<Plus className="h-3.5 w-3.5" />}
+              disabled={isSaving || !testPassed}
+              icon={draft.editingId ? <Save className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
             >
-              Add Client
+              {draft.editingId ? 'Save' : 'Add Client'}
             </TapeDeckButton>
           </ActionBar>
+          {status && (!status.ok || testPassed) && (
+            <p
+              role="status"
+              className={`text-xs font-mono ${status.ok ? 'text-[#22c55e]' : 'text-[#ef4444]'}`}
+            >
+              {status.message}
+            </p>
+          )}
         </form>
       </MachinedCard>
     </div>

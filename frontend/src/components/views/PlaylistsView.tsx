@@ -481,7 +481,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                     )}
                   </div>
                 )}
-                {isAdmin && onDelete && (
+                {(isAdmin || (currentUserId != null && String(pl.creator_id) === String(currentUserId))) && onDelete && (
                   <ConfirmDangerButton
                     onConfirm={() => onDelete(pl.id)}
                     icon={<Trash2 className="h-3 w-3" />}
