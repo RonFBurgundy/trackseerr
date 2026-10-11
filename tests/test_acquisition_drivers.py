@@ -307,14 +307,65 @@ def test_slskd_download_and_status():
         assert status["progress"] == 100.0
 
 
-def test_slskd_cancel():
-    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
-    mock_del_resp = MagicMock()
-    mock_del_resp.status_code = 200
+_SLSKD_DL_ID = "user1::Music%2Ftrack.flac"
 
-    with patch("httpx.Client.request", return_value=mock_del_resp):
-        success = driver.cancel("music_fan::Music%2Ftrack.flac")
-        assert success is True
+
+def _slskd_downloads(state: str, **extra):
+    f = {"id": "abc", "filename": "Music/track.flac", "state": state, "size": 1000, "bytesTransferred": 0}
+    f.update(extra)
+    return [{"username": "user1", "directories": [{"directory": "Music", "files": [f]}]}]
+
+
+def _slskd_status(state: str, **extra):
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, _slskd_downloads(state, **extra))):
+        return driver.get_status(_SLSKD_DL_ID)
+
+
+def test_slskd_status_completed_succeeded():
+    status = _slskd_status("Completed, Succeeded", bytesTransferred=1000)
+    assert status["status"] == DownloadStatus.COMPLETED.value
+    assert status["progress"] == 100.0
+
+
+@pytest.mark.parametrize("suffix", ["Errored", "Rejected", "TimedOut"])
+def test_slskd_status_completed_errored_is_failed(suffix):
+    status = _slskd_status(f"Completed, {suffix}")
+    assert status["status"] == DownloadStatus.FAILED.value
+    assert suffix in status["error_message"]
+
+
+def test_slskd_status_queued_remotely():
+    status = _slskd_status("Queued, Remotely")
+    assert status["status"] == DownloadStatus.QUEUED.value
+    assert status["remote_state"] == "Queued, Remotely"
+    assert status["transfer_id"] == "abc"
+
+
+def test_slskd_status_missing_flag():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, [])):
+        status = driver.get_status(_SLSKD_DL_ID)
+    assert status["status"] == DownloadStatus.QUEUED.value
+    assert status["missing"] is True
+
+
+def test_slskd_cancel_deletes_by_transfer_id():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    user = _slskd_downloads("InProgress")[0]
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, user)), \
+            patch("httpx.Client.delete", return_value=_slskd_resp(204)) as d:
+        assert driver.cancel(_SLSKD_DL_ID) is True
+    assert d.call_args.args[0] == "http://slskd.local:5030/api/v0/transfers/downloads/user1/abc"
+    assert d.call_args.kwargs["params"] == {"remove": "true"}
+
+
+def test_slskd_cancel_not_found_returns_false():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, {"username": "user1", "directories": []})), \
+            patch("httpx.Client.delete") as d:
+        assert driver.cancel(_SLSKD_DL_ID) is False
+    d.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

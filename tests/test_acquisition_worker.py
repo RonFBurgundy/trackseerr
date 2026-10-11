@@ -516,3 +516,93 @@ def test_worker_rejects_target_escaping_root_folder(test_db, workspace_dirs):
     # Source file remains safe
     assert audio_file.exists()
 
+
+
+# ---------------------------------------------------------------------------
+# slskd stall detection
+# ---------------------------------------------------------------------------
+def _seed_slskd_row(db, driver_type, created_min_ago, progress=0.0, moved_min_ago=None, status="queued"):
+    db.create_download_client(
+        DownloadClientConfig(id="cl-1", name="Client", driver_type=driver_type, host_url="http://slskd:5030")
+    )
+    db.create_active_download(
+        ActiveDownload(
+            id="dl-s1",
+            title="Artist - Song",
+            artist="Artist",
+            client_id="cl-1",
+            download_hash="user1::Music%2Fsong.flac",
+            status=status,
+        )
+    )
+    moved = moved_min_ago if moved_min_ago is not None else created_min_ago
+    db.conn.execute(
+        "UPDATE active_downloads SET progress = ?, "
+        "created_at = datetime('now', ?), progress_updated_at = datetime('now', ?) WHERE id = 'dl-s1'",
+        (progress, f"-{created_min_ago} minutes", f"-{moved} minutes"),
+    )
+    db.conn.commit()
+
+
+def _poll_slskd(db, tmp_path, status_dict):
+    driver = MagicMock()
+    driver.get_status.return_value = {"size_bytes": 1000, "error_message": None, **status_dict}
+    driver.cancel.return_value = True
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver):
+        AcquisitionWorker().poll_once(db=db, staging_dir=str(tmp_path))
+    return driver, db.get_active_download("dl-s1")
+
+
+def test_slskd_stalled_queued_download_fails_and_cancels(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.SLSKD, 45)
+    driver, row = _poll_slskd(
+        test_db, tmp_path, {"status": "queued", "progress": 0.0, "remote_state": "Queued, Remotely"}
+    )
+    assert row["status"] == DownloadStatus.FAILED.value
+    assert "Peer never started" in row["error_message"]
+    driver.cancel.assert_called_once_with("user1::Music%2Fsong.flac")
+    entries = test_db.list_blocklist()
+    assert [e["release_guid"] for e in entries] == ["user1::Music%2Fsong.flac"]
+
+
+def test_slskd_missing_transfer_fails_after_grace(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.SLSKD, 20)
+    _, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0, "missing": True})
+    assert row["status"] == DownloadStatus.FAILED.value
+    assert "disappeared" in row["error_message"]
+
+
+def test_slskd_recent_queued_download_untouched(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.SLSKD, 5)
+    driver, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0, "missing": True})
+    assert row["status"] != DownloadStatus.FAILED.value
+    driver.cancel.assert_not_called()
+
+
+def test_slskd_in_progress_without_movement_fails(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.SLSKD, 60, progress=40.0, moved_min_ago=20, status="downloading")
+    _, row = _poll_slskd(test_db, tmp_path, {"status": "downloading", "progress": 40.0})
+    assert row["status"] == DownloadStatus.FAILED.value
+    assert "stalled at 40%" in row["error_message"]
+
+
+def test_slskd_in_progress_moving_untouched(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.SLSKD, 60, progress=40.0, moved_min_ago=20, status="downloading")
+    driver, row = _poll_slskd(test_db, tmp_path, {"status": "downloading", "progress": 55.0})
+    assert row["status"] == DownloadStatus.DOWNLOADING.value
+    driver.cancel.assert_not_called()
+
+
+def test_slskd_queue_timeout_env_override(test_db, tmp_path, monkeypatch):
+    monkeypatch.setenv("SLSKD_QUEUE_TIMEOUT_MINUTES", "60")
+    _seed_slskd_row(test_db, DownloadDriverType.SLSKD, 45)
+    driver, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0})
+    assert row["status"] != DownloadStatus.FAILED.value
+    driver.cancel.assert_not_called()
+
+
+def test_non_slskd_queued_download_not_stall_checked(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.QBITTORRENT, 300)
+    driver, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0, "missing": True})
+    assert row["status"] != DownloadStatus.FAILED.value
+    driver.cancel.assert_not_called()
