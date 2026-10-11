@@ -55,8 +55,9 @@ export const QuotaBadge: React.FC<QuotaBadgeProps> = ({ quota, className = '' })
       />
       <span className="text-neutral-400">{KIND_LABEL[worst.kind].toUpperCase()}:</span>
       <span className={`font-bold ${isLow ? 'text-red-400' : 'text-neutral-200'}`}>
-        {worst.remaining}/{worst.limit}
+        {worst.remaining} left
       </span>
+      <span className="text-neutral-500 text-[10px]">of {worst.limit}</span>
       <span className="text-neutral-500 text-[10px]">({quota.period_days}d)</span>
     </div>
   );
