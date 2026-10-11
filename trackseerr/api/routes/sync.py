@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timezone
 import json
 import logging
+import sqlite3
 import threading
 from typing import Any, Optional
 
@@ -34,6 +35,7 @@ from trackseerr.smart_collections import SmartCollectionError, refresh_tracks
 from trackseerr.models import Playlist, RequestStatus, Track
 from trackseerr.native_match import match_playlist_tracks_native
 from trackseerr.storage import Database
+from trackseerr.track_aliases import apply_track_aliases, restore_missing
 from trackseerr.redaction import redact_text, safe_exc
 
 logger = logging.getLogger(__name__)
@@ -76,6 +78,15 @@ class BroadcastLogHandler(logging.Handler):
     def remove_listener(self, q: asyncio.Queue) -> None:
         with self._lock:
             self.listeners = [item for item in self.listeners if item[1] is not q]
+
+
+def _effective_tracks(db: Database, tracks: list[Track], playlist_name: str) -> tuple[list[Track], dict[int, Track], set[int]]:
+    """Applies approved track aliases; a storage failure falls back to the unaliased tracks (logged)."""
+    try:
+        return apply_track_aliases(db, tracks)
+    except sqlite3.Error as e:
+        logger.warning("Track aliases not applied for playlist '%s': %s", playlist_name, safe_exc(e))
+        return list(tracks), {}, set()
 
 
 class SyncState:
@@ -256,6 +267,7 @@ class SyncState:
                     db.record_sync_result(pl_id, status="error")
                     continue
 
+                tracks, original_by_effective, ignored_ids = _effective_tracks(db, tracks, pl["name"])
                 model_playlist = Playlist(
                     id=pl_id,
                     name=pl["name"],
@@ -269,6 +281,7 @@ class SyncState:
                     # library so its missing tracks reach monitoring / wanted.
                     try:
                         matched, missing = match_playlist_tracks_native(db, tracks)
+                        missing = restore_missing(missing, original_by_effective, ignored_ids)
                         db.record_sync_result(playlist_id=pl_id, status="success", missing_tracks=missing)
                         apply_playlist_missing_safely(db, config, pl_id)
                         stats["success_count"] += 1
@@ -288,6 +301,7 @@ class SyncState:
                         matched, missing = server.match_playlist_tracks(
                             tracks, threshold=config.search_similarity_threshold
                         )
+                        missing = restore_missing(missing, original_by_effective, ignored_ids)
                         success = any(r.success for r in results) if results else False
                         db.record_sync_result(
                             playlist_id=pl_id,

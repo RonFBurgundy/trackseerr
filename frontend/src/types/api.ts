@@ -3009,6 +3009,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/missing/aliases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Track Aliases
+         * @description Lists track aliases, optionally only those in one status.
+         */
+        get: operations["list_track_aliases_api_missing_aliases_get"];
+        put?: never;
+        /**
+         * Create Track Alias
+         * @description Admin-created alias (approved at once): a manual alias or an ``ignore`` (unmatchable) mark.
+         */
+        post: operations["create_track_alias_api_missing_aliases_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/aliases/{alias_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Track Alias
+         * @description Deletes an alias.
+         */
+        delete: operations["delete_track_alias_api_missing_aliases__alias_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/aliases/{alias_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve Track Alias
+         * @description Approves an alias (applied from the next sync) and resolves its linked issue.
+         */
+        post: operations["approve_track_alias_api_missing_aliases__alias_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing/aliases/{alias_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject Track Alias
+         * @description Rejects an alias and closes its linked issue as won't fix.
+         */
+        post: operations["reject_track_alias_api_missing_aliases__alias_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/missing/csv": {
         parameters: {
             query?: never;
@@ -3504,6 +3588,30 @@ export interface paths {
         get: operations["get_playlist_tracks_status_api_playlists__playlist_id__tracks_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playlists/{playlist_id}/tracks/suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suggest Track Match
+         * @description Suggests the catalog song a missing playlist track really is.
+         *
+         *     Admins' suggestions apply at once; everyone else's become a pending alias plus a ``playlist_match`` issue for
+         *     an admin to approve. 404 when the playlist is not visible or the track is not missing; 409 when an approved
+         *     alias already exists (or the user already has an open issue for it).
+         */
+        post: operations["suggest_track_match_api_playlists__playlist_id__tracks_suggest_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8272,7 +8380,7 @@ export interface components {
          * IssueType
          * @enum {string}
          */
-        IssueType: "audio_quality" | "corrupted_file" | "wrong_release" | "missing_tracks" | "incorrect_tags" | "request_stuck" | "other";
+        IssueType: "audio_quality" | "corrupted_file" | "wrong_release" | "missing_tracks" | "incorrect_tags" | "request_stuck" | "playlist_match" | "other";
         /** ItemHistoryEvent */
         ItemHistoryEvent: {
             /** Actor Display */
@@ -10871,7 +10979,9 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "pending" | "matched" | "missing";
+            status: "pending" | "matched" | "missing" | "ignored";
+            /** Suggestion */
+            suggestion?: ("pending" | "approved") | null;
             /** Title */
             title: string;
         };
@@ -12815,6 +12925,97 @@ export interface components {
             /** Success */
             success: boolean;
         };
+        /**
+         * TrackAlias
+         * @description A source song mapped to a canonical song (``alias``) or flagged unmatchable (``ignore``); applied during sync.
+         */
+        TrackAlias: {
+            /** Created At */
+            created_at: string;
+            /** Decided At */
+            decided_at?: string | null;
+            /** Decided By */
+            decided_by?: string | null;
+            /** Discovery Id */
+            discovery_id?: string | null;
+            /** Id */
+            id: number;
+            /** Issue Id */
+            issue_id?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "alias" | "ignore";
+            /** Playlist Id */
+            playlist_id?: string | null;
+            /** Source Artist */
+            source_artist: string;
+            /** Source Key */
+            source_key: string;
+            /** Source Title */
+            source_title: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "approved" | "rejected";
+            /** Suggested By */
+            suggested_by?: string | null;
+            /** Target Album */
+            target_album?: string | null;
+            /** Target Artist */
+            target_artist?: string | null;
+            /** Target Title */
+            target_title?: string | null;
+        };
+        /** TrackAliasCreateRequest */
+        TrackAliasCreateRequest: {
+            /**
+             * Kind
+             * @description alias: match as the target song; ignore: unmatchable
+             * @enum {string}
+             */
+            kind: "alias" | "ignore";
+            /**
+             * Source Artist
+             * @description Artist as the source playlist credits it
+             */
+            source_artist: string;
+            /**
+             * Source Title
+             * @description Title as the source playlist spells it
+             */
+            source_title: string;
+            /** Target Album */
+            target_album?: string | null;
+            /** Target Artist */
+            target_artist?: string | null;
+            /** Target Title */
+            target_title?: string | null;
+        };
+        /** TrackAliasDeletedResponse */
+        TrackAliasDeletedResponse: {
+            /** Id */
+            id: number;
+            /** Status */
+            status: string;
+        };
+        /**
+         * TrackAliasSuggestion
+         * @description Result of suggesting the right catalog song for a missing playlist track.
+         */
+        TrackAliasSuggestion: {
+            /** Alias Id */
+            alias_id: number;
+            /** Issue Id */
+            issue_id?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "approved";
+        };
         /** TrackBulkEditRequest */
         TrackBulkEditRequest: {
             /** Monitored */
@@ -12859,6 +13060,23 @@ export interface components {
         TrackMonitoredRequest: {
             /** Monitored */
             monitored: boolean;
+        };
+        /** TrackSuggestBody */
+        TrackSuggestBody: {
+            /** Discovery Id */
+            discovery_id: string;
+            /** Note */
+            note?: string | null;
+            /** Source Artist */
+            source_artist: string;
+            /** Source Title */
+            source_title: string;
+            /** Target Album */
+            target_album?: string | null;
+            /** Target Artist */
+            target_artist: string;
+            /** Target Title */
+            target_title: string;
         };
         /** TracksPage */
         TracksPage: {
@@ -18589,6 +18807,163 @@ export interface operations {
             };
         };
     };
+    list_track_aliases_api_missing_aliases_get: {
+        parameters: {
+            query?: {
+                status?: ("pending" | "approved" | "rejected") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackAlias"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_track_alias_api_missing_aliases_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrackAliasCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackAlias"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_track_alias_api_missing_aliases__alias_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alias_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackAliasDeletedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_track_alias_api_missing_aliases__alias_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alias_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackAlias"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_track_alias_api_missing_aliases__alias_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alias_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackAlias"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     download_missing_csv_api_missing_csv_get: {
         parameters: {
             query?: {
@@ -19439,6 +19814,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlaylistTracksResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    suggest_track_match_api_playlists__playlist_id__tracks_suggest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrackSuggestBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackAliasSuggestion"];
                 };
             };
             /** @description Validation Error */

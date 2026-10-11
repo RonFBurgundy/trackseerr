@@ -417,6 +417,24 @@ CREATE TABLE match_overrides (
                 created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 UNIQUE(source_title, source_artist)
             );
+CREATE TABLE track_aliases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_title TEXT NOT NULL,
+                source_artist TEXT NOT NULL,
+                source_key TEXT NOT NULL UNIQUE,
+                kind TEXT NOT NULL CHECK (kind IN ('alias','ignore')),
+                status TEXT NOT NULL CHECK (status IN ('pending','approved','rejected')),
+                target_title TEXT,
+                target_artist TEXT,
+                target_album TEXT,
+                discovery_id TEXT,
+                playlist_id TEXT,
+                issue_id TEXT,
+                suggested_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+                decided_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                decided_at TEXT
+            );
 CREATE TABLE music_requests (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
@@ -655,6 +673,7 @@ CREATE INDEX idx_playlist_targets_user ON playlist_targets(user_id);
 CREATE INDEX idx_missing_tracks_playlist ON missing_tracks(playlist_id);
 CREATE INDEX idx_sessions_user ON sessions(user_id);
 CREATE INDEX idx_match_overrides_lookup ON match_overrides(source_title, source_artist);
+CREATE INDEX idx_track_aliases_status ON track_aliases(status);
 CREATE INDEX idx_missing_tracks_lidarr_status ON missing_tracks(lidarr_status);
 CREATE INDEX idx_requests_user ON music_requests(user_id);
 CREATE INDEX idx_requests_status ON music_requests(status);

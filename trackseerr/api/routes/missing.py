@@ -4,7 +4,7 @@ import csv
 from email.utils import formatdate
 import io
 import logging
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from xml.sax.saxutils import escape
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -27,8 +27,12 @@ from trackseerr.api.schemas.missing import (
     MatchOverride,
     MediaTrackHit,
     MissingTrack,
+    TrackAlias,
+    TrackAliasDeletedResponse,
 )
+from trackseerr.api.routes.issues import FINAL_STATUSES, _apply_status
 from trackseerr.media_servers import as_media_server
+from trackseerr.models import IssueStatus
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.storage import Database
 
@@ -43,6 +47,15 @@ class MatchOverrideRequest(BaseModel):
     plex_rating_key: str = Field(..., min_length=1, max_length=100, description="Plex ratingKey of matched library track")
     plex_title: str = Field(..., min_length=1, max_length=500, description="Title of matched track in Plex")
     plex_artist: str = Field(..., min_length=1, max_length=500, description="Artist of matched track in Plex")
+
+
+class TrackAliasCreateRequest(BaseModel):
+    source_title: str = Field(..., min_length=1, max_length=500, description="Title as the source playlist spells it")
+    source_artist: str = Field(..., min_length=1, max_length=500, description="Artist as the source playlist credits it")
+    kind: Literal["alias", "ignore"] = Field(..., description="alias: match as the target song; ignore: unmatchable")
+    target_title: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    target_artist: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    target_album: Optional[str] = Field(default=None, max_length=500)
 
 
 def _sanitize_csv_cell(value: Any) -> str:
@@ -291,6 +304,97 @@ def delete_match_override(
             detail="Match override not found",
         )
     return {"status": "deleted", "id": override_id}
+
+
+@router.get("/aliases", response_model=list[TrackAlias], response_model_exclude_unset=True)
+def list_track_aliases(
+    status_filter: Optional[Literal["pending", "approved", "rejected"]] = Query(default=None, alias="status"),
+    current_user: dict[str, Any] = Depends(require_admin),
+    db: Database = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Lists track aliases, optionally only those in one status."""
+    return db.list_track_aliases(status_filter)
+
+
+@router.post(
+    "/aliases", response_model=TrackAlias, response_model_exclude_unset=True, status_code=status.HTTP_201_CREATED
+)
+def create_track_alias(
+    req: TrackAliasCreateRequest,
+    current_user: dict[str, Any] = Depends(require_admin),
+    db: Database = Depends(get_db),
+) -> dict[str, Any]:
+    """Admin-created alias (approved at once): a manual alias or an ``ignore`` (unmatchable) mark."""
+    if req.kind == "alias" and not (req.target_title and req.target_artist):
+        raise HTTPException(
+            status_code=422,
+            detail="An alias needs target_title and target_artist",
+        )
+    is_alias = req.kind == "alias"
+    return db.upsert_track_alias(
+        source_title=req.source_title,
+        source_artist=req.source_artist,
+        kind=req.kind,
+        status="approved",
+        target_title=req.target_title if is_alias else None,
+        target_artist=req.target_artist if is_alias else None,
+        target_album=req.target_album if is_alias else None,
+        decided_by=str(current_user["id"]),
+    )
+
+
+def _close_linked_issue(db: Database, alias: dict[str, Any], issue_status: IssueStatus, admin: dict[str, Any]) -> None:
+    """Moves the issue behind a suggested alias to ``issue_status`` unless it is already closed."""
+    issue_id = alias.get("issue_id")
+    issue = db.get_issue(str(issue_id)) if issue_id else None
+    if issue is None or issue["status"] in FINAL_STATUSES:
+        return
+    try:
+        _apply_status(db, issue, issue_status.value, admin, is_admin=True)
+    except HTTPException as e:
+        logger.warning("Could not set issue %s to %s for track alias %s: %s", issue_id, issue_status.value, alias["id"], e.detail)
+
+
+def _decide_track_alias(
+    alias_id: int, new_status: str, issue_status: IssueStatus, admin: dict[str, Any], db: Database
+) -> dict[str, Any]:
+    alias = db.set_track_alias_status(alias_id, new_status, str(admin["id"]))
+    if alias is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track alias not found")
+    _close_linked_issue(db, alias, issue_status, admin)
+    return alias
+
+
+@router.post("/aliases/{alias_id}/approve", response_model=TrackAlias, response_model_exclude_unset=True)
+def approve_track_alias(
+    alias_id: int,
+    current_user: dict[str, Any] = Depends(require_admin),
+    db: Database = Depends(get_db),
+) -> dict[str, Any]:
+    """Approves an alias (applied from the next sync) and resolves its linked issue."""
+    return _decide_track_alias(alias_id, "approved", IssueStatus.RESOLVED, current_user, db)
+
+
+@router.post("/aliases/{alias_id}/reject", response_model=TrackAlias, response_model_exclude_unset=True)
+def reject_track_alias(
+    alias_id: int,
+    current_user: dict[str, Any] = Depends(require_admin),
+    db: Database = Depends(get_db),
+) -> dict[str, Any]:
+    """Rejects an alias and closes its linked issue as won't fix."""
+    return _decide_track_alias(alias_id, "rejected", IssueStatus.WONT_FIX, current_user, db)
+
+
+@router.delete("/aliases/{alias_id}", response_model=TrackAliasDeletedResponse, response_model_exclude_unset=True)
+def delete_track_alias(
+    alias_id: int,
+    current_user: dict[str, Any] = Depends(require_admin),
+    db: Database = Depends(get_db),
+) -> dict[str, Any]:
+    """Deletes an alias."""
+    if not db.delete_track_alias(alias_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track alias not found")
+    return {"status": "deleted", "id": alias_id}
 
 
 def _playlist_trigger(db: Database, track: dict[str, Any], admin: dict[str, Any]) -> GrabTrigger:

@@ -312,6 +312,7 @@ export type IssueType =
   | 'missing_tracks'
   | 'incorrect_tags'
   | 'request_stuck'
+  | 'playlist_match'
   | 'other';
 
 export type IssueStatus = 'open' | 'in_progress' | 'resolved' | 'wont_fix';
@@ -361,6 +362,7 @@ export const ISSUE_TYPE_LABELS: Record<IssueType, string> = {
   missing_tracks: 'Missing tracks',
   incorrect_tags: 'Incorrect tags',
   request_stuck: 'Request is stuck',
+  playlist_match: 'Playlist match',
   other: 'Other',
 };
 

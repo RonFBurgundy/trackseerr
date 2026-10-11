@@ -532,6 +532,7 @@ const MainApp: React.FC = () => {
                 serverLabel={mediaServer.label}
                 canTargetUsers={mediaServer.capabilities.users}
                 mixesEnabled={mediaServer.capabilities.mixes}
+                onRequestItem={handleRequestItem}
               />
             )}
 

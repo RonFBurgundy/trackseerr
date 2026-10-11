@@ -140,6 +140,27 @@ def test_tracks_endpoint_appends_unmatched_missing_rows(app_and_client, test_db,
     assert data["missing"] == 1
 
 
+def test_tracks_endpoint_ignored_and_suggestion(app_and_client, test_db, secret_key):
+    _, client = app_and_client
+    ck = _cookies(test_db, "admin-1", "admin_user", True, secret_key)
+    _add(client, ck, ["admin-1"])
+    test_db.record_sync_result(
+        PL_ID, status="success",
+        missing_tracks=[Track(title="Song 1", artist="Artist 1", album=""), Track(title="Song 2", artist="Artist 2", album="")],
+    )
+    test_db.upsert_track_alias("Song 1", "Artist 1", "ignore", "approved")
+    test_db.upsert_track_alias("Song 2", "Artist 2", "alias", "pending", target_title="Songg 2", target_artist="Artist 2")
+    test_db.upsert_track_alias("Song 3", "Artist 3", "alias", "approved", target_title="Song Three", target_artist="Artist 3")
+    data = client.get(f"/api/playlists/{PL_ID}/tracks", cookies=ck).json()
+    by_title = {t["title"]: t for t in data["tracks"]}
+    assert by_title["Song 1"]["status"] == "ignored"
+    assert by_title["Song 1"].get("suggestion") is None and by_title["Song 1"].get("missing_track_id") is None
+    assert by_title["Song 2"]["status"] == "missing" and by_title["Song 2"]["suggestion"] == "pending"
+    assert by_title["Song 3"]["status"] == "matched" and by_title["Song 3"]["suggestion"] == "approved"
+    assert data["missing"] == 1
+    assert data["total"] == 3
+
+
 def test_tracks_endpoint_access(app_and_client, test_db, secret_key):
     _, client = app_and_client
     alice = _cookies(test_db, "user-alice", "alice", False, secret_key)

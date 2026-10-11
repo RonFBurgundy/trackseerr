@@ -58,6 +58,7 @@ class MigrationsMixin:
 
             migrations: list[tuple[int, Any]] = [
                 (72, self._migration_v72),
+                (73, self._migration_v73),
             ]
 
             applied = 0
@@ -98,6 +99,32 @@ class MigrationsMixin:
                 cur.execute(f"ALTER TABLE library_artists ADD COLUMN {col} {col_type}")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_artists_begin_year ON library_artists(begin_year)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_artists_popularity ON library_artists(popularity)")
+
+    def _migration_v73(self, cur: sqlite3.Cursor) -> None:
+        """v73: Add track_aliases (source song -> canonical song, or ignore) applied during playlist sync."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS track_aliases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_title TEXT NOT NULL,
+                source_artist TEXT NOT NULL,
+                source_key TEXT NOT NULL UNIQUE,
+                kind TEXT NOT NULL CHECK (kind IN ('alias','ignore')),
+                status TEXT NOT NULL CHECK (status IN ('pending','approved','rejected')),
+                target_title TEXT,
+                target_artist TEXT,
+                target_album TEXT,
+                discovery_id TEXT,
+                playlist_id TEXT,
+                issue_id TEXT,
+                suggested_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+                decided_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                decided_at TEXT
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_track_aliases_status ON track_aliases(status)")
 
     def _seed_baseline(self, cur: sqlite3.Cursor) -> None:
         """Seed reference rows and runtime settings for the v71 baseline database."""

@@ -3,7 +3,7 @@
 Skipped (file / plain-text / XML bodies): ``/csv``, ``/rss``, ``/text``. Everything here is admin only.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 
 from trackseerr.api.response_models import ApiModel
 
@@ -52,6 +52,32 @@ class MatchCreatedResponse(ApiModel):
 
 
 class MatchDeletedResponse(ApiModel):
+    status: str
+    id: int
+
+
+class TrackAlias(ApiModel):
+    """A source song mapped to a canonical song (``alias``) or flagged unmatchable (``ignore``); applied during sync."""
+
+    id: int
+    source_title: str
+    source_artist: str
+    source_key: str
+    kind: Literal["alias", "ignore"]
+    status: Literal["pending", "approved", "rejected"]
+    target_title: Optional[str] = None
+    target_artist: Optional[str] = None
+    target_album: Optional[str] = None
+    discovery_id: Optional[str] = None
+    playlist_id: Optional[str] = None
+    issue_id: Optional[str] = None
+    suggested_by: Optional[str] = None
+    decided_by: Optional[str] = None
+    created_at: str
+    decided_at: Optional[str] = None
+
+
+class TrackAliasDeletedResponse(ApiModel):
     status: str
     id: int
 
