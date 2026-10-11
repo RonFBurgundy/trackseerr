@@ -51,6 +51,8 @@ function parseRpcPath(extra: string | null | undefined): string {
   return '';
 }
 
+export const DEFAULT_CLIENT_PRIORITY = 1;
+
 export interface ClientDraft {
   editingId: string | null;
   name: string;
@@ -61,6 +63,8 @@ export interface ClientDraft {
   password: string;
   apiKey: string;
   category: string;
+  priority: number;
+  enabled: boolean;
   setName: (v: string) => void;
   setType: (v: DownloadDriverType) => void;
   setHostUrl: (v: string) => void;
@@ -69,6 +73,8 @@ export interface ClientDraft {
   setPassword: (v: string) => void;
   setApiKey: (v: string) => void;
   setCategory: (v: string) => void;
+  setPriority: (v: number) => void;
+  setEnabled: (v: boolean) => void;
   startEdit: (client: DownloadClientItem) => void;
   reset: () => void;
   toPayload: () => Schema<'DownloadClientPayload'>;
@@ -85,6 +91,8 @@ export function useClientDraft(): ClientDraft {
   const [password, setPassword] = useState<string>('');
   const [apiKey, setApiKey] = useState<string>('');
   const [category, setCategory] = useState<string>('');
+  const [priority, setPriority] = useState<number>(DEFAULT_CLIENT_PRIORITY);
+  const [enabled, setEnabled] = useState<boolean>(true);
 
   const setType = useCallback((next: DownloadDriverType) => {
     setTypeState(next);
@@ -102,6 +110,8 @@ export function useClientDraft(): ClientDraft {
     setPassword(client.password ?? '');
     setApiKey(client.api_key ?? '');
     setCategory(client.category ?? '');
+    setPriority(client.priority);
+    setEnabled(client.enabled);
   }, []);
 
   const reset = useCallback(() => {
@@ -114,6 +124,8 @@ export function useClientDraft(): ClientDraft {
     setPassword('');
     setApiKey('');
     setCategory('');
+    setPriority(DEFAULT_CLIENT_PRIORITY);
+    setEnabled(true);
   }, []);
 
   const toPayload = useCallback((): Schema<'DownloadClientPayload'> => {
@@ -130,19 +142,19 @@ export function useClientDraft(): ClientDraft {
       name: name.trim(),
       driver_type: type,
       host_url: hostUrl.trim(),
-      enabled: true,
-      priority: 1,
+      enabled,
+      priority,
       username: usesUsername && username.trim() ? username.trim() : undefined,
       password: usesPassword && password.trim() ? password.trim() : undefined,
       api_key: usesApiKey && apiKey.trim() ? apiKey.trim() : undefined,
       category: category.trim() || undefined,
       extra_settings_json: Object.keys(extraSettings).length > 0 ? JSON.stringify(extraSettings) : undefined,
     };
-  }, [editingId, name, type, hostUrl, rpcPath, username, password, apiKey, category]);
+  }, [editingId, name, type, hostUrl, rpcPath, username, password, apiKey, category, priority, enabled]);
 
   return {
-    editingId, name, type, hostUrl, rpcPath, username, password, apiKey, category,
-    setName, setType, setHostUrl, setRpcPath, setUsername, setPassword, setApiKey, setCategory,
+    editingId, name, type, hostUrl, rpcPath, username, password, apiKey, category, priority, enabled,
+    setName, setType, setHostUrl, setRpcPath, setUsername, setPassword, setApiKey, setCategory, setPriority, setEnabled,
     startEdit, reset, toPayload,
   };
 }

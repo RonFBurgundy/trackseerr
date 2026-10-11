@@ -52,6 +52,8 @@ export function seedingDraftToPayload(draft: SeedingDraft): SeedingPayload | nul
   return { seed_ratio, seed_time_minutes, discography_seed_time_minutes, minimum_seeders };
 }
 
+export const DEFAULT_INDEXER_PRIORITY = 25;
+
 export interface IndexerDraft {
   editingId: IndexerItem['id'] | null;
   name: string;
@@ -59,9 +61,13 @@ export interface IndexerDraft {
   apiKey: string;
   indexerType: IndexerItem['indexer_type'];
   seeding: SeedingDraft;
+  priority: number;
+  enabled: boolean;
   setName: (v: string) => void;
   setUrl: (v: string) => void;
   setApiKey: (v: string) => void;
+  setPriority: (v: number) => void;
+  setEnabled: (v: boolean) => void;
   setSeedingField: (field: SeedingDraftField, value: string) => void;
   startEdit: (indexer: IndexerItem) => void;
   reset: () => void;
@@ -75,6 +81,8 @@ export function useIndexerDraft(): IndexerDraft {
   const [apiKey, setApiKey] = useState<string>('');
   const [indexerType, setIndexerType] = useState<IndexerItem['indexer_type']>('torznab');
   const [seeding, setSeeding] = useState<SeedingDraft>(EMPTY_SEEDING_DRAFT);
+  const [priority, setPriority] = useState<number>(DEFAULT_INDEXER_PRIORITY);
+  const [enabled, setEnabled] = useState<boolean>(true);
 
   const setSeedingField = useCallback((field: SeedingDraftField, value: string) => {
     setSeeding((prev) => ({ ...prev, [field]: value }));
@@ -86,6 +94,8 @@ export function useIndexerDraft(): IndexerDraft {
     setUrl(indexer.host_url);
     setApiKey('');
     setIndexerType(indexer.indexer_type);
+    setPriority(indexer.priority);
+    setEnabled(indexer.enabled);
     setSeeding({
       seed_ratio: toText(indexer.seed_ratio),
       seed_time_minutes: toText(indexer.seed_time_minutes),
@@ -101,7 +111,9 @@ export function useIndexerDraft(): IndexerDraft {
     setApiKey('');
     setIndexerType('torznab');
     setSeeding(EMPTY_SEEDING_DRAFT);
+    setPriority(DEFAULT_INDEXER_PRIORITY);
+    setEnabled(true);
   }, []);
 
-  return { editingId, name, url, apiKey, indexerType, seeding, setName, setUrl, setApiKey, setSeedingField, startEdit, reset };
+  return { editingId, name, url, apiKey, indexerType, seeding, priority, enabled, setName, setUrl, setApiKey, setPriority, setEnabled, setSeedingField, startEdit, reset };
 }
