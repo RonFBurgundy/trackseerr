@@ -13,6 +13,9 @@ heading becomes the version and date.
 
 ### Added
 
+- Activity has a Searches tab listing every indexer and Soulseek search Trackseerr ran: the query, how many results came back, how long it took, and what triggered it (request, wanted sweep, manual search, retry...). Kept for 30 days.
+- Soulseek downloads in the Activity queue show the peer, whether it is a whole folder, and slskd's own state (e.g. "Queued, Remotely"). A new "Blocklist and search again" action drops the current release and looks for another.
+- The slskd download client has a Soulseek tuning section: peer queue and speed limits, ignored users, search timeout and spacing, and how long a stuck transfer may wait before Trackseerr tries another peer.
 - Indexer priority (1–50): breaks ties between otherwise equal releases, so a preferred indexer's copy wins; a better release from a lower-priority indexer still wins. Soulseek results use their slskd client's priority.
 - Download client priority (1–50) and an Enabled switch: grabs go to the highest-priority enabled client for their protocol, clients with equal priority take turns, and if a client can't take a grab the next one is tried (the failed client is skipped for 5 minutes).
 - Reject current release: from an album's or track's history, or from Manual Search, blocklist the release behind the current files and search for another; the current files stay until the replacement imports.
@@ -56,9 +59,11 @@ heading becomes the version and date.
 ### Fixed
 
 - Soulseek results now show their real quality (FLAC 16/24-bit, MP3 320/V0/V2, AAC, ALAC, OGG, Opus) instead of Unknown, so quality profiles rank and accept them properly.
-- Soulseek downloads that a peer never starts ("Queued, Remotely") for 30 minutes, that stop moving for 15 minutes, or that vanish from slskd for 10 minutes are now cancelled and blocklisted, so the next search tries another peer (adjustable with `SLSKD_QUEUE_TIMEOUT_MINUTES`, `SLSKD_STALL_MINUTES`, `SLSKD_MISSING_MINUTES`). Failed Soulseek transfers (errored, rejected, timed out) are no longer treated as finished downloads, and cancelling a Soulseek download works again.
+- Soulseek downloads that a peer never starts ("Queued, Remotely") for 30 minutes, that stop moving for 15 minutes, or that vanish from slskd for 10 minutes are now cancelled and blocklisted, so the next search tries another peer (adjustable per slskd client in Settings, or with `SLSKD_QUEUE_TIMEOUT_MINUTES`, `SLSKD_STALL_MINUTES`, `SLSKD_MISSING_MINUTES`). Failed Soulseek transfers (errored, rejected, timed out) are no longer treated as finished downloads, and cancelling a Soulseek download works again.
 - Soulseek searches now wait for peers to answer before reading results (they almost always came back empty), and each finished search is removed from slskd instead of piling up in its Searches list.
 - Editing a download client or indexer no longer resets its priority or re-enables it.
+- Editing a download client no longer drops settings the form does not show (such as a custom download folder or remote path mappings).
+- Removing a Soulseek download from the queue with "blocklist" now actually blocklists that peer's file, so it is not grabbed again.
 - slskd connection tests failed with HTTP 404 even with a valid API key; slskd now connects with its URL and API key only.
 - qBittorrent 5 logins were reported as invalid credentials; a rejected login now also mentions the URL port, which must match qBittorrent's own WebUI port.
 - Download client tests say when the client could not be reached at all, instead of blaming the credentials, and failed tests are written to the TrackSeerr log.
