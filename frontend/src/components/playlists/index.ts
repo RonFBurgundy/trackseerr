@@ -4,3 +4,4 @@ export * from './SmartCollectionModal';
 export * from './SmartCollectionCardActions';
 export * from './FeaturedChartsTab';
 export * from './M3uImportTab';
+export * from './PlaylistTracksModal';

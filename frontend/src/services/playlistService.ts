@@ -8,6 +8,10 @@ export async function getPlaylists(): Promise<Playlist[]> {
   return res || [];
 }
 
+export async function getPlaylistTracks(playlistId: string): Promise<Schema<'PlaylistTracksResponse'>> {
+  return apiRequest<Schema<'PlaylistTracksResponse'>>(`/api/playlists/${encodeURIComponent(playlistId)}/tracks`);
+}
+
 export async function toggleUserTarget(playlistId: number | string, targetUserIds: string[]): Promise<void> {
   await apiRequest<void>(`/api/playlists/${playlistId}/targets`, {
     method: 'PUT',
@@ -63,23 +67,24 @@ function parseTrackLine(line: string): { title: string; artist: string } {
   return { artist: line.slice(0, at).trim(), title: line.slice(at + 3).trim() };
 }
 
-export async function importPlaylist(payload: ImportPlaylistPayload): Promise<void> {
+/** Resolves to the created playlist for a link import (it carries the fetched tracklist), otherwise null. */
+export async function importPlaylist(payload: ImportPlaylistPayload): Promise<Schema<'PlaylistRecord'> | null> {
   if (payload.source === 'link') {
-    await apiRequest<Schema<'PlaylistRecord'>>('/api/playlists', {
+    return apiRequest<Schema<'PlaylistRecord'>>('/api/playlists', {
       method: 'POST',
       body: { url_or_id: payload.url, ...(payload.service ? { service: payload.service } : {}) },
     });
-    return;
   }
   if (payload.source === 'm3u') {
     await apiRequest<Schema<'PlaylistImportResponse'>>('/api/playlists/import/m3u', {
       method: 'POST',
       body: { name: payload.name, content: payload.content },
     });
-    return;
+    return null;
   }
   await apiRequest<Schema<'PlaylistImportResponse'>>('/api/playlists/import', {
     method: 'POST',
     body: { name: payload.name, service: 'custom', tracks: payload.tracks.map(parseTrackLine) },
   });
+  return null;
 }
