@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Trash2, Plus, Save, X } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, TactileSwitch, ConfirmDangerButton, ActionBar } from '@/components/ui';
 import type { DownloadClientItem } from '@/types/models';
 import { saveClientSettings, deleteClientSettings, testClientConnection } from '@/services/settingsService';
 import { ApiError } from '@/services/apiClient';
@@ -33,7 +33,8 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
 
   const payload = draft.toPayload();
   const payloadKey = JSON.stringify(payload);
-  const testPassed = testedKey !== null && testedKey === payloadKey;
+  // A disabled client may be saved untested (the backend skips the test when disabled).
+  const testPassed = !draft.enabled || (testedKey !== null && testedKey === payloadKey);
   const editing = draft.editingId ? clients.find((c) => c.id === draft.editingId) : undefined;
 
   const resetForm = () => {
@@ -111,13 +112,21 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 content-start">
           {clients.map((c) => (
-            <MachinedCard key={c.id} className="p-3 sm:p-4 flex items-center justify-between gap-3">
+            <MachinedCard key={c.id} className={`p-3 sm:p-4 flex items-center justify-between gap-3 ${c.enabled ? '' : 'opacity-60'}`}>
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-sm text-white">{c.name}</span>
                   <span className="px-1.5 py-0.5 rounded-[2px] bg-[#1a1a1a] text-[10px] font-mono uppercase text-[#e5a00d]">
                     {c.driver_type}
                   </span>
+                  <span className="px-1.5 py-0.5 rounded-[2px] bg-[#1a1a1a] text-[10px] font-mono uppercase text-neutral-300">
+                    P{c.priority}
+                  </span>
+                  {!c.enabled && (
+                    <span className="px-1.5 py-0.5 rounded-[2px] bg-[#1a1a1a] text-[10px] font-mono uppercase text-neutral-500">
+                      Disabled
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-neutral-400 font-mono mt-1">
                   {c.host_url}
@@ -295,6 +304,27 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
               />
             </div>
           )}
+
+          <div>
+            <label htmlFor="client-priority" className={compactLabelClass}>Priority</label>
+            <input
+              id="client-priority"
+              name="priority"
+              type="number"
+              min={1}
+              max={50}
+              step={1}
+              required
+              value={draft.priority}
+              onChange={(e) => draft.setPriority(Number(e.target.value))}
+              className={compactInputClass}
+            />
+            <p className="text-[10px] font-mono text-neutral-500 mt-1">
+              1 = most preferred. Grabs go to the highest-priority enabled client for their protocol; equal
+              priorities take turns, and if one fails the next is tried.
+            </p>
+          </div>
+          <TactileSwitch id="client-enabled" name="enabled" label="Enabled" checked={draft.enabled} onChange={draft.setEnabled} />
 
           <ActionBar align="end" className="pt-2">
             {draft.editingId && (

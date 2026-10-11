@@ -201,6 +201,9 @@ const ReleaseRow = React.memo<ReleaseRowProps>(({ release: r, expanded, busy, gr
       {expanded && (
         <div id={detailId} className="px-3 pb-3 pt-1 bg-[#0d0d0d] text-xs font-mono space-y-2">
           {blocklistNote(r) && <p className="text-[#ef4444]/90 break-words">{blocklistNote(r)}</p>}
+          {r.indexer_priority != null && (
+            <p className="text-neutral-400">Indexer priority: {r.indexer_priority}</p>
+          )}
           <div>
             <div className="text-neutral-500 uppercase tracking-wider text-[10px] mb-1">Rejection reasons</div>
             {r.rejection_reasons.length > 0 ? (

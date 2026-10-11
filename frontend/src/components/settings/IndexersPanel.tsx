@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Trash2, Plus, Save, X } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, ConfirmDangerButton, ActionBar } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, TactileSwitch, ConfirmDangerButton, ActionBar } from '@/components/ui';
 import type { IndexerItem, MediaManagementSettings } from '@/types/models';
 import { useIndexerDraft, seedingDraftToPayload } from '@/hooks/useIndexerDraft';
 import { IndexerSeedingFields } from './IndexerSeedingFields';
@@ -17,7 +17,7 @@ export interface IndexersPanelProps {
 
 export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, media, reload, onToast }) => {
   const draft = useIndexerDraft();
-  const { editingId, name, url, apiKey, indexerType, seeding } = draft;
+  const { editingId, name, url, apiKey, indexerType, seeding, priority, enabled } = draft;
   const editing = indexers.find((i) => i.id === editingId) ?? null;
   const showSeeding = indexerType === 'torznab';
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -39,8 +39,8 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, media, r
         api_key: apiKey.trim(),
         indexer_type: indexerType,
         categories: editing ? editing.categories : undefined,
-        enabled: editing ? editing.enabled : true,
-        priority: editing ? editing.priority : 1,
+        enabled,
+        priority,
         ...seedPayload,
       });
       const wasEditing = editing !== null;
@@ -86,13 +86,21 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, media, r
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 content-start">
           {indexers.map((idx) => (
-            <MachinedCard key={idx.id} className="p-3 sm:p-4 flex items-center justify-between gap-3">
+            <MachinedCard key={idx.id} className={`p-3 sm:p-4 flex items-center justify-between gap-3 ${idx.enabled ? '' : 'opacity-60'}`}>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-sm text-white">{idx.name}</span>
                   <span className="px-1.5 py-0.5 rounded-[2px] bg-[#1a1a1a] text-[10px] font-mono uppercase text-[#e5a00d]">
                     {idx.indexer_type}
                   </span>
+                  <span className="px-1.5 py-0.5 rounded-[2px] bg-[#1a1a1a] text-[10px] font-mono uppercase text-neutral-300">
+                    P{idx.priority}
+                  </span>
+                  {!idx.enabled && (
+                    <span className="px-1.5 py-0.5 rounded-[2px] bg-[#1a1a1a] text-[10px] font-mono uppercase text-neutral-500">
+                      Disabled
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-neutral-400 font-mono mt-1 truncate max-w-xs">{idx.host_url}</p>
               </div>
@@ -144,6 +152,26 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, media, r
             <label htmlFor="indexer-api-key" className={compactLabelClass}>API Key</label>
             <input id="indexer-api-key" name="api-key" type="password" autoComplete="off" value={apiKey} onChange={(e) => draft.setApiKey(e.target.value)} className={compactInputClass} />
           </div>
+          <div>
+            <label htmlFor="indexer-priority" className={compactLabelClass}>Priority</label>
+            <input
+              id="indexer-priority"
+              name="priority"
+              type="number"
+              min={1}
+              max={50}
+              step={1}
+              required
+              value={priority}
+              onChange={(e) => draft.setPriority(Number(e.target.value))}
+              className={compactInputClass}
+            />
+            <p className="text-[10px] font-mono text-neutral-500 mt-1">
+              1 = most preferred. Only breaks ties between otherwise equal releases; a better release from a
+              lower-priority indexer still wins.
+            </p>
+          </div>
+          <TactileSwitch id="indexer-enabled" name="enabled" label="Enabled" checked={enabled} onChange={draft.setEnabled} />
           {showSeeding && (
             <IndexerSeedingFields
               value={seeding}
