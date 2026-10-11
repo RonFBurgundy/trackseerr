@@ -196,6 +196,74 @@ def test_search_all_indexers_aggregates_sources(test_db):
     assert "Radiohead - Karma Police.flac" in titles
 
 
+def _result(title):
+    return AcquisitionSearchResult(
+        download_id=title, title=title, artist="Morgan Page", item_type="track", source="torznab", protocol="torrent"
+    )
+
+
+_MP_ARTIST = "Morgan Page, BT, Ned Shepard & Sultan"
+_MP_TITLE = "In the Air (Mord Fustang Remix) [feat. Angela McCluskey]"
+
+
+def test_search_with_fallback_stops_at_first_hit():
+    hit = _result("Morgan Page - In The Air (Mord Fustang Remix) FLAC")
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", side_effect=[[], [hit]]) as m:
+        out = AcquisitionCoordinator().search_with_fallback(_MP_ARTIST, _MP_TITLE, None, MagicMock())
+    assert out == [hit]
+    assert m.call_count == 2
+    assert m.call_args_list[1].kwargs["artist"] == "Morgan Page"
+
+
+def test_search_with_fallback_filters_irrelevant_on_fallback_rungs():
+    wrong = _result("Morgan Page - In The Air (Original Mix)")
+    good = _result("Morgan Page - In The Air (Mord Fustang Remix)")
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", side_effect=[[], [wrong], [good]]) as m:
+        out = AcquisitionCoordinator().search_with_fallback(_MP_ARTIST, _MP_TITLE, None, MagicMock())
+    assert out == [good]
+    assert m.call_count == 3
+
+
+def test_search_with_fallback_rung1_unfiltered():
+    odd = _result("Totally Unrelated Name")
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", return_value=[odd]) as m:
+        out = AcquisitionCoordinator().search_with_fallback(_MP_ARTIST, _MP_TITLE, None, MagicMock())
+    assert out == [odd]
+    assert m.call_count == 1
+
+
+def test_search_with_fallback_exhausted_returns_empty():
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", return_value=[]) as m:
+        out = AcquisitionCoordinator().search_with_fallback(_MP_ARTIST, _MP_TITLE, None, MagicMock())
+    assert out == []
+    assert m.call_count == 3
+
+
+def test_search_and_grab_uses_fallback(test_db):
+    with patch.object(AcquisitionCoordinator, "search_with_fallback", return_value=[]) as fb:
+        res = AcquisitionCoordinator().search_and_grab(
+            "Morgan Page, BT", "In the Air (feat. X)", db=test_db, trigger=GrabTrigger("request")
+        )
+    fb.assert_called_once()
+    assert fb.call_args.args[:3] == ("Morgan Page, BT", "In the Air (feat. X)", None)
+    assert res["success"] is False
+
+
+def test_search_all_indexers_logs_per_source(test_db, caplog):
+    test_db.create_indexer(
+        IndexerConfig(
+            id="idx-t", name="Prowlarr Torznab", indexer_type="torznab",
+            host_url="http://prowlarr:9696", api_key="k", enabled=True,
+        )
+    )
+    driver = MagicMock()
+    driver.search.return_value = [_result("Radiohead - Karma Police")]
+    with patch("trackseerr.acquisition_coordinator.get_indexer_driver", return_value=driver):
+        with caplog.at_level("INFO", logger="trackseerr.acquisition_coordinator"):
+            AcquisitionCoordinator().search_all_indexers("Radiohead", "Karma Police", db=test_db)
+    assert any("source=Prowlarr Torznab" in r.getMessage() and "-> 1 results" in r.getMessage() for r in caplog.records)
+
+
 def test_search_all_indexers_error_isolation(test_db):
     """Ensures a failure on one indexer does not abort searches on other indexers."""
     test_db.create_indexer(

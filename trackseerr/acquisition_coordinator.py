@@ -24,6 +24,7 @@ from trackseerr.clients.acquisition.base import AcquisitionRetryableError, Acqui
 from trackseerr.item_history import GrabTrigger, emit, emit_named, trigger_kwargs
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.redaction import redact_text
+from trackseerr.search_terms import build_query_ladder, matches_request
 from trackseerr.models import (
     AcquisitionSearchResult,
     ActiveDownload,
@@ -232,6 +233,21 @@ def resolve_duration(
     return None
 
 
+def _log_source_search(
+    source: str,
+    source_type: Optional[str],
+    artist: str,
+    title: Optional[str],
+    album: Optional[str],
+    results: Optional[list[AcquisitionSearchResult]],
+    started: float,
+) -> None:
+    logger.info(
+        "Indexer search source=%s type=%s query_artist=%r query_title=%r query_album=%r -> %d results in %.1fs",
+        source, source_type or "indexer", artist, title, album, len(results or []), time.monotonic() - started,
+    )
+
+
 class AcquisitionCoordinator:
     """Coordinates search, quality evaluation, client dispatch, and active transfer records."""
 
@@ -267,7 +283,9 @@ class AcquisitionCoordinator:
             idx_name = idx_cfg.get("name", "unknown")
             try:
                 driver = get_indexer_driver(idx_cfg)
+                started = time.monotonic()
                 res = driver.search(artist=artist, title=title, album=album)
+                _log_source_search(idx_name, idx_cfg.get("indexer_type"), artist, title, album, res, started)
                 if res:
                     for r in res:
                         if isinstance(r.extra, dict) or r.extra is None:
@@ -298,7 +316,9 @@ class AcquisitionCoordinator:
             s_name = s_cfg.get("name", "slskd")
             try:
                 driver = get_acquisition_driver(s_cfg)
+                started = time.monotonic()
                 res = driver.search(artist=artist, title=title, album=album)
+                _log_source_search(s_name, "slskd", artist, title, album, res, started)
                 if res:
                     for r in res:
                         extra = dict(r.extra or {})
@@ -312,6 +332,34 @@ class AcquisitionCoordinator:
                     errors.append({"source": str(s_name), "error": redact_text(str(e))})
 
         return _apply_blocklist(db, all_results, include_blocklisted)
+
+    def search_with_fallback(
+        self,
+        artist: str,
+        title: Optional[str],
+        album: Optional[str],
+        db: Optional[Database],
+    ) -> list[AcquisitionSearchResult]:
+        """Searches with the raw query, then simpler rungs, returning the first non-empty result list.
+
+        Rung 1 is unfiltered (the historical behavior); later rungs keep only results that pass ``matches_request``
+        against the ORIGINAL title/album so a loose query cannot grab the wrong release.
+        """
+        rungs = build_query_ladder(artist, title, album)
+        for number, (r_artist, r_title, r_album) in enumerate(rungs, start=1):
+            started = time.monotonic()
+            results = self.search_all_indexers(artist=r_artist, title=r_title, album=r_album, db=db)
+            found = len(results)
+            if number > 1:
+                results = [r for r in results if matches_request(r.title, title, album)]
+            logger.info(
+                "Search rung %d/%d artist=%r title=%r album=%r -> %d results (%d after relevance) in %.1fs",
+                number, len(rungs), r_artist, r_title, r_album, found, len(results), time.monotonic() - started,
+            )
+            if results:
+                return results
+        logger.info("Search exhausted %d rungs for %r - %r with no results", len(rungs), artist, title or album)
+        return []
 
     def evaluate_and_rank(
         self,
@@ -543,7 +591,7 @@ class AcquisitionCoordinator:
         profile = _to_quality_profile(profile_dict)
 
         # 2. Search indexers & slskd
-        candidates = self.search_all_indexers(artist=artist, title=title, album=album, db=db)
+        candidates = self.search_with_fallback(artist, title, album, db)
 
         # 3. Evaluate and rank (protocol preference comes from the delay profile that applies to this artist)
         tags = delay_gate.artist_tags(db, artist)
