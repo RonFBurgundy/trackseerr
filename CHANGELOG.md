@@ -13,6 +13,8 @@ heading becomes the version and date.
 
 ### Added
 
+- Indexer priority (1–50): breaks ties between otherwise equal releases, so a preferred indexer's copy wins; a better release from a lower-priority indexer still wins. Soulseek results use their slskd client's priority.
+- Download client priority (1–50) and an Enabled switch: grabs go to the highest-priority enabled client for their protocol, clients with equal priority take turns, and if a client can't take a grab the next one is tried (the failed client is skipped for 5 minutes).
 - Reject current release: from an album's or track's history, or from Manual Search, blocklist the release behind the current files and search for another; the current files stay until the replacement imports.
 - Manual Search has a History tab for the album or track, shows when the automatic search last ran and what it found, and flags releases that are blocklisted (with the reason and date), already downloading, or held by a delay profile.
 - Album and track history shows each release's name and quality, says what an upgrade replaced, and has a Releases filter for the download, import, replacement and blocklist trail.
@@ -50,6 +52,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Editing a download client or indexer no longer resets its priority or re-enables it.
 - slskd connection tests failed with HTTP 404 even with a valid API key; slskd now connects with its URL and API key only.
 - qBittorrent 5 logins were reported as invalid credentials; a rejected login now also mentions the URL port, which must match qBittorrent's own WebUI port.
 - Download client tests say when the client could not be reached at all, instead of blaming the credentials, and failed tests are written to the TrackSeerr log.
