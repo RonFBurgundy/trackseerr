@@ -102,8 +102,14 @@ def build_query_ladder(artist: str, title: Optional[str], album: Optional[str]) 
     return rungs[:3]
 
 
-def matches_request(candidate_title: str, title: Optional[str], album: Optional[str]) -> bool:
-    """Relevance gate for fallback rungs: the candidate must contain the title core, and any requested remixer."""
+def matches_request(candidate_text: str, artist: str, title: Optional[str], album: Optional[str]) -> bool:
+    """Relevance gate for fallback rungs: the candidate must name the artist, contain the title core, and any requested remixer."""
+    candidate_title = candidate_text
+    if (artist or "").strip() and not (
+        phrase_score(primary_artist(artist), candidate_text) >= _MIN_RELEVANCE
+        or phrase_score(artist, candidate_text) >= _MIN_RELEVANCE
+    ):
+        return False
     source = title or album or ""
     target = title_core(source)
     if not target or phrase_score(target, candidate_title) < _MIN_RELEVANCE:

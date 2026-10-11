@@ -224,6 +224,17 @@ def test_search_with_fallback_filters_irrelevant_on_fallback_rungs():
     assert m.call_count == 3
 
 
+def test_search_with_fallback_uses_slskd_path_for_artist():
+    slskd = AcquisitionSearchResult(
+        download_id="u1", title="In the Air (Mord Fustang Remix)", artist="", item_type="track", source="slskd",
+        protocol="soulseek",
+        extra={"filename": "Music\\Morgan Page\\Remixes\\03 In the Air (Mord Fustang Remix).flac"},
+    )
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", side_effect=[[], [slskd]]):
+        out = AcquisitionCoordinator().search_with_fallback(_MP_ARTIST, _MP_TITLE, None, MagicMock())
+    assert out == [slskd]
+
+
 def test_search_with_fallback_rung1_unfiltered():
     odd = _result("Totally Unrelated Name")
     with patch.object(AcquisitionCoordinator, "search_all_indexers", return_value=[odd]) as m:

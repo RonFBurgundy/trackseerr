@@ -333,6 +333,14 @@ class AcquisitionCoordinator:
 
         return _apply_blocklist(db, all_results, include_blocklisted)
 
+    @staticmethod
+    def _candidate_text(result: AcquisitionSearchResult) -> str:
+        """Result title plus the slskd filename (its path carries the artist folder) when present."""
+        extra = result.extra
+        if isinstance(extra, dict) and extra.get("filename"):
+            return f"{result.title} {extra['filename']}"
+        return result.title
+
     def search_with_fallback(
         self,
         artist: str,
@@ -351,7 +359,7 @@ class AcquisitionCoordinator:
             results = self.search_all_indexers(artist=r_artist, title=r_title, album=r_album, db=db)
             found = len(results)
             if number > 1:
-                results = [r for r in results if matches_request(r.title, title, album)]
+                results = [r for r in results if matches_request(self._candidate_text(r), artist, title, album)]
             logger.info(
                 "Search rung %d/%d artist=%r title=%r album=%r -> %d results (%d after relevance) in %.1fs",
                 number, len(rungs), r_artist, r_title, r_album, found, len(results), time.monotonic() - started,

@@ -64,11 +64,21 @@ def test_build_query_ladder_album_request():
 
 
 def test_matches_request_requires_remixer():
-    assert matches_request("Morgan Page - In The Air (Mord Fustang Remix) [2011] FLAC", MP_TITLE, None)
-    assert not matches_request("Morgan Page - In The Air (Original Mix)", MP_TITLE, None)
-    assert not matches_request("Completely Different Song Name", MP_TITLE, None)
+    assert matches_request("Morgan Page - In The Air (Mord Fustang Remix) [2011] FLAC", "Morgan Page", MP_TITLE, None)
+    assert not matches_request("Morgan Page - In The Air (Original Mix)", "Morgan Page", MP_TITLE, None)
+    assert not matches_request("Completely Different Song Name", "Morgan Page", MP_TITLE, None)
 
 
 def test_matches_request_original_rejects_remix():
-    assert matches_request("Morgan Page - In The Air [FLAC]", "In the Air", None)
-    assert not matches_request("Morgan Page - In The Air (Someone Remix)", "In the Air", None)
+    assert matches_request("Morgan Page - In The Air [FLAC]", "Morgan Page", "In the Air", None)
+    assert not matches_request("Morgan Page - In The Air (Someone Remix)", "Morgan Page", "In the Air", None)
+
+
+def test_matches_request_rejects_other_artist():
+    artist = "Earth, Wind & Fire"
+    assert not matches_request("Taylor Swift - September (2023) FLAC", artist, "September", None)
+    assert matches_request("Earth Wind & Fire - September [1978] FLAC", artist, "September", None)
+
+
+def test_matches_request_empty_artist_skips_artist_check():
+    assert matches_request("Taylor Swift - September (2023) FLAC", "", "September", None)
