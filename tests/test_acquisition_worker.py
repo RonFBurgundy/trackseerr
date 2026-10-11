@@ -521,9 +521,14 @@ def test_worker_rejects_target_escaping_root_folder(test_db, workspace_dirs):
 # ---------------------------------------------------------------------------
 # slskd stall detection
 # ---------------------------------------------------------------------------
-def _seed_slskd_row(db, driver_type, created_min_ago, progress=0.0, moved_min_ago=None, status="queued"):
+def _seed_slskd_row(
+    db, driver_type, created_min_ago, progress=0.0, moved_min_ago=None, status="queued", extra_settings_json=None
+):
     db.create_download_client(
-        DownloadClientConfig(id="cl-1", name="Client", driver_type=driver_type, host_url="http://slskd:5030")
+        DownloadClientConfig(
+            id="cl-1", name="Client", driver_type=driver_type, host_url="http://slskd:5030",
+            extra_settings_json=extra_settings_json,
+        )
     )
     db.create_active_download(
         ActiveDownload(
@@ -623,3 +628,28 @@ def test_slskd_stalled_not_cancelled_twice(test_db, tmp_path):
     driver, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0})
     assert row["status"] == DownloadStatus.FAILED.value
     assert driver.cancel.call_count == 1
+
+
+def test_slskd_remote_state_persisted(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.SLSKD, 5)
+    _, row = _poll_slskd(
+        test_db, tmp_path, {"status": "queued", "progress": 0.0, "remote_state": "Queued, Remotely"}
+    )
+    assert row["remote_state"] == "Queued, Remotely"
+
+
+def test_slskd_client_timeout_overrides_env(test_db, tmp_path):
+    _seed_slskd_row(
+        test_db, DownloadDriverType.SLSKD, 45, extra_settings_json='{"queue_timeout_minutes": 60}'
+    )
+    driver, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0})
+    assert row["status"] != DownloadStatus.FAILED.value
+    driver.cancel.assert_not_called()
+
+
+@pytest.mark.parametrize("extra", ["not json", '{"queue_timeout_minutes": -5}', '{"queue_timeout_minutes": "x"}', "[1]"])
+def test_slskd_invalid_client_timeout_falls_back(test_db, tmp_path, extra):
+    _seed_slskd_row(test_db, DownloadDriverType.SLSKD, 45, extra_settings_json=extra)
+    driver, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0})
+    assert row["status"] == DownloadStatus.FAILED.value
+    driver.cancel.assert_called_once()

@@ -6,6 +6,7 @@ paths via the token template engine, performs atomic file moves with
 collision resolution into /music, and triggers Plex library update pings.
 """
 
+import json
 import logging
 import os
 import sqlite3
@@ -90,13 +91,13 @@ def _minutes_since(stamp: Any, now: datetime) -> Optional[float]:
     return (now - then).total_seconds() / 60.0
 
 
-def _slskd_stall_reason(item: dict[str, Any], status_dict: dict[str, Any], now: datetime) -> Optional[str]:
+def _slskd_stall_reason(
+    item: dict[str, Any], status_dict: dict[str, Any], now: datetime, limits: dict[str, int]
+) -> Optional[str]:
     """Return why a Soulseek transfer should be failed as stuck, or None.
 
-    Env knobs (minutes, read at call time):
-    SLSKD_QUEUE_TIMEOUT_MINUTES (default 30) queued/requested with no progress;
-    SLSKD_STALL_MINUTES (default 15) in progress with no byte movement;
-    SLSKD_MISSING_MINUTES (default 10) transfer absent from slskd.
+    ``limits`` (minutes) comes from ``_slskd_limits``: ``queue`` is queued/requested with no progress,
+    ``stall`` is in progress with no byte movement, ``missing`` is the transfer absent from slskd.
     """
     created_age = _minutes_since(item.get("created_at"), now)
     moved_age = _minutes_since(item.get("progress_updated_at") or item.get("created_at"), now)
@@ -104,32 +105,77 @@ def _slskd_stall_reason(item: dict[str, Any], status_dict: dict[str, Any], now: 
     progress = float(status_dict.get("progress") or 0.0)
 
     if status_dict.get("missing"):
-        limit = _slskd_minutes("SLSKD_MISSING_MINUTES", 10)
+        limit = limits["missing"]
         if created_age is not None and created_age > limit:
             return "Transfer disappeared from slskd"
         return None
     if status == DownloadStatus.QUEUED.value and progress == 0.0:
-        limit = _slskd_minutes("SLSKD_QUEUE_TIMEOUT_MINUTES", 30)
+        limit = limits["queue"]
         if moved_age is not None and moved_age > limit:
             remote = status_dict.get("remote_state") or "queued"
             return f"Peer never started the transfer ({remote}) after {limit} min"
         return None
     if status == DownloadStatus.DOWNLOADING.value and progress == float(item.get("progress") or 0.0):
-        limit = _slskd_minutes("SLSKD_STALL_MINUTES", 15)
+        limit = limits["stall"]
         if moved_age is not None and moved_age > limit:
             return f"Transfer stalled at {progress:.0f}% for {limit} min"
     return None
 
 
-def _fail_if_slskd_stalled(driver: Any, item: dict[str, Any], status_dict: dict[str, Any], lookup: str) -> dict[str, Any]:
+def _slskd_limits(client_config: dict[str, Any]) -> dict[str, int]:
+    """Stall limits in minutes: the client's ``extra_settings_json`` overrides, else the env knobs, else defaults.
+
+    Client keys: ``queue_timeout_minutes``, ``stall_minutes``, ``missing_minutes`` (positive ints).
+    Env: SLSKD_QUEUE_TIMEOUT_MINUTES (30), SLSKD_STALL_MINUTES (15), SLSKD_MISSING_MINUTES (10).
+    """
+    limits = {
+        "queue": _slskd_minutes("SLSKD_QUEUE_TIMEOUT_MINUTES", 30),
+        "stall": _slskd_minutes("SLSKD_STALL_MINUTES", 15),
+        "missing": _slskd_minutes("SLSKD_MISSING_MINUTES", 10),
+    }
+    raw = client_config.get("extra_settings_json")
+    if not raw:
+        return limits
+    try:
+        extra = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError) as exc:
+        logger.warning("Invalid extra_settings_json on slskd client %s; using default timeouts: %s", client_config.get("name"), exc)
+        return limits
+    if not isinstance(extra, dict):
+        return limits
+    for key, name in (("queue_timeout_minutes", "queue"), ("stall_minutes", "stall"), ("missing_minutes", "missing")):
+        value = extra.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            limits[name] = value
+        elif value is not None:
+            logger.warning("Ignoring invalid %s=%r on slskd client %s", key, value, client_config.get("name"))
+    return limits
+
+
+def _fail_if_slskd_stalled(
+    driver: Any, item: dict[str, Any], status_dict: dict[str, Any], lookup: str, client_config: dict[str, Any]
+) -> dict[str, Any]:
     """Cancel a stuck Soulseek transfer and return a FAILED status dict; otherwise return ``status_dict`` unchanged."""
-    reason = _slskd_stall_reason(item, status_dict, datetime.now(timezone.utc))
+    reason = _slskd_stall_reason(item, status_dict, datetime.now(timezone.utc), _slskd_limits(client_config))
     if not reason:
         return status_dict
     logger.info("slskd download %s stalled: %s", item["id"], reason)
     if not driver.cancel(lookup):
         logger.warning("Could not cancel stalled slskd transfer %s", lookup)
     return {**status_dict, "status": DownloadStatus.FAILED.value, "error_message": reason, "cancelled": True}
+
+
+def _check_slskd_status(
+    db: Database, driver: Any, item: dict[str, Any], status_dict: dict[str, Any], lookup: str,
+    client_config: dict[str, Any],
+) -> dict[str, Any]:
+    """Applies stall detection to a Soulseek status and stores the peer's remote transfer state."""
+    status_dict = _fail_if_slskd_stalled(driver, item, status_dict, lookup, client_config)
+    try:
+        db.set_download_remote_state(str(item["id"]), status_dict.get("remote_state"))
+    except sqlite3.Error as exc:
+        logger.warning("Could not store remote state for %s: %s", item["id"], exc)
+    return status_dict
 
 
 class AcquisitionWorker(ImportPipelineMixin):
@@ -557,7 +603,7 @@ class AcquisitionWorker(ImportPipelineMixin):
 
         is_slskd = str(client_config.get("driver_type")).lower() == "slskd"
         if is_slskd:
-            status_dict = _fail_if_slskd_stalled(driver, item, status_dict, target_lookup)
+            status_dict = _check_slskd_status(db, driver, item, status_dict, target_lookup, client_config)
 
         cur_status = status_dict.get("status", DownloadStatus.DOWNLOADING.value).lower()
         progress = float(status_dict.get("progress") or 0.0)

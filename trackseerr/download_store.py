@@ -607,6 +607,15 @@ class DownloadStoreMixin:
             self.conn.commit()
             return cur.rowcount > 0
 
+    def set_download_remote_state(self, download_id: str, state: Optional[str]) -> None:
+        """Stores the remote peer-side transfer state (Soulseek); writes only when the value changed."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE active_downloads SET remote_state = ? WHERE id = ? AND remote_state IS NOT ?",
+                (state, str(download_id), state),
+            )
+            self.conn.commit()
+
     def update_download_status(
         self,
         download_id: str,
