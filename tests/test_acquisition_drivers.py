@@ -164,6 +164,14 @@ _SLSKD_BUSY = {"isComplete": False, "state": "InProgress"}
 _SLSKD_MOD = "trackseerr.clients.acquisition.slskd"
 
 
+@pytest.fixture(autouse=True)
+def _reset_slskd_pacing():
+    import trackseerr.clients.acquisition.slskd as mod
+    mod._last_search_at = 0.0
+    yield
+    mod._last_search_at = 0.0
+
+
 def _slskd_search(driver, gets, post=None, delete=None, **kw):
     post = post or _slskd_resp(200, {"id": "search-uuid-123"})
     delete = delete or _slskd_resp(204)
@@ -182,7 +190,7 @@ def test_slskd_search_music():
     )
     assert len(results) == 1
     r = results[0]
-    assert r.title == "01 - Everything In Its Right Place"
+    assert r.title == "01 - Everything In Its Right Place [FLAC 16bit]"
     assert "Everything In Its Right Place" in r.extra["filename"]
     assert r.source == "slskd"
     assert r.format == "flac"
@@ -234,7 +242,7 @@ def test_slskd_search_deletes_even_when_responses_fail():
 
 
 def test_slskd_search_deadline_stops_polling():
-    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey", min_search_interval=0)
 
     def gets():
         while True:
@@ -260,6 +268,92 @@ def test_slskd_search_logs_summary(caplog):
     line = next(r.getMessage() for r in caplog.records if "finished" in r.getMessage())
     assert "Radiohead Kid A" in line
     assert "responses=1" in line and "files=2" in line and "audio_kept=1" in line
+
+
+@pytest.mark.parametrize(
+    "f,expected",
+    [
+        ({"extension": "flac", "bitDepth": 24, "sampleRate": 96000}, "FLAC 24bit"),
+        ({"extension": "flac", "bitDepth": 16, "sampleRate": 44100}, "FLAC 16bit"),
+        ({"extension": "flac"}, "FLAC 16bit"),
+        ({"extension": "mp3", "bitRate": 320}, "MP3 320"),
+        ({"extension": "mp3", "bitRate": 245, "isVariableBitRate": True}, "MP3 V0"),
+        ({"extension": "mp3", "bitRate": 190, "isVariableBitRate": True}, "MP3 V2"),
+        ({"extension": "m4a", "bitRate": 256}, "AAC 256"),
+        ({"extension": "m4a", "bitDepth": 16, "bitRate": 900}, "ALAC"),
+        ({"extension": "aac", "bitRate": 256}, "AAC 256"),
+        ({"extension": "ogg", "bitRate": 192}, "OGG Vorbis"),
+        ({"extension": "opus"}, "Opus"),
+    ],
+)
+def test_slskd_quality_tag_parses(f, expected):
+    from trackseerr.quality import parse_release_title
+    tag = SlskdDriver._quality_tag(f)
+    assert parse_release_title(f"Song [{tag}]").quality == expected
+
+
+def _peer(name="p", files=None, **kw):
+    files = files or [{"filename": "a\\\\b\\\\01 Song.flac", "size": 1, "extension": "flac"}]
+    return {"username": name, "files": files, **kw}
+
+
+def _search_peers(driver, peers):
+    results, *_ = _slskd_search(driver, [_slskd_resp(200, _SLSKD_DONE), _slskd_resp(200, peers)])
+    return results
+
+
+def test_slskd_result_title_has_quality_tag_and_extra():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="k")
+    f = {"filename": "x\\\\03 In the Air.flac", "size": 9, "extension": "flac", "bitDepth": 24,
+         "sampleRate": 96000, "length": 245}
+    peers = [_peer("u", [f], hasFreeUploadSlot=True, queueLength=3, uploadSpeed=1000)]
+    r = _search_peers(driver, peers)[0]
+    assert r.title.endswith("[FLAC 24bit 96kHz]")
+    assert r.extra["bit_depth"] == 24 and r.extra["sample_rate"] == 96000
+    assert r.extra["length_seconds"] == 245
+    assert r.extra["peer"] == {"has_free_slot": True, "queue_length": 3, "upload_speed": 1000}
+
+
+def test_slskd_filters_long_queue_peer(caplog):
+    driver = SlskdDriver("http://slskd.local:5030", api_key="k", max_peer_queue=10)
+    with caplog.at_level("INFO", logger=_SLSKD_MOD):
+        r = _search_peers(driver, [_peer("slow", queueLength=11), _peer("ok", queueLength=10)])
+    assert [x.extra["username"] for x in r] == ["ok"]
+    assert any("peers_filtered=1" in rec.getMessage() for rec in caplog.records)
+
+
+def test_slskd_filters_slow_peer():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="k", min_upload_speed_kbps=1000)
+    r = _search_peers(driver, [_peer("slow", uploadSpeed=50_000), _peer("fast", uploadSpeed=500_000)])
+    assert [x.extra["username"] for x in r] == ["fast"]
+
+
+def test_slskd_filters_ignored_user_case_insensitive():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="k", ignored_users=["BadUser"])
+    r = _search_peers(driver, [_peer("baduser"), _peer("gooduser")])
+    assert [x.extra["username"] for x in r] == ["gooduser"]
+
+
+def test_slskd_search_paces_consecutive_searches():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="k", min_search_interval=5.0)
+    with patch(f"{_SLSKD_MOD}.time.monotonic", return_value=100.0):
+        _, _, _, _, sl1 = _slskd_search(driver, [_slskd_resp(200, _SLSKD_DONE), _slskd_resp(200, [])])
+        _, _, _, _, sl2 = _slskd_search(driver, [_slskd_resp(200, _SLSKD_DONE), _slskd_resp(200, [])])
+    assert not any(c.args == (5.0,) for c in sl1.call_args_list)
+    assert any(c.args[0] == pytest.approx(5.0) for c in sl2.call_args_list)
+
+
+def test_get_acquisition_driver_passes_slskd_peer_settings():
+    extra = {"max_peer_queue": 7, "min_upload_speed_kbps": 256, "ignored_users": ["A", "b"],
+             "search_timeout": 20, "min_search_interval": 2}
+    cfg = {"driver_type": "slskd", "host_url": "http://slskd.local:5030", "api_key": "k",
+           "extra_settings_json": json.dumps(extra)}
+    d = get_acquisition_driver(cfg)
+    assert (d.max_peer_queue, d.min_upload_speed_kbps, d.search_timeout, d.min_search_interval) == (7, 256, 20.0, 2.0)
+    assert d.ignored_users == {"a", "b"}
+    cfg["extra_settings_json"] = json.dumps({"ignored_users": "Foo, bar", "max_peer_queue": "x"})
+    d = get_acquisition_driver(cfg)
+    assert d.ignored_users == {"foo", "bar"} and d.max_peer_queue == 50
 
 
 def test_slskd_download_and_status():
