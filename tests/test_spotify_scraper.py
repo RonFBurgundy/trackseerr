@@ -166,3 +166,31 @@ def test_scraper_fetch_all_playlists(scraper):
         assert playlists[0].name == "Batch Playlist - Scraped"
         assert len(playlists[0].tracks) == 1
         assert playlists[0].tracks[0].title == "Track A"
+
+
+def _entity(track_title):
+    return {"title": "X", "trackList": [{"title": track_title, "subtitle": "B"}]}
+
+
+def test_cache_hit_within_ttl(scraper):
+    with patch.object(scraper, "_fetch_embed", return_value=_entity("A")) as fetch, patch(
+        "trackseerr.clients.spotify_scraper.time.monotonic", side_effect=[1000.0, 1100.0]
+    ):
+        first = scraper._load_playlist("pl1")
+        second = scraper._load_playlist("pl1")
+    assert fetch.call_count == 1
+    assert second is first
+
+
+def test_cache_expires_after_ttl(scraper):
+    with patch.object(
+        scraper, "_fetch_embed", side_effect=[_entity("A"), _entity("New")]
+    ) as fetch, patch(
+        "trackseerr.clients.spotify_scraper.time.monotonic",
+        side_effect=[1000.0, 1400.0, 1400.0],
+    ):
+        first = scraper._load_playlist("pl1")
+        second = scraper._load_playlist("pl1")
+    assert fetch.call_count == 2
+    assert [t.title for t in first["tracks"]] == ["A"]
+    assert [t.title for t in second["tracks"]] == ["New"]

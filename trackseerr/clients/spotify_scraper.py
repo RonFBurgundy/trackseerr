@@ -8,6 +8,7 @@ import base64
 import json
 import logging
 import re
+import time
 import urllib.request
 from typing import Any, List, Optional
 
@@ -25,9 +26,10 @@ USER_AGENT = (
 class SpotifyWebScraper:
     """Scrapes public Spotify playlist metadata and tracks without requiring API credentials."""
 
-    def __init__(self, timeout: int = 15) -> None:
+    def __init__(self, timeout: int = 15, cache_ttl_seconds: float = 300.0) -> None:
         self.timeout = timeout
-        self._cache: dict[str, dict[str, Any]] = {}
+        self.cache_ttl_seconds = cache_ttl_seconds
+        self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
         logger.info("Initialized keyless SpotifyWebScraper client")
 
     def _fetch_embed(self, playlist_id: str) -> Optional[dict[str, Any]]:
@@ -85,8 +87,11 @@ class SpotifyWebScraper:
 
     def _load_playlist(self, playlist_id: str, suffix: str = "") -> Optional[dict[str, Any]]:
         """Load and cache playlist metadata and tracks from embed or public page."""
-        if playlist_id in self._cache:
-            return self._cache[playlist_id]
+        entry = self._cache.get(playlist_id)
+        if entry is not None:
+            if time.monotonic() - entry[0] < self.cache_ttl_seconds:
+                return entry[1]
+            del self._cache[playlist_id]
 
         name: Optional[str] = None
         desc: str = ""
@@ -156,7 +161,7 @@ class SpotifyWebScraper:
             "poster": poster_url,
             "tracks": tracks,
         }
-        self._cache[playlist_id] = cached
+        self._cache[playlist_id] = (time.monotonic(), cached)
         logger.info(
             "Successfully scraped Spotify playlist '%s' (%d tracks) without API key",
             playlist_name,
