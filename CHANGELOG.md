@@ -36,6 +36,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Soulseek album requests now grab a whole folder from one peer instead of a single file. The folder must have the album's track count (up to 2 bonus tracks), at least 80% of its track titles, and a matching total length when the album's tracks are known. Multi-disc albums are not grabbed from Soulseek yet.
 - Soulseek: among files of the same quality, peers with a free upload slot, then a shorter queue, then a faster connection are preferred; peers with a queue over 50 are skipped; files whose length is far from the track's known length are skipped (catches the wrong mix or edit); searches to slskd are spaced at least 5 seconds apart.
 - Automatic searches that find nothing retry with simpler queries: the main artist only, without "feat." credits, then the bare title with any remix name kept. Results from these retries must match the artist, title and remixer, so a remix request never grabs the original mix. Every indexer and Soulseek search is now logged with its query, result count and time.
 - Download clients must pass a connection test before they can be saved, and the add/edit form has its own Test button.
