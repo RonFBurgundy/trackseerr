@@ -28,6 +28,8 @@ export interface FlatListColumn<T> {
   mobile?: MobileRole;
   /** Shown only from the `xl` breakpoint up on desktop; the `lg` grid drops it to keep the core columns readable. */
   xlOnly?: boolean;
+  /** Desktop: one line with ellipsis instead of wrapping; mobile is unchanged. */
+  truncate?: boolean;
   align?: 'left' | 'right';
 }
 
@@ -193,6 +195,15 @@ function CardInner<T>({
   );
 }
 
+/** Desktop one-line cell with ellipsis; a `title` tooltip carries the full text when the cell renders a string. */
+function TruncatedCell({ value }: { value: React.ReactNode }): React.ReactElement {
+  return (
+    <div className="min-w-0 break-words lg:truncate" title={typeof value === 'string' ? value : undefined}>
+      {value}
+    </div>
+  );
+}
+
 function RowInner<T>(props: RowProps<T>) {
   const { item, rowKey, columns, selectable, selected, onToggle, rowActions, tone, card } = props;
   const rowUid = useId();
@@ -239,7 +250,11 @@ function RowInner<T>(props: RowProps<T>) {
               {col.label}
             </span>
           )}
-          <div className="min-w-0 break-words">{col.render(item)}</div>
+          {col.truncate ? (
+            <TruncatedCell value={col.render(item)} />
+          ) : (
+            <div className="min-w-0 break-words">{col.render(item)}</div>
+          )}
         </div>
       ))}
       {rowActions && (

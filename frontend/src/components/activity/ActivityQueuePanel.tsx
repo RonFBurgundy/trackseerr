@@ -133,9 +133,9 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
 
   const columns = useMemo<FlatListColumn<ActivityQueueRecord>[]>(
     () => [
-      { key: 'artist', label: 'Artist', sortable: true, width: 'minmax(0,1.1fr)', mobile: 'sub', render: (r) => orDash(r.artist) },
-      { key: 'album', label: 'Album', width: 'minmax(0,1.1fr)', mobile: 'sub', render: (r) => orDash(r.album) },
-      { key: 'title', label: 'Title', sortable: true, width: 'minmax(0,1.2fr)', mobile: 'title', render: (r) => orDash(r.title) },
+      { key: 'artist', label: 'Artist', sortable: true, width: 'minmax(120px,1fr)', truncate: true, mobile: 'sub', render: (r) => orDash(r.artist) },
+      { key: 'album', label: 'Album', width: 'minmax(120px,1fr)', truncate: true, xlOnly: true, mobile: 'sub', render: (r) => orDash(r.album) },
+      { key: 'title', label: 'Title', sortable: true, width: 'minmax(140px,1.4fr)', truncate: true, mobile: 'title', render: (r) => orDash(r.title) },
       { key: 'quality', label: 'Quality', width: '80px', mobile: 'meta', render: (r) => orDash(r.quality) },
       { key: 'protocol', label: 'Protocol', width: '70px', xlOnly: true, hideOnMobile: true, render: (r) => orDash(r.protocol) },
       { key: 'indexer', label: 'Indexer', width: '100px', xlOnly: true, hideOnMobile: true, render: (r) => orDash(r.indexer) },
@@ -144,7 +144,7 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
         key: 'progress',
         label: 'Progress',
         sortable: true,
-        width: '120px',
+        width: '110px',
         mobile: 'meta',
         render: (r) => <ProgressMeter value={r.progress} tone={r.stalled ? 'warning' : 'default'} />,
       },
@@ -153,6 +153,7 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
         label: 'Size',
         sortable: true,
         width: '100px',
+        xlOnly: true,
         mobile: 'hide',
         render: (r) => (
           <span title="size left / total">
@@ -161,8 +162,8 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
         ),
       },
       { key: 'eta', label: 'ETA', width: '64px', mobile: 'meta', render: (r) => formatEta(r.eta_seconds) },
-      { key: 'status', label: 'Status', sortable: true, width: '110px', mobile: 'end', render: (r) => <StatusCell record={r} /> },
-      { key: 'added_at', label: 'Added', sortable: true, width: '140px', mobile: 'hide', render: (r) => formatDateTime(r.added_at) },
+      { key: 'status', label: 'Status', sortable: true, width: '100px', mobile: 'end', render: (r) => <StatusCell record={r} /> },
+      { key: 'added_at', label: 'Added', sortable: true, width: '120px', xlOnly: true, mobile: 'hide', render: (r) => formatDateTime(r.added_at) },
     ],
     []
   );
@@ -258,7 +259,7 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
         sortDir={sortDir}
         onSortChange={onSortChange}
         rowActions={rowActions}
-        actionsWidth="230px"
+        actionsWidth="120px"
         mobileLayout="compact"
         rowTone={rowTone}
         emptyMessage="The queue is empty."
