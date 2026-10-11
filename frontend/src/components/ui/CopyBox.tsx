@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
+import { copyText } from '@/lib/clipboard';
 import { TapeDeckButton } from './TapeDeckButton';
 
 export interface CopyBoxProps {
@@ -19,13 +20,7 @@ export const CopyBox: React.FC<CopyBoxProps> = ({
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setState('copied');
-    } catch (err: unknown) {
-      console.warn('Clipboard write failed', err);
-      setState('failed');
-    }
+    setState((await copyText(value)) ? 'copied' : 'failed');
     window.setTimeout(() => setState('idle'), 2000);
   };
 

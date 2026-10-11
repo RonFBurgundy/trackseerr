@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Copy, Eye, EyeOff, Loader2, RotateCw, Save } from 'lucide-react';
 import { TapeDeckButton, MachinedCard, ActionBar } from '@/components/ui';
 import type { GeneralSettings } from '@/types/models';
-import { getApiKey, regenerateApiKey, updateGeneralSettings } from '@/services/settingsService';
+import { copyText } from '@/lib/clipboard';
+import { getApiKey,regenerateApiKey, updateGeneralSettings } from '@/services/settingsService';
 import { inputClass, labelClass } from './formClasses';
 
 export interface GeneralPanelProps {
@@ -65,13 +66,13 @@ export const GeneralPanel: React.FC<GeneralPanelProps> = ({
 
   const handleCopy = async () => {
     if (!apiKey) return;
-    try {
-      await navigator.clipboard.writeText(apiKey);
+    if (await copyText(apiKey)) {
       setCopied(true);
       onToast('API key copied to clipboard');
       window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      onToast('Failed to copy API key', 'error');
+    } else {
+      setShowKey(true);
+      onToast('Copy blocked by the browser — key revealed, select it to copy', 'error');
     }
   };
 
@@ -134,15 +135,26 @@ export const GeneralPanel: React.FC<GeneralPanelProps> = ({
           <div className="space-y-2">
             <label htmlFor="general-api-key" className={labelClass}>API Key</label>
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-              <input
-                id="general-api-key"
-                name="api_key"
-                type={showKey ? 'text' : 'password'}
-                value={isLoadingKey ? 'Loading...' : apiKey}
-                readOnly
-                aria-label="API Key"
-                className={`${inputClass} flex-1 font-mono tracking-wider`}
-              />
+              {showKey && !isLoadingKey ? (
+                <code
+                  id="general-api-key"
+                  aria-label="API Key"
+                  style={{ WebkitUserSelect: 'text' }}
+                  className="flex-1 min-w-0 bg-[var(--bg-canvas)] border border-[var(--border-default)] rounded-[3px] px-3 py-2 text-xs font-mono text-[var(--text-primary)] select-all select-text break-all"
+                >
+                  {apiKey}
+                </code>
+              ) : (
+                <input
+                  id="general-api-key"
+                  name="api_key"
+                  type="password"
+                  value={isLoadingKey ? 'Loading...' : apiKey}
+                  readOnly
+                  aria-label="API Key"
+                  className={`${inputClass} flex-1 font-mono tracking-wider`}
+                />
+              )}
               <div className="flex items-center gap-2 shrink-0">
                 <TapeDeckButton
                   type="button"

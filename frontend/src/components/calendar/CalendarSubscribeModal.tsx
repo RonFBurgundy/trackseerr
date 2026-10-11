@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Check, Copy, KeyRound } from 'lucide-react';
 import { ObsidianModal, TapeDeckButton } from '@/components/ui';
 import { getCalendarFeedUrl } from '@/services/calendarService';
+import { copyText } from '@/lib/clipboard';
 
 export interface CalendarSubscribeModalProps {
   isOpen: boolean;
@@ -13,12 +14,9 @@ export const CalendarSubscribeModal: React.FC<CalendarSubscribeModalProps> = ({ 
   const feedUrl = getCalendarFeedUrl();
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(feedUrl);
+    if (await copyText(feedUrl)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // fallback
     }
   };
 

@@ -7,6 +7,7 @@ import type {
   ScrobbleServerConfigBody,
 } from '@/types/models';
 import { MachinedCard, TapeDeckButton, TactileSwitch, ObsidianModal } from '@/components/ui';
+import { copyText } from '@/lib/clipboard';
 
 const inputClass =
   'w-full bg-[#0d0d0d] border border-[#2a2a2a] rounded-[3px] px-3 py-2 text-sm text-white focus:outline-none focus:border-[#e5a00d] disabled:opacity-50';
@@ -69,11 +70,10 @@ export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
 
   const handleCopy = async () => {
     if (!webhookUrl) return;
-    try {
-      await navigator.clipboard.writeText(webhookUrl);
+    if (await copyText(webhookUrl)) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
-    } catch {
+    } else {
       setCopied(false);
     }
   };
