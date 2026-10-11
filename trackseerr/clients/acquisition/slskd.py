@@ -22,42 +22,15 @@ class SlskdDriver(AcquisitionDriver):
         self,
         host_url: str,
         api_key: Optional[str] = None,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
         download_dir: Optional[str] = None,
         timeout: float = 10.0,
     ) -> None:
         self.host_url = host_url.rstrip("/")
         self.api_key = (api_key or "").strip()
-        self.username = username
-        self.password = password
         # Explicit override only; otherwise the completed-downloads folder is read from slskd's own options.
         self.download_dir = (download_dir or "").strip() or None
         self.timeout = timeout
         self._downloads_root: Optional[str] = None
-        self._token: Optional[str] = None
-
-    def _session_token(self) -> Optional[str]:
-        """Logs in with username/password (when no API key is set) and caches the bearer token."""
-        if self.api_key or not (self.username and self.password):
-            return None
-        if self._token:
-            return self._token
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                resp = client.post(
-                    f"{self.host_url}/api/v0/session",
-                    json={"username": self.username, "password": self.password},
-                )
-                if resp.status_code != 200:
-                    logger.warning("slskd session login rejected (HTTP %d) at %s", resp.status_code, self.host_url)
-                    return None
-                token = resp.json().get("token")
-        except (httpx.HTTPError, ValueError, AttributeError) as e:
-            logger.warning("slskd session login failed at %s: %s", self.host_url, type(e).__name__)
-            return None
-        self._token = str(token) if token else None
-        return self._token
 
     def _headers(self) -> dict[str, str]:
         headers = {
@@ -66,10 +39,6 @@ class SlskdDriver(AcquisitionDriver):
         }
         if self.api_key:
             headers["X-API-KEY"] = self.api_key
-        else:
-            token = self._session_token()
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
         return headers
 
     def _read_downloads_root(self) -> Optional[str]:
@@ -138,9 +107,6 @@ class SlskdDriver(AcquisitionDriver):
         """Validates slskd connectivity and API credentials."""
         if not is_safe_service_url(self.host_url):
             return False, "Invalid or prohibited host URL (SSRF defense)"
-
-        if not self.api_key and self.username and self.password and self._session_token() is None:
-            return False, "Authentication failed: slskd rejected the username/password"
 
         auth_failed = "Authentication failed: invalid API key or credentials"
         try:

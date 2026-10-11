@@ -81,8 +81,8 @@ def _missing_credentials_message(
         return "Password is required for Deluge"
     if driver_type == "nzbget" and (not username or not password):
         return "Username and password are required for NZBGet"
-    if driver_type == "slskd" and not api_key and not (username and password):
-        return "slskd needs an API key or a username and password"
+    if driver_type == "slskd" and not api_key:
+        return "slskd needs an API key"
     return None
 
 

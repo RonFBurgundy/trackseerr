@@ -169,8 +169,7 @@ web:
 
 ```bash
 docker run -d --rm --name slskd-it -p 127.0.0.1:15030:5030 -v $PWD/slskd.yml:/app/slskd.yml:ro slskd/slskd:latest
-export SLSKD_IT_URL=http://127.0.0.1:15030 SLSKD_IT_API_KEY=testapikey0123456789abcdef \
-       SLSKD_IT_USER=webuser SLSKD_IT_PASSWORD=webpass123
+export SLSKD_IT_URL=http://127.0.0.1:15030 SLSKD_IT_API_KEY=testapikey0123456789abcdef
 RUN_INTEGRATION=1 pytest tests/integration/test_slskd_contract.py -q
 docker stop slskd-it
 ```

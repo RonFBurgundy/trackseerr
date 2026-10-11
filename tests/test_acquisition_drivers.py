@@ -120,17 +120,6 @@ def test_slskd_test_connection_404_reports_http():
     assert msg.startswith("HTTP 404")
 
 
-def test_slskd_test_connection_uses_bearer_when_no_key():
-    driver = SlskdDriver("http://slskd.local:5030", username="u", password="p")
-    with patch("httpx.Client.post", return_value=_slskd_resp(200, {"token": "jwt123"})), patch(
-        "httpx.Client.get", return_value=_slskd_resp(200, _SLSKD_APP)
-    ) as get:
-        ok, msg = driver.test_connection()
-    assert ok is True
-    assert get.call_args.args[0].endswith("/api/v0/application")
-    assert get.call_args.kwargs["headers"]["Authorization"] == "Bearer jwt123"
-
-
 def test_slskd_search_music():
     driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
 
@@ -548,27 +537,8 @@ def test_get_indexer_driver_factory():
 
 
 # ---------------------------------------------------------------------------
-# Auth fixes: slskd session login, qBittorrent CSRF/ban, SABnzbd API key probe
+# Auth fixes: qBittorrent CSRF/ban, SABnzbd API key probe
 # ---------------------------------------------------------------------------
-def test_slskd_session_login_bearer():
-    driver = SlskdDriver("http://slskd.local:5030", username="user", password="pw")
-    resp = MagicMock()
-    resp.status_code = 200
-    resp.json.return_value = {"token": "abc"}
-    with patch("httpx.Client.post", return_value=resp):
-        assert driver._headers()["Authorization"] == "Bearer abc"
-
-
-def test_slskd_session_login_rejected():
-    driver = SlskdDriver("http://slskd.local:5030", username="user", password="bad")
-    resp = MagicMock()
-    resp.status_code = 401
-    with patch("httpx.Client.post", return_value=resp):
-        ok, msg = driver.test_connection()
-    assert ok is False
-    assert "username/password" in msg
-
-
 def test_qbittorrent_login_sends_referer_and_handles_ban():
     driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "wrong")
     resp = MagicMock()
