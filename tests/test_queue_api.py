@@ -101,8 +101,7 @@ def test_download_clients_crud(app_and_client, test_db, test_config, seeded_user
         "name": "My Slskd",
         "driver_type": "slskd",
         "host_url": "http://192.168.1.100:5030",
-        "username": "user",
-        "password": "pwd",
+        "api_key": "slskd-key-1234567890",
         "priority": 2,
         "enabled": True,
     }
@@ -123,6 +122,7 @@ def test_download_clients_crud(app_and_client, test_db, test_config, seeded_user
         "name": "Updated Slskd",
         "driver_type": "slskd",
         "host_url": "http://192.168.1.100:5030",
+        "api_key": "slskd-key-1234567890",
         "priority": 1,
         "enabled": False,
     }
@@ -175,20 +175,19 @@ def test_download_clients_test_connection_endpoint(app_and_client, test_db, test
     test_payload = {
         "driver_type": "slskd",
         "host_url": "http://192.168.1.50:5030",
-        "username": "admin",
-        "password": "pwd",
+        "api_key": "slskd-key-1234567890",
     }
 
     with patch("trackseerr.api.routes.download_clients.get_acquisition_driver") as mock_factory:
         mock_driver = MagicMock()
-        mock_driver.test_connection.return_value = (True, "slskd 0.20.0 connected")
+        mock_driver.test_connection.return_value = (True, "slskd 0.26.1.0")
         mock_factory.return_value = mock_driver
 
         resp = client.post("/api/settings/download-clients/test", json=test_payload, headers=admin_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
-        assert "0.20.0" in data["message"]
+        assert "0.26.1.0" in data["message"]
 
 
 # ---------------------------------------------------------------------------
@@ -371,22 +370,22 @@ def test_queue_api(app_and_client, test_db, test_config, seeded_users):
 def test_download_client_masked_secret_round_trip(app_and_client, test_db, test_config, seeded_users):
     _, client = app_and_client
     h = _auth_headers(seeded_users["admin"], test_db, test_config)
-    base = {"name": "C", "driver_type": "slskd", "host_url": "http://192.168.1.100:5030", "username": "u"}
-    created = client.post("/api/settings/download-clients", json={**base, "password": "hunter2-secret-9999"}, headers=h).json()
-    masked = created["password"]
+    base = {"name": "C", "driver_type": "slskd", "host_url": "http://192.168.1.100:5030"}
+    created = client.post("/api/settings/download-clients", json={**base, "api_key": "hunter2-secret-9999"}, headers=h).json()
+    masked = created["api_key"]
     assert masked and masked != "hunter2-secret-9999"
 
     # Unchanged mask keeps the stored secret.
-    r = client.post("/api/settings/download-clients", json={**base, "id": created["id"], "password": masked}, headers=h)
+    r = client.post("/api/settings/download-clients", json={**base, "id": created["id"], "api_key": masked}, headers=h)
     assert r.status_code == 200, r.text
-    assert test_db.get_download_client(created["id"])["password"] == "hunter2-secret-9999"
+    assert test_db.get_download_client(created["id"])["api_key"] == "hunter2-secret-9999"
 
     # A half-edited placeholder is rejected, not silently reverted.
-    r = client.post("/api/settings/download-clients", json={**base, "id": created["id"], "password": "x" + masked}, headers=h)
+    r = client.post("/api/settings/download-clients", json={**base, "id": created["id"], "api_key": "x" + masked}, headers=h)
     assert r.status_code == 400
-    assert test_db.get_download_client(created["id"])["password"] == "hunter2-secret-9999"
+    assert test_db.get_download_client(created["id"])["api_key"] == "hunter2-secret-9999"
 
     # A new full value replaces it.
-    r = client.post("/api/settings/download-clients", json={**base, "id": created["id"], "password": "brand-new-pw"}, headers=h)
+    r = client.post("/api/settings/download-clients", json={**base, "id": created["id"], "api_key": "brand-new-key"}, headers=h)
     assert r.status_code == 200
-    assert test_db.get_download_client(created["id"])["password"] == "brand-new-pw"
+    assert test_db.get_download_client(created["id"])["api_key"] == "brand-new-key"
