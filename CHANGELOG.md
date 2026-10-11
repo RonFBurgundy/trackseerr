@@ -25,6 +25,7 @@ heading becomes the version and date.
 - Library filters: narrow artists, albums and tracks by genre (include or exclude), decade or year range, country, release type, solo or group, band size, year formed, popularity and tags, with new Formed, Year and Popularity sorts.
 - Artist facts: band type, current member count, years active and Deezer fan count are fetched for library artists on refresh.
 - Smart collections: playlists built from library filters, previewed live and pushed to your media server, either auto-updated on every sync or one-time; build them from Playlists, from a filtered Library view, or under Library → Collections.
+- Lidarr import report: every import saves a report comparing Lidarr's counts with what was imported, per artist, and listing anything skipped; download it from Settings → Library manager.
 
 ### Changed
 
@@ -43,6 +44,10 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Lidarr import: tracks are only monitored when their album and artist are monitored in Lidarr, so unmonitored albums no longer show up as missing after switching.
+- Missing-track counts skip unmonitored artists and match Lidarr's numbers, and artists with files on unmonitored albums no longer look complete when monitored tracks are missing.
+- Artist refresh no longer adds duplicate tracks when MusicBrainz spells a title differently from an imported track.
+- Tracks without a file on unmonitored albums show "Unmonitored" instead of "Missing".
 - Importing from Lidarr now links the music files you already have, so owned tracks no longer show as missing.
 - Importing from Lidarr keeps Lidarr's monitoring: only the albums you monitored there are monitored, the back catalog stays unmonitored, and re-running the import unmonitors albums Lidarr doesn't have.
 - Adding a playlist that another user already added now adds it to your playlists instead of failing.
