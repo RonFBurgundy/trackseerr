@@ -79,7 +79,8 @@ def test_user_cannot_take_over_playlist_via_create(tc, db, config, users):
     assert tc.put(f"/api/playlists/{SP_ID}/targets", json={"user_ids": ["u-alice", "u-bob", "u-admin"]}, headers=hadm).status_code == 200
 
     r = tc.post("/api/playlists", json={"url_or_id": SP_ID, "targets": ["u-bob"]}, headers=hb)
-    assert r.status_code == 404
+    assert r.status_code == 201  # subscribes to the existing row; never takes it over
+    assert r.json()["subscribed"] is True
     row = db.get_playlist(SP_ID)
     assert row["creator_id"] == "u-alice"
     assert db.get_playlist_targets(SP_ID) == ["u-admin", "u-alice", "u-bob"]

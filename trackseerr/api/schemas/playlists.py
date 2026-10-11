@@ -25,6 +25,7 @@ class PlaylistRecord(ApiModel):
     created_at: str
     updated_at: str
     targets: list[str]
+    subscribed: bool = False  # create only: the playlist already existed (added by another user) and the caller was subscribed to it
 
 
 class FeaturedChart(ApiModel):
