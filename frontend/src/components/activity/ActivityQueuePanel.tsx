@@ -1,11 +1,12 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { AlertTriangle, FolderInput, RotateCcw, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Ban, FolderInput, RotateCcw, Trash2, X } from 'lucide-react';
 import type { ActivityQueueRecord, ActivitySeeding, ListSortDir } from '@/types/activity';
 import { getActivityQueue, removeActivityQueueItem, retryActivityQueueItem } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
 import { pagedFetcher, useVirtualPagedList } from '@/hooks/useVirtualPagedList';
 import { usePolling } from '@/hooks/usePolling';
 import { TapeDeckButton } from '@/components/ui';
+import { SoulseekQueueDetail } from './SoulseekQueueDetail';
 import { ManualImportModal } from '@/components/manualImport';
 import type { ManualImportScope } from '@/types/manualImport';
 import {
@@ -50,6 +51,13 @@ const SeedingLine: React.FC<{ seeding: ActivitySeeding }> = ({ seeding }) => {
     </span>
   );
 };
+
+const TitleCell: React.FC<{ record: ActivityQueueRecord }> = ({ record }) => (
+  <span className="flex flex-col min-w-0">
+    <span className="truncate">{orDash(record.title)}</span>
+    {record.peer && <SoulseekQueueDetail record={record} />}
+  </span>
+);
 
 const StatusCell: React.FC<{ record: ActivityQueueRecord }> = ({ record }) => {
   const reason = record.stalled_reason || record.messages.join(' | ') || 'Stalled';
@@ -111,10 +119,10 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
   );
 
   const doRetry = useCallback(
-    async (id: string | number) => {
+    async (id: string | number, blocklistCurrent = false) => {
       setBusyId(id);
       try {
-        const res = await retryActivityQueueItem(id);
+        const res = await retryActivityQueueItem(id, blocklistCurrent ? { blocklist: true } : undefined);
         if (!res.success) {
           // Nothing was grabbed: the server keeps the stuck row, so there is nothing to refresh.
           onToast(res.message || 'No release found', 'error');
@@ -135,7 +143,7 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
     () => [
       { key: 'artist', label: 'Artist', sortable: true, width: 'minmax(120px,1fr)', truncate: true, mobile: 'sub', render: (r) => orDash(r.artist) },
       { key: 'album', label: 'Album', width: 'minmax(120px,1fr)', truncate: true, xlOnly: true, mobile: 'sub', render: (r) => orDash(r.album) },
-      { key: 'title', label: 'Title', sortable: true, width: 'minmax(140px,1.4fr)', truncate: true, mobile: 'title', render: (r) => orDash(r.title) },
+      { key: 'title', label: 'Title', sortable: true, width: 'minmax(140px,1.4fr)', truncate: true, mobile: 'title', render: (r) => <TitleCell record={r} /> },
       { key: 'quality', label: 'Quality', width: '80px', mobile: 'meta', render: (r) => orDash(r.quality) },
       { key: 'protocol', label: 'Protocol', width: '70px', xlOnly: true, hideOnMobile: true, render: (r) => orDash(r.protocol) },
       { key: 'indexer', label: 'Indexer', width: '100px', xlOnly: true, hideOnMobile: true, render: (r) => orDash(r.indexer) },
@@ -233,6 +241,16 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
             aria-label="Retry"
             title="Retry (search again)"
           />
+          {r.source === 'native' && (
+            <TapeDeckButton
+              size="sm"
+              disabled={busy}
+              onClick={() => void doRetry(r.id, true)}
+              icon={<Ban className="h-3.5 w-3.5" />}
+              aria-label="Blocklist and search again"
+              title="Blocklist and search again"
+            />
+          )}
           <TapeDeckButton
             size="sm"
             variant="danger"
@@ -259,7 +277,7 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
         sortDir={sortDir}
         onSortChange={onSortChange}
         rowActions={rowActions}
-        actionsWidth="120px"
+        actionsWidth="152px"
         mobileLayout="compact"
         rowTone={rowTone}
         emptyMessage="The queue is empty."

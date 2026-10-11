@@ -51,6 +51,59 @@ function parseRpcPath(extra: string | null | undefined): string {
   return '';
 }
 
+/** Parses `extra_settings_json` into an object; {} when absent or unparsable. */
+function parseExtra(extra: string | null | undefined): Record<string, unknown> {
+  if (!extra) return {};
+  try {
+    const parsed: unknown = JSON.parse(extra);
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export const SLSKD_NUMERIC_KEYS = [
+  'max_peer_queue',
+  'min_upload_speed_kbps',
+  'search_timeout',
+  'min_search_interval',
+  'queue_timeout_minutes',
+  'stall_minutes',
+  'missing_minutes',
+] as const;
+
+export type SlskdNumericKey = (typeof SLSKD_NUMERIC_KEYS)[number];
+export type SlskdTuningKey = SlskdNumericKey | 'ignored_users';
+/** Form strings for the slskd tuning keys; blank means "omit, backend default applies". */
+export type SlskdTuning = Record<SlskdTuningKey, string>;
+
+export const EMPTY_SLSKD_TUNING: SlskdTuning = {
+  max_peer_queue: '',
+  min_upload_speed_kbps: '',
+  search_timeout: '',
+  min_search_interval: '',
+  queue_timeout_minutes: '',
+  stall_minutes: '',
+  missing_minutes: '',
+  ignored_users: '',
+};
+
+function readSlskdTuning(extra: Record<string, unknown>): SlskdTuning {
+  const out: SlskdTuning = { ...EMPTY_SLSKD_TUNING };
+  for (const key of SLSKD_NUMERIC_KEYS) {
+    const v = extra[key];
+    if (typeof v === 'number' && Number.isFinite(v)) out[key] = String(v);
+    else if (typeof v === 'string' && v.trim()) out[key] = v.trim();
+  }
+  const ignored = extra.ignored_users;
+  if (Array.isArray(ignored)) {
+    out.ignored_users = ignored.filter((u): u is string => typeof u === 'string').join(', ');
+  } else if (typeof ignored === 'string') {
+    out.ignored_users = ignored;
+  }
+  return out;
+}
+
 export const DEFAULT_CLIENT_PRIORITY = 1;
 
 export interface ClientDraft {
@@ -65,6 +118,7 @@ export interface ClientDraft {
   category: string;
   priority: number;
   enabled: boolean;
+  slskd: SlskdTuning;
   setName: (v: string) => void;
   setType: (v: DownloadDriverType) => void;
   setHostUrl: (v: string) => void;
@@ -75,6 +129,7 @@ export interface ClientDraft {
   setCategory: (v: string) => void;
   setPriority: (v: number) => void;
   setEnabled: (v: boolean) => void;
+  setSlskdField: (key: SlskdTuningKey, value: string) => void;
   startEdit: (client: DownloadClientItem) => void;
   reset: () => void;
   toPayload: () => Schema<'DownloadClientPayload'>;
@@ -93,6 +148,13 @@ export function useClientDraft(): ClientDraft {
   const [category, setCategory] = useState<string>('');
   const [priority, setPriority] = useState<number>(DEFAULT_CLIENT_PRIORITY);
   const [enabled, setEnabled] = useState<boolean>(true);
+  const [slskd, setSlskd] = useState<SlskdTuning>(EMPTY_SLSKD_TUNING);
+  // Original parsed extra settings; edits merge over it so keys the form does not know survive a save.
+  const [baseExtra, setBaseExtra] = useState<Record<string, unknown>>({});
+
+  const setSlskdField = useCallback((key: SlskdTuningKey, value: string) => {
+    setSlskd((prev) => ({ ...prev, [key]: value }));
+  }, []);
 
   const setType = useCallback((next: DownloadDriverType) => {
     setTypeState(next);
@@ -112,6 +174,9 @@ export function useClientDraft(): ClientDraft {
     setCategory(client.category ?? '');
     setPriority(client.priority);
     setEnabled(client.enabled);
+    const extra = parseExtra(client.extra_settings_json);
+    setBaseExtra(extra);
+    setSlskd(readSlskdTuning(extra));
   }, []);
 
   const reset = useCallback(() => {
@@ -126,12 +191,27 @@ export function useClientDraft(): ClientDraft {
     setCategory('');
     setPriority(DEFAULT_CLIENT_PRIORITY);
     setEnabled(true);
+    setBaseExtra({});
+    setSlskd(EMPTY_SLSKD_TUNING);
   }, []);
 
   const toPayload = useCallback((): Schema<'DownloadClientPayload'> => {
-    const extraSettings: Record<string, string> = {};
+    const extraSettings: Record<string, unknown> = { ...baseExtra };
     if (type === 'transmission' && rpcPath.trim()) extraSettings.rpc_path = rpcPath.trim();
+    else delete extraSettings.rpc_path;
     if (category.trim()) extraSettings.category = category.trim();
+    else delete extraSettings.category;
+    if (type === 'slskd') {
+      for (const key of SLSKD_NUMERIC_KEYS) {
+        const raw = slskd[key].trim();
+        const n = raw === '' ? NaN : Number(raw);
+        if (Number.isFinite(n)) extraSettings[key] = n;
+        else delete extraSettings[key];
+      }
+      const ignored = slskd.ignored_users.trim();
+      if (ignored) extraSettings.ignored_users = ignored;
+      else delete extraSettings.ignored_users;
+    }
 
     const usesUsername = type === 'qbittorrent' || type === 'transmission' || type === 'nzbget';
     const usesPassword = usesUsername || type === 'deluge';
@@ -150,11 +230,11 @@ export function useClientDraft(): ClientDraft {
       category: category.trim() || undefined,
       extra_settings_json: Object.keys(extraSettings).length > 0 ? JSON.stringify(extraSettings) : undefined,
     };
-  }, [editingId, name, type, hostUrl, rpcPath, username, password, apiKey, category, priority, enabled]);
+  }, [editingId, name, type, hostUrl, rpcPath, username, password, apiKey, category, priority, enabled, slskd, baseExtra]);
 
   return {
-    editingId, name, type, hostUrl, rpcPath, username, password, apiKey, category, priority, enabled,
-    setName, setType, setHostUrl, setRpcPath, setUsername, setPassword, setApiKey, setCategory, setPriority, setEnabled,
+    editingId, name, type, hostUrl, rpcPath, username, password, apiKey, category, priority, enabled, slskd,
+    setName, setType, setHostUrl, setRpcPath, setUsername, setPassword, setApiKey, setCategory, setPriority, setEnabled, setSlskdField,
     startEdit, reset, toPayload,
   };
 }

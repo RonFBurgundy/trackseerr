@@ -7,7 +7,7 @@ import { parseImportHash, storePendingImport, peekPendingImport } from '@/servic
 export type MainTab = 'discover' | 'requests' | 'library' | 'playlists' | 'activity' | 'wanted' | 'settings';
 
 export type RequestsSub = RequestFilter | 'issues';
-export type ActivitySub = 'queue' | 'history' | 'blocklist' | 'review';
+export type ActivitySub = 'queue' | 'history' | 'blocklist' | 'searches' | 'review';
 export type WantedSub = WantedListName | 'calendar';
 
 export type SettingsSection = 'general' | 'media-management' | 'lidarr' | 'requests' | 'system' | 'account';
@@ -85,7 +85,7 @@ function prevHashOf(state: unknown): string | undefined {
 export const MAIN_TABS: readonly MainTab[] = ['discover', 'requests', 'library', 'playlists', 'activity', 'wanted', 'settings'];
 export const REQUESTS_SUBS: readonly RequestsSub[] = ['all', 'pending', 'approved', 'fulfilled', 'rejected', 'issues'];
 export const LIBRARY_SUBS: readonly LibraryTab[] = ['artists', 'albums', 'tracks', 'collections'];
-export const ACTIVITY_SUBS: readonly ActivitySub[] = ['queue', 'history', 'blocklist', 'review'];
+export const ACTIVITY_SUBS: readonly ActivitySub[] = ['queue', 'history', 'blocklist', 'searches', 'review'];
 export const WANTED_SUBS: readonly WantedSub[] = ['missing', 'cutoff', 'calendar'];
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   'general',
