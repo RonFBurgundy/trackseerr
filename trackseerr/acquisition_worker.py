@@ -11,6 +11,7 @@ import os
 import sqlite3
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -56,10 +57,79 @@ from trackseerr.seed_safety import (
 )
 
 logger = logging.getLogger(__name__)
+
 from trackseerr.acquisition_import import (
     ImportPipelineMixin,
     _PollContext,
 )
+
+
+def _slskd_minutes(name: str, default: int) -> int:
+    """Read a positive-minutes env knob at call time; fall back to ``default`` when missing or invalid."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        value = 0
+    if value < 1:
+        logger.warning("Invalid %s=%r; using default %d", name, raw, default)
+        return default
+    return value
+
+
+def _minutes_since(stamp: Any, now: datetime) -> Optional[float]:
+    """Minutes between a SQLite UTC timestamp ("YYYY-MM-DD HH:MM:SS") and ``now``; None if unparsable."""
+    if not stamp:
+        return None
+    try:
+        then = datetime.strptime(str(stamp)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return (now - then).total_seconds() / 60.0
+
+
+def _slskd_stall_reason(item: dict[str, Any], status_dict: dict[str, Any], now: datetime) -> Optional[str]:
+    """Return why a Soulseek transfer should be failed as stuck, or None.
+
+    Env knobs (minutes, read at call time):
+    SLSKD_QUEUE_TIMEOUT_MINUTES (default 30) queued/requested with no progress;
+    SLSKD_STALL_MINUTES (default 15) in progress with no byte movement;
+    SLSKD_MISSING_MINUTES (default 10) transfer absent from slskd.
+    """
+    created_age = _minutes_since(item.get("created_at"), now)
+    moved_age = _minutes_since(item.get("progress_updated_at") or item.get("created_at"), now)
+    status = str(status_dict.get("status", "")).lower()
+    progress = float(status_dict.get("progress") or 0.0)
+
+    if status_dict.get("missing"):
+        limit = _slskd_minutes("SLSKD_MISSING_MINUTES", 10)
+        if created_age is not None and created_age > limit:
+            return "Transfer disappeared from slskd"
+        return None
+    if status == DownloadStatus.QUEUED.value and progress == 0.0:
+        limit = _slskd_minutes("SLSKD_QUEUE_TIMEOUT_MINUTES", 30)
+        if moved_age is not None and moved_age > limit:
+            remote = status_dict.get("remote_state") or "queued"
+            return f"Peer never started the transfer ({remote}) after {limit} min"
+        return None
+    if status == DownloadStatus.DOWNLOADING.value and progress == float(item.get("progress") or 0.0):
+        limit = _slskd_minutes("SLSKD_STALL_MINUTES", 15)
+        if moved_age is not None and moved_age > limit:
+            return f"Transfer stalled at {progress:.0f}% for {limit} min"
+    return None
+
+
+def _fail_if_slskd_stalled(driver: Any, item: dict[str, Any], status_dict: dict[str, Any], lookup: str) -> dict[str, Any]:
+    """Cancel a stuck Soulseek transfer and return a FAILED status dict; otherwise return ``status_dict`` unchanged."""
+    reason = _slskd_stall_reason(item, status_dict, datetime.now(timezone.utc))
+    if not reason:
+        return status_dict
+    logger.info("slskd download %s stalled: %s", item["id"], reason)
+    if not driver.cancel(lookup):
+        logger.warning("Could not cancel stalled slskd transfer %s", lookup)
+    return {**status_dict, "status": DownloadStatus.FAILED.value, "error_message": reason}
 
 
 class AcquisitionWorker(ImportPipelineMixin):
@@ -485,6 +555,10 @@ class AcquisitionWorker(ImportPipelineMixin):
             logger.warning("Exception querying driver status for %s: %s", target_lookup, e)
             return
 
+        is_slskd = str(client_config.get("driver_type")).lower() == "slskd"
+        if is_slskd:
+            status_dict = _fail_if_slskd_stalled(driver, item, status_dict, target_lookup)
+
         cur_status = status_dict.get("status", DownloadStatus.DOWNLOADING.value).lower()
         progress = float(status_dict.get("progress") or 0.0)
         size_bytes = status_dict.get("size_bytes")
@@ -527,7 +601,7 @@ class AcquisitionWorker(ImportPipelineMixin):
                 db.add_to_blocklist(
                     source_title=item.get("title", ""),
                     artist=item.get("artist"),
-                    release_guid=item.get("id"),
+                    release_guid=(item.get("download_hash") or item.get("id")) if is_slskd else item.get("id"),
                     info_hash=item.get("download_hash"),
                     reason=err_msg,
                     download_id=download_id,

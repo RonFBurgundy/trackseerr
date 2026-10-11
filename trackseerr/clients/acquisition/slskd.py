@@ -310,7 +310,44 @@ class SlskdDriver(AcquisitionDriver):
 
         return f"{username}::{quote(filename)}"
 
-    def get_status(self, download_id: str) -> dict[str, Any]:  # noqa: C901
+    @staticmethod
+    def _find_transfer(
+        data: Any, target_user: Optional[str], target_file: Optional[str], download_id: str
+    ) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+        """Locate one transfer in slskd's downloads list; returns (transfer, directory)."""
+        if not isinstance(data, list):
+            return None, None
+        for item in data:
+            if target_user and item.get("username", "") != target_user:
+                continue
+            for d in item.get("directories", []):
+                for f in d.get("files", []):
+                    if (target_file and f.get("filename") == target_file) or f.get("id") == download_id:
+                        return f, d.get("directory")
+            # Also check flat transfer files if present
+            for f in item.get("files", []):
+                if (target_file and f.get("filename") == target_file) or f.get("id") == download_id:
+                    return f, None
+        return None, None
+
+    @staticmethod
+    def _map_state(state: str) -> tuple[str, Optional[str]]:
+        """Map a slskd transfer state to (DownloadStatus value, error message)."""
+        low = str(state or "").strip().lower()
+        if low.startswith("completed"):
+            if "succeeded" in low:
+                return DownloadStatus.COMPLETED.value, None
+            suffix = state.split(",", 1)[1].strip() if "," in state else "Failed"
+            return DownloadStatus.FAILED.value, f"Soulseek transfer {suffix}"
+        if low in ("succeeded", "finished"):
+            return DownloadStatus.COMPLETED.value, None
+        if any(s in low for s in ("errored", "failed", "aborted", "cancelled", "rejected")):
+            return DownloadStatus.FAILED.value, f"Soulseek transfer {low}"
+        if any(s in low for s in ("queued", "requested", "initializing", "waiting")):
+            return DownloadStatus.QUEUED.value, None
+        return DownloadStatus.DOWNLOADING.value, None
+
+    def get_status(self, download_id: str) -> dict[str, Any]:
         """Inspects transfer status across all slskd downloads."""
         if not is_safe_service_url(self.host_url):
             return {"status": DownloadStatus.FAILED.value, "error_message": "Prohibited host URL"}
@@ -333,45 +370,10 @@ class SlskdDriver(AcquisitionDriver):
                     }
                 data = resp.json()
 
-            # slskd returns a list of user download groups
-            # Each entry: {"username": ..., "directories": [{"files": [...]}]}
-            # or a flat list of transfers depending on version
-            transfer = None
-            transfer_dir: Optional[str] = None
-            if isinstance(data, list):
-                for item in data:
-                    item_user = item.get("username", "")
-                    if target_user and item_user != target_user:
-                        continue
-                    # Check nested files
-                    directories = item.get("directories", [])
-                    for d in directories:
-                        for f in d.get("files", []):
-                            if target_file and f.get("filename") == target_file:
-                                transfer = f
-                                transfer_dir = d.get("directory")
-                                break
-                            elif f.get("id") == download_id:
-                                transfer = f
-                                transfer_dir = d.get("directory")
-                                break
-                        if transfer:
-                            break
-                    if transfer:
-                        break
-                    # Also check flat transfer files if present
-                    for f in item.get("files", []):
-                        if target_file and f.get("filename") == target_file:
-                            transfer = f
-                            break
-                        elif f.get("id") == download_id:
-                            transfer = f
-                            break
-                    if transfer:
-                        break
+            transfer, transfer_dir = self._find_transfer(data, target_user, target_file, download_id)
 
             if not transfer:
-                # If download not in active list, check if completed previously or queued
+                # Not in slskd's list: the worker decides how long to tolerate this.
                 return {
                     "status": DownloadStatus.QUEUED.value,
                     "progress": 0.0,
@@ -380,28 +382,26 @@ class SlskdDriver(AcquisitionDriver):
                     "eta_seconds": 0,
                     "source_path": None,
                     "error_message": None,
+                    "missing": True,
                 }
 
-            state = str(transfer.get("state", "")).lower()
             size = int(transfer.get("size", 0))
             transferred = int(transfer.get("bytesTransferred", 0))
             speed = int(transfer.get("averageSpeed", 0) or transfer.get("speed", 0) or 0)
             progress = (float(transferred) / float(size) * 100.0) if size > 0 else 0.0
 
-            status_str = DownloadStatus.DOWNLOADING.value
-            if any(s in state for s in ("completed", "succeeded", "finished")):
-                status_str = DownloadStatus.COMPLETED.value
+            status_str, state_error = self._map_state(str(transfer.get("state", "")))
+            if status_str == DownloadStatus.COMPLETED.value:
                 progress = 100.0
-            elif any(s in state for s in ("queued", "requested", "waiting")):
-                status_str = DownloadStatus.QUEUED.value
-            elif any(s in state for s in ("errored", "failed", "aborted", "cancelled", "rejected")):
-                status_str = DownloadStatus.FAILED.value
 
             source_file = (
                 self._local_source_path(transfer, transfer_dir)
                 if status_str == DownloadStatus.COMPLETED.value
                 else None
             )
+            error_message = transfer.get("error")
+            if status_str == DownloadStatus.FAILED.value and not error_message:
+                error_message = state_error
             return {
                 "status": status_str,
                 "progress": round(progress, 1),
@@ -409,9 +409,11 @@ class SlskdDriver(AcquisitionDriver):
                 "speed_bps": speed,
                 "eta_seconds": int((size - transferred) / speed) if speed > 0 and size > transferred else 0,
                 "source_path": source_file,
-                "error_message": transfer.get("error"),
+                "error_message": error_message,
+                "remote_state": transfer.get("state"),
+                "transfer_id": transfer.get("id"),
             }
-        except Exception as e:
+        except (httpx.HTTPError, ValueError) as e:
             logger.warning("Error fetching slskd status for %s: %s", download_id, e)
             return {
                 "status": DownloadStatus.FAILED.value,
@@ -424,7 +426,7 @@ class SlskdDriver(AcquisitionDriver):
             }
 
     def cancel(self, download_id: str) -> bool:
-        """Cancels a transfer in slskd."""
+        """Cancels a transfer in slskd (DELETE by transfer id, removing it from the list)."""
         if not is_safe_service_url(self.host_url):
             return False
 
@@ -435,12 +437,19 @@ class SlskdDriver(AcquisitionDriver):
             target_user = parts[0]
             target_file = unquote(parts[1])
 
-        url = f"{self.host_url}/api/v0/transfers/downloads/{quote(target_user)}"
+        base = f"{self.host_url}/api/v0/transfers/downloads/{quote(target_user)}"
         try:
             with httpx.Client(timeout=self.timeout) as client:
-                resp = client.request("DELETE", url, headers=self._headers(), json=[{"filename": target_file}])
+                resp = client.get(base, headers=self._headers())
+                if resp.status_code != 200:
+                    return False
+                transfer, _ = self._find_transfer([resp.json()], target_user, target_file, download_id)
+                transfer_id = transfer.get("id") if transfer else None
+                if not transfer_id:
+                    return False
+                resp = client.delete(f"{base}/{quote(str(transfer_id))}", headers=self._headers(), params={"remove": "true"})
                 return resp.status_code in (200, 204)
-        except Exception as e:
+        except (httpx.HTTPError, ValueError) as e:
             logger.error("Failed to cancel slskd transfer %s: %s", download_id, e)
             return False
 
