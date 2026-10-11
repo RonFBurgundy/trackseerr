@@ -284,8 +284,8 @@ class TestWritePaths:
         client.fetch_artist_albums.side_effect = lambda artist_id, **kw: [
             a for a in albums if a["artistId"] == artist_id
         ]
-        client.fetch_album_tracks.side_effect = lambda album_id, **kw: [
-            t for t in tracks if t["albumId"] == album_id
+        client.fetch_artist_tracks_strict.side_effect = lambda artist_id, **kw: [
+            t for t in tracks if t["artistId"] == artist_id
         ]
         client.fetch_artist_track_files.side_effect = lambda artist_id, **kw: []
         res = LidarrMigrationJob().run_migration(test_db, client, auto_switch_mode=False)

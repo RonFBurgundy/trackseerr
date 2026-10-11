@@ -144,13 +144,13 @@ def test_non_admin_is_403_and_changes_nothing(env, method, path, body):
 
 
 @pytest.mark.parametrize("method,path,body", ADMIN_ROUTES)
-def test_forwarded_admin_is_403(env, method, path, body):
+def test_forwarded_admin_is_401(env, method, path, body):
     raw = json.dumps(body).encode() if body is not None else b""
     headers = internal_auth.sign_assertion(SECRET, method, path, "admin-1", "root", raw)
     if raw:
         headers["Content-Type"] = "application/json"
     res = env["client"].request(method, path, content=raw or None, headers=headers)
-    assert res.status_code == 403
+    assert res.status_code == 401
     assert env["db"].get_user("1001") is not None
 
 
