@@ -542,6 +542,16 @@ class QualityCatalogMixin:
         total = int(alb[0]) if alb and alb[0] is not None else None
         return [float(r[0]) if r[0] is not None else None for r in rows], total
 
+    def get_album_track_titles(self, album_id: str) -> list[tuple[int, int, str]]:
+        """(disc, track number, title) for each library track of the album, in disc/track order."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT disc_number, track_number, title FROM library_tracks WHERE album_id = ? "
+                "ORDER BY disc_number, track_number",
+                (str(album_id),),
+            ).fetchall()
+        return [(int(r[0]), int(r[1]), str(r[2])) for r in rows]
+
     def get_track_duration(self, track_id: str) -> Optional[float]:
         with self._lock:
             row = self.conn.execute(
