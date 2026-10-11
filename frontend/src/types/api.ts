@@ -3490,6 +3490,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/playlists/{playlist_id}/tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Playlist Tracks Status
+         * @description Every track of a playlist with its sync status. Admins, the creator and target users only (404 otherwise).
+         */
+        get: operations["get_playlist_tracks_status_api_playlists__playlist_id__tracks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plex-playlists": {
         parameters: {
             query?: never;
@@ -10833,6 +10853,38 @@ export interface components {
             id: string;
             /** Targets */
             targets: string[];
+        };
+        /** PlaylistTrackItem */
+        PlaylistTrackItem: {
+            /**
+             * Album
+             * @default
+             */
+            album: string;
+            /** Artist */
+            artist: string;
+            /** Missing Track Id */
+            missing_track_id?: number | null;
+            /** Position */
+            position: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "matched" | "missing";
+            /** Title */
+            title: string;
+        };
+        /** PlaylistTracksResponse */
+        PlaylistTracksResponse: {
+            /** Missing */
+            missing: number;
+            /** Synced */
+            synced: boolean;
+            /** Total */
+            total: number;
+            /** Tracks */
+            tracks: components["schemas"]["PlaylistTrackItem"][];
         };
         /** PlexIdentityResponse */
         PlexIdentityResponse: {
@@ -19356,6 +19408,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlaylistTargetsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_playlist_tracks_status_api_playlists__playlist_id__tracks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistTracksResponse"];
                 };
             };
             /** @description Validation Error */
