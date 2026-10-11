@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import time
+import urllib.error
 import urllib.request
 from typing import Any, List, Optional
 
@@ -21,6 +22,13 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/122.0.0.0 Safari/537.36"
 )
+
+EMBED_TRACK_CAP = 100
+PATHFINDER_URL = "https://api-partner.spotify.com/pathfinder/v2/query"
+DEFAULT_PATHFINDER_HASH = "8964e8eafb21aa992a7d951d256d83285c04be2105d209262901de70cb97584a"
+PATHFINDER_HASH_TTL_SECONDS = 24 * 3600.0
+_FETCH_ERRORS = (urllib.error.URLError, TimeoutError, OSError)
+_PARSE_ERRORS = (json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError)
 
 
 def _primary_embed_artist(subtitle: str) -> str:
@@ -37,6 +45,8 @@ class SpotifyWebScraper:
         self.timeout = timeout
         self.cache_ttl_seconds = cache_ttl_seconds
         self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._embed_tokens: dict[str, str] = {}
+        self._hash_cache: Optional[tuple[float, str]] = None
         logger.info("Initialized keyless SpotifyWebScraper client")
 
     def _fetch_embed(self, playlist_id: str) -> Optional[dict[str, Any]]:
@@ -49,6 +59,12 @@ class SpotifyWebScraper:
         except Exception as e:
             logger.debug("Embed fetch error for playlist %s: %s", playlist_id, e)
             return None
+
+        token = re.search(r'"accessToken":"([^"]+)"', html)
+        if token:
+            self._embed_tokens[playlist_id] = token.group(1)
+        else:
+            self._embed_tokens.pop(playlist_id, None)
 
         match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html)
         if not match:
@@ -66,6 +82,108 @@ class SpotifyWebScraper:
         except Exception as e:
             logger.debug("Failed to parse embed JSON for %s: %s", playlist_id, e)
             return None
+
+    def _get_text(self, url: str) -> str:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            return resp.read().decode("utf-8")
+
+    def _discover_pathfinder_hash(self) -> Optional[str]:
+        """Find the persisted-query hash for fetchPlaylistContents in the live web-player bundle."""
+        try:
+            home = self._get_text("https://open.spotify.com/")
+            js = re.search(r"https://open\.spotifycdn\.com/cdn/build/web-player/web-player\.[a-f0-9]+\.js", home)
+            if not js:
+                return None
+            bundle = self._get_text(js.group(0))
+        except (*_FETCH_ERRORS, UnicodeDecodeError) as e:
+            logger.debug("Pathfinder hash discovery failed: %s", e)
+            return None
+        for op in ("fetchPlaylistContents", "fetchPlaylist"):
+            m = re.search(rf'"{op}","query","([a-f0-9]{{64}})"', bundle)
+            if m:
+                return m.group(1)
+        return None
+
+    def _pathfinder_hash(self) -> str:
+        cached = self._hash_cache
+        if cached is not None and time.monotonic() - cached[0] < PATHFINDER_HASH_TTL_SECONDS:
+            return cached[1]
+        value = self._discover_pathfinder_hash() or DEFAULT_PATHFINDER_HASH
+        self._hash_cache = (time.monotonic(), value)
+        return value
+
+    def _pathfinder_page(self, playlist_id: str, token: str, offset: int, query_hash: str) -> dict[str, Any]:
+        body = json.dumps(
+            {
+                "operationName": "fetchPlaylistContents",
+                "variables": {"uri": f"spotify:playlist:{playlist_id}", "offset": offset, "limit": 100},
+                "extensions": {"persistedQuery": {"version": 1, "sha256Hash": query_hash}},
+            }
+        ).encode("utf-8")
+        req = urllib.request.Request(
+            PATHFINDER_URL,
+            data=body,
+            method="POST",
+            headers={
+                "User-Agent": USER_AGENT,
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def _pathfinder_page_retrying(self, playlist_id: str, token: str, offset: int, rediscovered: bool) -> tuple[dict[str, Any], bool]:
+        """One page; on HTTP 412 (stale hash) rediscover the hash once per fetch and retry."""
+        try:
+            return self._pathfinder_page(playlist_id, token, offset, self._pathfinder_hash()), rediscovered
+        except urllib.error.HTTPError as e:
+            if e.code != 412 or rediscovered:
+                raise
+        self._hash_cache = None
+        return self._pathfinder_page(playlist_id, token, offset, self._pathfinder_hash()), True
+
+    @staticmethod
+    def _parse_pathfinder_items(items: list[Any]) -> list[Track]:
+        out: list[Track] = []
+        for item in items:
+            data = (item.get("itemV2") or {}).get("data") or {}
+            title = (data.get("name") or "").strip()
+            if not title:
+                continue
+            artists = (data.get("artists") or {}).get("items") or []
+            artist = ((artists[0].get("profile") or {}).get("name") or "").strip() if artists else ""
+            album = ((data.get("albumOfTrack") or {}).get("name") or "").strip()
+            ms = (data.get("trackDuration") or data.get("duration") or {}).get("totalMilliseconds")
+            out.append(
+                Track(title=title, artist=artist, album=album, duration_seconds=ms / 1000 if ms else None)
+            )
+        return out
+
+    def _fetch_remaining(self, playlist_id: str, token: str, offset: int, max_tracks: int = 2000) -> list[Track]:
+        """Page the web player's GraphQL endpoint from ``offset`` for tracks beyond the embed's 100-row cap."""
+        collected: list[Track] = []
+        rediscovered = False
+        try:
+            while offset < max_tracks:
+                payload, rediscovered = self._pathfinder_page_retrying(playlist_id, token, offset, rediscovered)
+                content = payload["data"]["playlistV2"]["content"]
+                raw_items = content.get("items") or []
+                if not raw_items:
+                    break
+                collected.extend(self._parse_pathfinder_items(raw_items))
+                offset += len(raw_items)
+                if offset >= int(content.get("totalCount") or 0):
+                    break
+        except (urllib.error.HTTPError, *_FETCH_ERRORS, *_PARSE_ERRORS) as e:
+            logger.warning(
+                "Spotify returned the first %d tracks only for playlist %s (%s)",
+                offset,
+                playlist_id,
+                e,
+            )
+        return collected
 
     def _fetch_page(self, playlist_id: str) -> Optional[dict[str, Any]]:
         """Fallback to fetch playlist data from public web page initialState."""
@@ -125,6 +243,10 @@ class SpotifyWebScraper:
                             album="",
                         )
                     )
+
+            token = self._embed_tokens.get(playlist_id)
+            if token and len(tracks) == EMBED_TRACK_CAP:
+                tracks.extend(self._fetch_remaining(playlist_id, token, EMBED_TRACK_CAP))
 
         # 2. Secondary fallback: Public web page initialState
         if not tracks or not name:
