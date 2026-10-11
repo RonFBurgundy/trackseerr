@@ -122,3 +122,4 @@ export * from './useFeaturedCharts';
 export * from './usePlaylistTracks';
 export * from './useTrackAliasForIssue';
 export * from './useFindTrack';
+export * from './useManualSearch';
