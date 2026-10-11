@@ -70,6 +70,8 @@ def sample_lidarr_data() -> dict[str, list[dict[str, Any]]]:
                 "id": 301,
                 "artistId": 101,
                 "albumId": 201,
+                "trackFileId": 401,
+                "mediumNumber": 1,
                 "title": "Airbag",
                 "trackNumber": 1,
                 "discNumber": 1,
@@ -81,6 +83,8 @@ def sample_lidarr_data() -> dict[str, list[dict[str, Any]]]:
                 "id": 302,
                 "artistId": 101,
                 "albumId": 201,
+                "trackFileId": 402,
+                "mediumNumber": 1,
                 "title": "Paranoid Android",
                 "trackNumber": 2,
                 "discNumber": 1,
@@ -92,6 +96,7 @@ def sample_lidarr_data() -> dict[str, list[dict[str, Any]]]:
                 "id": 303,
                 "artistId": 102,
                 "albumId": 202,
+                "trackFileId": 0,
                 "title": "One More Time",
                 "trackNumber": 1,
                 "discNumber": 1,
@@ -103,7 +108,8 @@ def sample_lidarr_data() -> dict[str, list[dict[str, Any]]]:
         "track_files": [
             {
                 "id": 401,
-                "trackId": 301,
+                "artistId": 101,
+                "albumId": 201,
                 "path": "/music/Radiohead/OK Computer/01 - Airbag.flac",
                 "relativePath": "01 - Airbag.flac",
                 "size": 31457280,
@@ -117,7 +123,8 @@ def sample_lidarr_data() -> dict[str, list[dict[str, Any]]]:
             },
             {
                 "id": 402,
-                "trackIds": [302],
+                "artistId": 101,
+                "albumId": 201,
                 "path": "/music/Radiohead/OK Computer/02 - Paranoid Android.flac",
                 "relativePath": "02 - Paranoid Android.flac",
                 "size": 41943040,
@@ -404,10 +411,11 @@ def two_artist_payload() -> dict[str, list[dict[str, Any]]]:
                 track_id = 300 + a_idx * 100 + b_idx * 10 + t_idx
                 data["tracks"].append(
                     {"id": track_id, "artistId": artist_id, "albumId": album_id,
-                     "title": f"{name} {b_idx}-{t_idx}", "trackNumber": t_idx + 1}
+                     "title": f"{name} {b_idx}-{t_idx}", "trackNumber": t_idx + 1,
+                     "trackFileId": track_id + 1000}
                 )
                 data["track_files"].append(
-                    {"id": track_id + 1000, "trackId": track_id, "path": f"/music/{name}/{b_idx}/{t_idx}.flac",
+                    {"id": track_id + 1000, "albumId": album_id, "artistId": artist_id, "path": f"/music/{name}/{b_idx}/{t_idx}.flac",
                      "size": 1, "mediaInfo": {"audioCodec": "FLAC"}}
                 )
     return data
@@ -551,3 +559,115 @@ class TestPerArtistImport:
         assert "track?artistId=102" in res["error"]
         assert "artist 'Daft Punk'" in res["error"]
         assert db.get_media_management_settings()["library_mode"] == "lidarr"
+
+
+class TestTrackFileLinking:
+    """Lidarr links files to tracks via TrackResource.trackFileId, not a trackId on the file."""
+
+    def _run(self, db: Database, payload: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+        fake = loaded_fake(payload)
+        with patch(HTTPX, fake):
+            return LidarrMigrationJob().run_migration(db, real_client())
+
+    def test_files_link_via_track_trackfileid(self, db: Database):
+        payload = two_artist_payload()
+        res = self._run(db, payload)
+
+        assert res["status"] == "completed"
+        assert res["files_migrated"] == len(payload["track_files"])
+        rows = db.conn.execute(
+            "SELECT t.title AS title, f.file_path AS path FROM library_files f JOIN library_tracks t ON t.id = f.track_id"
+        ).fetchall()
+        linked = {r["title"]: r["path"] for r in rows}
+        assert len(linked) == len(payload["track_files"])
+        for trk in payload["tracks"]:
+            tf = next(f for f in payload["track_files"] if f["id"] == trk["trackFileId"])
+            assert linked[trk["title"]] == tf["path"]
+        wanted, total = db.list_wanted("missing", 1, 500, "artist", "asc")
+        assert total == 0 and wanted == []
+
+    def test_track_with_zero_trackfileid_stays_missing(self, db: Database):
+        payload = two_artist_payload()
+        payload["tracks"][0]["trackFileId"] = 0
+        payload["track_files"] = payload["track_files"][1:]
+        res = self._run(db, payload)
+
+        assert res["status"] == "completed"
+        assert count(db, "library_files") == len(payload["track_files"])
+        wanted, total = db.list_wanted("missing", 1, 500, "artist", "asc")
+        assert total == 1
+        assert wanted[0]["title"] == payload["tracks"][0]["title"]
+
+    def test_medium_number_and_string_track_number(self, db: Database):
+        payload = two_artist_payload()
+        payload["tracks"][0].update({"mediumNumber": 2, "trackNumber": "A1", "absoluteTrackNumber": 5})
+        self._run(db, payload)
+
+        row = db.conn.execute(
+            "SELECT disc_number, track_number FROM library_tracks WHERE title = ?",
+            (payload["tracks"][0]["title"],),
+        ).fetchone()
+        assert (row["disc_number"], row["track_number"]) == (2, 5)
+
+
+class TestImportMonitoring:
+    """Imported artists must not monitor the whole discography."""
+
+    def _run(self, db: Database, payload: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+        fake = loaded_fake(payload)
+        with patch(HTTPX, fake):
+            return LidarrMigrationJob().run_migration(db, real_client())
+
+    def test_import_sets_release_group_and_future_option(self, db: Database):
+        payload = two_artist_payload()
+        payload["artists"][0]["monitorNewItems"] = "all"
+        payload["albums"][0]["foreignAlbumId"] = "rg-201"
+        payload["tracks"][0]["foreignRecordingId"] = "rec-300"
+        self._run(db, payload)
+
+        artist = db.get_library_artist_by_name("Radiohead")
+        assert artist["monitor_option"] == "future"
+        album = db.get_library_album_by_release_group_id("rg-201")
+        assert album is not None
+        row = db.conn.execute(
+            "SELECT mb_recording_id FROM library_tracks WHERE title = ?", (payload["tracks"][0]["title"],)
+        ).fetchone()
+        assert row["mb_recording_id"] == "rec-300"
+
+    def test_monitor_new_items_none_maps_to_none(self, db: Database):
+        payload = two_artist_payload()
+        payload["artists"][0]["monitorNewItems"] = "none"
+        self._run(db, payload)
+        assert db.get_library_artist_by_name("Radiohead")["monitor_option"] == "none"
+
+    def test_reimport_unmonitors_albums_not_in_lidarr(self, db: Database):
+        from trackseerr.models import LibraryAlbum, LibraryTrack
+
+        payload = two_artist_payload()
+        self._run(db, payload)
+        artist = db.get_library_artist_by_name("Radiohead")
+        extra = db.upsert_library_album(
+            LibraryAlbum(id="extra-album", artist_id=str(artist["id"]), title="Back Catalog", monitored=True)
+        )
+        db.upsert_library_track(
+            LibraryTrack(id="extra-track", album_id=str(extra["id"]), artist_id=str(artist["id"]),
+                         title="Old Song", track_number=1, monitored=True)
+        )
+
+        self._run(db, payload)
+
+        alb = db.conn.execute("SELECT monitored FROM library_albums WHERE id = 'extra-album'").fetchone()
+        trk = db.conn.execute("SELECT monitored FROM library_tracks WHERE id = 'extra-track'").fetchone()
+        assert alb["monitored"] == 0 and trk["monitored"] == 0
+        imported = db.conn.execute(
+            "SELECT COUNT(*) FROM library_albums WHERE artist_id = ? AND monitored = 1", (str(artist["id"]),)
+        ).fetchone()[0]
+        assert imported == 2
+
+    def test_refresh_after_import_does_not_monitor_back_catalog(self):
+        from trackseerr.library_monitoring import album_monitored_for_option
+
+        assert album_monitored_for_option(
+            "future", artist_monitored=True, album_type="Album", has_files=False,
+            release_date="1997-05-21", artist_added_at="2026-10-11",
+        ) is False

@@ -136,11 +136,7 @@ class FakeLidarr:
         return album.get("artistId") if album else None
 
     def _file_album_id(self, track_file: dict[str, Any]) -> Optional[int]:
-        if track_file.get("albumId") is not None:
-            return track_file["albumId"]
-        track_id = track_file.get("trackId") or (track_file.get("trackIds") or [None])[0]
-        track = next((t for t in self.tracks if t.get("id") == track_id), None)
-        return track.get("albumId") if track else None
+        return track_file.get("albumId")
 
     def _file_artist_id(self, track_file: dict[str, Any]) -> Optional[int]:
         album = self._album(self._file_album_id(track_file))
