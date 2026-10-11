@@ -536,15 +536,13 @@ class LidarrMigrationJob:
                 if self._stop_event.is_set():
                     raise _MigrationCancelled()
                 self._migrate_one_album(run, album)
-                album_id = album.get("id")
-                if album_id is None:
-                    continue
-                try:
-                    tracks = client.fetch_album_tracks(album_id, timeout=60.0)
-                except LidarrApiError as exc:
-                    raise LidarrApiError(f"{exc} (album {album_id}, artist '{artist_name}')") from exc
-                for track in tracks:
-                    self._migrate_one_track(run, track)
+            if self._stop_event.is_set():
+                raise _MigrationCancelled()
+            # One call returns every track of the artist (each row carries its albumId) instead of one per album.
+            for index, track in enumerate(client.fetch_artist_tracks_strict(artist_id, timeout=60.0)):
+                if index % 200 == 0 and self._stop_event.is_set():
+                    raise _MigrationCancelled()
+                self._migrate_one_track(run, track)
             if self._stop_event.is_set():
                 raise _MigrationCancelled()
             for track_file in client.fetch_artist_track_files(artist_id):

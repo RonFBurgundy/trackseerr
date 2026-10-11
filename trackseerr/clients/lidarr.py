@@ -1010,6 +1010,11 @@ class LidarrClient:
         rows = self._get_list("track", {"albumId": int(album_id)}, self.timeout if timeout is None else timeout)
         return [row for row in rows if isinstance(row, dict)]
 
+    def fetch_artist_tracks_strict(self, artist_id: int, timeout: Optional[float] = None) -> list[dict[str, Any]]:
+        """Every track of one artist in a single call (rows carry ``albumId``); raises LidarrApiError on failure."""
+        rows = self._get_list("track", {"artistId": int(artist_id)}, self.timeout if timeout is None else timeout)
+        return [row for row in rows if isinstance(row, dict)]
+
     def lookup_artist(self, term: str) -> list[dict[str, Any]]:
         """``GET /artist/lookup``. ``term`` may be a name or ``lidarr:<musicbrainz id>``; raises LidarrApiError."""
         data = self._get_json(f"artist/lookup?term={quote(term)}")

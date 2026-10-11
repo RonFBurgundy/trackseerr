@@ -129,6 +129,12 @@ class FakeLidarr:
     def _album(self, album_id: int) -> Optional[dict[str, Any]]:
         return next((a for a in self.albums if a.get("id") == album_id), None)
 
+    def _track_artist_id(self, track: dict[str, Any]) -> Optional[int]:
+        if track.get("artistId") is not None:
+            return track["artistId"]
+        album = self._album(track.get("albumId"))
+        return album.get("artistId") if album else None
+
     def _file_album_id(self, track_file: dict[str, Any]) -> Optional[int]:
         if track_file.get("albumId") is not None:
             return track_file["albumId"]
@@ -230,10 +236,12 @@ class FakeLidarr:
                 if not any(k in query for k in ("artistId", "albumId", "albumReleaseId", "trackIds")):
                     return httpx.Response(400, json={"message": "artistId, albumId, albumReleaseId or trackIds required"})
                 if "artistId" in query:
+                    wanted_artist = int(query["artistId"][0])
                     rows = [
                         t
                         for t in self.tracks
-                        if self._visible_album_ids is None or t.get("albumId") in self._visible_album_ids
+                        if (self._visible_album_ids is None or t.get("albumId") in self._visible_album_ids)
+                        and self._track_artist_id(t) in (None, wanted_artist)
                     ]
                     return httpx.Response(200, json=copy.deepcopy(rows) if self.track_by_artist_supported else [])
                 if "albumId" in query:

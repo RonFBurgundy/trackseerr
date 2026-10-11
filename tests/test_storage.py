@@ -543,6 +543,11 @@ class TestBusyTimeout:
         assert db.conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
         db.close()
 
+    def test_synchronous_is_normal_under_wal(self, tmp_path):
+        db = Database(tmp_path / "t.db")
+        assert db.conn.execute("PRAGMA synchronous").fetchone()[0] == 1
+        db.close()
+
     def test_writer_waits_for_a_concurrent_writer_instead_of_failing(self, tmp_path):
         import sqlite3
         import threading

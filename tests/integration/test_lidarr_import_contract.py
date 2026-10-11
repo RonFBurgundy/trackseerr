@@ -36,6 +36,10 @@ def test_strict_fetchers_read_one_artist(client: LidarrClient, settled_artist):
     tracks = client.fetch_album_tracks(album_id)
     assert tracks
     assert all(t["albumId"] == album_id for t in tracks)
+    artist_tracks = client.fetch_artist_tracks_strict(artist_id)
+    assert artist_tracks
+    assert {t["albumId"] for t in artist_tracks} <= {a["id"] for a in albums}
+    assert {t["id"] for t in tracks} <= {t["id"] for t in artist_tracks}
     files = client.fetch_artist_track_files(artist_id)
     assert isinstance(files, list)
     assert files == []  # this stack has no media files
