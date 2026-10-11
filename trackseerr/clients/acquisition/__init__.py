@@ -58,8 +58,6 @@ def get_acquisition_driver(
         return SlskdDriver(
             host_url=host_url,
             api_key=api_key,
-            username=username,
-            password=password,
             download_dir=extra.get("download_dir"),
         )
     elif driver_type in (DownloadDriverType.SABNZBD.value, "sabnzbd"):

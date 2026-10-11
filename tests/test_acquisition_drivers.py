@@ -10,6 +10,7 @@ Covers:
 - SSRF defense rejection across all drivers and indexers
 """
 
+import json
 from unittest.mock import MagicMock, patch
 import pytest
 import httpx
@@ -69,29 +70,74 @@ def test_driver_ssrf_rejection(unsafe_url: str):
 # ---------------------------------------------------------------------------
 # slskd Driver Tests
 # ---------------------------------------------------------------------------
+_SLSKD_APP = {
+    "version": {"full": "0.26.1.0 (0.26.1.0+71dcc7a6)", "current": "0.26.1.0", "latest": "0.26.1.0", "isUpdateAvailable": False},
+    "server": {"state": "None", "isConnected": False, "isLoggedIn": True},
+}
+
+
+def _slskd_resp(status: int, payload=None, text: str = ""):
+    resp = MagicMock()
+    resp.status_code = status
+    resp.text = text or (json.dumps(payload) if payload is not None else "")
+    resp.json.return_value = payload
+    return resp
+
+
 def test_slskd_test_connection_success():
     driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.text = '{"version": "0.20.0"}'
-    mock_resp.json.return_value = {"version": "0.20.0"}
-
-    with patch("httpx.Client.get", return_value=mock_resp):
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, _SLSKD_APP)) as get:
         ok, msg = driver.test_connection()
-        assert ok is True
-        assert "0.20.0" in msg
+    assert ok is True
+    assert msg == "slskd 0.26.1.0"
+    assert get.call_args.args[0] == "http://slskd.local:5030/api/v0/application"
+    assert get.call_args.kwargs["headers"]["X-API-KEY"] == "secretkey"
 
 
 def test_slskd_test_connection_failure():
     driver = SlskdDriver("http://slskd.local:5030", api_key="wrongkey")
-    mock_resp = MagicMock()
-    mock_resp.status_code = 401
-    mock_resp.text = "Unauthorized"
-
-    with patch("httpx.Client.get", return_value=mock_resp):
+    with patch("httpx.Client.get", return_value=_slskd_resp(401, text="Unauthorized")):
         ok, msg = driver.test_connection()
         assert ok is False
         assert "Authentication failed" in msg
+
+
+def test_slskd_test_connection_not_logged_in_still_ok():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    payload = {**_SLSKD_APP, "server": {"state": "None", "isConnected": False, "isLoggedIn": False}}
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, payload)):
+        ok, msg = driver.test_connection()
+    assert ok is True
+    assert "slskd 0.26.1.0" in msg
+    assert "not logged in" in msg
+
+
+def test_slskd_test_connection_404_reports_http():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with patch("httpx.Client.get", return_value=_slskd_resp(404, text="Not Found")):
+        ok, msg = driver.test_connection()
+    assert ok is False
+    assert msg.startswith("HTTP 404")
+
+
+def test_slskd_connect_error_message():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with patch("httpx.Client.get", side_effect=httpx.ConnectError("Connection refused")):
+        ok, msg = driver.test_connection()
+    assert ok is False
+    assert msg == "Could not reach slskd at http://slskd.local:5030: ConnectError: Connection refused"
+
+
+def test_slskd_failed_test_logs_warning(caplog):
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with caplog.at_level("WARNING", logger="trackseerr.clients.acquisition.slskd"):
+        with patch("httpx.Client.get", return_value=_slskd_resp(404, text="Not Found")):
+            driver.test_connection()
+    records = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(records) == 1
+    text = records[0].getMessage()
+    assert "http://slskd.local:5030" in text and "404" in text and "Not Found" in text
+    assert "secretkey" not in text
 
 
 def test_slskd_search_music():
@@ -511,27 +557,8 @@ def test_get_indexer_driver_factory():
 
 
 # ---------------------------------------------------------------------------
-# Auth fixes: slskd session login, qBittorrent CSRF/ban, SABnzbd API key probe
+# Auth fixes: qBittorrent CSRF/ban, SABnzbd API key probe
 # ---------------------------------------------------------------------------
-def test_slskd_session_login_bearer():
-    driver = SlskdDriver("http://slskd.local:5030", username="user", password="pw")
-    resp = MagicMock()
-    resp.status_code = 200
-    resp.json.return_value = {"token": "abc"}
-    with patch("httpx.Client.post", return_value=resp):
-        assert driver._headers()["Authorization"] == "Bearer abc"
-
-
-def test_slskd_session_login_rejected():
-    driver = SlskdDriver("http://slskd.local:5030", username="user", password="bad")
-    resp = MagicMock()
-    resp.status_code = 401
-    with patch("httpx.Client.post", return_value=resp):
-        ok, msg = driver.test_connection()
-    assert ok is False
-    assert "username/password" in msg
-
-
 def test_qbittorrent_login_sends_referer_and_handles_ban():
     driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "wrong")
     resp = MagicMock()

@@ -308,11 +308,11 @@ def test_test_route_rejects_masked_without_id(client: TestClient, auth_headers: 
     assert res.json()["success"] is False
 
 
-def test_slskd_requires_key_or_credentials(client: TestClient, auth_headers: dict[str, str]):
+def test_slskd_requires_api_key(client: TestClient, auth_headers: dict[str, str]):
     res = client.post(
         "/api/settings/download-clients",
         json={"name": "slsk", "driver_type": "slskd", "host_url": "http://192.168.1.50:5030"},
         headers=auth_headers,
     )
     assert res.status_code == 400
-    assert "slskd" in res.json()["detail"]
+    assert res.json()["detail"] == "slskd needs an API key"
