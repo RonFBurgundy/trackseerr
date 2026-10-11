@@ -2,6 +2,7 @@
 
 import logging
 import posixpath
+import threading
 import time
 from typing import Any, Optional
 from urllib.parse import quote, unquote
@@ -14,6 +15,10 @@ from trackseerr.security import is_safe_service_url
 
 logger = logging.getLogger(__name__)
 
+# Soulseek punishes search floods: space searches globally across every driver instance.
+_SEARCH_LOCK = threading.Lock()
+_last_search_at: float = 0.0
+
 
 class SlskdDriver(AcquisitionDriver):
     """Driver for slskd (Soulseek REST API daemon)."""
@@ -25,7 +30,15 @@ class SlskdDriver(AcquisitionDriver):
         download_dir: Optional[str] = None,
         timeout: float = 10.0,
         search_timeout: float = 12.0,
+        max_peer_queue: int = 50,
+        min_upload_speed_kbps: int = 0,
+        ignored_users: Optional[list[str]] = None,
+        min_search_interval: float = 5.0,
     ) -> None:
+        self.max_peer_queue = max_peer_queue
+        self.min_upload_speed_kbps = min_upload_speed_kbps
+        self.ignored_users = {str(u).strip().lower() for u in (ignored_users or []) if str(u).strip()}
+        self.min_search_interval = min_search_interval
         self.search_timeout = search_timeout
         self.host_url = host_url.rstrip("/")
         self.api_key = (api_key or "").strip()
@@ -33,6 +46,7 @@ class SlskdDriver(AcquisitionDriver):
         self.download_dir = (download_dir or "").strip() or None
         self.timeout = timeout
         self._downloads_root: Optional[str] = None
+        self.peers_filtered = 0
 
     def _headers(self) -> dict[str, str]:
         headers = {
@@ -159,6 +173,7 @@ class SlskdDriver(AcquisitionDriver):
         if not is_safe_service_url(self.host_url):
             logger.error("Prohibited slskd host URL: %s", self.host_url)
             return []
+        self._pace_search()
 
         query_parts = [artist.strip()]
         if title:
@@ -198,11 +213,13 @@ class SlskdDriver(AcquisitionDriver):
                     user_responses = resp.json()
                     if not isinstance(user_responses, list):
                         return []
+                    self.peers_filtered = 0
                     results = self._parse_responses(user_responses, artist, title, album)
                     files = sum(len(u.get("files", [])) for u in user_responses if isinstance(u, dict))
                     logger.info(
-                        "slskd search id=%s query=%r finished state=%s responses=%d files=%d audio_kept=%d in %.1fs",
-                        search_id, query, state, len(user_responses), files, len(results), time.monotonic() - started,
+                        "slskd search id=%s query=%r finished state=%s responses=%d files=%d audio_kept=%d peers_filtered=%d in %.1fs",
+                        search_id, query, state, len(user_responses), files, len(results), self.peers_filtered,
+                        time.monotonic() - started,
                     )
                     return results
                 finally:
@@ -238,6 +255,100 @@ class SlskdDriver(AcquisitionDriver):
         except httpx.HTTPError as e:
             logger.debug("slskd search delete failed for id=%s: %s: %s", search_id, type(e).__name__, e)
 
+    def _pace_search(self) -> None:
+        """Block until ``min_search_interval`` has passed since the last search (any instance); no HTTP under the lock."""
+        global _last_search_at
+        if self.min_search_interval <= 0:
+            return
+        with _SEARCH_LOCK:
+            wait = max(0.0, _last_search_at + self.min_search_interval - time.monotonic())
+            if wait > 0:
+                logger.debug("slskd search paced: waiting %.1fs", wait)
+                time.sleep(wait)
+            _last_search_at = time.monotonic()
+
+    def _peer_rejected(self, user_resp: dict[str, Any]) -> bool:
+        """True when the peer is ignored, has too long a queue, or is slower than the configured minimum."""
+        uname = str(user_resp.get("username", "")).strip().lower()
+        if uname and uname in self.ignored_users:
+            return True
+        queue = int(user_resp.get("queueLength") or 0)
+        if self.max_peer_queue > 0 and queue > self.max_peer_queue:
+            return True
+        speed_kbps = int(user_resp.get("uploadSpeed") or 0) * 8 / 1000
+        return self.min_upload_speed_kbps > 0 and speed_kbps < self.min_upload_speed_kbps
+
+    @staticmethod
+    def _quality_tag(f: dict[str, Any]) -> str:
+        """Bracket-tag text that ``parse_release_title`` maps to the file's real quality."""
+        ext = str(f.get("extension", "")).lower().lstrip(".")
+        bitrate = int(f.get("bitRate") or 0)
+        depth = int(f.get("bitDepth") or 0)
+        rate = int(f.get("sampleRate") or 0)
+        if ext == "flac":
+            tag = "FLAC 24bit" if depth >= 24 else "FLAC 16bit"
+            return f"{tag} {rate / 1000:g}kHz" if rate else tag
+        if ext == "mp3":
+            if f.get("isVariableBitRate"):
+                if bitrate >= 220:
+                    return "MP3 V0"
+                return "MP3 V2" if bitrate >= 170 else "MP3"
+            return "MP3 320" if bitrate >= 315 else "MP3"
+        if ext in ("m4a", "aac"):
+            if ext == "m4a" and depth:
+                return "ALAC"
+            return f"AAC {bitrate}" if bitrate else "AAC"
+        if ext == "ogg":
+            return "OGG"
+        return "OPUS" if ext == "opus" else ""
+
+    def _build_result(
+        self,
+        user_resp: dict[str, Any],
+        f: dict[str, Any],
+        ext: str,
+        artist: str,
+        album: Optional[str],
+    ) -> AcquisitionSearchResult:
+        uname = user_resp.get("username", "")
+        fname = f.get("filename", "")
+        size = int(f.get("size", 0))
+        bitrate = f.get("bitRate")
+        quality_desc = f"{ext.upper()}"
+        if bitrate:
+            quality_desc += f" {bitrate}kbps"
+
+        base = fname.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
+        name = base.rsplit(".", 1)[0] if "." in base else base
+        tag = self._quality_tag(f)
+        unique_dl_id = f"{uname}::{quote(fname)}"
+        return AcquisitionSearchResult(
+            download_id=unique_dl_id,
+            title=f"{name} [{tag}]" if tag else name,
+            artist=artist,
+            album=album,
+            item_type="track",
+            size_bytes=size,
+            bit_rate=int(bitrate) if bitrate else None,
+            format=ext,
+            quality_str=quality_desc,
+            download_url=unique_dl_id,
+            source="slskd",
+            extra={
+                "username": uname,
+                "filename": fname,
+                "size": size,
+                "bit_depth": f.get("bitDepth"),
+                "sample_rate": f.get("sampleRate"),
+                "length_seconds": f.get("length"),
+                "peer": {
+                    "has_free_slot": bool(user_resp.get("hasFreeUploadSlot")),
+                    "queue_length": int(user_resp.get("queueLength") or 0),
+                    "upload_speed": int(user_resp.get("uploadSpeed") or 0),
+                },
+            },
+        )
+
     def _parse_responses(
         self,
         payload: list[Any],
@@ -247,38 +358,14 @@ class SlskdDriver(AcquisitionDriver):
     ) -> list[AcquisitionSearchResult]:
         results: list[AcquisitionSearchResult] = []
         for user_resp in payload:
-            uname = user_resp.get("username", "")
+            if self._peer_rejected(user_resp):
+                self.peers_filtered += 1
+                continue
             for f in user_resp.get("files", []):
-                fname = f.get("filename", "")
                 ext = f.get("extension", "").lower().lstrip(".")
                 if ext not in ("mp3", "flac", "m4a", "aac", "ogg", "opus"):
                     continue
-
-                size = int(f.get("size", 0))
-                bitrate = f.get("bitRate")
-                quality_desc = f"{ext.upper()}"
-                if bitrate:
-                    quality_desc += f" {bitrate}kbps"
-
-                base = fname.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
-                name = base.rsplit(".", 1)[0] if "." in base else base
-                unique_dl_id = f"{uname}::{quote(fname)}"
-                results.append(
-                    AcquisitionSearchResult(
-                        download_id=unique_dl_id,
-                        title=name,
-                        artist=artist,
-                        album=album,
-                        item_type="track",
-                        size_bytes=size,
-                        bit_rate=int(bitrate) if bitrate else None,
-                        format=ext,
-                        quality_str=quality_desc,
-                        download_url=unique_dl_id,
-                        source="slskd",
-                        extra={"username": uname, "filename": fname, "size": size},
-                    )
-                )
+                results.append(self._build_result(user_resp, f, ext, artist, album))
         return results
 
     def download(self, result: AcquisitionSearchResult) -> str:

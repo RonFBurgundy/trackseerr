@@ -33,6 +33,31 @@ def is_torrent_driver_type(driver_type: str | DownloadDriverType | None) -> bool
     return bool(cls is not None and cls.is_torrent)
 
 
+def _slskd_tuning(extra: dict[str, Any]) -> dict[str, Any]:
+    """Valid slskd peer/search tuning keys from ``extra``; absent or invalid ones fall back to driver defaults."""
+    out: dict[str, Any] = {}
+    for key, cast, minimum in (
+        ("max_peer_queue", int, 0),
+        ("min_upload_speed_kbps", int, 0),
+        ("search_timeout", float, 1),
+        ("min_search_interval", float, 0),
+    ):
+        if extra.get(key) is None or isinstance(extra.get(key), bool):
+            continue
+        try:
+            val = cast(extra[key])
+        except (TypeError, ValueError):
+            continue
+        if val >= minimum:
+            out[key] = val
+    users = extra.get("ignored_users")
+    if isinstance(users, str):
+        users = users.split(",")
+    if isinstance(users, list):
+        out["ignored_users"] = [str(u).strip() for u in users if str(u).strip()]
+    return out
+
+
 def get_acquisition_driver(
     config: Union[dict[str, Any], DownloadClientConfig],
 ) -> AcquisitionDriver:
@@ -59,6 +84,7 @@ def get_acquisition_driver(
             host_url=host_url,
             api_key=api_key,
             download_dir=extra.get("download_dir"),
+            **_slskd_tuning(extra),
         )
     elif driver_type in (DownloadDriverType.SABNZBD.value, "sabnzbd"):
         return SabnzbdDriver(
