@@ -145,10 +145,10 @@ def test_admin_routes_reject_forwarded_principal_of_an_admin_user(env):
     for path in ("/api/library/stats", "/api/system/logs", "/api/queue", "/api/missing", "/api/users", "/api/sync/status"):
         headers = internal_auth.sign_assertion(SECRET, "GET", path, "admin-1", "root", b"")
         res = client.get(path, headers=headers)
-        assert res.status_code == 403, (path, res.status_code)
+        assert res.status_code == 401, (path, res.status_code)
     path = "/api/issues/issue-x"
     headers = internal_auth.sign_assertion(SECRET, "DELETE", path, "admin-1", "root", b"")
-    assert client.delete(path, headers=headers).status_code == 403
+    assert client.delete(path, headers=headers).status_code == 401
 
 
 def test_missing_feeds_refuse_anonymous_and_accept_api_key_and_admin(env):

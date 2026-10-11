@@ -609,7 +609,7 @@ class TestTierPlacement:
         client, _ = core
         for method, path in (("GET", "/api/issues"), ("GET", "/api/issues/open-count"), ("POST", "/api/issues/x/actions/research")):
             res = client.request(method, path, headers=_signed(method, path, user_id="admin-1", user_name="root"))
-            assert res.status_code == 403, path
+            assert res.status_code == 401, path
 
     def test_forwarded_principal_is_never_admin_on_admin_routes(self, core):
         client, db = core
