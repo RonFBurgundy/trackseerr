@@ -41,6 +41,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Keyless Spotify playlists match more songs: tracks with several artists match on the main artist, and titles Spotify censors with asterisks ("F**k You") still match the uncensored song in your library or Plex.
 - Scheduled syncs pick up tracks added to or removed from public Spotify playlists when no Spotify API keys are set; before, the first fetched list was reused until restart.
 - Admins can connect Last.fm from the Core admin interface; the connection no longer bounces to the public Requests site and fails with "Authentication required".
 - The request quota badge in the header and menu drawer now reads "N left of M", so an unused quota no longer looks used up.
