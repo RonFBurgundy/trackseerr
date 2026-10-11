@@ -36,6 +36,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Automatic searches that find nothing retry with simpler queries: the main artist only, without "feat." credits, then the bare title with any remix name kept. Results from these retries must match the artist, title and remixer, so a remix request never grabs the original mix. Every indexer and Soulseek search is now logged with its query, result count and time.
 - Download clients must pass a connection test before they can be saved, and the add/edit form has its own Test button.
 - The Lidarr library import is much faster: it asks Lidarr for each artist's tracks in one go instead of album by album, and database writes are quicker everywhere.
 - Adding a Spotify or Deezer playlist loads its tracks right away. Each playlist on the Sync tab shows its track count and a Tracks button listing every song, with missing tracks highlighted after a sync.
@@ -52,6 +53,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Soulseek searches now wait for peers to answer before reading results (they almost always came back empty), and each finished search is removed from slskd instead of piling up in its Searches list.
 - Editing a download client or indexer no longer resets its priority or re-enables it.
 - slskd connection tests failed with HTTP 404 even with a valid API key; slskd now connects with its URL and API key only.
 - qBittorrent 5 logins were reported as invalid credentials; a rejected login now also mentions the URL port, which must match qBittorrent's own WebUI port.
