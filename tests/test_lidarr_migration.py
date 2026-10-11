@@ -256,6 +256,7 @@ class TestLidarrMigrationJob:
 
         assert res["status"] == "completed"
         assert res["is_migrating"] is False
+        assert not any(p.startswith("track?albumId=") for p in fake.paths("GET"))
         assert res["artists_migrated"] == 2
         assert res["albums_migrated"] == 2
         assert res["tracks_migrated"] == 3
@@ -442,7 +443,8 @@ class TestPerArtistImport:
             if path.split("?")[0] in ("track", "trackfile"):
                 assert "?" in path and path.split("?")[1].split("=")[0] in ("albumId", "artistId"), path
         assert not [p for p in paths if p in ("track", "trackfile", "album")]
-        assert any(p.startswith("track?albumId=") for p in paths)
+        assert not any(p.startswith("track?albumId=") for p in paths)
+        assert [p for p in paths if p.startswith("track?artistId=")] == ["track?artistId=101", "track?artistId=102"]
         assert any(p.startswith("trackfile?artistId=") for p in paths)
 
     def test_album_fetch_timeout_fails_without_switching(self, db: Database):
@@ -507,4 +509,45 @@ class TestPerArtistImport:
 
         assert res["status"] == "failed"
         assert "HTTP 500" in res["error"]
+        assert db.get_media_management_settings()["library_mode"] == "lidarr"
+
+    def test_migration_fetches_tracks_once_per_artist(self, db: Database):
+        data: dict[str, list[dict[str, Any]]] = {"artists": [], "albums": [], "tracks": [], "track_files": []}
+        data["artists"].append({"id": 7, "artistName": "Solo", "foreignArtistId": "mbid-7", "monitored": True})
+        for album_id in (21, 22, 23):
+            data["albums"].append({"id": album_id, "artistId": 7, "title": f"Album {album_id}", "monitored": True})
+            for n in (1, 2):
+                data["tracks"].append(
+                    {"id": album_id * 10 + n, "artistId": 7, "albumId": album_id,
+                     "title": f"T{album_id}-{n}", "trackNumber": n}
+                )
+        data["tracks"].append({"id": 999, "artistId": 7, "albumId": 4040, "title": "Orphan", "trackNumber": 1})
+        fake = loaded_fake(data)
+
+        with patch(HTTPX, fake), patch.object(
+            LidarrClient, "fetch_album_tracks", side_effect=AssertionError("per-album fetch")
+        ):
+            res = LidarrMigrationJob().run_migration(db, real_client(), auto_switch_mode=False)
+
+        assert res["status"] == "completed"
+        assert [p for p in fake.paths("GET") if p.startswith("track?")] == ["track?artistId=7"]
+        assert res["tracks_migrated"] == 6
+        artist = db.get_library_artist_by_name("Solo")
+        for album_id in (21, 22, 23):
+            album = db.get_library_album_by_title(artist["id"], f"Album {album_id}")
+            assert db.get_library_track_by_title(album["id"], f"T{album_id}-1", track_number=1) is not None
+            assert db.get_library_track_by_title(album["id"], f"T{album_id}-2", track_number=2) is not None
+        assert count(db, "library_tracks") == 6
+
+    def test_migration_artist_track_fetch_error_fails_with_artist_context(self, db: Database):
+        fake = loaded_fake(two_artist_payload())
+        fake.fail[("GET", "track?artistId=102")] = 500
+        db.update_media_management_settings({"library_mode": "lidarr"})
+
+        with patch(HTTPX, fake):
+            res = LidarrMigrationJob().run_migration(db, real_client())
+
+        assert res["status"] == "failed"
+        assert "track?artistId=102" in res["error"]
+        assert "artist 'Daft Punk'" in res["error"]
         assert db.get_media_management_settings()["library_mode"] == "lidarr"

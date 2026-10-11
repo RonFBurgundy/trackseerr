@@ -157,6 +157,8 @@ class Database(
         # instead of failing at once with "database is locked".
         conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS};")
         conn.execute("PRAGMA journal_mode=WAL;")
+        # NORMAL is SQLite's recommended pairing with WAL: no corruption risk, only the last commits can be lost on power loss.
+        conn.execute("PRAGMA synchronous=NORMAL;")
         conn.execute("PRAGMA foreign_keys = ON;")
         return conn
 
