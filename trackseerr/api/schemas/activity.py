@@ -102,6 +102,33 @@ class BlocklistPage(PagedBase):
     records: list[BlocklistRecord]
 
 
+class SearchLogRecord(ApiModel):
+    id: int
+    created_at: str
+    source_name: Optional[str] = None
+    source_type: Optional[str] = None
+    query_artist: Optional[str] = None
+    query_title: Optional[str] = None
+    query_album: Optional[str] = None
+    rung: Optional[int] = None
+    result_count: Optional[int] = None
+    duration_ms: Optional[int] = None
+    error: Optional[str] = None
+    trigger_kind: Optional[str] = None
+    trigger_ref: Optional[str] = None
+    trigger_label: Optional[str] = None
+    request_id: Optional[str] = None
+    track_id: Optional[str] = None
+    album_id: Optional[str] = None
+
+
+class SearchLogPage(ApiModel):
+    page: int
+    page_size: int
+    total: int
+    records: list[SearchLogRecord]
+
+
 class HistoryIndexResponse(ApiModel):
     """Scrubber groups; ``empty_index`` (Lidarr mode) is the same shape with no groups."""
 

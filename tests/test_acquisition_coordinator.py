@@ -1330,3 +1330,94 @@ def test_dispatch_all_fail_returns_last_error(test_db):
 def test_dispatch_no_client_raises(test_db):
     with pytest.raises(NoClientAvailable):
         AcquisitionCoordinator().dispatch_with_failover(test_db, _torrent_candidate())
+
+
+# ---------------------------------------------------------------------------- search_log recording
+
+
+def _seed_two_sources(db):
+    db.create_indexer(
+        IndexerConfig(id="idx-t", name="Prowlarr Torznab", indexer_type="torznab",
+                      host_url="http://prowlarr:9696", api_key="k", enabled=True)
+    )
+    db.create_download_client(
+        DownloadClientConfig(id="cli-s", name="slskd Soulseek", driver_type="slskd",
+                             host_url="http://slskd:5030", api_key="k", enabled=True)
+    )
+
+
+def _patched_drivers(torz_search, slsk_search):
+    torz, slsk = MagicMock(), MagicMock()
+    torz.search.side_effect = torz_search
+    slsk.search.side_effect = slsk_search
+    return (
+        patch("trackseerr.acquisition_coordinator.get_indexer_driver", return_value=torz),
+        patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=slsk),
+    )
+
+
+def test_search_all_indexers_records_each_source_with_context(test_db):
+    from trackseerr.acquisition_coordinator import SearchContext
+
+    _seed_two_sources(test_db)
+    p1, p2 = _patched_drivers(lambda **kw: [_result("a")], lambda **kw: [_result("b"), _result("c")])
+    ctx = SearchContext(trigger_kind="manual", trigger_ref="ref1", trigger_label="lbl", request_id="rq",
+                        track_id="tr", album_id="al", rung=2)
+    with p1, p2:
+        AcquisitionCoordinator().search_all_indexers("Radiohead", "Karma Police", db=test_db, context=ctx)
+    rows, total = test_db.list_search_log(1, 50)
+    assert total == 2
+    by_type = {r["source_type"]: r for r in rows}
+    assert by_type["torznab"]["source_name"] == "Prowlarr Torznab" and by_type["torznab"]["result_count"] == 1
+    assert by_type["slskd"]["result_count"] == 2
+    for r in rows:
+        assert (r["trigger_kind"], r["trigger_ref"], r["trigger_label"]) == ("manual", "ref1", "lbl")
+        assert (r["request_id"], r["track_id"], r["album_id"], r["rung"]) == ("rq", "tr", "al", 2)
+        assert r["query_artist"] == "Radiohead" and r["query_title"] == "Karma Police" and r["error"] is None
+
+
+def test_search_all_indexers_records_error_row(test_db):
+    _seed_two_sources(test_db)
+
+    def boom(**kw):
+        raise httpx.ConnectError("connection refused")
+
+    p1, p2 = _patched_drivers(boom, lambda **kw: [])
+    with p1, p2:
+        AcquisitionCoordinator().search_all_indexers("A", "T", db=test_db)
+    rows, _ = test_db.list_search_log(1, 50)
+    err = next(r for r in rows if r["source_type"] == "torznab")
+    assert err["result_count"] == 0 and "connection refused" in err["error"]
+    assert next(r for r in rows if r["source_type"] == "slskd")["error"] is None
+
+
+def test_search_with_fallback_records_rung_numbers(test_db):
+    from trackseerr.acquisition_coordinator import SearchContext
+
+    test_db.create_indexer(
+        IndexerConfig(id="idx-t", name="Prowlarr Torznab", indexer_type="torznab",
+                      host_url="http://prowlarr:9696", api_key="k", enabled=True)
+    )
+    driver = MagicMock()
+    driver.search.return_value = []
+    with patch("trackseerr.acquisition_coordinator.get_indexer_driver", return_value=driver):
+        AcquisitionCoordinator().search_with_fallback(
+            "Radiohead", "Karma Police (Remastered 2009)", "OK Computer (Deluxe)", test_db,
+            context=SearchContext(trigger_kind="manual"),
+        )
+    rows, total = test_db.list_search_log(1, 50)
+    rungs = sorted(r["rung"] for r in rows)
+    assert total >= 2 and rungs[0] == 1 and rungs == list(range(1, total + 1))
+    assert all(r["trigger_kind"] == "manual" for r in rows)
+
+
+def test_search_recording_failure_does_not_break_search(test_db, caplog):
+    import sqlite3
+
+    _seed_two_sources(test_db)
+    p1, p2 = _patched_drivers(lambda **kw: [_result("a")], lambda **kw: [_result("b")])
+    with p1, p2, patch.object(test_db, "record_search", side_effect=sqlite3.OperationalError("locked")):
+        with caplog.at_level("WARNING", logger="trackseerr.acquisition_coordinator"):
+            results = AcquisitionCoordinator().search_all_indexers("A", "T", db=test_db)
+    assert len(results) == 2
+    assert any("Could not record search" in r.getMessage() for r in caplog.records)

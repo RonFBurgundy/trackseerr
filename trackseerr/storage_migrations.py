@@ -59,6 +59,7 @@ class MigrationsMixin:
             migrations: list[tuple[int, Any]] = [
                 (72, self._migration_v72),
                 (73, self._migration_v73),
+                (74, self._migration_v74),
             ]
 
             applied = 0
@@ -125,6 +126,37 @@ class MigrationsMixin:
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_track_aliases_status ON track_aliases(status)")
+
+    def _migration_v74(self, cur: sqlite3.Cursor) -> None:
+        """v74: Add search_log (one row per indexer/slskd search with its trigger) and active_downloads.remote_state."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS search_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                    source_name TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    query_artist TEXT,
+                    query_title TEXT,
+                    query_album TEXT,
+                    rung INTEGER NOT NULL DEFAULT 1,
+                    result_count INTEGER NOT NULL DEFAULT 0,
+                    duration_ms INTEGER NOT NULL DEFAULT 0,
+                    error TEXT,
+                    trigger_kind TEXT,
+                    trigger_ref TEXT,
+                    trigger_label TEXT,
+                    request_id TEXT,
+                    track_id TEXT,
+                    album_id TEXT
+                );
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_search_log_created ON search_log(created_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_search_log_source_type ON search_log(source_type)")
+        cur.execute("PRAGMA table_info(active_downloads)")
+        if "remote_state" not in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE active_downloads ADD COLUMN remote_state TEXT")
 
     def _seed_baseline(self, cur: sqlite3.Cursor) -> None:
         """Seed reference rows and runtime settings for the v71 baseline database."""

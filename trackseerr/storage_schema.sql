@@ -650,7 +650,7 @@ CREATE TABLE active_downloads (
                 target_path TEXT,
                 error_message TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, track_id TEXT REFERENCES library_tracks(id), album_id TEXT REFERENCES library_albums(id), progress_updated_at TEXT, indexer TEXT, quality TEXT, protocol TEXT, unmatched_files TEXT, indexer_id TEXT, seed_ratio_target REAL, seed_time_target_minutes INTEGER, seed_rule_source TEXT, seed_ratio_current REAL, seeding_seconds INTEGER, cleanup_attempts INTEGER NOT NULL DEFAULT 0, cleanup_error TEXT, placed_files TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, track_id TEXT REFERENCES library_tracks(id), album_id TEXT REFERENCES library_albums(id), progress_updated_at TEXT, indexer TEXT, quality TEXT, protocol TEXT, unmatched_files TEXT, indexer_id TEXT, seed_ratio_target REAL, seed_time_target_minutes INTEGER, seed_rule_source TEXT, seed_ratio_current REAL, seeding_seconds INTEGER, cleanup_attempts INTEGER NOT NULL DEFAULT 0, cleanup_error TEXT, placed_files TEXT, remote_state TEXT,
                 FOREIGN KEY (client_id) REFERENCES download_clients(id) ON DELETE CASCADE,
                 FOREIGN KEY (request_id) REFERENCES music_requests(id) ON DELETE SET NULL
             );
@@ -677,6 +677,27 @@ CREATE INDEX idx_track_aliases_status ON track_aliases(status);
 CREATE INDEX idx_missing_tracks_lidarr_status ON missing_tracks(lidarr_status);
 CREATE INDEX idx_requests_user ON music_requests(user_id);
 CREATE INDEX idx_requests_status ON music_requests(status);
+CREATE TABLE search_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                source_name TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                query_artist TEXT,
+                query_title TEXT,
+                query_album TEXT,
+                rung INTEGER NOT NULL DEFAULT 1,
+                result_count INTEGER NOT NULL DEFAULT 0,
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                trigger_kind TEXT,
+                trigger_ref TEXT,
+                trigger_label TEXT,
+                request_id TEXT,
+                track_id TEXT,
+                album_id TEXT
+            );
+CREATE INDEX idx_search_log_created ON search_log(created_at);
+CREATE INDEX idx_search_log_source_type ON search_log(source_type);
 CREATE INDEX idx_active_downloads_status ON active_downloads(status);
 CREATE INDEX idx_active_downloads_client ON active_downloads(client_id);
 CREATE INDEX idx_notification_channels_enabled ON notification_channels(enabled);
