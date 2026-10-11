@@ -8115,7 +8115,7 @@ export interface components {
             name: string;
             /**
              * Priority
-             * @default 1
+             * @default 25
              */
             priority: number;
             /** Seed Ratio */
@@ -8276,6 +8276,8 @@ export interface components {
             in_queue: boolean;
             /** Indexer Name */
             indexer_name: string;
+            /** Indexer Priority */
+            indexer_priority?: number | null;
             /** Is Acceptable */
             is_acceptable: boolean;
             /** Magnet Url */
@@ -12379,6 +12381,8 @@ export interface components {
             in_queue: boolean;
             /** Indexer Name */
             indexer_name: string;
+            /** Indexer Priority */
+            indexer_priority?: number | null;
             /** Is Acceptable */
             is_acceptable: boolean;
             /** Magnet Url */
