@@ -53,6 +53,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Soulseek downloads that a peer never starts ("Queued, Remotely") for 30 minutes, that stop moving for 15 minutes, or that vanish from slskd for 10 minutes are now cancelled and blocklisted, so the next search tries another peer (adjustable with `SLSKD_QUEUE_TIMEOUT_MINUTES`, `SLSKD_STALL_MINUTES`, `SLSKD_MISSING_MINUTES`). Failed Soulseek transfers (errored, rejected, timed out) are no longer treated as finished downloads, and cancelling a Soulseek download works again.
 - Soulseek searches now wait for peers to answer before reading results (they almost always came back empty), and each finished search is removed from slskd instead of piling up in its Searches list.
 - Editing a download client or indexer no longer resets its priority or re-enables it.
 - slskd connection tests failed with HTTP 404 even with a valid API key; slskd now connects with its URL and API key only.
