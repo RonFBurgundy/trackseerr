@@ -140,47 +140,126 @@ def test_slskd_failed_test_logs_warning(caplog):
     assert "secretkey" not in text
 
 
+_SLSKD_RESPONSES = [
+    {
+        "username": "music_fan",
+        "uploadSpeed": 500000,
+        "files": [
+            {
+                "filename": "Music/Radiohead - Kid A/01 - Everything In Its Right Place.flac",
+                "size": 25000000,
+                "bitRate": 950,
+                "extension": "flac",
+            },
+            {
+                "filename": "Music/Radiohead - Kid A/cover.jpg",
+                "size": 50000,
+                "extension": "jpg",
+            },
+        ],
+    }
+]
+_SLSKD_DONE = {"isComplete": True, "state": "Completed, TimedOut"}
+_SLSKD_BUSY = {"isComplete": False, "state": "InProgress"}
+_SLSKD_MOD = "trackseerr.clients.acquisition.slskd"
+
+
+def _slskd_search(driver, gets, post=None, delete=None, **kw):
+    post = post or _slskd_resp(200, {"id": "search-uuid-123"})
+    delete = delete or _slskd_resp(204)
+    with patch("httpx.Client.post", return_value=post) as p, \
+            patch("httpx.Client.get", side_effect=gets) as g, \
+            patch("httpx.Client.delete", return_value=delete) as d, \
+            patch(f"{_SLSKD_MOD}.time.sleep") as sl:
+        results = driver.search(artist="Radiohead", title="Kid A", **kw)
+    return results, p, g, d, sl
+
+
 def test_slskd_search_music():
     driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    results, _, _, _, _ = _slskd_search(
+        driver, [_slskd_resp(200, _SLSKD_DONE), _slskd_resp(200, _SLSKD_RESPONSES)]
+    )
+    assert len(results) == 1
+    r = results[0]
+    assert r.title == "01 - Everything In Its Right Place"
+    assert "Everything In Its Right Place" in r.extra["filename"]
+    assert r.source == "slskd"
+    assert r.format == "flac"
+    assert r.bit_rate == 950
+    assert r.size_bytes == 25000000
 
-    init_resp = MagicMock()
-    init_resp.status_code = 200
-    init_resp.json.return_value = {"id": "search-uuid-123"}
 
-    # slskd returns a list of user response objects
-    poll_resp = MagicMock()
-    poll_resp.status_code = 200
-    poll_resp.json.return_value = [
-        {
-            "username": "music_fan",
-            "uploadSpeed": 500000,
-            "files": [
-                {
-                    "filename": "Music/Radiohead - Kid A/01 - Everything In Its Right Place.flac",
-                    "size": 25000000,
-                    "bitRate": 950,
-                    "extension": "flac",
-                },
-                {
-                    "filename": "Music/Radiohead - Kid A/cover.jpg",
-                    "size": 50000,
-                    "extension": "jpg",
-                },
-            ],
-        }
+def test_slskd_search_polls_until_complete():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    gets = [
+        _slskd_resp(200, _SLSKD_BUSY),
+        _slskd_resp(200, _SLSKD_BUSY),
+        _slskd_resp(200, _SLSKD_DONE),
+        _slskd_resp(200, _SLSKD_RESPONSES),
     ]
+    results, _, g, _, sl = _slskd_search(driver, gets)
+    assert len(results) == 1
+    assert sl.call_count == 2
+    urls = [c.args[0] for c in g.call_args_list]
+    assert urls.count("http://slskd.local:5030/api/v0/searches/search-uuid-123/responses") == 1
+    assert urls[-1].endswith("/responses")
 
-    with patch("httpx.Client.post", return_value=init_resp):
-        with patch("httpx.Client.get", return_value=poll_resp):
-            results = driver.search(artist="Radiohead", title="Kid A")
-            assert len(results) == 1
-            r = results[0]
-            assert r.title == "Kid A"
-            assert "Everything In Its Right Place" in r.extra["filename"]
-            assert r.source == "slskd"
-            assert r.format == "flac"
-            assert r.bit_rate == 950
-            assert r.size_bytes == 25000000
+
+def test_slskd_search_sends_timeout_and_filter():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    _, p, _, _, _ = _slskd_search(
+        driver, [_slskd_resp(200, _SLSKD_DONE), _slskd_resp(200, _SLSKD_RESPONSES)]
+    )
+    body = p.call_args.kwargs["json"]
+    assert body["searchTimeout"] == 12000
+    assert body["filterResponses"] is True
+
+
+def test_slskd_search_deletes_search_after():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    _, _, _, d, _ = _slskd_search(
+        driver, [_slskd_resp(200, _SLSKD_DONE), _slskd_resp(200, _SLSKD_RESPONSES)]
+    )
+    d.assert_called_once()
+    assert d.call_args.args[0] == "http://slskd.local:5030/api/v0/searches/search-uuid-123"
+
+
+def test_slskd_search_deletes_even_when_responses_fail():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    gets = [_slskd_resp(200, _SLSKD_DONE), httpx.ConnectError("boom")]
+    results, _, _, d, _ = _slskd_search(driver, gets)
+    assert results == []
+    d.assert_called_once()
+
+
+def test_slskd_search_deadline_stops_polling():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+
+    def gets():
+        while True:
+            yield _slskd_resp(200, _SLSKD_BUSY)
+
+    # monotonic: started, deadline calc, then a loop check inside the deadline, then past it, then summary calls.
+    ticks = iter([0.0, 0.0, 1.0, 100.0, 100.0, 100.0, 100.0])
+    seq = [_slskd_resp(200, _SLSKD_BUSY), _slskd_resp(200, _SLSKD_RESPONSES)]
+    with patch("httpx.Client.post", return_value=_slskd_resp(200, {"id": "search-uuid-123"})), \
+            patch("httpx.Client.get", side_effect=seq) as g, \
+            patch("httpx.Client.delete", return_value=_slskd_resp(204)), \
+            patch(f"{_SLSKD_MOD}.time.sleep"), \
+            patch(f"{_SLSKD_MOD}.time.monotonic", side_effect=lambda: next(ticks)):
+        results = driver.search(artist="Radiohead", title="Kid A")
+    assert len(results) == 1
+    assert g.call_count == 2
+
+
+def test_slskd_search_logs_summary(caplog):
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with caplog.at_level("INFO", logger=_SLSKD_MOD):
+        _slskd_search(driver, [_slskd_resp(200, _SLSKD_DONE), _slskd_resp(200, _SLSKD_RESPONSES)])
+    line = next(r.getMessage() for r in caplog.records if "finished" in r.getMessage())
+    assert "Radiohead Kid A" in line
+    assert "responses=1" in line and "files=2" in line and "audio_kept=1" in line
 
 
 def test_slskd_download_and_status():

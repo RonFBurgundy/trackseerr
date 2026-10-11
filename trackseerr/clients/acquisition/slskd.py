@@ -24,7 +24,9 @@ class SlskdDriver(AcquisitionDriver):
         api_key: Optional[str] = None,
         download_dir: Optional[str] = None,
         timeout: float = 10.0,
+        search_timeout: float = 12.0,
     ) -> None:
+        self.search_timeout = search_timeout
         self.host_url = host_url.rstrip("/")
         self.api_key = (api_key or "").strip()
         # Explicit override only; otherwise the completed-downloads folder is read from slskd's own options.
@@ -166,71 +168,118 @@ class SlskdDriver(AcquisitionDriver):
         query = " ".join(query_parts)
 
         init_url = f"{self.host_url}/api/v0/searches"
+        search_id = None
+        started = time.monotonic()
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 init_resp = client.post(
                     init_url,
                     headers=self._headers(),
-                    json={"searchText": query},
+                    json={
+                        "searchText": query,
+                        "searchTimeout": int(self.search_timeout * 1000),
+                        "filterResponses": True,
+                    },
                 )
                 if init_resp.status_code not in (200, 201, 202):
                     logger.warning("slskd search initiation failed (%d): %s", init_resp.status_code, init_resp.text[:100])
                     return []
 
-                search_obj = init_resp.json()
-                search_id = search_obj.get("id")
+                search_id = init_resp.json().get("id")
                 if not search_id:
                     return []
+                logger.info("slskd search started id=%s query=%r timeout=%.0fs", search_id, query, self.search_timeout)
 
-                # Poll brief window for fast responses
-                responses_url = f"{self.host_url}/api/v0/searches/{search_id}/responses"
-                results: list[AcquisitionSearchResult] = []
-                
-                # Fetch available responses
-                resp = client.get(responses_url, headers=self._headers())
-                if resp.status_code != 200:
-                    return []
-                
-                user_responses = resp.json()
-                if not isinstance(user_responses, list):
-                    return []
-
-                for user_resp in user_responses:
-                    uname = user_resp.get("username", "")
-                    files = user_resp.get("files", [])
-                    for f in files:
-                        fname = f.get("filename", "")
-                        ext = f.get("extension", "").lower().lstrip(".")
-                        if ext not in ("mp3", "flac", "m4a", "aac", "ogg", "opus"):
-                            continue
-
-                        size = int(f.get("size", 0))
-                        bitrate = f.get("bitRate")
-                        quality_desc = f"{ext.upper()}"
-                        if bitrate:
-                            quality_desc += f" {bitrate}kbps"
-
-                        unique_dl_id = f"{uname}::{quote(fname)}"
-                        results.append(
-                            AcquisitionSearchResult(
-                                download_id=unique_dl_id,
-                                title=title or fname.rsplit("\\", 1)[-1].rsplit("/", 1)[-1],
-                                artist=artist,
-                                album=album,
-                                item_type="track",
-                                size_bytes=size,
-                                bit_rate=int(bitrate) if bitrate else None,
-                                format=ext,
-                                quality_str=quality_desc,
-                                download_url=unique_dl_id,
-                                source="slskd",
-                                extra={"username": uname, "filename": fname, "size": size},
-                            )
-                        )
-                return results
-        except Exception as e:
-            logger.error("Error during slskd search: %s", e)
+                try:
+                    state = self._wait_for_search(client, search_id)
+                    resp = client.get(f"{init_url}/{search_id}/responses", headers=self._headers())
+                    if resp.status_code != 200:
+                        return []
+                    user_responses = resp.json()
+                    if not isinstance(user_responses, list):
+                        return []
+                    results = self._parse_responses(user_responses, artist, title, album)
+                    files = sum(len(u.get("files", [])) for u in user_responses if isinstance(u, dict))
+                    logger.info(
+                        "slskd search id=%s query=%r finished state=%s responses=%d files=%d audio_kept=%d in %.1fs",
+                        search_id, query, state, len(user_responses), files, len(results), time.monotonic() - started,
+                    )
+                    return results
+                finally:
+                    self._delete_search(client, init_url, search_id)
+        except (httpx.HTTPError, ValueError) as e:
+            logger.error("slskd search failed for query %r: %s: %s", query, type(e).__name__, e)
             return []
+
+    def _wait_for_search(self, client: httpx.Client, search_id: str) -> str:
+        """Poll the search until slskd reports it complete or the deadline passes; returns the last state."""
+        status_url = f"{self.host_url}/api/v0/searches/{search_id}"
+        deadline = time.monotonic() + self.search_timeout + 5.0
+        state = "Unknown"
+        while time.monotonic() < deadline:
+            resp = client.get(status_url, headers=self._headers())
+            if resp.status_code != 200:
+                logger.warning("slskd search status poll failed (%d) for id=%s", resp.status_code, search_id)
+                return state
+            data = resp.json()
+            data = data if isinstance(data, dict) else {}
+            state = str(data.get("state") or state)
+            if data.get("isComplete") or "Completed" in state:
+                return state
+            time.sleep(1.0)
+        return state
+
+    def _delete_search(self, client: httpx.Client, init_url: str, search_id: str) -> None:
+        """Remove the finished search from slskd; cleanup never raises."""
+        try:
+            resp = client.delete(f"{init_url}/{search_id}", headers=self._headers())
+            if resp.status_code not in (200, 204):
+                logger.debug("slskd search delete returned %d for id=%s", resp.status_code, search_id)
+        except httpx.HTTPError as e:
+            logger.debug("slskd search delete failed for id=%s: %s: %s", search_id, type(e).__name__, e)
+
+    def _parse_responses(
+        self,
+        payload: list[Any],
+        artist: str,
+        title: Optional[str],
+        album: Optional[str],
+    ) -> list[AcquisitionSearchResult]:
+        results: list[AcquisitionSearchResult] = []
+        for user_resp in payload:
+            uname = user_resp.get("username", "")
+            for f in user_resp.get("files", []):
+                fname = f.get("filename", "")
+                ext = f.get("extension", "").lower().lstrip(".")
+                if ext not in ("mp3", "flac", "m4a", "aac", "ogg", "opus"):
+                    continue
+
+                size = int(f.get("size", 0))
+                bitrate = f.get("bitRate")
+                quality_desc = f"{ext.upper()}"
+                if bitrate:
+                    quality_desc += f" {bitrate}kbps"
+
+                base = fname.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
+                name = base.rsplit(".", 1)[0] if "." in base else base
+                unique_dl_id = f"{uname}::{quote(fname)}"
+                results.append(
+                    AcquisitionSearchResult(
+                        download_id=unique_dl_id,
+                        title=name,
+                        artist=artist,
+                        album=album,
+                        item_type="track",
+                        size_bytes=size,
+                        bit_rate=int(bitrate) if bitrate else None,
+                        format=ext,
+                        quality_str=quality_desc,
+                        download_url=unique_dl_id,
+                        source="slskd",
+                        extra={"username": uname, "filename": fname, "size": size},
+                    )
+                )
+        return results
 
     def download(self, result: AcquisitionSearchResult) -> str:
         """Enqueues track or folder download via slskd."""
