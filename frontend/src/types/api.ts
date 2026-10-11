@@ -10159,6 +10159,16 @@ export interface components {
              * @default 0
              */
             artists_migrated: number;
+            /**
+             * Artists Processed
+             * @default 0
+             */
+            artists_processed: number;
+            /**
+             * Artists Total
+             * @default 0
+             */
+            artists_total: number;
             /** Completed At */
             completed_at?: string | null;
             /** Error */
