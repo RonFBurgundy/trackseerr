@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, errorMessage } from '@/services/apiClient';
 import { grabRelease, searchReleases } from '@/services/acquisitionService';
+import type { Schema } from '@/types/apiSchema';
 import type {
   IndexerSearchError,
   ManualSearchFilter,
@@ -15,6 +16,8 @@ export interface UseManualSearchReturn {
   /** Everything the server returned, unfiltered. */
   total: number;
   profileName: string;
+  /** The last automatic search recorded for the item, if any. */
+  lastSearch: Schema<'LastSearch'> | null;
   indexerErrors: IndexerSearchError[];
   loading: boolean;
   error: string | null;
@@ -68,7 +71,8 @@ export function useManualSearch(
 ): UseManualSearchReturn {
   const [releases, setReleases] = useState<SearchRelease[]>([]);
   const [profileName, setProfileName] = useState<string>('');
-  const [indexerErrors, setIndexerErrors] = useState<IndexerSearchError[]>([]);
+  const [lastSearch, setLastSearch] = useState<Schema<'LastSearch'> | null>(null);
+  const [indexerErrors, setIndexerErrors] =useState<IndexerSearchError[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<ManualSearchFilter>('all');
@@ -82,6 +86,7 @@ export function useManualSearch(
   useEffect(() => {
     setReleases([]);
     setProfileName('');
+    setLastSearch(null);
     setIndexerErrors([]);
     setError(null);
     setBusyIds(new Set());
@@ -109,6 +114,7 @@ export function useManualSearch(
         if (controller.signal.aborted) return;
         setReleases(res.results);
         setProfileName(res.profile_name);
+        setLastSearch(res.last_search ?? null);
         setIndexerErrors(readIndexerErrors(res));
       })
       .catch((err: unknown) => {
@@ -165,6 +171,7 @@ export function useManualSearch(
     results,
     total: releases.length,
     profileName,
+    lastSearch,
     indexerErrors,
     loading,
     error,

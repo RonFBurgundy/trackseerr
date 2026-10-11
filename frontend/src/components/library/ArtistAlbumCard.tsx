@@ -284,7 +284,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
         </div>
       )}
       {historyOpen && (
-        <ItemHistoryModal isOpen onClose={() => setHistoryOpen(false)} entity="album" entityId={String(album.id)} title={album.title ?? ''} />
+        <ItemHistoryModal isOpen onClose={() => setHistoryOpen(false)} entity="album" entityId={String(album.id)} title={album.title ?? ''} canReject={isAdmin && !lidarrMode} onToast={onToast} />
       )}
     </MachinedCard>
   );

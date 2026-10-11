@@ -25,6 +25,8 @@ export * from './artSrc';
 export * from './ArtistRestOfDiscography';
 export * from './itemHistoryFormat';
 export * from './ItemHistoryModal';
+export * from './ItemHistoryTimeline';
+export * from './RejectCurrentButton';
 export * from './ItemOriginCaption';
 export * from './ArtistTagsRow';
 export * from './DiscographyFilter';

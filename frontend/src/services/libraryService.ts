@@ -106,6 +106,16 @@ export async function searchAlbum(albumId: number | string): Promise<LidarrSearc
   return apiRequest<LidarrSearchResult>(`/api/library/albums/${albumId}/search`, { method: 'POST' });
 }
 
+/** Native mode, admin: blocklist the release behind an album's/track's files and queue a replacement search. */
+export async function rejectCurrentRelease(
+  entity: 'album' | 'track',
+  id: string
+): Promise<Schema<'RejectCurrentResponse'>> {
+  return apiRequest<Schema<'RejectCurrentResponse'>>(`/api/library/${entity}/${encodeURIComponent(id)}/reject-current`, {
+    method: 'POST',
+  });
+}
+
 export async function setArtistMonitoringPreset(
   artistId: number | string,
   option: MonitorOption

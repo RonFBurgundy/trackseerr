@@ -1,8 +1,11 @@
-import React, { useId, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Download, Loader2, RefreshCw, X } from 'lucide-react';
 import { useManualSearch } from '@/hooks/useManualSearch';
 import type { ManualSearchFilter, ManualSearchSort, ManualSearchTarget, SearchRelease } from '@/types/manualSearch';
-import { CassetteLoader, ConfirmDangerButton, ObsidianModal, TapeDeckButton } from '@/components/ui';
+import { CassetteLoader, ConfirmDangerButton, ObsidianModal, TabStrip, TapeDeckButton } from '@/components/ui';
+import { ItemHistoryTimeline } from '@/components/library/ItemHistoryTimeline';
+import { RejectCurrentButton } from '@/components/library/RejectCurrentButton';
+import { historyRelativeTime } from '@/components/library/itemHistoryFormat';
 import { formatBytes } from '@/components/lists';
 
 export interface ManualSearchModalProps {
@@ -39,6 +42,51 @@ function formatAge(value: string | null | undefined): string {
   if (days < 730) return `${Math.floor(days / 30)}mo`;
   return `${Math.floor(days / 365)}y`;
 }
+
+/** Local date-time for a server timestamp; the raw text when it does not parse. */
+function formatWhen(value: string): string {
+  const t = Date.parse(value);
+  return Number.isNaN(t) ? value : new Date(t).toLocaleString();
+}
+
+/** Blocklist match carried on a release: reason/date as one line for the badge tooltip, or null when not blocklisted. */
+function blocklistNote(release: SearchRelease): string | null {
+  const b = release.blocklist;
+  if (!b) return null;
+  const reason = typeof b.reason === 'string' && b.reason !== '' ? b.reason : 'Blocklisted';
+  const indexer = typeof b.indexer === 'string' && b.indexer !== '' ? ` on ${b.indexer}` : '';
+  const when = typeof b.created_at === 'string' && b.created_at !== '' ? ` (${formatWhen(b.created_at)})` : '';
+  return `${reason}${indexer}${when}`;
+}
+
+const BADGE =
+  'px-1 py-px rounded-[2px] text-[10px] uppercase border flex-shrink-0 font-mono';
+
+const ReleaseBadges: React.FC<{ release: SearchRelease }> = ({ release }) => {
+  const note = blocklistNote(release);
+  return (
+    <>
+      {note && (
+        <span className={`${BADGE} border-[#ef4444]/40 text-[#ef4444]`} title={note}>
+          Blocklisted
+        </span>
+      )}
+      {release.in_queue && (
+        <span className={`${BADGE} border-[#e5a00d]/40 text-[#e5a00d]`} title="This release is already in the download queue">
+          Downloading
+        </span>
+      )}
+      {release.pending_until && (
+        <span
+          className={`${BADGE} border-[#2a2a2a] text-neutral-300`}
+          title={`Held by the delay profile until ${formatWhen(release.pending_until)}`}
+        >
+          Held until {formatWhen(release.pending_until)}
+        </span>
+      )}
+    </>
+  );
+};
 
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) return '-';
@@ -127,6 +175,7 @@ const ReleaseRow = React.memo<ReleaseRowProps>(({ release: r, expanded, busy, gr
           <span className="px-1 py-px rounded-[2px] text-[10px] uppercase bg-[#1a1a1a] border border-[#2a2a2a] text-neutral-300 flex-shrink-0">
             {r.protocol}
           </span>
+          <ReleaseBadges release={r} />
         </div>
         <span className="hidden sm:block text-xs font-mono text-neutral-300 truncate" title={r.parsed_quality}>
           {r.parsed_quality || '-'}
@@ -151,6 +200,7 @@ const ReleaseRow = React.memo<ReleaseRowProps>(({ release: r, expanded, busy, gr
       </div>
       {expanded && (
         <div id={detailId} className="px-3 pb-3 pt-1 bg-[#0d0d0d] text-xs font-mono space-y-2">
+          {blocklistNote(r) && <p className="text-[#ef4444]/90 break-words">{blocklistNote(r)}</p>}
           <div>
             <div className="text-neutral-500 uppercase tracking-wider text-[10px] mb-1">Rejection reasons</div>
             {r.rejection_reasons.length > 0 ? (
@@ -187,12 +237,24 @@ ReleaseRow.displayName = 'ReleaseRow';
 export const ManualSearchModal: React.FC<ManualSearchModalProps> = ({ target, onClose, onToast, onGrabbed }) => {
   const search = useManualSearch(target, onToast, onGrabbed);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [tab, setTab] = useState<'releases' | 'history'>('releases');
+  const [historyKey, setHistoryKey] = useState<number>(0);
   const uid = useId();
   const sortId = `${uid}-sort`;
   const what = target ? target.title || target.album || '' : '';
   const subtitle = target
     ? `${target.artist}${what ? ` • ${what}` : ''}${search.profileName ? ` · Profile: ${search.profileName}` : ''}`
     : undefined;
+
+  const trackId = target?.trackId != null ? String(target.trackId) : null;
+  const albumId = target?.albumId != null ? String(target.albumId) : null;
+  const historyEntity: 'track' | 'album' | null = trackId !== null ? 'track' : albumId !== null ? 'album' : null;
+  const historyId = trackId ?? albumId;
+  const activeTab = historyEntity === null ? 'releases' : tab;
+
+  useEffect(() => {
+    setTab('releases');
+  }, [target]);
 
   const toggle = (id: string): void => setExpandedId((cur) => (cur === id ? null : id));
 
@@ -210,6 +272,38 @@ export const ManualSearchModal: React.FC<ManualSearchModalProps> = ({ target, on
       }
     >
       <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {historyEntity !== null && (
+            <TabStrip aria-label="Manual search sections">
+              <TapeDeckButton size="sm" active={activeTab === 'releases'} onClick={() => setTab('releases')}>
+                Releases
+              </TapeDeckButton>
+              <TapeDeckButton size="sm" active={activeTab === 'history'} onClick={() => setTab('history')}>
+                History
+              </TapeDeckButton>
+            </TabStrip>
+          )}
+          {historyEntity !== null && historyId !== null && (
+            <RejectCurrentButton
+              entity={historyEntity}
+              entityId={historyId}
+              onToast={onToast}
+              onDone={() => {
+                search.rerun();
+                setHistoryKey((k) => k + 1);
+              }}
+            />
+          )}
+        </div>
+        <p className="text-xs font-mono text-neutral-500">
+          {search.lastSearch
+            ? `Last automatic search: ${historyRelativeTime(search.lastSearch.at)} \u2014 ${search.lastSearch.message}`
+            : 'No automatic search recorded'}
+        </p>
+        {activeTab === 'history' && historyEntity !== null && historyId !== null ? (
+          <ItemHistoryTimeline key={`${historyEntity}:${historyId}:${historyKey}`} entity={historyEntity} entityId={historyId} />
+        ) : (
+        <>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-mono text-neutral-400 mr-auto" aria-live="polite">
             {search.loading ? 'Searching' : `${search.results.length} of ${search.total} releases`}
@@ -313,6 +407,8 @@ export const ManualSearchModal: React.FC<ManualSearchModalProps> = ({ target, on
               ))}
             </ul>
           </div>
+        )}
+        </>
         )}
       </div>
     </ObsidianModal>
