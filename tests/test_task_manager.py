@@ -259,7 +259,7 @@ def test_task_list_exposes_structured_fields(app_and_client, seeded_users, secre
     resp = client.get("/api/system/tasks", cookies=cookies)
     assert resp.status_code == 200
     tasks = {t["id"]: t for t in resp.json()}
-    assert set(tasks) >= set(task_manager.TASKS) - {"lidarr_request_retry"}  # that one is Lidarr-mode only
+    assert set(tasks) >= set(task_manager.TASKS) - {"lidarr_request_retry", "lidarr_migration"}  # Lidarr-mode only / hidden until it has run
 
     rss = tasks["indexer_rss_sync"]
     assert rss["schedule_kind"] == "interval" and rss["editable"] is True
@@ -831,3 +831,33 @@ def test_schedule_edit_rejected_for_playlist_sync_when_wait_seconds_is_zero(db):
     with pytest.raises(HTTPException) as err:
         set_task_schedule("playlist_sync", TaskScheduleUpdate(interval_seconds=3600), db=db, config=_cfg(wait_seconds=0), _admin={})
     assert err.value.status_code == 400
+
+
+def test_lidarr_migration_is_registered():
+    assert "lidarr_migration" in task_manager.TASKS
+    assert task_manager.WORKER_THREAD_TASKS["LidarrMigrationThread"] == "lidarr_migration"
+    assert "LidarrMigrationThread" not in task_manager.NON_TASK_THREADS
+
+
+def test_activity_shows_running_lidarr_migration(db, monkeypatch):
+    from trackseerr.api.routes.system.tasks import get_system_activity
+    from trackseerr.lidarr_migration import lidarr_migration_job
+
+    monkeypatch.setattr(
+        lidarr_migration_job,
+        "_status",
+        {
+            **LidarrMigrationJob._default_status(),
+            "is_migrating": True,
+            "status": "running",
+            "artists_total": 10,
+            "artists_processed": 4,
+            "artists_migrated": 10,
+        },
+    )
+    db.start_task_run("lidarr_migration", "manual", _iso(timedelta(seconds=-5)))
+    body = get_system_activity(db=db, _admin={})
+    assert len(body["running"]) == 1
+    entry = body["running"][0]
+    assert entry["name"] == "Lidarr Library Import"
+    assert entry["progress"].total == 10 and entry["progress"].current == 4

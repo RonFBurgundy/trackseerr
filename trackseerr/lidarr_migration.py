@@ -21,9 +21,11 @@ from trackseerr.models import (
     LibraryFile,
     LibraryTrack,
 )
+from trackseerr.job_tracker import track_job
 from trackseerr.library_manager import MODE_NATIVE, SwitchRefused, switch_mode
 from trackseerr.redaction import safe_exc
 from trackseerr.storage import Database
+from trackseerr.task_manager import TRIGGER_MANUAL, record_task_run
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,8 @@ class LidarrMigrationJob:
     def _default_status() -> dict[str, Any]:
         return {
             "is_migrating": False,
+            "artists_total": 0,
+            "artists_processed": 0,
             "artists_migrated": 0,
             "albums_migrated": 0,
             "tracks_migrated": 0,
@@ -103,13 +107,43 @@ class LidarrMigrationJob:
             self._status["started_at"] = datetime.now(timezone.utc).isoformat()
 
             self._thread = threading.Thread(
-                target=self.run_migration,
+                target=self._run_recorded,
                 args=(db, lidarr_client, auto_switch_mode),
                 daemon=True,
                 name="LidarrMigrationThread",
             )
             self._thread.start()
             return True
+
+    def _run_recorded(self, db: Database, lidarr_client: LidarrClient, auto_switch_mode: bool) -> None:
+        """Thread body: runs the migration inside a task-run record and a live job entry."""
+        with record_task_run(db, "lidarr_migration", TRIGGER_MANUAL) as run, track_job(
+            "lidarr_migration", "Lidarr library import"
+        ) as job:
+            result = self.run_migration(db, lidarr_client, auto_switch_mode)
+            summary = (
+                f"{result.get('artists_migrated', 0)} artists, {result.get('albums_migrated', 0)} albums, "
+                f"{result.get('tracks_migrated', 0)} tracks, {result.get('files_migrated', 0)} files"
+            )
+            status = result.get("status")
+            if status == "failed":
+                run.failed = job.failed = str(result.get("error") or "Lidarr import failed")
+            elif status == "cancelled":
+                run.cancelled = job.cancelled = True
+                run.message = summary
+            else:
+                run.message = summary
+                job.update_message(summary)
+
+    def progress_snapshot(self) -> tuple[int, int, str]:
+        """Returns (artists_processed, artists_total, message) for the task list."""
+        with self._lock:
+            st = self._status
+            message = (
+                f"{st['artists_migrated']} artists · {st['albums_migrated']} albums · "
+                f"{st['tracks_migrated']} tracks · {st['files_migrated']} files"
+            )
+            return int(st["artists_processed"]), int(st["artists_total"]), message
 
     def _migrate_one_artist(self, run: _MigrationRun, artist: dict[str, Any]) -> None:
         """Ingests a single raw Lidarr artist dictionary."""
@@ -169,6 +203,8 @@ class LidarrMigrationJob:
 
     def _migrate_artists(self, run: _MigrationRun, raw_artists: list[dict[str, Any]]) -> bool:
         """Ingests raw Lidarr artists into the native catalog."""
+        with self._lock:
+            self._status["artists_total"] = len(raw_artists)
         for artist in raw_artists:
             if self._stop_event.is_set():
                 logger.info("LidarrMigration: Cancellation requested during artist ingestion.")
@@ -424,6 +460,7 @@ class LidarrMigrationJob:
             self._status["is_migrating"] = True
             self._status["status"] = "running"
             self._status["artists_migrated"] = 0
+            self._status["artists_processed"] = 0
             self._status["albums_migrated"] = 0
             self._status["tracks_migrated"] = 0
             self._status["files_migrated"] = 0
@@ -450,6 +487,8 @@ class LidarrMigrationJob:
                 if self._stop_event.is_set():
                     return self._mark("cancelled")
                 self._migrate_artist_catalog(run, lidarr_artist)
+                with self._lock:
+                    self._status["artists_processed"] += 1
 
             if self._stop_event.is_set():
                 return self._mark("cancelled")

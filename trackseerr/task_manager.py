@@ -79,6 +79,12 @@ TASKS: dict[str, TaskSpec] = {
             "Scans local audio storage, extracts Mutagen tags, and indexes media into the library catalog.",
             KIND_MANUAL,
         ),
+        TaskSpec(
+            "lidarr_migration",
+            "Lidarr Library Import",
+            "Imports the Lidarr catalog (artists, albums, tracks, files) into TrackSeerr and switches the library manager to TrackSeerr when it finishes.",
+            KIND_MANUAL,
+        ),
         # Calls Spotify/Deezer/Plex: not more often than every 15m to stay clear of rate limits. Config: WAIT_SECONDS.
         TaskSpec(
             "playlist_sync",
@@ -318,6 +324,7 @@ WORKER_THREAD_TASKS: dict[str, str] = {
     "ManualBackupTask": "backup",
     "UpdateCheckWorkerThread": "update_check",
     "ManualUpdateCheckTask": "update_check",
+    "LidarrMigrationThread": "lidarr_migration",
 }
 
 NON_TASK_THREADS: dict[str, str] = {
@@ -325,7 +332,6 @@ NON_TASK_THREADS: dict[str, str] = {
     "and keeps no run history; the core reports gateway health separately",
     "media-server-probe": "one-shot connectivity probe with a timeout, started per status request",
     "lidarr-list-refresh": "request-driven cache refresh of the Lidarr list snapshot, not a scheduled job",
-    "LidarrMigrationThread": "one-off user-started migration with its own status endpoint",
     "BootInit": "one-shot post-bind startup sequence (starts the real workers), not a recurring job",
     "BootListenLog": "one-shot boot log line once the server socket is bound",
     "media-server-user-discovery": "one-shot user import when a media server connects, not a recurring job",
