@@ -508,3 +508,52 @@ def test_get_indexer_driver_factory():
     }
     driver = get_indexer_driver(cfg_torznab)
     assert isinstance(driver, TorznabDriver)
+
+
+# ---------------------------------------------------------------------------
+# Auth fixes: slskd session login, qBittorrent CSRF/ban, SABnzbd API key probe
+# ---------------------------------------------------------------------------
+def test_slskd_session_login_bearer():
+    driver = SlskdDriver("http://slskd.local:5030", username="user", password="pw")
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"token": "abc"}
+    with patch("httpx.Client.post", return_value=resp):
+        assert driver._headers()["Authorization"] == "Bearer abc"
+
+
+def test_slskd_session_login_rejected():
+    driver = SlskdDriver("http://slskd.local:5030", username="user", password="bad")
+    resp = MagicMock()
+    resp.status_code = 401
+    with patch("httpx.Client.post", return_value=resp):
+        ok, msg = driver.test_connection()
+    assert ok is False
+    assert "username/password" in msg
+
+
+def test_qbittorrent_login_sends_referer_and_handles_ban():
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "wrong")
+    resp = MagicMock()
+    resp.status_code = 403
+    resp.text = "Your IP address has been banned"
+    resp.cookies = {}
+    with patch("httpx.Client.post", return_value=resp) as post:
+        ok, msg = driver.test_connection()
+    assert ok is False
+    assert "banned" in msg
+    assert post.call_args.kwargs["headers"]["Referer"] == "http://qbittorrent:8080"
+
+
+def test_sabnzbd_bad_api_key_fails_test():
+    driver = SabnzbdDriver("http://sabnzbd:8080", api_key="wrong")
+    version = MagicMock()
+    version.status_code = 200
+    version.json.return_value = {"version": "4.2.1"}
+    queue = MagicMock()
+    queue.status_code = 200
+    queue.json.return_value = {"status": False, "error": "API Key Incorrect"}
+    with patch("httpx.Client.get", side_effect=[version, queue]):
+        ok, msg = driver.test_connection()
+    assert ok is False
+    assert "API key" in msg

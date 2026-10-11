@@ -5,6 +5,7 @@ import logging
 import uuid
 from typing import Any, Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from trackseerr.api.response_models import ApiModel
@@ -15,7 +16,7 @@ from trackseerr.redaction import redact_text
 from trackseerr.clients.acquisition import get_acquisition_driver
 from trackseerr.download_roots import describe_client_roots
 from trackseerr.models import DownloadClientConfig, DownloadDriverType
-from trackseerr.security import is_safe_service_url, mask_secret, resolve_masked_value
+from trackseerr.security import MASK_MARKER, is_safe_service_url, mask_secret, resolve_masked_value
 from trackseerr.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ class DownloadClientPayload(BaseModel):
 
 
 class TestConnectionPayload(BaseModel):
+    id: Optional[str] = None
     driver_type: str
     host_url: str
     api_key: Optional[str] = None
@@ -69,6 +71,47 @@ class TestConnectionPayload(BaseModel):
 class TestConnectionResponse(ApiModel):
     success: bool
     message: str
+
+
+def _missing_credentials_message(
+    driver_type: str, api_key: Optional[str], username: Optional[str], password: Optional[str]
+) -> Optional[str]:
+    """Returns an error message when the driver type's required credentials are absent."""
+    if driver_type == "deluge" and not password:
+        return "Password is required for Deluge"
+    if driver_type == "nzbget" and (not username or not password):
+        return "Username and password are required for NZBGet"
+    if driver_type == "slskd" and not api_key and not (username and password):
+        return "slskd needs an API key or a username and password"
+    return None
+
+
+def _verify_connection(cfg: dict[str, Any]) -> tuple[bool, str]:
+    """Builds the driver for ``cfg`` and runs its connection test; the single seam tests patch."""
+    try:
+        driver = get_acquisition_driver(cfg)
+        return driver.test_connection()
+    except (httpx.HTTPError, ValueError, RuntimeError, OSError) as e:
+        logger.warning("Download client connection test failed: %s", redact_text(str(e)))
+        return False, f"Connection failed: {redact_text(str(e))}"
+
+
+def _resolve_test_secrets(
+    payload: "TestConnectionPayload", db: Database
+) -> tuple[Optional[str], Optional[str]]:
+    """Resolves masked/omitted secrets in a test payload against the stored client named by ``payload.id``.
+
+    Raises ValueError when a masked placeholder cannot be resolved.
+    """
+    api_key, password = payload.api_key, payload.password
+    stored = db.get_download_client(payload.id.strip()) if payload.id and payload.id.strip() else None
+    if stored:
+        api_key = resolve_masked_value(api_key, stored.get("api_key"), mask_secret(stored.get("api_key")), "api_key")
+        password = resolve_masked_value(password, stored.get("password"), mask_secret(stored.get("password")), "password")
+        return api_key or stored.get("api_key"), password or stored.get("password")
+    if (api_key and MASK_MARKER in api_key) or (password and MASK_MARKER in password):
+        raise ValueError("Masked placeholder submitted; enter the full value")
+    return api_key, password
 
 
 def _normalize_extra_settings(
@@ -196,22 +239,29 @@ def create_or_update_download_client(
 
     # Validate per-type required credentials
     effective_username = payload.username.strip() if payload.username else (existing.get("username") if existing else None)
-    if clean_type == "deluge" and not password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password is required for Deluge",
-        )
-    if clean_type == "nzbget" and (not effective_username or not password):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username and password are required for NZBGet",
-        )
+    missing = _missing_credentials_message(clean_type, api_key, effective_username, password)
+    if missing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=missing)
 
     extra_settings = _normalize_extra_settings(
         payload.extra_settings_json,
         category=payload.category,
         remote_path_mappings=payload.remote_path_mappings,
     )
+
+    if payload.enabled:
+        ok, msg = _verify_connection(
+            {
+                "driver_type": clean_type,
+                "host_url": clean_host,
+                "api_key": api_key,
+                "username": effective_username,
+                "password": password,
+                "extra_settings_json": extra_settings,
+            }
+        )
+        if not ok:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Connection test failed: {msg}")
 
     config = DownloadClientConfig(
         id=client_id,
@@ -252,16 +302,14 @@ def test_download_client_connection(
             message=f"Invalid driver type '{payload.driver_type}'",
         )
 
-    if clean_type == "deluge" and not payload.password:
-        return TestConnectionResponse(
-            success=False,
-            message="Password is required for Deluge",
-        )
-    if clean_type == "nzbget" and (not payload.username or not payload.password):
-        return TestConnectionResponse(
-            success=False,
-            message="Username and password are required for NZBGet",
-        )
+    try:
+        api_key, password = _resolve_test_secrets(payload, db)
+    except ValueError as exc:
+        return TestConnectionResponse(success=False, message=str(exc))
+
+    missing = _missing_credentials_message(clean_type, api_key, payload.username, password)
+    if missing:
+        return TestConnectionResponse(success=False, message=missing)
 
     extra_settings = _normalize_extra_settings(
         payload.extra_settings_json,
@@ -269,22 +317,17 @@ def test_download_client_connection(
         remote_path_mappings=payload.remote_path_mappings,
     )
 
-    try:
-        driver = get_acquisition_driver(
-            {
-                "driver_type": clean_type,
-                "host_url": clean_host,
-                "api_key": payload.api_key,
-                "username": payload.username,
-                "password": payload.password,
-                "extra_settings_json": extra_settings,
-            }
-        )
-        success, msg = driver.test_connection()
-        return TestConnectionResponse(success=success, message=msg)
-    except Exception as e:
-        logger.warning("Download client connection test failed: %s", redact_text(str(e)))
-        return TestConnectionResponse(success=False, message=f"Connection failed: {redact_text(str(e))}")
+    success, msg = _verify_connection(
+        {
+            "driver_type": clean_type,
+            "host_url": clean_host,
+            "api_key": api_key,
+            "username": payload.username,
+            "password": password,
+            "extra_settings_json": extra_settings,
+        }
+    )
+    return TestConnectionResponse(success=success, message=msg)
 
 
 @router.delete("/{client_id}", response_model=DeletedResponse, response_model_exclude_unset=True, summary="Delete download client")

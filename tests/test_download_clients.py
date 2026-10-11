@@ -245,3 +245,74 @@ def test_create_and_test_routes_all_client_types(client: TestClient, auth_header
         assert res.status_code == 200
         assert res.json()["success"] is False
         assert "password" in res.json()["message"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Connection verification before save / masked secret resolution
+# ---------------------------------------------------------------------------
+_QB_PAYLOAD = {
+    "name": "qb",
+    "driver_type": "qbittorrent",
+    "host_url": "http://192.168.1.50:8080",
+    "username": "admin",
+    "password": "realpass1234",
+}
+
+
+def test_create_rejected_when_connection_test_fails(client: TestClient, auth_headers: dict[str, str], db: Database, monkeypatch):
+    monkeypatch.setattr("trackseerr.api.routes.download_clients._verify_connection", lambda cfg: (False, "nope"))
+    res = client.post("/api/settings/download-clients", json=_QB_PAYLOAD, headers=auth_headers)
+    assert res.status_code == 400
+    assert "Connection test failed" in res.json()["detail"]
+    assert db.list_download_clients() == []
+
+
+def test_create_disabled_client_skips_connection_test(client: TestClient, auth_headers: dict[str, str], monkeypatch):
+    monkeypatch.setattr("trackseerr.api.routes.download_clients._verify_connection", lambda cfg: (False, "nope"))
+    res = client.post("/api/settings/download-clients", json={**_QB_PAYLOAD, "enabled": False}, headers=auth_headers)
+    assert res.status_code == 200
+
+
+def test_test_route_resolves_masked_secret_by_id(client: TestClient, auth_headers: dict[str, str], monkeypatch):
+    res = client.post("/api/settings/download-clients", json=_QB_PAYLOAD, headers=auth_headers)
+    assert res.status_code == 200
+    listed = client.get("/api/settings/download-clients", headers=auth_headers).json()[0]
+    assert listed["password"] != "realpass1234"
+
+    seen: list[dict] = []
+    monkeypatch.setattr(
+        "trackseerr.api.routes.download_clients._verify_connection",
+        lambda cfg: (seen.append(cfg) or (True, "ok")),
+    )
+    res = client.post(
+        "/api/settings/download-clients/test",
+        json={
+            "id": listed["id"],
+            "driver_type": "qbittorrent",
+            "host_url": listed["host_url"],
+            "username": listed["username"],
+            "password": listed["password"],
+        },
+        headers=auth_headers,
+    )
+    assert res.json()["success"] is True
+    assert seen[0]["password"] == "realpass1234"
+
+
+def test_test_route_rejects_masked_without_id(client: TestClient, auth_headers: dict[str, str]):
+    res = client.post(
+        "/api/settings/download-clients/test",
+        json={**_QB_PAYLOAD, "password": "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u20221234"},
+        headers=auth_headers,
+    )
+    assert res.json()["success"] is False
+
+
+def test_slskd_requires_key_or_credentials(client: TestClient, auth_headers: dict[str, str]):
+    res = client.post(
+        "/api/settings/download-clients",
+        json={"name": "slsk", "driver_type": "slskd", "host_url": "http://192.168.1.50:5030"},
+        headers=auth_headers,
+    )
+    assert res.status_code == 400
+    assert "slskd" in res.json()["detail"]
