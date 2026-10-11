@@ -28,6 +28,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- The Lidarr library import is much faster: it asks Lidarr for each artist's tracks in one go instead of album by album, and database writes are quicker everywhere.
 - Adding a Spotify or Deezer playlist loads its tracks right away. Each playlist on the Sync tab shows its track count and a Tracks button listing every song, with missing tracks highlighted after a sync.
 - The Lidarr library import now shows as a running task in the task drawer, with progress and a cancel button, and the logo animates while it runs.
 - The "Smart collection" button is greyed out in Lidarr mode, since smart collections need TrackSeerr as the library manager.
