@@ -27,3 +27,4 @@ export * from './backup';
 export * from './calendar';
 export * from './libraryFilters';
 export * from './smartCollections';
+export * from './manualSearch';

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FolderInput, Search } from 'lucide-react';
+import { FolderInput, ListFilter, Search } from 'lucide-react';
 import type { IndexFetcher, ListSortDir, WantedCutoffRecord, WantedListName, WantedRecord } from '@/types/activity';
 import { getWantedCutoff, getWantedIndex, getWantedMissing, searchWanted } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
@@ -8,6 +8,8 @@ import { useGroupIndex } from '@/hooks/useGroupIndex';
 import { useListSelection } from '@/hooks/useListSelection';
 import { ConfirmDangerButton, TapeDeckButton } from '@/components/ui';
 import { ManualImportModal } from '@/components/manualImport';
+import { ManualSearchModal } from '@/components/manualSearch';
+import type { ManualSearchTarget } from '@/types/manualSearch';
 import type { ManualImportScope } from '@/types/manualImport';
 import {
   FlatList,
@@ -40,6 +42,7 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
   const [sortDir, setSortDir] = useState<ListSortDir>('asc');
   const [busy, setBusy] = useState<boolean>(false);
   const [importScope, setImportScope] = useState<ManualImportScope | null>(null);
+  const [searchTarget, setSearchTarget] = useState<ManualSearchTarget | null>(null);
   const { selected, setSelected, clear } = useListSelection();
 
   const list = useVirtualPagedList<WantedRow>(isCutoff ? fetchCutoff : fetchMissing, {
@@ -114,14 +117,36 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
 
   const rowActions = useCallback(
     (r: WantedRow): React.ReactNode =>
-      r.source === 'native' && r.album_id ? (
-        <TapeDeckButton
-          size="sm"
-          onClick={() => setImportScope({ kind: 'album', albumId: r.album_id ?? '', title: r.album || 'Album' })}
-          icon={<FolderInput className="h-3.5 w-3.5" />}
-        >
-          Import files&hellip;
-        </TapeDeckButton>
+      r.source === 'native' ? (
+        <>
+          <TapeDeckButton
+            size="sm"
+            onClick={() =>
+              setSearchTarget({
+                artist: r.artist ?? '',
+                album: r.album,
+                title: r.item_type === 'album' ? null : r.title,
+                itemType: r.item_type === 'album' ? 'album' : 'track',
+                albumId: r.album_id,
+              })
+            }
+            icon={<ListFilter className="h-3.5 w-3.5" />}
+            aria-label="Manual search"
+            title="Manual search"
+            collapseLabel
+          >
+            Search&hellip;
+          </TapeDeckButton>
+          {r.album_id ? (
+            <TapeDeckButton
+              size="sm"
+              onClick={() => setImportScope({ kind: 'album', albumId: r.album_id ?? '', title: r.album || 'Album' })}
+              icon={<FolderInput className="h-3.5 w-3.5" />}
+            >
+              Import files&hellip;
+            </TapeDeckButton>
+          ) : null}
+        </>
       ) : null,
     []
   );
@@ -175,10 +200,16 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
         selectedKeys={selected}
         onSelectedKeysChange={setSelected}
         rowActions={rowActions}
-        actionsWidth="150px"
+        actionsWidth="230px"
         mobileLayout="compact"
         emptyMessage={isCutoff ? 'Nothing is below its cutoff.' : 'Nothing is missing.'}
         rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
+      />
+      <ManualSearchModal
+        target={searchTarget}
+        onClose={() => setSearchTarget(null)}
+        onToast={onToast}
+        onGrabbed={() => void list.refresh()}
       />
       <ManualImportModal
         scope={importScope}

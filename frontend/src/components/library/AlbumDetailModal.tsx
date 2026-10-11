@@ -1,5 +1,5 @@
-import React, { useCallback } from 'react';
-import { BookmarkPlus, Disc, FileText, FolderInput, Loader2, Search, Tag, User } from 'lucide-react';
+import React, { useCallback, useState } from 'react';
+import { BookmarkPlus, Disc, FileText, FolderInput, ListFilter, Loader2, Search, Tag, User } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
 import { useAlbumTracks } from '@/hooks/useAlbumTracks';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
@@ -8,6 +8,8 @@ import { ObsidianModal, TapeDeckButton } from '@/components/ui';
 import { IssueReportButton } from '@/components/issues';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
 import { MEDIA_ISSUE_TYPES } from '@/types/models';
+import { ManualSearchModal } from '@/components/manualSearch';
+import type { ManualSearchTarget } from '@/types/manualSearch';
 import { AlbumTrackList } from './AlbumTrackList';
 import { ItemOriginCaption } from './ItemOriginCaption';
 import { genreNames } from './genres';
@@ -49,6 +51,7 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
 }) => {
   const { tracks, loading, error, patchMonitored } = useAlbumTracks(album ? album.id : null);
   const lidarrSearch = useLidarrSearch(onToast);
+  const [searchTarget, setSearchTarget] = useState<ManualSearchTarget | null>(null);
   const searching = album !== null && lidarrSearch.busyKey === `album:${album.id}`;
 
   const handleToggle = useCallback(
@@ -90,6 +93,25 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
                 title="Ask Lidarr to search for this album"
               >
                 Search
+              </TapeDeckButton>
+            )}
+            {isAdmin && !lidarrMode && (
+              <TapeDeckButton
+                size="sm"
+                disabled={album === null}
+                onClick={() =>
+                  album &&
+                  setSearchTarget({
+                    artist: album.artist_name || 'Unknown Artist',
+                    album: album.title,
+                    itemType: 'album',
+                    albumId: album.id,
+                  })
+                }
+                icon={<ListFilter className="h-3.5 w-3.5" />}
+                title="Search indexers and pick a release"
+              >
+                Manual search
               </TapeDeckButton>
             )}
             {isAdmin && !lidarrMode && (
@@ -201,16 +223,36 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
             renderRowAction={
               isAdmin
                 ? (t) => (
-                    <IssueReportButton
-                      mediaTitle={t.title ?? ''}
-                      artist={album.artist_name || 'Unknown Artist'}
-                      types={MEDIA_ISSUE_TYPES}
-                      reference={{ albumId: String(album.id), trackId: String(t.id) }}
-                      isAdmin
-                      issuesHook={issuesHook}
-                      label="Report issue with this track"
-                      iconOnly
-                    />
+                    <>
+                      {!lidarrMode && (
+                        <TapeDeckButton
+                          size="sm"
+                          onClick={() =>
+                            setSearchTarget({
+                              artist: album.artist_name || 'Unknown Artist',
+                              album: album.title,
+                              title: t.title,
+                              itemType: 'track',
+                              albumId: album.id,
+                              trackId: t.id,
+                            })
+                          }
+                          icon={<ListFilter className="h-3.5 w-3.5" />}
+                          aria-label={`Manual search for ${t.title ?? 'track'}`}
+                          title="Manual search for this track"
+                        />
+                      )}
+                      <IssueReportButton
+                        mediaTitle={t.title ?? ''}
+                        artist={album.artist_name || 'Unknown Artist'}
+                        types={MEDIA_ISSUE_TYPES}
+                        reference={{ albumId: String(album.id), trackId: String(t.id) }}
+                        isAdmin
+                        issuesHook={issuesHook}
+                        label="Report issue with this track"
+                        iconOnly
+                      />
+                    </>
                   )
                 : undefined
             }
@@ -218,6 +260,7 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
           />
         </div>
       )}
+      <ManualSearchModal target={searchTarget} onClose={() => setSearchTarget(null)} onToast={onToast} />
     </ObsidianModal>
   );
 };

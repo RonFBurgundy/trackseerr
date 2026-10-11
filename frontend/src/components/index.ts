@@ -23,3 +23,4 @@ export * from './manualImport';
 export * from './notifications';
 export * from './playlists';
 export * from './calendar';
+export * from './manualSearch';

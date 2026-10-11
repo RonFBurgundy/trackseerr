@@ -43,3 +43,4 @@ export * from './calendarService';
 export * from './retagService';
 export * from './smartCollectionService';
 export * from './trackFixService';
+export * from './acquisitionService';
