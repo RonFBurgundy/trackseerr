@@ -35,11 +35,10 @@ def _reset_enricher():
 
 
 def test_fresh_db_has_artist_metadata_columns(test_db: Database) -> None:
-    """PRAGMA table_info(library_artists) contains the five columns; schema_migrations max == 72."""
+    """PRAGMA table_info(library_artists) contains the five columns; schema_migrations max == SCHEMA_VERSION."""
     cur = test_db.conn.cursor()
     cur.execute("SELECT MAX(version) FROM schema_migrations")
-    assert cur.fetchone()[0] == 72
-    assert SCHEMA_VERSION == 72
+    assert cur.fetchone()[0] == SCHEMA_VERSION
 
     cur.execute("PRAGMA table_info(library_artists)")
     cols = {r[1] for r in cur.fetchall()}
@@ -56,7 +55,7 @@ def test_v71_db_migrates_to_v72(tmp_path: Path) -> None:
         db.conn.execute("DROP INDEX IF EXISTS idx_lib_artists_popularity")
         for col in ("artist_type", "member_count", "begin_year", "end_year", "popularity"):
             db.conn.execute(f"ALTER TABLE library_artists DROP COLUMN {col}")
-        db.conn.execute("DELETE FROM schema_migrations WHERE version = 72")
+        db.conn.execute("DELETE FROM schema_migrations WHERE version > 71")
         db.conn.execute("INSERT OR REPLACE INTO schema_migrations (version) VALUES (71)")
         db.conn.commit()
     db.close()
@@ -65,7 +64,7 @@ def test_v71_db_migrates_to_v72(tmp_path: Path) -> None:
     try:
         cur = db2.conn.cursor()
         cur.execute("SELECT MAX(version) FROM schema_migrations")
-        assert cur.fetchone()[0] == 72
+        assert cur.fetchone()[0] == SCHEMA_VERSION
 
         cur.execute("PRAGMA table_info(library_artists)")
         cols = {r[1] for r in cur.fetchall()}
