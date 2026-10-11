@@ -799,6 +799,45 @@ def test_auth_url_ignores_forwarded_host_from_untrusted_peer(db, lfm_config, use
     assert _cb_origin(r.json()["url"]) == "http://testserver"
 
 
+def _core_config(lfm_config):
+    import dataclasses
+
+    return dataclasses.replace(
+        lfm_config, role="core", application_url="https://ts.example", internal_core_secret="s" * 40
+    )
+
+
+def test_core_auth_url_uses_lan_origin_for_local_session(db, lfm_config, users):
+    cfg = _core_config(lfm_config)
+    tc = make_client(db, cfg)
+    admin, _ = auth_headers(users["admin"], db, cfg)
+    r = tc.get("/api/scrobbles/lastfm/auth-url", params={"origin": "http://testserver"}, headers=admin)
+    assert r.status_code == 200
+    assert _cb_origin(r.json()["url"]) == "http://testserver"
+
+
+def test_core_auth_url_rejects_spoofed_origin(db, lfm_config, users):
+    cfg = _core_config(lfm_config)
+    tc = make_client(db, cfg)
+    admin, _ = auth_headers(users["admin"], db, cfg)
+    r = tc.get("/api/scrobbles/lastfm/auth-url", params={"origin": "https://evil.example"}, headers=admin)
+    assert r.status_code == 200
+    assert _cb_origin(r.json()["url"]) == "https://ts.example"
+
+
+def test_core_auth_url_ignores_forwarded_host(db, lfm_config, users):
+    cfg = _core_config(lfm_config)
+    tc = make_client(db, cfg)
+    admin, _ = auth_headers(users["admin"], db, cfg)
+    r = tc.get(
+        "/api/scrobbles/lastfm/auth-url",
+        params={"origin": "https://spoof.example"},
+        headers={**admin, "X-Forwarded-Host": "spoof.example", "X-Forwarded-Proto": "https"},
+    )
+    assert r.status_code == 200
+    assert _cb_origin(r.json()["url"]) == "https://ts.example"
+
+
 # --- callback: shape check and bounce only ----------------------------------------------------------------------
 
 

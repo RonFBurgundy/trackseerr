@@ -36,6 +36,7 @@ from trackseerr.clients.scrobbler import (
 )
 from trackseerr import local_auth
 from trackseerr.config import Config
+from trackseerr.internal_auth import HEADER_SIGNATURE
 from trackseerr.models import UserListen, UserScrobbleConfig
 from trackseerr.scrobbling import (
     build_lastfm_client,
@@ -104,8 +105,9 @@ def _callback_base_url(request: Request, db: Database, config: Config, browser_o
     token travel with them.
 
     ``browser_origin`` (sent by the SPA as ``window.location.origin``) is honoured only when its host:port equals
-    the one this request reached (``Host``, or ``X-Forwarded-Host`` from a TRUSTED_PROXIES peer; never on a core,
-    whose request host is the LAN address) or the configured Application URL. Anything else falls back to
+    the one this request reached (``Host``, or ``X-Forwarded-Host`` from a TRUSTED_PROXIES peer) or the configured Application URL. On a
+    core, a request that did not come through the gateway (no signature) may use the LAN ``Host`` it reached,
+    ignoring ``X-Forwarded-*``; gateway-signed requests get the Application URL only. Anything else falls back to
     :func:`_base_url`, so an arbitrary origin can never be injected.
     """
     claimed = _origin_of(browser_origin)
@@ -126,6 +128,8 @@ def _callback_base_url(request: Request, db: Database, config: Config, browser_o
             )
             if seen:
                 allowed.add(_host_port(seen))
+        elif request.headers.get(HEADER_SIGNATURE) is None:
+            allowed.add(_host_port(_request_base_url(request)))
         if _host_port(claimed) in allowed:
             return claimed
         logger.warning("Last.fm auth-url: ignoring a browser origin that does not match this server")
