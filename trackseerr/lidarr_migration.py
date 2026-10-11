@@ -44,6 +44,8 @@ class _MigrationRun:
     lidarr_album_map: dict[Any, str] = field(default_factory=dict)
     lidarr_track_map: dict[Any, str] = field(default_factory=dict)
     lidarr_trackfile_map: dict[Any, str] = field(default_factory=dict)
+    lidarr_artist_monitored: dict[Any, bool] = field(default_factory=dict)
+    lidarr_album_monitored: dict[Any, bool] = field(default_factory=dict)
 
 
 class LidarrMigrationJob:
@@ -199,6 +201,7 @@ class LidarrMigrationJob:
 
         if lidarr_art_id is not None:
             run.lidarr_artist_map[lidarr_art_id] = new_artist_id
+            run.lidarr_artist_monitored[lidarr_art_id] = monitored
 
         with self._lock:
             self._status["artists_migrated"] += 1
@@ -295,6 +298,7 @@ class LidarrMigrationJob:
 
         if lidarr_album_id is not None:
             run.lidarr_album_map[lidarr_album_id] = new_album_id
+            run.lidarr_album_monitored[lidarr_album_id] = monitored
 
         with self._lock:
             self._status["albums_migrated"] += 1
@@ -343,7 +347,10 @@ class LidarrMigrationJob:
             except (ValueError, TypeError):
                 pass
 
-        monitored = bool(track.get("monitored", True))
+        # Lidarr tracks carry no monitored flag; they follow album and artist.
+        monitored = run.lidarr_album_monitored.get(lidarr_alb_id, False) and run.lidarr_artist_monitored.get(
+            lidarr_art_id, True
+        )
         foreign_track_id = (
             str(track["foreignTrackId"]) if track.get("foreignTrackId") is not None else None
         )
