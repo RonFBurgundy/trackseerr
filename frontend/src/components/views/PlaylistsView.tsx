@@ -16,7 +16,7 @@ import {
   ListMusic,
 } from 'lucide-react';
 import type { Schema } from '@/types/apiSchema';
-import type { Playlist, User } from '@/types/models';
+import type { DiscoveryItem, Playlist, User } from '@/types/models';
 import { parseTrackCount } from '@/lib/trackCount';
 import type { ImportPlaylistPayload } from '@/services/playlistService';
 import type { MediaServerType } from '@/types/mediaServer';
@@ -92,6 +92,8 @@ export interface PlaylistsViewProps {
   canTargetUsers?: boolean;
   /** False when the server has no mixes (Subsonic): the Mixes section is hidden. */
   mixesEnabled?: boolean;
+  /** Request a catalog song found through a playlist's Fix panel. */
+  onRequestItem?: (item: DiscoveryItem) => Promise<void>;
 }
 
 const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
@@ -112,6 +114,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   hasMediaServer = true,
   serverLabel = 'Plex',
   canTargetUsers = true,
+  onRequestItem,
 }) => {
   const { toast, showToast } = useToast();
   const [isSmartModalOpen, setIsSmartModalOpen] = useState<boolean>(false);
@@ -751,6 +754,13 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
         onClose={() => setTracksModalPlaylist(null)}
         playlistId={tracksModalPlaylist?.id ?? null}
         playlistName={tracksModalPlaylist?.name ?? ''}
+        isAdmin={isAdmin}
+        onRequest={
+          onRequestItem ??
+          (async () => {
+            throw new Error('Requesting is not available here');
+          })
+        }
         onOpenMissing={
           isAdmin
             ? () => {

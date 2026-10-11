@@ -120,3 +120,5 @@ export * from './useSmartCollectionEditor';
 export * from './useSmartCollections';
 export * from './useFeaturedCharts';
 export * from './usePlaylistTracks';
+export * from './useTrackAliasForIssue';
+export * from './useFindTrack';

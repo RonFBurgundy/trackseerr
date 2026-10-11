@@ -2,6 +2,11 @@ import React, { useMemo, useState } from 'react';
 import { AlertCircle, Check, Loader2 } from 'lucide-react';
 import { ObsidianModal, TapeDeckButton } from '@/components/ui';
 import { usePlaylistTracks } from '@/hooks/usePlaylistTracks';
+import { createTrackAlias } from '@/services/trackFixService';
+import { errorMessage } from '@/services/apiClient';
+import type { Schema } from '@/types/apiSchema';
+import type { DiscoveryItem } from '@/types/models';
+import { FindTrackPanel } from './FindTrackPanel';
 
 export interface PlaylistTracksModalProps {
   isOpen: boolean;
@@ -10,6 +15,10 @@ export interface PlaylistTracksModalProps {
   playlistName: string;
   /** Admins only: jump to the match-missing flow for this playlist. */
   onOpenMissing?: () => void;
+  /** Admins see "Mark unmatchable" on missing rows. */
+  isAdmin: boolean;
+  /** Request a catalog song that is not in the library yet (from the Fix panel). */
+  onRequest: (item: DiscoveryItem) => Promise<void>;
 }
 
 type TrackFilter = 'all' | 'missing';
@@ -20,9 +29,36 @@ export const PlaylistTracksModal: React.FC<PlaylistTracksModalProps> = ({
   playlistId,
   playlistName,
   onOpenMissing,
+  isAdmin,
+  onRequest,
 }) => {
   const { data, loading, error, reload } = usePlaylistTracks(isOpen ? playlistId : null);
   const [filter, setFilter] = useState<TrackFilter>('all');
+  const [fixing, setFixing] = useState<Schema<'PlaylistTrackItem'> | null>(null);
+  const [confirmIgnore, setConfirmIgnore] = useState<number | null>(null);
+  const [ignoring, setIgnoring] = useState<boolean>(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const close = (): void => {
+    setFixing(null);
+    setConfirmIgnore(null);
+    setActionError(null);
+    onClose();
+  };
+
+  const markUnmatchable = async (track: Schema<'PlaylistTrackItem'>): Promise<void> => {
+    setIgnoring(true);
+    setActionError(null);
+    try {
+      await createTrackAlias({ kind: 'ignore', source_title: track.title, source_artist: track.artist });
+      setConfirmIgnore(null);
+      await reload();
+    } catch (err: unknown) {
+      setActionError(errorMessage(err, 'Failed to mark the track unmatchable'));
+    } finally {
+      setIgnoring(false);
+    }
+  };
 
   const visible = useMemo(() => {
     const tracks = data?.tracks ?? [];
@@ -45,12 +81,30 @@ export const PlaylistTracksModal: React.FC<PlaylistTracksModalProps> = ({
   return (
     <ObsidianModal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={close}
       title={playlistName}
       subtitle={summary || undefined}
       footer={footer}
     >
+      {fixing && playlistId !== null ? (
+        <FindTrackPanel
+          playlistId={playlistId}
+          playlistName={playlistName}
+          track={{ title: fixing.title, artist: fixing.artist }}
+          onBack={() => setFixing(null)}
+          onRequest={onRequest}
+          onDone={() => {
+            setFixing(null);
+            void reload();
+          }}
+        />
+      ) : (
       <div className="flex flex-col gap-3 min-h-0">
+        {actionError && (
+          <p role="alert" className="text-xs font-mono text-[var(--status-error)]">
+            {actionError}
+          </p>
+        )}
         <div className="tape-transport-bay p-1.5 flex items-center gap-1.5 self-start">
           <TapeDeckButton size="sm" active={filter === 'all'} onClick={() => setFilter('all')}>
             All
@@ -87,11 +141,11 @@ export const PlaylistTracksModal: React.FC<PlaylistTracksModalProps> = ({
             {visible.map((t, idx) => (
               <li
                 key={`${t.position}-${idx}`}
-                className={`flex items-center gap-3 rounded-[3px] border px-2.5 py-2 ${
+                className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[3px] border px-2.5 py-2 ${
                   t.status === 'missing'
                     ? 'border-[#e5a00d]/40 bg-[#e5a00d]/10'
                     : 'border-[#222222] bg-[#141414]'
-                }`}
+                } ${t.status === 'ignored' ? 'opacity-60' : ''}`}
               >
                 <span className="w-8 shrink-0 text-right text-[11px] font-mono text-neutral-500">{t.position}</span>
                 <div className="min-w-0 flex-1">
@@ -107,6 +161,42 @@ export const PlaylistTracksModal: React.FC<PlaylistTracksModalProps> = ({
                     Missing
                   </span>
                 )}
+                {t.status === 'ignored' && (
+                  <span className="shrink-0 rounded-[3px] border border-[#2a2a2a] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+                    Ignored
+                  </span>
+                )}
+                {t.suggestion === 'approved' && (
+                  <span className="shrink-0 text-[10px] uppercase tracking-wider text-[var(--status-success)] font-mono">
+                    Fixed - applies next sync
+                  </span>
+                )}
+                {t.suggestion === 'pending' && (
+                  <span className="shrink-0 text-[10px] uppercase tracking-wider text-neutral-400 font-mono">
+                    Suggested - awaiting admin
+                  </span>
+                )}
+                {t.status === 'missing' && !t.suggestion && (
+                  <TapeDeckButton size="sm" variant="amber" onClick={() => setFixing(t)}>
+                    Fix
+                  </TapeDeckButton>
+                )}
+                {isAdmin && t.status === 'missing' && (
+                  confirmIgnore === t.position ? (
+                    <span className="flex items-center gap-1.5 shrink-0">
+                      <TapeDeckButton size="sm" variant="danger" disabled={ignoring} onClick={() => void markUnmatchable(t)}>
+                        Confirm
+                      </TapeDeckButton>
+                      <TapeDeckButton size="sm" disabled={ignoring} onClick={() => setConfirmIgnore(null)}>
+                        Cancel
+                      </TapeDeckButton>
+                    </span>
+                  ) : (
+                    <TapeDeckButton size="sm" onClick={() => setConfirmIgnore(t.position)}>
+                      Mark unmatchable
+                    </TapeDeckButton>
+                  )
+                )}
                 {t.status === 'matched' && (
                   <Check className="h-3.5 w-3.5 shrink-0 text-neutral-500" aria-label="Matched" />
                 )}
@@ -120,6 +210,7 @@ export const PlaylistTracksModal: React.FC<PlaylistTracksModalProps> = ({
           </ul>
         )}
       </div>
+      )}
     </ObsidianModal>
   );
 };

@@ -3,7 +3,7 @@ import { RotateCcw, CheckCheck } from 'lucide-react';
 import { ObsidianModal, TapeDeckButton, CassetteLoader } from '@/components/ui';
 import { useIssueActions } from '@/hooks/useIssueActions';
 import { useIssueDetail } from '@/hooks/useIssueDetail';
-import { notifyIssuesChanged, deleteIssue } from '@/services/issueService';
+import { notifyIssuesChanged, deleteIssue, getIssue } from '@/services/issueService';
 import { errorMessage } from '@/services/apiClient';
 import type { Issue, IssueAction, IssueRematchResult } from '@/types/models';
 import { ISSUE_ACTION_LABELS, ISSUE_TYPE_LABELS } from '@/types/models';
@@ -56,6 +56,15 @@ export const IssueDetailModal: React.FC<IssueDetailModalProps> = ({
   const changeStatus = async (status: Issue['status']): Promise<void> => {
     const failure = await detail.changeStatus(status);
     if (failure) toast(failure, 'error');
+  };
+
+  const refreshIssue = async (): Promise<void> => {
+    if (!issue) return;
+    try {
+      await detail.adopt(await getIssue(issue.id));
+    } catch (err: unknown) {
+      toast(errorMessage(err, 'Failed to refresh the issue'), 'error');
+    }
   };
 
   const runAction = async (action: IssueAction): Promise<void> => {
@@ -155,6 +164,7 @@ export const IssueDetailModal: React.FC<IssueDetailModalProps> = ({
               onStatus={(s) => void changeStatus(s)}
               onAction={(a) => void runAction(a)}
               onDelete={() => void remove()}
+              onAliasDecided={() => void refreshIssue()}
             />
           )}
 

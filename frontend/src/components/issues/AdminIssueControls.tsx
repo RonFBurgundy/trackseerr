@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ExternalLink, Loader2, Trash2 } from 'lucide-react';
 import { ConfirmDialog, FormField, inputClass, TapeDeckButton } from '@/components/ui';
 import { routeToHash } from '@/hooks/useAppRoute';
+import { useTrackAliasForIssue } from '@/hooks/useTrackAliasForIssue';
 import type { Issue, IssueAction, IssueStatus } from '@/types/models';
 import { ISSUE_ACTION_LABELS, ISSUE_STATUS_LABELS } from '@/types/models';
 
@@ -17,15 +18,19 @@ export interface AdminIssueControlsProps {
   onStatus: (status: IssueStatus) => void;
   onAction: (action: IssueAction) => void;
   onDelete: () => void;
+  /** Fired after a playlist track match was approved or rejected, so the issue and thread reload. */
+  onAliasDecided?: () => void;
 }
 
 /** Admin-only panel: status control, the fix actions the server offers for this issue, library/request links, delete. */
-export const AdminIssueControls: React.FC<AdminIssueControlsProps> = ({ issue, busy, runningAction, onStatus, onAction, onDelete }) => {
+export const AdminIssueControls: React.FC<AdminIssueControlsProps> = ({ issue, busy, runningAction, onStatus, onAction, onDelete, onAliasDecided }) => {
   const [confirmAction, setConfirmAction] = useState<IssueAction | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<boolean>(false);
   const offered = issue.available_actions ?? [];
   const actions = ACTION_ORDER.filter((a) => offered.includes(a));
   const acting = runningAction !== null;
+  const aliasState = useTrackAliasForIssue(issue.id, issue.issue_type === 'playlist_match');
+  const { alias } = aliasState;
 
   const request = (action: IssueAction): void => {
     if (action === 'blocklist_and_research') setConfirmAction(action);
@@ -51,6 +56,38 @@ export const AdminIssueControls: React.FC<AdminIssueControlsProps> = ({ issue, b
           ))}
         </select>
       </FormField>
+
+      {alias && (
+        <div className="space-y-2 p-2.5 rounded-[3px] border border-[var(--accent-amber)]/40 bg-[var(--accent-amber)]/10" role="group" aria-label="Suggested track match">
+          <p className="text-xs font-mono text-[var(--text-primary)] break-words">
+            Spotify: {alias.source_artist} - {alias.source_title}
+            {' \u2192 '}
+            Library: {alias.target_artist ?? ''} - {alias.target_title ?? ''}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <TapeDeckButton
+              size="sm"
+              variant="amber"
+              disabled={busy || acting || aliasState.busy}
+              onClick={() => void aliasState.decide('approve').then((ok) => ok && onAliasDecided?.())}
+            >
+              Approve match
+            </TapeDeckButton>
+            <TapeDeckButton
+              size="sm"
+              disabled={busy || acting || aliasState.busy}
+              onClick={() => void aliasState.decide('reject').then((ok) => ok && onAliasDecided?.())}
+            >
+              Reject
+            </TapeDeckButton>
+          </div>
+        </div>
+      )}
+      {aliasState.error && (
+        <p role="alert" className="text-xs font-mono text-[var(--status-error)]">
+          {aliasState.error}
+        </p>
+      )}
 
       {actions.length > 0 && (
         <div className="flex flex-wrap gap-2" role="group" aria-label="Fix actions">
