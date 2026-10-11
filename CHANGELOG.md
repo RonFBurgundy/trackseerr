@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- Fix unmatched playlist songs from the tracklist: users search the catalog for the right song and suggest it (an admin approves it from the Issue in one click), request it if it's not in the library, or report it. Admins can also mark a song unmatchable so it stops counting as missing. Approved fixes apply to every playlist on the next sync, for the TrackSeerr library, Plex and Jellyfin.
 - Backup and restore: scheduled and on-demand backups of the database and settings, with restore from the System page.
 - Changelog: a "What's new" section on the System page and a one-time notice for admins after an upgrade.
 - Lidarr-compatible API, so Prowlarr can sync its indexers to TrackSeerr.
