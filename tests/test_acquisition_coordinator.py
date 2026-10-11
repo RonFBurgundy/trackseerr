@@ -13,13 +13,16 @@ Covers:
 """
 
 import json
+import httpx
 from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from trackseerr.clients.acquisition.base import AcquisitionUnavailableError
 from trackseerr.item_history import GrabTrigger
 from trackseerr.acquisition_coordinator import (
     AcquisitionCoordinator,
+    NoClientAvailable,
     acquisition_coordinator,
 )
 from trackseerr.import_files import translate_remote_path
@@ -911,3 +914,133 @@ def test_find_blocklist_entry_matches_hash_guid_title(test_db):
     assert test_db.find_blocklist_entry(release_title="Nope", release_guid="x", info_hash="y") is None
     assert test_db.is_blocklisted(release_guid="guid-1") is True
     assert test_db.is_blocklisted(release_title="Nope") is False
+
+
+# ---------------------------------------------------------------------------
+# Indexer / client priority, round-robin and failover
+# ---------------------------------------------------------------------------
+
+def _mk_client(db, cid, driver_type="qbittorrent", priority=1):
+    db.create_download_client(
+        DownloadClientConfig(
+            id=cid, name=cid, driver_type=driver_type, host_url=f"http://{cid}:8080", priority=priority, enabled=True
+        )
+    )
+
+
+def _torrent_candidate():
+    return AcquisitionSearchResult(
+        download_id="t1", title="A - B [FLAC]", artist="A", item_type="track", source="torznab", protocol="torrent",
+        magnet_url="magnet:?xt=urn:btih:" + "a" * 40,
+    )
+
+
+def test_search_all_indexers_stamps_indexer_priority(test_db):
+    test_db.create_indexer(
+        IndexerConfig(
+            id="idx-1", name="Pri Indexer", indexer_type="torznab", host_url="http://prowlarr:9696",
+            api_key="k", enabled=True, priority=7,
+        )
+    )
+    _mk_client(test_db, "slskd-1", "slskd", priority=3)
+    torrent = AcquisitionSearchResult(
+        download_id="t1", title="A - B", artist="A", item_type="track", source="torznab", protocol="torrent"
+    )
+    soulseek = AcquisitionSearchResult(
+        download_id="s1", title="A - B.flac", artist="A", item_type="track", source="slskd", protocol="slskd"
+    )
+    idx_driver, sl_driver = MagicMock(), MagicMock()
+    idx_driver.search.return_value = [torrent]
+    sl_driver.search.return_value = [soulseek]
+    with patch("trackseerr.acquisition_coordinator.get_indexer_driver", return_value=idx_driver), patch(
+        "trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=sl_driver
+    ):
+        results = AcquisitionCoordinator().search_all_indexers("A", "B", db=test_db)
+    by_id = {r.download_id: r for r in results}
+    assert by_id["t1"].extra["indexer_priority"] == 7
+    assert by_id["s1"].extra["indexer_priority"] == 3
+    assert by_id["s1"].extra["indexer_name"] == "slskd-1"
+
+
+def test_clients_for_protocol_orders_by_priority(test_db):
+    _mk_client(test_db, "low", priority=5)
+    _mk_client(test_db, "high", priority=1)
+    _mk_client(test_db, "mid", priority=3)
+    _mk_client(test_db, "sab", "sabnzbd", priority=1)
+    ids = [c["id"] for c in AcquisitionCoordinator().clients_for_protocol("torrent", test_db)]
+    assert ids == ["high", "mid", "low"]
+    assert AcquisitionCoordinator().clients_for_protocol("ftp", test_db) == []
+
+
+def test_clients_for_protocol_round_robin_equal_priority(test_db):
+    _mk_client(test_db, "a", priority=1)
+    _mk_client(test_db, "b", priority=1)
+    _mk_client(test_db, "c", priority=2)
+    coordinator = AcquisitionCoordinator()
+    heads = [coordinator.clients_for_protocol("torrent", test_db)[0]["id"] for _ in range(4)]
+    assert heads[0] != heads[1] and heads[0] == heads[2] and heads[1] == heads[3]
+    assert {heads[0], heads[1]} == {"a", "b"}
+    assert coordinator.clients_for_protocol("torrent", test_db)[-1]["id"] == "c"
+
+
+def test_clients_for_protocol_backed_off_client_goes_last(test_db):
+    _mk_client(test_db, "a", priority=1)
+    _mk_client(test_db, "b", priority=2)
+    coordinator = AcquisitionCoordinator()
+    coordinator._mark_client_failed({"id": "a", "name": "a"}, "boom")
+    assert [c["id"] for c in coordinator.clients_for_protocol("torrent", test_db)] == ["b", "a"]
+    coordinator._client_backoff["a"] = 0.0  # deadline passed
+    assert [c["id"] for c in coordinator.clients_for_protocol("torrent", test_db)] == ["a", "b"]
+
+
+def _drivers(**by_client):
+    return lambda cfg: by_client[cfg["id"]]
+
+
+def test_dispatch_failover_to_next_client(test_db):
+    _mk_client(test_db, "first", priority=1)
+    _mk_client(test_db, "second", priority=2)
+    bad, good = MagicMock(), MagicMock()
+    bad.download.side_effect = httpx.ConnectError("refused")
+    good.download.return_value = "hash-2"
+    coordinator = AcquisitionCoordinator()
+    client, dl_hash = coordinator.dispatch_with_failover(test_db, _torrent_candidate(), _drivers(first=bad, second=good))
+    assert client["id"] == "second" and dl_hash == "hash-2"
+    assert not coordinator._client_available("first")
+    # next grab tries the healthy client first
+    assert coordinator.clients_for_protocol("torrent", test_db)[0]["id"] == "second"
+
+
+def test_dispatch_unavailable_does_not_failover(test_db):
+    _mk_client(test_db, "first", priority=1)
+    _mk_client(test_db, "second", priority=2)
+    gone, other = MagicMock(), MagicMock()
+    gone.download.side_effect = AcquisitionUnavailableError("gone")
+    coordinator = AcquisitionCoordinator()
+    with pytest.raises(AcquisitionUnavailableError):
+        coordinator.dispatch_with_failover(test_db, _torrent_candidate(), _drivers(first=gone, second=other))
+    other.download.assert_not_called()
+    assert coordinator._client_available("first")
+
+
+def test_dispatch_all_fail_returns_last_error(test_db):
+    _mk_client(test_db, "first", priority=1)
+    _mk_client(test_db, "second", priority=2)
+    one, two = MagicMock(), MagicMock()
+    one.download.side_effect = httpx.ConnectError("one down")
+    two.download.side_effect = RuntimeError("two down")
+    coordinator = AcquisitionCoordinator()
+    with pytest.raises(RuntimeError, match="two down"):
+        coordinator.dispatch_with_failover(test_db, _torrent_candidate(), _drivers(first=one, second=two))
+    # grab_candidate reports it as a failed dispatch rather than raising
+    with patch("trackseerr.acquisition_coordinator.get_acquisition_driver", side_effect=_drivers(first=one, second=two)):
+        res = coordinator.grab_candidate(
+            test_db, _torrent_candidate(), parsed_quality="FLAC", score=1, artist="A", album=None, item_type="track",
+            request_id=None, track_id=None, album_id=None, trigger=GrabTrigger("request"),
+        )
+    assert res["success"] is False and "two down" in res["message"]
+
+
+def test_dispatch_no_client_raises(test_db):
+    with pytest.raises(NoClientAvailable):
+        AcquisitionCoordinator().dispatch_with_failover(test_db, _torrent_candidate())

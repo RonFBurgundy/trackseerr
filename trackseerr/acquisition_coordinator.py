@@ -8,8 +8,12 @@ appropriate download clients (qBittorrent, SABnzbd, slskd), and tracks active tr
 import logging
 import re
 import sqlite3
-from typing import Any, Optional, Union
+import threading
+import time
+from typing import Any, Callable, Optional, Union
 import uuid
+
+import httpx
 
 from trackseerr.clients.acquisition import (
     get_acquisition_driver,
@@ -36,6 +40,7 @@ from trackseerr.decision_engine import (
     candidate_context,
     evaluate_prepared,
     prepare_profile,
+    DEFAULT_INDEXER_PRIORITY,
     rank_key,
     resolve_durations,
 )
@@ -53,7 +58,53 @@ def candidate_rank(
 ) -> tuple[Any, ...]:
     """``rank_key`` for a search result (seeders only count for torrents)."""
     is_torrent = cand.protocol == "torrent" or cand.source in ("torznab", "torrent") or bool(cand.magnet_url)
-    return rank_key(cand.protocol, int(cand.seeders or 0) if is_torrent else 0, res, preferred_protocol)
+    raw_priority = (cand.extra or {}).get("indexer_priority")
+    indexer_priority = raw_priority if isinstance(raw_priority, int) and not isinstance(raw_priority, bool) else None
+    return rank_key(
+        cand.protocol, int(cand.seeders or 0) if is_torrent else 0, res, preferred_protocol, indexer_priority
+    )
+
+
+CLIENT_BACKOFF_SECONDS = 300.0
+
+
+class NoClientAvailable(RuntimeError):
+    """No enabled download client can take a release of the requested protocol."""
+
+
+def _protocol_group(protocol: str) -> Optional[str]:
+    """Maps a protocol/source label to the client family that serves it (``torrent``/``usenet``/``slskd``)."""
+    proto = str(protocol).lower().strip()
+    if proto in ("torrent", "torznab"):
+        return "torrent"
+    if proto in ("usenet", "newznab"):
+        return "usenet"
+    if proto in ("slskd", "soulseek", "p2p"):
+        return "slskd"
+    return None
+
+
+def _client_serves(group: str, client: dict[str, Any]) -> bool:
+    driver_type = str(client.get("driver_type", "")).lower()
+    if group == "torrent":
+        return is_torrent_driver_type(client.get("driver_type"))
+    if group == "usenet":
+        return driver_type in ("sabnzbd", "nzbget")
+    return driver_type == "slskd"
+
+
+def _client_priority(client: dict[str, Any]) -> int:
+    try:
+        return int(client.get("priority") or 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _indexer_priority(cfg: dict[str, Any]) -> int:
+    try:
+        return int(cfg.get("priority") or DEFAULT_INDEXER_PRIORITY)
+    except (TypeError, ValueError):
+        return DEFAULT_INDEXER_PRIORITY
 
 
 _BTIH_RE = re.compile(r"urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})", re.IGNORECASE)
@@ -223,6 +274,7 @@ class AcquisitionCoordinator:
                             extra = dict(r.extra or {})
                             extra.setdefault("indexer_id", idx_cfg.get("id"))
                             extra.setdefault("indexer_name", idx_name)
+                            extra.setdefault("indexer_priority", _indexer_priority(idx_cfg))
                             extra.setdefault("indexer_minimum_seeders", idx_cfg.get("minimum_seeders"))
                             r.extra = extra
                     all_results.extend(res)
@@ -248,6 +300,11 @@ class AcquisitionCoordinator:
                 driver = get_acquisition_driver(s_cfg)
                 res = driver.search(artist=artist, title=title, album=album)
                 if res:
+                    for r in res:
+                        extra = dict(r.extra or {})
+                        extra["indexer_priority"] = _indexer_priority(s_cfg)
+                        extra.setdefault("indexer_name", s_name)
+                        r.extra = extra
                     all_results.extend(res)
             except Exception as e:
                 logger.warning("Error searching slskd client '%s' (%s): %s", s_name, s_cfg.get("host_url"), e)
@@ -308,50 +365,98 @@ class AcquisitionCoordinator:
         ranked.sort(key=lambda item: candidate_rank(item[0], item[1], preferred_protocol), reverse=True)
         return ranked
 
-    def find_client_for_protocol(
-        self,
-        protocol: str,
-        db: Database,
-    ) -> Optional[dict[str, Any]]:
-        """Finds the enabled download client with the highest priority for the requested protocol.
+    def __init__(self) -> None:
+        self._client_lock = threading.Lock()
+        self._rotation: dict[tuple[str, int], int] = {}
+        self._client_backoff: dict[str, float] = {}
+
+    def _mark_client_failed(self, client: dict[str, Any], reason: str) -> None:
+        """Skips the client for ``CLIENT_BACKOFF_SECONDS`` after a client-side dispatch failure."""
+        with self._client_lock:
+            self._client_backoff[str(client.get("id"))] = time.monotonic() + CLIENT_BACKOFF_SECONDS
+        logger.warning(
+            "Download client '%s' failed a dispatch (%s); trying other clients first for %d minutes",
+            client.get("name"), reason, int(CLIENT_BACKOFF_SECONDS // 60),
+        )
+
+    def _client_available(self, client_id: Any) -> bool:
+        with self._client_lock:
+            deadline = self._client_backoff.get(str(client_id))
+            if deadline is None:
+                return True
+            if time.monotonic() >= deadline:
+                del self._client_backoff[str(client_id)]
+                return True
+            return False
+
+    def clients_for_protocol(self, protocol: str, db: Database) -> list[dict[str, Any]]:
+        """Enabled clients for the protocol in dispatch order.
+
+        Ordered by priority ascending (1 = preferred); clients sharing a priority take turns (the head rotates on each
+        call); clients in backoff after a failed dispatch go last rather than being dropped.
 
         - "torrent" / "torznab": driver_type in ("qbittorrent", "transmission", "deluge")
         - "usenet" / "newznab": driver_type in ("sabnzbd", "nzbget")
         - "slskd" / "soulseek" / "p2p": driver_type == "slskd"
         """
-        proto = str(protocol).lower().strip()
-        matching: list[dict[str, Any]] = []
-
+        group = _protocol_group(protocol)
+        if group is None:
+            return []
         try:
             enabled_clients = db.list_download_clients(enabled_only=True)
-        except Exception as e:
+        except sqlite3.Error as e:
             logger.error("Failed to list download clients from database: %s", e)
-            return None
+            return []
 
-        if proto in ("torrent", "torznab"):
-            matching = [
-                c for c in enabled_clients
-                if is_torrent_driver_type(c.get("driver_type"))
-            ]
-        elif proto in ("usenet", "newznab"):
-            matching = [
-                c for c in enabled_clients
-                if str(c.get("driver_type", "")).lower() in ("sabnzbd", "nzbget")
-            ]
-        elif proto in ("slskd", "soulseek", "p2p"):
-            matching = [
-                c for c in enabled_clients
-                if str(c.get("driver_type", "")).lower() == "slskd"
-            ]
-        else:
-            return None
+        matching = [c for c in enabled_clients if _client_serves(group, c)]
+        matching.sort(key=lambda c: (_client_priority(c), str(c.get("created_at", ""))))
 
-        if not matching:
-            return None
+        ordered: list[dict[str, Any]] = []
+        priorities = sorted({_client_priority(c) for c in matching})
+        with self._client_lock:
+            for prio in priorities:
+                tier = [c for c in matching if _client_priority(c) == prio]
+                turn = self._rotation.get((group, prio), 0)
+                self._rotation[(group, prio)] = turn + 1
+                shift = turn % len(tier)
+                ordered.extend(tier[shift:] + tier[:shift])
+        available = [c for c in ordered if self._client_available(c.get("id"))]
+        backed_off = [c for c in ordered if not self._client_available(c.get("id"))]
+        return available + backed_off
 
-        # Sort by priority ascending (1 = highest priority), then created_at
-        matching.sort(key=lambda c: (int(c.get("priority", 1)), str(c.get("created_at", ""))))
-        return matching[0]
+    def find_client_for_protocol(self, protocol: str, db: Database) -> Optional[dict[str, Any]]:
+        """The first client ``clients_for_protocol`` would try, or None."""
+        clients = self.clients_for_protocol(protocol, db)
+        return clients[0] if clients else None
+
+    def dispatch_with_failover(
+        self,
+        db: Database,
+        candidate: AcquisitionSearchResult,
+        driver_factory: Optional[Callable[[dict[str, Any]], Any]] = None,
+    ) -> tuple[dict[str, Any], str]:
+        """Sends the candidate to the best client, falling over to the next on client-side failures.
+
+        Returns ``(client, download_hash)`` for the client that accepted it. ``AcquisitionUnavailableError`` (the
+        release itself is gone) is re-raised immediately; if every client fails the last error is re-raised;
+        ``NoClientAvailable`` is raised when no client serves the protocol. ``driver_factory`` builds a client's driver
+        (default ``get_acquisition_driver``).
+        """
+        make_driver = driver_factory or get_acquisition_driver
+        clients = self.clients_for_protocol(candidate.protocol, db)
+        if not clients:
+            raise NoClientAvailable(f"No enabled download client available for {candidate.protocol}")
+        last_error: Optional[Exception] = None
+        for client in clients:
+            try:
+                return client, make_driver(client).download(candidate)
+            except AcquisitionUnavailableError:
+                raise
+            except (AcquisitionRetryableError, httpx.HTTPError, OSError, RuntimeError, ValueError) as e:
+                self._mark_client_failed(client, f"{type(e).__name__}: {redact_text(str(e))}")
+                last_error = e
+        assert last_error is not None
+        raise last_error
 
     def search_and_grab(
         self,
@@ -555,23 +660,19 @@ class AcquisitionCoordinator:
         trigger: GrabTrigger,
     ) -> dict[str, Any]:
         """Dispatches a chosen candidate to its protocol's client and records the download (no delay gate)."""
-        # 4. Find appropriate client for candidate's protocol
-        client = self.find_client_for_protocol(protocol=top_candidate.protocol, db=db)
-        if not client:
+        # 5. Dispatch to the best client for the protocol, failing over to the next on client-side errors
+        try:
+            client, download_hash = self.dispatch_with_failover(db, top_candidate)
+            client_driver = get_acquisition_driver(client)
+        except NoClientAvailable:
             return {
                 "success": False,
                 "message": f"No enabled download client available for {top_candidate.protocol}",
             }
-
-        # 5. Dispatch download to client driver
-        try:
-            client_driver = get_acquisition_driver(client)
-            download_hash = client_driver.download(top_candidate)
         except (AcquisitionRetryableError, AcquisitionUnavailableError) as e:
             retryable = isinstance(e, AcquisitionRetryableError)
             logger.warning(
-                "Dispatch on client '%s' for '%s' %s: %s",
-                client.get("name"),
+                "Dispatch for '%s' %s: %s",
                 top_candidate.title,
                 "needs a retry" if retryable else "is unavailable",
                 e,
@@ -589,8 +690,7 @@ class AcquisitionCoordinator:
             }
         except Exception as e:
             logger.error(
-                "Dispatch download failed on client '%s' for '%s': %s",
-                client.get("name"),
+                "Dispatch download failed for '%s': %s",
                 top_candidate.title,
                 e,
             )

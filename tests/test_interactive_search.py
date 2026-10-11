@@ -839,3 +839,31 @@ def test_last_search_from_item_events(app_and_client, test_db, test_config, seed
     assert last["at"].endswith("Z") and last["message"]
     album_only = _search_one(client, headers, cand, {**body, "track_id": None}).json()["last_search"]
     assert album_only["at"]
+
+
+def test_manual_grab_explicit_client_no_failover(app_and_client, test_db, test_config, seeded_users):
+    """An explicit client_id targets exactly that client: its failure is an error, never a fall-over."""
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    for cid, prio in (("qbit-a", 1), ("qbit-b", 2)):
+        test_db.create_download_client(
+            DownloadClientConfig(
+                id=cid, name=cid, driver_type="qbittorrent", host_url=f"http://127.0.0.1:{8080 + prio}",
+                enabled=True, priority=prio,
+            )
+        )
+    payload = {
+        "release": {
+            "id": "rel-1", "title": "A - B [FLAC]", "indexer_name": "Idx", "protocol": "torrent",
+            "size_bytes": 1000, "magnet_url": "magnet:?xt=urn:btih:" + "b" * 40, "parsed_quality": "FLAC",
+            "is_acceptable": True, "score": 1, "meets_cutoff": True,
+        },
+        "artist": "A", "title": "B", "item_type": "track", "client_id": "qbit-b",
+    }
+    driver = MagicMock()
+    driver.download.side_effect = RuntimeError("qbit-b down")
+    with patch("trackseerr.api.routes.acquisition.get_acquisition_driver", return_value=driver) as factory:
+        resp = client.post("/api/acquisition/grab", headers=admin_headers, json=payload)
+    assert resp.status_code == 500
+    driver.download.assert_called_once()
+    assert [c.args[0]["id"] for c in factory.call_args_list] == ["qbit-b"]

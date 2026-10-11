@@ -19,6 +19,7 @@ import uuid
 from trackseerr import delay_gate
 from trackseerr.acquisition_coordinator import (
     acquisition_coordinator,
+    NoClientAvailable,
     candidate_rank,
     _to_quality_profile,
 )
@@ -1122,11 +1123,13 @@ class RSSSyncWorker:
         active_req_ids: Optional[set[Any]] = None,
     ) -> None:
         """Locate a client, dispatch download, and record active download and history in database."""
-        # Find download client for protocol
-        client = acquisition_coordinator.find_client_for_protocol(
-            protocol=candidate.protocol, db=db
-        )
-        if not client:
+        # Dispatch to the best client for the protocol, failing over to the next on client-side errors
+        try:
+            client, download_hash = acquisition_coordinator.dispatch_with_failover(
+                db, candidate, get_acquisition_driver
+            )
+            client_driver = get_acquisition_driver(client)
+        except NoClientAvailable:
             if claimed_pending:
                 db.restore_pending_release(claimed_pending)
             logger.warning(
@@ -1136,15 +1139,9 @@ class RSSSyncWorker:
                 candidate.protocol,
             )
             return
-
-        # Dispatch download to client
-        try:
-            client_driver = get_acquisition_driver(client)
-            download_hash = client_driver.download(candidate)
         except Exception as e:
             logger.error(
-                "Dispatch download failed on client '%s' for '%s': %s",
-                client.get("name"),
+                "Dispatch download failed for '%s': %s",
                 candidate.title,
                 e,
             )

@@ -24,6 +24,7 @@ class SearchRelease(ApiModel):
     id: str
     title: str
     indexer_name: str
+    indexer_priority: Optional[int] = None
     protocol: str
     size_bytes: int
     seeders: Optional[int] = None

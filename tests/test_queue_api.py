@@ -389,3 +389,19 @@ def test_download_client_masked_secret_round_trip(app_and_client, test_db, test_
     r = client.post("/api/settings/download-clients", json={**base, "id": created["id"], "api_key": "brand-new-key"}, headers=h)
     assert r.status_code == 200
     assert test_db.get_download_client(created["id"])["api_key"] == "brand-new-key"
+
+
+def test_priority_validation_range(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    client_body = {"name": "Q", "driver_type": "qbittorrent", "host_url": "http://192.168.1.100:8080"}
+    indexer_body = {"name": "I", "indexer_type": "torznab", "host_url": "http://192.168.1.100:9696/1/api"}
+    for bad in (0, 51):
+        resp = client.post("/api/settings/download-clients", json={**client_body, "priority": bad}, headers=admin_headers)
+        assert resp.status_code == 422
+        resp = client.post("/api/settings/indexers", json={**indexer_body, "priority": bad}, headers=admin_headers)
+        assert resp.status_code == 422
+    resp = client.post("/api/settings/indexers", json={**indexer_body, "priority": 50}, headers=admin_headers)
+    assert resp.status_code == 200 and resp.json()["priority"] == 50
+    resp = client.post("/api/settings/indexers", json=indexer_body, headers=admin_headers)
+    assert resp.json()["priority"] == 25

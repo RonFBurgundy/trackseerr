@@ -504,3 +504,18 @@ def test_breakdown_output_shape():
     assert d["kbps"]["checked"] and d["kbps"]["estimated"] is False and d["kbps"]["preferred"] == 895.0
     assert [x["code"] for x in d["rejections"]] == ["release_profile_ignored"]
     assert d["release_profiles"][0]["result"] == "rejected"
+
+
+def test_rank_key_indexer_priority_breaks_ties_only():
+    from trackseerr.models import EvaluationResult
+
+    def res(tier):
+        return EvaluationResult(True, 0, [], "FLAC 16bit", True, format_score=0, tier=tier, kbps_distance=0.0)
+
+    same = res(1)
+    assert rank_key("torrent", 5, same, None, 10) > rank_key("torrent", 5, same, None, 40)
+    assert rank_key("torrent", 5, same, None, 10) > rank_key("torrent", 5, same, None, None)  # None counts as 25
+    assert rank_key("torrent", 5, same, None, None) > rank_key("torrent", 5, same, None, 40)
+    # priority beats seeders, but a better quality tier beats priority
+    assert rank_key("torrent", 1, same, None, 10) > rank_key("torrent", 900, same, None, 40)
+    assert rank_key("torrent", 1, res(0), None, 50) > rank_key("torrent", 1, res(1), None, 1)
