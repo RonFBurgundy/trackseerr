@@ -303,112 +303,112 @@ export const ManualSearchModal: React.FC<ManualSearchModalProps> = ({ target, on
         {activeTab === 'history' && historyEntity !== null && historyId !== null ? (
           <ItemHistoryTimeline key={`${historyEntity}:${historyId}:${historyKey}`} entity={historyEntity} entityId={historyId} />
         ) : (
-        <>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-mono text-neutral-400 mr-auto" aria-live="polite">
-            {search.loading ? 'Searching' : `${search.results.length} of ${search.total} releases`}
-          </span>
-          <div role="group" aria-label="Filter releases" className="tape-transport-bay flex items-center gap-1">
-            {FILTERS.map((f) => (
-              <TapeDeckButton
-                key={f.value}
-                size="sm"
-                active={search.filter === f.value}
-                onClick={() => search.setFilter(f.value)}
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-mono text-neutral-400 mr-auto" aria-live="polite">
+                {search.loading ? 'Searching' : `${search.results.length} of ${search.total} releases`}
+              </span>
+              <div role="group" aria-label="Filter releases" className="tape-transport-bay flex items-center gap-1">
+                {FILTERS.map((f) => (
+                  <TapeDeckButton
+                    key={f.value}
+                    size="sm"
+                    active={search.filter === f.value}
+                    onClick={() => search.setFilter(f.value)}
+                  >
+                    {f.label}
+                  </TapeDeckButton>
+                ))}
+              </div>
+              <label htmlFor={sortId} className="sr-only">
+                Sort releases
+              </label>
+              <select
+                id={sortId}
+                name="manual-search-sort"
+                value={search.sort}
+                onChange={(e) => search.setSort(e.target.value as ManualSearchSort)}
+                className="h-9 sm:h-8 px-2 text-[13px] font-mono bg-[#0d0d0d] border border-[#2a2a2a] rounded-[3px] text-neutral-200"
               >
-                {f.label}
+                {SORTS.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+              <TapeDeckButton
+                size="sm"
+                disabled={search.loading}
+                onClick={search.rerun}
+                icon={<RefreshCw className={`h-3.5 w-3.5 ${search.loading ? 'animate-spin' : ''}`} />}
+                aria-label="Re-run search"
+                title="Re-run search"
+                collapseLabel
+              >
+                Re-run
               </TapeDeckButton>
-            ))}
-          </div>
-          <label htmlFor={sortId} className="sr-only">
-            Sort releases
-          </label>
-          <select
-            id={sortId}
-            name="manual-search-sort"
-            value={search.sort}
-            onChange={(e) => search.setSort(e.target.value as ManualSearchSort)}
-            className="h-9 sm:h-8 px-2 text-[13px] font-mono bg-[#0d0d0d] border border-[#2a2a2a] rounded-[3px] text-neutral-200"
-          >
-            {SORTS.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-          <TapeDeckButton
-            size="sm"
-            disabled={search.loading}
-            onClick={search.rerun}
-            icon={<RefreshCw className={`h-3.5 w-3.5 ${search.loading ? 'animate-spin' : ''}`} />}
-            aria-label="Re-run search"
-            title="Re-run search"
-            collapseLabel
-          >
-            Re-run
-          </TapeDeckButton>
-        </div>
-
-        {search.indexerErrors.length > 0 && (
-          <div
-            role="alert"
-            className="flex items-start gap-2 p-2.5 rounded-[3px] border border-[#e5a00d]/40 bg-[#e5a00d]/10 text-xs font-mono text-[#e5a00d]"
-          >
-            <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-px" />
-            <ul className="min-w-0 space-y-0.5">
-              {search.indexerErrors.map((e) => (
-                <li key={`${e.source}:${e.error}`} className="break-words">
-                  {e.source}: {e.error}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {search.loading ? (
-          <div className="flex flex-col items-center gap-3 py-10">
-            <CassetteLoader size="sm" />
-            <p className="text-xs font-mono text-neutral-400 text-center px-4">
-              Querying all indexers. This can take up to a minute.
-            </p>
-          </div>
-        ) : search.error ? (
-          <p role="alert" className="text-xs text-red-300 font-mono py-6 text-center">
-            {search.error}
-          </p>
-        ) : search.results.length === 0 ? (
-          <p className="text-xs text-neutral-500 font-mono py-6 text-center">No releases found</p>
-        ) : (
-          <div className="border border-[#1f1f1f] rounded-[3px] bg-[#0a0a0a]">
-            <div
-              className={`hidden ${ROW_GRID} px-2.5 py-1.5 border-b border-[#1f1f1f] text-[10px] font-mono uppercase tracking-wider text-neutral-500`}
-            >
-              <span />
-              <span>Release</span>
-              <span>Indexer</span>
-              <span>Quality</span>
-              <span>Size</span>
-              <span>Seeds</span>
-              <span>Age</span>
-              <span>Score</span>
-              <span />
             </div>
-            <ul>
-              {search.results.map((r) => (
-                <ReleaseRow
-                  key={r.id}
-                  release={r}
-                  expanded={expandedId === r.id}
-                  busy={search.busyIds.has(r.id)}
-                  grabbed={search.grabbedIds.has(r.id)}
-                  onToggle={toggle}
-                  onGrab={(rel) => void search.grab(rel)}
-                />
-              ))}
-            </ul>
-          </div>
-        )}
-        </>
+
+            {search.indexerErrors.length > 0 && (
+              <div
+                role="alert"
+                className="flex items-start gap-2 p-2.5 rounded-[3px] border border-[#e5a00d]/40 bg-[#e5a00d]/10 text-xs font-mono text-[#e5a00d]"
+              >
+                <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-px" />
+                <ul className="min-w-0 space-y-0.5">
+                  {search.indexerErrors.map((e) => (
+                    <li key={`${e.source}:${e.error}`} className="break-words">
+                      {e.source}: {e.error}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {search.loading ? (
+              <div className="flex flex-col items-center gap-3 py-10">
+                <CassetteLoader size="sm" />
+                <p className="text-xs font-mono text-neutral-400 text-center px-4">
+                  Querying all indexers. This can take up to a minute.
+                </p>
+              </div>
+            ) : search.error ? (
+              <p role="alert" className="text-xs text-red-300 font-mono py-6 text-center">
+                {search.error}
+              </p>
+            ) : search.results.length === 0 ? (
+              <p className="text-xs text-neutral-500 font-mono py-6 text-center">No releases found</p>
+            ) : (
+              <div className="border border-[#1f1f1f] rounded-[3px] bg-[#0a0a0a]">
+                <div
+                  className={`hidden ${ROW_GRID} px-2.5 py-1.5 border-b border-[#1f1f1f] text-[10px] font-mono uppercase tracking-wider text-neutral-500`}
+                >
+                  <span />
+                  <span>Release</span>
+                  <span>Indexer</span>
+                  <span>Quality</span>
+                  <span>Size</span>
+                  <span>Seeds</span>
+                  <span>Age</span>
+                  <span>Score</span>
+                  <span />
+                </div>
+                <ul>
+                  {search.results.map((r) => (
+                    <ReleaseRow
+                      key={r.id}
+                      release={r}
+                      expanded={expandedId === r.id}
+                      busy={search.busyIds.has(r.id)}
+                      grabbed={search.grabbedIds.has(r.id)}
+                      onToggle={toggle}
+                      onGrab={(rel) => void search.grab(rel)}
+                    />
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
         )}
       </div>
     </ObsidianModal>

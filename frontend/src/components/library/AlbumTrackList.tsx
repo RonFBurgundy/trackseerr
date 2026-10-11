@@ -20,6 +20,9 @@ export interface AlbumTrackListProps {
   trackHistory?: boolean;
   /** The album's monitored flag; file-less tracks on an unmonitored album read "Unmonitored". */
   albumMonitored?: boolean;
+  /** Shows "Reject current release" in a track's history (admin, native mode). Needs `onToast`. */
+  canReject?: boolean;
+  onToast?: (msg: string, tone?: 'ok' | 'error') => void;
 }
 
 /** One album's tracks (from the paged endpoint) with quality badge and monitoring switch. */
@@ -34,6 +37,8 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
   scrollClass = '',
   trackHistory = true,
   albumMonitored,
+  canReject = false,
+  onToast,
 }) => {
   const [historyTrack, setHistoryTrack] = useState<TrackItem | null>(null);
   if (loading) {
@@ -109,7 +114,7 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
       })}
     </div>
     {historyTrack && (
-      <ItemHistoryModal isOpen onClose={() => setHistoryTrack(null)} entity="track" entityId={String(historyTrack.id)} title={historyTrack.title ?? ''} />
+      <ItemHistoryModal isOpen onClose={() => setHistoryTrack(null)} entity="track" entityId={String(historyTrack.id)} title={historyTrack.title ?? ''} canReject={canReject} onToast={onToast} />
     )}
     </>
   );

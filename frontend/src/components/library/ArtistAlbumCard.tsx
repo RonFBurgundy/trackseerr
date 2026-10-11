@@ -278,6 +278,8 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
             error={error}
             isAdmin={isAdmin}
             canMonitorTracks={!lidarrMode}
+            canReject={isAdmin && !lidarrMode}
+            onToast={onToast}
             albumMonitored={album.monitored === true}
             onToggleMonitored={(id, cur) => void handleTrackToggle(id, cur)}
           />
