@@ -40,6 +40,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Admins can connect Last.fm from the Core admin interface; the connection no longer bounces to the public Requests site and fails with "Authentication required".
+- The request quota badge in the header and menu drawer now reads "N left of M", so an unused quota no longer looks used up.
 - The download queue table is readable on desktop: artist, album and title no longer break letter by letter.
 - Plex sign-in now works through TrackSeerr Requests in the two-container setup; it gets your Plex server's identity from Core instead of failing with "No Plex machine identifier configured".
 - Unraid two-container setup: the templates, install guide and `init-dmz` now list both networks in Extra Parameters (Unraid ignores the Network Type dropdown once a `--network` flag is there), so Requests can reach your tunnel/proxy and Core can reach Plex. The docs now explain which network Core should join: your app network when Cloudflare Tunnel runs on the host, or its own `trackseerr-core-lan` network when a reverse proxy or tunnel runs as a container. The internal network is created with `--internal`.
