@@ -5,6 +5,8 @@ scores and ranks candidates against Quality Profiles, dispatches grabs to
 appropriate download clients (qBittorrent, SABnzbd, slskd), and tracks active transfers.
 """
 
+import dataclasses
+from dataclasses import dataclass
 import logging
 import re
 import sqlite3
@@ -320,6 +322,55 @@ def resolve_duration(
     return None
 
 
+@dataclass(frozen=True)
+class SearchContext:
+    """What triggered a search, persisted with each search_log row."""
+
+    trigger_kind: Optional[str] = None
+    trigger_ref: Optional[str] = None
+    trigger_label: Optional[str] = None
+    request_id: Optional[str] = None
+    track_id: Optional[str] = None
+    album_id: Optional[str] = None
+    rung: int = 1
+
+
+def _record_search(
+    db: Database,
+    context: Optional[SearchContext],
+    source_name: str,
+    source_type: Optional[str],
+    artist: str,
+    title: Optional[str],
+    album: Optional[str],
+    count: int,
+    started: float,
+    error: Optional[str] = None,
+) -> None:
+    """Persists one search_log row; a storage failure is logged and never breaks the search."""
+    ctx = context or SearchContext()
+    try:
+        db.record_search(
+            source_name=str(source_name),
+            source_type=source_type or "torznab",
+            query_artist=artist,
+            query_title=title,
+            query_album=album,
+            rung=ctx.rung,
+            result_count=count,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            error=error,
+            trigger_kind=ctx.trigger_kind,
+            trigger_ref=ctx.trigger_ref,
+            trigger_label=ctx.trigger_label,
+            request_id=ctx.request_id,
+            track_id=ctx.track_id,
+            album_id=ctx.album_id,
+        )
+    except sqlite3.Error as e:
+        logger.warning("Could not record search for source %s: %s", source_name, e)
+
+
 def _log_source_search(
     source: str,
     source_type: Optional[str],
@@ -346,6 +397,7 @@ class AcquisitionCoordinator:
         db: Optional[Database] = None,
         include_blocklisted: bool = False,
         errors: Optional[list[dict[str, str]]] = None,
+        context: Optional[SearchContext] = None,
     ) -> list[AcquisitionSearchResult]:
         """Queries all enabled Torznab/Newznab indexers and slskd clients.
 
@@ -368,11 +420,14 @@ class AcquisitionCoordinator:
 
         for idx_cfg in indexers:
             idx_name = idx_cfg.get("name", "unknown")
+            idx_type = idx_cfg.get("indexer_type")
+            started = time.monotonic()
             try:
                 driver = get_indexer_driver(idx_cfg)
                 started = time.monotonic()
                 res = driver.search(artist=artist, title=title, album=album)
-                _log_source_search(idx_name, idx_cfg.get("indexer_type"), artist, title, album, res, started)
+                _log_source_search(idx_name, idx_type, artist, title, album, res, started)
+                _record_search(db, context, idx_name, idx_type, artist, title, album, len(res or []), started)
                 if res:
                     for r in res:
                         if isinstance(r.extra, dict) or r.extra is None:
@@ -385,6 +440,7 @@ class AcquisitionCoordinator:
                     all_results.extend(res)
             except Exception as e:
                 logger.warning("Error searching indexer '%s' (%s): %s", idx_name, idx_cfg.get("host_url"), e)
+                _record_search(db, context, idx_name, idx_type, artist, title, album, 0, started, redact_text(str(e)))
                 if errors is not None:
                     errors.append({"source": str(idx_name), "error": redact_text(str(e))})
 
@@ -401,11 +457,13 @@ class AcquisitionCoordinator:
         ]
         for s_cfg in slskd_clients:
             s_name = s_cfg.get("name", "slskd")
+            started = time.monotonic()
             try:
                 driver = get_acquisition_driver(s_cfg)
                 started = time.monotonic()
                 res = driver.search(artist=artist, title=title, album=album)
                 _log_source_search(s_name, "slskd", artist, title, album, res, started)
+                _record_search(db, context, s_name, "slskd", artist, title, album, len(res or []), started)
                 if res:
                     for r in res:
                         extra = dict(r.extra or {})
@@ -415,6 +473,7 @@ class AcquisitionCoordinator:
                     all_results.extend(res)
             except Exception as e:
                 logger.warning("Error searching slskd client '%s' (%s): %s", s_name, s_cfg.get("host_url"), e)
+                _record_search(db, context, s_name, "slskd", artist, title, album, 0, started, redact_text(str(e)))
                 if errors is not None:
                     errors.append({"source": str(s_name), "error": redact_text(str(e))})
 
@@ -434,6 +493,7 @@ class AcquisitionCoordinator:
         title: Optional[str],
         album: Optional[str],
         db: Optional[Database],
+        context: Optional[SearchContext] = None,
     ) -> list[AcquisitionSearchResult]:
         """Searches with the raw query, then simpler rungs, returning the first non-empty result list.
 
@@ -443,7 +503,10 @@ class AcquisitionCoordinator:
         rungs = build_query_ladder(artist, title, album)
         for number, (r_artist, r_title, r_album) in enumerate(rungs, start=1):
             started = time.monotonic()
-            results = self.search_all_indexers(artist=r_artist, title=r_title, album=r_album, db=db)
+            results = self.search_all_indexers(
+                artist=r_artist, title=r_title, album=r_album, db=db,
+                context=dataclasses.replace(context or SearchContext(), rung=number),
+            )
             found = len(results)
             if number > 1:
                 results = [r for r in results if matches_request(self._candidate_text(r), artist, title, album)]
@@ -702,7 +765,15 @@ class AcquisitionCoordinator:
         profile = _to_quality_profile(profile_dict)
 
         # 2. Search indexers & slskd
-        candidates = self.search_with_fallback(artist, title, album, db)
+        search_context = SearchContext(
+            trigger_kind=trigger.kind,
+            trigger_ref=trigger.ref,
+            trigger_label=trigger.label,
+            request_id=request_id,
+            track_id=track_id,
+            album_id=album_id,
+        )
+        candidates = self.search_with_fallback(artist, title, album, db, context=search_context)
 
         # 3. Evaluate and rank (protocol preference comes from the delay profile that applies to this artist)
         tags = delay_gate.artist_tags(db, artist)

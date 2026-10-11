@@ -15,6 +15,7 @@ from trackseerr.acquisition_coordinator import (
     NoClientAvailable,
     candidate_rank,
     resolve_duration,
+    SearchContext,
     acquisition_coordinator,
 )
 from trackseerr import delay_gate
@@ -265,6 +266,7 @@ def search_releases(
             db=db,
             include_blocklisted=True,
             errors=indexer_errors,
+            context=SearchContext(trigger_kind=TRIGGER_MANUAL, track_id=query.track_id, album_id=query.album_id),
         )
     except Exception as e:
         logger.error(

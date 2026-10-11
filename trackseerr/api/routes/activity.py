@@ -20,6 +20,7 @@ from trackseerr.api.schemas.activity import (
     HistoryIndexResponse,
     HistoryPage,
     QueuePage,
+    SearchLogPage,
 )
 from trackseerr.clients.lidarr import LidarrApiError, LidarrClient, _exc_text
 from trackseerr.library_manager import MODE_LIDARR, ModeChanged, get_library_mode, run_for_mode
@@ -237,6 +238,19 @@ def list_blocklist(
     if _is_lidarr(db):
         return lidarr_call(svc.lidarr_blocklist, require_lidarr(client), page, page_size, key, sort_dir)
     return svc.native_blocklist(db, page, page_size, key, sort_dir)
+
+
+@router.get("/searches", response_model=SearchLogPage, summary="Log of indexer and Soulseek searches with their triggers")
+def list_searches(
+    page: int = Query(1, ge=1, le=MAX_PAGE),
+    page_size: int = Query(50, ge=1, le=200),
+    source_type: Optional[str] = Query(None, pattern="^(torznab|newznab|slskd)$"),
+    request_id: Optional[str] = Query(None),
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    records, total = db.list_search_log(page, page_size, source_type, request_id)
+    return {"page": page, "page_size": page_size, "total": total, "records": records}
 
 
 @router.delete("/blocklist/{blocklist_id}", response_model=ActionResult, response_model_exclude_unset=True, summary="Remove an entry from the blocklist")
