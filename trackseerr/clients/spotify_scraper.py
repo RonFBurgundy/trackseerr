@@ -24,6 +24,7 @@ USER_AGENT = (
 )
 
 EMBED_TRACK_CAP = 100
+MAX_PLAYLIST_TRACKS = 10_000
 PATHFINDER_URL = "https://api-partner.spotify.com/pathfinder/v2/query"
 DEFAULT_PATHFINDER_HASH = "8964e8eafb21aa992a7d951d256d83285c04be2105d209262901de70cb97584a"
 PATHFINDER_HASH_TTL_SECONDS = 24 * 3600.0
@@ -161,7 +162,7 @@ class SpotifyWebScraper:
             )
         return out
 
-    def _fetch_remaining(self, playlist_id: str, token: str, offset: int, max_tracks: int = 2000) -> list[Track]:
+    def _fetch_remaining(self, playlist_id: str, token: str, offset: int, max_tracks: int = MAX_PLAYLIST_TRACKS) -> list[Track]:
         """Page the web player's GraphQL endpoint from ``offset`` for tracks beyond the embed's 100-row cap."""
         collected: list[Track] = []
         rediscovered = False
