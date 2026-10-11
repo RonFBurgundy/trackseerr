@@ -278,13 +278,15 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
             error={error}
             isAdmin={isAdmin}
             canMonitorTracks={!lidarrMode}
+            canReject={isAdmin && !lidarrMode}
+            onToast={onToast}
             albumMonitored={album.monitored === true}
             onToggleMonitored={(id, cur) => void handleTrackToggle(id, cur)}
           />
         </div>
       )}
       {historyOpen && (
-        <ItemHistoryModal isOpen onClose={() => setHistoryOpen(false)} entity="album" entityId={String(album.id)} title={album.title ?? ''} />
+        <ItemHistoryModal isOpen onClose={() => setHistoryOpen(false)} entity="album" entityId={String(album.id)} title={album.title ?? ''} canReject={isAdmin && !lidarrMode} onToast={onToast} />
       )}
     </MachinedCard>
   );
