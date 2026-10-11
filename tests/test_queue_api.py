@@ -167,7 +167,12 @@ def test_download_clients_ssrf_rejection(app_and_client, test_db, test_config, s
     assert "SSRF" in resp.json()["message"] or "Prohibited" in resp.json()["message"]
 
 
-def test_download_clients_test_connection_endpoint(app_and_client, test_db, test_config, seeded_users):
+from trackseerr.api.routes.download_clients import _verify_connection as _REAL_VERIFY_CONNECTION
+
+
+def test_download_clients_test_connection_endpoint(app_and_client, test_db, test_config, seeded_users, monkeypatch):
+    # The autouse conftest fixture stubs the verification seam; this test exercises the real one.
+    monkeypatch.setattr("trackseerr.api.routes.download_clients._verify_connection", _REAL_VERIFY_CONNECTION)
     _, client = app_and_client
     admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
 

@@ -34,6 +34,7 @@ class QbittorrentDriver(AcquisitionDriver):
         self.category = category
         self.timeout = timeout
         self._cookie: Optional[str] = None
+        self.last_login_status: Optional[int] = None
 
     def _login(self, client: httpx.Client) -> bool:
         """Authenticates with qBittorrent and caches the SID cookie."""
@@ -44,12 +45,15 @@ class QbittorrentDriver(AcquisitionDriver):
             resp = client.post(
                 login_url,
                 data={"username": self.username or "", "password": self.password or ""},
+                headers={"Referer": self.host_url, "Origin": self.host_url},
             )
-            if resp.status_code == 200 and "Ok." in resp.text:
+            self.last_login_status = resp.status_code
+            has_sid = "SID" in resp.cookies or "SID" in client.cookies
+            if 200 <= resp.status_code < 300 and ("Ok." in resp.text or has_sid):
                 self._cookie = resp.headers.get("set-cookie")
                 return True
             return False
-        except Exception as e:
+        except httpx.HTTPError as e:
             logger.warning("qBittorrent login exception: %s", e)
             return False
 
@@ -62,6 +66,8 @@ class QbittorrentDriver(AcquisitionDriver):
             with httpx.Client(timeout=5.0) as client:
                 if self.username or self.password:
                     if not self._login(client):
+                        if self.last_login_status == 403:
+                            return False, "qBittorrent banned this IP after too many failed logins; wait or restart qBittorrent"
                         return False, "Authentication failed (invalid credentials)"
                 version_url = f"{self.host_url}/api/v2/app/version"
                 headers = {"Cookie": self._cookie} if self._cookie else {}

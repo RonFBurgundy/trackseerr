@@ -35,6 +35,29 @@ class SlskdDriver(AcquisitionDriver):
         self.download_dir = (download_dir or "").strip() or None
         self.timeout = timeout
         self._downloads_root: Optional[str] = None
+        self._token: Optional[str] = None
+
+    def _session_token(self) -> Optional[str]:
+        """Logs in with username/password (when no API key is set) and caches the bearer token."""
+        if self.api_key or not (self.username and self.password):
+            return None
+        if self._token:
+            return self._token
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.post(
+                    f"{self.host_url}/api/v0/session",
+                    json={"username": self.username, "password": self.password},
+                )
+                if resp.status_code != 200:
+                    logger.warning("slskd session login rejected (HTTP %d) at %s", resp.status_code, self.host_url)
+                    return None
+                token = resp.json().get("token")
+        except (httpx.HTTPError, ValueError, AttributeError) as e:
+            logger.warning("slskd session login failed at %s: %s", self.host_url, type(e).__name__)
+            return None
+        self._token = str(token) if token else None
+        return self._token
 
     def _headers(self) -> dict[str, str]:
         headers = {
@@ -43,6 +66,10 @@ class SlskdDriver(AcquisitionDriver):
         }
         if self.api_key:
             headers["X-API-KEY"] = self.api_key
+        else:
+            token = self._session_token()
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
         return headers
 
     def _read_downloads_root(self) -> Optional[str]:
@@ -112,17 +139,24 @@ class SlskdDriver(AcquisitionDriver):
         if not is_safe_service_url(self.host_url):
             return False, "Invalid or prohibited host URL (SSRF defense)"
 
-        url = f"{self.host_url}/api/v0/version"
+        if not self.api_key and self.username and self.password and self._session_token() is None:
+            return False, "Authentication failed: slskd rejected the username/password"
+
+        auth_failed = "Authentication failed: invalid API key or credentials"
         try:
             with httpx.Client(timeout=5.0) as client:
-                resp = client.get(url, headers=self._headers())
-                if resp.status_code == 200:
-                    data = resp.json() if resp.text else {}
-                    version = data.get("version", "connected") if isinstance(data, dict) else "connected"
-                    return True, f"slskd {version}"
+                resp = client.get(f"{self.host_url}/api/v0/version", headers=self._headers())
                 if resp.status_code in (401, 403):
-                    return False, "Authentication failed: invalid X-API-KEY"
-                return False, f"HTTP {resp.status_code}: {resp.text[:120]}"
+                    return False, auth_failed
+                if resp.status_code != 200:
+                    return False, f"HTTP {resp.status_code}: {resp.text[:120]}"
+                data = resp.json() if resp.text else {}
+                version = data.get("version", "connected") if isinstance(data, dict) else "connected"
+                # /version is unauthenticated on some slskd releases; probe an authenticated endpoint too.
+                probe = client.get(f"{self.host_url}/api/v0/application", headers=self._headers())
+                if probe.status_code in (401, 403):
+                    return False, auth_failed
+                return True, f"slskd {version}"
         except httpx.TimeoutException:
             return False, "Connection timed out (5s)"
         except Exception as e:

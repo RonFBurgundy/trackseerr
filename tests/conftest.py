@@ -63,6 +63,15 @@ def _gateway_session_status_allows_by_default(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _download_client_connection_ok(monkeypatch):
+    """Saving an enabled download client now requires a passing connection test; existing tests create clients
+    against unreachable hosts, so the verification seam reports success. Tests asserting rejection override it."""
+    monkeypatch.setattr(
+        "trackseerr.api.routes.download_clients._verify_connection", lambda cfg: (True, "ok")
+    )
+
+
+@pytest.fixture(autouse=True)
 def _reset_media_server_process_state():
     """The Settings-page media-server overlay, its change listeners and the shared Subsonic adapter are process-wide:
     never let one test's saved settings reach the next."""
