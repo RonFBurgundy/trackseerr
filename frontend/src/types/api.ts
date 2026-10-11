@@ -2606,6 +2606,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/migrate-lidarr/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Lidarr Import Report
+         * @description Downloads the reconciliation report of the latest Lidarr import (Lidarr's numbers versus what was imported).
+         */
+        get: operations["download_lidarr_import_report_api_library_migrate_lidarr_report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/migrate-lidarr/status": {
         parameters: {
             query?: never;
@@ -10308,6 +10328,8 @@ export interface components {
             files_migrated: number;
             /** Is Migrating */
             is_migrating: boolean;
+            /** Report Name */
+            report_name?: string | null;
             /** Started At */
             started_at?: string | null;
             /** Status */
@@ -18142,6 +18164,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MigrationStatus"];
+                };
+            };
+        };
+    };
+    download_lidarr_import_report_api_library_migrate_lidarr_report_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

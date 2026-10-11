@@ -401,6 +401,7 @@ class MigrationStatus(ApiModel):
     error: Optional[str] = None
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
+    report_name: Optional[str] = None
 
 
 class MigrationTriggerResponse(ApiModel):

@@ -22,6 +22,7 @@ from trackseerr.models import (
     LibraryTrack,
 )
 from trackseerr.job_tracker import track_job
+from trackseerr.lidarr_import_report import ImportReport, write_report
 from trackseerr.library_manager import MODE_NATIVE, SwitchRefused, switch_mode
 from trackseerr.redaction import safe_exc
 from trackseerr.storage import Database
@@ -46,6 +47,7 @@ class _MigrationRun:
     lidarr_trackfile_map: dict[Any, str] = field(default_factory=dict)
     lidarr_artist_monitored: dict[Any, bool] = field(default_factory=dict)
     lidarr_album_monitored: dict[Any, bool] = field(default_factory=dict)
+    report: ImportReport = field(default_factory=ImportReport)
 
 
 class LidarrMigrationJob:
@@ -71,6 +73,7 @@ class LidarrMigrationJob:
             "error": None,
             "started_at": None,
             "completed_at": None,
+            "report_name": None,
         }
 
     def is_running(self) -> bool:
@@ -96,6 +99,7 @@ class LidarrMigrationJob:
         db: Database,
         lidarr_client: LidarrClient,
         auto_switch_mode: bool = True,
+        config_dir: Optional[str] = None,
     ) -> bool:
         """Spawns background daemon thread running run_migration."""
         with self._lock:
@@ -111,19 +115,21 @@ class LidarrMigrationJob:
 
             self._thread = threading.Thread(
                 target=self._run_recorded,
-                args=(db, lidarr_client, auto_switch_mode),
+                args=(db, lidarr_client, auto_switch_mode, config_dir),
                 daemon=True,
                 name="LidarrMigrationThread",
             )
             self._thread.start()
             return True
 
-    def _run_recorded(self, db: Database, lidarr_client: LidarrClient, auto_switch_mode: bool) -> None:
+    def _run_recorded(
+        self, db: Database, lidarr_client: LidarrClient, auto_switch_mode: bool, config_dir: Optional[str] = None
+    ) -> None:
         """Thread body: runs the migration inside a task-run record and a live job entry."""
         with record_task_run(db, "lidarr_migration", TRIGGER_MANUAL) as run, track_job(
             "lidarr_migration", "Lidarr library import"
         ) as job:
-            result = self.run_migration(db, lidarr_client, auto_switch_mode)
+            result = self.run_migration(db, lidarr_client, auto_switch_mode, config_dir)
             summary = (
                 f"{result.get('artists_migrated', 0)} artists, {result.get('albums_migrated', 0)} albums, "
                 f"{result.get('tracks_migrated', 0)} tracks, {result.get('files_migrated', 0)} files"
@@ -198,6 +204,7 @@ class LidarrMigrationJob:
         )
         upserted = run.db.upsert_library_artist(artist_model)
         new_artist_id = str(upserted["id"])
+        run.report.add_artist(artist, new_artist_id)
 
         if lidarr_art_id is not None:
             run.lidarr_artist_map[lidarr_art_id] = new_artist_id
@@ -241,6 +248,11 @@ class LidarrMigrationJob:
                 "LidarrMigration: Skipping album '%s', artistId %s could not be resolved.",
                 album.get("title"),
                 lidarr_art_id,
+            )
+            run.report.skip(
+                "album",
+                "artist_unresolved",
+                {"title": album.get("title"), "lidarr_album_id": lidarr_album_id, "lidarr_artist_id": lidarr_art_id},
             )
             return
 
@@ -299,6 +311,7 @@ class LidarrMigrationJob:
         if lidarr_album_id is not None:
             run.lidarr_album_map[lidarr_album_id] = new_album_id
             run.lidarr_album_monitored[lidarr_album_id] = monitored
+        run.report.album(lidarr_art_id, monitored)
 
         with self._lock:
             self._status["albums_migrated"] += 1
@@ -323,6 +336,16 @@ class LidarrMigrationJob:
                 track.get("title"),
                 lidarr_alb_id,
                 lidarr_art_id,
+            )
+            run.report.skip(
+                "track",
+                "album_or_artist_unresolved",
+                {
+                    "title": track.get("title"),
+                    "lidarr_track_id": lidarr_track_id,
+                    "lidarr_album_id": lidarr_alb_id,
+                    "lidarr_artist_id": lidarr_art_id,
+                },
             )
             return
 
@@ -383,6 +406,7 @@ class LidarrMigrationJob:
         lidarr_trackfile_id = track.get("trackFileId")
         if isinstance(lidarr_trackfile_id, int) and lidarr_trackfile_id:
             run.lidarr_trackfile_map[lidarr_trackfile_id] = new_track_id
+        run.report.track(lidarr_art_id, monitored, lidarr_trackfile_id)
 
         with self._lock:
             self._status["tracks_migrated"] += 1
@@ -396,10 +420,16 @@ class LidarrMigrationJob:
                 tf.get("id"),
                 tf.get("path"),
             )
+            run.report.skip(
+                "track_file",
+                "no_matching_track",
+                {"lidarr_trackfile_id": tf.get("id"), "path": tf.get("path")},
+            )
             return
 
         file_path = tf.get("path")
         if not file_path:
+            run.report.skip("track_file", "no_path", {"lidarr_trackfile_id": tf.get("id")})
             return
 
         relative_path = tf.get("relativePath") or Path(file_path).name
@@ -453,6 +483,7 @@ class LidarrMigrationJob:
             cutoff_met=True,
         )
         run.db.upsert_library_file(file_model)
+        run.report.file_linked(tf.get("id"))
 
         with self._lock:
             self._status["files_migrated"] += 1
@@ -462,8 +493,46 @@ class LidarrMigrationJob:
         db: Database,
         lidarr_client: LidarrClient,
         auto_switch_mode: bool = True,
+        config_dir: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Synchronously executes the Lidarr library migration loop."""
+        """Synchronously executes the Lidarr library migration loop and writes its reconciliation report."""
+        report = ImportReport()
+        result = self._execute_migration(db, lidarr_client, auto_switch_mode, report)
+        if not report.active:
+            return result
+        return self._finish_report(db, report, result, auto_switch_mode, config_dir)
+
+    def _finish_report(
+        self,
+        db: Database,
+        report: ImportReport,
+        result: dict[str, Any],
+        auto_switch_mode: bool,
+        config_dir: Optional[str],
+    ) -> dict[str, Any]:
+        """Builds and writes the report for a finished run; a report failure never fails the import."""
+        if not config_dir:
+            return result
+        try:
+            data = report.finalize(db, result.get("status", ""), result.get("error"), result.get("started_at"), auto_switch_mode)
+        except sqlite3.Error as exc:
+            logger.warning("LidarrMigration: could not build the import report: %s", safe_exc(exc))
+            return result
+        path = write_report(data, config_dir)
+        if path is None:
+            return result
+        with self._lock:
+            self._status["report_name"] = path.name
+            return dict(self._status)
+
+    def _execute_migration(
+        self,
+        db: Database,
+        lidarr_client: LidarrClient,
+        auto_switch_mode: bool,
+        report: ImportReport,
+    ) -> dict[str, Any]:
+        """The migration loop itself; marks ``report.active`` once the run really starts."""
         with self._lock:
             if self._stop_event.is_set():
                 self._status["status"] = "cancelled"
@@ -487,9 +556,11 @@ class LidarrMigrationJob:
                 self._status["started_at"] = datetime.now(timezone.utc).isoformat()
             self._status["completed_at"] = None
 
+        report.active = True
         run = _MigrationRun(
             db=db,
             lidarr_client=lidarr_client,
+            report=report,
         )
 
         try:
