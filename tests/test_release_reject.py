@@ -87,6 +87,21 @@ def test_reject_track_scopes_to_one_track(client, hdr, library, test_db):
     assert queue.call_args.kwargs["replacement"].issue_id is None
 
 
+def test_reject_track_blocklists_the_tracks_own_release(client, hdr, library, test_db):
+    test_db.record_download_event(
+        "imported", track_id="trk-2", release_title="Release.B", info_hash="bbbb", artist="The Beatles"
+    )
+    test_db.record_download_event(
+        "imported", album_id="alb-1", release_title="Release.A", info_hash="aaaa", artist="The Beatles"
+    )
+    with patch.object(backlog_worker, "queue_wanted_search", return_value={"queued": 1}):
+        res = _reject(client, hdr["admin"], "track", "trk-2")
+    assert res.status_code == 200, res.text
+    assert res.json()["release"] == "Release.B"
+    assert test_db.find_blocklist_entry(release_title="Release.B") is not None
+    assert test_db.find_blocklist_entry(release_title="Release.A") is None
+
+
 def test_reject_without_source_still_searches(client, hdr, library, test_db):
     with patch.object(backlog_worker, "queue_wanted_search", return_value={"queued": 2}) as queue:
         res = _reject(client, hdr["admin"], "album", "alb-1")

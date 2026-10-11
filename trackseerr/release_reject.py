@@ -16,13 +16,14 @@ REJECT_REASON = "Rejected from the library"
 
 
 def blocklist_current_release(
-    db: Database, album_id: str, track_ids: list[str], request_id: Optional[str], reason: str
+    db: Database, album_id: str, track_ids: list[str], request_id: Optional[str], reason: str,
+    track_first: bool = False,
 ) -> Optional[dict[str, Any]]:
     """Blocklists the release whose import produced the album's/tracks' files.
 
     Returns ``{"blocklist_id", "release"}``, or None when the import history does not name a release.
     """
-    source = db.get_imported_release_source(album_id, track_ids, request_id)
+    source = db.get_imported_release_source(album_id, track_ids, request_id, track_first=track_first)
     if source is None:
         return None
     item = db.add_to_blocklist(
@@ -58,7 +59,11 @@ def reject_current_release(
         album_id = str(track["album_id"]) if track.get("album_id") else None
         track_ids = [str(entity_id)]
 
-    blocklisted = blocklist_current_release(db, album_id, track_ids, None, REJECT_REASON) if album_id else None
+    blocklisted = (
+        blocklist_current_release(db, album_id, track_ids, None, REJECT_REASON, track_first=entity == "track")
+        if album_id
+        else None
+    )
     targets = db.list_wanted_search_targets(track_ids=track_ids)
     search = backlog_worker.queue_wanted_search(
         db, targets, replacement=ReplacementSpec(issue_id=None, require_better=False), actor_user_id=actor_user_id

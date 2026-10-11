@@ -545,12 +545,18 @@ class IssueStoreMixin:
         album_id: str,
         track_ids: Optional[list[str]] = None,
         request_id: Optional[str] = None,
+        track_first: bool = False,
     ) -> Optional[dict[str, Any]]:
         """The newest ``imported`` history row that produced an album's files (matched by album, then its tracks,
-        then the request), or None when no import is on record. Carries the release identity for blocklisting."""
+        then the request), or None when no import is on record. Carries the release identity for blocklisting.
+        ``track_first`` tries the track ids before the album (for a single track's own release)."""
         candidates: list[tuple[str, list[str]]] = [("album_id", [str(album_id)])]
         if track_ids:
-            candidates.append(("track_id", [str(t) for t in track_ids]))
+            track_candidate = ("track_id", [str(t) for t in track_ids])
+            if track_first:
+                candidates.insert(0, track_candidate)
+            else:
+                candidates.append(track_candidate)
         if request_id:
             candidates.append(("request_id", [str(request_id)]))
         with self._lock:
