@@ -397,15 +397,22 @@ class LibraryCatalogStoreMixin:
             row = cur.fetchone()
             return self._map_library_track(row) if row else None
 
-    def get_library_track_by_mb_recording_id(self, mb_recording_id: str) -> Optional[dict[str, Any]]:
-        """Retrieves a library track by MusicBrainz recording id (first match), or None."""
+    def get_library_track_by_mb_recording_id(
+        self, mb_recording_id: str, album_id: Optional[str] = None
+    ) -> Optional[dict[str, Any]]:
+        """Retrieves a library track by MusicBrainz recording id (first match), or None.
+
+        When ``album_id`` is given the match is limited to that album.
+        """
         if not mb_recording_id:
             return None
+        query = "SELECT * FROM library_tracks WHERE mb_recording_id = ?"
+        params: list[Any] = [str(mb_recording_id)]
+        if album_id is not None:
+            query += " AND album_id = ?"
+            params.append(str(album_id))
         with self._lock:
-            cur = self.conn.execute(
-                "SELECT * FROM library_tracks WHERE mb_recording_id = ? LIMIT 1",
-                (str(mb_recording_id),),
-            )
+            cur = self.conn.execute(query + " LIMIT 1", params)
             row = cur.fetchone()
             return self._map_library_track(row) if row else None
 
@@ -829,11 +836,11 @@ class LibraryCatalogStoreMixin:
             cur.execute("SELECT COUNT(*) FROM library_tracks")
             total_track_count = int(cur.fetchone()[0] or 0)
 
-            # Lidarr semantics: ``track_count`` only covers tracks on monitored albums (unmonitored discography
-            # stays stored, as ``total_track_count``).
+            # Lidarr semantics: ``track_count`` covers tracks on monitored albums or that already have a file
+            # (unmonitored, file-less discography stays stored, as ``total_track_count``).
             cur.execute(
                 "SELECT COUNT(*) FROM library_tracks t JOIN library_albums al ON al.id = t.album_id "
-                "WHERE al.monitored = 1"
+                "WHERE al.monitored = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id)"
             )
             track_count = int(cur.fetchone()[0] or 0)
 
@@ -856,7 +863,8 @@ class LibraryCatalogStoreMixin:
 
             cur.execute(
                 "SELECT COUNT(*) FROM library_tracks t JOIN library_albums al ON al.id = t.album_id "
-                "WHERE t.monitored = 1 AND al.monitored = 1 "
+                "JOIN library_artists ar ON ar.id = t.artist_id "
+                "WHERE t.monitored = 1 AND al.monitored = 1 AND ar.monitored = 1 "
                 "AND NOT EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id)"
             )
             missing_track_count = int(cur.fetchone()[0] or 0)

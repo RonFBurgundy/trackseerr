@@ -396,6 +396,58 @@ def test_refresh_single_artist_hydrates_tracks_and_caches_artwork(test_db: Datab
         )
 
 
+def test_refresh_matches_existing_track_by_recording_id(test_db: Database):
+    """A Lidarr-imported track (same recording id, differently spelled title) is reused, not duplicated."""
+    artist_id = "artist-rec-1"
+    test_db.upsert_library_artist(
+        LibraryArtist(id=artist_id, name="Band", mbid="mbid-band", monitored=True, monitor_option="all")
+    )
+    test_db.upsert_library_album(
+        {"id": "alb-rec", "artist_id": artist_id, "title": "Album", "mb_release_group_id": "rg-rec", "monitored": True}
+    )
+    test_db.upsert_library_track(
+        {
+            "id": "trk-rec",
+            "album_id": "alb-rec",
+            "artist_id": artist_id,
+            "title": "Song (2011 Remaster)",
+            "track_number": 1,
+            "monitored": True,
+            "mb_recording_id": "rec-1",
+        }
+    )
+    test_db.upsert_library_file(
+        {
+            "id": "f-rec",
+            "track_id": "trk-rec",
+            "file_path": "/m/song.flac",
+            "relative_path": "song.flac",
+            "codec": "FLAC",
+            "quality_name": "FLAC",
+            "size_bytes": 1,
+        }
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    enricher.get_artist_details.return_value = {"id": "mbid-band"}
+    disco = [{"id": "rg-rec", "title": "Album", "album_type": "album", "year": 2011}]
+    enricher.get_artist_discography.return_value = disco
+    enricher.get_artist_discography_result.return_value = (disco, True)
+    enricher.source_available.return_value = True
+    enricher.stats.return_value = {"network_requests": 0, "cache_hits": 0}
+    enricher.get_release_group_tracks.return_value = [
+        {"track_number": 1, "disc_number": 1, "title": "Song", "duration_seconds": 60.0, "mb_recording_id": "rec-1"}
+    ]
+    with patch.object(mediacover_service, "ensure_artwork", return_value=Path("/tmp/cover.jpg")):
+        result = refresh_single_artist(artist_id=artist_id, db=test_db, enricher=enricher)
+    assert result["success"] is True
+    tracks = test_db.list_library_tracks(album_id="alb-rec")
+    assert len(tracks) == 1
+    assert tracks[0]["id"] == "trk-rec"
+    with test_db._lock:
+        n = test_db.conn.execute("SELECT COUNT(*) FROM library_files WHERE track_id = 'trk-rec'").fetchone()[0]
+    assert n == 1
+
+
 # =========================================================================
 # Test 5: artist_refresh_worker lifecycle and status
 # =========================================================================

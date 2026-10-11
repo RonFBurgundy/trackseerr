@@ -27,7 +27,7 @@ def test_native_stats_payload(app_and_client, test_db, test_config, seeded_users
     assert (s["artist_count"], s["monitored_artist_count"], s["unmonitored_artist_count"]) == (2, 1, 1)
     assert s["album_count"] == 3 and s["track_count"] == 3 and s["total_track_count"] == 3
     assert s["track_file_count"] == 1 and s["file_count"] == 1
-    assert s["missing_track_count"] == 3 - 1  # monitored tracks without a file
+    assert s["missing_track_count"] == 1  # monitored tracks without a file, on monitored artists only
     assert s["continuing_artist_count"] is None and s["ended_artist_count"] is None
     assert "monitored_track_count" in s and "cutoff_unmet_track_count" in s and "total_size_bytes" in s
 
@@ -115,6 +115,40 @@ def test_native_stats_track_count_only_monitored_albums(app_and_client, test_db,
     assert s["track_count"] == 1
     assert s["track_file_count"] == 1
     assert s["missing_track_count"] == 0
+
+
+def test_native_stats_missing_excludes_unmonitored_artist(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    h = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _seed_artist(test_db, "A1", monitored=False)
+    _seed_album(test_db, "mon", "A1", with_file=False)
+    s = client.get("/api/library/stats", headers=h).json()
+    assert s["missing_track_count"] == 0
+
+
+def _seed_filed_unmonitored_mix(test_db):
+    _seed_artist(test_db, "A1")
+    _seed_album(test_db, "mon", "A1", with_file=False)
+    _seed_album(test_db, "unmon", "A1", with_file=True, monitored=False)
+
+
+def test_native_stats_track_count_includes_filed_tracks_on_unmonitored_albums(
+    app_and_client, test_db, test_config, seeded_users
+):
+    _, client = app_and_client
+    h = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _seed_filed_unmonitored_mix(test_db)
+    s = client.get("/api/library/stats", headers=h).json()
+    assert s["track_count"] == 2
+    assert s["track_file_count"] == 1
+    assert s["missing_track_count"] == 1
+
+
+def test_artist_track_counts_lidarr_style(test_db):
+    from trackseerr.api.routes.library._shared import _artist_track_counts
+
+    _seed_filed_unmonitored_mix(test_db)
+    assert _artist_track_counts(test_db, ["A1"]) == {"A1": (2, 2, 1)}
 
 
 def test_upsert_track_with_new_id_reuses_existing_row(test_db):
