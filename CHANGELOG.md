@@ -43,6 +43,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Importing from Lidarr now links the music files you already have, so owned tracks no longer show as missing.
+- Importing from Lidarr keeps Lidarr's monitoring: only the albums you monitored there are monitored, the back catalog stays unmonitored, and re-running the import unmonitors albums Lidarr doesn't have.
 - Adding a playlist that another user already added now adds it to your playlists instead of failing.
 - Without Spotify API keys, playlists longer than 100 tracks are now read in full (up to 10,000 tracks); before, only the first 100 came through.
 - Signing in to the Requests site with an admin account now says to use TrackSeerr Core instead of letting you in to a page where nothing loads.
