@@ -13,6 +13,9 @@ heading becomes the version and date.
 
 ### Added
 
+- Reject current release: from an album's or track's history, or from Manual Search, blocklist the release behind the current files and search for another; the current files stay until the replacement imports.
+- Manual Search has a History tab for the album or track, shows when the automatic search last ran and what it found, and flags releases that are blocklisted (with the reason and date), already downloading, or held by a delay profile.
+- Album and track history shows each release's name and quality, says what an upgrade replaced, and has a Releases filter for the download, import, replacement and blocklist trail.
 - Manual search: search every indexer for an album or track from the album view or the Missing and Cutoff Unmet pages, see each release's quality, size, seeders, age and score with the reasons it would be rejected, and download the one you want.
 - Download clients can be edited, and slskd accepts an API key or its web UI username and password.
 - Fix unmatched playlist songs from the tracklist: users search the catalog for the right song and suggest it (an admin approves it from the Issue in one click), request it if it's not in the library, or report it. Admins can also mark a song unmatchable so it stops counting as missing. Approved fixes apply to every playlist on the next sync, for the TrackSeerr library, Plex and Jellyfin.
