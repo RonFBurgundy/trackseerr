@@ -36,7 +36,7 @@ import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useSettingsData } from '@/hooks/useSettingsData';
 import { useLibraryManager } from '@/hooks/useLibraryManager';
 import { useLibraryModeSwitch } from '@/hooks/useLibraryModeSwitch';
-import { startLidarrMigration } from '@/services/libraryService';
+import { getLidarrStatus, startLidarrMigration } from '@/services/libraryService';
 import { errorMessage } from '@/services/apiClient';
 
 export type { SettingsTab } from '@/components/settings';
@@ -91,6 +91,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const modeSwitch = useLibraryModeSwitch(libraryManager, showToast);
   const { request: requestSwitch } = modeSwitch;
   const [isImporting, setIsImporting] = useState<boolean>(false);
+  const [lastImportReport, setLastImportReport] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isAdmin || mfaEnrollmentRequired) return;
+    let cancelled = false;
+    getLidarrStatus()
+      .then((status) => {
+        if (!cancelled) setLastImportReport(status.report_name ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setLastImportReport(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, mfaEnrollmentRequired]);
 
   const importAndSwitch = useCallback(async () => {
     setIsImporting(true);
@@ -236,6 +252,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             manager={libraryManager}
             mode={mode}
             onRequestSwitch={requestSwitch}
+            lastImportReport={lastImportReport}
           />
           <GeneralPanel
             settings={data.general}

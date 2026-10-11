@@ -176,3 +176,42 @@ def test_report_route_404_then_download(db, payload, tmp_path):
     assert resp.status_code == 200
     assert resp.json()["status"] == "completed"
     assert "lidarr-import-" in resp.headers["content-disposition"]
+
+
+def _admin_client(db, config):
+    app = create_app(db=db, config=config)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_config] = lambda: config
+    secret = get_or_create_secret_key(data_dir=config.data_dir)
+    user = db.upsert_user("admin-1", "admin_user", "a@plex.tv", is_admin=True)
+    token = create_session_token(user_id=user["id"], username=user["username"], is_admin=True, secret_key=secret)
+    db.create_session(token, user["id"], {"auth": "test"})
+    return TestClient(app), {"Authorization": f"Bearer {token}"}
+
+
+def test_status_reports_latest_report_name_after_restart(db, tmp_path):
+    config = Config(plex_url="http://127.0.0.1:32400", plex_token="t", data_dir=str(tmp_path), config_dir=str(tmp_path))
+    client, admin = _admin_client(db, config)
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    (reports / "lidarr-import-20260101T000000Z.json").write_text("{}")
+    fresh = LidarrMigrationJob()
+    with patch("trackseerr.api.routes.library.scan.lidarr_migration_job", fresh):
+        resp = client.get("/api/library/migrate-lidarr/status", headers=admin)
+    assert resp.status_code == 200
+    assert resp.json()["report_name"] == latest_report_path(str(tmp_path)).name
+    assert "lidarr-import-" in resp.json()["report_name"]
+    assert fresh.get_status().get("report_name") in (None, "")
+
+
+def test_report_route_refused_on_gateway_tier(tmp_path):
+    from fastapi import HTTPException
+    from trackseerr.api.dependencies import require_core_tier
+    from trackseerr.api.routes.library.scan import router
+
+    route = next(r for r in router.routes if r.path == "/migrate-lidarr/report")
+    assert require_core_tier in [d.call for d in route.dependant.dependencies]
+    gateway_cfg = Config(plex_url="http://127.0.0.1:32400", plex_token="t", data_dir=str(tmp_path), role="gateway")
+    with pytest.raises(HTTPException) as exc:
+        require_core_tier(gateway_cfg)
+    assert exc.value.status_code == 403

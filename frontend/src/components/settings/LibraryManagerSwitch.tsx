@@ -1,8 +1,9 @@
 import React from 'react';
-import { Loader2, AlertTriangle } from 'lucide-react';
+import { Loader2, AlertTriangle, Download } from 'lucide-react';
 import { TabStrip, TapeDeckButton, MachinedCard } from '@/components/ui';
 import type { LibraryManagerMode } from '@/types/models';
 import type { UseLibraryManagerReturn } from '@/hooks/useLibraryManager';
+import { getLidarrImportReportUrl } from '@/services/libraryService';
 import { MANAGER_LABEL } from './InactiveGate';
 
 export interface LibraryManagerSwitchProps {
@@ -11,12 +12,15 @@ export interface LibraryManagerSwitchProps {
   mode: LibraryManagerMode;
   /** Opens the shared confirmation (rendered by the parent) for the chosen mode. */
   onRequestSwitch: (mode: LibraryManagerMode) => void;
+  /** File name of the newest Lidarr import report, when one exists. */
+  lastImportReport?: string | null;
 }
 
 export const LibraryManagerSwitch: React.FC<LibraryManagerSwitchProps> = ({
   manager,
   mode,
   onRequestSwitch,
+  lastImportReport = null,
 }) => {
   const { state, isLoading, isSwitching, loadError } = manager;
   const blocked = state ? !state.can_switch : false;
@@ -51,6 +55,26 @@ export const LibraryManagerSwitch: React.FC<LibraryManagerSwitchProps> = ({
         </TabStrip>
         {isLoading && <Loader2 className="h-4 w-4 animate-spin text-[#e5a00d]" />}
       </div>
+
+      {lastImportReport && (
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-xs font-mono text-neutral-300">
+            <span>Last Lidarr import report</span>
+            <a
+              href={getLidarrImportReportUrl()}
+              download={lastImportReport}
+              className="p-1.5 rounded-[3px] text-neutral-300 hover:text-white hover:bg-[#222222] transition-colors"
+              title="Download the last Lidarr import report"
+              aria-label="Download the last Lidarr import report"
+            >
+              <Download className="h-3.5 w-3.5" />
+            </a>
+          </div>
+          <p className="text-[11px] font-mono text-neutral-500">
+            Compares Lidarr&apos;s counts with what was imported, per artist, and lists anything skipped.
+          </p>
+        </div>
+      )}
 
       {loadError && (
         <p className="flex items-start gap-2 text-xs font-mono text-red-300">
