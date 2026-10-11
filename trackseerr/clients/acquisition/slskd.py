@@ -537,7 +537,7 @@ class SlskdDriver(AcquisitionDriver):
             status = DownloadStatus.FAILED.value
             first = next((f.get("error") for f in files if f.get("error")), None) or failed[0][1]
             error = f"{len(failed)} of {len(files)} files failed: {first}"
-        elif in_flight:
+        elif in_flight or done:
             status = DownloadStatus.DOWNLOADING.value
         else:
             status = DownloadStatus.QUEUED.value
@@ -679,70 +679,63 @@ class SlskdDriver(AcquisitionDriver):
                 "error_message": str(e),
             }
 
-    def cancel(self, download_id: str) -> bool:
-        """Cancels a transfer in slskd (DELETE by transfer id, removing it from the list)."""
-        if not is_safe_service_url(self.host_url):
-            return False
+    def _remove_transfers(self, download_id: str, ok_codes: tuple[int, ...]) -> Optional[bool]:
+        """DELETE the transfer(s) behind a track or folder id from slskd's list.
 
-        target_user = ""
-        target_file = ""
+        Returns None when nothing matches, else True only if every delete returned one of ``ok_codes``.
+        Raises ``httpx.HTTPError`` / ``ValueError`` on transport or decode failures.
+        """
         folder = self._split_folder_id(download_id) if self._is_folder_id(download_id) else None
+        target_user, target_file = "", ""
         if folder:
             target_user = folder[0]
         elif "::" in download_id:
-            parts = download_id.split("::", 1)
-            target_user = parts[0]
-            target_file = unquote(parts[1])
+            target_user, _, raw = download_id.partition("::")
+            target_file = unquote(raw)
 
         base = f"{self.host_url}/api/v0/transfers/downloads/{quote(target_user)}"
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                resp = client.get(base, headers=self._headers())
-                if resp.status_code != 200:
-                    return False
-                if folder:
-                    return self._cancel_folder(client, base, resp.json(), folder)
-                transfer, _ = self._find_transfer([resp.json()], target_user, target_file, download_id)
-                transfer_id = transfer.get("id") if transfer else None
-                if not transfer_id:
-                    return False
-                resp = client.delete(f"{base}/{quote(str(transfer_id))}", headers=self._headers(), params={"remove": "true"})
-                return resp.status_code in (200, 204)
-        except (httpx.HTTPError, ValueError) as e:
-            logger.error("Failed to cancel slskd transfer %s: %s", download_id, e)
-            return False
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.get(base, headers=self._headers())
+            if resp.status_code == 404:
+                return None
+            if resp.status_code != 200:
+                return False
+            data = resp.json()
+            if folder:
+                dir_obj = self._find_directory(data, folder[0], folder[1])
+                ids = [f.get("id") for f in (dir_obj or {}).get("files", []) if f.get("id")]
+            else:
+                transfer, _ = self._find_transfer([data], target_user, target_file, download_id)
+                ids = [transfer["id"]] if transfer and transfer.get("id") else []
+            if not ids:
+                return None
+            ok = True
+            for tid in ids:
+                r = client.delete(f"{base}/{quote(str(tid))}", headers=self._headers(), params={"remove": "true"})
+                ok = ok and r.status_code in ok_codes
+            return ok
 
-    def _cancel_folder(
-        self, client: httpx.Client, base: str, data: Any, folder: tuple[str, str]
-    ) -> bool:
-        """Delete every transfer of a folder; True only when each delete succeeds."""
-        dir_obj = self._find_directory(data, folder[0], folder[1])
-        ids = [f.get("id") for f in (dir_obj or {}).get("files", []) if f.get("id")]
-        if not ids:
-            return False
-        ok = True
-        for tid in ids:
-            resp = client.delete(f"{base}/{quote(str(tid))}", headers=self._headers(), params={"remove": "true"})
-            ok = ok and resp.status_code in (200, 204)
-        return ok
-
-    def cleanup_completed(self, download_id: str, delete_files: bool = False) -> bool:
-        """Removes completed transfer from slskd or returns True."""
+    def cancel(self, download_id: str) -> bool:
+        """Cancels a track or folder transfer in slskd (DELETE by transfer id, removing it from the list)."""
         if not is_safe_service_url(self.host_url):
             return False
+        try:
+            return bool(self._remove_transfers(download_id, (200, 204)))
+        except (httpx.HTTPError, ValueError) as e:
+            logger.error("Failed to cancel slskd transfer %s: %s: %s", download_id, type(e).__name__, e)
+            return False
 
+    def cleanup_completed(self, download_id: str, delete_files: bool = False) -> bool:
+        """Removes finished transfer(s) from slskd's list; True when all gone or nothing was found."""
+        if not is_safe_service_url(self.host_url):
+            return False
         if "::" not in download_id:
             return True
-
-        parts = download_id.split("::", 1)
-        target_user = parts[0]
-        target_file = unquote(parts[1])
-
-        url = f"{self.host_url}/api/v0/transfers/downloads/{quote(target_user)}"
+        if delete_files:
+            logger.debug("slskd cannot delete downloaded files via its API; ignoring delete_files for %s", download_id)
         try:
-            with httpx.Client(timeout=self.timeout) as client:
-                resp = client.request("DELETE", url, headers=self._headers(), json=[{"filename": target_file}])
-                return resp.status_code in (200, 204, 404)
-        except Exception as e:
-            logger.warning("Error cleaning up slskd completed transfer %s: %s", download_id, e)
-            return True
+            result = self._remove_transfers(download_id, (200, 204, 404))
+        except (httpx.HTTPError, ValueError) as e:
+            logger.warning("Error cleaning up slskd transfer %s: %s: %s", download_id, type(e).__name__, e)
+            return False
+        return result is not False

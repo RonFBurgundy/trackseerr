@@ -588,6 +588,37 @@ def test_slskd_cancel_folder_deletes_each_transfer():
     assert all(c.kwargs["params"] == {"remove": "true"} for c in d.call_args_list)
 
 
+def test_slskd_folder_status_done_plus_queued_is_downloading():
+    st = _folder_status(_tf(1, "Completed, Succeeded", done=1000), _tf(2, "Queued, Remotely"))
+    assert st["status"] == DownloadStatus.DOWNLOADING.value
+
+
+def test_slskd_cleanup_completed_track_by_id():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="k")
+    user = _slskd_downloads("Completed, Succeeded")[0]
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, user)), \
+            patch("httpx.Client.delete", return_value=_slskd_resp(204)) as d:
+        assert driver.cleanup_completed(_SLSKD_DL_ID, delete_files=True) is True
+    assert d.call_args.args[0] == "http://slskd.local:5030/api/v0/transfers/downloads/user1/abc"
+    assert d.call_args.kwargs["params"] == {"remove": "true"}
+    assert "json" not in d.call_args.kwargs
+
+
+def test_slskd_cleanup_completed_folder():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="k")
+    user = _folder_downloads(_tf(1, "Completed, Succeeded"), _tf(2, "Completed, Succeeded"))[0]
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, user)), \
+            patch("httpx.Client.delete", side_effect=[_slskd_resp(204), _slskd_resp(404)]) as d:
+        assert driver.cleanup_completed(_folder_id()) is True
+    assert d.call_count == 2
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, {"username": "user1", "directories": []})), \
+            patch("httpx.Client.delete") as d2:
+        assert driver.cleanup_completed(_folder_id()) is True
+    d2.assert_not_called()
+    with patch("httpx.Client.get", side_effect=httpx.ConnectError("boom")):
+        assert driver.cleanup_completed(_folder_id()) is False
+
+
 # ---------------------------------------------------------------------------
 # SABnzbd Driver Tests
 # ---------------------------------------------------------------------------
