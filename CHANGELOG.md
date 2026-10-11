@@ -27,6 +27,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Adding a Spotify or Deezer playlist loads its tracks right away. Each playlist on the Sync tab shows its track count and a Tracks button listing every song, with missing tracks highlighted after a sync.
 - The Lidarr library import now shows as a running task in the task drawer, with progress and a cancel button, and the logo animates while it runs.
 - The "Smart collection" button is greyed out in Lidarr mode, since smart collections need TrackSeerr as the library manager.
 - Phone navigation is tidier: the header shows only the essential shortcuts and no longer scrolls, the Calendar now lives under Wanted, and the notification bell is in the menu drawer (desktop keeps its header bell too).
@@ -40,6 +41,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Scheduled syncs pick up tracks added to or removed from public Spotify playlists when no Spotify API keys are set; before, the first fetched list was reused until restart.
 - Admins can connect Last.fm from the Core admin interface; the connection no longer bounces to the public Requests site and fails with "Authentication required".
 - The request quota badge in the header and menu drawer now reads "N left of M", so an unused quota no longer looks used up.
 - The download queue table is readable on desktop: artist, album and title no longer break letter by letter.
