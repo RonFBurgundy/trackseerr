@@ -446,7 +446,10 @@ class ActivityStoreMixin:
     def get_monitored_missing_catalog_tracks(
         self, limit: int = 100
     ) -> list[dict[str, Any]]:
-        """Queries tracks where artist, album, and track are monitored, but no file exists."""
+        """Queries tracks where artist, album, and track are monitored, but no file exists.
+
+        Least recently searched first (never-searched first), so successive sweeps rotate through the whole list.
+        """
         sql = """
             SELECT
                 t.id AS track_id,
@@ -458,7 +461,8 @@ class ActivityStoreMixin:
                 al.year AS year,
                 ar.id AS artist_id,
                 ar.name AS artist_name,
-                ar.quality_profile_id AS quality_profile_id
+                ar.quality_profile_id AS quality_profile_id,
+                t.last_searched_at AS last_searched_at
             FROM library_tracks t
             JOIN library_albums al ON t.album_id = al.id
             JOIN library_artists ar ON t.artist_id = ar.id
@@ -467,7 +471,8 @@ class ActivityStoreMixin:
               AND al.monitored = 1
               AND ar.monitored = 1
               AND f.id IS NULL
-            ORDER BY ar.name ASC, al.year ASC, t.disc_number ASC, t.track_number ASC
+            ORDER BY (t.last_searched_at IS NOT NULL) ASC, t.last_searched_at ASC,
+                     ar.name ASC, al.year ASC, t.disc_number ASC, t.track_number ASC
             LIMIT ?
         """
         with self._lock:
@@ -485,7 +490,10 @@ class ActivityStoreMixin:
     def get_cutoff_unmet_catalog_tracks(
         self, limit: int = 100
     ) -> list[dict[str, Any]]:
-        """Queries tracks where artist, album, and track are monitored, but file cutoff_met is 0."""
+        """Queries tracks where artist, album, and track are monitored, but file cutoff_met is 0.
+
+        Least recently searched first (never-searched first), so successive sweeps rotate through the whole list.
+        """
         sql = """
             SELECT
                 t.id AS track_id,
@@ -497,7 +505,8 @@ class ActivityStoreMixin:
                 ar.quality_profile_id AS quality_profile_id,
                 f.id AS file_id,
                 f.quality_name AS quality_name,
-                f.file_path AS file_path
+                f.file_path AS file_path,
+                t.last_searched_at AS last_searched_at
             FROM library_tracks t
             JOIN library_albums al ON t.album_id = al.id
             JOIN library_artists ar ON t.artist_id = ar.id
@@ -506,7 +515,8 @@ class ActivityStoreMixin:
               AND al.monitored = 1
               AND ar.monitored = 1
               AND f.cutoff_met = 0
-            ORDER BY ar.name ASC, al.year ASC, t.disc_number ASC, t.track_number ASC
+            ORDER BY (t.last_searched_at IS NOT NULL) ASC, t.last_searched_at ASC,
+                     ar.name ASC, al.year ASC, t.disc_number ASC, t.track_number ASC
             LIMIT ?
         """
         with self._lock:
