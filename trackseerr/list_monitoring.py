@@ -45,6 +45,7 @@ from trackseerr.playlist_policy import creator_may_auto_acquire, is_listening_pl
 from trackseerr.redaction import safe_exc
 from trackseerr.request_submission import RequestRejected, submit_track_request
 from trackseerr.storage import Database, clean_library_name
+from trackseerr.track_credits import store_track_credits
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +228,7 @@ def _hydrate_album_tracks(
         existing = db.get_library_track_by_title(album_id, title, track_number=number)
         if existing:
             continue
-        db.upsert_library_track(
+        saved = db.upsert_library_track(
             LibraryTrack(
                 id=str(uuid.uuid4()),
                 album_id=album_id,
@@ -241,6 +242,7 @@ def _hydrate_album_tracks(
                 mb_recording_id=trk.get("mb_recording_id"),
             )
         )
+        store_track_credits(db, str(saved["id"]), trk)
 
 
 def _apply_album_native(

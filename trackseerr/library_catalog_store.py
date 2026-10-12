@@ -404,6 +404,85 @@ class LibraryCatalogStoreMixin:
             raise RuntimeError(f"Failed to upsert library track {track_id}")
         return track
 
+    _CREDIT_SOURCE_RANK = {"title": 1, "tags": 2, "musicbrainz": 3}
+
+    def replace_track_artists(self, track_id: str, credits: list[dict[str, Any]]) -> None:
+        """Replaces a track's artist credits (positions 0..n in list order) in one transaction.
+
+        Source precedence is musicbrainz > tags > title: the incoming list is ranked by its best source, and if
+        the track already has rows from a higher-precedence source the call is a no-op, so MusicBrainz credits are
+        never overwritten by tag- or title-derived ones. Equal or higher incoming rank replaces.
+        """
+        rank = self._CREDIT_SOURCE_RANK
+        incoming = max((rank.get(str(c.get("source")), 0) for c in credits), default=0)
+        with self._lock:
+            existing_sources = [
+                r[0]
+                for r in self.conn.execute(
+                    "SELECT DISTINCT source FROM library_track_artists WHERE track_id = ?", (str(track_id),)
+                ).fetchall()
+            ]
+            existing = max((rank.get(str(s), 0) for s in existing_sources), default=0)
+            if existing > incoming:
+                return
+            try:
+                self.conn.execute("DELETE FROM library_track_artists WHERE track_id = ?", (str(track_id),))
+                for position, credit in enumerate(credits):
+                    self.conn.execute(
+                        "INSERT INTO library_track_artists "
+                        "(track_id, position, artist_name, artist_mbid, role, join_phrase, source) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            str(track_id),
+                            position,
+                            str(credit["artist_name"]),
+                            credit.get("artist_mbid") or None,
+                            str(credit.get("role") or "primary"),
+                            str(credit.get("join_phrase") or ""),
+                            str(credit.get("source") or "musicbrainz"),
+                        ),
+                    )
+                self.conn.commit()
+            except sqlite3.Error:
+                self.conn.rollback()
+                raise
+
+    _CREDIT_COLUMNS = "track_id, position, artist_name, artist_mbid, role, join_phrase, source"
+
+    @staticmethod
+    def _credit_row(row: Any) -> dict[str, Any]:
+        return {
+            "position": row[1],
+            "artist_name": row[2],
+            "artist_mbid": row[3],
+            "role": row[4],
+            "join_phrase": row[5],
+            "source": row[6],
+        }
+
+    def list_track_artists(self, track_id: str) -> list[dict[str, Any]]:
+        """Returns a track's artist credits ordered by position."""
+        with self._lock:
+            rows = self.conn.execute(
+                f"SELECT {self._CREDIT_COLUMNS} FROM library_track_artists WHERE track_id = ? ORDER BY position",
+                (str(track_id),),
+            ).fetchall()
+        return [self._credit_row(r) for r in rows]
+
+    def list_track_artists_for_album(self, album_id: str) -> dict[str, list[dict[str, Any]]]:
+        """Returns ``{track_id: credits}`` for every credited track of an album (one query)."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT a.track_id, a.position, a.artist_name, a.artist_mbid, a.role, a.join_phrase, a.source "
+                "FROM library_track_artists a JOIN library_tracks t ON t.id = a.track_id "
+                "WHERE t.album_id = ? ORDER BY a.track_id, a.position",
+                (str(album_id),),
+            ).fetchall()
+        out: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            out.setdefault(str(r[0]), []).append(self._credit_row(r))
+        return out
+
     def get_library_track(self, track_id: str) -> Optional[dict[str, Any]]:
         """Retrieves a single library track by ID."""
         with self._lock:

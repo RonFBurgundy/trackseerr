@@ -1043,7 +1043,7 @@ class MbidEnricherClient:
         if self._store is not None:
             clean_rg_id = self._store.resolve_redirect(clean_rg_id)
 
-        cache_key = f"tracks:rg:{clean_rg_id.lower()}"
+        cache_key = f"tracks:rg:v2:{clean_rg_id.lower()}"
         hit, cached_data = self._lookup(cache_key, force=force)
         if hit and isinstance(cached_data, list):
             return cached_data
@@ -1052,7 +1052,7 @@ class MbidEnricherClient:
             url = f"{self.base_url}/ws/2/release"
             params = {
                 "release-group": clean_rg_id,
-                "inc": "recordings",
+                "inc": "recordings+artist-credits",
                 "limit": 1,
                 "fmt": "json",
             }
@@ -1130,6 +1130,9 @@ class MbidEnricherClient:
                             "title": title,
                             "duration_seconds": duration_seconds,
                             "mb_recording_id": mb_recording_id,
+                            "artist_credit": track.get("artist-credit")
+                            or (rec_obj if isinstance(rec_obj, dict) else {}).get("artist-credit")
+                            or [],
                         }
                     )
 

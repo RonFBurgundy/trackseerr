@@ -655,6 +655,16 @@ CREATE TABLE active_downloads (
                 FOREIGN KEY (client_id) REFERENCES download_clients(id) ON DELETE CASCADE,
                 FOREIGN KEY (request_id) REFERENCES music_requests(id) ON DELETE SET NULL
             );
+CREATE TABLE library_track_artists (
+                track_id TEXT NOT NULL REFERENCES library_tracks(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                artist_name TEXT NOT NULL,
+                artist_mbid TEXT,
+                role TEXT NOT NULL CHECK (role IN ('primary','featured','remixer')),
+                join_phrase TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL CHECK (source IN ('musicbrainz','tags','title')),
+                PRIMARY KEY (track_id, position)
+            );
 CREATE TABLE library_files (
                 id TEXT PRIMARY KEY,
                 track_id TEXT NOT NULL REFERENCES library_tracks(id) ON DELETE CASCADE,
@@ -714,6 +724,8 @@ CREATE INDEX idx_lib_tracks_album ON library_tracks(album_id);
 CREATE INDEX idx_lib_tracks_artist ON library_tracks(artist_id);
 CREATE INDEX idx_lib_tracks_clean_title ON library_tracks(clean_title);
 CREATE INDEX idx_lib_tracks_foreign ON library_tracks(foreign_track_id);
+CREATE INDEX idx_lib_track_artists_mbid ON library_track_artists(artist_mbid);
+CREATE INDEX idx_lib_track_artists_name ON library_track_artists(lower(artist_name));
 CREATE INDEX idx_lib_files_track ON library_files(track_id);
 CREATE INDEX idx_lib_files_path ON library_files(file_path);
 CREATE INDEX idx_lib_files_cutoff ON library_files(cutoff_met);
