@@ -31,6 +31,15 @@ from trackseerr.task_manager import TRIGGER_MANUAL, record_task_run
 logger = logging.getLogger(__name__)
 
 
+def _lidarr_image_url(img: dict[str, Any]) -> Optional[str]:
+    """Return a fetchable absolute art URL: Lidarr's ``remoteUrl``, else an absolute ``url``; never a local path."""
+    for key in ("remoteUrl", "url"):
+        value = img.get(key)
+        if isinstance(value, str) and value.strip().lower().startswith(("http://", "https://")):
+            return value.strip()
+    return None
+
+
 class _MigrationCancelled(Exception):
     """Raised inside the per-artist loop when the cancel event is set."""
 
@@ -174,10 +183,9 @@ class LidarrMigrationJob:
             if not isinstance(img, dict):
                 continue
             ctype = str(img.get("coverType") or "").strip().lower()
-            url = img.get("url")
-            if not url:
+            url_str = _lidarr_image_url(img)
+            if not url_str:
                 continue
-            url_str = str(url)
             if ctype == "poster":
                 image_url = url_str
             elif ctype == "banner":
@@ -288,9 +296,9 @@ class LidarrMigrationJob:
             if not isinstance(img, dict):
                 continue
             ctype = str(img.get("coverType") or "").strip().lower()
-            url = img.get("url")
-            if url and ctype == "cover":
-                cover_url = str(url)
+            url_str = _lidarr_image_url(img)
+            if url_str and ctype == "cover":
+                cover_url = url_str
                 break
 
         album_model = LibraryAlbum(

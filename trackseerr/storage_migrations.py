@@ -60,6 +60,7 @@ class MigrationsMixin:
                 (72, self._migration_v72),
                 (73, self._migration_v73),
                 (74, self._migration_v74),
+                (75, self._migration_v75),
             ]
 
             applied = 0
@@ -126,6 +127,19 @@ class MigrationsMixin:
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_track_aliases_status ON track_aliases(status)")
+
+    def _migration_v75(self, cur: sqlite3.Cursor) -> None:
+        """v75: Clear Lidarr-local /MediaCover/ art paths stored by the Lidarr import so artist refresh refills them."""
+        for table, columns in (
+            ("library_artists", ("image_url", "banner_url")),
+            ("library_albums", ("cover_url",)),
+        ):
+            cur.execute(f"PRAGMA table_info({table})")
+            existing = {row[1] for row in cur.fetchall()}
+            for col in columns:
+                if col not in existing:
+                    continue
+                cur.execute(f"UPDATE {table} SET {col} = NULL WHERE {col} LIKE '/MediaCover/%'")
 
     def _migration_v74(self, cur: sqlite3.Cursor) -> None:
         """v74: Add search_log (one row per indexer/slskd search with its trigger) and active_downloads.remote_state."""

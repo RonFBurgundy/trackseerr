@@ -250,6 +250,36 @@ class TestLidarrMigrationJob:
         assert processed == total == len(sample_lidarr_data["artists"])
         assert "artists" in message
 
+    def test_import_uses_remote_image_urls(self, db: Database, sample_lidarr_data):
+        sample_lidarr_data["artists"][0]["images"] = [
+            {"coverType": "poster", "url": "/MediaCover/1/poster.jpg?lastWrite=1",
+             "remoteUrl": "https://assets.fanart.tv/x.jpg"}
+        ]
+        sample_lidarr_data["albums"][0]["images"] = [
+            {"coverType": "cover", "url": "/MediaCover/Albums/2/cover.jpg",
+             "remoteUrl": "https://coverartarchive.org/release/y/front.jpg"}
+        ]
+        with patch(HTTPX, loaded_fake(sample_lidarr_data)):
+            LidarrMigrationJob().run_migration(db, real_client(), auto_switch_mode=False)
+        art = db.get_library_artist_by_name("Radiohead")
+        assert art["image_url"] == "https://assets.fanart.tv/x.jpg"
+        alb = db.get_library_album_by_title(art["id"], "OK Computer")
+        assert alb["cover_url"] == "https://coverartarchive.org/release/y/front.jpg"
+
+    def test_import_drops_relative_image_without_remote(self, db: Database, sample_lidarr_data):
+        sample_lidarr_data["artists"][0]["images"] = [
+            {"coverType": "poster", "url": "/MediaCover/1/poster.jpg?lastWrite=1"}
+        ]
+        sample_lidarr_data["albums"][0]["images"] = [
+            {"coverType": "cover", "url": "/MediaCover/Albums/2/cover.jpg"}
+        ]
+        with patch(HTTPX, loaded_fake(sample_lidarr_data)):
+            LidarrMigrationJob().run_migration(db, real_client(), auto_switch_mode=False)
+        art = db.get_library_artist_by_name("Radiohead")
+        assert art["image_url"] is None
+        alb = db.get_library_album_by_title(art["id"], "OK Computer")
+        assert alb["cover_url"] is None
+
     def test_run_migration_full_ingestion(self, db: Database, sample_lidarr_data):
         fake = loaded_fake(sample_lidarr_data)
 
