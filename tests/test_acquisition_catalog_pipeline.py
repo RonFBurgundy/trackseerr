@@ -397,6 +397,79 @@ def test_acquisition_worker_imports_and_populates_native_catalog(test_db: Databa
     assert Path(lib_file["file_path"]).exists()
 
 
+def test_compilation_tagged_file_files_under_catalog_artist(test_db: Database, workspace_dirs):
+    """A file tagged as a DJ-compilation track, matched to a catalog track, is filed under the catalog artist/album."""
+    downloads_dir, music_dir = workspace_dirs
+    settings = test_db.get_media_management_settings()
+    settings.update({"root_folder_path": str(music_dir), "library_mode": "native",
+                     "staging_folder_path": str(downloads_dir), "enrich_mbids": False, "write_audio_tags": False})
+    test_db.update_media_management_settings(settings)
+    test_db.create_download_client(
+        DownloadClientConfig(id="c1", name="Slskd", driver_type=DownloadDriverType.SLSKD, host_url="http://slskd:5030")
+    )
+    test_db.upsert_library_artist(LibraryArtist(id="art-1", name="Adriatique", path=str(music_dir / "Adriatique")))
+    test_db.upsert_library_album(
+        LibraryAlbum(id="alb-1", artist_id="art-1", title="Closer", year=2019, album_type="single")
+    )
+    test_db.upsert_library_track(
+        LibraryTrack(id="trk-1", album_id="alb-1", artist_id="art-1", title="Closer (extended mix)",
+                     track_number=1, disc_number=1)
+    )
+    test_db.create_active_download(
+        ActiveDownload(id="dl-1", client_id="c1", title="Adriatique Closer", artist="Adriatique", item_type="track",
+                       status=DownloadStatus.COMPLETED.value, download_hash="h", track_id="trk-1", album_id="alb-1")
+    )
+    dl = downloads_dir / "Adriatique_Closer"
+    af = dl / "81. Adriatique, Emmit Fenn - Closer (Extended Mix).flac"
+    dl.mkdir(parents=True, exist_ok=True)
+    write_flac(af)
+    driver = MagicMock()
+    driver.get_status.return_value = {
+        "status": DownloadStatus.COMPLETED.value, "progress": 100.0, "size_bytes": 1, "speed_bps": 0,
+        "eta_seconds": 0, "source_path": str(dl), "error_message": None,
+    }
+    meta = {
+        "artist": "Adriatique", "title": "Closer (Extended Mix)", "album": "Some DJ Mix",
+        "album_artist": "Various Artists", "compilation": True, "album_type": "compilation", "year": "",
+        "track_number": 81,
+        "disc_number": 1, "total_discs": 1, "codec": "FLAC", "bits_per_sample": 16, "bitrate": 900,
+        "sample_rate": 44100, "extension": ".flac", "file_path": str(af),
+    }
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_import.inspect_audio_file", return_value=dict(meta)), \
+         patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=dict(meta)), \
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+        stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(downloads_dir))
+    assert stats["imported"] == 1
+    placed = list(music_dir.rglob("*.flac"))
+    assert len(placed) == 1
+    rel = placed[0].relative_to(music_dir).parts
+    assert rel[0] == "Adriatique"
+    assert rel[1] == "Closer (2019)"
+
+
+def test_apply_catalog_album_overrides_compilation_tags():
+    from trackseerr.acquisition_import import _apply_catalog_album
+
+    meta = {"album": "Mix", "artist": "X", "album_artist": "Various Artists", "compilation": True, "year": "",
+            "album_type": "compilation"}
+    _apply_catalog_album(meta, {"title": "Closer", "year": None, "album_type": "single"}, {"name": "Adriatique"})
+    assert meta["album"] == "Closer"
+    assert meta["artist"] == meta["album_artist"] == "Adriatique"
+    assert meta["is_compilation"] is False and meta["compilation"] is False
+    assert "album_type" not in meta
+    assert "year" not in meta
+
+    kept = {"year": 1999}
+    _apply_catalog_album(kept, {"title": "T", "year": None}, None)
+    assert kept["year"] == 1999
+
+    comp = {}
+    _apply_catalog_album(comp, {"title": "T", "year": 2020, "album_type": "compilation"}, None)
+    assert comp["is_compilation"] is True and comp["album_type"] == "compilation"
+    assert comp["year"] == comp["release_year"] == 2020
+
+
 # ===========================================================================
 # Test 5: Failing Downloads Automatically Add Release to Blocklist
 # ===========================================================================

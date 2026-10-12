@@ -742,6 +742,7 @@ def build_path_parts(
 
     def render(fmt: str, m: dict[str, Any]) -> str:
         raw = render_template(fmt, m, clean_artist_names=clean_artist_names, colon_replacement=colon_replacement)
+        raw = re.sub(r"\s*(\(\s*\)|\[\s*\])", "", raw)  # drop empty ()/[] left by missing tokens
         return sanitize_component(raw, colon_replacement=colon_replacement)
 
     # Artist folder

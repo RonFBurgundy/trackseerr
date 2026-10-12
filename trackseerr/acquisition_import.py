@@ -70,6 +70,28 @@ from trackseerr.track_matching import (
 logger = logging.getLogger(__name__)
 
 
+def _apply_catalog_album(metadata: dict[str, Any], album: dict[str, Any], artist: Optional[dict[str, Any]]) -> None:
+    """Re-labels a catalog-matched file with the catalog album/artist so compilation tags can't misfile it."""
+    metadata["album"] = album["title"]
+    if artist:
+        metadata["artist"] = artist["name"]
+        metadata["album_artist"] = artist["name"]
+    if album.get("year"):
+        metadata["release_year"] = metadata["year"] = album["year"]
+    else:
+        for key in ("release_year", "year"):
+            if key in metadata and metadata[key] in ("", None):
+                del metadata[key]
+    is_compilation = str(album.get("album_type") or "").lower() == "compilation"
+    metadata["is_compilation"] = metadata["compilation"] = is_compilation
+    # Only a catalog compilation keeps an album type: a plain type would add a " - album" folder suffix, and a stale
+    # compilation type from the file's tags would still trigger the Various Artists layout.
+    if is_compilation:
+        metadata["album_type"] = "compilation"
+    else:
+        metadata.pop("album_type", None)
+
+
 def _quality_from_codec(meta: dict[str, Any]) -> Optional[str]:
     """Quality id for a file whose title said nothing, from its mutagen codec/bitrate (None when unrecognised)."""
     codec = str(meta.get("codec", "")).upper()
@@ -612,10 +634,9 @@ class ImportPipelineMixin(ImportCatalogMixin):
                 metadata["track_number"] = int(matched_expected_track.get("track_number") or 1)
                 metadata["disc_number"] = int(matched_expected_track.get("disc_number") or 1)
                 if job.target_album:
-                    metadata["album"] = job.target_album["title"]
-                    art_cand = db.get_library_artist(job.target_album["artist_id"])
-                    if art_cand:
-                        metadata["artist"] = art_cand["name"]
+                    _apply_catalog_album(
+                        metadata, job.target_album, db.get_library_artist(job.target_album["artist_id"])
+                    )
 
         if job.expected_tracks and matched_expected_track is None:
             logger.warning(
