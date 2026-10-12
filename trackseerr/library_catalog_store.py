@@ -151,17 +151,33 @@ class LibraryCatalogStoreMixin:
             return self._map_library_album(row) if row else None
 
     def get_library_album_by_title(
-        self, artist_id: str, title: str
+        self, artist_id: str, title: str, release_group_id: Optional[str] = None
     ) -> Optional[dict[str, Any]]:
-        """Retrieves a library album by artist ID and title using clean_library_name."""
+        """Retrieves a library album by artist ID and title using clean_library_name.
+
+        When ``release_group_id`` is given, a row already linked to a different release group is never returned
+        (an album and a single can share a normalised title); an exact RG match is preferred over an unlinked row.
+        """
         clean = clean_library_name(title)
         with self._lock:
             cur = self.conn.execute(
-                "SELECT * FROM library_albums WHERE artist_id = ? AND clean_title = ? LIMIT 1",
+                "SELECT * FROM library_albums WHERE artist_id = ? AND clean_title = ?",
                 (str(artist_id), clean),
             )
-            row = cur.fetchone()
-            return self._map_library_album(row) if row else None
+            rows = cur.fetchall()
+            if not rows:
+                return None
+            if release_group_id is None:
+                return self._map_library_album(rows[0])
+            rg = str(release_group_id)
+            unlinked = None
+            for row in rows:
+                linked = row["mb_release_group_id"]
+                if linked and str(linked) == rg:
+                    return self._map_library_album(row)
+                if not linked and unlinked is None:
+                    unlinked = row
+            return self._map_library_album(unlinked) if unlinked is not None else None
 
     def get_library_album_by_foreign_id(
         self, foreign_id: str

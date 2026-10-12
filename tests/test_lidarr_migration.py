@@ -250,6 +250,54 @@ class TestLidarrMigrationJob:
         assert processed == total == len(sample_lidarr_data["artists"])
         assert "artists" in message
 
+    def test_single_with_same_clean_title_does_not_merge_into_album(self, db: Database):
+        data = {
+            "artists": [{"id": 101, "artistName": "Ramones", "foreignArtistId": "mbid-ram", "monitored": True}],
+            "albums": [
+                {"id": 1, "artistId": 101, "title": "Ramones", "foreignAlbumId": "rg-a",
+                 "albumType": "Album", "year": 1976, "monitored": True},
+                {"id": 2, "artistId": 101, "title": "R.A.M.O.N.E.S.", "foreignAlbumId": "rg-b",
+                 "albumType": "Single", "year": 1996, "monitored": True},
+            ],
+            "tracks": [
+                {"id": 11, "artistId": 101, "albumId": 1, "trackFileId": 21, "title": "Blitzkrieg Bop",
+                 "trackNumber": 1, "discNumber": 1, "monitored": True},
+                {"id": 12, "artistId": 101, "albumId": 2, "trackFileId": 22, "title": "R.A.M.O.N.E.S.",
+                 "trackNumber": 1, "discNumber": 1, "monitored": True},
+            ],
+            "track_files": [
+                {"id": 21, "artistId": 101, "albumId": 1, "path": "/m/Ramones/1976/01.flac",
+                 "relativePath": "01.flac", "size": 1, "quality": {"quality": {"name": "FLAC"}}},
+                {"id": 22, "artistId": 101, "albumId": 2, "path": "/m/Ramones/1996/01.flac",
+                 "relativePath": "01.flac", "size": 1, "quality": {"quality": {"name": "FLAC"}}},
+            ],
+        }
+        with patch(HTTPX, loaded_fake(data)):
+            LidarrMigrationJob().run_migration(db, real_client(), auto_switch_mode=False)
+        art = db.get_library_artist_by_name("Ramones")
+        albums = db.list_library_albums(artist_id=art["id"])
+        assert len(albums) == 2
+        album = db.get_library_album_by_release_group_id("rg-a")
+        single = db.get_library_album_by_release_group_id("rg-b")
+        assert album["id"] != single["id"]
+        assert album["title"] == "Ramones"
+        assert album["year"] == 1976
+        assert [t["title"] for t in db.list_library_tracks(album_id=album["id"])] == ["Blitzkrieg Bop"]
+        assert single["title"] == "R.A.M.O.N.E.S."
+        assert single["album_type"] == "single"
+
+    def test_album_type_imported_from_lidarr(self, db: Database, sample_lidarr_data):
+        sample_lidarr_data["albums"][0]["albumType"] = "EP"
+        sample_lidarr_data["albums"][0]["secondaryTypes"] = [{"name": "Live"}, "Compilation"]
+        with patch(HTTPX, loaded_fake(sample_lidarr_data)):
+            LidarrMigrationJob().run_migration(db, real_client(), auto_switch_mode=False)
+        ep = db.get_library_album_by_release_group_id("mbid-alb-201")
+        assert ep["album_type"] == "ep"
+        assert ep["secondary_types"] == ["live", "compilation"]
+        default = db.get_library_album_by_release_group_id("mbid-alb-202")
+        assert default["album_type"] == "album"
+        assert default["secondary_types"] in (None, [])
+
     def test_import_uses_remote_image_urls(self, db: Database, sample_lidarr_data):
         sample_lidarr_data["artists"][0]["images"] = [
             {"coverType": "poster", "url": "/MediaCover/1/poster.jpg?lastWrite=1",
