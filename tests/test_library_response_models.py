@@ -249,7 +249,7 @@ def test_manual_import_scan_album_tracks_and_fingerprint(client, admin, seeded, 
 def test_rename_preview_apply(client, admin, seeded):
     with patch("trackseerr.api.routes.library.tagging.validate_media_path", side_effect=lambda p, **_: Path(p)):
         preview = _ok(client.post(f"{PREFIX}/rename/preview", json={}, headers=admin))
-        assert set(preview[0]) == {"file_id", "track_id", "current_path", "proposed_path", "needs_rename"}
+        assert set(preview[0]) == {"file_id", "track_id", "current_path", "proposed_path", "needs_rename", "reasons", "default_selected"}
         applied = _ok(client.post(f"{PREFIX}/rename/apply", json={"file_ids": ["missing"]}, headers=admin))
         assert applied["renamed_count"] == 0 and applied["errors"]
 

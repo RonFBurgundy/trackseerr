@@ -82,6 +82,7 @@ class SettingsStoreMixin:
                 row = cur.fetchone()
             res = dict(row)
             res["replace_illegal_characters"] = bool(res.get("replace_illegal_characters", 1))
+            res["rename_artist_folders"] = bool(res.get("rename_artist_folders", 0))
             res["write_audio_tags"] = bool(res.get("write_audio_tags", 1))
             res["embed_artwork"] = bool(res.get("embed_artwork", 1))
             res["save_cover_art_file"] = bool(res.get("save_cover_art_file", 1))
@@ -133,6 +134,7 @@ class SettingsStoreMixin:
             "root_folder_path",
             "colon_replacement_format",
             "replace_illegal_characters",
+            "rename_artist_folders",
             "staging_folder_path",
             "import_mode",
             "torrent_hardlink_tags",
@@ -183,6 +185,7 @@ class SettingsStoreMixin:
             if k in allowed_keys:
                 if k in (
                     "replace_illegal_characters",
+                    "rename_artist_folders",
                     "write_audio_tags",
                     "embed_artwork",
                     "save_cover_art_file",

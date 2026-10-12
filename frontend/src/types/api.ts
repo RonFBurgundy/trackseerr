@@ -10047,6 +10047,12 @@ export interface components {
              */
             recycle_bin_permanent_delete: boolean;
             /**
+             * Rename Artist Folders
+             * @description Rename artist folders to the artist folder format; off keeps each artist's existing folder
+             * @default false
+             */
+            rename_artist_folders: boolean;
+            /**
              * Replace Illegal Characters
              * @description Replace illegal characters (\ / ? * become + + ! -) instead of removing them
              * @default true
@@ -10167,6 +10173,8 @@ export interface components {
             recycle_bin_path?: string | null;
             /** Recycle Bin Permanent Delete */
             recycle_bin_permanent_delete?: boolean | null;
+            /** Rename Artist Folders */
+            rename_artist_folders?: boolean | null;
             /** Replace Illegal Characters */
             replace_illegal_characters?: boolean | null;
             /** Root Folder Path */
@@ -11239,6 +11247,8 @@ export interface components {
             multi_disc_folder_format?: string | null;
             /** Multi Disc Track Format */
             multi_disc_track_format?: string | null;
+            /** Rename Artist Folders */
+            rename_artist_folders?: boolean | null;
             /** Replace Illegal Characters */
             replace_illegal_characters?: boolean | null;
             /** Root Folder Path */
@@ -11953,12 +11963,16 @@ export interface components {
         RenamePreviewItem: {
             /** Current Path */
             current_path: string;
+            /** Default Selected */
+            default_selected: boolean;
             /** File Id */
             file_id: string;
             /** Needs Rename */
             needs_rename: boolean;
             /** Proposed Path */
             proposed_path: string;
+            /** Reasons */
+            reasons: string[];
             /** Track Id */
             track_id: string;
         };

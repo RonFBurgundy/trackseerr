@@ -60,7 +60,7 @@ def _seed(db, tmp_path):
     db.update_media_management_settings(
         {"root_folder_path": str(music), "staging_folder_path": str(staging), "library_mode": "native",
          "enrich_mbids": False, "write_audio_tags": False})
-    db.upsert_library_artist(LibraryArtist(id="art-1", name="Daft Punk", path=str(music / "DP")))
+    db.upsert_library_artist(LibraryArtist(id="art-1", name="Daft Punk", path=str(music / "Daft Punk")))
     db.upsert_library_album(LibraryAlbum(id="alb-1", artist_id="art-1", title="Discovery", year=2001))
     for tid, n, title in (("trk-1", 1, "One More Time"), ("trk-2", 2, "Aerodynamic")):
         db.upsert_library_track(LibraryTrack(id=tid, album_id="alb-1", artist_id="art-1", title=title,
