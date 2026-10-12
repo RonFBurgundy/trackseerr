@@ -80,5 +80,20 @@ def test_matches_request_rejects_other_artist():
     assert matches_request("Earth Wind & Fire - September [1978] FLAC", artist, "September", None)
 
 
+_ALEX_PATH = "Music\\ALEX\\ALEX - AKUMA (2019)\\"
+
+
+def test_matches_request_title_text_ignores_album_folder():
+    text = "01 - 05 - Danger City [FLAC 24bit 48kHz] " + _ALEX_PATH + "01 - 05 - Danger City.flac"
+    assert not matches_request(text, "ALEX", "AKUMA", "AKUMA", title_text="01 - 05 - Danger City [FLAC 24bit 48kHz]")
+    assert matches_request(text, "ALEX", "AKUMA", "AKUMA")
+
+
+def test_matches_request_title_text_accepts_real_track():
+    title_text = "03 - AKUMA [FLAC 16bit 44.1kHz]"
+    text = title_text + " " + _ALEX_PATH + "03 - AKUMA.flac"
+    assert matches_request(text, "ALEX", "AKUMA", "AKUMA", title_text=title_text)
+
+
 def test_matches_request_empty_artist_skips_artist_check():
     assert matches_request("Taylor Swift - September (2023) FLAC", "", "September", None)

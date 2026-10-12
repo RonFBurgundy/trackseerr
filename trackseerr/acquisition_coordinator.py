@@ -487,6 +487,31 @@ class AcquisitionCoordinator:
             return f"{result.title} {extra['filename']}"
         return result.title
 
+    @staticmethod
+    def _is_slskd_file(result: AcquisitionSearchResult) -> bool:
+        """True for a Soulseek single-file result, whose title is the file name rather than a release name."""
+        return result.protocol == "slskd" and result.item_type == "track"
+
+    def _relevant(
+        self,
+        results: list[AcquisitionSearchResult],
+        number: int,
+        artist: str,
+        title: Optional[str],
+        album: Optional[str],
+    ) -> list[AcquisitionSearchResult]:
+        """Relevance filter for one rung. Rung 1 only filters Soulseek files of a track request; later rungs filter all."""
+        if number == 1 and not title:
+            return results
+        kept = []
+        for r in results:
+            slskd_file = self._is_slskd_file(r)
+            if number == 1 and not slskd_file:
+                kept.append(r)
+            elif matches_request(self._candidate_text(r), artist, title, album, title_text=r.title if slskd_file else None):
+                kept.append(r)
+        return kept
+
     def search_with_fallback(
         self,
         artist: str,
@@ -497,7 +522,7 @@ class AcquisitionCoordinator:
     ) -> list[AcquisitionSearchResult]:
         """Searches with the raw query, then simpler rungs, returning the first non-empty result list.
 
-        Rung 1 is unfiltered (the historical behavior); later rungs keep only results that pass ``matches_request``
+        Rung 1 is unfiltered except Soulseek files of a track request (matched by file name); later rungs keep only results that pass ``matches_request``
         against the ORIGINAL title/album so a loose query cannot grab the wrong release.
         """
         rungs = build_query_ladder(artist, title, album)
@@ -508,8 +533,7 @@ class AcquisitionCoordinator:
                 context=dataclasses.replace(context or SearchContext(), rung=number),
             )
             found = len(results)
-            if number > 1:
-                results = [r for r in results if matches_request(self._candidate_text(r), artist, title, album)]
+            results = self._relevant(results, number, artist, title, album)
             logger.info(
                 "Search rung %d/%d artist=%r title=%r album=%r -> %d results (%d after relevance) in %.1fs",
                 number, len(rungs), r_artist, r_title, r_album, found, len(results), time.monotonic() - started,
