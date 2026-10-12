@@ -158,7 +158,6 @@ class MediaManagementSettingsModel(ApiModel):
     multi_disc_folder_format: str = Field(..., description="Legacy multi-disc subdirectory format (superseded)")
     root_folder_path: str = Field("/data/media/music", description="Base music library folder")
     colon_replacement_format: str = Field(" - ", description="String to replace colons with")
-    clean_artist_names: bool = Field(True, description="Whether to strip leading articles from artist names")
     replace_illegal_characters: bool = Field(
         True, description='Replace illegal characters (\\ / ? * become + + ! -) instead of removing them'
     )
@@ -219,7 +218,6 @@ class MediaManagementUpdateModel(BaseModel):
     multi_disc_track_format: str | None = None
     root_folder_path: str | None = None
     colon_replacement_format: str | None = None
-    clean_artist_names: bool | None = None
     replace_illegal_characters: bool | None = None
     staging_folder_path: str | None = None
     import_mode: Literal["move", "hardlink", "copy"] | None = None
@@ -267,7 +265,6 @@ class PreviewRequestModel(BaseModel):
     multi_disc_track_format: str | None = None
     root_folder_path: str | None = None
     colon_replacement_format: str | None = None
-    clean_artist_names: bool | None = None
     replace_illegal_characters: bool | None = None
     staging_folder_path: str | None = None
     import_mode: Literal["move", "hardlink", "copy"] | None = None

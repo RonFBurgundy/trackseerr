@@ -606,6 +606,12 @@ def test_explicit_write_tags_overrides_the_global_setting(env):
 
 
 def test_freshly_imported_file_needs_no_rename(env):
+    env.db.update_media_management_settings(
+        {
+            "standard_track_format": "{Album Title}/{track:00} - {Track Title}{[ (Quality Full)]}",
+            "multi_disc_track_format": "{Album Title}/Disc {medium:00}/{track:00} - {Track Title}{[ (Quality Full)]}",
+        }
+    )
     src = make_mp3(env.staging / "x.mp3", kbps320=True, TIT2="Aerodynamic", TPE1="Daft Punk", TALB="Discovery", TRCK="2")
     assert inspect_audio_file(src)["quality_full"] == "MP3 320kbps"  # what the tag reader reports
     dest = Path(_commit(env, src, write_tags=False)["destination_path"])

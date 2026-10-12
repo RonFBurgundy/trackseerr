@@ -15,7 +15,6 @@ export interface NamingFormats {
 /** Fields applied together when a preset is chosen (never the library root path). */
 export interface NamingPreset extends NamingFormats {
   colon_replacement_format?: string;
-  clean_artist_names?: boolean;
   replace_illegal_characters?: boolean;
 }
 
@@ -55,6 +54,5 @@ export interface NamingPresetCatalog {
 export interface NamingPreviewContext {
   root_folder_path?: string;
   colon_replacement_format?: string;
-  clean_artist_names?: boolean;
   replace_illegal_characters?: boolean;
 }

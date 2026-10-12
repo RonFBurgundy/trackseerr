@@ -135,10 +135,10 @@ Presets:
 
 | Preset | Layout |
 |---|---|
-| Trackseerr | Clean artist folders, `Album - [Type] (Year)` folders, `Disc NN` subfolders. The default. |
+| Trackseerr | Artist names as written, `Album - [Type] (Year)` folders, `Disc NN` subfolders. The default. |
 | TRaSH Guides | Artist and album repeated in every file name, as the Lidarr community recommends. |
 | Plex | Plex's layout: `Artist/Album/NN - Title`. Multi-disc albums stay in one folder with `101`, `201` numbering. |
-| Lidarr Standard | The old TrackSeerr default, with the quality in the file name. |
+| Lidarr Default | Lidarr's out-of-the-box naming; zero renames for a library Lidarr built with its defaults. |
 | Clean Minimal | Drops a leading The, A, or An from names. |
 | Audiophile / Detailed | Adds codec, bit depth, and sample rate to every file name. |
 

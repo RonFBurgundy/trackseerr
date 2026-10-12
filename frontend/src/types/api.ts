@@ -9936,12 +9936,6 @@ export interface components {
              */
             artist_folder_format: string;
             /**
-             * Clean Artist Names
-             * @description Whether to strip leading articles from artist names
-             * @default true
-             */
-            clean_artist_names: boolean;
-            /**
              * Colon Replacement Format
              * @description String to replace colons with
              * @default -
@@ -10137,8 +10131,6 @@ export interface components {
             album_folder_format?: string | null;
             /** Artist Folder Format */
             artist_folder_format?: string | null;
-            /** Clean Artist Names */
-            clean_artist_names?: boolean | null;
             /** Colon Replacement Format */
             colon_replacement_format?: string | null;
             /** Compilation Track Format */
@@ -11233,8 +11225,6 @@ export interface components {
             album_folder_format?: string | null;
             /** Artist Folder Format */
             artist_folder_format?: string | null;
-            /** Clean Artist Names */
-            clean_artist_names?: boolean | null;
             /** Colon Replacement Format */
             colon_replacement_format?: string | null;
             /** Compilation Track Format */

@@ -81,7 +81,6 @@ class SettingsStoreMixin:
                 cur = self.conn.execute("SELECT * FROM media_management_settings WHERE id = 1")
                 row = cur.fetchone()
             res = dict(row)
-            res["clean_artist_names"] = bool(res.get("clean_artist_names", 1))
             res["replace_illegal_characters"] = bool(res.get("replace_illegal_characters", 1))
             res["write_audio_tags"] = bool(res.get("write_audio_tags", 1))
             res["embed_artwork"] = bool(res.get("embed_artwork", 1))
@@ -133,7 +132,6 @@ class SettingsStoreMixin:
             "multi_disc_track_format",
             "root_folder_path",
             "colon_replacement_format",
-            "clean_artist_names",
             "replace_illegal_characters",
             "staging_folder_path",
             "import_mode",
@@ -184,7 +182,6 @@ class SettingsStoreMixin:
         for k, v in settings.items():
             if k in allowed_keys:
                 if k in (
-                    "clean_artist_names",
                     "replace_illegal_characters",
                     "write_audio_tags",
                     "embed_artwork",

@@ -80,7 +80,6 @@ function presetPatch(preset: NamingPreset): Partial<NamingPreset> {
     compilation_track_format: preset.compilation_track_format ?? '',
   };
   if (preset.colon_replacement_format !== undefined) patch.colon_replacement_format = preset.colon_replacement_format;
-  if (preset.clean_artist_names !== undefined) patch.clean_artist_names = preset.clean_artist_names;
   if (preset.replace_illegal_characters !== undefined) patch.replace_illegal_characters = preset.replace_illegal_characters;
   return patch;
 }
