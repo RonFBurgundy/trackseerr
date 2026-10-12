@@ -27,7 +27,7 @@ const SLSKD_NUMERIC_FIELDS: ReadonlyArray<{ key: SlskdNumericKey; label: string;
   { key: 'min_upload_speed_kbps', label: 'Min upload speed (KB/s)', hint: 'Skip slower peers. Default 0.' },
   { key: 'search_timeout', label: 'Search timeout (s)', hint: 'How long a search collects results. Default 12.' },
   { key: 'min_search_interval', label: 'Min search interval (s)', hint: 'Pause between searches. Default 5.' },
-  { key: 'queue_timeout_minutes', label: 'Queue timeout (min)', hint: 'Give up on a download still queued remotely. Default 30.' },
+  { key: 'queue_timeout_minutes', label: 'Queue timeout (min)', hint: 'Give up on a download still queued remotely. Default 15.' },
   { key: 'stall_minutes', label: 'Stall time (min)', hint: 'Flag a download with no progress. Default 15.' },
   { key: 'missing_minutes', label: 'Missing time (min)', hint: 'Give up when slskd no longer lists it. Default 10.' },
 ];

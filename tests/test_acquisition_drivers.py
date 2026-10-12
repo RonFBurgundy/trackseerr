@@ -261,6 +261,36 @@ def test_slskd_search_deadline_stops_polling():
     assert g.call_count == 2
 
 
+def _run_overrun(ticks, seq):
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey", min_search_interval=0)
+    it = iter(ticks)
+    with patch("httpx.Client.post", return_value=_slskd_resp(200, {"id": "search-uuid-123"})), \
+            patch("httpx.Client.get", side_effect=seq) as g, \
+            patch("httpx.Client.delete", return_value=_slskd_resp(204)), \
+            patch(f"{_SLSKD_MOD}.time.sleep"), \
+            patch(f"{_SLSKD_MOD}.time.monotonic", side_effect=lambda: next(it, 1000.0)):
+        results = driver.search(artist="Radiohead", title="Kid A")
+    return results, g
+
+
+def test_slskd_search_overruns_while_in_progress():
+    # soft deadline = timeout+5 (17 by default); 20.0 is past it but inside the overrun window.
+    ticks = [0.0, 0.0, 1.0, 2.0, 20.0, 21.0, 21.0, 21.0, 21.0]
+    seq = [_slskd_resp(200, _SLSKD_BUSY), _slskd_resp(200, _SLSKD_BUSY),
+           _slskd_resp(200, _SLSKD_DONE), _slskd_resp(200, _SLSKD_RESPONSES)]
+    results, g = _run_overrun(ticks, seq)
+    assert len(results) == 1
+    assert g.call_count == 4
+
+
+def test_slskd_search_hard_deadline_stops_overrun():
+    ticks = [0.0, 0.0, 1.0, 20.0, 25.0, 500.0, 500.0, 500.0, 500.0]
+    seq = [_slskd_resp(200, _SLSKD_BUSY)] * 3 + [_slskd_resp(200, _SLSKD_RESPONSES)]
+    results, g = _run_overrun(ticks, seq)
+    assert len(results) == 1
+    assert g.call_count <= 4
+
+
 def test_slskd_search_logs_summary(caplog):
     driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
     with caplog.at_level("INFO", logger=_SLSKD_MOD):

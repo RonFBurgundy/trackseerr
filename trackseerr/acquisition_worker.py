@@ -126,10 +126,10 @@ def _slskd_limits(client_config: dict[str, Any]) -> dict[str, int]:
     """Stall limits in minutes: the client's ``extra_settings_json`` overrides, else the env knobs, else defaults.
 
     Client keys: ``queue_timeout_minutes``, ``stall_minutes``, ``missing_minutes`` (positive ints).
-    Env: SLSKD_QUEUE_TIMEOUT_MINUTES (30), SLSKD_STALL_MINUTES (15), SLSKD_MISSING_MINUTES (10).
+    Env: SLSKD_QUEUE_TIMEOUT_MINUTES (15), SLSKD_STALL_MINUTES (15), SLSKD_MISSING_MINUTES (10).
     """
     limits = {
-        "queue": _slskd_minutes("SLSKD_QUEUE_TIMEOUT_MINUTES", 30),
+        "queue": _slskd_minutes("SLSKD_QUEUE_TIMEOUT_MINUTES", 15),
         "stall": _slskd_minutes("SLSKD_STALL_MINUTES", 15),
         "missing": _slskd_minutes("SLSKD_MISSING_MINUTES", 10),
     }
@@ -176,6 +176,25 @@ def _check_slskd_status(
     except sqlite3.Error as exc:
         logger.warning("Could not store remote state for %s: %s", item["id"], exc)
     return status_dict
+
+
+def _research_after_slskd_stall(db: Database, item: dict[str, Any]) -> None:
+    """Queue an immediate wanted-search for the track whose Soulseek transfer was cancelled as stalled."""
+    from trackseerr.backlog_worker import backlog_worker  # lazy: backlog_worker imports this module's neighbours
+
+    try:
+        targets = db.list_wanted_search_targets(track_ids=[str(item["track_id"])])
+        if targets:
+            res = backlog_worker.queue_wanted_search(db, targets)
+            logger.info("Re-searching track %s after stalled Soulseek transfer: %s", item["track_id"], res)
+    except sqlite3.Error as exc:
+        logger.warning("Could not queue re-search for track %s after stalled Soulseek transfer: %s", item.get("track_id"), exc)
+
+
+def _research_if_slskd_stalled(db: Database, item: dict[str, Any], status_dict: dict[str, Any], is_slskd: bool) -> None:
+    """Re-search the item's track when a Soulseek transfer was cancelled as stalled (kept out of ``_process_item``)."""
+    if is_slskd and status_dict.get("cancelled") and item.get("track_id"):
+        _research_after_slskd_stall(db, item)
 
 
 class AcquisitionWorker(ImportPipelineMixin):
@@ -656,6 +675,7 @@ class AcquisitionWorker(ImportPipelineMixin):
                 )
             except Exception as bl_err:
                 logger.warning("Failed to add failed download to blocklist: %s", bl_err)
+            _research_if_slskd_stalled(db, item, status_dict, is_slskd)
             stats["failed"] += 1
             return
 
