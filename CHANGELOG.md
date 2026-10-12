@@ -14,7 +14,7 @@ heading becomes the version and date.
 ### Added
 
 - Tracks now record their own artists (performer, featured artists, remixers) from MusicBrainz, file tags and remix titles, so a compilation track knows it is by the Bee Gees rather than "Various Artists". Run "Track Artist Credits Backfill" on the Tasks page once to fill this in for an existing library; scans and refreshes keep it up to date.
-- Media Management has a "Replace illegal characters" switch, as in Lidarr: on, "?" becomes "!" and "*" becomes "-"; off, they are removed. The Trackseerr preset turns it off. The switch sits in the naming settings and is applied by presets.
+- Media Management has a "Replace illegal characters" switch, as in Lidarr: on, "?" becomes "!" and "*" becomes "-"; off, they are removed. The switch sits in the naming settings and is applied by presets.
 - Activity has a Searches tab listing every indexer and Soulseek search Trackseerr ran: the query, how many results came back, how long it took, and what triggered it (request, wanted sweep, manual search, retry...). Kept for 30 days.
 - Soulseek downloads in the Activity queue show the peer, whether it is a whole folder, and slskd's own state (e.g. "Queued, Remotely"). A new "Blocklist and search again" action drops the current release and looks for another.
 - The slskd download client has a Soulseek tuning section: peer queue and speed limits, ignored users, search timeout and spacing, and how long a stuck transfer may wait before Trackseerr tries another peer.
@@ -60,6 +60,10 @@ heading becomes the version and date.
 - Artist and album metadata from MusicBrainz and Deezer is now stored locally and refreshed on a schedule, so artist refreshes make far fewer requests to those services. Refreshing an artist by hand always fetches fresh data.
 - When the MusicBrainz mirror is down, TrackSeerr switches to musicbrainz.org without waiting on the mirror for every request. When both are down, scheduled refreshes pause and retry the skipped artists on the next run.
 - Deezer requests are paced to stay under Deezer's rate limit, and a "quota exceeded" reply is retried instead of being treated as missing data.
+
+### Changed
+
+- New installs use the Trackseerr naming preset: artist and album names exactly as written (accents and & kept), Lidarr's handling of characters a filesystem can't store (? → !, * → -, / → +), a "?" at the end of a track title dropped as Lidarr does, and "..." in titles kept. "Lidarr Standard" is now "Lidarr Default" with Lidarr's real out-of-the-box naming, every preset explains who it is for, and the unused "clean artist names" setting is gone.
 
 ### Fixed
 
