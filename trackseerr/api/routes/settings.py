@@ -159,6 +159,9 @@ class MediaManagementSettingsModel(ApiModel):
     root_folder_path: str = Field("/data/media/music", description="Base music library folder")
     colon_replacement_format: str = Field(" - ", description="String to replace colons with")
     clean_artist_names: bool = Field(True, description="Whether to strip leading articles from artist names")
+    replace_illegal_characters: bool = Field(
+        True, description='Replace illegal characters (\\ / ? * become + + ! -) instead of removing them'
+    )
     staging_folder_path: str = Field("", description="Optional extra allowed import folder; empty means download clients' folders only")
     import_mode: Literal["move", "hardlink", "copy"] = Field(
         "move", description="Import mode: move, hardlink or copy (hardlink and copy keep the source so torrents keep seeding)"
@@ -217,6 +220,7 @@ class MediaManagementUpdateModel(BaseModel):
     root_folder_path: str | None = None
     colon_replacement_format: str | None = None
     clean_artist_names: bool | None = None
+    replace_illegal_characters: bool | None = None
     staging_folder_path: str | None = None
     import_mode: Literal["move", "hardlink", "copy"] | None = None
     torrent_hardlink_tags: Literal["copy_and_tag", "keep_hardlink"] | None = None
@@ -264,6 +268,7 @@ class PreviewRequestModel(BaseModel):
     root_folder_path: str | None = None
     colon_replacement_format: str | None = None
     clean_artist_names: bool | None = None
+    replace_illegal_characters: bool | None = None
     staging_folder_path: str | None = None
     import_mode: Literal["move", "hardlink", "copy"] | None = None
     torrent_hardlink_tags: Literal["copy_and_tag", "keep_hardlink"] | None = None

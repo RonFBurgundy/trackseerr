@@ -82,6 +82,7 @@ class TestMediaManagementStorage:
         assert settings["root_folder_path"] == "/data/media/music"
         assert settings["colon_replacement_format"] == " - "
         assert settings["clean_artist_names"] is True
+        assert settings["replace_illegal_characters"] is True
 
     def test_update_settings_partial_and_full(self, test_db):
         updated = test_db.update_media_management_settings({
@@ -200,6 +201,7 @@ class TestMediaManagementAPI:
             "root_folder_path": "/data/music",
             "colon_replacement_format": "_",
             "clean_artist_names": False,
+            "replace_illegal_characters": False,
         }
         resp = client.post("/api/settings/media-management", json=payload, headers=admin_headers)
         assert resp.status_code == 200
@@ -207,9 +209,13 @@ class TestMediaManagementAPI:
         assert data["root_folder_path"] == "/data/music"
         assert data["colon_replacement_format"] == "_"
         assert data["clean_artist_names"] is False
+        assert data["replace_illegal_characters"] is False
 
         # Verify DB persisted
         db_settings = test_db.get_media_management_settings()
+        assert db_settings["replace_illegal_characters"] is False
+        refetched = client.get("/api/settings/media-management", headers=admin_headers).json()
+        assert refetched["settings"]["replace_illegal_characters"] is False
         assert db_settings["root_folder_path"] == "/data/music"
 
     def test_live_preview_renders_valid_paths(self, app_and_client, test_db, test_config, seeded_users):

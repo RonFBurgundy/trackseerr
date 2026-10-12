@@ -39,7 +39,7 @@ def settings_for(preset: str, **extra):
 
 def test_trackseerr_preset_keeps_leading_article():
     assert render_template(PRESETS["Trackseerr"]["artist_folder_format"], {"artist": "The Offspring"}) == "The Offspring"
-    assert render_template(PRESETS["Trackseerr"]["artist_folder_format"], {"artist": "AC/DC"}) == "ACDC"
+    assert render_template(PRESETS["Trackseerr"]["artist_folder_format"], {"artist": "AC/DC"}) == "AC DC"
 
 
 class TestOptionalBlocks:
@@ -79,7 +79,7 @@ class TestSegments:
     def test_slash_in_token_value_does_not_split(self):
         meta = dict(META, artist="AC/DC", total_discs=1, disc_number=1)
         path = build_track_path(meta, settings_for("Trackseerr"))
-        assert path.startswith("/music/ACDC/")
+        assert path.startswith("/music/AC DC/")
 
 
 class TestPresets:
@@ -265,11 +265,11 @@ class TestExtraTokens:
 
 def test_clean_name_keeps_article_and_drops_illegal_chars():
     assert render_template("{Artist CleanName}", {"artist": "The Offspring"}) == "The Offspring"
-    assert render_template("{Artist CleanName}", {"artist": "AC/DC"}) == "ACDC"
+    assert render_template("{Artist CleanName}", {"artist": "AC/DC"}) == "AC DC"
     assert render_template("{Album CleanTitle}", {"album": "Re: Stacks"}) == "Re Stacks"
-    assert render_template("{Track CleanTitle}", {"title": 'A "Quoted"  Song?'}) == "A Quoted Song"
-    assert render_template("{Track ArtistCleanName}", {"track_artist": "The Who/Live"}) == "The WhoLive"
-    assert render_template("{Artist CleanNameThe}", {"artist": "The Who/Live"}) == "WhoLive, The"
+    assert render_template("{Track CleanTitle}", {"title": 'A "Quoted"  Song?'}) == 'A "Quoted" Song'
+    assert render_template("{Track ArtistCleanName}", {"track_artist": "The Who/Live"}) == "The Who Live"
+    assert render_template("{Artist CleanNameThe}", {"artist": "The Who/Live"}) == "Who Live, The"
     assert render_template("{Artist NameThe}", {"artist": "The Who"}) == "Who, The"
 
 
@@ -291,3 +291,48 @@ def test_smart_colon_replacement():
     assert sanitize_component("Live: Tokyo") == "Live - Tokyo"
     assert sanitize_component("45:33", colon_replacement="_") == "45_33"
     assert sanitize_component("Live: Tokyo", colon_replacement="_") == "Live_Tokyo"
+
+
+def test_clean_name_matches_lidarr_clean_title():
+    from trackseerr.naming import clean_name
+
+    expected = {
+        "Blunts & Blondes": "Blunts and Blondes",
+        "AC/DC": "AC DC",
+        "Tanerélle": "Tanerelle",
+        "Hüsker Dü": "Husker Du",
+        "Lightnin' Luke": "Lightnin Luke",
+        "Crosby, Stills & Nash": "Crosby Stills and Nash",
+        "Río": "Rio",
+        "The Offspring": "The Offspring",
+        "KAS:ST": "KAS:ST",
+        "Code: Pandorum": "Code Pandorum",
+    }
+    for raw, clean in expected.items():
+        assert clean_name(raw) == clean, raw
+
+
+def test_sanitize_replace_illegal_off_removes_characters():
+    from trackseerr.naming import sanitize_component
+
+    assert sanitize_component("Voodoo?", replace_illegal=False) == "Voodoo"
+    assert sanitize_component("D*Minds", replace_illegal=False) == "DMinds"
+    assert sanitize_component("a/b", replace_illegal=False) == "ab"
+    assert sanitize_component("a/b", replace_illegal=True) == "a+b"
+
+
+def test_sanitize_strips_leading_dots():
+    from trackseerr.naming import sanitize_component
+
+    assert sanitize_component(".WAV Theory") == "WAV Theory"
+    assert sanitize_component(" . .Hidden") == "Hidden"
+
+
+def test_trackseerr_preset_does_not_replace_illegal_characters():
+    assert PRESETS["Trackseerr"]["replace_illegal_characters"] is False
+    assert all(p["replace_illegal_characters"] for n, p in PRESETS.items() if n != "Trackseerr")
+    meta = dict(META, title="How Do You Sleep?", total_discs=1, disc_number=1)
+    path = build_track_path(meta, settings_for("Trackseerr"))
+    assert path.endswith("/01 - How Do You Sleep.flac")
+    other = build_track_path(meta, settings_for("Trackseerr", replace_illegal_characters=True))
+    assert other.endswith("/01 - How Do You Sleep!.flac")
