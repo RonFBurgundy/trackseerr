@@ -168,7 +168,7 @@ PRESET_DESCRIPTIONS: dict[str, str] = {
     "TRaSH Guides": "Lidarr-community style (TRaSH has no official Lidarr page): artist & album repeated in every file name.",
     "Plex": "Plex's recommended Artist/Album/NN - Title layout; multi-disc albums use 101/201-style numbering in one folder.",
     "Lidarr Standard": "Previous Trackseerr default with quality suffix on the file name.",
-    "Clean Minimal": "Article-stripped (no leading The/A/An) names with underscore colon replacement.",
+    "Clean Minimal": "Illegal characters removed from names, underscore colon replacement.",
     "Audiophile / Detailed": "Appends codec, bit depth and sample rate to every file name.",
 }
 
@@ -179,6 +179,16 @@ def strip_leading_articles(name: str | None) -> str:
         return ""
     stripped = re.sub(r"^(?:the|a|an)\s+", "", str(name).strip(), flags=re.IGNORECASE)
     return stripped.strip()
+
+
+_ILLEGAL_NAME_CHARS = re.compile(r'[/\\:*?"<>|\x00-\x1f\x7f]')
+
+
+def clean_name(name: str | None) -> str:
+    """Removes characters illegal in file names (Lidarr 'Clean'); the leading article is kept."""
+    if not name:
+        return ""
+    return re.sub(r"\s+", " ", _ILLEGAL_NAME_CHARS.sub("", str(name))).strip()
 
 
 def move_leading_article(name: str | None) -> str:
@@ -299,12 +309,14 @@ def resolve_token(token: str, metadata: dict[str, Any], clean_artist_names: bool
     # Artist
     if t == "Artist CleanName":
         val = metadata.get("artist") or metadata.get("artist_name") or metadata.get("album_artist") or ""
-        return strip_leading_articles(str(val)) or None
+        return clean_name(str(val)) or None
     if t == "Artist Name":
         val = metadata.get("artist") or metadata.get("artist_name") or metadata.get("album_artist") or ""
         return str(val) or None
     if t in ("Artist NameThe", "Artist CleanNameThe"):
         val = metadata.get("artist") or metadata.get("artist_name") or metadata.get("album_artist") or ""
+        if t == "Artist CleanNameThe":
+            val = clean_name(str(val))
         return move_leading_article(str(val)) or None
     if t == "Artist NameFirstCharacter":
         val = metadata.get("artist") or metadata.get("artist_name") or metadata.get("album_artist") or ""
@@ -323,9 +335,11 @@ def resolve_token(token: str, metadata: dict[str, Any], clean_artist_names: bool
     # Album
     if t == "Album CleanTitle":
         val = metadata.get("album") or metadata.get("album_title") or ""
-        return strip_leading_articles(str(val)) or None
+        return clean_name(str(val)) or None
     if t in ("Album TitleThe", "Album CleanTitleThe"):
         val = metadata.get("album") or metadata.get("album_title") or ""
+        if t == "Album CleanTitleThe":
+            val = clean_name(str(val))
         return move_leading_article(str(val)) or None
     if t == "Album TitleFirstCharacter":
         val = metadata.get("album") or metadata.get("album_title") or ""
@@ -401,11 +415,13 @@ def resolve_token(token: str, metadata: dict[str, Any], clean_artist_names: bool
         return str(val).strip() if val else None
     if t in ("Track TitleThe", "Track CleanTitleThe"):
         val = metadata.get("title") or metadata.get("track_title") or ""
+        if t == "Track CleanTitleThe":
+            val = clean_name(str(val))
         return move_leading_article(str(val)) or None
     if t in ("Track ArtistName", "Track ArtistCleanName", "Track ArtistNameThe"):
         val = metadata.get("track_artist") or metadata.get("artist") or metadata.get("artist_name") or ""
         if t == "Track ArtistCleanName":
-            return strip_leading_articles(str(val)) or None
+            return clean_name(str(val)) or None
         if t == "Track ArtistNameThe":
             return move_leading_article(str(val)) or None
         return str(val).strip() or None
@@ -414,7 +430,7 @@ def resolve_token(token: str, metadata: dict[str, Any], clean_artist_names: bool
         return Path(str(src)).stem if src else None
     if t == "Track CleanTitle":
         val = metadata.get("title") or metadata.get("track_title") or ""
-        return strip_leading_articles(str(val)) or None
+        return clean_name(str(val)) or None
 
     # Audio / Quality / MediaInfo
     if t == "Quality Full":
@@ -812,7 +828,7 @@ TOKEN_HELP: list[dict[str, Any]] = [
         "group": "Artist",
         "tokens": [
             ("{Artist Name}", "The artist's name exactly as stored", "Artist Name"),
-            ("{Artist CleanName}", "Artist name without a leading The / A / An", "Beatles"),
+            ("{Artist CleanName}", "Artist name with characters illegal in file names removed", "AC/DC -> ACDC"),
             ("{Artist NameThe}", "Artist name with the leading article moved to the end", "Beatles, The"),
             ("{Artist CleanNameThe}", "Clean artist name with the leading article moved to the end", "Beatles, The"),
             ("{Artist NameFirstCharacter}", "First letter of the artist (article ignored), upper-case", "B"),
@@ -825,7 +841,7 @@ TOKEN_HELP: list[dict[str, Any]] = [
         "group": "Album",
         "tokens": [
             ("{Album Title}", "Album title", "The White Album"),
-            ("{Album CleanTitle}", "Album title without a leading The / A / An", "White Album"),
+            ("{Album CleanTitle}", "Album title with characters illegal in file names removed", "Re: Stacks -> Re Stacks"),
             ("{Album TitleThe}", "Album title with the leading article moved to the end", "White Album, The"),
             ("{Album CleanTitleThe}", "Clean album title with the leading article moved to the end", "White Album, The"),
             ("{Album TitleFirstCharacter}", "First letter of the album (article ignored), upper-case", "W"),
@@ -852,11 +868,11 @@ TOKEN_HELP: list[dict[str, Any]] = [
         "group": "Track",
         "tokens": [
             ("{Track Title}", "Track title", "Revolution 1"),
-            ("{Track CleanTitle}", "Track title without a leading The / A / An", "Revolution 1"),
+            ("{Track CleanTitle}", "Track title with characters illegal in file names removed", "Why? -> Why"),
             ("{Track TitleThe}", "Track title with the leading article moved to the end", "Fool on the Hill, The"),
             ("{Track CleanTitleThe}", "Clean track title with the leading article moved to the end", "Fool on the Hill, The"),
             ("{Track ArtistName}", "Artist of this track (differs from the album artist on compilations)", "The Beatles"),
-            ("{Track ArtistCleanName}", "Track artist without a leading The / A / An", "Beatles"),
+            ("{Track ArtistCleanName}", "Track artist with characters illegal in file names removed", "AC/DC -> ACDC"),
             ("{Track ArtistNameThe}", "Track artist with the leading article moved to the end", "Beatles, The"),
             ("{Original Filename}", "File name the file had before renaming (no extension)", "01 revolution 1"),
             ("{track:00}", "Track number, 2 digits", "01"),

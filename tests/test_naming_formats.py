@@ -256,7 +256,17 @@ class TestExtraTokens:
         assert render_template("{Album Genre}/{Album MbId}", meta) == "Rock/abc"
         assert render_template("{Track TitleThe}", meta) == "Fool on the Hill, The"
         assert render_template("{Track ArtistName}|{Track ArtistCleanName}|{Track ArtistNameThe}", meta) == (
-            "The Who|Who|Who, The"
+            "The Who|The Who|Who, The"
         )
         assert render_template("{Original Filename}", meta) == "01 rev"
         assert render_template("{Track ArtistName}", META) == "The Beatles"  # falls back to artist
+
+
+def test_clean_name_keeps_article_and_drops_illegal_chars():
+    assert render_template("{Artist CleanName}", {"artist": "The Offspring"}) == "The Offspring"
+    assert render_template("{Artist CleanName}", {"artist": "AC/DC"}) == "ACDC"
+    assert render_template("{Album CleanTitle}", {"album": "Re: Stacks"}) == "Re Stacks"
+    assert render_template("{Track CleanTitle}", {"title": 'A "Quoted"  Song?'}) == "A Quoted Song"
+    assert render_template("{Track ArtistCleanName}", {"track_artist": "The Who/Live"}) == "The WhoLive"
+    assert render_template("{Artist CleanNameThe}", {"artist": "The Who/Live"}) == "WhoLive, The"
+    assert render_template("{Artist NameThe}", {"artist": "The Who"}) == "Who, The"

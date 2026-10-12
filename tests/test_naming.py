@@ -60,11 +60,11 @@ class TestTokenReplacement:
         }
 
         assert render_template("{Artist Name}", metadata) == "The Beatles"
-        assert render_template("{Artist CleanName}", metadata) == "Beatles"
+        assert render_template("{Artist CleanName}", metadata) == "The Beatles"
         assert render_template("{Artist Disambiguation}", metadata) == "UK"
 
         assert render_template("{Album Title}", metadata) == "The White Album"
-        assert render_template("{Album CleanTitle}", metadata) == "White Album"
+        assert render_template("{Album CleanTitle}", metadata) == "The White Album"
         assert render_template("{Release Year}", metadata) == "1968"
         assert render_template("{Original Release Year}", metadata) == "1968"
         assert render_template("{Album Disambiguation}", metadata) == "Deluxe"
@@ -91,7 +91,7 @@ class TestTokenReplacement:
     def test_clean_artist_names_tokens(self):
         metadata = {"artist": "The Beatles"}
         assert render_template("{Artist Name}", metadata) == "The Beatles"
-        assert render_template("{Artist CleanName}", metadata) == "Beatles"
+        assert render_template("{Artist CleanName}", metadata) == "The Beatles"
 
     def test_format_quality_generator(self):
         lossless = {
