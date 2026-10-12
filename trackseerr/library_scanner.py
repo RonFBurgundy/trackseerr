@@ -140,7 +140,7 @@ class _ScanRun:
     audio_files: list[Path] = field(default_factory=list)
     existing_files_map: dict[str, dict[str, Any]] = field(default_factory=dict)
     artist_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
-    album_cache: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
+    album_cache: dict[tuple[str, str, Optional[str]], dict[str, Any]] = field(default_factory=dict)
     track_cache: dict[tuple[str, str, Optional[int]], dict[str, Any]] = field(default_factory=dict)
     track_id_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
     artist_tag_cache: dict[str, list[str]] = field(default_factory=dict)
@@ -518,6 +518,18 @@ class LibraryScanner:
         artist_id = str(artist_row["id"])
         return artist_id, artist_row
 
+    @staticmethod
+    def _find_scan_album(
+        run: _ScanRun, artist_id: str, album_title: str, mb_rg_id: Optional[str]
+    ) -> Optional[dict[str, Any]]:
+        """Finds the existing library album for a scanned file, guarding on its MusicBrainz release group."""
+        if not mb_rg_id:
+            return run.db.get_library_album_by_title(artist_id, album_title)
+        by_rg = run.db.get_library_album_by_release_group_id(mb_rg_id)
+        if by_rg and str(by_rg.get("artist_id")) == str(artist_id):
+            return by_rg
+        return run.db.get_library_album_by_title(artist_id, album_title, release_group_id=mb_rg_id)
+
     def _resolve_scan_album(
         self,
         run: _ScanRun,
@@ -542,8 +554,10 @@ class LibraryScanner:
             if extracted is not None and extracted.is_file():
                 has_local_cover = True
 
-        album_key = (artist_id, album_title)
-        album_row = run.album_cache.get(album_key) or run.db.get_library_album_by_title(artist_id, album_title)
+        album_key = (artist_id, album_title, mb_rg_id)
+        album_row = run.album_cache.get(album_key) or self._find_scan_album(
+            run, artist_id, album_title, mb_rg_id
+        )
         if not album_row:
             album_id = str(uuid.uuid4())
             new_album_type = normalize_album_type(
