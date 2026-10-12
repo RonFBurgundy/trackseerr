@@ -20,7 +20,9 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
    scan, Lidarr import, credits backfill, rename/retag · Acquisition: wanted sweep, RSS, download queue, retries ·
    Metadata & art: artist refresh, art backfill · Maintenance: health, seed cleanup, recycle bin, backups, update
    check · Playlists & listening: playlist sync, scrobbles, mixes); within a group, scheduled tasks by next run, manual
-   tasks last. Add the group to `TaskSpec` in `task_manager.py` so the order is defined server-side.
+   tasks last. Add the group to `TaskSpec` in `task_manager.py` so the order is defined server-side. Goal (user): easy to navigate, find a task fast, manage it quickly and cleanly, not cluttered — e.g. collapsible
+   groups, a search/filter box, one compact row per task (name, status, last/next run) with actions (Run · Cancel ·
+   Pause · interval) in the row, details/history behind a click instead of always shown.
 3. **P1 · Requesting a track that's already in the library.** Discover/search results don't always show the
    "In library" badge, so the request goes through; the track page does detect it. Two fixes: (a) server-side guard
    in `create_request` (`trackseerr/api/routes/requests.py` ~L89) — reject/short-circuit when the library has a
