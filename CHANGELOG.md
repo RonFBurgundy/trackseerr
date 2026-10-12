@@ -39,6 +39,9 @@ heading becomes the version and date.
 
 ### Changed
 
+- A failed download (torrent, Usenet or Soulseek) now searches for the track again right away instead of waiting for the next wanted sweep; a failed album download re-searches its tracks.
+- A torrent that has downloaded nothing after 2 hours (no seeders) is removed, blocklisted and searched again. Torrents with any progress, or seeding, are never touched. Set `TORRENT_DEAD_MINUTES` or a client's `dead_torrent_minutes` to change the wait.
+- A Soulseek download still queued by the peer is given up after 15 minutes (was 30) and another source is searched at once.
 - Soulseek album requests now grab a whole folder from one peer instead of a single file. The folder must have the album's track count (up to 2 bonus tracks), at least 80% of its track titles, and a matching total length when the album's tracks are known. Multi-disc albums are not grabbed from Soulseek yet.
 - Soulseek: among files of the same quality, peers with a free upload slot, then a shorter queue, then a faster connection are preferred; peers with a queue over 50 are skipped; files whose length is far from the track's known length are skipped (catches the wrong mix or edit); searches to slskd are spaced at least 5 seconds apart.
 - Automatic searches that find nothing retry with simpler queries: the main artist only, without "feat." credits, then the bare title with any remix name kept. Results from these retries must match the artist, title and remixer, so a remix request never grabs the original mix. Every indexer and Soulseek search is now logged with its query, result count and time.
@@ -58,6 +61,9 @@ heading becomes the version and date.
 
 ### Fixed
 
+- The wanted sweep no longer re-searches the same alphabetical first 100 tracks every hour; it works through the whole list, least recently searched first.
+- Soulseek no longer grabs the wrong song from a folder named after the album (e.g. a track called "AKUMA" from an "AKUMA" album folder); the file name itself must match the track title.
+- Soulseek searches that are still collecting results are no longer cut off early, so fewer searches come back empty.
 - Soulseek results now show their real quality (FLAC 16/24-bit, MP3 320/V0/V2, AAC, ALAC, OGG, Opus) instead of Unknown, so quality profiles rank and accept them properly.
 - Soulseek downloads that a peer never starts ("Queued, Remotely") for 30 minutes, that stop moving for 15 minutes, or that vanish from slskd for 10 minutes are now cancelled and blocklisted, so the next search tries another peer (adjustable per slskd client in Settings, or with `SLSKD_QUEUE_TIMEOUT_MINUTES`, `SLSKD_STALL_MINUTES`, `SLSKD_MISSING_MINUTES`). Failed Soulseek transfers (errored, rejected, timed out) are no longer treated as finished downloads, and cancelling a Soulseek download works again.
 - Soulseek searches now wait for peers to answer before reading results (they almost always came back empty), and each finished search is removed from slskd instead of piling up in its Searches list.
