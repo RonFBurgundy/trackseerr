@@ -570,6 +570,47 @@ def test_slskd_stalled_queued_download_fails_and_cancels(test_db, tmp_path):
     assert [e["release_guid"] for e in entries] == ["user1::Music%2Fsong.flac"]
 
 
+def _poll_slskd_research(test_db, tmp_path, status_dict, track_id):
+    _seed_slskd_row(test_db, DownloadDriverType.SLSKD, 45)
+    if track_id:
+        test_db.conn.execute("PRAGMA foreign_keys = OFF")
+        test_db.conn.execute("UPDATE active_downloads SET track_id = ? WHERE id = 'dl-s1'", (track_id,))
+        test_db.conn.commit()
+    target = {"track_id": track_id or "t1"}
+    with patch("trackseerr.backlog_worker.backlog_worker.queue_wanted_search", return_value={"queued": 1}) as q, \
+            patch.object(Database, "list_wanted_search_targets", return_value=[target]):
+        _poll_slskd(test_db, tmp_path, status_dict)
+    return q, target
+
+
+def test_slskd_stall_queues_research_for_track(test_db, tmp_path):
+    q, target = _poll_slskd_research(
+        test_db, tmp_path, {"status": "queued", "progress": 0.0, "remote_state": "Queued, Remotely"}, "trk-1"
+    )
+    q.assert_called_once()
+    assert q.call_args.args[1] == [target]
+
+
+def test_slskd_stall_without_track_id_no_research(test_db, tmp_path):
+    q, _ = _poll_slskd_research(test_db, tmp_path, {"status": "queued", "progress": 0.0}, None)
+    q.assert_not_called()
+
+
+def test_slskd_non_stall_failure_no_research(test_db, tmp_path):
+    q, _ = _poll_slskd_research(
+        test_db, tmp_path, {"status": "failed", "progress": 0.0, "error_message": "refused"}, "trk-1"
+    )
+    q.assert_not_called()
+
+
+def test_slskd_queue_timeout_default_15(test_db, tmp_path, monkeypatch):
+    monkeypatch.delenv("SLSKD_QUEUE_TIMEOUT_MINUTES", raising=False)
+    _seed_slskd_row(test_db, DownloadDriverType.SLSKD, 20)
+    _, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0})
+    assert row["status"] == DownloadStatus.FAILED.value
+    assert "after 15 min" in row["error_message"]
+
+
 def test_slskd_missing_transfer_fails_after_grace(test_db, tmp_path):
     _seed_slskd_row(test_db, DownloadDriverType.SLSKD, 20)
     _, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0, "missing": True})

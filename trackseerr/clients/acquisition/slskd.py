@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Soulseek punishes search floods: space searches globally across every driver instance.
 _SEARCH_LOCK = threading.Lock()
+_SEARCH_OVERRUN_SECONDS = 20.0  # extra polling past the soft deadline while slskd still reports the search running
 _last_search_at: float = 0.0
 
 
@@ -232,9 +233,22 @@ class SlskdDriver(AcquisitionDriver):
     def _wait_for_search(self, client: httpx.Client, search_id: str) -> str:
         """Poll the search until slskd reports it complete or the deadline passes; returns the last state."""
         status_url = f"{self.host_url}/api/v0/searches/{search_id}"
-        deadline = time.monotonic() + self.search_timeout + 5.0
+        started = time.monotonic()
+        deadline = started + self.search_timeout + 5.0
+        hard_deadline = deadline + _SEARCH_OVERRUN_SECONDS
         state = "Unknown"
-        while time.monotonic() < deadline:
+        overrun_logged = False
+        while True:
+            now = time.monotonic()
+            if now >= hard_deadline:
+                break
+            if now >= deadline:
+                if not any(s in state for s in ("InProgress", "Requested", "Queued")):
+                    break
+                if not overrun_logged:
+                    overrun_logged = True
+                    logger.debug("slskd search id=%s still %s past soft deadline; waiting up to %.0fs more",
+                                 search_id, state, _SEARCH_OVERRUN_SECONDS)
             resp = client.get(status_url, headers=self._headers())
             if resp.status_code != 200:
                 logger.warning("slskd search status poll failed (%d) for id=%s", resp.status_code, search_id)
