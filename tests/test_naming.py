@@ -274,6 +274,23 @@ class TestPathBuilder:
         path = build_track_path(metadata, default_settings)
         assert path == "/music/Various Artists/Wayne's World - Music from the Motion Picture (1992) - Soundtrack/01 - Queen - Bohemian Rhapsody (MP3 320kbps).mp3"
 
+    def _closer_meta(self, **extra):
+        return {
+            "artist": "Adriatique", "album": "Closer", "title": "Closer", "track_number": 1,
+            "disc_number": 1, "total_discs": 1, "codec": "FLAC", "quality_full": "FLAC 16bit 44.1kHz",
+            "extension": ".flac", **extra,
+        }
+
+    def test_missing_year_leaves_no_empty_parens(self, default_settings):
+        path = build_track_path(self._closer_meta(), default_settings)
+        parts = path.split("/")
+        assert parts[3] == "Closer"
+        assert "()" not in path
+
+    def test_present_year_keeps_parens(self, default_settings):
+        path = build_track_path(self._closer_meta(release_year=2019), default_settings)
+        assert path.split("/")[3] == "Closer (2019)"
+
     def test_directory_traversal_prevention(self, default_settings):
         malicious_meta = {
             "artist": "../../etc/shadow",
