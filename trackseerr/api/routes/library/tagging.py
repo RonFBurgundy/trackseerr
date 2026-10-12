@@ -1,6 +1,7 @@
 """Endpoints for token preview, batch renaming, and audio retagging."""
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -55,7 +56,7 @@ from .models import (RenamePreviewRequest, RenameApplyRequest, RetagPreviewReque
 
 _ART_STEMS = ("cover", "folder", "front")
 _ART_EXTS = (".jpg", ".jpeg", ".png", ".webp")
-_RENAME_PAGE_SIZE = 500
+_RENAME_PAGE_SIZE = 1000
 
 
 def _rename_meta(
@@ -106,11 +107,11 @@ def _cached_row(
 def _preview_row(
     db: Database,
     t: dict[str, Any],
+    f: Optional[dict[str, Any]],
     media_settings: dict[str, Any],
     caches: dict[str, dict[Any, Any]],
 ) -> Optional[dict[str, Any]]:
-    """Builds one rename-preview row for a track, or None when it has no file or no catalog artist/album."""
-    f = db.get_library_file_for_track(t["id"])
+    """Builds one rename-preview row for a track's file, or None when it has no file or no catalog artist/album."""
     if not f:
         return None
     current_path = f.get("file_path")
@@ -127,7 +128,7 @@ def _preview_row(
         "track_id": t["id"],
         "current_path": current_path,
         "proposed_path": proposed_path,
-        "needs_rename": Path(current_path).resolve() != Path(proposed_path).resolve(),
+        "needs_rename": os.path.normpath(current_path) != os.path.normpath(proposed_path),
     }
 
 
@@ -154,23 +155,17 @@ def rename_preview(
         else:
             tracks = db.list_library_tracks(artist_id=req.artist_id, limit=limit)
         for t in tracks:
-            row = _preview_row(db, t, media_settings, caches)
+            row = _preview_row(db, t, db.get_library_file_for_track(t["id"]), media_settings, caches)
             if row:
                 preview_diffs.append(row)
         return preview_diffs
 
-    offset = 0
-    while len(preview_diffs) < limit:
-        page = db.list_library_tracks(limit=_RENAME_PAGE_SIZE, offset=offset, album_order=True)
-        if not page:
-            break
-        offset += len(page)
-        for t in page:
-            row = _preview_row(db, t, media_settings, caches)
-            if row and row["needs_rename"]:
-                preview_diffs.append(row)
-                if len(preview_diffs) >= limit:
-                    break
+    for t, f in db.iter_library_files_for_rename(_RENAME_PAGE_SIZE):
+        row = _preview_row(db, t, f, media_settings, caches)
+        if row and row["needs_rename"]:
+            preview_diffs.append(row)
+            if len(preview_diffs) >= limit:
+                break
     return preview_diffs
 
 

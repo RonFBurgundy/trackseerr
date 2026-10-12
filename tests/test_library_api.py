@@ -1027,6 +1027,103 @@ def test_rename_preview_library_wide_returns_only_changes(
     assert resp.json() == []
 
 
+def test_rename_preview_library_wide_skips_tracks_without_files(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    test_db.upsert_library_artist({"id": "ar-x", "name": "Artist X", "monitored": True})
+    test_db.upsert_library_album({"id": "al-x", "artist_id": "ar-x", "title": "Closer", "year": 2000, "monitored": True})
+    for n in range(1, 51):
+        test_db.upsert_library_track({
+            "id": f"nf-{n}", "album_id": "al-x", "artist_id": "ar-x",
+            "title": f"Song {n}", "track_number": n, "disc_number": 1, "monitored": True,
+        })
+    for i in (1, 2):
+        _seed_rename_track(test_db, i, f"Artist{i}", root / "Wrong" / f"{i}.flac")
+
+    resp = client.post("/api/library/rename/preview", json={}, headers=headers)
+    assert resp.status_code == 200
+    assert sorted(r["file_id"] for r in resp.json()) == ["rf-1", "rf-2"]
+
+
+def test_rename_preview_does_not_touch_filesystem(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path, monkeypatch
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    _seed_rename_track(test_db, 1, "Artist1", root / "Wrong" / "1.flac")
+
+    real_resolve = Path.resolve
+
+    def guarded(self, *a, **k):
+        # Auth and config code resolve unrelated paths; only the library paths must stay pure string work.
+        if str(self).startswith(str(root)):
+            raise AssertionError("filesystem touched")
+        return real_resolve(self, *a, **k)
+
+    monkeypatch.setattr(Path, "resolve", guarded)
+    resp = client.post("/api/library/rename/preview", json={}, headers=headers)
+    assert resp.status_code == 200
+    assert [r["file_id"] for r in resp.json()] == ["rf-1"]
+
+
+def test_iter_library_files_for_rename_keyset_batches(test_db: Database):
+    test_db.upsert_library_artist({"id": "ar", "name": "A", "monitored": True})
+    test_db.upsert_library_album({"id": "al", "artist_id": "ar", "title": "T", "year": 2000, "monitored": True})
+    # Inserted out of order; track without a file must be skipped.
+    for tid, disc, num in (("t3", 2, 1), ("t1", 1, 1), ("t2", 1, 2), ("t4", 2, 2), ("t5", 2, 3), ("tx", 1, 3)):
+        test_db.upsert_library_track({
+            "id": tid, "album_id": "al", "artist_id": "ar", "title": tid,
+            "track_number": num, "disc_number": disc, "monitored": True,
+        })
+        if tid != "tx":
+            test_db.upsert_library_file({
+                "id": f"f-{tid}", "track_id": tid, "file_path": f"/m/{tid}.flac",
+                "relative_path": f"{tid}.flac", "codec": "FLAC",
+            })
+    pairs = list(test_db.iter_library_files_for_rename(batch_size=2))
+    assert [f["id"] for _, f in pairs] == ["f-t1", "f-t2", "f-t3", "f-t4", "f-t5"]
+    assert [t["id"] for t, _ in pairs] == ["t1", "t2", "t3", "t4", "t5"]
+    assert pairs[0][0]["title"] == "t1" and pairs[0][1]["file_path"] == "/m/t1.flac"
+
+
+def test_rename_preview_library_wide_has_no_per_track_lookups(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path, monkeypatch
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    test_db.upsert_library_artist({"id": "ar-p", "name": "Artist P", "monitored": True})
+    test_db.upsert_library_album({"id": "al-p", "artist_id": "ar-p", "title": "Closer", "year": 2000, "monitored": True})
+    conn = test_db.conn
+    with test_db._lock:
+        conn.executemany(
+            "INSERT INTO library_tracks (id, album_id, artist_id, title, clean_title, track_number, disc_number) "
+            "VALUES (?, ?, 'ar-p', ?, ?, ?, 1)",
+            [(f"pt-{n}", "al-p", f"Song {n}", f"song {n}", n) for n in range(1, 5001)],
+        )
+        conn.commit()
+    for n in range(1, 301):
+        test_db.upsert_library_file({
+            "id": f"pf-{n}", "track_id": f"pt-{n}", "file_path": str(root / "Wrong" / f"{n}.flac"),
+            "relative_path": f"{n}.flac", "codec": "FLAC",
+        })
+
+    def boom(*a, **k):
+        raise AssertionError("per-track file lookup")
+
+    monkeypatch.setattr(test_db, "get_library_file_for_track", boom)
+    resp = client.post("/api/library/rename/preview", json={"limit": 1000}, headers=headers)
+    assert resp.status_code == 200
+    assert len(resp.json()) == 300
+
+
 def test_rename_preview_album_scope_unchanged(
     app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
 ):
