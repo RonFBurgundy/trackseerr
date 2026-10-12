@@ -147,7 +147,7 @@ class ImportCatalogMixin:
             ).strip()
             track_num = int(f_meta.get("track_number") or 1)
             track_row = db.get_library_track_by_title(
-                album_id, track_title, track_number=track_num
+                album_id, track_title, track_number=track_num, disc_number=int(f_meta.get("disc_number") or 1)
             )
             if not track_row:
                 track_id = str(uuid.uuid4())

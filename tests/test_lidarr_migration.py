@@ -820,3 +820,103 @@ class TestImportMonitoring:
             "future", artist_monitored=True, album_type="Album", has_files=False,
             release_date="1997-05-21", artist_added_at="2026-10-11",
         ) is False
+
+
+def _identity_payload(tracks: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """One artist, one album, the given tracks (id/title/trackNumber/mediumNumber) each with its own file."""
+    data: dict[str, list[dict[str, Any]]] = {
+        "artists": [{"id": 101, "artistName": "Zero 7", "foreignArtistId": "mbid-art-z7", "monitored": True}],
+        "albums": [{"id": 201, "artistId": 101, "title": "Simple Things", "monitored": True}],
+        "tracks": [],
+        "track_files": [],
+    }
+    for trk in tracks:
+        data["tracks"].append(
+            {"artistId": 101, "albumId": 201, "trackFileId": trk["id"] + 1000,
+             "foreignTrackId": f"mbid-trk-{trk['id']}", **trk}
+        )
+        data["track_files"].append(
+            {"id": trk["id"] + 1000, "albumId": 201, "artistId": 101, "path": f"/m/z7/{trk['id']}.flac",
+             "relativePath": f"{trk['id']}.flac", "size": 1, "mediaInfo": {"audioCodec": "FLAC"}}
+        )
+    return data
+
+
+def _file_rows(db: Database) -> dict[str, dict[str, Any]]:
+    rows = db.conn.execute(
+        "SELECT f.file_path AS path, t.title AS title, t.disc_number AS disc, t.track_number AS num "
+        "FROM library_files f JOIN library_tracks t ON t.id = f.track_id"
+    ).fetchall()
+    return {r["path"]: dict(r) for r in rows}
+
+
+def _run_import(db: Database, payload: dict[str, list[dict[str, Any]]]) -> None:
+    with patch(HTTPX, loaded_fake(payload)):
+        LidarrMigrationJob().run_migration(db, real_client(), auto_switch_mode=False)
+
+
+class TestTrackIdentity:
+    """Lidarr tracks are told apart by foreignTrackId; titles never merge them."""
+
+    def test_same_title_on_two_discs_stays_two_tracks(self, db: Database):
+        payload = _identity_payload([
+            {"id": 1, "title": "In the Waiting Line", "trackNumber": 8, "mediumNumber": 1},
+            {"id": 2, "title": "In the Waiting Line (Dorfmeister con Madrid de los Austrias dub)",
+             "trackNumber": 8, "mediumNumber": 2},
+        ])
+        _run_import(db, payload)
+
+        assert count(db, "library_tracks") == 2
+        files = _file_rows(db)
+        assert files["/m/z7/1.flac"] == {
+            "path": "/m/z7/1.flac", "title": "In the Waiting Line", "disc": 1, "num": 8}
+        assert files["/m/z7/2.flac"]["title"].endswith("dub)")
+        assert (files["/m/z7/2.flac"]["disc"], files["/m/z7/2.flac"]["num"]) == (2, 8)
+
+    def test_many_identical_titles_stay_separate(self, db: Database):
+        payload = _identity_payload(
+            [{"id": n, "title": "[silence]", "trackNumber": n, "mediumNumber": 1} for n in range(90, 100)]
+        )
+        _run_import(db, payload)
+
+        assert count(db, "library_tracks") == 10
+        assert count(db, "library_files") == 10
+        assert db.conn.execute("SELECT COUNT(DISTINCT track_id) FROM library_files").fetchone()[0] == 10
+
+    def test_reimport_repairs_merged_tracks(self, db: Database):
+        payload = _identity_payload([
+            {"id": 1, "title": "In the Waiting Line", "trackNumber": 8, "mediumNumber": 1},
+            {"id": 2, "title": "In the Waiting Line (Dorfmeister con Madrid de los Austrias dub)",
+             "trackNumber": 8, "mediumNumber": 2},
+            {"id": 3, "title": "[silence]", "trackNumber": 90, "mediumNumber": 1},
+            {"id": 4, "title": "[silence]", "trackNumber": 91, "mediumNumber": 1},
+        ])
+        _run_import(db, payload)
+
+        # Recreate what the old title-matching import left behind: one row per merged pair, both files on it,
+        # carrying the last writer's foreign id but the first writer's title/disc/number.
+        for keep, drop in (("mbid-trk-2", "mbid-trk-1"), ("mbid-trk-4", "mbid-trk-3")):
+            keep_row = db.conn.execute("SELECT id FROM library_tracks WHERE foreign_track_id = ?", (keep,)).fetchone()
+            drop_row = db.conn.execute(
+                "SELECT id, title, clean_title, disc_number, track_number FROM library_tracks "
+                "WHERE foreign_track_id = ?", (drop,)
+            ).fetchone()
+            db.conn.execute("UPDATE library_files SET track_id = ? WHERE track_id = ?", (keep_row["id"], drop_row["id"]))
+            db.conn.execute("DELETE FROM library_tracks WHERE id = ?", (drop_row["id"],))
+            db.conn.execute(
+                "UPDATE library_tracks SET title = ?, clean_title = ?, disc_number = ?, track_number = ? WHERE id = ?",
+                (drop_row["title"], drop_row["clean_title"], drop_row["disc_number"], drop_row["track_number"],
+                 keep_row["id"]),
+            )
+        db.conn.commit()
+        assert count(db, "library_tracks") == 2
+
+        _run_import(db, payload)
+
+        assert count(db, "library_tracks") == 4
+        files = _file_rows(db)
+        assert db.conn.execute("SELECT COUNT(DISTINCT track_id) FROM library_files").fetchone()[0] == 4
+        assert (files["/m/z7/1.flac"]["title"], files["/m/z7/1.flac"]["disc"]) == ("In the Waiting Line", 1)
+        assert (files["/m/z7/2.flac"]["disc"], files["/m/z7/2.flac"]["num"]) == (2, 8)
+        assert files["/m/z7/2.flac"]["title"].endswith("dub)")
+        assert (files["/m/z7/3.flac"]["num"], files["/m/z7/4.flac"]["num"]) == (90, 91)

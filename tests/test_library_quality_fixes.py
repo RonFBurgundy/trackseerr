@@ -231,8 +231,8 @@ def test_track_lookup_matches_title_first_and_never_by_number_alone(db):
 def test_track_lookup_number_is_a_tiebreaker_for_near_equal_titles(db):
     album_id = _seed_album(db)
     _seed_track(db, "t6", "Night Vision", 6)
-    assert db.get_library_track_by_title(album_id, "Night Vision (Radio Edit)", track_number=6)["id"] == "t6"
-    assert db.get_library_track_by_title(album_id, "Night Vision (Radio Edit)") is None
+    assert db.get_library_track_by_title(album_id, "Night Visions", track_number=6)["id"] == "t6"
+    assert db.get_library_track_by_title(album_id, "Night Visions") is None
 
 
 def test_track_lookup_titles_differing_only_in_digits_stay_separate(db):
@@ -681,3 +681,53 @@ def test_manual_import_creates_artist_with_saved_add_monitor_option(env):
     src = make_mp3(env.staging / "x.mp3", TIT2="Aerodynamic", TPE1="Daft Punk", TALB="Discovery", TRCK="2")
     _commit(env, src, write_tags=False)
     assert env.db.get_library_artist_by_name("Daft Punk")["monitor_option"] == "albums"
+
+
+def _seed_disc_track(db: Database, track_id: str, title: str, number: int, disc: int) -> None:
+    db.upsert_library_track(
+        LibraryTrack(id=track_id, album_id="al", artist_id="ar", title=title, track_number=number, disc_number=disc)
+    )
+
+
+def test_track_lookup_prefers_same_disc_for_identical_titles(db):
+    album_id = _seed_album(db)
+    _seed_disc_track(db, "d1", "Reprise", 8, 1)
+    _seed_disc_track(db, "d2", "Reprise", 8, 2)
+    assert db.get_library_track_by_title(album_id, "Reprise", 8, disc_number=2)["id"] == "d2"
+    assert db.get_library_track_by_title(album_id, "Reprise", 8, disc_number=1)["id"] == "d1"
+    # Without a disc the behaviour is unchanged: some row with that title.
+    assert db.get_library_track_by_title(album_id, "Reprise", 8)["id"] in ("d1", "d2")
+
+
+def test_track_lookup_never_crosses_discs_with_a_different_number(db):
+    album_id = _seed_album(db)
+    _seed_disc_track(db, "d1", "Reprise", 8, 1)
+    assert db.get_library_track_by_title(album_id, "Reprise", 5, disc_number=2) is None
+    assert db.get_library_track_by_title(album_id, "Reprise", 8, disc_number=2) is None
+    assert db.get_library_track_by_title(album_id, "Reprise", disc_number=2)["id"] == "d1"
+    assert db.get_library_track_by_title(album_id, "Reprise", 5)["id"] == "d1"
+
+
+def test_track_lookup_near_equal_fallback_stays_on_the_same_disc(db):
+    album_id = _seed_album(db)
+    _seed_disc_track(db, "d1", "Night Vision", 6, 1)
+    assert db.get_library_track_by_title(album_id, "Night Visions", 6, disc_number=2) is None
+    assert db.get_library_track_by_title(album_id, "Night Visions", 6, disc_number=1)["id"] == "d1"
+    assert db.get_library_track_by_title(album_id, "Night Visions", 6)["id"] == "d1"
+
+
+def test_track_lookup_bracketed_version_suffix_is_a_different_track(db):
+    album_id = _seed_album(db)
+    _seed_track(db, "t6", "In the Waiting Line", 8)
+    assert db.get_library_track_by_title(album_id, "In the Waiting Line (Dorfmeister dub)", track_number=8) is None
+    assert db.get_library_track_by_title(album_id, "In the Waiting Line [Live]", track_number=8) is None
+    assert db.get_library_track_by_title(album_id, "In the Waiting Line", track_number=8)["id"] == "t6"
+
+
+def test_same_title_on_two_discs_scans_into_two_tracks(db, tmp_path):
+    album = tmp_path / "music" / "Zero 7" / "Simple Things"
+    make_mp3(album / "1-08 Reprise.mp3", TIT2="Reprise", TPE1="Zero 7", TALB="Simple Things", TRCK="8", TPOS="1")
+    make_mp3(album / "2-08 Reprise.mp3", TIT2="Reprise", TPE1="Zero 7", TALB="Simple Things", TRCK="8", TPOS="2")
+    scan(db, tmp_path / "music")
+    tracks = db.list_library_tracks(limit=100)
+    assert sorted((t["disc_number"], t["track_number"]) for t in tracks) == [(1, 8), (2, 8)]

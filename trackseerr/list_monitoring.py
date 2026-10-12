@@ -225,7 +225,9 @@ def _hydrate_album_tracks(
     for trk in enricher.get_release_group_tracks(rg_id) or []:
         title = trk.get("title") or "Unknown Track"
         number = int(trk.get("track_number") or 1)
-        existing = db.get_library_track_by_title(album_id, title, track_number=number)
+        existing = db.get_library_track_by_title(
+            album_id, title, track_number=number, disc_number=int(trk.get("disc_number") or 1)
+        )
         if existing:
             continue
         saved = db.upsert_library_track(

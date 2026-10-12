@@ -221,6 +221,7 @@ def _ingest_album_tracks(
                     album_id,
                     trk.get("title", ""),
                     track_number=trk.get("track_number"),
+                    disc_number=trk.get("disc_number") or None,
                 )
             track_id = existing_trk["id"] if existing_trk else str(uuid.uuid4())
             trk_title = trk.get("title") or "Unknown Track"
