@@ -492,7 +492,9 @@ class TrackMatcher:
             if album_clean:
                 album = self._db.get_library_album_by_title(artist["id"], entry["album"])
                 if album:
-                    track = self._db.get_library_track_by_title(album["id"], entry["name"], number)
+                    track = self._db.get_library_track_by_title(
+                        album["id"], entry["name"], number, disc_number=entry.get("disc_number") or None
+                    )
                     if track and self._db.get_library_file_for_track(track["id"]):
                         return str(track["id"])
             candidates = [

@@ -37,6 +37,17 @@ def _opt_int(value: Any) -> Optional[int]:
     return None if value is None or value == "" else int(value)
 
 
+_BRACKET_SUFFIX_RE = re.compile(r"[\(\[][^\)\]]*[\)\]]")
+
+
+def _has_extra_bracket_suffix(a: str, b: str) -> bool:
+    """True when one raw title carries a bracketed/parenthesised part ('(... dub)', '[live]') the other lacks.
+
+    'X' and 'X (Foo Remix)' are different recordings even though their clean titles overlap.
+    """
+    return sorted(_BRACKET_SUFFIX_RE.findall(a or "")) != sorted(_BRACKET_SUFFIX_RE.findall(b or ""))
+
+
 def _titles_near_equal(a: str, b: str) -> bool:
     """True when two clean titles plausibly name the same track (a track number then breaks the tie).
 

@@ -25,7 +25,7 @@ from trackseerr.job_tracker import track_job
 from trackseerr.lidarr_import_report import ImportReport, write_report
 from trackseerr.library_manager import MODE_NATIVE, SwitchRefused, switch_mode
 from trackseerr.redaction import safe_exc
-from trackseerr.storage import Database
+from trackseerr.storage import Database, clean_library_name
 from trackseerr.task_manager import TRIGGER_MANUAL, record_task_run
 
 logger = logging.getLogger(__name__)
@@ -400,8 +400,9 @@ class LidarrMigrationJob:
             str(track["foreignTrackId"]) if track.get("foreignTrackId") is not None else None
         )
 
-        existing_track = run.db.get_library_track_by_title(
-            mapped_album_id, track_title, track_number
+        # Lidarr's data is authoritative and complete: identity is the foreign track id, never a title match.
+        existing_track = self._find_existing_track(
+            run.db, mapped_album_id, foreign_track_id, track_title, track_number, disc_number
         )
         track_id = str(existing_track["id"]) if existing_track else str(uuid.uuid4())
 
@@ -432,6 +433,27 @@ class LidarrMigrationJob:
 
         with self._lock:
             self._status["tracks_migrated"] += 1
+
+    @staticmethod
+    def _find_existing_track(
+        db: Database,
+        album_id: str,
+        foreign_track_id: Optional[str],
+        title: str,
+        track_number: int,
+        disc_number: int,
+    ) -> Optional[dict[str, Any]]:
+        """Lidarr's identity for a track is its foreign id; without one only an exact disc + number + title matches."""
+        if foreign_track_id:
+            return db.get_library_track_by_foreign_id(foreign_track_id, album_id=album_id)
+        row = db.get_library_track_by_title(album_id, title, track_number, disc_number=disc_number)
+        if row and (
+            int(row["disc_number"]) == disc_number
+            and int(row["track_number"]) == track_number
+            and clean_library_name(row["title"]) == clean_library_name(title)
+        ):
+            return row
+        return None
 
     def _migrate_one_track_file(self, run: _MigrationRun, tf: dict[str, Any]) -> None:
         """Ingests a single raw Lidarr track file dictionary."""

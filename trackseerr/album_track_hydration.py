@@ -167,7 +167,9 @@ def hydrate_album_tracks(
         for trk in fetched:
             title = trk.get("title") or "Unknown Track"
             number = int(trk.get("track_number") or 1)
-            if db.get_library_track_by_title(album_id, title, track_number=number):
+            if db.get_library_track_by_title(
+                album_id, title, track_number=number, disc_number=int(trk.get("disc_number") or 1)
+            ):
                 continue
             saved = db.upsert_library_track(
                 LibraryTrack(

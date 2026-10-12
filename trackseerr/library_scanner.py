@@ -143,7 +143,7 @@ class _ScanRun:
     existing_files_map: dict[str, dict[str, Any]] = field(default_factory=dict)
     artist_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
     album_cache: dict[tuple[str, str, Optional[str]], dict[str, Any]] = field(default_factory=dict)
-    track_cache: dict[tuple[str, str, Optional[int]], dict[str, Any]] = field(default_factory=dict)
+    track_cache: dict[tuple[str, str, Optional[int], int], dict[str, Any]] = field(default_factory=dict)
     track_id_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
     artist_tag_cache: dict[str, list[str]] = field(default_factory=dict)
     quality_profile_cache: dict[Optional[str], Any] = field(default_factory=dict)
@@ -645,9 +645,9 @@ class LibraryScanner:
         """Finds or creates the library track record from audio metadata."""
         mb_rec_id = metadata.get("musicbrainz_trackid")
         track_isrc = metadata.get("isrc")
-        track_key = (album_id, track_title, tagged_track_number)
+        track_key = (album_id, track_title, tagged_track_number, int(disc_number))
         track_row = run.track_cache.get(track_key) or run.db.get_library_track_by_title(
-            album_id, track_title, tagged_track_number
+            album_id, track_title, tagged_track_number, disc_number=int(disc_number)
         )
         if not track_row:
             track_id = str(uuid.uuid4())

@@ -24,6 +24,7 @@ from trackseerr.models import (
 )
 from trackseerr.storage_common import (
     _TRACK_DURATION_TOLERANCE,
+    _has_extra_bracket_suffix,
     _titles_near_equal,
     clean_library_name,
 )
@@ -571,28 +572,43 @@ class LibraryCatalogStoreMixin:
             return self._map_library_track(row) if row else None
 
     def get_library_track_by_title(
-        self, album_id: str, title: str, track_number: Optional[int] = None
+        self,
+        album_id: str,
+        title: str,
+        track_number: Optional[int] = None,
+        disc_number: Optional[int] = None,
     ) -> Optional[dict[str, Any]]:
-        """Retrieves a library track by album ID and title, with an optional track-number tiebreaker.
+        """Retrieves a library track by album ID and title, with optional track-number and disc tiebreakers.
 
         Order: exact clean title; clean title ignoring spaces ('Nightvision' finds 'Night Vision'); then, only when
         a track number is supplied, a track holding that number whose title is near-equal. A track number alone never
         matches: untagged or differently named tracks sharing a number are different tracks.
+
+        With ``disc_number`` the title matches prefer a row on the same disc (and number); a row from another disc is
+        returned only when no track number is given, and the near-equal fallback only considers same-disc,
+        same-number candidates. Without it, discs are ignored.
         """
         clean = clean_library_name(title)
         with self._lock:
-            row = self.conn.execute(
-                "SELECT * FROM library_tracks WHERE album_id = ? AND clean_title = ? LIMIT 1",
-                (str(album_id), clean),
-            ).fetchone()
+            row = self._pick_title_match(
+                self.conn.execute(
+                    "SELECT * FROM library_tracks WHERE album_id = ? AND clean_title = ?", (str(album_id), clean)
+                ).fetchall(),
+                track_number,
+                disc_number,
+            )
             if row:
                 return self._map_library_track(row)
             squashed = clean.replace(" ", "")
             if squashed:
-                row = self.conn.execute(
-                    "SELECT * FROM library_tracks WHERE album_id = ? AND REPLACE(clean_title, ' ', '') = ? LIMIT 1",
-                    (str(album_id), squashed),
-                ).fetchone()
+                row = self._pick_title_match(
+                    self.conn.execute(
+                        "SELECT * FROM library_tracks WHERE album_id = ? AND REPLACE(clean_title, ' ', '') = ?",
+                        (str(album_id), squashed),
+                    ).fetchall(),
+                    track_number,
+                    disc_number,
+                )
                 if row:
                     return self._map_library_track(row)
             if track_number is not None and clean:
@@ -600,9 +616,33 @@ class LibraryCatalogStoreMixin:
                     "SELECT * FROM library_tracks WHERE album_id = ? AND track_number = ?",
                     (str(album_id), int(track_number)),
                 ).fetchall():
-                    if _titles_near_equal(str(cand["clean_title"] or ""), clean):
+                    if disc_number is not None and int(cand["disc_number"] or 1) != int(disc_number):
+                        continue
+                    if _titles_near_equal(str(cand["clean_title"] or ""), clean) and not _has_extra_bracket_suffix(
+                        str(cand["title"] or ""), str(title or "")
+                    ):
                         return self._map_library_track(cand)
             return None
+
+    @staticmethod
+    def _pick_title_match(
+        rows: list[Any], track_number: Optional[int], disc_number: Optional[int]
+    ) -> Optional[Any]:
+        """Chooses among same-title rows; with a disc, prefers the same disc and crosses discs only without a number."""
+        if not rows:
+            return None
+        if disc_number is None:
+            return rows[0]
+        pool = [r for r in rows if int(r["disc_number"] or 1) == int(disc_number)]
+        if not pool:
+            pool = rows if track_number is None else []
+        if not pool:
+            return None
+        if track_number is not None:
+            for r in pool:
+                if int(r["track_number"] or 1) == int(track_number):
+                    return r
+        return pool[0]
 
     def list_library_tracks(
         self,

@@ -453,6 +453,7 @@ def _hydrate_release_group_tracks(
                         album_id,
                         trk_title,
                         track_number=trk_num,
+                        disc_number=disc_num,
                     )
                 if existing_trk:
                     trk_id = existing_trk["id"]
@@ -790,6 +791,7 @@ def _hydrate_deezer_album_tracks(
                         album_id,
                         trk.get("title", ""),
                         track_number=trk.get("track_number"),
+                        disc_number=trk.get("disc_number") or None,
                     )
 
                 if existing_trk:
