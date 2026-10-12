@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { MoreVertical } from 'lucide-react';
 
 export interface OverflowMenuItem {
@@ -9,6 +10,14 @@ export interface OverflowMenuItem {
   /** Reflects a toggled state (role menuitemcheckbox). */
   checked?: boolean;
   onSelect: () => void;
+}
+
+const GUTTER = 16;
+const GAP = 4;
+
+interface MenuPosition {
+  top: number;
+  right: number;
 }
 
 export interface OverflowMenuProps {
@@ -25,14 +34,57 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, label, classN
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+  const [pos, setPos] = useState<MenuPosition | null>(null);
 
   const close = useCallback((): void => setOpen(false), []);
 
-  // Focus moves to the first enabled item when the menu opens.
+  const place = useCallback((): void => {
+    const trigger = triggerRef.current;
+    const menu = menuRef.current;
+    if (!trigger || !menu) return;
+    const rect = trigger.getBoundingClientRect();
+    const height = menu.offsetHeight;
+    const width = menu.offsetWidth;
+    const maxRight = Math.max(GUTTER, window.innerWidth - width - GUTTER);
+    const right = Math.min(Math.max(GUTTER, window.innerWidth - rect.right), maxRight);
+    const below = rect.bottom + GAP;
+    const fitsBelow = below + height <= window.innerHeight - GUTTER;
+    const above = rect.top - GAP - height;
+    let top = fitsBelow || above < GUTTER ? below : above;
+    top = Math.max(GUTTER, Math.min(top, window.innerHeight - GUTTER - height));
+    setPos({ top, right });
+  }, []);
+
+  // Measure after the menu mounts, before paint, so it never flashes at the wrong spot.
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    place();
+  }, [open, place]);
+
   useEffect(() => {
     if (!open) return;
-    menuRef.current?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled)')?.focus();
-  }, [open]);
+    const onScroll = (e: Event): void => {
+      // Scrolling inside the menu itself must not dismiss it.
+      if (e.target instanceof Node && menuRef.current?.contains(e.target)) return;
+      close();
+    };
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [open, place, close]);
+
+  // Focus moves to the first enabled item once the menu is positioned (hidden elements cannot focus).
+  useEffect(() => {
+    if (!open || !pos) return;
+    const first = menuRef.current?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled)');
+    if (first && !menuRef.current?.contains(document.activeElement)) first.focus();
+  }, [open, pos]);
 
   const onMenuKeyDown = (e: React.KeyboardEvent<HTMLElement>): void => {
     if (e.key === 'Escape') {
@@ -62,11 +114,12 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, label, classN
 
   useEffect(() => {
     if (!open) return;
+    const isInside = (node: Node): boolean => !!rootRef.current?.contains(node) || !!menuRef.current?.contains(node);
     const onPointer = (e: MouseEvent | TouchEvent): void => {
-      if (e.target instanceof Node && !rootRef.current?.contains(e.target)) close();
+      if (e.target instanceof Node && !isInside(e.target)) close();
     };
     const onFocusIn = (e: FocusEvent): void => {
-      if (e.target instanceof Node && !rootRef.current?.contains(e.target)) close();
+      if (e.target instanceof Node && !isInside(e.target)) close();
     };
     document.addEventListener('mousedown', onPointer);
     document.addEventListener('touchstart', onPointer);
@@ -94,13 +147,15 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, label, classN
       >
         <MoreVertical className="h-5 w-5" />
       </button>
-      {open && (
+      {open &&
+        createPortal(
         <div
           id={menuId}
           ref={menuRef}
           role="menu"
           aria-label={label}
-          className="absolute right-0 top-full z-30 mt-1 min-w-[11rem] rounded-[4px] border border-[#2a2a2a] bg-[#181818] py-1 shadow-[0_8px_20px_rgba(0,0,0,0.6)]"
+          style={{ top: pos?.top ?? 0, right: pos?.right ?? 0, visibility: pos ? 'visible' : 'hidden' }}
+          className="fixed z-40 min-w-[11rem] rounded-[4px] border border-[#2a2a2a] bg-[#181818] py-1 shadow-[0_8px_20px_rgba(0,0,0,0.6)]"
         >
           {items.map((item) => (
             <button
@@ -122,7 +177,8 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, label, classN
               )}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
