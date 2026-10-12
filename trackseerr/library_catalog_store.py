@@ -476,8 +476,12 @@ class LibraryCatalogStoreMixin:
         query: Optional[str] = None,
         limit: int = 200,
         offset: int = 0,
+        album_order: bool = False,
     ) -> list[dict[str, Any]]:
-        """Lists library tracks filtered by album and/or artist with pagination."""
+        """Lists library tracks filtered by album and/or artist with pagination.
+
+        ``album_order`` walks album by album (artist, album, disc, track) so paged scans stay grouped.
+        """
         sql = "SELECT * FROM library_tracks WHERE 1=1"
         params: list[Any] = []
         if album_id:
@@ -492,7 +496,12 @@ class LibraryCatalogStoreMixin:
             clean_q = clean_library_name(query)
             sql += " AND (clean_title LIKE ? OR title LIKE ?)"
             params.extend([f"%{clean_q}%", f"%{query}%"])
-        sql += " ORDER BY disc_number ASC, track_number ASC LIMIT ? OFFSET ?"
+        order = (
+            "artist_id ASC, album_id ASC, disc_number ASC, track_number ASC"
+            if album_order
+            else "disc_number ASC, track_number ASC"
+        )
+        sql += f" ORDER BY {order} LIMIT ? OFFSET ?"
         params.extend([int(limit), int(offset)])
 
         with self._lock:

@@ -37,6 +37,10 @@ def settings_for(preset: str, **extra):
     return s
 
 
+def test_trackseerr_preset_keeps_leading_article():
+    assert render_template(PRESETS["Trackseerr"]["artist_folder_format"], {"artist": "The Offspring"}) == "The Offspring"
+
+
 class TestOptionalBlocks:
     def test_nested_block_keeps_brackets(self):
         assert render_template("{Album Title}{ - [{Album Type}]}", META) == "The White Album - [Album]"
@@ -74,25 +78,25 @@ class TestSegments:
     def test_slash_in_token_value_does_not_split(self):
         meta = dict(META, artist="AC/DC", total_discs=1, disc_number=1)
         path = build_track_path(meta, settings_for("Trackseerr"))
-        assert path.startswith("/music/AC-DC/")
+        assert path.startswith("/music/AC+DC/")
 
 
 class TestPresets:
     def test_trackseerr_standard(self):
         meta = dict(META, total_discs=1, disc_number=1)
         assert build_track_path(meta, settings_for("Trackseerr")) == (
-            "/music/Beatles/The White Album - [Album] (1968)/01 - Revolution 1.flac"
+            "/music/The Beatles/The White Album - [Album] (1968)/01 - Revolution 1.flac"
         )
 
     def test_trackseerr_multi_disc(self):
         assert build_track_path(META, settings_for("Trackseerr")) == (
-            "/music/Beatles/The White Album - [Album] (1968)/Disc 02/01 - Revolution 1.flac"
+            "/music/The Beatles/The White Album - [Album] (1968)/Disc 02/01 - Revolution 1.flac"
         )
 
     def test_trackseerr_without_type_or_year(self):
         meta = {k: v for k, v in META.items() if k not in ("album_type", "release_year")}
         assert build_track_path(meta, settings_for("Trackseerr")) == (
-            "/music/Beatles/The White Album/Disc 02/01 - Revolution 1.flac"
+            "/music/The Beatles/The White Album/Disc 02/01 - Revolution 1.flac"
         )
 
     def test_plex_multi_disc_uses_prefixed_track_numbers(self):
@@ -190,9 +194,9 @@ class TestPreviewApi:
         data = client.post("/api/settings/media-management/preview", json=body, headers=headers).json()
         fp = data["format_previews"]
         assert set(fp) == {"artist_folder_format", "standard_track_format", "multi_disc_track_format"}
-        assert fp["artist_folder_format"]["format"] == "{Artist CleanName}"
+        assert fp["artist_folder_format"]["format"] == "{Artist Name}"
         by_id = {s["sample_id"]: s["output"] for s in fp["artist_folder_format"]["samples"]}
-        assert by_id["multi_disc"] == "Beatles"
+        assert by_id["multi_disc"] == "The Beatles"
         typed = {s["sample_id"]: s["output"] for s in fp["standard_track_format"]["samples"]}
         assert typed["typed_release"] == "Twoism - [EP] (1995)/03 - Basefree.flac"
         multi = {s["sample_id"]: s["output"] for s in fp["multi_disc_track_format"]["samples"]}

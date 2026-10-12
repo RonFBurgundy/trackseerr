@@ -983,6 +983,35 @@ def test_rename_preview_library_wide_scans_past_limit(
     assert rows[0]["needs_rename"] is True
 
 
+def test_rename_preview_library_wide_walks_album_by_album(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    for aid in ("a", "b"):
+        test_db.upsert_library_artist({"id": f"ar-{aid}", "name": f"Artist {aid}", "monitored": True})
+        test_db.upsert_library_album(
+            {"id": f"al-{aid}", "artist_id": f"ar-{aid}", "title": "Closer", "year": 2000, "monitored": True}
+        )
+    # Album A has three misplaced tracks, album B one; disc/track-only ordering would interleave the track 1s.
+    for aid, n in (("a", 1), ("b", 1), ("a", 2), ("a", 3)):
+        test_db.upsert_library_track({
+            "id": f"t-{aid}{n}", "album_id": f"al-{aid}", "artist_id": f"ar-{aid}",
+            "title": f"Song {n}", "track_number": n, "disc_number": 1, "monitored": True,
+        })
+        wrong = root / "Wrong" / f"{aid}{n}.flac"
+        test_db.upsert_library_file({
+            "id": f"f-{aid}{n}", "track_id": f"t-{aid}{n}", "file_path": str(wrong),
+            "relative_path": wrong.name, "codec": "FLAC",
+        })
+
+    resp = client.post("/api/library/rename/preview", json={"limit": 2}, headers=headers)
+    assert resp.status_code == 200
+    assert [r["file_id"] for r in resp.json()] == ["f-a1", "f-a2"]
+
+
 def test_rename_preview_library_wide_returns_only_changes(
     app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
 ):
