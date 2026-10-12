@@ -43,7 +43,8 @@ from trackseerr.library import (
 )
 from trackseerr.job_tracker import track_job
 from trackseerr.task_manager import TRIGGER_MANUAL, record_task_run
-from trackseerr.naming import build_track_path
+from trackseerr.naming import build_track_path, existing_artist_folder
+from trackseerr.rename_reasons import classify_rename, flag_collisions, is_default_selected, COLLISION
 from trackseerr.storage import Database
 
 
@@ -67,8 +68,12 @@ def _rename_meta(
     f: dict[str, Any],
     current_path: str,
     caches: dict[str, dict[Any, Any]],
+    media_settings: dict[str, Any],
 ) -> dict[str, Any]:
-    """Builds the naming-template metadata for a track's file; discs totals are memoised per album in ``caches``."""
+    """Builds the naming-template metadata for a track's file; discs totals are memoised per album in ``caches``.
+
+    An artist whose folder already exists keeps it (unless ``rename_artist_folders`` is on).
+    """
     alb_id = track["album_id"]
     discs = caches.setdefault("discs", {})
     if alb_id not in discs:
@@ -76,6 +81,7 @@ def _rename_meta(
     return {
         "artist": artist["name"],
         "album_artist": artist["name"],
+        "artist_folder": existing_artist_folder(artist, media_settings),
         "album": album["title"],
         "title": track["title"],
         "track_number": track["track_number"],
@@ -121,15 +127,39 @@ def _preview_row(
     album = _cached_row(caches.setdefault("albums", {}), t["album_id"], db.get_library_album)
     if not artist or not album:
         return None
-    meta = _rename_meta(db, t, album, artist, f, current_path, caches)
+    meta = _rename_meta(db, t, album, artist, f, current_path, caches, media_settings)
     proposed_path = build_track_path(meta, media_settings)
+    reasons = classify_rename(
+        _root_relative(current_path, media_settings), _root_relative(proposed_path, media_settings)
+    )
     return {
         "file_id": f["id"],
         "track_id": t["id"],
         "current_path": current_path,
         "proposed_path": proposed_path,
         "needs_rename": os.path.normpath(current_path) != os.path.normpath(proposed_path),
+        "reasons": reasons,
+        "default_selected": is_default_selected(reasons),
     }
+
+
+def _root_relative(path: str, media_settings: dict[str, Any]) -> str:
+    """``path`` relative to the library root; a path outside the root keeps its absolute segments."""
+    norm = os.path.normpath(path)
+    root = os.path.normpath(str(media_settings.get("root_folder_path") or "/music"))
+    try:
+        return str(Path(norm).relative_to(root))
+    except ValueError:
+        return norm.lstrip("/")
+
+
+def _flag_collisions(rows: list[dict[str, Any]]) -> None:
+    """Adds the ``collision`` reason (and clears ``default_selected``) on rows that share a proposed path."""
+    flags = flag_collisions([os.path.normpath(r["proposed_path"]) for r in rows])
+    for row, collides in zip(rows, flags):
+        if collides:
+            row["reasons"] = [*row["reasons"], COLLISION]
+            row["default_selected"] = False
 
 
 @router.post("/rename/preview", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=list[RenamePreviewItem], response_model_exclude_unset=True)
@@ -158,6 +188,7 @@ def rename_preview(
             row = _preview_row(db, t, db.get_library_file_for_track(t["id"]), media_settings, caches)
             if row:
                 preview_diffs.append(row)
+        _flag_collisions(preview_diffs)
         return preview_diffs
 
     for t, f in db.iter_library_files_for_rename(_RENAME_PAGE_SIZE):
@@ -166,6 +197,7 @@ def rename_preview(
             preview_diffs.append(row)
             if len(preview_diffs) >= limit:
                 break
+    _flag_collisions(preview_diffs)
     return preview_diffs
 
 
@@ -244,7 +276,7 @@ def rename_apply(
                 errors.append(f"Album or artist not found for track '{track['id']}'")
                 continue
 
-            meta = _rename_meta(db, track, album, artist, f, str(current_path), {})
+            meta = _rename_meta(db, track, album, artist, f, str(current_path), {}, media_settings)
             proposed = build_track_path(meta, media_settings)
             validate_media_path(proposed, db=db)
 

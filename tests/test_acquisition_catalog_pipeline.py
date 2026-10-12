@@ -782,3 +782,62 @@ def test_lidarr_mode_skips_native_catalog_upsert(test_db: Database, workspace_di
     assert len(tracks) == 0
     files = test_db.list_library_files()
     assert len(files) == 0
+
+
+def _import_one_for_mumford(test_db: Database, workspace_dirs, rename_artist_folders: bool) -> Path:
+    """Imports one catalog-matched track for an artist whose existing folder is 'Mumford & Sons'; returns its path."""
+    downloads_dir, music_dir = workspace_dirs
+    settings = test_db.get_media_management_settings()
+    settings.update({
+        "root_folder_path": str(music_dir), "library_mode": "native", "staging_folder_path": str(downloads_dir),
+        "enrich_mbids": False, "write_audio_tags": False, "artist_folder_format": "{Artist CleanName}",
+        "rename_artist_folders": rename_artist_folders,
+    })
+    test_db.update_media_management_settings(settings)
+    test_db.create_download_client(
+        DownloadClientConfig(id="c1", name="Slskd", driver_type=DownloadDriverType.SLSKD, host_url="http://slskd:5030")
+    )
+    test_db.upsert_library_artist(LibraryArtist(id="art-1", name="Mumford & Sons", path=str(music_dir / "Mumford & Sons")))
+    test_db.upsert_library_album(LibraryAlbum(id="alb-1", artist_id="art-1", title="Wilder Mind", year=2015))
+    test_db.upsert_library_track(
+        LibraryTrack(id="trk-1", album_id="alb-1", artist_id="art-1", title="Tompkins Square Park",
+                     track_number=1, disc_number=1)
+    )
+    test_db.create_active_download(
+        ActiveDownload(id="dl-1", client_id="c1", title="Mumford Wilder Mind", artist="Mumford & Sons",
+                       item_type="track", status=DownloadStatus.COMPLETED.value, download_hash="h",
+                       track_id="trk-1", album_id="alb-1")
+    )
+    dl = downloads_dir / "Mumford_Wilder_Mind"
+    af = dl / "01 - Tompkins Square Park.flac"
+    dl.mkdir(parents=True, exist_ok=True)
+    write_flac(af)
+    driver = MagicMock()
+    driver.get_status.return_value = {
+        "status": DownloadStatus.COMPLETED.value, "progress": 100.0, "size_bytes": 1, "speed_bps": 0,
+        "eta_seconds": 0, "source_path": str(dl), "error_message": None,
+    }
+    meta = {
+        "artist": "Mumford & Sons", "title": "Tompkins Square Park", "album": "Wilder Mind", "year": "2015",
+        "track_number": 1, "disc_number": 1, "total_discs": 1, "codec": "FLAC", "bits_per_sample": 16,
+        "bitrate": 900, "sample_rate": 44100, "extension": ".flac", "file_path": str(af),
+    }
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_import.inspect_audio_file", return_value=dict(meta)), \
+         patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=dict(meta)), \
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+        stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(downloads_dir))
+    assert stats["imported"] == 1
+    placed = list(music_dir.rglob("*.flac"))
+    assert len(placed) == 1
+    return placed[0].relative_to(music_dir)
+
+
+def test_import_lands_in_artist_existing_folder(test_db: Database, workspace_dirs):
+    rel = _import_one_for_mumford(test_db, workspace_dirs, rename_artist_folders=False)
+    assert rel.parts[0] == "Mumford & Sons"
+
+
+def test_import_renders_artist_folder_when_renaming_enabled(test_db: Database, workspace_dirs):
+    rel = _import_one_for_mumford(test_db, workspace_dirs, rename_artist_folders=True)
+    assert rel.parts[0] == "Mumford and Sons"

@@ -44,7 +44,7 @@ from trackseerr.models import (
     NotificationEvent,
     RequestStatus,
 )
-from trackseerr.naming import build_track_path
+from trackseerr.naming import build_track_path, existing_artist_folder
 from trackseerr.notifications import notification_dispatcher
 from trackseerr.redaction import safe_exc
 from trackseerr.quality import evaluate_release, parse_release_title
@@ -70,12 +70,21 @@ from trackseerr.track_matching import (
 logger = logging.getLogger(__name__)
 
 
-def _apply_catalog_album(metadata: dict[str, Any], album: dict[str, Any], artist: Optional[dict[str, Any]]) -> None:
-    """Re-labels a catalog-matched file with the catalog album/artist so compilation tags can't misfile it."""
+def _apply_catalog_album(
+    metadata: dict[str, Any],
+    album: dict[str, Any],
+    artist: Optional[dict[str, Any]],
+    media_settings: Optional[dict[str, Any]] = None,
+) -> None:
+    """Re-labels a catalog-matched file with the catalog album/artist so compilation tags can't misfile it.
+
+    The artist's existing folder (when ``rename_artist_folders`` is off) is kept, so a new album lands beside the old ones.
+    """
     metadata["album"] = album["title"]
     if artist:
         metadata["artist"] = artist["name"]
         metadata["album_artist"] = artist["name"]
+        metadata["artist_folder"] = existing_artist_folder(artist, media_settings or {})
     if album.get("year"):
         metadata["release_year"] = metadata["year"] = album["year"]
     else:
@@ -635,7 +644,10 @@ class ImportPipelineMixin(ImportCatalogMixin):
                 metadata["disc_number"] = int(matched_expected_track.get("disc_number") or 1)
                 if job.target_album:
                     _apply_catalog_album(
-                        metadata, job.target_album, db.get_library_artist(job.target_album["artist_id"])
+                        metadata,
+                        job.target_album,
+                        db.get_library_artist(job.target_album["artist_id"]),
+                        ctx.media_settings,
                     )
 
         if job.expected_tracks and matched_expected_track is None:

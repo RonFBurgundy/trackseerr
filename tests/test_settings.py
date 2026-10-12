@@ -196,6 +196,7 @@ class TestMediaManagementAPI:
             "root_folder_path": "/data/music",
             "colon_replacement_format": "_",
             "replace_illegal_characters": False,
+            "rename_artist_folders": True,
         }
         resp = client.post("/api/settings/media-management", json=payload, headers=admin_headers)
         assert resp.status_code == 200
@@ -203,10 +204,12 @@ class TestMediaManagementAPI:
         assert data["root_folder_path"] == "/data/music"
         assert data["colon_replacement_format"] == "_"
         assert data["replace_illegal_characters"] is False
+        assert data["rename_artist_folders"] is True
 
         # Verify DB persisted
         db_settings = test_db.get_media_management_settings()
         assert db_settings["replace_illegal_characters"] is False
+        assert db_settings["rename_artist_folders"] is True
         refetched = client.get("/api/settings/media-management", headers=admin_headers).json()
         assert refetched["settings"]["replace_illegal_characters"] is False
         assert db_settings["root_folder_path"] == "/data/music"

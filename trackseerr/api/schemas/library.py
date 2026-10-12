@@ -522,6 +522,8 @@ class RenamePreviewItem(ApiModel):
     current_path: str
     proposed_path: str
     needs_rename: bool
+    reasons: list[str]
+    default_selected: bool
 
 
 class RenameApplyResponse(ApiModel):

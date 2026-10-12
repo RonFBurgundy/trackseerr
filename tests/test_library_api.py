@@ -1072,6 +1072,69 @@ def test_rename_preview_does_not_touch_filesystem(
     assert [r["file_id"] for r in resp.json()] == ["rf-1"]
 
 
+def _seed_mumford(db: Database, root: Path, idx: int = 1, title: str = "Closer") -> str:
+    """Seeds an artist 'Mumford & Sons' whose folder already exists as <root>/Mumford & Sons."""
+    db.upsert_library_artist(
+        {"id": "ma", "name": "Mumford & Sons", "monitored": True, "path": str(root / "Mumford & Sons")}
+    )
+    db.upsert_library_album({"id": "mb", "artist_id": "ma", "title": title, "year": 2000, "monitored": True})
+    db.upsert_library_track({
+        "id": f"mt-{idx}", "album_id": "mb", "artist_id": "ma", "title": f"Song {idx}",
+        "track_number": idx, "disc_number": 1, "monitored": True,
+    })
+    old = root / "Mumford & Sons" / "Closer (2000)" / f"{idx:02d} - Song {idx}.flac"
+    db.upsert_library_file({"id": f"mf-{idx}", "track_id": f"mt-{idx}", "file_path": str(old),
+                            "relative_path": old.name, "codec": "FLAC"})
+    return f"mf-{idx}"
+
+
+def test_rename_preview_keeps_existing_artist_folder(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    test_db.update_media_management_settings({"artist_folder_format": "{Artist CleanName}"})
+    _seed_mumford(test_db, root)
+
+    assert client.post("/api/library/rename/preview", json={}, headers=headers).json() == []
+    rows = client.post("/api/library/rename/preview", json={"artist_id": "ma"}, headers=headers).json()
+    assert rows[0]["proposed_path"] == str(root / "Mumford & Sons" / "Closer (2000)" / "01 - Song 1.flac")
+    assert rows[0]["needs_rename"] is False and rows[0]["reasons"] == []
+
+    test_db.update_media_management_settings({"rename_artist_folders": True})
+    rows = client.post("/api/library/rename/preview", json={}, headers=headers).json()
+    assert [r["file_id"] for r in rows] == ["mf-1"]
+    assert rows[0]["proposed_path"].startswith(str(root / "Mumford and Sons") + "/")
+    assert rows[0]["reasons"] == ["artist_folder"]
+    assert rows[0]["default_selected"] is True
+
+
+def test_rename_preview_flags_collisions_and_unselects_them(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    test_db.upsert_library_artist({"id": "ca", "name": "Artist C", "monitored": True})
+    test_db.upsert_library_album({"id": "cb", "artist_id": "ca", "title": "Closer", "year": 2000, "monitored": True})
+    # Two catalog tracks with the same number and title: both files propose the same destination.
+    for n in (1, 2):
+        test_db.upsert_library_track({"id": f"ct-{n}", "album_id": "cb", "artist_id": "ca", "title": "Song",
+                                      "track_number": 1, "disc_number": 1, "monitored": True})
+        wrong = root / "Wrong" / f"{n}.flac"
+        test_db.upsert_library_file({"id": f"cf-{n}", "track_id": f"ct-{n}", "file_path": str(wrong),
+                                     "relative_path": wrong.name, "codec": "FLAC"})
+    rows = client.post("/api/library/rename/preview", json={}, headers=headers).json()
+    assert len(rows) == 2
+    assert rows[0]["proposed_path"] == rows[1]["proposed_path"]
+    for r in rows:
+        assert "collision" in r["reasons"]
+        assert r["default_selected"] is False
+
+
 def test_iter_library_files_for_rename_keyset_batches(test_db: Database):
     test_db.upsert_library_artist({"id": "ar", "name": "A", "monitored": True})
     test_db.upsert_library_album({"id": "al", "artist_id": "ar", "title": "T", "year": 2000, "monitored": True})

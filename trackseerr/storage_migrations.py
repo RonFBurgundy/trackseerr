@@ -64,6 +64,7 @@ class MigrationsMixin:
                 (76, self._migration_v76),
                 (77, self._migration_v77),
                 (78, self._migration_v78),
+                (79, self._migration_v79),
             ]
 
             applied = 0
@@ -150,6 +151,14 @@ class MigrationsMixin:
         if "replace_illegal_characters" not in {row[1] for row in cur.fetchall()}:
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN replace_illegal_characters INTEGER NOT NULL DEFAULT 1"
+            )
+
+    def _migration_v79(self, cur: sqlite3.Cursor) -> None:
+        """v79: Add media_management_settings.rename_artist_folders (off: rename keeps each artist's existing folder)."""
+        cur.execute("PRAGMA table_info(media_management_settings)")
+        if "rename_artist_folders" not in {row[1] for row in cur.fetchall()}:
+            cur.execute(
+                "ALTER TABLE media_management_settings ADD COLUMN rename_artist_folders INTEGER NOT NULL DEFAULT 0"
             )
 
     def _migration_v78(self, cur: sqlite3.Cursor) -> None:

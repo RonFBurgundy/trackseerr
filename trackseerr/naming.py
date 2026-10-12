@@ -3,6 +3,7 @@
 cross-platform path sanitizer, and path builder for TrackSeerr.
 """
 
+import os
 import re
 import unicodedata
 from pathlib import Path
@@ -96,6 +97,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "root_folder_path": "/music",
         "colon_replacement_format": " - ",
         "replace_illegal_characters": True,
+        "rename_artist_folders": False,
     },
     # TRaSH Guides has no official Lidarr naming page; this mirrors the Lidarr defaults the
     # community recommends (artist/album in the file name so loose files stay identifiable).
@@ -112,6 +114,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "root_folder_path": "/music",
         "colon_replacement_format": " - ",
         "replace_illegal_characters": True,
+        "rename_artist_folders": False,
     },
     # Plex's documented layout: Artist/Album/NN - Title. Multi-disc albums stay in one folder
     # with the disc number prefixed to the track number (101, 102, 201, ...).
@@ -123,6 +126,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "root_folder_path": "/music",
         "colon_replacement_format": " - ",
         "replace_illegal_characters": True,
+        "rename_artist_folders": False,
     },
     # Lidarr's out-of-the-box naming (full-path model).
     "Lidarr Default": {
@@ -138,6 +142,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "root_folder_path": "/music",
         "colon_replacement_format": " - ",
         "replace_illegal_characters": True,
+        "rename_artist_folders": False,
     },
     "Clean Minimal": _legacy_preset(
         artist_folder_format="{Artist CleanName}",
@@ -148,6 +153,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         root_folder_path="/music",
         colon_replacement_format="_",
         replace_illegal_characters=True,
+        rename_artist_folders=False,
     ),
     "Audiophile / Detailed": _legacy_preset(
         artist_folder_format="{Artist Name}",
@@ -158,6 +164,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         root_folder_path="/music",
         colon_replacement_format=" - ",
         replace_illegal_characters=True,
+        rename_artist_folders=False,
     ),
 }
 
@@ -804,6 +811,32 @@ def _guess_extension(meta: dict[str, Any]) -> str:
     return str(ext).strip() if ext else ""
 
 
+def _fixed_artist_folder(value: Any) -> str:
+    """An existing artist folder name to use verbatim; empty when absent or unsafe (separator or '..')."""
+    name = str(value or "").strip()
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        return ""
+    return name
+
+
+def existing_artist_folder(artist: dict[str, Any] | None, settings: dict[str, Any]) -> str | None:
+    """Folder name of a library artist's existing directory, when rename should keep it.
+
+    Returns the basename of ``artist["path"]`` when ``rename_artist_folders`` is off and that path lies directly
+    under the library root; otherwise None (the artist folder is rendered from the format).
+    """
+    if not artist or settings.get("rename_artist_folders"):
+        return None
+    path = str(artist.get("path") or "").strip()
+    root = str(settings.get("root_folder_path") or "").strip()
+    if not path or not root:
+        return None
+    norm = os.path.normpath(path)
+    if os.path.normpath(os.path.dirname(norm)) != os.path.normpath(root):
+        return None
+    return _fixed_artist_folder(os.path.basename(norm)) or None
+
+
 def build_path_parts(
     metadata: dict[str, Any],
     settings: dict[str, Any],
@@ -812,7 +845,7 @@ def build_path_parts(
     """Renders the sanitized path pieces: ``artist`` folder, ``folders`` (below the artist) and ``file`` name.
 
     ``multi_disc`` forces which track format is used (used for previews); ``None`` auto-detects from
-    the metadata.
+    the metadata. ``metadata["artist_folder"]`` (an existing folder name) replaces the rendered artist folder.
     """
     colon_replacement = str(settings.get("colon_replacement_format") or DEFAULT_COLON_REPLACEMENT)
     replace_illegal = bool(settings.get("replace_illegal_characters", DEFAULT_REPLACE_ILLEGAL))
@@ -836,7 +869,7 @@ def build_path_parts(
     if is_compilation and (not meta.get("artist") or album_artist.lower() in ("various artists", "various")):
         artist_meta = dict(meta)
         artist_meta["artist"] = album_artist or "Various Artists"
-    artist_component = render(artist_format, artist_meta)
+    artist_component = _fixed_artist_folder(meta.get("artist_folder")) or render(artist_format, artist_meta)
     if not artist_component:
         artist_component = "Various Artists" if is_compilation else "Unknown Artist"
 
