@@ -243,6 +243,46 @@ def test_search_with_fallback_rung1_unfiltered():
     assert m.call_count == 1
 
 
+def _slskd_file(stem, folder="ALEX - AKUMA (2019)", item_type="track"):
+    return AcquisitionSearchResult(
+        download_id=stem, title=f"{stem} [FLAC 16bit 44.1kHz]", artist="", item_type=item_type, source="slskd",
+        protocol="slskd", extra={"filename": f"Music\\ALEX\\{folder}\\{stem}.flac"},
+    )
+
+
+def test_search_with_fallback_rung1_drops_wrong_slskd_file():
+    wrong = _slskd_file("01 - 05 - Danger City")
+    right = _slskd_file("03 - AKUMA")
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", return_value=[wrong, right]) as m:
+        out = AcquisitionCoordinator().search_with_fallback("ALEX", "AKUMA", "AKUMA", MagicMock())
+    assert out == [right]
+    assert m.call_count == 1
+
+
+def test_search_with_fallback_rung1_all_wrong_slskd_falls_through():
+    wrong = _slskd_file("01 - 05 - Danger City")
+    right = _slskd_file("03 - AKUMA")
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", side_effect=[[wrong], [right]]) as m:
+        out = AcquisitionCoordinator().search_with_fallback("ALEX, BT", "AKUMA (feat. X)", "AKUMA", MagicMock())
+    assert out == [right]
+    assert m.call_count == 2
+
+
+def test_search_with_fallback_rung1_keeps_torrent_results():
+    torrent = _result("Totally Unrelated Name")
+    wrong = _slskd_file("01 - 05 - Danger City")
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", return_value=[torrent, wrong]):
+        out = AcquisitionCoordinator().search_with_fallback("ALEX", "AKUMA", "AKUMA", MagicMock())
+    assert out == [torrent]
+
+
+def test_search_with_fallback_album_request_does_not_filter_slskd_rung1():
+    folder = _slskd_file("Whatever", item_type="album")
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", return_value=[folder]):
+        out = AcquisitionCoordinator().search_with_fallback("ALEX", None, "AKUMA", MagicMock())
+    assert out == [folder]
+
+
 def test_search_with_fallback_exhausted_returns_empty():
     with patch.object(AcquisitionCoordinator, "search_all_indexers", return_value=[]) as m:
         out = AcquisitionCoordinator().search_with_fallback(_MP_ARTIST, _MP_TITLE, None, MagicMock())

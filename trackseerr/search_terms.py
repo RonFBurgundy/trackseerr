@@ -102,9 +102,19 @@ def build_query_ladder(artist: str, title: Optional[str], album: Optional[str]) 
     return rungs[:3]
 
 
-def matches_request(candidate_text: str, artist: str, title: Optional[str], album: Optional[str]) -> bool:
-    """Relevance gate for fallback rungs: the candidate must name the artist, contain the title core, and any requested remixer."""
-    candidate_title = candidate_text
+def matches_request(
+    candidate_text: str,
+    artist: str,
+    title: Optional[str],
+    album: Optional[str],
+    title_text: Optional[str] = None,
+) -> bool:
+    """Relevance gate for fallback rungs: the candidate must name the artist, contain the title core, and any requested remixer.
+
+    ``candidate_text`` is checked for the artist; the title/remixer checks use ``title_text`` when given (e.g. a
+    Soulseek file name, so an album folder in the path cannot satisfy the title) and ``candidate_text`` otherwise.
+    """
+    candidate_title = title_text if title_text is not None else candidate_text
     if (artist or "").strip() and not (
         phrase_score(primary_artist(artist), candidate_text) >= _MIN_RELEVANCE
         or phrase_score(artist, candidate_text) >= _MIN_RELEVANCE
