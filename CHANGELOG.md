@@ -13,6 +13,8 @@ heading becomes the version and date.
 
 ### Added
 
+- Renames keep each artist's existing folder, as Lidarr does, and new downloads for that artist go into it too; only album folders and file names are tidied. A new "Rename artist folders" switch in the naming settings renames artist folders as well when you want them consistent.
+- The rename preview says why each file would move (artist folder, loose file, format only, album year or title changed, disc layout, track number or title changed, name collision), lets you filter by reason, and pre-selects only the safe, format-only moves. It shows up to 5,000 moves.
 - Tracks now record their own artists (performer, featured artists, remixers) from MusicBrainz, file tags and remix titles, so a compilation track knows it is by the Bee Gees rather than "Various Artists". Run "Track Artist Credits Backfill" on the Tasks page once to fill this in for an existing library; scans and refreshes keep it up to date.
 - Media Management has a "Replace illegal characters" switch, as in Lidarr: on, "?" becomes "!" and "*" becomes "-"; off, they are removed. The switch sits in the naming settings and is applied by presets.
 - Activity has a Searches tab listing every indexer and Soulseek search Trackseerr ran: the query, how many results came back, how long it took, and what triggered it (request, wanted sweep, manual search, retry...). Kept for 30 days.
