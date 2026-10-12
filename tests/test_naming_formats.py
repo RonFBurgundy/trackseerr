@@ -332,7 +332,7 @@ def test_all_presets_replace_illegal_characters():
     assert all(p["replace_illegal_characters"] for p in PRESETS.values())
     meta = dict(META, title="Why? Not", total_discs=1, disc_number=1)
     path = build_track_path(meta, settings_for("Trackseerr"))
-    assert other.endswith("/01 - How Do You Sleep!.flac")
+    assert path.endswith("/01 - Why! Not.flac")
 
 
 OFFSPRING = {
