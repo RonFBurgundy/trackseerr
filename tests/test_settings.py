@@ -66,32 +66,28 @@ class TestMediaManagementStorage:
     """Validates DB migration v7 and CRUD operations."""
 
     def test_default_settings_initialized(self, test_db):
+        from trackseerr.naming import PRESETS
+
         settings = test_db.get_media_management_settings()
-        assert settings["artist_folder_format"] == "{Artist Name}"
-        assert settings["album_folder_format"] == "{Album Title} ({Release Year}){[ - Album Type]}"
-        # Lidarr-style: the track formats are full paths relative to the artist folder (album folder included)
-        assert settings["standard_track_format"] == (
-            "{Album Title} ({Release Year}){[ - Album Type]}/{track:00} - {Track Title}{[ (Quality Full)]}"
-        )
-        assert settings["multi_disc_track_format"] == (
-            "{Album Title} ({Release Year}){[ - Album Type]}/{Medium Format} {medium:00}/"
-            "{track:00} - {Track Title}{[ (Quality Full)]}"
-        )
-        assert settings["compilation_track_format"] == "{track:00} - {Artist Name} - {Track Title}{[ (Quality Full)]}"
-        assert settings["multi_disc_folder_format"] == "{Medium Format} {medium:00}"
+        preset = PRESETS["Trackseerr"]
+        for key in (
+            "artist_folder_format",
+            "standard_track_format",
+            "multi_disc_track_format",
+            "compilation_track_format",
+            "colon_replacement_format",
+            "replace_illegal_characters",
+        ):
+            assert settings[key] == preset[key], key
         assert settings["root_folder_path"] == "/data/media/music"
-        assert settings["colon_replacement_format"] == " - "
-        assert settings["clean_artist_names"] is True
-        assert settings["replace_illegal_characters"] is True
+        assert "clean_artist_names" not in settings
 
     def test_update_settings_partial_and_full(self, test_db):
         updated = test_db.update_media_management_settings({
             "artist_folder_format": "{Artist CleanName}",
-            "clean_artist_names": False,
             "colon_replacement_format": "_",
         })
         assert updated["artist_folder_format"] == "{Artist CleanName}"
-        assert updated["clean_artist_names"] is False
         assert updated["colon_replacement_format"] == "_"
         # Unchanged fields remain intact
         assert updated["root_folder_path"] == "/data/media/music"
@@ -99,7 +95,6 @@ class TestMediaManagementStorage:
         # Verify persistence on subsequent fetch
         fetched = test_db.get_media_management_settings()
         assert fetched["artist_folder_format"] == "{Artist CleanName}"
-        assert fetched["clean_artist_names"] is False
 
     def test_migration_v9(self, test_db):
         cursor = test_db.conn.cursor()
@@ -180,7 +175,7 @@ class TestMediaManagementAPI:
         assert "settings" in data
         assert data["settings"]["artist_folder_format"] == "{Artist Name}"
         assert "presets" in data
-        assert "Lidarr Standard" in data["presets"]
+        assert "Lidarr Default" in data["presets"]
         assert "Clean Minimal" in data["presets"]
         assert "Audiophile / Detailed" in data["presets"]
 
@@ -200,7 +195,6 @@ class TestMediaManagementAPI:
         payload = {
             "root_folder_path": "/data/music",
             "colon_replacement_format": "_",
-            "clean_artist_names": False,
             "replace_illegal_characters": False,
         }
         resp = client.post("/api/settings/media-management", json=payload, headers=admin_headers)
@@ -208,7 +202,6 @@ class TestMediaManagementAPI:
         data = resp.json()
         assert data["root_folder_path"] == "/data/music"
         assert data["colon_replacement_format"] == "_"
-        assert data["clean_artist_names"] is False
         assert data["replace_illegal_characters"] is False
 
         # Verify DB persisted
@@ -235,17 +228,17 @@ class TestMediaManagementAPI:
         # 1. Standard single disc
         std = previews_by_id["standard"]
         assert std["name"] == "Standard Single-Disc Track"
-        assert std["output_path"] == "/data/media/music/Pink Floyd/The Dark Side of the Moon (1973)/01 - Speak to Me (FLAC 24bit 96kHz).flac"
+        assert std["output_path"] == "/data/media/music/Pink Floyd/The Dark Side of the Moon (1973)/01 - Speak to Me.flac"
 
         # 2. Multi-disc track
         multi = previews_by_id["multi_disc"]
         assert multi["name"] == "Multi-Disc Track (Disc 2)"
-        assert multi["output_path"] == "/data/media/music/The Beatles/The Beatles (White Album) (1968)/CD 02/01 - Revolution 1 (FLAC 16bit 44.1kHz).flac"
+        assert multi["output_path"] == "/data/media/music/The Beatles/The Beatles (White Album) (1968)/Disc 02/01 - Revolution 1.flac"
 
         # 3. Compilation track
         comp = previews_by_id["compilation"]
         assert comp["name"] == "Compilation / Various Artists Track"
-        assert comp["output_path"] == "/data/media/music/Various Artists/Wayne's World - Music from the Motion Picture (1992) - Soundtrack/01 - Queen - Bohemian Rhapsody (MP3 320kbps).mp3"
+        assert comp["output_path"] == "/data/media/music/Various Artists/Wayne's World - Music from the Motion Picture - [Soundtrack] (1992)/01 - Bohemian Rhapsody.mp3"
 
     def test_live_preview_with_custom_template_overrides(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client

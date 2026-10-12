@@ -63,6 +63,7 @@ class MigrationsMixin:
                 (75, self._migration_v75),
                 (76, self._migration_v76),
                 (77, self._migration_v77),
+                (78, self._migration_v78),
             ]
 
             applied = 0
@@ -150,6 +151,12 @@ class MigrationsMixin:
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN replace_illegal_characters INTEGER NOT NULL DEFAULT 1"
             )
+
+    def _migration_v78(self, cur: sqlite3.Cursor) -> None:
+        """v78: Drop media_management_settings.clean_artist_names (it never affected rendered names)."""
+        cur.execute("PRAGMA table_info(media_management_settings)")
+        if "clean_artist_names" in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE media_management_settings DROP COLUMN clean_artist_names")
 
     def _migration_v77(self, cur: sqlite3.Cursor) -> None:
         """v77: Add library_track_artists (per-track artist credits: primary / featured / remixer)."""
@@ -351,15 +358,13 @@ class MigrationsMixin:
             (secrets.token_hex(16),),
         )
 
-        # 8. Media management settings
+        # 8. Media management settings (naming formats come from the schema defaults = the Trackseerr preset)
         cur.execute(
             """
             INSERT INTO media_management_settings (
-                id, standard_track_format, multi_disc_track_format, mb_mirror_url, add_monitor_option, seed_complete_action
+                id, mb_mirror_url, add_monitor_option, seed_complete_action
             ) VALUES (
                 1,
-                '{Album Title} ({Release Year}){[ - Album Type]}/{track:00} - {Track Title}{[ (Quality Full)]}',
-                '{Album Title} ({Release Year}){[ - Album Type]}/{Medium Format} {medium:00}/{track:00} - {Track Title}{[ (Quality Full)]}',
                 'https://api.brainzmash.cc',
                 'existing',
                 'keep'

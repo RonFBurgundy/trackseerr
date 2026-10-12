@@ -57,18 +57,10 @@ SUPPORTED_TOKENS: list[str] = [
     "MediaInfo SampleRate",
 ]
 
-DEFAULT_ARTIST_FOLDER_FORMAT = "{Artist Name}"
-DEFAULT_ALBUM_FOLDER_FORMAT = "{Album Title} ({Release Year}){[ - Album Type]}"
-DEFAULT_LEGACY_TRACK_FILE_FORMAT = "{track:00} - {Track Title}{[ (Quality Full)]}"
-DEFAULT_LEGACY_DISC_FOLDER_FORMAT = "{Medium Format} {medium:00}"
-DEFAULT_COMPILATION_TRACK_FORMAT = "{track:00} - {Artist Name} - {Track Title}{[ (Quality Full)]}"
-
-# Lidarr-style formats: the track formats are a '/'-separated path *relative to the artist
-# folder*; every segment but the last is a folder, the last is the file name (no extension).
-DEFAULT_STANDARD_TRACK_FORMAT = f"{DEFAULT_ALBUM_FOLDER_FORMAT}/{DEFAULT_LEGACY_TRACK_FILE_FORMAT}"
-DEFAULT_MULTI_DISC_TRACK_FORMAT = (
-    f"{DEFAULT_ALBUM_FOLDER_FORMAT}/{DEFAULT_LEGACY_DISC_FOLDER_FORMAT}/{DEFAULT_LEGACY_TRACK_FILE_FORMAT}"
-)
+# Legacy split-format building blocks, used only to compose full-path formats from old-style settings.
+_LEGACY_ALBUM_FOLDER_FORMAT = "{Album Title} ({Release Year}){[ - Album Type]}"
+_LEGACY_TRACK_FILE_FORMAT = "{track:00} - {Track Title}{[ (Quality Full)]}"
+_LEGACY_DISC_FOLDER_FORMAT = "{Medium Format} {medium:00}"
 
 
 def legacy_to_track_formats(settings: dict[str, Any]) -> tuple[str, str]:
@@ -77,9 +69,9 @@ def legacy_to_track_formats(settings: dict[str, Any]) -> tuple[str, str]:
     Legacy settings stored the album folder, disc folder and file name separately; this joins
     them so old data renders identically under the full-path model.
     """
-    album = str(settings.get("album_folder_format") or DEFAULT_ALBUM_FOLDER_FORMAT)
-    track = str(settings.get("standard_track_format") or DEFAULT_LEGACY_TRACK_FILE_FORMAT)
-    disc = str(settings.get("multi_disc_folder_format") or DEFAULT_LEGACY_DISC_FOLDER_FORMAT)
+    album = str(settings.get("album_folder_format") or _LEGACY_ALBUM_FOLDER_FORMAT)
+    track = str(settings.get("standard_track_format") or _LEGACY_TRACK_FILE_FORMAT)
+    disc = str(settings.get("multi_disc_folder_format") or _LEGACY_DISC_FOLDER_FORMAT)
     return f"{album}/{track}", f"{album}/{disc}/{track}"
 
 
@@ -95,7 +87,7 @@ def _legacy_preset(**legacy: Any) -> dict[str, Any]:
 # Preset templates
 PRESETS: dict[str, dict[str, Any]] = {
     "Trackseerr": {
-        "artist_folder_format": "{Artist CleanName}",
+        "artist_folder_format": "{Artist Name}",
         "standard_track_format": "{Album Title}{ - [{Album Type}]}{ (Release Year)}/{track:00} - {Track Title}",
         "multi_disc_track_format": (
             "{Album Title}{ - [{Album Type}]}{ (Release Year)}/Disc {medium:00}/{track:00} - {Track Title}"
@@ -103,8 +95,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "compilation_track_format": "",
         "root_folder_path": "/music",
         "colon_replacement_format": " - ",
-        "clean_artist_names": True,
-        "replace_illegal_characters": False,
+        "replace_illegal_characters": True,
     },
     # TRaSH Guides has no official Lidarr naming page; this mirrors the Lidarr defaults the
     # community recommends (artist/album in the file name so loose files stay identifiable).
@@ -120,7 +111,6 @@ PRESETS: dict[str, dict[str, Any]] = {
         "compilation_track_format": "",
         "root_folder_path": "/music",
         "colon_replacement_format": " - ",
-        "clean_artist_names": False,
         "replace_illegal_characters": True,
     },
     # Plex's documented layout: Artist/Album/NN - Title. Multi-disc albums stay in one folder
@@ -132,20 +122,23 @@ PRESETS: dict[str, dict[str, Any]] = {
         "compilation_track_format": "",
         "root_folder_path": "/music",
         "colon_replacement_format": " - ",
-        "clean_artist_names": False,
         "replace_illegal_characters": True,
     },
-    "Lidarr Standard": _legacy_preset(
-        artist_folder_format="{Artist Name}",
-        album_folder_format="{Album Title} ({Release Year}){[ - Album Type]}",
-        standard_track_format="{track:00} - {Track Title}{[ (Quality Full)]}",
-        compilation_track_format="{track:00} - {Artist Name} - {Track Title}{[ (Quality Full)]}",
-        multi_disc_folder_format="{Medium Format} {medium:00}",
-        root_folder_path="/music",
-        colon_replacement_format=" - ",
-        clean_artist_names=True,
-        replace_illegal_characters=True,
-    ),
+    # Lidarr's out-of-the-box naming (full-path model).
+    "Lidarr Default": {
+        "artist_folder_format": "{Artist Name}",
+        "standard_track_format": (
+            "{Album Title} ({Release Year})/{Artist Name} - {Album Title} - {track:00} - {Track Title}"
+        ),
+        "multi_disc_track_format": (
+            "{Album Title} ({Release Year})/{Medium Format} {medium:00}/"
+            "{Artist Name} - {Album Title} - {track:00} - {Track Title}"
+        ),
+        "compilation_track_format": "",
+        "root_folder_path": "/music",
+        "colon_replacement_format": " - ",
+        "replace_illegal_characters": True,
+    },
     "Clean Minimal": _legacy_preset(
         artist_folder_format="{Artist CleanName}",
         album_folder_format="{Album CleanTitle} ({Release Year})",
@@ -154,7 +147,6 @@ PRESETS: dict[str, dict[str, Any]] = {
         multi_disc_folder_format="Disc {medium:0}",
         root_folder_path="/music",
         colon_replacement_format="_",
-        clean_artist_names=True,
         replace_illegal_characters=True,
     ),
     "Audiophile / Detailed": _legacy_preset(
@@ -165,19 +157,55 @@ PRESETS: dict[str, dict[str, Any]] = {
         multi_disc_folder_format="{Medium Format} {medium:00}",
         root_folder_path="/music",
         colon_replacement_format=" - ",
-        clean_artist_names=False,
         replace_illegal_characters=True,
     ),
 }
 
 PRESET_DESCRIPTIONS: dict[str, str] = {
-    "Trackseerr": "Trackseerr default: artist folders use the clean name (\"The\" kept), illegal characters are removed rather than replaced (mirrors Lidarr with that option off), 'Album - [Type] (Year)' folders, Disc NN subfolders.",
-    "TRaSH Guides": "Lidarr-community style (TRaSH has no official Lidarr page): artist & album repeated in every file name.",
-    "Plex": "Plex's recommended Artist/Album/NN - Title layout; multi-disc albums use 101/201-style numbering in one folder.",
-    "Lidarr Standard": "Previous Trackseerr default with quality suffix on the file name.",
-    "Clean Minimal": "Lidarr-clean names (accents removed, & becomes and), underscore colon replacement.",
-    "Audiophile / Detailed": "Appends codec, bit depth and sample rate to every file name.",
+    "Trackseerr": (
+        "Default. Built for a clean, readable library that matches MusicBrainz: names exactly as the artist writes "
+        "them (accents and & kept), characters a filesystem can't store are replaced the way Lidarr does (? -> !, "
+        "* -> -, / -> +), album type and year on every album folder, Disc NN subfolders. File names stay stable across quality upgrades."
+    ),
+    "TRaSH Guides": (
+        "The community-recommended Lidarr setup: like Lidarr Default plus artist and album disambiguation, so "
+        "same-named artists and albums never collide. Repeats artist and album in every file name, so a loose file "
+        "is still identifiable."
+    ),
+    "Plex": (
+        "Plex's recommended layout for the best automatic matching: Artist/Album/NN - Title, multi-disc albums in "
+        "one folder numbered 101, 102, 201. Short paths with nothing extra in them."
+    ),
+    "Lidarr Default": (
+        "Lidarr's out-of-the-box naming. Pick this if your library was built by Lidarr with its default settings so "
+        "nothing gets renamed. Artist and album are repeated in every file name."
+    ),
+    "Clean Minimal": (
+        "Lidarr-style clean names: accents removed, & written as and, punctuation dropped, colons replaced with _. "
+        "Good for older devices, car stereos and players that mishandle special characters."
+    ),
+    "Audiophile / Detailed": (
+        "Adds codec, bit depth and sample rate to every file name (e.g. [FLAC 24 96000]). Note: files are renamed "
+        "whenever their quality changes, such as after an upgrade."
+    ),
 }
+
+# Fresh-install defaults are exactly the Trackseerr preset.
+_DEFAULT_PRESET = PRESETS["Trackseerr"]
+DEFAULT_ARTIST_FOLDER_FORMAT: str = _DEFAULT_PRESET["artist_folder_format"]
+DEFAULT_STANDARD_TRACK_FORMAT: str = _DEFAULT_PRESET["standard_track_format"]
+DEFAULT_MULTI_DISC_TRACK_FORMAT: str = _DEFAULT_PRESET["multi_disc_track_format"]
+DEFAULT_COMPILATION_TRACK_FORMAT: str = _DEFAULT_PRESET["compilation_track_format"]
+DEFAULT_COLON_REPLACEMENT: str = _DEFAULT_PRESET["colon_replacement_format"]
+DEFAULT_REPLACE_ILLEGAL: bool = _DEFAULT_PRESET["replace_illegal_characters"]
+_LEGACY_COMPILATION_TRACK_FORMAT = "{track:00} - {Artist Name} - {Track Title}{[ (Quality Full)]}"
+
+_LEGACY_FORMAT_KEYS = ("album_folder_format", "standard_track_format", "multi_disc_folder_format")
+
+
+def _uses_legacy_split_formats(settings: dict[str, Any]) -> bool:
+    """True for settings that predate the full-path model: legacy keys present, no multi_disc_track_format."""
+    return settings.get("multi_disc_track_format") is None and any(k in settings for k in _LEGACY_FORMAT_KEYS)
 
 
 def strip_leading_articles(name: str | None) -> str:
@@ -190,10 +218,15 @@ def strip_leading_articles(name: str | None) -> str:
 
 _CLEAN_TITLE_PUNCT = re.compile(
     r"(?<=\s)(,|<|>|/|\\|;|:|'|\"|\||`|~|!|\?|@|\$|%|\^|\*|-|_|=){1}(?=\s)"
-    r"|('|`|:|\?|,)(?=(?:(?:s|m|t|ve|ll|d|re)\s)|\s|$)"
+    r"|('|:|\?|,)(?=(?:(?:s|m)\s)|\s|$)"
     r"|(\(|\)|\[|\]|\{|\})",
     re.IGNORECASE,
 )
+
+
+def _trim_track_title(title: str) -> str:
+    """Lidarr trims trailing spaces, dots and '?' from track titles ('Voodoo?' -> 'Voodoo'); interior ones stay."""
+    return title.strip().rstrip(" .?")
 
 
 def _remove_diacritics(text: str) -> str:
@@ -296,29 +329,31 @@ def truncate_utf8_bytes(s: str, max_bytes: int = 255) -> str:
 def sanitize_component(name: str, colon_replacement: str = " - ", replace_illegal: bool = True) -> str:
     """Sanitizes a single directory or file path component across Windows, Linux, and macOS.
 
-    - Colon: with the default " - " ("smart", Lidarr's default) ': ' becomes " - " and a bare ':' becomes "-"
-      ('45:33' -> '45-33'); any other colon_replacement replaces ':' and following whitespace.
-    - Strips directory traversal sequences ('..').
+    - Normalizes to Unicode NFC so composed and decomposed accents yield identical bytes.
+    - Colon: with ``replace_illegal`` on, the default " - " ("smart", Lidarr's default) turns ': ' into " - " and a
+      bare ':' into "-" ('45:33' -> '45-33'); any other colon_replacement replaces ':' and following whitespace.
+      With it off, colons are deleted regardless of the colon format (as Lidarr does).
     - With ``replace_illegal`` (Lidarr's "Replace illegal characters") maps '/' and '\\' -> '+', '?' -> '!',
       '*' -> '-' and removes < > " |; without it all of \\ / < > ? * | " are simply removed.
+    - Dots inside a title are kept ('Flashdance... What a Feeling'); a component made only of dots ('..') becomes ''.
     - Strips ASCII control characters (0x00-0x1F).
-    - Strips leading spaces and dots (Lidarr's TrimStart).
     - Collapses redundant whitespace.
     - Truncates to max 255 bytes on clean UTF-8 code point boundaries.
-    - Strips trailing spaces and dots (preventing SMB/CIFS and Windows filesystem errors).
+    - Strips leading spaces and dots, and trailing spaces and dots. Lidarr only trims trailing spaces from file
+      names; trailing dots are stripped here as well because they break Windows/SMB (a deliberate difference).
     """
     if not name:
         return ""
+    name = unicodedata.normalize("NFC", str(name))
 
-    if colon_replacement == " - ":
+    if not replace_illegal:
+        result = name.replace(":", "")
+    elif colon_replacement == " - ":
         # Smart (Lidarr default): ': ' -> ' - ', bare ':' -> '-'
-        result = re.sub(r":\s+", " - ", str(name))
-        result = result.replace(":", "-")
+        result = re.sub(r":\s+", " - ", name).replace(":", "-")
     else:
         # Replace colons and any immediately following whitespace
-        result = re.sub(r":\s*", colon_replacement, str(name))
-    # Prevent directory traversal
-    result = re.sub(r"\.{2,}", "", result)
+        result = re.sub(r":\s*", colon_replacement, name)
     if replace_illegal:
         # Lidarr maps '/' to '+' ('AC/DC' -> 'AC+DC'), '?' -> '!' and '*' -> '-'; this also keeps tag-joined
         # names apart ('Daft Punk/Romanthony' -> 'Daft Punk+Romanthony')
@@ -327,18 +362,14 @@ def sanitize_component(name: str, colon_replacement: str = " - ", replace_illega
         result = re.sub(r'[<>"|]', "", result)
     else:
         result = re.sub(r'[\\/<>?*|"]', "", result)
-    # Strip ASCII controls
     result = re.sub(r"[\x00-\x1f]", "", result)
-    # Collapse redundant spaces
     result = re.sub(r"\s+", " ", result).strip()
-    # Truncate to 255 bytes UTF-8 cleanly
     result = truncate_utf8_bytes(result, 255)
-    # Strip trailing periods and spaces
-    result = result.lstrip(" .").rstrip(" .")
+    result = result.lstrip(" .").rstrip(" .")  # also guarantees a component is never '.' or '..'
     return result
 
 
-def resolve_token(token: str, metadata: dict[str, Any], clean_artist_names: bool = False) -> str | None:  # noqa: C901, PLR0915
+def resolve_token(token: str, metadata: dict[str, Any]) -> str | None:  # noqa: C901, PLR0915
     """Resolves a token identifier against metadata."""
     t = token.strip()
 
@@ -448,9 +479,9 @@ def resolve_token(token: str, metadata: dict[str, Any], clean_artist_names: bool
             return "1"
     if t == "Track Title":
         val = metadata.get("title") or metadata.get("track_title")
-        return str(val).strip() if val else None
+        return _trim_track_title(str(val)) if val else None
     if t in ("Track TitleThe", "Track CleanTitleThe"):
-        val = metadata.get("title") or metadata.get("track_title") or ""
+        val = _trim_track_title(str(metadata.get("title") or metadata.get("track_title") or ""))
         if t == "Track CleanTitleThe":
             val = clean_name(str(val))
         return move_leading_article(str(val)) or None
@@ -513,7 +544,7 @@ def resolve_token(token: str, metadata: dict[str, Any], clean_artist_names: bool
     return None
 
 
-def _evaluate_conditional_block(block_content: str, metadata: dict[str, Any], clean_artist_names: bool = False) -> str:
+def _evaluate_conditional_block(block_content: str, metadata: dict[str, Any]) -> str:
     """Evaluates the inner content of a conditional block.
 
     If all resolved tokens are non-empty, replaces tokens and keeps prefixes/suffixes.
@@ -538,7 +569,7 @@ def _evaluate_conditional_block(block_content: str, metadata: dict[str, Any], cl
     # Verify that all tokens in the conditional block resolve to non-empty values
     resolved_values: dict[str, str] = {}
     for tok in found_tokens:
-        val = resolve_token(tok, metadata, clean_artist_names=clean_artist_names)
+        val = resolve_token(tok, metadata)
         if not val:
             return ""
         resolved_values[tok] = val
@@ -562,7 +593,7 @@ _BARE_TOKEN_RE = re.compile(
 )
 
 
-def _render_nested_block(match: re.Match[str], metadata: dict[str, Any], clean_artist_names: bool) -> str:
+def _render_nested_block(match: re.Match[str], metadata: dict[str, Any]) -> str:
     """Lidarr-style optional block with inner tokens, e.g. ``{ - [{Album Type}]}``.
 
     Everything outside the inner ``{Token}``s (prefix, suffix, brackets) is kept literally and the
@@ -570,16 +601,16 @@ def _render_nested_block(match: re.Match[str], metadata: dict[str, Any], clean_a
     """
     content = match.group(1)
     for tok in _BRACE_BLOCK_RE.findall(content):
-        if not resolve_token(tok, metadata, clean_artist_names=clean_artist_names):
+        if not resolve_token(tok, metadata):
             return ""
 
     def sub(m: re.Match[str]) -> str:
-        return resolve_token(m.group(1), metadata, clean_artist_names=clean_artist_names) or ""
+        return resolve_token(m.group(1), metadata) or ""
 
     return _BRACE_BLOCK_RE.sub(sub, content)
 
 
-def _render_brace_block(match: re.Match[str], metadata: dict[str, Any], clean_artist_names: bool) -> str:
+def _render_brace_block(match: re.Match[str], metadata: dict[str, Any]) -> str:
     """Renders ``{Token}`` or a Lidarr optional block with bare tokens such as ``{ (Release Year)}``.
 
     A plain token (no surrounding whitespace/punctuation) resolves to its value or "". Anything
@@ -588,14 +619,14 @@ def _render_brace_block(match: re.Match[str], metadata: dict[str, Any], clean_ar
     """
     content = match.group(1)
     if _PURE_TOKEN_RE.match(content):
-        return resolve_token(content, metadata, clean_artist_names=clean_artist_names) or ""
+        return resolve_token(content, metadata) or ""
 
     tokens = _BARE_TOKEN_RE.findall(content)
     if not tokens:
         return ""
     values: dict[str, str] = {}
     for tok in tokens:
-        val = resolve_token(tok, metadata, clean_artist_names=clean_artist_names)
+        val = resolve_token(tok, metadata)
         if not val:
             return ""
         values[tok] = val
@@ -605,7 +636,6 @@ def _render_brace_block(match: re.Match[str], metadata: dict[str, Any], clean_ar
 def render_template(
     template: str,
     metadata: dict[str, Any],
-    clean_artist_names: bool = False,
     colon_replacement: str = " - ",
 ) -> str:
     """Renders a token naming template with conditional block evaluation and token replacement.
@@ -625,23 +655,23 @@ def render_template(
     # 1. Legacy {[prefix Token suffix]} conditional blocks (brackets are delimiters, not output)
     def replace_bracket_conditional(match: re.Match[str]) -> str:
         inner = match.group(1)
-        return _evaluate_conditional_block(inner, metadata, clean_artist_names=clean_artist_names)
+        return _evaluate_conditional_block(inner, metadata)
 
     result = re.sub(r"\{\[(.*?)\]\}", replace_bracket_conditional, result)
 
     # 2. Legacy {(Token)} conditional blocks
     def replace_paren_conditional(match: re.Match[str]) -> str:
         inner = match.group(1)
-        eval_res = _evaluate_conditional_block(inner, metadata, clean_artist_names=clean_artist_names)
+        eval_res = _evaluate_conditional_block(inner, metadata)
         return f"({eval_res})" if eval_res else ""
 
     result = re.sub(r"\{\((.*?)\)\}", replace_paren_conditional, result)
 
     # 3. Lidarr optional blocks with nested {Token}s, e.g. { - [{Album Type}]}
-    result = _NESTED_BLOCK_RE.sub(lambda m: _render_nested_block(m, metadata, clean_artist_names), result)
+    result = _NESTED_BLOCK_RE.sub(lambda m: _render_nested_block(m, metadata), result)
 
     # 4. Plain {Token}s and Lidarr optional blocks with bare tokens, e.g. { (Release Year)}
-    result = _BRACE_BLOCK_RE.sub(lambda m: _render_brace_block(m, metadata, clean_artist_names), result)
+    result = _BRACE_BLOCK_RE.sub(lambda m: _render_brace_block(m, metadata), result)
 
     # 5. Clean up any remaining double spaces or dangling formatting artifacts
     result = re.sub(r" +", " ", result).strip()
@@ -673,10 +703,12 @@ def resolve_track_formats(settings: dict[str, Any]) -> tuple[str, str]:
     Settings that predate the Lidarr-style model (no ``multi_disc_track_format`` key) are composed
     from the legacy album/disc/file formats so existing callers render unchanged.
     """
-    if settings.get("multi_disc_track_format") is None:
+    if _uses_legacy_split_formats(settings):
         return legacy_to_track_formats(settings)
 
     standard = str(settings.get("standard_track_format") or DEFAULT_STANDARD_TRACK_FORMAT)
+    if settings.get("multi_disc_track_format") is None:
+        return standard, DEFAULT_MULTI_DISC_TRACK_FORMAT
     multi = str(settings.get("multi_disc_track_format") or "").strip()
     if not multi:
         # No explicit multi-disc format: put a disc folder between the album folder(s) and the file.
@@ -782,13 +814,12 @@ def build_path_parts(
     ``multi_disc`` forces which track format is used (used for previews); ``None`` auto-detects from
     the metadata.
     """
-    colon_replacement = str(settings.get("colon_replacement_format") or " - ")
-    clean_artist_names = bool(settings.get("clean_artist_names", True))
-    replace_illegal = bool(settings.get("replace_illegal_characters", True))
+    colon_replacement = str(settings.get("colon_replacement_format") or DEFAULT_COLON_REPLACEMENT)
+    replace_illegal = bool(settings.get("replace_illegal_characters", DEFAULT_REPLACE_ILLEGAL))
     artist_format = str(settings.get("artist_folder_format") or DEFAULT_ARTIST_FOLDER_FORMAT)
     compilation_track_format = str(settings.get("compilation_track_format") or "").strip()
-    if "compilation_track_format" not in settings and settings.get("multi_disc_track_format") is None:
-        compilation_track_format = DEFAULT_COMPILATION_TRACK_FORMAT  # legacy callers
+    if "compilation_track_format" not in settings and _uses_legacy_split_formats(settings):
+        compilation_track_format = _LEGACY_COMPILATION_TRACK_FORMAT  # legacy callers
     standard_format, multi_format = resolve_track_formats(settings)
 
     meta = dict(metadata)
@@ -796,7 +827,7 @@ def build_path_parts(
     is_compilation = _detect_compilation(meta)
 
     def render(fmt: str, m: dict[str, Any]) -> str:
-        raw = render_template(fmt, m, clean_artist_names=clean_artist_names, colon_replacement=colon_replacement)
+        raw = render_template(fmt, m, colon_replacement=colon_replacement)
         raw = re.sub(r"\s*(\(\s*\)|\[\s*\])", "", raw)  # drop empty ()/[] left by missing tokens
         return sanitize_component(raw, colon_replacement=colon_replacement, replace_illegal=replace_illegal)
 

@@ -39,7 +39,7 @@ def settings_for(preset: str, **extra):
 
 def test_trackseerr_preset_keeps_leading_article():
     assert render_template(PRESETS["Trackseerr"]["artist_folder_format"], {"artist": "The Offspring"}) == "The Offspring"
-    assert render_template(PRESETS["Trackseerr"]["artist_folder_format"], {"artist": "AC/DC"}) == "AC DC"
+    assert render_template(PRESETS["Trackseerr"]["artist_folder_format"], {"artist": "AC/DC"}) == "AC/DC"
 
 
 class TestOptionalBlocks:
@@ -79,7 +79,7 @@ class TestSegments:
     def test_slash_in_token_value_does_not_split(self):
         meta = dict(META, artist="AC/DC", total_discs=1, disc_number=1)
         path = build_track_path(meta, settings_for("Trackseerr"))
-        assert path.startswith("/music/AC DC/")
+        assert path.startswith("/music/AC+DC/")
 
 
 class TestPresets:
@@ -195,7 +195,7 @@ class TestPreviewApi:
         data = client.post("/api/settings/media-management/preview", json=body, headers=headers).json()
         fp = data["format_previews"]
         assert set(fp) == {"artist_folder_format", "standard_track_format", "multi_disc_track_format"}
-        assert fp["artist_folder_format"]["format"] == "{Artist CleanName}"
+        assert fp["artist_folder_format"]["format"] == "{Artist Name}"
         by_id = {s["sample_id"]: s["output"] for s in fp["artist_folder_format"]["samples"]}
         assert by_id["multi_disc"] == "The Beatles"
         typed = {s["sample_id"]: s["output"] for s in fp["standard_track_format"]["samples"]}
@@ -328,11 +328,128 @@ def test_sanitize_strips_leading_dots():
     assert sanitize_component(" . .Hidden") == "Hidden"
 
 
-def test_trackseerr_preset_does_not_replace_illegal_characters():
-    assert PRESETS["Trackseerr"]["replace_illegal_characters"] is False
-    assert all(p["replace_illegal_characters"] for n, p in PRESETS.items() if n != "Trackseerr")
-    meta = dict(META, title="How Do You Sleep?", total_discs=1, disc_number=1)
+def test_all_presets_replace_illegal_characters():
+    assert all(p["replace_illegal_characters"] for p in PRESETS.values())
+    meta = dict(META, title="Why? Not", total_discs=1, disc_number=1)
     path = build_track_path(meta, settings_for("Trackseerr"))
-    assert path.endswith("/01 - How Do You Sleep.flac")
-    other = build_track_path(meta, settings_for("Trackseerr", replace_illegal_characters=True))
     assert other.endswith("/01 - How Do You Sleep!.flac")
+
+
+OFFSPRING = {
+    "artist": "The Offspring",
+    "album": "Smash",
+    "title": "Come Out and Play?",
+    "album_type": "Album",
+    "release_year": 1994,
+    "track_number": 3,
+    "disc_number": 1,
+    "total_discs": 1,
+    "extension": ".flac",
+}
+NAMING_KEYS = (
+    "artist_folder_format",
+    "standard_track_format",
+    "multi_disc_track_format",
+    "compilation_track_format",
+    "colon_replacement_format",
+    "replace_illegal_characters",
+)
+
+
+def test_defaults_equal_trackseerr_preset():
+    from_empty = build_track_path(OFFSPRING, {"root_folder_path": "/music"})
+    from_preset = build_track_path(OFFSPRING, settings_for("Trackseerr"))
+    assert from_empty == from_preset
+    multi = dict(OFFSPRING, disc_number=2, total_discs=2)
+    assert build_track_path(multi, {"root_folder_path": "/music"}) == build_track_path(multi, settings_for("Trackseerr"))
+
+
+def test_fresh_db_settings_equal_trackseerr_preset(tmp_path):
+    db = Database(str(tmp_path / "fresh.db"))
+    try:
+        settings = db.get_media_management_settings()
+    finally:
+        db.close()
+    for key in NAMING_KEYS:
+        assert settings[key] == PRESETS["Trackseerr"][key], key
+    assert "clean_artist_names" not in settings
+    assert build_track_path(OFFSPRING, dict(settings, root_folder_path="/music")) == build_track_path(
+        OFFSPRING, settings_for("Trackseerr")
+    )
+
+
+def test_lidarr_default_preset_paths():
+    assert "Lidarr Standard" not in PRESETS
+    settings = settings_for("Lidarr Default")
+    assert build_track_path(OFFSPRING, settings) == (
+        "/music/The Offspring/Smash (1994)/The Offspring - Smash - 03 - Come Out and Play.flac"
+    )
+    multi = dict(OFFSPRING, disc_number=2, total_discs=2)
+    assert build_track_path(multi, settings) == (
+        "/music/The Offspring/Smash (1994)/CD 02/The Offspring - Smash - 03 - Come Out and Play.flac"
+    )
+
+
+def test_preset_order_and_descriptions():
+    from trackseerr.naming import PRESET_DESCRIPTIONS
+
+    assert list(PRESETS) == [
+        "Trackseerr", "TRaSH Guides", "Plex", "Lidarr Default", "Clean Minimal", "Audiophile / Detailed",
+    ]
+    assert set(PRESET_DESCRIPTIONS) == set(PRESETS)
+    assert PRESET_DESCRIPTIONS["Trackseerr"].startswith("Default.")
+    assert PRESET_DESCRIPTIONS["Audiophile / Detailed"].endswith("such as after an upgrade.")
+
+
+def test_sanitize_normalizes_to_nfc():
+    import unicodedata
+
+    from trackseerr.naming import sanitize_component
+
+    composed = "H\u00fcsker D\u00fc"
+    decomposed = unicodedata.normalize("NFD", composed)
+    assert composed != decomposed
+    assert sanitize_component(decomposed).encode() == sanitize_component(composed).encode() == composed.encode()
+
+
+@pytest.mark.parametrize(
+    ("artist", "folder"),
+    [("Ti\u00ebsto", "Ti\u00ebsto"), ("Mumford & Sons", "Mumford & Sons"), ("R\u00dcF\u00dcS DU SOL", "R\u00dcF\u00dcS DU SOL"), ("AC/DC", "AC+DC")],
+)
+def test_trackseerr_preset_keeps_artist_names_as_written(artist, folder):
+    path = build_track_path(dict(OFFSPRING, artist=artist), settings_for("Trackseerr"))
+    assert path.startswith(f"/music/{folder}/")
+
+
+def test_track_title_trailing_question_mark_trimmed():
+    assert render_template("{Track Title}", {"title": "Voodoo?"}) == "Voodoo"
+    assert render_template("{Track Title}", {"title": "How Do You Sleep?"}) == "How Do You Sleep"
+    assert render_template("{Track TitleThe}", {"title": "The Voodoo?"}) == "Voodoo, The"
+    path = build_track_path(dict(OFFSPRING, title="Why? Not"), settings_for("Trackseerr"))
+    assert path.endswith("03 - Why! Not.flac")
+
+
+def test_sanitize_keeps_interior_dots_and_rejects_dot_only_components():
+    from trackseerr.naming import sanitize_component
+
+    assert sanitize_component("Flashdance... What a Feeling") == "Flashdance... What a Feeling"
+    for bad in ("..", "...", ". .", "/..", "../"):
+        assert sanitize_component(bad) not in (".", "..")
+        assert sanitize_component(bad).strip(".") == sanitize_component(bad)
+    assert sanitize_component("..") == ""
+
+
+def test_sanitize_colon_handling_depends_on_replace_flag():
+    from trackseerr.naming import sanitize_component
+
+    assert sanitize_component("Part: One 12:30", replace_illegal=False) == "Part One 1230"
+    assert sanitize_component("Part: One 12:30", replace_illegal=False, colon_replacement="_") == "Part One 1230"
+    assert sanitize_component("Part: One 12:30", replace_illegal=True) == "Part - One 12-30"
+
+
+def test_clean_title_apostrophe_rules():
+    from trackseerr.naming import clean_name
+
+    assert clean_name("Lightnin' Luke") == "Lightnin Luke"
+    assert clean_name("Don't Stop") == "Don't Stop"
+    assert clean_name("Rock 'n' Roll") == "Rock 'n Roll"

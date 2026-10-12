@@ -88,7 +88,7 @@ class TestTokenReplacement:
         assert render_template("{MediaInfo SampleRate}", metadata) == "44.1kHz"
         assert render_template("{MediaInfo BitDepth}", metadata) == "16bit"
 
-    def test_clean_artist_names_tokens(self):
+    def test_artist_clean_name_keeps_the(self):
         metadata = {"artist": "The Beatles"}
         assert render_template("{Artist Name}", metadata) == "The Beatles"
         assert render_template("{Artist CleanName}", metadata) == "The Beatles"
@@ -201,7 +201,6 @@ class TestPathBuilder:
             "compilation_track_format": "{track:00} - {Artist Name} - {Track Title}{[ (Quality Full)]}",
             "multi_disc_folder_format": "{Medium Format} {medium:00}",
             "colon_replacement_format": " - ",
-            "clean_artist_names": False,
         }
 
     def test_standard_single_disc_path(self, default_settings):
@@ -301,6 +300,6 @@ class TestPathBuilder:
             "extension": ".flac",
         }
         path = build_track_path(malicious_meta, default_settings)
-        assert ".." not in path
+        assert ".." not in path.split("/")  # no component can climb; dots inside a joined name are harmless
         assert path.startswith("/music/")
         assert "etc/shadow" not in path
