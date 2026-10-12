@@ -62,6 +62,7 @@ heading becomes the version and date.
 ### Fixed
 
 - Importing from Lidarr or refreshing an artist no longer merges a single into an album with the same title (e.g. "R.A.M.O.N.E.S." into "Ramones", the "Wild Ones" single into the album), which had renamed the album, changed its year and moved its tracks. Albums imported from Lidarr also keep their type (single, EP, live, compilation). Wipe and re-import an affected library.
+- A library scan files tracks under the album matching their MusicBrainz release group tag before trying the album title, so a single is no longer filed onto an album with the same name.
 - File names now treat characters that aren't allowed in them the way Lidarr does: "*" becomes "-" (D*Minds → D-Minds), "?" becomes "!", "\" becomes "+", and a colon without a space after it becomes "-" (45:33 → 45-33), so renaming a Lidarr library no longer moves these files.
 - The rename preview shows full paths (scroll sideways on narrow screens) and highlights the part that changes.
 - Naming tokens {Artist CleanName}, {Album CleanTitle}, {Track CleanTitle} and {Track ArtistCleanName} now work like Lidarr's: they remove characters that aren't allowed in file names and keep a leading "The" (The Offspring stays The Offspring; AC/DC becomes ACDC). The CleanNameThe/CleanTitleThe variants clean the name and move the article to the end. Elsewhere a "/" becomes "+" as in Lidarr.
