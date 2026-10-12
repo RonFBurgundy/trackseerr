@@ -124,12 +124,13 @@ def test_migration_v73_applies_on_v72_database(tmp_path):
     path = str(tmp_path / "m.db")
     d = Database(path)
     d.conn.execute("DROP TABLE track_aliases")
-    d.conn.execute("UPDATE schema_migrations SET version = 72 WHERE version = 74")
+    d.conn.execute("DELETE FROM schema_migrations WHERE version >= 73")
+    d.conn.execute("INSERT INTO schema_migrations (version) VALUES (72)")
     d.conn.commit()
     d.close()
     d2 = Database(path)
     try:
-        assert d2.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 74
+        assert d2.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
         assert _alias(d2)["id"] == 1
     finally:
         d2.close()

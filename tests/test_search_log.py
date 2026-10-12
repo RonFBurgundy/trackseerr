@@ -7,7 +7,7 @@ from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db
 from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.config import Config
-from trackseerr.storage import Database
+from trackseerr.storage import SCHEMA_VERSION, Database
 
 
 @pytest.fixture
@@ -28,12 +28,13 @@ def test_migration_v74_creates_search_log_and_remote_state(tmp_path):
     d = Database(path)
     d.conn.execute("DROP TABLE search_log")
     d.conn.execute("ALTER TABLE active_downloads DROP COLUMN remote_state")
-    d.conn.execute("UPDATE schema_migrations SET version = 73 WHERE version = 74")
+    d.conn.execute("DELETE FROM schema_migrations WHERE version >= 74")
+    d.conn.execute("INSERT INTO schema_migrations (version) VALUES (73)")
     d.conn.commit()
     d.close()
     d2 = Database(path)
     try:
-        assert d2.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 74
+        assert d2.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
         assert d2.conn.execute("SELECT COUNT(*) FROM search_log").fetchone()[0] == 0
         cols = {r[1] for r in d2.conn.execute("PRAGMA table_info(active_downloads)")}
         assert "remote_state" in cols
