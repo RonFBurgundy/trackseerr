@@ -41,6 +41,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- New installs use the Trackseerr naming preset: artist and album names exactly as written (accents and & kept), Lidarr's handling of characters a filesystem can't store (? → !, * → -, / → +), a "?" at the end of a track title dropped as Lidarr does, and "..." in titles kept. "Lidarr Standard" is now "Lidarr Default" with Lidarr's real out-of-the-box naming, every preset explains who it is for, and the unused "clean artist names" setting is gone.
 - A failed download (torrent, Usenet or Soulseek) now searches for the track again right away instead of waiting for the next wanted sweep; a failed album download re-searches its tracks.
 - A torrent that has downloaded nothing after 2 hours (no seeders) is removed, blocklisted and searched again. Torrents with any progress, or seeding, are never touched. Set `TORRENT_DEAD_MINUTES` or a client's `dead_torrent_minutes` to change the wait.
 - A Soulseek download still queued by the peer is given up after 15 minutes (was 30) and another source is searched at once.
@@ -60,10 +61,6 @@ heading becomes the version and date.
 - Artist and album metadata from MusicBrainz and Deezer is now stored locally and refreshed on a schedule, so artist refreshes make far fewer requests to those services. Refreshing an artist by hand always fetches fresh data.
 - When the MusicBrainz mirror is down, TrackSeerr switches to musicbrainz.org without waiting on the mirror for every request. When both are down, scheduled refreshes pause and retry the skipped artists on the next run.
 - Deezer requests are paced to stay under Deezer's rate limit, and a "quota exceeded" reply is retried instead of being treated as missing data.
-
-### Changed
-
-- New installs use the Trackseerr naming preset: artist and album names exactly as written (accents and & kept), Lidarr's handling of characters a filesystem can't store (? → !, * → -, / → +), a "?" at the end of a track title dropped as Lidarr does, and "..." in titles kept. "Lidarr Standard" is now "Lidarr Default" with Lidarr's real out-of-the-box naming, every preset explains who it is for, and the unused "clean artist names" setting is gone.
 
 ### Fixed
 
