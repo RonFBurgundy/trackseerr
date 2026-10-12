@@ -2745,7 +2745,10 @@ export interface paths {
         put?: never;
         /**
          * Rename Preview
-         * @description Previews proposed file path changes based on token naming templates and identifies files needing renaming.
+         * @description Previews proposed file path changes from the naming templates.
+         *
+         *     Album/artist scope returns up to ``limit`` tracks, including ones already in place. Library-wide scope scans the
+         *     whole library and returns only files that need a move, up to ``limit`` of them.
          */
         post: operations["rename_preview_api_library_rename_preview_post"];
         delete?: never;
