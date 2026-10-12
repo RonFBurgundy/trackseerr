@@ -289,8 +289,8 @@ def test_tagless_file_takes_title_and_number_from_its_name(db, tmp_path):
 
 
 def test_sanitize_component_keeps_words_apart_across_a_slash():
-    assert sanitize_component("Daft Punk/Romanthony") == "Daft Punk-Romanthony"
-    assert sanitize_component("AC/DC") == "AC-DC"
+    assert sanitize_component("Daft Punk/Romanthony") == "Daft Punk+Romanthony"
+    assert sanitize_component("AC/DC") == "AC+DC"
     assert "/" not in sanitize_component("a / b")
 
 

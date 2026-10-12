@@ -161,7 +161,7 @@ def rename_preview(
 
     offset = 0
     while len(preview_diffs) < limit:
-        page = db.list_library_tracks(limit=_RENAME_PAGE_SIZE, offset=offset)
+        page = db.list_library_tracks(limit=_RENAME_PAGE_SIZE, offset=offset, album_order=True)
         if not page:
             break
         offset += len(page)

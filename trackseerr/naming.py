@@ -94,7 +94,7 @@ def _legacy_preset(**legacy: Any) -> dict[str, Any]:
 # Preset templates
 PRESETS: dict[str, dict[str, Any]] = {
     "Trackseerr": {
-        "artist_folder_format": "{Artist CleanName}",
+        "artist_folder_format": "{Artist Name}",
         "standard_track_format": "{Album Title}{ - [{Album Type}]}{ (Release Year)}/{track:00} - {Track Title}",
         "multi_disc_track_format": (
             "{Album Title}{ - [{Album Type}]}{ (Release Year)}/Disc {medium:00}/{track:00} - {Track Title}"
@@ -164,7 +164,7 @@ PRESETS: dict[str, dict[str, Any]] = {
 }
 
 PRESET_DESCRIPTIONS: dict[str, str] = {
-    "Trackseerr": "Trackseerr default: clean artist folders, 'Album - [Type] (Year)' folders, Disc NN subfolders.",
+    "Trackseerr": "Trackseerr default: artist folders named as-is (Lidarr default), 'Album - [Type] (Year)' folders, Disc NN subfolders.",
     "TRaSH Guides": "Lidarr-community style (TRaSH has no official Lidarr page): artist & album repeated in every file name.",
     "Plex": "Plex's recommended Artist/Album/NN - Title layout; multi-disc albums use 101/201-style numbering in one folder.",
     "Lidarr Standard": "Previous Trackseerr default with quality suffix on the file name.",
@@ -265,7 +265,8 @@ def sanitize_component(name: str, colon_replacement: str = " - ") -> str:
 
     - Replaces ':' with colon_replacement.
     - Strips directory traversal sequences ('..').
-    - Strips illegal chars: < > " / \\ | ? * and ASCII control characters (0x00-0x1F).
+    - Replaces '/' with '+' (Lidarr's mapping).
+    - Strips illegal chars: < > " \\ | ? * and ASCII control characters (0x00-0x1F).
     - Collapses redundant whitespace.
     - Truncates to max 255 bytes on clean UTF-8 code point boundaries.
     - Strips trailing spaces and dots (preventing SMB/CIFS and Windows filesystem errors).
@@ -277,8 +278,9 @@ def sanitize_component(name: str, colon_replacement: str = " - ") -> str:
     result = re.sub(r":\s*", colon_replacement, str(name))
     # Prevent directory traversal
     result = re.sub(r"\.{2,}", "", result)
-    # A slash separates words in tags ('Daft Punk/Romanthony'): keep them apart instead of gluing them together
-    result = result.replace("/", "-")
+    # Lidarr maps '/' to '+' ('AC/DC' -> 'AC+DC'); match it so Lidarr-built folders are not renamed. This also
+    # keeps tag-joined names apart ('Daft Punk/Romanthony' -> 'Daft Punk+Romanthony')
+    result = result.replace("/", "+")
     # Strip illegal cross-platform characters and ASCII controls
     result = re.sub(r'[<>"\\|?*\x00-\x1f]', "", result)
     # Collapse redundant spaces
