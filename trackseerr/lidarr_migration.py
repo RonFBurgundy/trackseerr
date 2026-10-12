@@ -288,7 +288,9 @@ class LidarrMigrationJob:
 
         existing_album = (
             run.db.get_library_album_by_release_group_id(foreign_album_id) if foreign_album_id else None
-        ) or run.db.get_library_album_by_title(mapped_artist_id, album_title)
+        ) or run.db.get_library_album_by_title(
+            mapped_artist_id, album_title, release_group_id=foreign_album_id
+        )
         album_id = str(existing_album["id"]) if existing_album else str(uuid.uuid4())
 
         cover_url: Optional[str] = None
@@ -301,10 +303,22 @@ class LidarrMigrationJob:
                 cover_url = url_str
                 break
 
+        album_type = str(album.get("albumType") or "").strip().lower() or "album"
+        secondary_raw = album.get("secondaryTypes")
+        secondary_types: Optional[list[str]] = None
+        if isinstance(secondary_raw, list):
+            secondary_types = [
+                str(t.get("name") if isinstance(t, dict) else t).strip()
+                for t in secondary_raw
+                if (t.get("name") if isinstance(t, dict) else t)
+            ]
+
         album_model = LibraryAlbum(
             id=album_id,
             artist_id=mapped_artist_id,
             title=album_title,
+            album_type=album_type,
+            secondary_types=secondary_types,
             foreign_album_id=foreign_album_id,
             mb_release_group_id=foreign_album_id,
             release_date=release_date,

@@ -757,3 +757,28 @@ def test_ingest_and_refresh_auth_and_edge_cases(
     assert resp_net_err.status_code == 200
     assert resp_net_err.json()["name"] == "Resilient Artist"
     assert resp_net_err.json()["albums_ingested"] == 0
+
+
+def test_get_library_album_by_title_release_group_awareness(tmp_path: Path):
+    """Title lookup with a release group id never returns a row linked to a different release group."""
+    db = Database(str(tmp_path / "title_rg.db"))
+    try:
+        db.upsert_library_artist(LibraryArtist(id="a1", name="Band", monitored=True))
+        db.upsert_library_artist(LibraryArtist(id="a2", name="Other", monitored=True))
+        db.upsert_library_album({"id": "linked", "artist_id": "a1", "title": "Ramones", "mb_release_group_id": "rg-a"})
+
+        # No RG given: first row, current behaviour.
+        assert db.get_library_album_by_title("a1", "Ramones")["id"] == "linked"
+        # Differently-linked row is rejected.
+        assert db.get_library_album_by_title("a1", "Ramones", release_group_id="rg-b") is None
+        # Exact match accepted.
+        assert db.get_library_album_by_title("a1", "Ramones", release_group_id="rg-a")["id"] == "linked"
+
+        # Unlinked row accepted; exact match preferred over unlinked regardless of order.
+        db.upsert_library_album({"id": "unlinked", "artist_id": "a2", "title": "Same", "mb_release_group_id": None})
+        assert db.get_library_album_by_title("a2", "Same", release_group_id="rg-x")["id"] == "unlinked"
+        db.upsert_library_album({"id": "exact", "artist_id": "a2", "title": "Same!", "mb_release_group_id": "rg-x"})
+        assert db.get_library_album_by_title("a2", "Same", release_group_id="rg-x")["id"] == "exact"
+        assert db.get_library_album_by_title("a2", "Same", release_group_id="rg-y")["id"] == "unlinked"
+    finally:
+        db.close()

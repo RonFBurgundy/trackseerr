@@ -448,6 +448,40 @@ def test_refresh_matches_existing_track_by_recording_id(test_db: Database):
     assert n == 1
 
 
+def test_refresh_does_not_relink_album_to_other_release_group_with_same_clean_title(test_db: Database):
+    """A single sharing the album's title (different RG) must never overwrite the existing album."""
+    artist_id = "artist-wild-1"
+    test_db.upsert_library_artist(
+        LibraryArtist(id=artist_id, name="Flo Rida", mbid="mbid-flo", monitored=True, monitor_option="all")
+    )
+    test_db.upsert_library_album(
+        {"id": "alb-wild", "artist_id": artist_id, "title": "Wild Ones", "year": 2012,
+         "mb_release_group_id": "rg-album", "monitored": True}
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    enricher.get_artist_details.return_value = {"id": "mbid-flo"}
+    disco = [{"id": "rg-single", "title": "Wild Ones", "album_type": "single", "year": 2011}]
+    enricher.get_artist_discography.return_value = disco
+    enricher.get_artist_discography_result.return_value = (disco, True)
+    enricher.source_available.return_value = True
+    enricher.stats.return_value = {"network_requests": 0, "cache_hits": 0}
+    enricher.get_release_group_tracks.return_value = []
+    enricher.resolve_release_group.return_value = None
+    with patch.object(mediacover_service, "ensure_artwork", return_value=Path("/tmp/cover.jpg")):
+        result = refresh_single_artist(
+            artist_id=artist_id, db=test_db, enricher=enricher, discovery_client=MagicMock()
+        )
+    assert result["success"] is True
+    original = test_db.get_library_album("alb-wild")
+    assert original["mb_release_group_id"] == "rg-album"
+    assert original["year"] == 2012
+    assert original["album_type"] == "album"
+    single = test_db.get_library_album_by_release_group_id("rg-single")
+    assert single is not None
+    assert single["id"] != "alb-wild"
+    assert single["year"] == 2011
+
+
 # =========================================================================
 # Test 5: artist_refresh_worker lifecycle and status
 # =========================================================================

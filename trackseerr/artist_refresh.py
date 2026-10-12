@@ -352,7 +352,7 @@ def _upsert_album_for_release_group(st: _RefreshState, rg: dict[str, Any]) -> tu
     if rg_id:
         existing_alb = st.db.get_library_album_by_release_group_id(rg_id)
     if not existing_alb:
-        existing_alb = st.db.get_library_album_by_title(st.artist_id, title)
+        existing_alb = st.db.get_library_album_by_title(st.artist_id, title, release_group_id=rg_id)
         if existing_alb and existing_alb.get("mb_release_group_id"):
             st.relinked_by_title_ids.add(str(existing_alb["mb_release_group_id"]))
 
@@ -586,7 +586,7 @@ def _link_mb_release_groups(st: _RefreshState) -> None:
             if rg_id:
                 existing_alb = st.db.get_library_album_by_release_group_id(rg_id)
             if not existing_alb:
-                existing_alb = st.db.get_library_album_by_title(st.artist_id, title)
+                existing_alb = st.db.get_library_album_by_title(st.artist_id, title, release_group_id=rg_id)
             if existing_alb:
                 _update_album_from_release_group(st.db, existing_alb, rg, rg_id)
 
@@ -700,7 +700,7 @@ def _upsert_deezer_album(
     if foreign_album_id:
         existing_alb = st.db.get_library_album_by_foreign_id(foreign_album_id)
     if not existing_alb:
-        existing_alb = st.db.get_library_album_by_title(st.artist_id, album_title)
+        existing_alb = st.db.get_library_album_by_title(st.artist_id, album_title, release_group_id=foreign_album_id)
 
     year_val: Optional[int] = None
     if album.get("year") is not None:

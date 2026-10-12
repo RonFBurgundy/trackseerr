@@ -571,6 +571,10 @@ def test_ingest_existing_or_none_option_sets_no_deferred_flag(app_and_client, te
 def test_refresh_persists_first_release_date_from_enricher(test_db: Database):
     _artist(test_db, option="none")
     _album(test_db, "Studio LP", year=None)  # existing album without a date
+    # unlinked (e.g. imported before MusicBrainz linking) so the title fallback may attach the release group
+    with test_db._lock:
+        test_db.conn.execute("UPDATE library_albums SET mb_release_group_id = NULL WHERE id = 'Studio LP'")
+        test_db.conn.commit()
     _refresh_real(test_db, "ar", _mb_http())
     row = test_db.get_library_album("Studio LP")
     assert row["release_date"] == "2000-03-01" and row["year"] == 2000
