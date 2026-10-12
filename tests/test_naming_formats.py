@@ -271,3 +271,23 @@ def test_clean_name_keeps_article_and_drops_illegal_chars():
     assert render_template("{Track ArtistCleanName}", {"track_artist": "The Who/Live"}) == "The WhoLive"
     assert render_template("{Artist CleanNameThe}", {"artist": "The Who/Live"}) == "WhoLive, The"
     assert render_template("{Artist NameThe}", {"artist": "The Who"}) == "Who, The"
+
+
+def test_sanitize_matches_lidarr_character_map():
+    from trackseerr.naming import sanitize_component
+
+    assert sanitize_component("Warface (D*Minds remix)") == "Warface (D-Minds remix)"
+    assert sanitize_component("Why?") == "Why!"
+    assert sanitize_component("a\\b") == "a+b"
+    assert sanitize_component("AC/DC") == "AC+DC"
+    assert sanitize_component('<a>"b"|c') == "abc"
+    assert sanitize_component("a\x00b\x1fc") == "abc"
+
+
+def test_smart_colon_replacement():
+    from trackseerr.naming import sanitize_component
+
+    assert sanitize_component("45:33") == "45-33"
+    assert sanitize_component("Live: Tokyo") == "Live - Tokyo"
+    assert sanitize_component("45:33", colon_replacement="_") == "45_33"
+    assert sanitize_component("Live: Tokyo", colon_replacement="_") == "Live_Tokyo"

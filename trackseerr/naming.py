@@ -273,10 +273,11 @@ def truncate_utf8_bytes(s: str, max_bytes: int = 255) -> str:
 def sanitize_component(name: str, colon_replacement: str = " - ") -> str:
     """Sanitizes a single directory or file path component across Windows, Linux, and macOS.
 
-    - Replaces ':' with colon_replacement.
+    - Colon: with the default " - " ("smart", Lidarr's default) ': ' becomes " - " and a bare ':' becomes "-"
+      ('45:33' -> '45-33'); any other colon_replacement replaces ':' and following whitespace.
     - Strips directory traversal sequences ('..').
-    - Replaces '/' with '+' (Lidarr's mapping).
-    - Strips illegal chars: < > " \\ | ? * and ASCII control characters (0x00-0x1F).
+    - Maps characters the way Lidarr does: '/' and '\\' -> '+', '?' -> '!', '*' -> '-'.
+    - Strips illegal chars: < > " | and ASCII control characters (0x00-0x1F).
     - Collapses redundant whitespace.
     - Truncates to max 255 bytes on clean UTF-8 code point boundaries.
     - Strips trailing spaces and dots (preventing SMB/CIFS and Windows filesystem errors).
@@ -284,15 +285,22 @@ def sanitize_component(name: str, colon_replacement: str = " - ") -> str:
     if not name:
         return ""
 
-    # Replace colons and any immediately following whitespace
-    result = re.sub(r":\s*", colon_replacement, str(name))
+    if colon_replacement == " - ":
+        # Smart (Lidarr default): ': ' -> ' - ', bare ':' -> '-'
+        result = re.sub(r":\s+", " - ", str(name))
+        result = result.replace(":", "-")
+    else:
+        # Replace colons and any immediately following whitespace
+        result = re.sub(r":\s*", colon_replacement, str(name))
     # Prevent directory traversal
     result = re.sub(r"\.{2,}", "", result)
     # Lidarr maps '/' to '+' ('AC/DC' -> 'AC+DC'); match it so Lidarr-built folders are not renamed. This also
     # keeps tag-joined names apart ('Daft Punk/Romanthony' -> 'Daft Punk+Romanthony')
-    result = result.replace("/", "+")
+    result = result.replace("/", "+").replace("\\", "+")
+    # Lidarr maps '?' -> '!' and '*' -> '-' ('D*Minds' -> 'D-Minds')
+    result = result.replace("?", "!").replace("*", "-")
     # Strip illegal cross-platform characters and ASCII controls
-    result = re.sub(r'[<>"\\|?*\x00-\x1f]', "", result)
+    result = re.sub(r'[<>"|\x00-\x1f]', "", result)
     # Collapse redundant spaces
     result = re.sub(r"\s+", " ", result).strip()
     # Truncate to 255 bytes UTF-8 cleanly
