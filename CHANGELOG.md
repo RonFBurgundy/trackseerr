@@ -61,6 +61,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Artist and album art imported from Lidarr no longer shows as broken images. Imports now keep each image's original web address, and existing Lidarr paths are cleared on upgrade; run the artist metadata refresh from Tasks to fill the art back in.
 - The wanted sweep no longer re-searches the same alphabetical first 100 tracks every hour; it works through the whole list, least recently searched first.
 - Soulseek no longer grabs the wrong song from a folder named after the album (e.g. a track called "AKUMA" from an "AKUMA" album folder); the file name itself must match the track title.
 - Soulseek searches that are still collecting results are no longer cut off early, so fewer searches come back empty.
