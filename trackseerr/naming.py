@@ -94,7 +94,7 @@ def _legacy_preset(**legacy: Any) -> dict[str, Any]:
 # Preset templates
 PRESETS: dict[str, dict[str, Any]] = {
     "Trackseerr": {
-        "artist_folder_format": "{Artist Name}",
+        "artist_folder_format": "{Artist CleanName}",
         "standard_track_format": "{Album Title}{ - [{Album Type}]}{ (Release Year)}/{track:00} - {Track Title}",
         "multi_disc_track_format": (
             "{Album Title}{ - [{Album Type}]}{ (Release Year)}/Disc {medium:00}/{track:00} - {Track Title}"
@@ -164,7 +164,7 @@ PRESETS: dict[str, dict[str, Any]] = {
 }
 
 PRESET_DESCRIPTIONS: dict[str, str] = {
-    "Trackseerr": "Trackseerr default: artist folders named as-is (Lidarr default), 'Album - [Type] (Year)' folders, Disc NN subfolders.",
+    "Trackseerr": "Trackseerr default: artist folders use the clean name (illegal characters removed, \"The\" kept), 'Album - [Type] (Year)' folders, Disc NN subfolders.",
     "TRaSH Guides": "Lidarr-community style (TRaSH has no official Lidarr page): artist & album repeated in every file name.",
     "Plex": "Plex's recommended Artist/Album/NN - Title layout; multi-disc albums use 101/201-style numbering in one folder.",
     "Lidarr Standard": "Previous Trackseerr default with quality suffix on the file name.",

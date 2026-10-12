@@ -39,6 +39,7 @@ def settings_for(preset: str, **extra):
 
 def test_trackseerr_preset_keeps_leading_article():
     assert render_template(PRESETS["Trackseerr"]["artist_folder_format"], {"artist": "The Offspring"}) == "The Offspring"
+    assert render_template(PRESETS["Trackseerr"]["artist_folder_format"], {"artist": "AC/DC"}) == "ACDC"
 
 
 class TestOptionalBlocks:
@@ -78,7 +79,7 @@ class TestSegments:
     def test_slash_in_token_value_does_not_split(self):
         meta = dict(META, artist="AC/DC", total_discs=1, disc_number=1)
         path = build_track_path(meta, settings_for("Trackseerr"))
-        assert path.startswith("/music/AC+DC/")
+        assert path.startswith("/music/ACDC/")
 
 
 class TestPresets:
@@ -194,7 +195,7 @@ class TestPreviewApi:
         data = client.post("/api/settings/media-management/preview", json=body, headers=headers).json()
         fp = data["format_previews"]
         assert set(fp) == {"artist_folder_format", "standard_track_format", "multi_disc_track_format"}
-        assert fp["artist_folder_format"]["format"] == "{Artist Name}"
+        assert fp["artist_folder_format"]["format"] == "{Artist CleanName}"
         by_id = {s["sample_id"]: s["output"] for s in fp["artist_folder_format"]["samples"]}
         assert by_id["multi_disc"] == "The Beatles"
         typed = {s["sample_id"]: s["output"] for s in fp["standard_track_format"]["samples"]}
