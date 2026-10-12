@@ -22,7 +22,8 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
    check · Playlists & listening: playlist sync, scrobbles, mixes); within a group, scheduled tasks by next run, manual
    tasks last. Add the group to `TaskSpec` in `task_manager.py` so the order is defined server-side. Goal (user): easy to navigate, find a task fast, manage it quickly and cleanly, not cluttered — e.g. collapsible
    groups, a search/filter box, one compact row per task (name, status, last/next run) with actions (Run · Cancel ·
-   Pause · interval) in the row, details/history behind a click instead of always shown.
+   Pause · interval) in the row, details/history behind a click instead of always shown. Mobile-first and fully within the frontend skill (tape-deck controls, amber accent, sharp fillets, full-width
+   mobile layout) — shared primitives only (`TactileSwitch`, `SelectionCheckbox`), no browser-default controls.
 3. **P1 · Requesting a track that's already in the library.** Discover/search results don't always show the
    "In library" badge, so the request goes through; the track page does detect it. Two fixes: (a) server-side guard
    in `create_request` (`trackseerr/api/routes/requests.py` ~L89) — reject/short-circuit when the library has a
@@ -56,4 +57,10 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
 10. **P3 · New downloads with no catalog match** still render the artist folder from the format (no artist row);
     look up the library artist by name/MBID so they land in the existing folder too.
 11. **P3 · Rename preview response has no total** — the UI counts returned rows; add a total if the 5,000 cap is hit.
-12. **P3 · Housekeeping:** an 8-day-old `tsc -w` process from another session is running on the host.
+12. **P2 · Guard against browser-default controls regressing.** Two layers: (a) a global safety net in
+    `frontend/src/index.css` — `input[type=checkbox], input[type=radio], input[type=range] { accent-color:
+    var(--accent-amber) }` so a stray native control can never render blue; (b) a CI check (small node script next to
+    `frontend/scripts/gen-api.mjs`, run in the CI workflow beside `check:api`) failing on `blue-|indigo-|sky-` Tailwind
+    classes or a raw checkbox/radio outside `components/ui`. Rule already added to the frontend skill (Phase 4d #5,
+    Phase 6 gate 7).
+13. **P3 · Housekeeping:** an 8-day-old `tsc -w` process from another session is running on the host.
