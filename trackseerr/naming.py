@@ -4,6 +4,7 @@ cross-platform path sanitizer, and path builder for TrackSeerr.
 """
 
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -103,6 +104,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "root_folder_path": "/music",
         "colon_replacement_format": " - ",
         "clean_artist_names": True,
+        "replace_illegal_characters": False,
     },
     # TRaSH Guides has no official Lidarr naming page; this mirrors the Lidarr defaults the
     # community recommends (artist/album in the file name so loose files stay identifiable).
@@ -119,6 +121,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "root_folder_path": "/music",
         "colon_replacement_format": " - ",
         "clean_artist_names": False,
+        "replace_illegal_characters": True,
     },
     # Plex's documented layout: Artist/Album/NN - Title. Multi-disc albums stay in one folder
     # with the disc number prefixed to the track number (101, 102, 201, ...).
@@ -130,6 +133,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "root_folder_path": "/music",
         "colon_replacement_format": " - ",
         "clean_artist_names": False,
+        "replace_illegal_characters": True,
     },
     "Lidarr Standard": _legacy_preset(
         artist_folder_format="{Artist Name}",
@@ -140,6 +144,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         root_folder_path="/music",
         colon_replacement_format=" - ",
         clean_artist_names=True,
+        replace_illegal_characters=True,
     ),
     "Clean Minimal": _legacy_preset(
         artist_folder_format="{Artist CleanName}",
@@ -150,6 +155,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         root_folder_path="/music",
         colon_replacement_format="_",
         clean_artist_names=True,
+        replace_illegal_characters=True,
     ),
     "Audiophile / Detailed": _legacy_preset(
         artist_folder_format="{Artist Name}",
@@ -160,15 +166,16 @@ PRESETS: dict[str, dict[str, Any]] = {
         root_folder_path="/music",
         colon_replacement_format=" - ",
         clean_artist_names=False,
+        replace_illegal_characters=True,
     ),
 }
 
 PRESET_DESCRIPTIONS: dict[str, str] = {
-    "Trackseerr": "Trackseerr default: artist folders use the clean name (illegal characters removed, \"The\" kept), 'Album - [Type] (Year)' folders, Disc NN subfolders.",
+    "Trackseerr": "Trackseerr default: artist folders use the clean name (\"The\" kept), illegal characters are removed rather than replaced (mirrors Lidarr with that option off), 'Album - [Type] (Year)' folders, Disc NN subfolders.",
     "TRaSH Guides": "Lidarr-community style (TRaSH has no official Lidarr page): artist & album repeated in every file name.",
     "Plex": "Plex's recommended Artist/Album/NN - Title layout; multi-disc albums use 101/201-style numbering in one folder.",
     "Lidarr Standard": "Previous Trackseerr default with quality suffix on the file name.",
-    "Clean Minimal": "Illegal characters removed from names, underscore colon replacement.",
+    "Clean Minimal": "Lidarr-clean names (accents removed, & becomes and), underscore colon replacement.",
     "Audiophile / Detailed": "Appends codec, bit depth and sample rate to every file name.",
 }
 
@@ -181,14 +188,30 @@ def strip_leading_articles(name: str | None) -> str:
     return stripped.strip()
 
 
-_ILLEGAL_NAME_CHARS = re.compile(r'[/\\:*?"<>|\x00-\x1f\x7f]')
+_CLEAN_TITLE_PUNCT = re.compile(
+    r"(?<=\s)(,|<|>|/|\\|;|:|'|\"|\||`|~|!|\?|@|\$|%|\^|\*|-|_|=){1}(?=\s)"
+    r"|('|`|:|\?|,)(?=(?:(?:s|m|t|ve|ll|d|re)\s)|\s|$)"
+    r"|(\(|\)|\[|\]|\{|\})",
+    re.IGNORECASE,
+)
+
+
+def _remove_diacritics(text: str) -> str:
+    decomposed = unicodedata.normalize("NFD", text)
+    return unicodedata.normalize("NFC", "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn"))
 
 
 def clean_name(name: str | None) -> str:
-    """Removes characters illegal in file names (Lidarr 'Clean'); the leading article is kept."""
+    """Lidarr's FileNameBuilder.CleanTitle: '&' -> 'and', '/' -> space, droppable punctuation and
+    brackets removed, diacritics stripped. The leading article is kept; remaining illegal characters
+    are left for ``sanitize_component``."""
     if not name:
         return ""
-    return re.sub(r"\s+", " ", _ILLEGAL_NAME_CHARS.sub("", str(name))).strip()
+    title = str(name).replace("&", "and")
+    title = re.sub(r"[/]", " ", title)
+    title = _CLEAN_TITLE_PUNCT.sub("", title)
+    title = _remove_diacritics(title)
+    return re.sub(r"\s+", " ", title).strip()
 
 
 def move_leading_article(name: str | None) -> str:
@@ -270,14 +293,16 @@ def truncate_utf8_bytes(s: str, max_bytes: int = 255) -> str:
     return decoded.rstrip(" .")
 
 
-def sanitize_component(name: str, colon_replacement: str = " - ") -> str:
+def sanitize_component(name: str, colon_replacement: str = " - ", replace_illegal: bool = True) -> str:
     """Sanitizes a single directory or file path component across Windows, Linux, and macOS.
 
     - Colon: with the default " - " ("smart", Lidarr's default) ': ' becomes " - " and a bare ':' becomes "-"
       ('45:33' -> '45-33'); any other colon_replacement replaces ':' and following whitespace.
     - Strips directory traversal sequences ('..').
-    - Maps characters the way Lidarr does: '/' and '\\' -> '+', '?' -> '!', '*' -> '-'.
-    - Strips illegal chars: < > " | and ASCII control characters (0x00-0x1F).
+    - With ``replace_illegal`` (Lidarr's "Replace illegal characters") maps '/' and '\\' -> '+', '?' -> '!',
+      '*' -> '-' and removes < > " |; without it all of \\ / < > ? * | " are simply removed.
+    - Strips ASCII control characters (0x00-0x1F).
+    - Strips leading spaces and dots (Lidarr's TrimStart).
     - Collapses redundant whitespace.
     - Truncates to max 255 bytes on clean UTF-8 code point boundaries.
     - Strips trailing spaces and dots (preventing SMB/CIFS and Windows filesystem errors).
@@ -294,19 +319,22 @@ def sanitize_component(name: str, colon_replacement: str = " - ") -> str:
         result = re.sub(r":\s*", colon_replacement, str(name))
     # Prevent directory traversal
     result = re.sub(r"\.{2,}", "", result)
-    # Lidarr maps '/' to '+' ('AC/DC' -> 'AC+DC'); match it so Lidarr-built folders are not renamed. This also
-    # keeps tag-joined names apart ('Daft Punk/Romanthony' -> 'Daft Punk+Romanthony')
-    result = result.replace("/", "+").replace("\\", "+")
-    # Lidarr maps '?' -> '!' and '*' -> '-' ('D*Minds' -> 'D-Minds')
-    result = result.replace("?", "!").replace("*", "-")
-    # Strip illegal cross-platform characters and ASCII controls
-    result = re.sub(r'[<>"|\x00-\x1f]', "", result)
+    if replace_illegal:
+        # Lidarr maps '/' to '+' ('AC/DC' -> 'AC+DC'), '?' -> '!' and '*' -> '-'; this also keeps tag-joined
+        # names apart ('Daft Punk/Romanthony' -> 'Daft Punk+Romanthony')
+        result = result.replace("/", "+").replace("\\", "+")
+        result = result.replace("?", "!").replace("*", "-")
+        result = re.sub(r'[<>"|]', "", result)
+    else:
+        result = re.sub(r'[\\/<>?*|"]', "", result)
+    # Strip ASCII controls
+    result = re.sub(r"[\x00-\x1f]", "", result)
     # Collapse redundant spaces
     result = re.sub(r"\s+", " ", result).strip()
     # Truncate to 255 bytes UTF-8 cleanly
     result = truncate_utf8_bytes(result, 255)
     # Strip trailing periods and spaces
-    result = result.rstrip(" .")
+    result = result.lstrip(" .").rstrip(" .")
     return result
 
 
@@ -756,6 +784,7 @@ def build_path_parts(
     """
     colon_replacement = str(settings.get("colon_replacement_format") or " - ")
     clean_artist_names = bool(settings.get("clean_artist_names", True))
+    replace_illegal = bool(settings.get("replace_illegal_characters", True))
     artist_format = str(settings.get("artist_folder_format") or DEFAULT_ARTIST_FOLDER_FORMAT)
     compilation_track_format = str(settings.get("compilation_track_format") or "").strip()
     if "compilation_track_format" not in settings and settings.get("multi_disc_track_format") is None:
@@ -769,7 +798,7 @@ def build_path_parts(
     def render(fmt: str, m: dict[str, Any]) -> str:
         raw = render_template(fmt, m, clean_artist_names=clean_artist_names, colon_replacement=colon_replacement)
         raw = re.sub(r"\s*(\(\s*\)|\[\s*\])", "", raw)  # drop empty ()/[] left by missing tokens
-        return sanitize_component(raw, colon_replacement=colon_replacement)
+        return sanitize_component(raw, colon_replacement=colon_replacement, replace_illegal=replace_illegal)
 
     # Artist folder
     artist_meta = meta
@@ -836,7 +865,7 @@ TOKEN_HELP: list[dict[str, Any]] = [
         "group": "Artist",
         "tokens": [
             ("{Artist Name}", "The artist's name exactly as stored", "Artist Name"),
-            ("{Artist CleanName}", "Artist name with characters illegal in file names removed", "AC/DC -> ACDC"),
+            ("{Artist CleanName}", "Artist name, Lidarr-clean: & becomes and, accents removed, punctuation Lidarr drops is removed", "Blunts & Blondes -> Blunts and Blondes"),
             ("{Artist NameThe}", "Artist name with the leading article moved to the end", "Beatles, The"),
             ("{Artist CleanNameThe}", "Clean artist name with the leading article moved to the end", "Beatles, The"),
             ("{Artist NameFirstCharacter}", "First letter of the artist (article ignored), upper-case", "B"),
@@ -849,7 +878,7 @@ TOKEN_HELP: list[dict[str, Any]] = [
         "group": "Album",
         "tokens": [
             ("{Album Title}", "Album title", "The White Album"),
-            ("{Album CleanTitle}", "Album title with characters illegal in file names removed", "Re: Stacks -> Re Stacks"),
+            ("{Album CleanTitle}", "Album title, Lidarr-clean: & becomes and, accents removed, punctuation Lidarr drops is removed", "Re: Stacks -> Re Stacks"),
             ("{Album TitleThe}", "Album title with the leading article moved to the end", "White Album, The"),
             ("{Album CleanTitleThe}", "Clean album title with the leading article moved to the end", "White Album, The"),
             ("{Album TitleFirstCharacter}", "First letter of the album (article ignored), upper-case", "W"),
@@ -876,11 +905,11 @@ TOKEN_HELP: list[dict[str, Any]] = [
         "group": "Track",
         "tokens": [
             ("{Track Title}", "Track title", "Revolution 1"),
-            ("{Track CleanTitle}", "Track title with characters illegal in file names removed", "Why? -> Why"),
+            ("{Track CleanTitle}", "Track title, Lidarr-clean: & becomes and, accents removed, punctuation Lidarr drops is removed", "Tanerélle -> Tanerelle"),
             ("{Track TitleThe}", "Track title with the leading article moved to the end", "Fool on the Hill, The"),
             ("{Track CleanTitleThe}", "Clean track title with the leading article moved to the end", "Fool on the Hill, The"),
             ("{Track ArtistName}", "Artist of this track (differs from the album artist on compilations)", "The Beatles"),
-            ("{Track ArtistCleanName}", "Track artist with characters illegal in file names removed", "AC/DC -> ACDC"),
+            ("{Track ArtistCleanName}", "Track artist, Lidarr-clean: & becomes and, accents removed, punctuation Lidarr drops is removed", "Hüsker Dü -> Husker Du"),
             ("{Track ArtistNameThe}", "Track artist with the leading article moved to the end", "Beatles, The"),
             ("{Original Filename}", "File name the file had before renaming (no extension)", "01 revolution 1"),
             ("{track:00}", "Track number, 2 digits", "01"),

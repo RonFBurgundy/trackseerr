@@ -16,8 +16,8 @@ def test_db(tmp_path: Path):
     db.close()
 
 
-def test_schema_version_is_75() -> None:
-    assert SCHEMA_VERSION == 75
+def test_schema_version_is_at_least_75() -> None:
+    assert SCHEMA_VERSION >= 75
 
 
 def test_v75_clears_only_mediacover_paths(test_db: Database) -> None:

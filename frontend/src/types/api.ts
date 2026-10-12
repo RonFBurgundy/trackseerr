@@ -10053,6 +10053,12 @@ export interface components {
              */
             recycle_bin_permanent_delete: boolean;
             /**
+             * Replace Illegal Characters
+             * @description Replace illegal characters (\ / ? * become + + ! -) instead of removing them
+             * @default true
+             */
+            replace_illegal_characters: boolean;
+            /**
              * Root Folder Path
              * @description Base music library folder
              * @default /data/media/music
@@ -10169,6 +10175,8 @@ export interface components {
             recycle_bin_path?: string | null;
             /** Recycle Bin Permanent Delete */
             recycle_bin_permanent_delete?: boolean | null;
+            /** Replace Illegal Characters */
+            replace_illegal_characters?: boolean | null;
             /** Root Folder Path */
             root_folder_path?: string | null;
             /** Save Cover Art File */
@@ -11241,6 +11249,8 @@ export interface components {
             multi_disc_folder_format?: string | null;
             /** Multi Disc Track Format */
             multi_disc_track_format?: string | null;
+            /** Replace Illegal Characters */
+            replace_illegal_characters?: boolean | null;
             /** Root Folder Path */
             root_folder_path?: string | null;
             /** Seed Complete Action */

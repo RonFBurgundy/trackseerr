@@ -61,6 +61,7 @@ class MigrationsMixin:
                 (73, self._migration_v73),
                 (74, self._migration_v74),
                 (75, self._migration_v75),
+                (76, self._migration_v76),
             ]
 
             applied = 0
@@ -140,6 +141,14 @@ class MigrationsMixin:
                 if col not in existing:
                     continue
                 cur.execute(f"UPDATE {table} SET {col} = NULL WHERE {col} LIKE '/MediaCover/%'")
+
+    def _migration_v76(self, cur: sqlite3.Cursor) -> None:
+        """v76: Add media_management_settings.replace_illegal_characters (Lidarr's "Replace illegal characters")."""
+        cur.execute("PRAGMA table_info(media_management_settings)")
+        if "replace_illegal_characters" not in {row[1] for row in cur.fetchall()}:
+            cur.execute(
+                "ALTER TABLE media_management_settings ADD COLUMN replace_illegal_characters INTEGER NOT NULL DEFAULT 1"
+            )
 
     def _migration_v74(self, cur: sqlite3.Cursor) -> None:
         """v74: Add search_log (one row per indexer/slskd search with its trigger) and active_downloads.remote_state."""
