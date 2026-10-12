@@ -4,6 +4,16 @@ Persistent working list (orchestrator-maintained). Items here are NOT part of `v
 per-track credits, VA naming, Appears On/Remixes, single-compilation requests, misfiled detection and MB/AcoustID
 contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable friction, P3 = polish.
 
+## Next up
+
+0. **P1 · AcoustID verification in the rename preview** (after the Lidarr track-identity fix lands). When an AcoustID
+   key is set: a "Verify with AcoustID" action on risky rows (track_number, file_title, album_title, album_year,
+   disc_layout, collision). Fingerprint the file (existing manual-import AcoustID code), compare the identified
+   recording MBID with the target track's `mb_recording_id`: match → `verified` reason, pre-selected; mismatch →
+   "Audio is actually X" with the correct track linked, apply blocked for that row; no result → unchanged. Cache
+   fingerprint + result per file (by path + size + mtime) so reruns are instant and the fingerprints feed the later
+   AcoustID submission work (various-artists.md phase 6). Background job with progress; respect AcoustID's ~3 req/s.
+
 ## User QA list (2026-10-12)
 
 1. **P2 · Searches run with no indexers or clients configured.** Wanted sweep / RSS / backlog search monitored tracks
