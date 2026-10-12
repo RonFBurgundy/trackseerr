@@ -44,6 +44,13 @@ from trackseerr.track_counts import positive_int as _positive_int
 
 logger = logging.getLogger(__name__)
 
+def _art_missing(value: Optional[str]) -> bool:
+    """True when stored art is empty or not fetchable (neither http(s) nor a cached /api/library/ proxy URL)."""
+    if not value:
+        return True
+    return not value.startswith(("http://", "https://", "/api/library/"))
+
+
 def _rg_release_date(rg: dict[str, Any]) -> Optional[str]:
     """Release date of an enricher release group (``first_release_date``; legacy ``release_date`` accepted)."""
     return rg.get("first_release_date") or rg.get("release_date") or None
@@ -303,7 +310,7 @@ def _update_album_from_release_group(
     if rg_id and existing_alb.get("mb_release_group_id") != rg_id:
         upd_album.append("mb_release_group_id = ?")
         upd_params.append(rg_id)
-    if not existing_alb.get("cover_url") and rg.get("cover_url"):
+    if _art_missing(existing_alb.get("cover_url")) and rg.get("cover_url"):
         upd_album.append("cover_url = ?")
         upd_params.append(rg["cover_url"])
     _queue_release_date_update(existing_alb, rg, upd_album, upd_params)
@@ -610,7 +617,7 @@ def _resolve_deezer_artist(st: _RefreshState) -> None:
             st.artist["foreign_artist_id"] = st.foreign_artist_id
             art_upd = ["foreign_artist_id = ?"]
             art_params: list[Any] = [st.foreign_artist_id]
-            if d_art.get("image_url") and not st.artist.get("image_url") and isinstance(d_art["image_url"], str):
+            if d_art.get("image_url") and _art_missing(st.artist.get("image_url")) and isinstance(d_art["image_url"], str):
                 art_upd.append("image_url = ?")
                 art_params.append(d_art["image_url"])
                 st.artist["image_url"] = d_art["image_url"]
@@ -643,7 +650,7 @@ def _apply_deezer_artist_art(st: _RefreshState, artist_details: dict[str, Any]) 
     )
     art_upd = []
     art_params: list[Any] = []
-    if d_img and not st.artist.get("image_url"):
+    if d_img and _art_missing(st.artist.get("image_url")):
         art_upd.append("image_url = ?")
         art_params.append(d_img)
         st.artist["image_url"] = d_img

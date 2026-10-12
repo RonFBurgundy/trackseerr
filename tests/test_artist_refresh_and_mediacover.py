@@ -697,3 +697,20 @@ def test_lidarr_migration_maps_artist_and_album_artwork(test_db: Database):
     album = test_db.get_library_album_by_title(artist["id"], "OK Computer")
     assert album is not None
     assert album["cover_url"] == "https://lidarr.local/MediaCover/Albums/201/cover.jpg"
+
+
+def test_refresh_repairs_lidarr_local_artist_image(test_db: Database):
+    """An artist whose stored image_url is a Lidarr-local /MediaCover/ path gets the refreshed remote image."""
+    from trackseerr.artist_refresh import _apply_deezer_artist_art, _RefreshState
+
+    test_db.upsert_library_artist(
+        LibraryArtist(id="art-mc", name="Radiohead", monitored=True, monitor_option="all",
+                      image_url="/MediaCover/1966/poster.jpg?lastWrite=1")
+    )
+    st = _RefreshState(
+        artist_id="art-mc", db=test_db, enricher=MagicMock(), discovery_client=MagicMock(), force=False,
+        artist=test_db.get_library_artist("art-mc"), artist_name="Radiohead", metadata_profile=None,
+        foreign_artist_id=None, mbid=None,
+    )
+    _apply_deezer_artist_art(st, {"image_url": "https://cdn.deezer.test/radiohead.jpg"})
+    assert test_db.get_library_artist("art-mc")["image_url"] == "https://cdn.deezer.test/radiohead.jpg"
