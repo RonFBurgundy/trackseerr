@@ -447,6 +447,46 @@ class LibraryCatalogStoreMixin:
                 self.conn.rollback()
                 raise
 
+    def list_albums_needing_credits(self, after_id: Optional[str], limit: int) -> list[dict[str, Any]]:
+        """Albums with a track that has a file but no artist credits, keyset-paged by album id (ascending)."""
+        sql = (
+            "SELECT a.id, a.title, a.mb_release_group_id, a.artist_id FROM library_albums a "
+            "WHERE EXISTS (SELECT 1 FROM library_tracks t WHERE t.album_id = a.id "
+            "AND EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) "
+            "AND NOT EXISTS (SELECT 1 FROM library_track_artists c WHERE c.track_id = t.id))"
+        )
+        params: list[Any] = []
+        if after_id:
+            sql += " AND a.id > ?"
+            params.append(str(after_id))
+        sql += " ORDER BY a.id LIMIT ?"
+        params.append(int(limit))
+        with self._lock:
+            rows = self.conn.execute(sql, params).fetchall()
+        return [
+            {"id": r[0], "title": r[1], "mb_release_group_id": r[2], "artist_id": r[3]} for r in rows
+        ]
+
+    def list_album_tracks_with_files(self, album_id: str) -> list[dict[str, Any]]:
+        """Tracks of an album that have a file, with one file path each and whether credits already exist."""
+        sql = (
+            "SELECT t.id, t.title, t.disc_number, t.track_number, t.mb_recording_id, "
+            "(SELECT MIN(f.file_path) FROM library_files f WHERE f.track_id = t.id), "
+            "EXISTS (SELECT 1 FROM library_track_artists c WHERE c.track_id = t.id) "
+            "FROM library_tracks t WHERE t.album_id = ? "
+            "AND EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) "
+            "ORDER BY t.disc_number, t.track_number, t.id"
+        )
+        with self._lock:
+            rows = self.conn.execute(sql, (str(album_id),)).fetchall()
+        return [
+            {
+                "id": r[0], "title": r[1], "disc_number": r[2], "track_number": r[3],
+                "mb_recording_id": r[4], "file_path": r[5], "has_credits": bool(r[6]),
+            }
+            for r in rows
+        ]
+
     _CREDIT_COLUMNS = "track_id, position, artist_name, artist_mbid, role, join_phrase, source"
 
     @staticmethod
