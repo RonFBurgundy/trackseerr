@@ -32,6 +32,31 @@ function modalTitle(scope: RenameScope | null): string {
   return 'Rename Files';
 }
 
+interface PathDiff {
+  prefix: string;
+  changed: string;
+  suffix: string;
+}
+
+/** Split `proposed` into the part shared with `current` (prefix/suffix) and the differing middle. */
+function diffPaths(current: string, proposed: string): PathDiff {
+  const max = Math.min(current.length, proposed.length);
+  let start = 0;
+  while (start < max && current[start] === proposed[start]) start += 1;
+  let end = 0;
+  while (
+    end < max - start &&
+    current[current.length - 1 - end] === proposed[proposed.length - 1 - end]
+  ) {
+    end += 1;
+  }
+  return {
+    prefix: proposed.slice(0, start),
+    changed: proposed.slice(start, proposed.length - end),
+    suffix: proposed.slice(proposed.length - end),
+  };
+}
+
 export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRenamed }) => {
   const selectAllId = useId();
   const isOpen = scope !== null;
@@ -60,7 +85,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
   const rowVirtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 76,
+    estimateSize: () => 80,
     overscan: 8,
   });
 
@@ -236,6 +261,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                       const item: RenamePreviewItem = items[virtualRow.index];
                       const isSelected = selectedIds.has(item.file_id);
                       const checkboxId = `rename-item-${item.file_id}`;
+                      const diff = diffPaths(item.current_path, item.proposed_path);
 
                       return (
                         <div
@@ -266,15 +292,28 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                             </label>
                           </div>
 
-                          <div className="min-w-0 flex-1 space-y-1 font-mono text-[11px] leading-tight">
-                            <div className="flex items-center gap-1.5 text-neutral-400 break-all">
-                              <span className="shrink-0 text-[10px] uppercase text-neutral-500 font-bold">From:</span>
-                              <span className="truncate" title={item.current_path}>{item.current_path}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 text-[#e5a00d] break-all">
-                              <ArrowRight className="h-3 w-3 shrink-0 text-[#e5a00d]/70" />
-                              <span className="shrink-0 text-[10px] uppercase text-[#e5a00d]/80 font-bold">To:</span>
-                              <span className="truncate font-semibold" title={item.proposed_path}>{item.proposed_path}</span>
+                          <div
+                            tabIndex={0}
+                            role="group"
+                            aria-label="Current and proposed path (scrolls horizontally)"
+                            className="min-w-0 flex-1 overflow-x-auto pb-1 font-mono text-[11px] leading-tight"
+                          >
+                            <div className="w-max min-w-full space-y-1 whitespace-nowrap">
+                              <div className="flex items-center gap-1.5 text-neutral-400">
+                                <span className="shrink-0 text-[10px] uppercase text-neutral-500 font-bold">From:</span>
+                                <span title={item.current_path}>{item.current_path}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[#e5a00d]/80">
+                                <ArrowRight className="h-3 w-3 shrink-0 text-[#e5a00d]/70" />
+                                <span className="shrink-0 text-[10px] uppercase text-[#e5a00d]/80 font-bold">To:</span>
+                                <span title={item.proposed_path}>
+                                  {diff.prefix}
+                                  <mark className="rounded-[2px] bg-[#e5a00d]/25 px-0.5 font-semibold text-[#ffc94d]">
+                                    {diff.changed}
+                                  </mark>
+                                  {diff.suffix}
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </div>
