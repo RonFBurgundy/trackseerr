@@ -66,6 +66,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- The Lidarr import no longer merges different tracks that share a title (a dub on disc 2, dozens of "[silence]" tracks), which made renames propose wrong numbers and collisions. Re-run the Lidarr import once to repair an existing library; no wipe needed.
 - Checkboxes in the rename and retag previews use the amber accent like the rest of the library instead of the browser's blue.
 - Clean naming tokens ({Artist CleanName}, {Album CleanTitle}, ...) now produce exactly what Lidarr does: "&" becomes "and", "/" becomes a space (AC DC), accents are removed (Husker Du), and the punctuation Lidarr drops is dropped (Lightnin Luke). A leading "." is removed from folder and file names.
 - Importing from Lidarr or refreshing an artist no longer merges a single into an album with the same title (e.g. "R.A.M.O.N.E.S." into "Ramones", the "Wild Ones" single into the album), which had renamed the album, changed its year and moved its tracks. Albums imported from Lidarr also keep their type (single, EP, live, compilation). Wipe and re-import an affected library.
