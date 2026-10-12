@@ -11684,6 +11684,8 @@ export interface components {
             protocol?: string | null;
             /** Quality */
             quality?: string | null;
+            /** Remote State */
+            remote_state?: string | null;
             /** Request Id */
             request_id?: string | null;
             /** Seed Ratio Current */
