@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { ObsidianModal, TapeDeckButton } from '@/components/ui';
 import { useRenamePreview } from '@/hooks/useRenamePreview';
 import type { RenamePreviewItem } from '@/services/renameService';
+import { reasonInfo } from './renameReasons';
 
 export interface RenameScope {
   artistId?: string;
@@ -57,11 +58,31 @@ function diffPaths(current: string, proposed: string): PathDiff {
   };
 }
 
+const CHIP_BASE =
+  'inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[3px] border px-1.5 py-0.5 font-mono text-[10px] leading-none';
+const CHIP_SAFE = 'border-[#2a2a2a] bg-[#161616] text-neutral-400';
+const CHIP_RISKY = 'border-[#e5a00d]/50 bg-[#e5a00d]/10 text-[#ffc94d]';
+
+const ReasonChip: React.FC<{ code: string }> = ({ code }) => {
+  const info = reasonInfo(code);
+  return (
+    <span title={info.help} className={`${CHIP_BASE} ${info.risky ? CHIP_RISKY : CHIP_SAFE}`}>
+      {info.label}
+    </span>
+  );
+};
+
 export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRenamed }) => {
   const selectAllId = useId();
   const isOpen = scope !== null;
   const {
     items,
+    filteredItems,
+    reasonCounts,
+    activeReasons,
+    toggleReason,
+    clearReasons,
+    selectSafe,
     allPreviewItems,
     loading,
     applying,
@@ -83,14 +104,19 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
   const parentRef = useRef<HTMLDivElement | null>(null);
 
   const rowVirtualizer = useVirtualizer({
-    count: items.length,
+    count: filteredItems.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 80,
+    estimateSize: () => 92,
     overscan: 8,
   });
 
-  const allSelected = items.length > 0 && selectedIds.size === items.length;
-  const isIndeterminate = selectedIds.size > 0 && !allSelected;
+  const selectedInView = filteredItems.reduce(
+    (n, item) => (selectedIds.has(item.file_id) ? n + 1 : n),
+    0
+  );
+  const allSelected = filteredItems.length > 0 && selectedInView === filteredItems.length;
+  const isIndeterminate = selectedInView > 0 && !allSelected;
+  const reasonCodes = Object.keys(reasonCounts).sort((a, b) => reasonCounts[b] - reasonCounts[a]);
 
   const handleApply = async () => {
     const res = await apply();
@@ -194,6 +220,50 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
               </div>
             ) : (
               <div className="space-y-3">
+                <p className="text-xs font-mono text-neutral-400">
+                  Showing <strong className="text-white">{items.length}</strong> proposed move
+                  {items.length === 1 ? '' : 's'}
+                </p>
+
+                {/* Reason filter bar */}
+                <div
+                  role="group"
+                  aria-label="Filter by reason"
+                  className="tab-strip overflow-x-auto pb-0.5"
+                >
+                  {reasonCodes.map((code) => {
+                    const info = reasonInfo(code);
+                    const active = activeReasons.has(code);
+                    return (
+                      <button
+                        key={code}
+                        type="button"
+                        aria-pressed={active}
+                        title={info.help}
+                        onClick={() => toggleReason(code)}
+                        className={`${CHIP_BASE} cursor-pointer transition-colors ${
+                          active
+                            ? 'border-[#e5a00d] bg-[#e5a00d] text-black font-bold'
+                            : info.risky
+                              ? `${CHIP_RISKY} hover:border-[#e5a00d]`
+                              : `${CHIP_SAFE} hover:text-white hover:border-[#3a3a3a]`
+                        }`}
+                      >
+                        {info.label} · {reasonCounts[code]}
+                      </button>
+                    );
+                  })}
+                  {activeReasons.size > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearReasons}
+                      className={`${CHIP_BASE} cursor-pointer border-transparent text-neutral-400 hover:text-white underline`}
+                    >
+                      Clear filter
+                    </button>
+                  )}
+                </div>
+
                 {/* Header Toolbar */}
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#222222] pb-2 text-xs font-mono">
                   <div className="flex items-center gap-2">
@@ -214,6 +284,15 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                     <label htmlFor={selectAllId} className="cursor-pointer text-neutral-300">
                       Select all
                     </label>
+                    <span className="text-neutral-500">•</span>
+                    <button
+                      type="button"
+                      onClick={selectSafe}
+                      title="Select only the cosmetic, low-risk moves"
+                      className="text-neutral-400 hover:text-white transition-colors"
+                    >
+                      Select safe only
+                    </button>
                     <span className="text-neutral-500">•</span>
                     <button
                       type="button"
@@ -258,7 +337,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                     }}
                   >
                     {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                      const item: RenamePreviewItem = items[virtualRow.index];
+                      const item: RenamePreviewItem = filteredItems[virtualRow.index];
                       const isSelected = selectedIds.has(item.file_id);
                       const checkboxId = `rename-item-${item.file_id}`;
                       const diff = diffPaths(item.current_path, item.proposed_path);
@@ -292,28 +371,35 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                             </label>
                           </div>
 
-                          <div
-                            tabIndex={0}
-                            role="group"
-                            aria-label="Current and proposed path (scrolls horizontally)"
-                            className="min-w-0 flex-1 overflow-x-auto pb-1 font-mono text-[11px] leading-tight"
-                          >
-                            <div className="w-max min-w-full space-y-1 whitespace-nowrap">
-                              <div className="flex items-center gap-1.5 text-neutral-400">
-                                <span className="shrink-0 text-[10px] uppercase text-neutral-500 font-bold">From:</span>
-                                <span title={item.current_path}>{item.current_path}</span>
+                          <div className="min-w-0 flex-1">
+                            <div
+                              tabIndex={0}
+                              role="group"
+                              aria-label="Current and proposed path (scrolls horizontally)"
+                              className="overflow-x-auto pb-1 font-mono text-[11px] leading-tight"
+                            >
+                              <div className="w-max min-w-full space-y-1 whitespace-nowrap">
+                                <div className="flex items-center gap-1.5 text-neutral-400">
+                                  <span className="shrink-0 text-[10px] uppercase text-neutral-500 font-bold">From:</span>
+                                  <span title={item.current_path}>{item.current_path}</span>
+                                </div>
+                                <div className="flex items-center gap-1.5 text-[#e5a00d]/80">
+                                  <ArrowRight className="h-3 w-3 shrink-0 text-[#e5a00d]/70" />
+                                  <span className="shrink-0 text-[10px] uppercase text-[#e5a00d]/80 font-bold">To:</span>
+                                  <span title={item.proposed_path}>
+                                    {diff.prefix}
+                                    <mark className="rounded-[2px] bg-[#e5a00d]/25 px-0.5 font-semibold text-[#ffc94d]">
+                                      {diff.changed}
+                                    </mark>
+                                    {diff.suffix}
+                                  </span>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-1.5 text-[#e5a00d]/80">
-                                <ArrowRight className="h-3 w-3 shrink-0 text-[#e5a00d]/70" />
-                                <span className="shrink-0 text-[10px] uppercase text-[#e5a00d]/80 font-bold">To:</span>
-                                <span title={item.proposed_path}>
-                                  {diff.prefix}
-                                  <mark className="rounded-[2px] bg-[#e5a00d]/25 px-0.5 font-semibold text-[#ffc94d]">
-                                    {diff.changed}
-                                  </mark>
-                                  {diff.suffix}
-                                </span>
-                              </div>
+                            </div>
+                            <div className="tab-strip mt-1 h-4 overflow-x-auto">
+                              {item.reasons.map((code) => (
+                                <ReasonChip key={code} code={code} />
+                              ))}
                             </div>
                           </div>
                         </div>

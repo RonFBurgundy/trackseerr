@@ -16,6 +16,7 @@ export interface NamingFormats {
 export interface NamingPreset extends NamingFormats {
   colon_replacement_format?: string;
   replace_illegal_characters?: boolean;
+  rename_artist_folders?: boolean;
 }
 
 export type NamingFormatKey = 'artist_folder_format' | 'standard_track_format' | 'multi_disc_track_format';
@@ -54,5 +55,5 @@ export interface NamingPresetCatalog {
 export interface NamingPreviewContext {
   root_folder_path?: string;
   colon_replacement_format?: string;
-  replace_illegal_characters?: boolean;
+  replace_illegal_characters?: boolean;  rename_artist_folders?: boolean;
 }

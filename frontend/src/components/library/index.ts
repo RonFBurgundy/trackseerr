@@ -31,6 +31,7 @@ export * from './ItemOriginCaption';
 export * from './ArtistTagsRow';
 export * from './DiscographyFilter';
 export * from './RenameModal';
+export * from './renameReasons';
 export * from './RetagModal';
 export * from './LibraryFilterFields';
 export * from './LibraryFilterSheet';

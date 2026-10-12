@@ -81,7 +81,15 @@ function presetPatch(preset: NamingPreset): Partial<NamingPreset> {
   };
   if (preset.colon_replacement_format !== undefined) patch.colon_replacement_format = preset.colon_replacement_format;
   if (preset.replace_illegal_characters !== undefined) patch.replace_illegal_characters = preset.replace_illegal_characters;
+  if (preset.rename_artist_folders !== undefined) patch.rename_artist_folders = preset.rename_artist_folders;
   return patch;
+}
+
+/** The format preview does not depend on whether existing artist folders are renamed. */
+function previewContext(context: NamingPreviewContext): NamingPreviewContext {
+  const { rename_artist_folders: _ignored, ...rest } = context;
+  void _ignored;
+  return rest;
 }
 
 export interface NamingFormatsEditorProps {
@@ -138,7 +146,7 @@ export const NamingFormatsEditor: React.FC<NamingFormatsEditorProps> = ({ value,
           multi_disc_track_format: value.multi_disc_track_format,
           compilation_track_format: compilation,
         },
-        JSON.parse(contextKey) as NamingPreviewContext
+        previewContext(JSON.parse(contextKey) as NamingPreviewContext)
       )
         .then((res) => {
           if (seq !== requestSeq.current) return; // a newer edit superseded this response
@@ -316,6 +324,22 @@ export const NamingFormatsEditor: React.FC<NamingFormatsEditorProps> = ({ value,
           onChange={(val) => onChange({ replace_illegal_characters: val })}
           ariaLabel="Replace illegal characters"
           name="replace_illegal_characters"
+        />
+      </div>
+
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <span className={LABEL_CLASS}>Rename artist folders</span>
+          <p className="text-[11px] text-neutral-500 font-mono">
+            Off (recommended): existing artist folders are kept, as Lidarr does; only album folders and file names are
+            tidied. New artists use the format above. On: artist folders are renamed to match the format too.
+          </p>
+        </div>
+        <TactileSwitch
+          checked={context?.rename_artist_folders ?? false}
+          onChange={(val) => onChange({ rename_artist_folders: val })}
+          ariaLabel="Rename artist folders"
+          name="rename_artist_folders"
         />
       </div>
 
