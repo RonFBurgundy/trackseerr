@@ -596,11 +596,11 @@ def test_slskd_stall_without_track_id_no_research(test_db, tmp_path):
     q.assert_not_called()
 
 
-def test_slskd_non_stall_failure_no_research(test_db, tmp_path):
+def test_slskd_plain_failure_also_researches(test_db, tmp_path):
     q, _ = _poll_slskd_research(
         test_db, tmp_path, {"status": "failed", "progress": 0.0, "error_message": "refused"}, "trk-1"
     )
-    q.assert_not_called()
+    q.assert_called_once()
 
 
 def test_slskd_queue_timeout_default_15(test_db, tmp_path, monkeypatch):
@@ -647,8 +647,8 @@ def test_slskd_queue_timeout_env_override(test_db, tmp_path, monkeypatch):
     driver.cancel.assert_not_called()
 
 
-def test_non_slskd_queued_download_not_stall_checked(test_db, tmp_path):
-    _seed_slskd_row(test_db, DownloadDriverType.QBITTORRENT, 300)
+def test_torrent_queued_under_dead_limit_untouched(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.QBITTORRENT, 60)
     driver, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0, "missing": True})
     assert row["status"] != DownloadStatus.FAILED.value
     driver.cancel.assert_not_called()
@@ -694,3 +694,70 @@ def test_slskd_invalid_client_timeout_falls_back(test_db, tmp_path, extra):
     driver, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0})
     assert row["status"] == DownloadStatus.FAILED.value
     driver.cancel.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Dead torrents and re-search after any failed download
+# ---------------------------------------------------------------------------
+def _set_row(db, **cols):
+    db.conn.execute("PRAGMA foreign_keys = OFF")
+    for k, v in cols.items():
+        db.conn.execute(f"UPDATE active_downloads SET {k} = ? WHERE id = 'dl-s1'", (v,))
+    db.conn.commit()
+
+
+def test_dead_torrent_zero_progress_fails_cancels_and_researches(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.QBITTORRENT, 150)
+    _set_row(test_db, track_id="trk-1")
+    with patch("trackseerr.backlog_worker.backlog_worker.queue_wanted_search", return_value={"queued": 1}) as q, \
+            patch.object(Database, "list_wanted_search_targets", return_value=[{"track_id": "trk-1"}]):
+        driver, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0})
+    assert row["status"] == DownloadStatus.FAILED.value
+    assert "never started" in row["error_message"]
+    driver.cancel.assert_called_once()
+    q.assert_called_once()
+
+
+def test_torrent_with_progress_never_cancelled(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.QBITTORRENT, 600, progress=0.5, status="downloading")
+    driver, row = _poll_slskd(test_db, tmp_path, {"status": "downloading", "progress": 0.5})
+    assert row["status"] != DownloadStatus.FAILED.value
+    driver.cancel.assert_not_called()
+
+
+def test_torrent_seeding_state_never_cancelled(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.QBITTORRENT, 600)
+    driver, row = _poll_slskd(
+        test_db, tmp_path, {"status": "downloading", "progress": 0.0, "ratio": 1.2, "seeding_time_seconds": 50}
+    )
+    assert row["status"] != DownloadStatus.FAILED.value
+    driver.cancel.assert_not_called()
+
+
+def test_torrent_dead_minutes_client_override(test_db, tmp_path):
+    _seed_slskd_row(
+        test_db, DownloadDriverType.QBITTORRENT, 45, extra_settings_json='{"dead_torrent_minutes": 30}'
+    )
+    _, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0})
+    assert row["status"] == DownloadStatus.FAILED.value
+
+
+def test_usenet_failure_researches_track(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.SABNZBD, 5)
+    _set_row(test_db, track_id="trk-1")
+    with patch("trackseerr.backlog_worker.backlog_worker.queue_wanted_search", return_value={"queued": 1}) as q, \
+            patch.object(Database, "list_wanted_search_targets", return_value=[{"track_id": "trk-1"}]):
+        driver, row = _poll_slskd(test_db, tmp_path, {"status": "failed", "error_message": "Unpack failed"})
+    assert row["status"] == DownloadStatus.FAILED.value
+    q.assert_called_once()
+    driver.cancel.assert_not_called()
+
+
+def test_failed_album_download_researches_album_tracks(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.SABNZBD, 5)
+    _set_row(test_db, album_id="alb-1")
+    with patch("trackseerr.backlog_worker.backlog_worker.queue_wanted_search", return_value={"queued": 2}), \
+            patch.object(Database, "list_library_tracks", return_value=[{"id": "t1"}, {"id": "t2"}]), \
+            patch.object(Database, "list_wanted_search_targets", return_value=[{"track_id": "t1"}]) as lt:
+        _poll_slskd(test_db, tmp_path, {"status": "failed", "error_message": "Unpack failed"})
+    lt.assert_called_once_with(track_ids=["t1", "t2"])

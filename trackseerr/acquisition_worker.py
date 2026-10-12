@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 
-from trackseerr.clients.acquisition import get_acquisition_driver
+from trackseerr.clients.acquisition import get_acquisition_driver, is_torrent_driver_type
 from trackseerr.clients.plex import PlexClient
 from trackseerr.job_tracker import job_tracker, summarize_result
 from trackseerr.task_manager import TRIGGER_SCHEDULED, record_finished_run
@@ -65,7 +65,7 @@ from trackseerr.acquisition_import import (
 )
 
 
-def _slskd_minutes(name: str, default: int) -> int:
+def _env_minutes(name: str, default: int) -> int:
     """Read a positive-minutes env knob at call time; fall back to ``default`` when missing or invalid."""
     raw = os.environ.get(name)
     if raw is None or not raw.strip():
@@ -129,9 +129,9 @@ def _slskd_limits(client_config: dict[str, Any]) -> dict[str, int]:
     Env: SLSKD_QUEUE_TIMEOUT_MINUTES (15), SLSKD_STALL_MINUTES (15), SLSKD_MISSING_MINUTES (10).
     """
     limits = {
-        "queue": _slskd_minutes("SLSKD_QUEUE_TIMEOUT_MINUTES", 15),
-        "stall": _slskd_minutes("SLSKD_STALL_MINUTES", 15),
-        "missing": _slskd_minutes("SLSKD_MISSING_MINUTES", 10),
+        "queue": _env_minutes("SLSKD_QUEUE_TIMEOUT_MINUTES", 15),
+        "stall": _env_minutes("SLSKD_STALL_MINUTES", 15),
+        "missing": _env_minutes("SLSKD_MISSING_MINUTES", 10),
     }
     raw = client_config.get("extra_settings_json")
     if not raw:
@@ -178,23 +178,100 @@ def _check_slskd_status(
     return status_dict
 
 
-def _research_after_slskd_stall(db: Database, item: dict[str, Any]) -> None:
-    """Queue an immediate wanted-search for the track whose Soulseek transfer was cancelled as stalled."""
+def _torrent_dead_minutes(client_config: dict[str, Any]) -> int:
+    """Minutes a torrent may sit at zero progress before it is failed: client ``dead_torrent_minutes`` > env > 120."""
+    default = _env_minutes("TORRENT_DEAD_MINUTES", 120)
+    raw = client_config.get("extra_settings_json")
+    if not raw:
+        return default
+    try:
+        extra = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError) as exc:
+        logger.warning("Invalid extra_settings_json on torrent client %s; using default dead limit: %s", client_config.get("name"), exc)
+        return default
+    if not isinstance(extra, dict):
+        return default
+    value = extra.get("dead_torrent_minutes")
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    if value is not None:
+        logger.warning("Ignoring invalid dead_torrent_minutes=%r on torrent client %s", value, client_config.get("name"))
+    return default
+
+
+def _torrent_dead_reason(item: dict[str, Any], status_dict: dict[str, Any], now: datetime, limit: int) -> Optional[str]:
+    """Return why a torrent should be failed as dead, or None.
+
+    Seeding safety: only a torrent that has downloaded and uploaded NOTHING qualifies. Any progress (row or
+    client), any ratio or seeding time, or any status other than queued/downloading returns None.
+    """
+    status = str(status_dict.get("status", "")).lower()
+    if status not in (DownloadStatus.QUEUED.value, DownloadStatus.DOWNLOADING.value):
+        return None
+    try:
+        untouched = (
+            float(status_dict.get("progress") or 0) == 0.0
+            and float(item.get("progress") or 0) == 0.0
+            and float(status_dict.get("ratio") or 0) == 0.0
+            and int(status_dict.get("seeding_time_seconds") or 0) == 0
+        )
+    except (TypeError, ValueError):
+        return None  # unreadable numbers: never risk cancelling
+    if not untouched:
+        return None
+    age = _minutes_since(item.get("progress_updated_at") or item.get("created_at"), now)
+    if age is None or age <= limit:
+        return None
+    return f"Torrent never started downloading after {limit} min (no seeders?)"
+
+
+def _fail_if_torrent_dead(
+    driver: Any, item: dict[str, Any], status_dict: dict[str, Any], lookup: str, client_config: dict[str, Any]
+) -> dict[str, Any]:
+    """Cancel a torrent that never started (zero progress) and return a FAILED dict; otherwise ``status_dict``."""
+    reason = _torrent_dead_reason(item, status_dict, datetime.now(timezone.utc), _torrent_dead_minutes(client_config))
+    if not reason:
+        return status_dict
+    logger.info("Torrent download %s is dead: %s", item["id"], reason)
+    if not driver.cancel(lookup):
+        logger.warning("Could not cancel dead torrent %s", lookup)
+    return {**status_dict, "status": DownloadStatus.FAILED.value, "error_message": reason, "cancelled": True}
+
+
+def _apply_stall_checks(
+    db: Database, driver: Any, item: dict[str, Any], status_dict: dict[str, Any], lookup: str,
+    client_config: dict[str, Any], is_slskd: bool,
+) -> dict[str, Any]:
+    """Soulseek stall detection or dead-torrent detection, whichever the client type calls for."""
+    if is_slskd:
+        return _check_slskd_status(db, driver, item, status_dict, lookup, client_config)
+    if is_torrent_driver_type(client_config.get("driver_type")):
+        return _fail_if_torrent_dead(driver, item, status_dict, lookup, client_config)
+    return status_dict
+
+
+def _research_after_failure(db: Database, item: dict[str, Any], reason: str) -> None:
+    """Queue an immediate wanted-search for the track (or album's tracks) of a failed download."""
     from trackseerr.backlog_worker import backlog_worker  # lazy: backlog_worker imports this module's neighbours
 
     try:
-        targets = db.list_wanted_search_targets(track_ids=[str(item["track_id"])])
+        if item.get("track_id"):
+            track_ids = [str(item["track_id"])]
+        elif item.get("album_id"):
+            track_ids = [str(t["id"]) for t in db.list_library_tracks(album_id=item["album_id"], limit=1000)]
+        else:
+            return
+        targets = db.list_wanted_search_targets(track_ids=track_ids) if track_ids else []
         if targets:
             res = backlog_worker.queue_wanted_search(db, targets)
-            logger.info("Re-searching track %s after stalled Soulseek transfer: %s", item["track_id"], res)
+            logger.info("Re-searching %d track(s) after failed download %s (%s): %s", len(track_ids), item.get("id"), reason, res)
     except sqlite3.Error as exc:
-        logger.warning("Could not queue re-search for track %s after stalled Soulseek transfer: %s", item.get("track_id"), exc)
+        logger.warning("Could not queue re-search after failed download %s: %s", item.get("id"), exc)
 
 
-def _research_if_slskd_stalled(db: Database, item: dict[str, Any], status_dict: dict[str, Any], is_slskd: bool) -> None:
-    """Re-search the item's track when a Soulseek transfer was cancelled as stalled (kept out of ``_process_item``)."""
-    if is_slskd and status_dict.get("cancelled") and item.get("track_id"):
-        _research_after_slskd_stall(db, item)
+def _research_if_failed(db: Database, item: dict[str, Any], err_msg: str) -> None:
+    """Re-search after any failed download, whatever the driver (kept out of ``_process_item``)."""
+    _research_after_failure(db, item, err_msg)
 
 
 class AcquisitionWorker(ImportPipelineMixin):
@@ -621,8 +698,7 @@ class AcquisitionWorker(ImportPipelineMixin):
             return
 
         is_slskd = str(client_config.get("driver_type")).lower() == "slskd"
-        if is_slskd:
-            status_dict = _check_slskd_status(db, driver, item, status_dict, target_lookup, client_config)
+        status_dict = _apply_stall_checks(db, driver, item, status_dict, target_lookup, client_config, is_slskd)
 
         cur_status = status_dict.get("status", DownloadStatus.DOWNLOADING.value).lower()
         progress = float(status_dict.get("progress") or 0.0)
@@ -675,7 +751,7 @@ class AcquisitionWorker(ImportPipelineMixin):
                 )
             except Exception as bl_err:
                 logger.warning("Failed to add failed download to blocklist: %s", bl_err)
-            _research_if_slskd_stalled(db, item, status_dict, is_slskd)
+            _research_if_failed(db, item, err_msg)
             stats["failed"] += 1
             return
 
