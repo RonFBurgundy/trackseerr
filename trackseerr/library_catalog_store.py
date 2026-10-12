@@ -9,6 +9,7 @@ import json
 import logging
 import sqlite3
 import uuid
+from collections.abc import Iterator
 from typing import Any, Optional, Union
 
 from trackseerr.library_monitoring import (
@@ -492,12 +493,8 @@ class LibraryCatalogStoreMixin:
         query: Optional[str] = None,
         limit: int = 200,
         offset: int = 0,
-        album_order: bool = False,
     ) -> list[dict[str, Any]]:
-        """Lists library tracks filtered by album and/or artist with pagination.
-
-        ``album_order`` walks album by album (artist, album, disc, track) so paged scans stay grouped.
-        """
+        """Lists library tracks filtered by album and/or artist with pagination."""
         sql = "SELECT * FROM library_tracks WHERE 1=1"
         params: list[Any] = []
         if album_id:
@@ -512,17 +509,48 @@ class LibraryCatalogStoreMixin:
             clean_q = clean_library_name(query)
             sql += " AND (clean_title LIKE ? OR title LIKE ?)"
             params.extend([f"%{clean_q}%", f"%{query}%"])
-        order = (
-            "artist_id ASC, album_id ASC, disc_number ASC, track_number ASC"
-            if album_order
-            else "disc_number ASC, track_number ASC"
-        )
-        sql += f" ORDER BY {order} LIMIT ? OFFSET ?"
+        sql += " ORDER BY disc_number ASC, track_number ASC LIMIT ? OFFSET ?"
         params.extend([int(limit), int(offset)])
 
         with self._lock:
             cur = self.conn.execute(sql, params)
             return [self._map_library_track(row) for row in cur.fetchall()]
+
+    def iter_library_files_for_rename(
+        self, batch_size: int = 1000
+    ) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
+        """Yields ``(track, file)`` for every file that has a track, in artist/album/disc/track/file order.
+
+        Keyset-paginated (no OFFSET) and driven from ``library_files`` so tracks without a file are never touched.
+        ``track`` carries id, artist_id, album_id, title, track_number and disc_number.
+        """
+        cols = ("id", "artist_id", "album_id", "title", "track_number", "disc_number")
+        select = "SELECT f.*, " + ", ".join(f"t.{c} AS t_{c}" for c in cols)
+        order = "t.artist_id, t.album_id, t.disc_number, t.track_number, f.id"
+        after: Optional[tuple[Any, ...]] = None
+        while True:
+            where = ""
+            params: list[Any] = []
+            if after is not None:
+                where = " WHERE (t.artist_id, t.album_id, t.disc_number, t.track_number, f.id) > (?, ?, ?, ?, ?)"
+                params.extend(after)
+            params.append(int(batch_size))
+            with self._lock:
+                rows = self.conn.execute(
+                    f"{select} FROM library_files f JOIN library_tracks t ON f.track_id = t.id"
+                    f"{where} ORDER BY {order} LIMIT ?",
+                    params,
+                ).fetchall()
+            if not rows:
+                return
+            for row in rows:
+                d = dict(row)
+                track = {c: d.pop(f"t_{c}") for c in cols}
+                yield track, self._map_library_file(d)  # type: ignore[arg-type]
+            last = rows[-1]
+            after = (last["t_artist_id"], last["t_album_id"], last["t_disc_number"], last["t_track_number"], last["id"])
+            if len(rows) < batch_size:
+                return
 
     def delete_library_track(self, track_id: str) -> bool:
         """Deletes a library track and cascades to child files (history is kept)."""
