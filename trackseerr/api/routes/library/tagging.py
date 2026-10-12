@@ -53,83 +53,158 @@ router = APIRouter()
 from ._shared import (validate_media_path, native_only, _album_total_discs)
 from .models import (RenamePreviewRequest, RenameApplyRequest, RetagPreviewRequest, RetagApplyRequest)
 
+_ART_STEMS = ("cover", "folder", "front")
+_ART_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+_RENAME_PAGE_SIZE = 500
+
+
+def _rename_meta(
+    db: Database,
+    track: dict[str, Any],
+    album: dict[str, Any],
+    artist: dict[str, Any],
+    f: dict[str, Any],
+    current_path: str,
+    caches: dict[str, dict[Any, Any]],
+) -> dict[str, Any]:
+    """Builds the naming-template metadata for a track's file; discs totals are memoised per album in ``caches``."""
+    alb_id = track["album_id"]
+    discs = caches.setdefault("discs", {})
+    if alb_id not in discs:
+        discs[alb_id] = _album_total_discs(db, alb_id)
+    return {
+        "artist": artist["name"],
+        "album_artist": artist["name"],
+        "album": album["title"],
+        "title": track["title"],
+        "track_number": track["track_number"],
+        "disc_number": track["disc_number"],
+        "total_discs": discs[alb_id],
+        "year": album.get("year"),
+        "release_year": album.get("year"),
+        "codec": f.get("codec"),
+        "bitrate": f.get("bitrate"),
+        "sample_rate": f.get("sample_rate"),
+        "bits_per_sample": f.get("bits_per_sample"),
+        "quality_full": f.get("quality_name"),
+        "file_path": current_path,
+        "extension": Path(current_path).suffix,
+    }
+
+
+def _cached_row(
+    cache: dict[Any, Any], key: Any, loader: Any
+) -> Optional[dict[str, Any]]:
+    """Returns a memoised row for ``key``, loading it once (misses are not cached)."""
+    if key not in cache:
+        row = loader(key)
+        if row:
+            cache[key] = row
+    return cache.get(key)
+
+
+def _preview_row(
+    db: Database,
+    t: dict[str, Any],
+    media_settings: dict[str, Any],
+    caches: dict[str, dict[Any, Any]],
+) -> Optional[dict[str, Any]]:
+    """Builds one rename-preview row for a track, or None when it has no file or no catalog artist/album."""
+    f = db.get_library_file_for_track(t["id"])
+    if not f:
+        return None
+    current_path = f.get("file_path")
+    if not current_path:
+        return None
+    artist = _cached_row(caches.setdefault("artists", {}), t["artist_id"], db.get_library_artist)
+    album = _cached_row(caches.setdefault("albums", {}), t["album_id"], db.get_library_album)
+    if not artist or not album:
+        return None
+    meta = _rename_meta(db, t, album, artist, f, current_path, caches)
+    proposed_path = build_track_path(meta, media_settings)
+    return {
+        "file_id": f["id"],
+        "track_id": t["id"],
+        "current_path": current_path,
+        "proposed_path": proposed_path,
+        "needs_rename": Path(current_path).resolve() != Path(proposed_path).resolve(),
+    }
+
+
 @router.post("/rename/preview", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=list[RenamePreviewItem], response_model_exclude_unset=True)
 def rename_preview(
     body: Optional[RenamePreviewRequest] = None,
     db: Database = Depends(get_db),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> list[dict[str, Any]]:
-    """Previews proposed file path changes based on token naming templates and identifies files needing renaming."""
+    """Previews proposed file path changes from the naming templates.
+
+    Album/artist scope returns up to ``limit`` tracks, including ones already in place. Library-wide scope scans the
+    whole library and returns only files that need a move, up to ``limit`` of them.
+    """
     req = body or RenamePreviewRequest()
     limit = req.limit or 200
-
-    if req.album_id:
-        tracks = db.list_library_tracks(album_id=req.album_id, limit=limit)
-    elif req.artist_id:
-        tracks = db.list_library_tracks(artist_id=req.artist_id, limit=limit)
-    else:
-        tracks = db.list_library_tracks(limit=limit)
-
     media_settings = db.get_media_management_settings()
+    caches: dict[str, dict[Any, Any]] = {}
     preview_diffs: list[dict[str, Any]] = []
 
-    artist_cache: dict[str, dict[str, Any]] = {}
-    album_cache: dict[str, dict[str, Any]] = {}
+    if req.album_id or req.artist_id:
+        if req.album_id:
+            tracks = db.list_library_tracks(album_id=req.album_id, limit=limit)
+        else:
+            tracks = db.list_library_tracks(artist_id=req.artist_id, limit=limit)
+        for t in tracks:
+            row = _preview_row(db, t, media_settings, caches)
+            if row:
+                preview_diffs.append(row)
+        return preview_diffs
 
-    for t in tracks:
-        f = db.get_library_file_for_track(t["id"])
-        if not f:
-            continue
-        current_path = f.get("file_path")
-        if not current_path:
-            continue
-
-        art_id = t["artist_id"]
-        if art_id not in artist_cache:
-            art = db.get_library_artist(art_id)
-            if art:
-                artist_cache[art_id] = art
-        artist = artist_cache.get(art_id)
-
-        alb_id = t["album_id"]
-        if alb_id not in album_cache:
-            alb = db.get_library_album(alb_id)
-            if alb:
-                album_cache[alb_id] = alb
-        album = album_cache.get(alb_id)
-
-        if not artist or not album:
-            continue
-
-        meta = {
-            "artist": artist["name"],
-            "album_artist": artist["name"],
-            "album": album["title"],
-            "title": t["title"],
-            "track_number": t["track_number"],
-            "disc_number": t["disc_number"],
-            "total_discs": _album_total_discs(db, alb_id),
-            "year": album.get("year"),
-            "release_year": album.get("year"),
-            "codec": f.get("codec"),
-            "bitrate": f.get("bitrate"),
-            "sample_rate": f.get("sample_rate"),
-            "bits_per_sample": f.get("bits_per_sample"),
-            "quality_full": f.get("quality_name"),
-            "file_path": current_path,
-            "extension": Path(current_path).suffix,
-        }
-        proposed_path = build_track_path(meta, media_settings)
-        needs_rename = Path(current_path).resolve() != Path(proposed_path).resolve()
-        preview_diffs.append({
-            "file_id": f["id"],
-            "track_id": t["id"],
-            "current_path": current_path,
-            "proposed_path": proposed_path,
-            "needs_rename": needs_rename,
-        })
-
+    offset = 0
+    while len(preview_diffs) < limit:
+        page = db.list_library_tracks(limit=_RENAME_PAGE_SIZE, offset=offset)
+        if not page:
+            break
+        offset += len(page)
+        for t in page:
+            row = _preview_row(db, t, media_settings, caches)
+            if row and row["needs_rename"]:
+                preview_diffs.append(row)
+                if len(preview_diffs) >= limit:
+                    break
     return preview_diffs
+
+
+def _is_art_file(p: Path) -> bool:
+    return p.is_file() and p.stem.lower() in _ART_STEMS and p.suffix.lower() in _ART_EXTS
+
+
+def _tidy_old_folder(old_parent: Path, new_parent: Path, root_dir: Path) -> None:
+    """After a move, carries lone album artwork to the new folder and removes emptied folders under the root.
+
+    Only moves artwork (never overwrites, never deletes files) and only rmdirs empty directories strictly
+    inside ``root_dir``.
+    """
+    try:
+        if old_parent == new_parent or not old_parent.is_dir():
+            return
+        entries = list(old_parent.iterdir())
+        if entries and all(_is_art_file(e) for e in entries):
+            for art in entries:
+                dest = new_parent / art.name
+                if dest.exists() or any(
+                    sib.name.lower() == art.name.lower() for sib in new_parent.iterdir()
+                ):
+                    continue
+                safe_atomic_move(art, dest)
+        if root_dir not in old_parent.parents or any(old_parent.iterdir()):
+            return
+        old_parent.rmdir()
+        grandparent = old_parent.parent
+        if grandparent != root_dir and root_dir in grandparent.parents and not any(grandparent.iterdir()):
+            grandparent.rmdir()
+    except OSError as exc:
+        logger.debug("Could not tidy old folder %s: %s", old_parent, exc)
+
 
 @router.post("/rename/apply", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=RenameApplyResponse, response_model_exclude_unset=True)
 def rename_apply(
@@ -174,24 +249,7 @@ def rename_apply(
                 errors.append(f"Album or artist not found for track '{track['id']}'")
                 continue
 
-            meta = {
-                "artist": artist["name"],
-                "album_artist": artist["name"],
-                "album": album["title"],
-                "title": track["title"],
-                "track_number": track["track_number"],
-                "disc_number": track["disc_number"],
-                "total_discs": _album_total_discs(db, track["album_id"]),
-                "year": album.get("year"),
-                "release_year": album.get("year"),
-                "codec": f.get("codec"),
-                "bitrate": f.get("bitrate"),
-                "sample_rate": f.get("sample_rate"),
-                "bits_per_sample": f.get("bits_per_sample"),
-                "quality_full": f.get("quality_name"),
-                "file_path": str(current_path),
-                "extension": current_path.suffix,
-            }
+            meta = _rename_meta(db, track, album, artist, f, str(current_path), {})
             proposed = build_track_path(meta, media_settings)
             validate_media_path(proposed, db=db)
 
@@ -227,12 +285,7 @@ def rename_apply(
                 details={"from": str(current_path), "to": str(new_path)},
             )
 
-            # Clean up empty parent folder if no other files remain
-            try:
-                if old_parent.exists() and not any(old_parent.iterdir()):
-                    old_parent.rmdir()
-            except OSError:
-                pass
+            _tidy_old_folder(old_parent, new_path.parent, root_dir)
 
         except Exception as exc:
             logger.exception("Failed to rename file ID %s: %s", fid, redact_text(str(exc)))
