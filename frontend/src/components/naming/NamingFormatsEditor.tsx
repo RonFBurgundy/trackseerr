@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, HelpCircle, Loader2, Wand2 } from 'lucide-react';
 import { NamingHelpModal } from './NamingHelpModal';
 import { getNamingPresets, previewNamingFormats } from '@/services/namingService';
+import { TactileSwitch } from '@/components/ui';
 import type {
   NamingFormatKey,
   NamingFormatPreview,
@@ -80,6 +81,7 @@ function presetPatch(preset: NamingPreset): Partial<NamingPreset> {
   };
   if (preset.colon_replacement_format !== undefined) patch.colon_replacement_format = preset.colon_replacement_format;
   if (preset.clean_artist_names !== undefined) patch.clean_artist_names = preset.clean_artist_names;
+  if (preset.replace_illegal_characters !== undefined) patch.replace_illegal_characters = preset.replace_illegal_characters;
   return patch;
 }
 
@@ -300,6 +302,22 @@ export const NamingFormatsEditor: React.FC<NamingFormatsEditorProps> = ({ value,
           Overrides only the file name for Various Artists / compilation releases. Leave empty to use the track
           formats above.
         </p>
+      </div>
+
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <span className={LABEL_CLASS}>Replace illegal characters</span>
+          <p className="text-[11px] text-neutral-500 font-mono">
+            On: ? becomes !, * becomes -, / and \ become +. Off: they're removed. Matches Lidarr's option of the same
+            name.
+          </p>
+        </div>
+        <TactileSwitch
+          checked={context?.replace_illegal_characters ?? true}
+          onChange={(val) => onChange({ replace_illegal_characters: val })}
+          ariaLabel="Replace illegal characters"
+          name="replace_illegal_characters"
+        />
       </div>
 
       <NamingHelpModal

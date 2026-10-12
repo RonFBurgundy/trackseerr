@@ -248,7 +248,7 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
                         if (e.target.checked) selectAll();
                         else selectNone();
                       }}
-                      className="rounded-[2px] bg-[#0d0d0d] border-[#2a2a2a] text-[#e5a00d] focus:ring-0 cursor-pointer"
+                      className="h-5 w-5 accent-[#e5a00d] cursor-pointer"
                     />
                     <label htmlFor={selectAllId} className="cursor-pointer text-neutral-300">
                       Select all
@@ -279,7 +279,7 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
                         type="checkbox"
                         checked={embedArt}
                         onChange={(e) => setEmbedArt(e.target.checked)}
-                        className="rounded-[2px] bg-[#0d0d0d] border-[#2a2a2a] text-[#e5a00d] focus:ring-0 cursor-pointer"
+                        className="h-5 w-5 accent-[#e5a00d] cursor-pointer"
                       />
                       <label htmlFor={embedArtId} className="cursor-pointer flex items-center gap-1 text-xs">
                         <Image className="h-3.5 w-3.5 text-neutral-400" />
@@ -351,7 +351,7 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
                               disabled={isSkipped}
                               onChange={() => toggleSelect(item.file_id)}
                               aria-label={`Select retag for ${item.path}`}
-                              className="rounded-[2px] bg-[#0d0d0d] border-[#2a2a2a] text-[#e5a00d] focus:ring-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                              className="h-5 w-5 accent-[#e5a00d] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                             />
                             <label htmlFor={checkboxId} className="sr-only">
                               Select retag for {item.path}
