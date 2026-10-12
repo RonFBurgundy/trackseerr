@@ -361,3 +361,49 @@ def test_bulk_monitor_albums_hydrates_empty_ones(app_and_client, test_db, test_c
     assert r.status_code == 200, r.text
     assert len(test_db.list_library_tracks(album_id="alb")) == 2
     assert all(t["monitored"] for t in test_db.list_library_tracks(album_id="alb"))
+
+
+# ------------------------------------------------------------ backlog sweep rotation
+
+def _set_searched(db: Database, track_id: str, ts: str) -> None:
+    db.conn.execute("UPDATE library_tracks SET last_searched_at=? WHERE id=?", (ts, track_id))
+    db.conn.commit()
+
+
+def test_missing_catalog_tracks_never_searched_first(test_db: Database):
+    _artist(test_db, aid="Aardvark")
+    _artist(test_db, aid="Zebra")
+    _album(test_db, "aa", 2, aid="Aardvark")
+    _album(test_db, "zz", 2, aid="Zebra")
+    test_db.mark_tracks_searched(["aa-t1", "aa-t2"])
+
+    ids = [t["track_id"] for t in test_db.get_monitored_missing_catalog_tracks()]
+    assert ids[:2] == ["zz-t1", "zz-t2"]
+    assert set(ids[2:]) == {"aa-t1", "aa-t2"}
+
+
+def test_missing_catalog_tracks_rotate_with_limit(test_db: Database):
+    _artist(test_db)
+    _album(test_db, "alb", 3)
+
+    seen = []
+    for n in range(3):
+        row = test_db.get_monitored_missing_catalog_tracks(limit=1)[0]
+        seen.append(row["track_id"])
+        _set_searched(test_db, row["track_id"], f"2026-01-01 00:00:0{n}")
+    assert seen == ["alb-t1", "alb-t2", "alb-t3"]
+    # all searched: the oldest stamp comes around again
+    assert test_db.get_monitored_missing_catalog_tracks(limit=1)[0]["track_id"] == "alb-t1"
+
+
+def test_cutoff_unmet_catalog_tracks_never_searched_first(test_db: Database):
+    _artist(test_db, aid="Aardvark")
+    _artist(test_db, aid="Zebra")
+    _album(test_db, "aa", 1, with_files=(1,), aid="Aardvark")
+    _album(test_db, "zz", 1, with_files=(1,), aid="Zebra")
+    test_db.conn.execute("UPDATE library_files SET cutoff_met=0")
+    test_db.conn.commit()
+    test_db.mark_tracks_searched(["aa-t1"])
+
+    ids = [t["track_id"] for t in test_db.get_cutoff_unmet_catalog_tracks()]
+    assert ids == ["zz-t1", "aa-t1"]
