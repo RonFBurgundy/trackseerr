@@ -41,6 +41,7 @@ class QueueItemResponse(ApiModel):
     track_id: Optional[str] = None
     album_id: Optional[str] = None
     progress_updated_at: Optional[str] = None
+    remote_state: Optional[str] = None
     indexer: Optional[str] = None
     indexer_id: Optional[str] = None
     quality: Optional[str] = None

@@ -317,6 +317,13 @@ def test_queue_api(app_and_client, test_db, test_config, seeded_users):
     assert admin_items[0]["title"] == "Daft Punk - One More Time"
     assert admin_items[0]["source_path"] == "/downloads/staging/01.mp3"
     assert admin_items[0]["target_path"] == "/music/Daft Punk/01.mp3"
+    assert admin_items[0]["remote_state"] is None
+
+    # remote_state (schema v74, Soulseek) must round-trip through the response model
+    test_db.set_download_remote_state("dl-q-1", "Queued, Remotely")
+    resp_state = client.get("/api/queue", headers=admin_headers)
+    assert resp_state.status_code == 200
+    assert resp_state.json()[0]["remote_state"] == "Queued, Remotely"
 
     # 3. A download tied to Alice's own request is still not manageable by Alice
     test_db.create_request(
