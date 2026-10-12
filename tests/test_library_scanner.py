@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from trackseerr.library_scanner import LibraryScanner
+from trackseerr.models import LibraryAlbum, LibraryArtist
 from trackseerr.storage import Database
 
 
@@ -364,3 +365,99 @@ def test_plex_client_refresh_called_when_provided(db: Database, scanner: Library
     status = scanner.scan(db, root_folder=str(music_dir), plex_client=mock_plex)
     assert status["status"] == "completed"
     mock_plex.refresh_music_library.assert_called_once()
+
+
+def _scan_tagged_files(db: Database, scanner: LibraryScanner, tmp_path: Path, artist: str, files: list[dict]) -> None:
+    """Scans one folder of fake files whose tags come from the given dicts (keys: name, album, rg, title, number)."""
+    music_dir = tmp_path / "music"
+    folder = music_dir / artist / "Folder"
+    folder.mkdir(parents=True)
+    meta: dict[str, dict] = {}
+    for spec in files:
+        f = folder / spec["name"]
+        f.write_bytes(b"dummy")
+        entry = {
+            "title": spec["title"],
+            "artist": artist,
+            "album": spec["album"],
+            "track_number": spec["number"],
+            "disc_number": 1,
+            "year": 2020,
+            "total_tracks": 10,
+            "duration": 100.0,
+            "codec": "FLAC",
+            "bitrate": 900000,
+            "sample_rate": 44100,
+            "bits_per_sample": 16,
+            "quality_full": "FLAC 16bit 44.1kHz",
+            "file_path": str(f.resolve()),
+        }
+        if spec.get("rg"):
+            entry["musicbrainz_releasegroupid"] = spec["rg"]
+        meta[str(f.resolve())] = entry
+
+    def fake_inspect(path: Path | str):
+        return meta[str(Path(path).resolve())]
+
+    with patch("trackseerr.library_scanner.inspect_audio_file", side_effect=fake_inspect):
+        status = scanner.scan(db, root_folder=str(music_dir))
+    assert status["status"] == "completed"
+
+
+def _seed_album(db: Database, artist: str, title: str, rg: str | None) -> tuple[str, str]:
+    artist_row = db.upsert_library_artist(LibraryArtist(id=f"artist-{artist}", name=artist))
+    album_row = db.upsert_library_album(
+        LibraryAlbum(id=f"album-{title}-{rg}", artist_id=artist_row["id"], title=title, mb_release_group_id=rg)
+    )
+    return artist_row["id"], album_row["id"]
+
+
+def _albums_of(db: Database, artist_id: str) -> list[dict]:
+    return db.conn.execute("SELECT * FROM library_albums WHERE artist_id = ?", (artist_id,)).fetchall()
+
+
+def test_scan_files_single_and_album_with_same_title_apart(db: Database, scanner: LibraryScanner, tmp_path: Path):
+    """A file tagged with a different release group must not land on a same-titled album."""
+    artist_id, album_id = _seed_album(db, "Jessie J", "Wild Ones", "rg-album")
+    _scan_tagged_files(db, scanner, tmp_path, "Jessie J", [
+        {"name": "01.flac", "title": "Wild Ones", "album": "Wild Ones", "rg": "rg-single", "number": 1},
+    ])
+    rows = _albums_of(db, artist_id)
+    assert sorted(r["mb_release_group_id"] for r in rows) == ["rg-album", "rg-single"]
+    original = db.conn.execute("SELECT * FROM library_albums WHERE id = ?", (album_id,)).fetchone()
+    assert original["mb_release_group_id"] == "rg-album"
+    n = db.conn.execute("SELECT COUNT(*) FROM library_tracks WHERE album_id = ?", (album_id,)).fetchone()[0]
+    assert n == 0
+
+
+def test_scan_matches_album_by_release_group_tag(db: Database, scanner: LibraryScanner, tmp_path: Path):
+    """The release group tag wins over a differing album title."""
+    artist_id, album_id = _seed_album(db, "Ramones", "Ramones", "rg-a")
+    _scan_tagged_files(db, scanner, tmp_path, "Ramones", [
+        {"name": "01.flac", "title": "Blitzkrieg Bop", "album": "Ramones (Remastered)", "rg": "rg-a", "number": 1},
+    ])
+    assert len(_albums_of(db, artist_id)) == 1
+    n = db.conn.execute("SELECT COUNT(*) FROM library_tracks WHERE album_id = ?", (album_id,)).fetchone()[0]
+    assert n == 1
+
+
+def test_scan_without_release_group_tag_matches_by_title(db: Database, scanner: LibraryScanner, tmp_path: Path):
+    """Files without an RG tag keep matching by title alone."""
+    artist_id, album_id = _seed_album(db, "Ramones", "Ramones", "rg-a")
+    _scan_tagged_files(db, scanner, tmp_path, "Ramones", [
+        {"name": "01.flac", "title": "Blitzkrieg Bop", "album": "Ramones", "number": 1},
+    ])
+    assert len(_albums_of(db, artist_id)) == 1
+    n = db.conn.execute("SELECT COUNT(*) FROM library_tracks WHERE album_id = ?", (album_id,)).fetchone()[0]
+    assert n == 1
+
+
+def test_scan_same_title_two_release_groups_in_one_scan(db: Database, scanner: LibraryScanner, tmp_path: Path):
+    """Two same-titled releases with different RG tags in one scan stay separate (album_cache key)."""
+    _scan_tagged_files(db, scanner, tmp_path, "Jessie J", [
+        {"name": "01.flac", "title": "Wild Ones", "album": "Wild Ones", "rg": "rg-one", "number": 1},
+        {"name": "02.flac", "title": "Other Song", "album": "Wild Ones", "rg": "rg-two", "number": 1},
+    ])
+    artist = db.get_library_artist_by_name("Jessie J")
+    rows = _albums_of(db, artist["id"])
+    assert sorted(r["mb_release_group_id"] for r in rows) == ["rg-one", "rg-two"]
