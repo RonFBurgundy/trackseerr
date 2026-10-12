@@ -937,3 +937,163 @@ def test_album_total_discs_helper_counts_catalog_discs():
     assert _album_total_discs(FakeDB(), "a") == 2
     assert _album_total_discs(FakeDB(), "a", 3) == 3
     assert _album_total_discs(FakeDB(), "a", None, "x") == 2
+
+
+def _seed_rename_track(db: Database, idx: int, artist_name: str, path: Path, create: bool = False) -> str:
+    """Seeds one artist/album/track/file whose catalog path is <artist>/Closer (2000)/NN - Title.flac."""
+    db.upsert_library_artist({"id": f"ra-{idx}", "name": artist_name, "monitored": True})
+    db.upsert_library_album({"id": f"rb-{idx}", "artist_id": f"ra-{idx}", "title": "Closer", "year": 2000, "monitored": True})
+    db.upsert_library_track({
+        "id": f"rt-{idx}", "album_id": f"rb-{idx}", "artist_id": f"ra-{idx}",
+        "title": f"Song {idx}", "track_number": idx, "disc_number": 1, "monitored": True,
+    })
+    if create:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _create_minimal_flac(path)
+    db.upsert_library_file({
+        "id": f"rf-{idx}", "track_id": f"rt-{idx}", "file_path": str(path),
+        "relative_path": path.name, "codec": "FLAC",
+    })
+    return f"rf-{idx}"
+
+
+def _rename_settings(db: Database, root: Path) -> None:
+    db.update_media_management_settings({
+        "root_folder_path": str(root),
+        "standard_track_format": "{track:00} - {Track Title}",
+        "album_folder_format": "{Album Title} ({Release Year})",
+    })
+
+
+def test_rename_preview_library_wide_scans_past_limit(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    for i in range(1, 6):
+        _seed_rename_track(test_db, i, f"Artist{i}", root / f"Artist{i}" / "Closer (2000)" / f"{i:02d} - Song {i}.flac")
+    _seed_rename_track(test_db, 6, "Artist6", root / "Various Artists" / "Closer" / "x.flac")
+
+    resp = client.post("/api/library/rename/preview", json={"limit": 2}, headers=headers)
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert [r["file_id"] for r in rows] == ["rf-6"]
+    assert rows[0]["needs_rename"] is True
+
+
+def test_rename_preview_library_wide_returns_only_changes(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    for i in range(1, 4):
+        _seed_rename_track(test_db, i, f"Artist{i}", root / f"Artist{i}" / "Closer (2000)" / f"{i:02d} - Song {i}.flac")
+
+    resp = client.post("/api/library/rename/preview", json={}, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_rename_preview_album_scope_unchanged(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    _seed_rename_track(test_db, 1, "Artist1", root / "Artist1" / "Closer (2000)" / "01 - Song 1.flac")
+
+    resp = client.post("/api/library/rename/preview", json={"album_id": "rb-1"}, headers=headers)
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert len(rows) == 1
+    assert rows[0]["needs_rename"] is False
+
+
+def _apply_rename(client, headers, file_id: str):
+    resp = client.post("/api/library/rename/apply", json={"file_ids": [file_id]}, headers=headers)
+    assert resp.status_code == 200
+    return resp.json()
+
+
+def test_rename_apply_moves_cover_and_removes_old_folders(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    old = root / "Various Artists" / "Closer" / "x.flac"
+    fid = _seed_rename_track(test_db, 1, "Artist1", old, create=True)
+    (old.parent / "cover.jpg").write_bytes(b"jpg")
+
+    res = _apply_rename(client, headers, fid)
+    assert res["renamed_count"] == 1 and res["errors"] == []
+
+    dest = root / "Artist1" / "Closer (2000)"
+    assert (dest / "01 - Song 1.flac").exists()
+    assert (dest / "cover.jpg").read_bytes() == b"jpg"
+    assert not (root / "Various Artists" / "Closer").exists()
+    assert not (root / "Various Artists").exists()
+    assert root.exists()
+
+
+def test_rename_apply_keeps_cover_when_destination_has_one(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    old = root / "Various Artists" / "Closer" / "x.flac"
+    fid = _seed_rename_track(test_db, 1, "Artist1", old, create=True)
+    (old.parent / "cover.jpg").write_bytes(b"old")
+    dest = root / "Artist1" / "Closer (2000)"
+    dest.mkdir(parents=True)
+    (dest / "cover.jpg").write_bytes(b"new")
+
+    res = _apply_rename(client, headers, fid)
+    assert res["renamed_count"] == 1
+    assert (old.parent / "cover.jpg").read_bytes() == b"old"
+    assert (dest / "cover.jpg").read_bytes() == b"new"
+    assert (dest / "01 - Song 1.flac").exists()
+
+
+def test_rename_apply_leaves_folder_with_other_files(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    old = root / "Various Artists" / "Closer" / "x.flac"
+    fid = _seed_rename_track(test_db, 1, "Artist1", old, create=True)
+    other = old.parent / "other.flac"
+    _create_minimal_flac(other)
+    (old.parent / "cover.jpg").write_bytes(b"jpg")
+
+    res = _apply_rename(client, headers, fid)
+    assert res["renamed_count"] == 1
+    assert other.exists()
+    assert (old.parent / "cover.jpg").exists()
+    assert not (root / "Artist1" / "Closer (2000)" / "cover.jpg").exists()
+
+
+def test_rename_apply_never_removes_root(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    old = root / "x.flac"
+    fid = _seed_rename_track(test_db, 1, "Artist1", old, create=True)
+
+    res = _apply_rename(client, headers, fid)
+    assert res["renamed_count"] == 1
+    assert root.is_dir()
+    assert (root / "Artist1" / "Closer (2000)" / "01 - Song 1.flac").exists()
