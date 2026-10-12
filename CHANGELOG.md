@@ -61,6 +61,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Renaming with the Trackseerr preset no longer moves folders Lidarr already named: artist folders keep a leading "The" (The Offspring stays The Offspring), and a "/" in a name becomes "+" as in Lidarr (AC+DC), not "-". If you picked the preset before this fix, pick it again so your naming settings update.
+- A library-wide rename preview now goes artist by artist and album by album, so a capped preview shows whole albums instead of scattered tracks from across the library.
 - Downloads that match a library track are filed under that track's artist, album and year, even when the file is tagged as part of a compilation (they no longer land in "Various Artists").
 - Album folders no longer end in empty brackets like "Closer ()" when the release year is unknown.
 - Library → Rename files now checks the whole library (not just the first 500 tracks), lists only files that need moving, and carries album artwork along so emptied folders are removed.
