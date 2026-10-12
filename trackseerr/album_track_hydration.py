@@ -21,6 +21,7 @@ from trackseerr.clients.mbid_enricher import MbidEnricherClient
 from trackseerr.library_monitoring import hydrated_track_monitored
 from trackseerr.models import LibraryTrack
 from trackseerr.storage import Database, clean_library_name
+from trackseerr.track_credits import store_track_credits
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,7 @@ def hydrate_album_tracks(
             number = int(trk.get("track_number") or 1)
             if db.get_library_track_by_title(album_id, title, track_number=number):
                 continue
-            db.upsert_library_track(
+            saved = db.upsert_library_track(
                 LibraryTrack(
                     id=str(uuid.uuid4()),
                     album_id=album_id,
@@ -182,6 +183,7 @@ def hydrate_album_tracks(
                     mb_recording_id=trk.get("mb_recording_id"),
                 )
             )
+            store_track_credits(db, str(saved["id"]), trk)
             created += 1
         return created
     finally:

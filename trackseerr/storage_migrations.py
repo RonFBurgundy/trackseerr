@@ -62,6 +62,7 @@ class MigrationsMixin:
                 (74, self._migration_v74),
                 (75, self._migration_v75),
                 (76, self._migration_v76),
+                (77, self._migration_v77),
             ]
 
             applied = 0
@@ -149,6 +150,27 @@ class MigrationsMixin:
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN replace_illegal_characters INTEGER NOT NULL DEFAULT 1"
             )
+
+    def _migration_v77(self, cur: sqlite3.Cursor) -> None:
+        """v77: Add library_track_artists (per-track artist credits: primary / featured / remixer)."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS library_track_artists (
+                track_id TEXT NOT NULL REFERENCES library_tracks(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                artist_name TEXT NOT NULL,
+                artist_mbid TEXT,
+                role TEXT NOT NULL CHECK (role IN ('primary','featured','remixer')),
+                join_phrase TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL CHECK (source IN ('musicbrainz','tags','title')),
+                PRIMARY KEY (track_id, position)
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_track_artists_mbid ON library_track_artists(artist_mbid)")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib_track_artists_name ON library_track_artists(lower(artist_name))"
+        )
 
     def _migration_v74(self, cur: sqlite3.Cursor) -> None:
         """v74: Add search_log (one row per indexer/slskd search with its trigger) and active_downloads.remote_state."""

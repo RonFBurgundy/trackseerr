@@ -40,6 +40,7 @@ from trackseerr.recycle_bin import (
 )
 from trackseerr.storage import Database, clean_library_name
 from trackseerr.track_counts import positive_int as _positive_int
+from trackseerr.track_credits import store_track_credits
 
 
 logger = logging.getLogger(__name__)
@@ -460,7 +461,7 @@ def _hydrate_release_group_tracks(
                     trk_id = str(uuid.uuid4())
                     t_monitored = hydrated_track_monitored(monitor_opt)
 
-                st.db.upsert_library_track(
+                saved = st.db.upsert_library_track(
                     LibraryTrack(
                         id=trk_id,
                         album_id=album_id,
@@ -474,6 +475,7 @@ def _hydrate_release_group_tracks(
                         mb_recording_id=mb_rec_id,
                     )
                 )
+                store_track_credits(st.db, str(saved["id"]), trk)
 
 
 def _sync_mb_discography(st: _RefreshState) -> None:
