@@ -16,6 +16,11 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
    shutdown that signals all running tasks to stop at the next item instead of waiting minutes (e.g. switching to
    Trackseerr mid-run). Manual tasks currently pass `should_stop=None` (credits backfill, art backfill) — wire them.
    Start: `trackseerr/task_manager.py`, `trackseerr/api/routes/system/tasks.py` (`_run_manual`, `_running_tasks`).
+   Also **sort/group the Tasks page better**: running tasks pinned at the top; then grouped by purpose (Library:
+   scan, Lidarr import, credits backfill, rename/retag · Acquisition: wanted sweep, RSS, download queue, retries ·
+   Metadata & art: artist refresh, art backfill · Maintenance: health, seed cleanup, recycle bin, backups, update
+   check · Playlists & listening: playlist sync, scrobbles, mixes); within a group, scheduled tasks by next run, manual
+   tasks last. Add the group to `TaskSpec` in `task_manager.py` so the order is defined server-side.
 3. **P1 · Requesting a track that's already in the library.** Discover/search results don't always show the
    "In library" badge, so the request goes through; the track page does detect it. Two fixes: (a) server-side guard
    in `create_request` (`trackseerr/api/routes/requests.py` ~L89) — reject/short-circuit when the library has a
