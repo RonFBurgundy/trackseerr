@@ -133,6 +133,7 @@ _MANUAL_RUNNABLE = {
     "mix_generation",
     "backup",
     "update_check",
+    "track_credits_backfill",
 }
 
 
@@ -269,6 +270,7 @@ def get_all_scheduled_tasks(
             False,
         ),
         "art_thumbnail_backfill": ("running" if "art_thumbnail_backfill" in _running_tasks else "idle", None, False),
+        "track_credits_backfill": ("running" if "track_credits_backfill" in _running_tasks else "idle", None, False),
         "seed_cleanup": (
             "running" if (sc_stat.get("running") or "seed_cleanup" in _running_tasks) else "idle",
             (sc_stat.get("last_run") or {}).get("finished_at"),
@@ -700,6 +702,16 @@ def run_scheduled_task(  # noqa: C901, PLR0915
                 run.message = "no releases found"
 
         _run_manual(db, task_id, "ManualUpdateCheckTask", _update)
+
+    elif task_id == "track_credits_backfill":
+        def _credits(run: RunHandle) -> None:
+            from trackseerr.mb_metadata_store import get_shared_enricher
+            from trackseerr.track_credits_backfill import run_credits_backfill
+
+            counts = run_credits_backfill(db, get_shared_enricher(db))
+            run.message = ", ".join(f"{k}={v}" for k, v in counts.items())
+
+        _run_manual(db, task_id, "ManualTrackCreditsTask", _credits)
 
     return {"success": True, "message": f"Task '{task_id}' dispatched successfully"}
 

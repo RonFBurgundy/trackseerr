@@ -233,6 +233,13 @@ TASKS: dict[str, TaskSpec] = {
             12 * _HOUR,
             _presets(6 * _HOUR),
         ),
+        TaskSpec(
+            "track_credits_backfill",
+            "Track Artist Credits Backfill",
+            "Fills per-track artist credits (performer, featured, remixer) from MusicBrainz and file tags for "
+            "tracks that have none. Safe to re-run.",
+            KIND_MANUAL,
+        ),
     )
 }
 
@@ -324,6 +331,7 @@ WORKER_THREAD_TASKS: dict[str, str] = {
     "ManualBackupTask": "backup",
     "UpdateCheckWorkerThread": "update_check",
     "ManualUpdateCheckTask": "update_check",
+    "ManualTrackCreditsTask": "track_credits_backfill",
     "LidarrMigrationThread": "lidarr_migration",
 }
 

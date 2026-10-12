@@ -461,3 +461,51 @@ def test_scan_same_title_two_release_groups_in_one_scan(db: Database, scanner: L
     artist = db.get_library_artist_by_name("Jessie J")
     rows = _albums_of(db, artist["id"])
     assert sorted(r["mb_release_group_id"] for r in rows) == ["rg-one", "rg-two"]
+
+
+def _scan_one(db: Database, scanner: LibraryScanner, tmp_path: Path, artist: str) -> None:
+    album_dir = tmp_path / "music" / "Various Artists" / "Saturday Night Fever"
+    album_dir.mkdir(parents=True)
+    fp = album_dir / "01 - Stayin Alive.flac"
+    fp.write_bytes(b"x")
+    meta = {
+        "title": "Stayin Alive", "artist": artist, "album": "Saturday Night Fever", "album_artist": "Various Artists",
+        "track_number": 1, "disc_number": 1, "year": 1977, "total_tracks": 1, "duration": 245.0, "codec": "FLAC",
+        "bitrate": 900000, "sample_rate": 44100, "bits_per_sample": 16, "quality_full": "FLAC 16bit 44.1kHz",
+        "file_path": str(fp.resolve()),
+    }
+    with patch("trackseerr.library_scanner.inspect_audio_file", return_value=meta):
+        scanner.scan(db, root_folder=str(tmp_path / "music"))
+
+
+def _only_track(db: Database) -> dict:
+    tracks = db.list_library_tracks(limit=10)
+    assert len(tracks) == 1
+    return tracks[0]
+
+
+def test_scan_stores_tag_credit_on_compilation_track(db: Database, scanner: LibraryScanner, tmp_path: Path):
+    _scan_one(db, scanner, tmp_path, "Bee Gees")
+    credits = db.list_track_artists(_only_track(db)["id"])
+    assert [(c["artist_name"], c["role"], c["source"]) for c in credits] == [("Bee Gees", "primary", "tags")]
+
+
+def test_scan_keeps_existing_musicbrainz_credits(db: Database, scanner: LibraryScanner, tmp_path: Path):
+    _scan_one(db, scanner, tmp_path, "Bee Gees")
+    track_id = _only_track(db)["id"]
+    db.replace_track_artists(
+        track_id,
+        [{"artist_name": "The Bee Gees", "artist_mbid": "mb-bg", "role": "primary", "join_phrase": "", "source": "musicbrainz"}],
+    )
+    scanner2 = LibraryScanner()
+    (tmp_path / "music" / "Various Artists" / "Saturday Night Fever" / "x.txt").write_text("x")
+    with patch("trackseerr.library_scanner.inspect_audio_file") as insp:
+        insp.side_effect = lambda p: {
+            "title": "Stayin Alive", "artist": "Other Tag", "album": "Saturday Night Fever",
+            "album_artist": "Various Artists", "track_number": 1, "disc_number": 1, "year": 1977, "total_tracks": 1,
+            "duration": 245.0, "codec": "FLAC", "bitrate": 900000, "sample_rate": 44100, "bits_per_sample": 16,
+            "quality_full": "FLAC 16bit 44.1kHz", "file_path": str(p),
+        }
+        scanner2.scan(db, root_folder=str(tmp_path / "music"))
+    credits = db.list_track_artists(track_id)
+    assert [(c["artist_name"], c["source"]) for c in credits] == [("The Bee Gees", "musicbrainz")]

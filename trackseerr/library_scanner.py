@@ -10,6 +10,7 @@ import concurrent.futures
 from dataclasses import dataclass, field
 import logging
 import os
+import sqlite3
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -42,6 +43,7 @@ from trackseerr.item_history import TRIGGER_SCAN, GrabTrigger, emit, provenance
 from trackseerr.recycle_bin import is_excluded_entry, library_excluded_paths, prune_excluded_dirs
 from trackseerr.redaction import redact_text, safe_exc
 from trackseerr.storage import Database
+from trackseerr.track_credits import build_track_credits
 
 logger = logging.getLogger(__name__)
 
@@ -683,7 +685,25 @@ class LibraryScanner:
                 }, preserve_monitoring=True)
         run.track_cache[track_key] = track_row
         run.track_id_cache[str(track_row["id"])] = track_row
+        self._store_scan_credits(run, str(track_row["id"]), track_title, metadata)
         return str(track_row["id"])
+
+    @staticmethod
+    def _store_scan_credits(run: _ScanRun, track_id: str, title: str, metadata: dict[str, Any]) -> None:
+        """Stores the tagged artist as a credit when the track has none yet (MusicBrainz rows always win)."""
+        try:
+            if run.db.list_track_artists(track_id):
+                return
+            credits = build_track_credits(
+                None,
+                title,
+                tag_artist=metadata.get("artist"),
+                tag_artist_mbid=metadata.get("musicbrainz_artistid"),
+            )
+            if credits:
+                run.db.replace_track_artists(track_id, credits)
+        except sqlite3.Error as exc:
+            logger.warning("LibraryScanner: storing artist credits for track %s failed: %s", track_id, exc)
 
     def _evaluate_scan_quality(
         self,

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import logging
 import os
 import sqlite3
+import time
 from unittest.mock import MagicMock, patch
 import httpx
 import pytest
@@ -562,3 +563,21 @@ class TestTaskRegistration:
             resp = client.post("/api/system/tasks/update_check/run", cookies=admin_cookies)
             assert resp.status_code == 200
             assert resp.json()["success"] is True
+
+
+class TestTrackCreditsTask:
+    def test_manual_run_via_tasks_api(self, app_and_client, seeded_users, secret_key, test_db):
+        _, client = app_and_client
+        admin_cookies = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
+        with patch("trackseerr.track_credits_backfill.run_credits_backfill") as mock_run, patch(
+            "trackseerr.mb_metadata_store.get_shared_enricher"
+        ):
+            mock_run.return_value = {"albums": 1}
+            resp = client.post("/api/system/tasks/track_credits_backfill/run", cookies=admin_cookies)
+            assert resp.status_code == 200
+            assert resp.json()["success"] is True
+            for _ in range(50):
+                if mock_run.called:
+                    break
+                time.sleep(0.1)
+            assert mock_run.called
