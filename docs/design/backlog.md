@@ -74,3 +74,8 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     classes or a raw checkbox/radio outside `components/ui`. Rule already added to the frontend skill (Phase 4d #5,
     Phase 6 gate 7).
 13. **P3 · Housekeeping:** an 8-day-old `tsc -w` process from another session is running on the host.
+14. **P2 · Scanner can still merge same-title tracks on one disc.** `_pick_title_match`
+    (`trackseerr/library_catalog_store.py`) returns the first same-disc row with that title when no row has the
+    requested track number, so a fresh scan of two new "[silence]" files (#90, #91) lands both on one track. The Lidarr
+    import is guarded by an exact disc+number+title check. Fix: with a track number given, cross numbers only when the
+    candidate row has no file yet (keeps renumbered catalog rows matching) — test with the scanner two-file case.
