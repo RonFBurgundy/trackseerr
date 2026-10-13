@@ -136,6 +136,11 @@ class RenameApplyRequest(BaseModel):
 class RenameVerifyRequest(BaseModel):
     file_ids: list[str] = Field(default_factory=list, max_length=5000)
 
+class RenameRelinkRequest(BaseModel):
+    file_id: str
+    target_track_id: str
+    conflict: Optional[Literal["keep_incoming", "keep_existing", "prefer_quality"]] = None
+
 class RetagPreviewRequest(BaseModel):
     artist_id: Optional[str] = None
     album_id: Optional[str] = None
