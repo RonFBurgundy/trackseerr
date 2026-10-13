@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- The rename preview can check risky moves with AcoustID: "Verify risky" fingerprints those files (about 3 per second, in the background) and compares the audio with the track each file is linked to. Confirmed files are marked "Audio verified" and pre-selected; files whose audio is a different track show what it really is and can't be renamed until relinked. Results are cached, so re-checking is instant. Needs an AcoustID API key in Media Management.
 - Renames keep each artist's existing folder, as Lidarr does, and new downloads for that artist go into it too; only album folders and file names are tidied. A new "Rename artist folders" switch in the naming settings renames artist folders as well when you want them consistent.
 - The rename preview says why each file would move (artist folder, loose file, format only, album year or title changed, disc layout, track number or title changed, name collision), lets you filter by reason, and pre-selects only the safe, format-only moves. It shows up to 5,000 moves.
 - Tracks now record their own artists (performer, featured artists, remixers) from MusicBrainz, file tags and remix titles, so a compilation track knows it is by the Bee Gees rather than "Various Artists". Run "Track Artist Credits Backfill" on the Tasks page once to fill this in for an existing library; scans and refreshes keep it up to date.
