@@ -85,3 +85,16 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     `role="group"` + `aria-label` for keyboard scrolling, full path in `title` (see
     `frontend/src/components/library/RenameModal.tsx` ~L450-470). Target: `frontend/src/components/library/RetagModal.tsx`
     file rows and the per-field diff values. Frontend skill applies.
+16. **P2 · Activity + Wanted item cards are cluttered (mobile first, desktop too).** On phones the per-item action
+    buttons fill the right half of every card and squeeze the track details into a narrow left column (user
+    screenshot `Screenshot_20261012-214949.png`, Queue). Standardise ONE shared item-card component used by every
+    sub-page of Activity (Queue, Searches, History, Blocklist, Needs Review) and Wanted (incl. Calendar agenda rows):
+    row 1 = full-width track details (title · artist · album, truncating); row 2 = at-a-glance status (status badge,
+    quality/source chips, download progress bar for queue items); all actions in one ⋯ `OverflowMenu`
+    (`frontend/src/components/ui/OverflowMenu.tsx`, portal fix 6b5e4bd) at the row-1 right edge; an optional chevron
+    expands secondary details (indexer, size, paths, errors, history) inline. Same pattern on desktop with denser
+    spacing. Precedent: the 2026-10-10 Library + artist page toolbox (`LibraryView.tsx`, `ArtistDetail.tsx`,
+    `ArtistAlbumCard.tsx` — tools collapsed into one ⋯ menu on all viewports). Same goal as the Tasks page compact-row
+    redesign in #2 — reuse the component there. Files: `frontend/src/components/activity/Activity*Panel.tsx`,
+    `NeedsReviewPanel.tsx`/`ReviewMappingCard.tsx`, `SoulseekQueueDetail.tsx`, `wanted/WantedPanel.tsx`,
+    `calendar/CalendarAgenda.tsx`. Frontend skill applies; decompose per sub-page after the shared card lands.
