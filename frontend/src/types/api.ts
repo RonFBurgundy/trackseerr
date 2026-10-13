@@ -2757,6 +2757,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/rename/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rename Verify
+         * @description Starts a background AcoustID check of the given library files against the tracks they are linked to.
+         */
+        post: operations["rename_verify_api_library_rename_verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/rename/verify/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Rename Verify Status
+         * @description Reports the progress of the current or last AcoustID verification run.
+         */
+        get: operations["rename_verify_status_api_library_rename_verify_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/retag/apply": {
         parameters: {
             query?: never;
@@ -11954,6 +11994,11 @@ export interface components {
         };
         /** RenameApplyResponse */
         RenameApplyResponse: {
+            /**
+             * Blocked Count
+             * @default 0
+             */
+            blocked_count: number;
             /** Errors */
             errors: string[];
             /** Renamed Count */
@@ -11975,6 +12020,7 @@ export interface components {
             reasons: string[];
             /** Track Id */
             track_id: string;
+            verification?: components["schemas"]["RenameVerification"] | null;
         };
         /** RenamePreviewRequest */
         RenamePreviewRequest: {
@@ -11992,6 +12038,53 @@ export interface components {
         RenameRequest: {
             /** Title */
             title: string;
+        };
+        /** RenameVerification */
+        RenameVerification: {
+            /** Actual Album Id */
+            actual_album_id?: string | null;
+            /** Actual Artist */
+            actual_artist?: string | null;
+            /** Actual Title */
+            actual_title?: string | null;
+            /** Actual Track Id */
+            actual_track_id?: string | null;
+            /** Score */
+            score?: number | null;
+            /** Status */
+            status: string;
+        };
+        /** RenameVerifyRequest */
+        RenameVerifyRequest: {
+            /** File Ids */
+            file_ids?: string[];
+        };
+        /** RenameVerifyStatus */
+        RenameVerifyStatus: {
+            /** Api Key Set */
+            api_key_set: boolean;
+            /** Cached */
+            cached: number;
+            /** Done */
+            done: number;
+            /** Errors */
+            errors: number;
+            /** Finished At */
+            finished_at?: number | null;
+            /** Message */
+            message?: string | null;
+            /** Mismatched */
+            mismatched: number;
+            /** Running */
+            running: boolean;
+            /** Started At */
+            started_at?: number | null;
+            /** Total */
+            total: number;
+            /** Unknown */
+            unknown: number;
+            /** Verified */
+            verified: number;
         };
         /** ReorderPayload */
         ReorderPayload: {
@@ -18608,6 +18701,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_verify_api_library_rename_verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameVerifyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenameVerifyStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_verify_status_api_library_rename_verify_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenameVerifyStatus"];
                 };
             };
         };
