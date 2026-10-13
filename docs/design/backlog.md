@@ -85,18 +85,27 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     `role="group"` + `aria-label` for keyboard scrolling, full path in `title` (see
     `frontend/src/components/library/RenameModal.tsx` ~L450-470). Target: `frontend/src/components/library/RetagModal.tsx`
     file rows and the per-field diff values. Frontend skill applies.
-16. **P2 · Activity + Wanted item cards are cluttered (mobile first, desktop too).** On phones the per-item action
-    buttons fill the right half of every card and squeeze the track details into a narrow left column (user
+16. **P2 · Activity, Wanted and album item cards are cluttered (mobile first, desktop too).** On phones the per-item
+    action buttons fill the right half of every card and squeeze the track details into a narrow left column (user
     screenshot `Screenshot_20261012-214949.png`, Queue: a status word + Retry/Blocklist/Delete icon buttons take
     ~55% of the width, so the artist truncates to "OK …"/"Her…"/"Ha…", the progress % clips to "1(", and a stalled
-    row's WARNING/STALLED badge + Manual Import button wrap the actions onto a second row). Standardise ONE shared item-card component used by every
-    sub-page of Activity (Queue, Searches, History, Blocklist, Needs Review) and Wanted (incl. Calendar agenda rows):
-    row 1 = full-width track details (title · artist · album, truncating); row 2 = at-a-glance status (status badge,
-    quality/source chips, download progress bar for queue items); all actions in one ⋯ `OverflowMenu`
-    (`frontend/src/components/ui/OverflowMenu.tsx`, portal fix 6b5e4bd) at the row-1 right edge; an optional chevron
-    expands secondary details (indexer, size, paths, errors, history) inline. Same pattern on desktop with denser
-    spacing. Precedent: the 2026-10-10 Library + artist page toolbox (`LibraryView.tsx`, `ArtistDetail.tsx`,
-    `ArtistAlbumCard.tsx` — tools collapsed into one ⋯ menu on all viewports). Same goal as the Tasks page compact-row
-    redesign in #2 — reuse the component there. Files: `frontend/src/components/activity/Activity*Panel.tsx`,
-    `NeedsReviewPanel.tsx`/`ReviewMappingCard.tsx`, `SoulseekQueueDetail.tsx`, `wanted/WantedPanel.tsx`,
-    `calendar/CalendarAgenda.tsx`. Frontend skill applies; decompose per sub-page after the shared card lands.
+    row's WARNING/STALLED badge + Manual Import button wrap the actions onto a second row).
+    **Decided with user 2026-10-13:** one shared item-card component, same layout on every viewport (desktop only
+    gets slightly tighter spacing, so switching devices never feels different):
+    row 1 = full-width details (title · artist · album, truncating) + monitor state as a compact icon toggle (not a
+    labelled switch) + one ⋯ `OverflowMenu` (`frontend/src/components/ui/OverflowMenu.tsx`) at the right edge holding
+    ALL actions; row 2 = the existing status badges, quality/source chips and progress bar; a chevron expands
+    secondary details (indexer, size, paths, errors, history) inline. Attention state (stalled, failed, needs review):
+    the badge stays in row 2 and is tappable to run the recommended action; that action (e.g. Manual Import) is the
+    first menu item, amber-highlighted; the ⋯ trigger gets a small amber dot. No per-row banners.
+    **Constraint (user):** nothing new visually — keep the current colours, badges, chips, progress bars and
+    tape-deck controls; this is a re-layout plus slight compaction only.
+    Scope: every Activity sub-page (Queue, Searches, History, Blocklist, Needs Review), every Wanted sub-page
+    (incl. Calendar agenda rows), and the Library album cards — `ArtistAlbumCard.tsx` currently splits by design
+    (`sm:hidden` chevron + ⋯ on phones, `hidden sm:flex` inline TactileSwitch + Search/Import/Info on desktop,
+    ~L184-240); unify it onto the shared card. Page-level toolboxes (`LibraryView.tsx`, `ArtistDetail.tsx`) are
+    already ⋯ on all viewports. Reuse the card for the Tasks page compact rows in #2.
+    Files: `frontend/src/components/activity/Activity*Panel.tsx`, `NeedsReviewPanel.tsx`/`ReviewMappingCard.tsx`,
+    `SoulseekQueueDetail.tsx`, `wanted/WantedPanel.tsx`, `calendar/CalendarAgenda.tsx`,
+    `library/ArtistAlbumCard.tsx`. Frontend skill applies. Decompose: (a) shared card + Queue, (b) remaining
+    Activity panels, (c) Wanted + Calendar, (d) album cards.
