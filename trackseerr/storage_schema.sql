@@ -729,6 +729,20 @@ CREATE INDEX idx_lib_track_artists_name ON library_track_artists(lower(artist_na
 CREATE INDEX idx_lib_files_track ON library_files(track_id);
 CREATE INDEX idx_lib_files_path ON library_files(file_path);
 CREATE INDEX idx_lib_files_cutoff ON library_files(cutoff_met);
+
+CREATE TABLE file_fingerprints (
+    file_id TEXT PRIMARY KEY REFERENCES library_files(id) ON DELETE CASCADE,
+    file_path TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    mtime_ns INTEGER NOT NULL,
+    duration REAL,
+    fingerprint TEXT,
+    status TEXT NOT NULL,          -- 'ok' | 'no_result' | 'error'
+    matches_json TEXT NOT NULL DEFAULT '[]',
+    error TEXT,
+    looked_up_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+);
+
 CREATE INDEX idx_blocklist_hash ON download_blocklist(info_hash);
 CREATE INDEX idx_blocklist_title ON download_blocklist(source_title);
 CREATE INDEX idx_blocklist_guid ON download_blocklist(release_guid);

@@ -31,6 +31,7 @@ from trackseerr.item_history import ItemHistoryMixin
 from trackseerr.tag_store import TagMixin
 from trackseerr.search_log_store import SearchLogStoreMixin
 from trackseerr.track_alias_store import TrackAliasStoreMixin
+from trackseerr.fingerprint_store import FingerprintStoreMixin
 
 # Re-exported: callers import these from trackseerr.storage.
 from trackseerr.storage_common import (  # noqa: F401
@@ -88,6 +89,7 @@ class Database(
     ItemHistoryMixin,
     TagMixin,
     TrackAliasStoreMixin,
+    FingerprintStoreMixin,
     SearchLogStoreMixin,
 ):
     """Thread-safe SQLite database wrapper with WAL mode, foreign keys, and migrations."""
