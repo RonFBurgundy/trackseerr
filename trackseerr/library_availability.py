@@ -38,52 +38,53 @@ def _track_availability(
     fid: Optional[str],
 ) -> Optional[dict[str, Any]]:
     artist_row = _artist_row(db, artist_clean, fid)
-    if artist_row:
-        track_row = None
-        if album_clean:
-            album_row = db.get_library_album_by_title(artist_row["id"], album_clean)
-            if album_row:
-                track_row = db.get_library_track_by_title(album_row["id"], track_clean)
+    track_row = None
+    if artist_row and album_clean:
+        album_row = db.get_library_album_by_title(artist_row["id"], album_clean)
+        if album_row:
+            track_row = db.get_library_track_by_title(album_row["id"], track_clean)
+            if track_row and not db.get_library_file_for_track(track_row["id"]):
+                track_row = None  # an empty same-title row must not hide a filed one on another album
 
-        if not track_row:
-            clean_t = clean_library_name(track_clean)
-            artist_tracks = db.list_library_tracks(artist_id=artist_row["id"], limit=500)
-            for t in artist_tracks:
-                if t.get("clean_title") == clean_t or clean_library_name(t.get("title", "")) == clean_t:
-                    track_row = t
-                    break
+    if not track_row:
+        matches = db.find_library_tracks_by_clean_title(
+            track_clean,
+            artist_id=str(artist_row["id"]) if artist_row else None,
+            credited_artist=artist_clean,
+        )
+        track_row = matches[0] if matches else None
 
-        if not track_row and fid:
-            with db._lock:
-                cur = db.conn.execute(
-                    "SELECT * FROM library_tracks WHERE foreign_track_id = ? AND artist_id = ? LIMIT 1",
-                    (fid, str(artist_row["id"])),
-                )
-                r = cur.fetchone()
-                if r:
-                    track_row = db._map_library_track(r)
+    if not track_row and artist_row and fid:
+        with db._lock:
+            cur = db.conn.execute(
+                "SELECT * FROM library_tracks WHERE foreign_track_id = ? AND artist_id = ? LIMIT 1",
+                (fid, str(artist_row["id"])),
+            )
+            r = cur.fetchone()
+            if r:
+                track_row = db._map_library_track(r)
 
-        if track_row:
-            file_row = db.get_library_file_for_track(track_row["id"])
-            if file_row:
-                cutoff_met = bool(file_row.get("cutoff_met", True))
-                status_str = "available" if cutoff_met else "cutoff_unmet"
-                return {
-                    "in_library": True,
-                    "monitored": bool(track_row.get("monitored", True)),
-                    "status": status_str,
-                    "quality": file_row.get("quality_name"),
-                    "file_count": 1,
-                    "track_count": 1,
-                }
+    if track_row:
+        file_row = db.get_library_file_for_track(track_row["id"])
+        if file_row:
+            cutoff_met = bool(file_row.get("cutoff_met", True))
+            status_str = "available" if cutoff_met else "cutoff_unmet"
             return {
                 "in_library": True,
                 "monitored": bool(track_row.get("monitored", True)),
-                "status": "missing",
-                "quality": None,
-                "file_count": 0,
+                "status": status_str,
+                "quality": file_row.get("quality_name"),
+                "file_count": 1,
                 "track_count": 1,
             }
+        return {
+            "in_library": True,
+            "monitored": bool(track_row.get("monitored", True)),
+            "status": "missing",
+            "quality": None,
+            "file_count": 0,
+            "track_count": 1,
+        }
 
     return None
 

@@ -293,8 +293,8 @@ def auto_request_missing(db: Any, config: Any, playlist: dict[str, Any]) -> dict
                 trigger=trigger,
             )
         except RequestRejected as exc:
-            if exc.code == "duplicate":
-                # Already requested: remember it so the sync stops asking.
+            if exc.code in ("duplicate", "in_library"):
+                # Already requested or owned: remember it so the sync stops asking.
                 db.mark_missing_tracks_list_applied([track_id])
                 counts["applied"] += 1
                 continue
