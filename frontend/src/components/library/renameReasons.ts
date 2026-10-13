@@ -59,6 +59,16 @@ export const RENAME_REASONS: Readonly<Record<string, RenameReasonInfo>> = {
     help: 'Another file already maps to this name; the move may be skipped or renamed.',
     risky: true,
   },
+  verified: {
+    label: 'Audio verified',
+    help: 'AcoustID confirms this file is the track it is linked to.',
+    risky: false,
+  },
+  audio_mismatch: {
+    label: 'Audio is a different track',
+    help: 'AcoustID identifies this audio as another track. Renaming is blocked until the file is linked to the right track.',
+    risky: true,
+  },
 };
 
 export function reasonInfo(code: string): RenameReasonInfo {

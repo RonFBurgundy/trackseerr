@@ -6,6 +6,9 @@ import {
   type RenameApplyResponse,
 } from '@/services/renameService';
 import { errorMessage } from '@/services/apiClient';
+import { RENAME_REASONS } from '@/components/library/renameReasons';
+
+const isMismatch = (item: RenamePreviewItem): boolean => item.verification?.status === 'mismatch';
 
 export interface UseRenamePreviewOptions {
   artistId?: string | null;
@@ -34,6 +37,8 @@ export interface UseRenamePreviewReturn {
   selectSafe: () => void;
   /** Deselects every currently filtered row. */
   selectNone: () => void;
+  /** file_ids of proposed moves with at least one risky reason, i.e. worth verifying by audio. */
+  riskyIds: string[];
   setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   apply: () => Promise<RenameApplyResponse | null>;
   result: RenameApplyResponse | null;
@@ -94,11 +99,12 @@ export function useRenamePreview({
       if (next.has(fileId)) {
         next.delete(fileId);
       } else {
+        if (items.some((item) => item.file_id === fileId && isMismatch(item))) return prev;
         next.add(fileId);
       }
       return next;
     });
-  }, []);
+  }, [items]);
 
   const reasonCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -114,6 +120,14 @@ export function useRenamePreview({
         ? items
         : items.filter((item) => item.reasons.some((reason) => activeReasons.has(reason))),
     [items, activeReasons]
+  );
+
+  const riskyIds = useMemo(
+    () =>
+      items
+        .filter((item) => item.reasons.some((reason) => RENAME_REASONS[reason]?.risky === true))
+        .map((item) => item.file_id),
+    [items]
   );
 
   const toggleReason = useCallback((reason: string) => {
@@ -132,7 +146,7 @@ export function useRenamePreview({
   const selectAll = useCallback(() => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      for (const item of filteredItems) next.add(item.file_id);
+      for (const item of filteredItems) if (!isMismatch(item)) next.add(item.file_id);
       return next;
     });
   }, [filteredItems]);
@@ -188,6 +202,7 @@ export function useRenamePreview({
     selectAll,
     selectSafe,
     selectNone,
+    riskyIds,
     setSelectedIds,
     apply,
     result,

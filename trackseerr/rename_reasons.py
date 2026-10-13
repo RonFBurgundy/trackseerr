@@ -19,6 +19,8 @@ TRACK_NUMBER = "track_number"
 FILE_NAME_FORMAT = "file_name_format"
 FILE_TITLE = "file_title"
 COLLISION = "collision"
+VERIFIED = "verified"
+AUDIO_MISMATCH = "audio_mismatch"
 
 # A move is pre-selected only when it is purely cosmetic or tidies a stray file: anything that touches numbering,
 # titles, years, disc layout or collisions needs a human decision.

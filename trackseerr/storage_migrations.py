@@ -65,6 +65,7 @@ class MigrationsMixin:
                 (77, self._migration_v77),
                 (78, self._migration_v78),
                 (79, self._migration_v79),
+                (80, self._migration_v80),
             ]
 
             applied = 0
@@ -152,6 +153,25 @@ class MigrationsMixin:
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN replace_illegal_characters INTEGER NOT NULL DEFAULT 1"
             )
+
+    def _migration_v80(self, cur: sqlite3.Cursor) -> None:
+        """v80: Add file_fingerprints (AcoustID fingerprint + lookup cache per library file)."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS file_fingerprints (
+                file_id TEXT PRIMARY KEY REFERENCES library_files(id) ON DELETE CASCADE,
+                file_path TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                mtime_ns INTEGER NOT NULL,
+                duration REAL,
+                fingerprint TEXT,
+                status TEXT NOT NULL,          -- 'ok' | 'no_result' | 'error'
+                matches_json TEXT NOT NULL DEFAULT '[]',
+                error TEXT,
+                looked_up_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+            )
+            """
+        )
 
     def _migration_v79(self, cur: sqlite3.Cursor) -> None:
         """v79: Add media_management_settings.rename_artist_folders (off: rename keeps each artist's existing folder)."""

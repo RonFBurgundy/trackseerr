@@ -109,6 +109,7 @@ export * from './useHasDownloadClients';
 export * from './useListeningSources';
 export * from './useCanAutoRequestPlaylists';
 export * from './useRenamePreview';
+export * from './useRenameVerify';
 export * from './useMissingTracks';
 export * from './useChangelog';
 export * from './useBackups';

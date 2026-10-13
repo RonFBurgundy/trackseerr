@@ -1040,3 +1040,65 @@ def fingerprint_audio_file(
         logger.warning("fingerprint_audio_file: AcoustID match failed for %s: %s", path, exc)
         return None
 
+
+VERIFY_MIN_SCORE = 0.80  # mirrors track_matching.FINGERPRINT_MIN_SCORE (not imported: avoids an import cycle)
+
+
+class FingerprintUnavailable(RuntimeError):
+    """pyacoustid is not installed or no fpcalc backend exists, so nothing can be fingerprinted."""
+
+
+def _lookup_result(status: str, duration: Any, fp: Any, matches: list[dict[str, Any]], error: Optional[str]) -> dict[str, Any]:
+    return {"status": status, "duration": duration, "fingerprint": fp, "matches": matches, "error": error}
+
+
+def _collect_matches(acoustid: Any, response: Any) -> list[dict[str, Any]]:
+    """Matches at or above VERIFY_MIN_SCORE, one per recording id (best score), sorted best first."""
+    best: dict[str, dict[str, Any]] = {}
+    for score, recording_id, title, artist in acoustid.parse_lookup_result(response):
+        score = float(score)
+        rid = str(recording_id)
+        if score < VERIFY_MIN_SCORE or (rid in best and best[rid]["score"] >= score):
+            continue
+        best[rid] = {
+            "recording_id": rid,
+            "title": str(title) if title else None,
+            "artist": str(artist) if artist else None,
+            "score": score,
+        }
+    return sorted(best.values(), key=lambda m: m["score"], reverse=True)
+
+
+def fingerprint_and_lookup(file_path: str | Path, api_key: str) -> dict[str, Any]:
+    """Fingerprints a file with fpcalc and looks the fingerprint up on AcoustID.
+
+    Returns ``{status, duration, fingerprint, matches, error}`` where status is ``ok`` (>=1 match),
+    ``no_result`` or ``error``. Raises FingerprintUnavailable when pyacoustid / fpcalc cannot run at all.
+    """
+    path = Path(file_path)
+    try:
+        import acoustid
+    except ImportError as exc:
+        _warn_fingerprint_unavailable("the pyacoustid package is not installed (%s)" % exc)
+        raise FingerprintUnavailable("pyacoustid is not installed") from exc
+
+    try:
+        duration, fp = acoustid.fingerprint_file(str(path), force_fpcalc=True)
+    except acoustid.NoBackendError as exc:
+        _warn_fingerprint_unavailable("the chromaprint 'fpcalc' binary / library was not found (install chromaprint)")
+        raise FingerprintUnavailable("fpcalc backend not found") from exc
+    except acoustid.FingerprintGenerationError as exc:
+        logger.warning("fingerprint_and_lookup: could not fingerprint %s: %s", path, exc)
+        return _lookup_result("error", None, None, [], str(exc)[:200] or "fingerprint generation failed")
+    if isinstance(fp, bytes):
+        fp = fp.decode("ascii")
+
+    _acoustid_rate_limit()
+    try:
+        response = acoustid.lookup(api_key, fp, duration)
+        matches = _collect_matches(acoustid, response)
+    except acoustid.WebServiceError as exc:
+        logger.warning("fingerprint_and_lookup: AcoustID lookup failed for %s: %s", path, exc)
+        return _lookup_result("error", duration, fp, [], str(exc)[:200] or "AcoustID lookup failed")
+    return _lookup_result("ok" if matches else "no_result", duration, fp, matches, None)
+

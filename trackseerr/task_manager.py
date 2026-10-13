@@ -340,6 +340,7 @@ NON_TASK_THREADS: dict[str, str] = {
     "and keeps no run history; the core reports gateway health separately",
     "media-server-probe": "one-shot connectivity probe with a timeout, started per status request",
     "lidarr-list-refresh": "request-driven cache refresh of the Lidarr list snapshot, not a scheduled job",
+    "rename-verify": "request-driven AcoustID check of selected rename-preview rows, started from the rename modal; not a scheduled job",
     "BootInit": "one-shot post-bind startup sequence (starts the real workers), not a recurring job",
     "BootListenLog": "one-shot boot log line once the server socket is bound",
     "media-server-user-discovery": "one-shot user import when a media server connects, not a recurring job",

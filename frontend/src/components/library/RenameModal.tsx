@@ -1,8 +1,9 @@
 import React, { useId, useRef } from 'react';
-import { ArrowRight, Check, FileCheck, Loader2, RefreshCw } from 'lucide-react';
+import { ArrowRight, AudioLines, Check, FileCheck, Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ObsidianModal, TapeDeckButton } from '@/components/ui';
 import { useRenamePreview } from '@/hooks/useRenamePreview';
+import { useRenameVerify } from '@/hooks/useRenameVerify';
 import type { RenamePreviewItem } from '@/services/renameService';
 import { reasonInfo } from './renameReasons';
 
@@ -95,11 +96,25 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
     result,
     reload,
     resetResult,
+    riskyIds,
   } = useRenamePreview({
     artistId: scope?.artistId,
     albumId: scope?.albumId,
     enabled: isOpen,
   });
+
+  const {
+    status: verifyStatus,
+    starting: verifyStarting,
+    error: verifyError,
+    start: startVerify,
+  } = useRenameVerify({ enabled: isOpen, onFinished: () => void reload() });
+  const verifyRunning = verifyStatus?.running === true;
+  const keyMissing = verifyStatus?.api_key_set === false;
+  const verifyDisabled = riskyIds.length === 0 || verifyRunning || verifyStarting || keyMissing;
+  const verifyTitle = keyMissing
+    ? 'Set an AcoustID API key in Settings → Media Management'
+    : 'Fingerprint the audio of risky renames and compare it with the linked track';
 
   const parentRef = useRef<HTMLDivElement | null>(null);
 
@@ -187,6 +202,13 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                 {result.renamed_count === 1 ? '' : 's'}.
               </p>
             </div>
+
+            {result.blocked_count > 0 && (
+              <p className="p-3 rounded-[3px] border border-[#e5a00d]/40 bg-[#e5a00d]/10 text-xs font-mono text-[#ffc94d]">
+                {result.blocked_count} file{result.blocked_count === 1 ? '' : 's'} skipped — the audio is a
+                different track
+              </p>
+            )}
 
             {result.errors.length > 0 && (
               <div className="p-3 rounded-[3px] border border-[var(--status-error)]/40 bg-[var(--status-error)]/10 space-y-1.5">
@@ -314,11 +336,61 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                     <span>
                       <strong className="text-white">{selectedIds.size}</strong> of {items.length} files selected
                     </span>
+                    <TapeDeckButton
+                      size="sm"
+                      disabled={verifyDisabled}
+                      title={verifyTitle}
+                      onClick={() => void startVerify(riskyIds)}
+                      icon={
+                        verifyRunning || verifyStarting ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <AudioLines className="h-3 w-3" />
+                        )
+                      }
+                    >
+                      Verify risky ({riskyIds.length})
+                    </TapeDeckButton>
                     <TapeDeckButton size="sm" onClick={() => void reload()} icon={<RefreshCw className="h-3 w-3" />} title="Reload preview">
                       Refresh
                     </TapeDeckButton>
                   </div>
                 </div>
+
+                {verifyRunning && verifyStatus && (
+                  <div className="space-y-1 text-xs font-mono text-neutral-300" aria-live="polite">
+                    <p>
+                      Verifying audio… {verifyStatus.done}/{verifyStatus.total}
+                    </p>
+                    <div className="h-1 w-full overflow-hidden rounded-[2px] bg-[#1c1c1c]">
+                      <div
+                        role="progressbar"
+                        aria-label="Audio verification progress"
+                        aria-valuemin={0}
+                        aria-valuenow={verifyStatus.done}
+                        aria-valuemax={verifyStatus.total}
+                        className="h-full bg-[#e5a00d] transition-[width]"
+                        style={{
+                          width: `${verifyStatus.total > 0 ? Math.min(100, (verifyStatus.done / verifyStatus.total) * 100) : 0}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+                {!verifyRunning && verifyStatus && verifyStatus.finished_at != null && (
+                  <div className="space-y-0.5 text-xs font-mono text-neutral-400">
+                    <p>
+                      {verifyStatus.verified} verified · {verifyStatus.mismatched} mismatched ·{' '}
+                      {verifyStatus.unknown} unknown · {verifyStatus.errors} errors
+                    </p>
+                    {verifyStatus.message && <p className="text-[#ffc94d]">{verifyStatus.message}</p>}
+                  </div>
+                )}
+                {verifyError && (
+                  <p role="alert" className="text-xs font-mono text-[var(--status-error)]">
+                    {verifyError}
+                  </p>
+                )}
 
                 {/* Virtualized List Container */}
                 <div
@@ -341,6 +413,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                       const isSelected = selectedIds.has(item.file_id);
                       const checkboxId = `rename-item-${item.file_id}`;
                       const diff = diffPaths(item.current_path, item.proposed_path);
+                      const mismatch = item.verification?.status === 'mismatch';
 
                       return (
                         <div
@@ -362,9 +435,12 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                               name={`rename-file-${item.file_id}`}
                               type="checkbox"
                               checked={isSelected}
+                              disabled={mismatch}
+                              aria-disabled={mismatch}
+                              title={mismatch ? 'Blocked: the audio is a different track' : undefined}
                               onChange={() => toggleSelect(item.file_id)}
                               aria-label={`Select rename for ${item.proposed_path}`}
-                              className="h-5 w-5 accent-[#e5a00d] cursor-pointer"
+                              className="h-5 w-5 accent-[#e5a00d] cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
                             />
                             <label htmlFor={checkboxId} className="sr-only">
                               Select rename for {item.proposed_path}
@@ -396,6 +472,15 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                                 </div>
                               </div>
                             </div>
+                            {mismatch && item.verification && (
+                              <p className="mt-1 flex items-start gap-1.5 break-words font-mono text-[11px] text-[var(--status-error)]">
+                                <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0" />
+                                <span>
+                                  Audio is actually: {item.verification.actual_title ?? 'unknown track'}
+                                  {item.verification.actual_artist ? ` — ${item.verification.actual_artist}` : ''}
+                                </span>
+                              </p>
+                            )}
                             <div className="tab-strip mt-1 h-4 overflow-x-auto">
                               {item.reasons.map((code) => (
                                 <ReasonChip key={code} code={code} />
