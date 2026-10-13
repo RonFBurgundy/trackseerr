@@ -331,6 +331,8 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
                       return (
                         <div
                           key={item.file_id}
+                          data-index={virtualRow.index}
+                          ref={rowVirtualizer.measureElement}
                           style={{
                             position: 'absolute',
                             top: 0,
@@ -360,9 +362,16 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
 
                           <div className="min-w-0 flex-1 space-y-1.5 font-mono text-[11px] leading-tight">
                             <div className="flex items-center justify-between gap-2">
-                              <span className="font-semibold text-neutral-200 truncate" title={item.path}>
-                                {item.path}
-                              </span>
+                              <div
+                                tabIndex={0}
+                                role="group"
+                                aria-label="File path (scrolls horizontally)"
+                                className="min-w-0 flex-1 overflow-x-auto pb-1"
+                              >
+                                <div className="w-max min-w-full whitespace-nowrap font-semibold text-neutral-200" title={item.path}>
+                                  {item.path}
+                                </div>
+                              </div>
                               {isSkipped && (
                                 <span className="px-1.5 py-0.5 rounded-[2px] bg-amber-950/80 border border-amber-800/60 text-amber-400 text-[10px] font-bold uppercase shrink-0">
                                   {item.skipped_reason}
@@ -372,8 +381,13 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
 
                             {/* Diff Table */}
                             {diffList.length > 0 && (
-                              <div className="border border-[#262626] rounded-[3px] bg-[#0a0a0a] overflow-hidden">
-                                <table className="w-full text-left text-[10px]">
+                              <div
+                                tabIndex={0}
+                                role="group"
+                                aria-label="Tag changes (scrolls horizontally)"
+                                className="border border-[#262626] rounded-[3px] bg-[#0a0a0a] overflow-x-auto"
+                              >
+                                <table className="w-max min-w-full text-left text-[10px]">
                                   <thead className="bg-[#141414] text-neutral-400 border-b border-[#222222]">
                                     <tr>
                                       <th className="py-1 px-2 font-semibold">Field</th>
@@ -387,10 +401,10 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
                                         <td className="py-1 px-2 font-medium text-neutral-400 whitespace-nowrap">
                                           {formatFieldName(diff.field)}
                                         </td>
-                                        <td className="py-1 px-2 text-neutral-400 truncate max-w-[180px]" title={diff.current || undefined}>
+                                        <td className="py-1 px-2 text-neutral-400 whitespace-nowrap" title={diff.current || undefined}>
                                           {diff.current ? diff.current : <span className="text-neutral-600 italic">(empty)</span>}
                                         </td>
-                                        <td className="py-1 px-2 text-[#e5a00d] font-medium truncate max-w-[180px]" title={diff.proposed || undefined}>
+                                        <td className="py-1 px-2 text-[#e5a00d] font-medium whitespace-nowrap" title={diff.proposed || undefined}>
                                           <div className="flex items-center gap-1">
                                             <ArrowRight className="h-2.5 w-2.5 text-[#e5a00d]/70 shrink-0" />
                                             <span>{diff.proposed || <span className="italic opacity-60">(empty)</span>}</span>

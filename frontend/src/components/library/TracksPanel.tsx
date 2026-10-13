@@ -8,6 +8,7 @@ import { useMonitoredOverrides } from '@/hooks/useMonitoredOverrides';
 import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { useTrackBulkEdit } from '@/hooks/useTrackBulkEdit';
 import { useSelectAllMatching } from '@/hooks/useSelectAllMatching';
+import { useTracksOwnedOnly } from '@/hooks/useTracksOwnedOnly';
 import {
   FlatList,
   ScrubberRail,
@@ -63,6 +64,11 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
   onSelectActionChange,
   facets,
 }) => {
+  const { ownedOnly, setOwnedOnly } = useTracksOwnedOnly();
+  const catalogFilters = useMemo<Readonly<Record<string, string | readonly string[]>>>(
+    () => ({ ...(facets ?? {}), ...(ownedOnly ? { has_file: 'true' } : {}) }),
+    [facets, ownedOnly]
+  );
   const { list, index, sortKey, sortDir, changeSort } = useLibraryCatalog<TrackItem>({
     fetchPage: fetchTracks,
     fetchIndex: getTracksIndex,
@@ -70,7 +76,7 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
     sortOptions: SORT_OPTIONS,
     query,
     monitoredOnly,
-    extraFilters: facets,
+    extraFilters: catalogFilters,
   });
   const overrides = useMonitoredOverrides();
   const { refresh, reload } = list;
@@ -85,18 +91,18 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
   const bulk = useTrackBulkEdit(onToast);
   const filters = useMemo<Record<string, string | readonly string[]>>(
     () => ({
-      ...(facets ?? {}),
+      ...catalogFilters,
       q: query.trim(),
       monitored_only: monitoredOnly ? 'true' : '',
     }),
-    [query, monitoredOnly, facets]
+    [query, monitoredOnly, catalogFilters]
   );
   const selectAll = useSelectAllMatching<TrackItem>(getTracksPaged, getKey, filters, 'title', onToast);
   const { collect: collectAllIds } = selectAll;
 
   useEffect(() => {
     exitSelection();
-  }, [query, monitoredOnly, facetsJson, exitSelection]);
+  }, [query, monitoredOnly, ownedOnly, facetsJson, exitSelection]);
 
   useEffect(() => {
     onSelectActionChange(
@@ -216,6 +222,14 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
   return (
     <section className="flex min-h-0 flex-col gap-2" aria-label="Tracks">
       <LibraryToolbarPortal slot={toolbarSlot}>
+        <TactileSwitch
+          id="library-tracks-owned-only"
+          name="tracks-owned-only"
+          label="Owned only"
+          checked={ownedOnly}
+          onChange={setOwnedOnly}
+          title="Show only tracks that have a file"
+        />
         <LibrarySortControl options={SORT_OPTIONS} sortKey={sortKey} sortDir={sortDir} onChange={changeSort} />
       </LibraryToolbarPortal>
       {canBulkEdit && selecting && (
@@ -225,7 +239,7 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
           busy={bulk.busy}
           selectBusy={selectAll.busy}
           selectLabel={
-            hasActiveFacets || query || monitoredOnly
+            hasActiveFacets || query || monitoredOnly || ownedOnly
               ? `All ${list.total.toLocaleString()} matching tracks`
               : `All ${list.total.toLocaleString()} tracks`
           }
@@ -255,6 +269,8 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
             ? 'Nothing in your library matches these filters.'
             : query
             ? 'No tracks match your search.'
+            : ownedOnly
+            ? 'No owned tracks match \u2014 turn off Owned only to include missing tracks'
             : 'No tracks found in library.'
         }
         rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
