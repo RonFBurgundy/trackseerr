@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- The library Tracks tab has an "Owned only" switch, on by default, listing just the tracks you have files for; turn it off to include missing catalog tracks.
 - Rename preview: a file whose audio AcoustID identifies as a different track in your library gets a "Relink to this track" button. If that track already has a file, you choose which to keep (or switch on "Keep the higher-quality file"); the other goes to the recycle bin.
 - The rename preview can check risky moves with AcoustID: "Verify risky" fingerprints those files (about 3 per second, in the background) and compares the audio with the track each file is linked to. Confirmed files are marked "Audio verified" and pre-selected; files whose audio is a different track show what it really is and can't be renamed until relinked. Results are cached, so re-checking is instant. Needs an AcoustID API key in Media Management.
 - Renames keep each artist's existing folder, as Lidarr does, and new downloads for that artist go into it too; only album folders and file names are tidied. A new "Rename artist folders" switch in the naming settings renames artist folders as well when you want them consistent.
@@ -45,6 +46,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Sorting and searching the library Tracks list is now near-instant on large libraries (hundreds of thousands of catalog tracks), and no longer stalls other pages while it runs. The first start after updating builds a new search index, which can take a minute on a big library.
 - New installs use the Trackseerr naming preset: artist and album names exactly as written (accents and & kept), Lidarr's handling of characters a filesystem can't store (? → !, * → -, / → +), a "?" at the end of a track title dropped as Lidarr does, and "..." in titles kept. "Lidarr Standard" is now "Lidarr Default" with Lidarr's real out-of-the-box naming, every preset explains who it is for, and the unused "clean artist names" setting is gone.
 - A failed download (torrent, Usenet or Soulseek) now searches for the track again right away instead of waiting for the next wanted sweep; a failed album download re-searches its tracks.
 - A torrent that has downloaded nothing after 2 hours (no seeders) is removed, blocklisted and searched again. Torrents with any progress, or seeding, are never touched. Set `TORRENT_DEAD_MINUTES` or a client's `dead_torrent_minutes` to change the wait.
@@ -68,6 +70,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Requesting a track that's already in your library is refused ("Already in your library"), and search results now show the In library badge for tracks deep in a large artist's catalog, on another edition, or on a compilation credited to the artist. Playlists, mixes and import lists skip such tracks instead of requesting them.
+- The retag preview scrolls long file paths and tag values sideways instead of cutting them off.
 - Album folders keep the album's original release year. An artist refresh no longer replaces it with a reissue or remaster date, and impossible years (such as 1884) are ignored, so new downloads no longer land in a second, wrongly dated album folder. Re-run the Lidarr import once to restore original years on albums that were already changed.
 - The Lidarr import no longer merges different tracks that share a title (a dub on disc 2, dozens of "[silence]" tracks), which made renames propose wrong numbers and collisions. Re-run the Lidarr import once to repair an existing library; no wipe needed.
 - Checkboxes in the rename and retag previews use the amber accent like the rest of the library instead of the browser's blue.

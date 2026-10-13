@@ -34,12 +34,12 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
    groups, a search/filter box, one compact row per task (name, status, last/next run) with actions (Run · Cancel ·
    Pause · interval) in the row, details/history behind a click instead of always shown. Mobile-first and fully within the frontend skill (tape-deck controls, amber accent, sharp fillets, full-width
    mobile layout) — shared primitives only (`TactileSwitch`, `SelectionCheckbox`), no browser-default controls.
-3. **P1 · Requesting a track that's already in the library.** Discover/search results don't always show the
+3. **DONE 2026-10-13 · P1 · Requesting a track that's already in the library.** Discover/search results don't always show the
    "In library" badge, so the request goes through; the track page does detect it. Two fixes: (a) server-side guard
    in `create_request` (`trackseerr/api/routes/requests.py` ~L89) — reject/short-circuit when the library has a
    matching track (recording MBID, ISRC, or artist+clean title), returning "already in library"; (b) find why the
    search results miss the badge on a 30k-track library (likely a capped/paginated in-library lookup) and fix it.
-4. **P1 · Library sorted by tracks takes minutes; track search slow (30k tracks, 317k catalog tracks).** Profile the
+4. **DONE 2026-10-13 · P1 · Library sorted by tracks takes minutes; track search slow (30k tracks, 317k catalog tracks).** Profile the
    tracks paged/index endpoints (`trackseerr/api/routes/library/browse.py` `/tracks/paged`, `/tracks/index`): likely
    OFFSET paging + sort over all catalog tracks instead of tracks-with-files, missing indexes on sort/search columns,
    or N+1 lookups. Same fix pattern as the rename preview (keyset paging, drive from library_files when "owned only").
@@ -79,7 +79,7 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     requested track number, so a fresh scan of two new "[silence]" files (#90, #91) lands both on one track. The Lidarr
     import is guarded by an exact disc+number+title check. Fix: with a track number given, cross numbers only when the
     candidate row has no file yet (keeps renumbered catalog rows matching) — test with the scanner two-file case.
-15. **P2 · Retag modal doesn't scroll file paths horizontally** (desktop and mobile), so long file names are
+15. **DONE 2026-10-13 · P2 · Retag modal doesn't scroll file paths horizontally** (desktop and mobile), so long file names are
     truncated or unreachable. Apply the same fix the rename modal got: each row's path block in its own
     `overflow-x-auto` container with a `w-max min-w-full whitespace-nowrap` inner wrapper, `tabIndex={0}` +
     `role="group"` + `aria-label` for keyboard scrolling, full path in `title` (see
