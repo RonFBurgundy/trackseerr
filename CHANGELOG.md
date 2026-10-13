@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- Rename preview: a file whose audio AcoustID identifies as a different track in your library gets a "Relink to this track" button. If that track already has a file, you choose which to keep (or switch on "Keep the higher-quality file"); the other goes to the recycle bin.
 - The rename preview can check risky moves with AcoustID: "Verify risky" fingerprints those files (about 3 per second, in the background) and compares the audio with the track each file is linked to. Confirmed files are marked "Audio verified" and pre-selected; files whose audio is a different track show what it really is and can't be renamed until relinked. Results are cached, so re-checking is instant. Needs an AcoustID API key in Media Management.
 - Renames keep each artist's existing folder, as Lidarr does, and new downloads for that artist go into it too; only album folders and file names are tidied. A new "Rename artist folders" switch in the naming settings renames artist folders as well when you want them consistent.
 - The rename preview says why each file would move (artist folder, loose file, format only, album year or title changed, disc layout, track number or title changed, name collision), lets you filter by reason, and pre-selects only the safe, format-only moves. It shows up to 5,000 moves.
@@ -67,6 +68,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Album folders keep the album's original release year. An artist refresh no longer replaces it with a reissue or remaster date, and impossible years (such as 1884) are ignored, so new downloads no longer land in a second, wrongly dated album folder. Re-run the Lidarr import once to restore original years on albums that were already changed.
 - The Lidarr import no longer merges different tracks that share a title (a dub on disc 2, dozens of "[silence]" tracks), which made renames propose wrong numbers and collisions. Re-run the Lidarr import once to repair an existing library; no wipe needed.
 - Checkboxes in the rename and retag previews use the amber accent like the rest of the library instead of the browser's blue.
 - Clean naming tokens ({Artist CleanName}, {Album CleanTitle}, ...) now produce exactly what Lidarr does: "&" becomes "and", "/" becomes a space (AC DC), accents are removed (Husker Du), and the punctuation Lidarr drops is dropped (Lightnin Luke). A leading "." is removed from folder and file names.
@@ -122,6 +124,7 @@ heading becomes the version and date.
 - Albums and artists whose MusicBrainz IDs were merged or changed are relinked automatically.
 - The MusicBrainz mirror setting is now used everywhere; some background tasks ignored it.
 - The artist page now shows how many of the artist's tracks are actually in your library (it read 0 for local libraries), and artist status lights show complete or missing tracks for local libraries.
+
 
 ## [1.0.0] - first TrackSeerr release (not yet tagged)
 
