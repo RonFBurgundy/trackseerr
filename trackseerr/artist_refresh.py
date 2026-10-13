@@ -11,6 +11,7 @@ import uuid
 
 
 from trackseerr import art_pipeline
+from trackseerr.album_years import merge_album_year, merge_release_date, plausible_year
 from trackseerr.mb_metadata_store import get_shared_discovery_client, get_shared_enricher
 from trackseerr.track_matching import (
     reconcile_audio_file_to_track,
@@ -82,14 +83,17 @@ def _album_track_counts(db: Database, artist_id: str) -> tuple[dict[str, int], d
 def _queue_release_date_update(
     existing_alb: dict[str, Any], rg: dict[str, Any], upd_album: list[str], upd_params: list[Any]
 ) -> None:
-    """Queues a backfill of an existing album's missing release date / year from a MusicBrainz release group."""
+    """Queues an update of an existing album's release date / year when MusicBrainz has an earlier (original) one."""
     rdate = _rg_release_date(rg)
-    if rdate and not existing_alb.get("release_date"):
-        upd_album.append("release_date = ?")
-        upd_params.append(str(rdate))
-    if rg.get("year") is not None and existing_alb.get("year") is None:
+    if rdate:
+        merged_date = merge_release_date(existing_alb.get("release_date"), str(rdate))
+        if merged_date != existing_alb.get("release_date"):
+            upd_album.append("release_date = ?")
+            upd_params.append(str(merged_date))
+    merged_year = merge_album_year(existing_alb.get("year"), rg.get("year"))
+    if merged_year is not None and merged_year != existing_alb.get("year"):
         upd_album.append("year = ?")
-        upd_params.append(rg["year"])
+        upd_params.append(merged_year)
     if _positive_int(rg.get("track_count")) is not None and not existing_alb.get("total_tracks"):
         upd_album.append("total_tracks = ?")
         upd_params.append(_positive_int(rg.get("track_count")))
@@ -374,7 +378,7 @@ def _upsert_album_for_release_group(st: _RefreshState, rg: dict[str, Any]) -> tu
                 mb_release_group_id=rg_id,
                 album_type=album_type,
                 release_date=_rg_release_date(rg),
-                year=rg.get("year"),
+                year=plausible_year(rg.get("year")),
                 cover_url=rg.get("cover_url"),
                 secondary_types=rg.get("secondary_types"),
                 monitored=alb_monitored,
@@ -746,8 +750,10 @@ def _upsert_deezer_album(
             title=album_title,
             clean_title=clean_library_name(album_title),
             foreign_album_id=foreign_album_id,
-            release_date=album.get("release_date") or (existing_alb.get("release_date") if existing_alb else None),
-            year=year_val or (existing_alb.get("year") if existing_alb else None),
+            release_date=merge_release_date(
+                existing_alb.get("release_date") if existing_alb else None, album.get("release_date")
+            ),
+            year=merge_album_year(existing_alb.get("year") if existing_alb else None, year_val),
             album_type=album_type,
             monitored=alb_monitored,
             path=alb_path,

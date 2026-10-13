@@ -286,6 +286,20 @@ class TestLidarrMigrationJob:
         assert single["title"] == "R.A.M.O.N.E.S."
         assert single["album_type"] == "single"
 
+    def test_lidarr_import_implausible_year_falls_back_to_release_date(self, db: Database):
+        data = {
+            "artists": [{"id": 101, "artistName": "Ramones", "foreignArtistId": "mbid-ram", "monitored": True}],
+            "albums": [
+                {"id": 1, "artistId": 101, "title": "Ramones", "foreignAlbumId": "rg-a",
+                 "albumType": "Album", "year": 1884, "releaseDate": "1976-04-23T00:00:00Z", "monitored": True},
+            ],
+            "tracks": [],
+            "track_files": [],
+        }
+        with patch(HTTPX, loaded_fake(data)):
+            LidarrMigrationJob().run_migration(db, real_client(), auto_switch_mode=False)
+        assert db.get_library_album_by_release_group_id("rg-a")["year"] == 1976
+
     def test_album_type_imported_from_lidarr(self, db: Database, sample_lidarr_data):
         sample_lidarr_data["albums"][0]["albumType"] = "EP"
         sample_lidarr_data["albums"][0]["secondaryTypes"] = [{"name": "Live"}, "Compilation"]

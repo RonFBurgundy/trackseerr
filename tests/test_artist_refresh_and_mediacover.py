@@ -482,6 +482,67 @@ def test_refresh_does_not_relink_album_to_other_release_group_with_same_clean_ti
     assert single["year"] == 2011
 
 
+def _deezer_upsert(db: Database, album: dict[str, Any]) -> None:
+    from trackseerr.artist_refresh import _RefreshState, _upsert_deezer_album
+
+    artist = db.get_library_artist("artist-yr")
+    st = _RefreshState(
+        artist_id="artist-yr", db=db, enricher=MagicMock(), discovery_client=MagicMock(), force=False,
+        artist=artist, artist_name="Band", metadata_profile=None, foreign_artist_id=None, mbid=None,
+    )
+    assert _upsert_deezer_album(st, "albums", album, set()) is not None
+
+
+def _year_artist_with_album(db: Database, year: Any, release_date: Any) -> None:
+    db.upsert_library_artist(
+        LibraryArtist(id="artist-yr", name="Band", mbid="mbid-yr", monitored=True, monitor_option="all")
+    )
+    db.upsert_library_album(
+        {"id": "alb-yr", "artist_id": "artist-yr", "title": "Album", "foreign_album_id": "dz-1",
+         "year": year, "release_date": release_date, "monitored": True}
+    )
+
+
+def test_deezer_refresh_keeps_original_year_over_reissue(test_db: Database):
+    _year_artist_with_album(test_db, 1971, "1971-11-08")
+    _deezer_upsert(test_db, {"id": "dz-1", "title": "Album", "release_date": "2011-05-02"})
+    alb = test_db.get_library_album("alb-yr")
+    assert alb["year"] == 1971
+    assert alb["release_date"] == "1971-11-08"
+
+
+def test_deezer_refresh_fills_missing_year(test_db: Database):
+    _year_artist_with_album(test_db, None, None)
+    _deezer_upsert(test_db, {"id": "dz-1", "title": "Album", "release_date": "1975-02-03"})
+    alb = test_db.get_library_album("alb-yr")
+    assert alb["year"] == 1975
+    assert alb["release_date"] == "1975-02-03"
+
+
+def test_deezer_refresh_replaces_implausible_year(test_db: Database):
+    _year_artist_with_album(test_db, 1884, "1884-01-01")
+    _deezer_upsert(test_db, {"id": "dz-1", "title": "Album", "release_date": "1975-02-03"})
+    alb = test_db.get_library_album("alb-yr")
+    assert alb["year"] == 1975
+    assert alb["release_date"] == "1975-02-03"
+
+
+def test_mb_release_group_earlier_date_replaces_later_year(test_db: Database):
+    from trackseerr.artist_refresh import _update_album_from_release_group
+
+    _year_artist_with_album(test_db, 2005, "2005-06-01")
+    existing = test_db.get_library_album("alb-yr")
+    rg = {"id": "rg-yr", "title": "Album", "first_release_date": "1999-03-01", "year": 1999}
+    _update_album_from_release_group(test_db, existing, rg, "rg-yr")
+    alb = test_db.get_library_album("alb-yr")
+    assert alb["year"] == 1999
+    assert alb["release_date"] == "1999-03-01"
+
+    later = {"id": "rg-yr", "title": "Album", "first_release_date": "2011-01-01", "year": 2011}
+    _update_album_from_release_group(test_db, alb, later, "rg-yr")
+    assert test_db.get_library_album("alb-yr")["year"] == 1999
+
+
 # =========================================================================
 # Test 5: artist_refresh_worker lifecycle and status
 # =========================================================================

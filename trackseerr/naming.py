@@ -9,6 +9,8 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
+from trackseerr.album_years import plausible_year
+
 # Supported token names
 SUPPORTED_TOKENS: list[str] = [
     # Artist
@@ -434,7 +436,8 @@ def resolve_token(token: str, metadata: dict[str, Any]) -> str | None:  # noqa: 
             m = re.search(r"\b(\d{4})\b", str(metadata["release_date"]))
             if m:
                 year = m.group(1)
-        return str(year).strip() if year else None
+        year = plausible_year(year)
+        return str(year) if year else None
     if t == "Original Release Year":
         year = metadata.get("original_release_year") or metadata.get("original_year")
         if not year:
@@ -443,7 +446,8 @@ def resolve_token(token: str, metadata: dict[str, Any]) -> str | None:  # noqa: 
             m = re.search(r"\b(\d{4})\b", str(metadata["release_date"]))
             if m:
                 year = m.group(1)
-        return str(year).strip() if year else None
+        year = plausible_year(year)
+        return str(year) if year else None
     if t == "Album Disambiguation":
         val = metadata.get("album_disambiguation")
         return str(val).strip() if val else None
