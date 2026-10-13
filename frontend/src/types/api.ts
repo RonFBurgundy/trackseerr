@@ -19105,6 +19105,8 @@ export interface operations {
                 monitored_only?: boolean;
                 artist_id?: string | null;
                 album_id?: string | null;
+                /** @description true: only tracks with a library file; false: only tracks without */
+                has_file?: boolean | null;
                 genre?: string[];
                 exclude_genre?: string[];
                 country?: string[];
@@ -19157,6 +19159,8 @@ export interface operations {
                 monitored_only?: boolean;
                 artist_id?: string | null;
                 album_id?: string | null;
+                /** @description true: only tracks with a library file; false: only tracks without */
+                has_file?: boolean | null;
                 genre?: string[];
                 exclude_genre?: string[];
                 country?: string[];
