@@ -15,7 +15,7 @@ from typing import Any, Callable, Iterator
 import pytest
 from fastapi.testclient import TestClient
 
-from library_perf_catalog import build_catalog
+from tests.library_perf_catalog import build_catalog
 from trackseerr import library_paging
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db
