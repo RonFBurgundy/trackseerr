@@ -6,7 +6,7 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
 
 ## Next up
 
-0. **P1 · AcoustID verification in the rename preview** (after the Lidarr track-identity fix lands). When an AcoustID
+0. **DONE 2026-10-13 (573f60e) · P1 · AcoustID verification in the rename preview** (after the Lidarr track-identity fix lands). When an AcoustID
    key is set: a "Verify with AcoustID" action on risky rows (track_number, file_title, album_title, album_year,
    disc_layout, collision). Fingerprint the file (existing manual-import AcoustID code), compare the identified
    recording MBID with the target track's `mb_recording_id`: match → `verified` reason, pre-selected; mismatch →
@@ -73,7 +73,7 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     `frontend/scripts/gen-api.mjs`, run in the CI workflow beside `check:api`) failing on `blue-|indigo-|sky-` Tailwind
     classes or a raw checkbox/radio outside `components/ui`. Rule already added to the frontend skill (Phase 4d #5,
     Phase 6 gate 7).
-13. **P3 · Housekeeping:** an 8-day-old `tsc -w` process from another session is running on the host.
+13. **DONE 2026-10-13 · P3 · Housekeeping:** an 8-day-old `tsc -w` process from another session is running on the host.
 14. **P2 · Scanner can still merge same-title tracks on one disc.** `_pick_title_match`
     (`trackseerr/library_catalog_store.py`) returns the first same-disc row with that title when no row has the
     requested track number, so a fresh scan of two new "[silence]" files (#90, #91) lands both on one track. The Lidarr
