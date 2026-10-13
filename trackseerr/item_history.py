@@ -48,6 +48,7 @@ ITEM_EVENTS: frozenset[str] = frozenset(
         "removed_from_library",
         "tags_changed",
         "retagged",
+        "relinked",
     }
 )
 
@@ -909,6 +910,7 @@ _PLAIN_MESSAGES: dict[str, str] = {
     "removed_from_library": "Removed from the library",
     "tags_changed": "Tags changed",
     "retagged": "Files retagged",
+    "relinked": "File relinked to another track",
 }
 
 

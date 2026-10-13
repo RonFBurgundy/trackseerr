@@ -557,6 +557,31 @@ class RenameVerifyStatus(ApiModel):
     api_key_set: bool
 
 
+class RenameRelinkFile(ApiModel):
+    id: str
+    file_path: str
+    codec: Optional[str] = None
+    bitrate: Optional[int] = None
+    sample_rate: Optional[int] = None
+    bits_per_sample: Optional[int] = None
+    quality_name: Optional[str] = None
+    size_bytes: Optional[int] = None
+
+
+class RenameRelinkResponse(ApiModel):
+    action: str
+    kept_file_id: Optional[str] = None
+    recycled_file_id: Optional[str] = None
+    old_track_id: str
+    target_track_id: str
+
+
+class RenameRelinkConflictResponse(ApiModel):
+    detail: str
+    existing: RenameRelinkFile
+    incoming: RenameRelinkFile
+
+
 # -------------------------------------------------------------------------------------------------------- retag
 
 

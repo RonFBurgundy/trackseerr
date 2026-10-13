@@ -1024,6 +1024,16 @@ class LibraryCatalogStoreMixin:
             self.conn.commit()
             return cur.rowcount > 0
 
+    def relink_library_file(self, file_id: str, track_id: str) -> bool:
+        """Points a library file row at another track. True when the row existed and was updated."""
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE library_files SET track_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (str(track_id), str(file_id)),
+            )
+            self.conn.commit()
+            return cur.rowcount == 1
+
     def list_library_files(
         self, limit: int = 500, offset: int = 0
     ) -> list[dict[str, Any]]:

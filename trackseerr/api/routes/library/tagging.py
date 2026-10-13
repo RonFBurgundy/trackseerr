@@ -7,10 +7,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 
 import httpx
 
 from trackseerr import art_pipeline
+from trackseerr.file_relink import RelinkConflict, relink_file
 from trackseerr.item_history import emit
 from trackseerr.redaction import redact_text, safe_exc
 from trackseerr.import_files import (
@@ -28,6 +30,9 @@ from trackseerr.api.dependencies import (
 from trackseerr.api.schemas.library import (
     RenameApplyResponse,
     RenamePreviewItem,
+    RenameRelinkConflictResponse,
+    RenameRelinkFile,
+    RenameRelinkResponse,
     RenameVerifyStatus,
     RetagApplyResponse,
     RetagPreviewItem,
@@ -68,7 +73,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 from ._shared import (validate_media_path, native_only, _album_total_discs)
-from .models import (RenamePreviewRequest, RenameApplyRequest, RenameVerifyRequest, RetagPreviewRequest, RetagApplyRequest)
+from .models import (RenamePreviewRequest, RenameApplyRequest, RenameVerifyRequest, RenameRelinkRequest, RetagPreviewRequest, RetagApplyRequest)
 
 _ART_STEMS = ("cover", "folder", "front")
 _ART_EXTS = (".jpg", ".jpeg", ".png", ".webp")
@@ -266,6 +271,36 @@ def rename_verify_status(
     """Reports the progress of the current or last AcoustID verification run."""
     key = str(db.get_media_management_settings().get("acoustid_api_key") or "").strip()
     return {**get_verification_status(), "api_key_set": bool(key)}
+
+
+@router.post(
+    "/rename/relink",
+    dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)],
+    response_model=RenameRelinkResponse,
+    responses={409: {"model": RenameRelinkConflictResponse}},
+)
+def rename_relink(
+    body: RenameRelinkRequest,
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> Any:
+    """Relinks a file to the track its audio really is; a target that already has a file needs a ``conflict`` choice."""
+    try:
+        return relink_file(db, body.file_id, body.target_track_id, body.conflict)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except RelinkConflict as exc:
+        fields = RenameRelinkFile.model_fields
+        return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={
+            "detail": "The right track already has a file \u2014 choose which to keep",
+            "existing": {k: exc.existing.get(k) for k in fields},
+            "incoming": {k: exc.incoming.get(k) for k in fields},
+        })
+    except OSError as exc:
+        logger.error("Relink of %s failed: %s", body.file_id, safe_exc(exc))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=redact_text(str(exc)))
 
 
 def _is_art_file(p: Path) -> bool:
