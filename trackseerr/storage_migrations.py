@@ -12,6 +12,7 @@ import secrets
 import sqlite3
 from typing import Any, Optional
 
+from trackseerr import library_track_index
 from trackseerr.storage_common import (
     BASELINE_VERSION,
     _TRACK_DURATION_TOLERANCE,
@@ -66,6 +67,7 @@ class MigrationsMixin:
                 (78, self._migration_v78),
                 (79, self._migration_v79),
                 (80, self._migration_v80),
+                (81, self._migration_v81),
             ]
 
             applied = 0
@@ -153,6 +155,14 @@ class MigrationsMixin:
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN replace_illegal_characters INTEGER NOT NULL DEFAULT 1"
             )
+
+    def _migration_v81(self, cur: sqlite3.Cursor) -> None:
+        """v81: Tracks list speed: has_file + denormalized sort columns, trigram search table, composite indexes.
+
+        Backfills in rowid batches, then installs the triggers that keep it all in sync (see ``library_track_index``).
+        Idempotent: columns are guarded, the FTS table is rebuilt, indexes and triggers are IF NOT EXISTS.
+        """
+        library_track_index.create_track_index(cur)
 
     def _migration_v80(self, cur: sqlite3.Cursor) -> None:
         """v80: Add file_fingerprints (AcoustID fingerprint + lookup cache per library file)."""

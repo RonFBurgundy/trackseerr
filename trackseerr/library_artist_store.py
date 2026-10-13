@@ -21,6 +21,7 @@ from trackseerr.library_monitoring import (
     validate_release_types,
 )
 from trackseerr.list_index import fold_search_text, library_sort_key
+from trackseerr.library_track_index import TRACK_COLUMNS
 from trackseerr.models import (
     LibraryArtist,
 )
@@ -75,6 +76,8 @@ class LibraryArtistStoreMixin:
         res = dict(row)
         res.pop("search_text", None)
         res.pop("search_clean", None)
+        for column, _decl in TRACK_COLUMNS:  # list-speed denormalizations, not part of the track record
+            res.pop(column, None)
         res["monitored"] = bool(res.get("monitored", 1))
         res["track_number"] = int(res.get("track_number", 1))
         res["disc_number"] = int(res.get("disc_number", 1))

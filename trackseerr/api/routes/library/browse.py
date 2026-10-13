@@ -170,6 +170,7 @@ def paged_tracks(
     monitored_only: bool = False,
     artist_id: Optional[str] = None,
     album_id: Optional[str] = None,
+    has_file: Optional[bool] = Query(None, description="true: only tracks with a library file; false: only tracks without"),
     facets: LibraryFacetFilter = Depends(facet_query),
     db: Database = Depends(get_db),
     client: Optional[LidarrClient] = Depends(get_lidarr_client),
@@ -190,7 +191,8 @@ def paged_tracks(
     if album_id and page == 1 and not q and not monitored_only:
         hydrate_album_tracks(db, enricher, album_id)
     return _paged(
-        "tracks", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, album_id, db, _enrich_tracks, facets=facets
+        "tracks", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, album_id, db, _enrich_tracks,
+        facets=facets, has_file=has_file,
     )
 
 @router.get("/tracks/index", dependencies=[Depends(require_core_tier)], response_model=LibraryIndexResponse, response_model_exclude_unset=True)
@@ -201,6 +203,7 @@ def tracks_index(
     monitored_only: bool = False,
     artist_id: Optional[str] = None,
     album_id: Optional[str] = None,
+    has_file: Optional[bool] = Query(None, description="true: only tracks with a library file; false: only tracks without"),
     facets: LibraryFacetFilter = Depends(facet_query),
     db: Database = Depends(get_db),
     client: Optional[LidarrClient] = Depends(get_lidarr_client),
@@ -211,5 +214,5 @@ def tracks_index(
         if not facets.is_empty():
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NATIVE_ONLY_DETAIL)
         return _lidarr_tracks_index(sort_key, sort_dir, album_id, client)
-    return _index("tracks", sort_key, sort_dir, q, monitored_only, artist_id, album_id, db, facets=facets)
+    return _index("tracks", sort_key, sort_dir, q, monitored_only, artist_id, album_id, db, facets=facets, has_file=has_file)
 

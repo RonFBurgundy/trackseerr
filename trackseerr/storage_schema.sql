@@ -626,7 +626,7 @@ CREATE TABLE library_tracks (
                 foreign_track_id TEXT,
                 created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
-            , mb_recording_id TEXT, isrc TEXT, last_searched_at TEXT, sort_title TEXT NOT NULL DEFAULT '', search_text TEXT NOT NULL DEFAULT '', search_clean TEXT NOT NULL DEFAULT '');
+            , mb_recording_id TEXT, isrc TEXT, last_searched_at TEXT, sort_title TEXT NOT NULL DEFAULT '', search_text TEXT NOT NULL DEFAULT '', search_clean TEXT NOT NULL DEFAULT '', has_file INTEGER NOT NULL DEFAULT 0, max_size_bytes INTEGER, artist_sort TEXT NOT NULL DEFAULT '', album_sort TEXT NOT NULL DEFAULT '', album_date TEXT);
 CREATE TABLE issue_comments (
                 id TEXT PRIMARY KEY,
                 issue_id TEXT NOT NULL REFERENCES media_issues(id) ON DELETE CASCADE,
@@ -801,3 +801,73 @@ CREATE INDEX idx_web_push_subs_user ON web_push_subscriptions(user_id);
 CREATE INDEX idx_mb_cache_expires ON mb_metadata_cache(expires_at);
 CREATE INDEX idx_mb_cache_kind ON mb_metadata_cache(kind);
 CREATE INDEX idx_mb_redirects_new ON mb_id_redirects(new_id);
+CREATE INDEX IF NOT EXISTS idx_lib_tracks_hf_title ON library_tracks(has_file, sort_title, id);
+CREATE INDEX IF NOT EXISTS idx_lib_tracks_hf_created ON library_tracks(has_file, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_lib_tracks_hf_artist ON library_tracks(has_file, artist_sort, id);
+CREATE INDEX IF NOT EXISTS idx_lib_tracks_hf_album ON library_tracks(has_file, album_sort, id);
+CREATE INDEX IF NOT EXISTS idx_lib_tracks_hf_date ON library_tracks(has_file, album_date, id);
+CREATE INDEX IF NOT EXISTS idx_lib_tracks_hf_size ON library_tracks(has_file, max_size_bytes, id);
+CREATE INDEX IF NOT EXISTS idx_lib_tracks_created_id ON library_tracks(created_at, id);
+CREATE VIRTUAL TABLE IF NOT EXISTS library_tracks_fts USING fts5(clean, raw, content='', contentless_delete=1, tokenize='trigram');
+CREATE TRIGGER IF NOT EXISTS trg_lib_tracks_ai AFTER INSERT ON library_tracks
+BEGIN
+    UPDATE library_tracks SET artist_sort = COALESCE((SELECT sort_name FROM library_artists WHERE id = library_tracks.artist_id), ''), album_sort = COALESCE((SELECT sort_title FROM library_albums WHERE id = library_tracks.album_id), ''), album_date = (SELECT COALESCE(NULLIF(release_date, ''), CAST(year AS TEXT)) FROM library_albums WHERE id = library_tracks.album_id) WHERE rowid = NEW.rowid;
+    INSERT INTO library_tracks_fts(rowid, clean, raw) SELECT t.rowid, t.search_clean || char(31) || COALESCE(al.search_clean, '') || char(31) || COALESCE(ar.search_clean, ''), t.search_text || char(31) || COALESCE(al.search_text, '') || char(31) || COALESCE(ar.search_text, '') FROM library_tracks t LEFT JOIN library_albums al ON al.id = t.album_id LEFT JOIN library_artists ar ON ar.id = t.artist_id WHERE t.rowid = NEW.rowid;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_lib_tracks_au
+AFTER UPDATE OF album_id, artist_id, search_text, search_clean ON library_tracks
+WHEN OLD.album_id IS NOT NEW.album_id OR OLD.artist_id IS NOT NEW.artist_id OR OLD.search_text IS NOT NEW.search_text OR OLD.search_clean IS NOT NEW.search_clean
+BEGIN
+    UPDATE library_tracks SET artist_sort = COALESCE((SELECT sort_name FROM library_artists WHERE id = library_tracks.artist_id), ''), album_sort = COALESCE((SELECT sort_title FROM library_albums WHERE id = library_tracks.album_id), ''), album_date = (SELECT COALESCE(NULLIF(release_date, ''), CAST(year AS TEXT)) FROM library_albums WHERE id = library_tracks.album_id) WHERE rowid = NEW.rowid;
+    DELETE FROM library_tracks_fts WHERE rowid = NEW.rowid;
+    INSERT INTO library_tracks_fts(rowid, clean, raw) SELECT t.rowid, t.search_clean || char(31) || COALESCE(al.search_clean, '') || char(31) || COALESCE(ar.search_clean, ''), t.search_text || char(31) || COALESCE(al.search_text, '') || char(31) || COALESCE(ar.search_text, '') FROM library_tracks t LEFT JOIN library_albums al ON al.id = t.album_id LEFT JOIN library_artists ar ON ar.id = t.artist_id WHERE t.rowid = NEW.rowid;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_lib_tracks_ad AFTER DELETE ON library_tracks
+BEGIN
+    DELETE FROM library_tracks_fts WHERE rowid = OLD.rowid;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_lib_albums_au_sort
+AFTER UPDATE OF sort_title, release_date, year ON library_albums
+WHEN OLD.sort_title IS NOT NEW.sort_title OR OLD.release_date IS NOT NEW.release_date OR OLD.year IS NOT NEW.year
+BEGIN
+    UPDATE library_tracks SET album_sort = COALESCE(NEW.sort_title, ''),
+        album_date = COALESCE(NULLIF(NEW.release_date, ''), CAST(NEW.year AS TEXT))
+    WHERE album_id = NEW.id;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_lib_albums_au_text
+AFTER UPDATE OF search_text, search_clean ON library_albums
+WHEN OLD.search_text IS NOT NEW.search_text OR OLD.search_clean IS NOT NEW.search_clean
+BEGIN
+    DELETE FROM library_tracks_fts WHERE rowid IN (SELECT rowid FROM library_tracks WHERE album_id = NEW.id);
+    INSERT INTO library_tracks_fts(rowid, clean, raw) SELECT t.rowid, t.search_clean || char(31) || COALESCE(al.search_clean, '') || char(31) || COALESCE(ar.search_clean, ''), t.search_text || char(31) || COALESCE(al.search_text, '') || char(31) || COALESCE(ar.search_text, '') FROM library_tracks t LEFT JOIN library_albums al ON al.id = t.album_id LEFT JOIN library_artists ar ON ar.id = t.artist_id WHERE t.album_id = NEW.id;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_lib_artists_au_sort
+AFTER UPDATE OF sort_name ON library_artists
+WHEN OLD.sort_name IS NOT NEW.sort_name
+BEGIN
+    UPDATE library_tracks SET artist_sort = COALESCE(NEW.sort_name, '') WHERE artist_id = NEW.id;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_lib_artists_au_text
+AFTER UPDATE OF search_text, search_clean ON library_artists
+WHEN OLD.search_text IS NOT NEW.search_text OR OLD.search_clean IS NOT NEW.search_clean
+BEGIN
+    DELETE FROM library_tracks_fts WHERE rowid IN (SELECT rowid FROM library_tracks WHERE artist_id = NEW.id);
+    INSERT INTO library_tracks_fts(rowid, clean, raw) SELECT t.rowid, t.search_clean || char(31) || COALESCE(al.search_clean, '') || char(31) || COALESCE(ar.search_clean, ''), t.search_text || char(31) || COALESCE(al.search_text, '') || char(31) || COALESCE(ar.search_text, '') FROM library_tracks t LEFT JOIN library_albums al ON al.id = t.album_id LEFT JOIN library_artists ar ON ar.id = t.artist_id WHERE t.artist_id = NEW.id;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_lib_files_ai AFTER INSERT ON library_files
+BEGIN
+    UPDATE library_tracks SET has_file = 1,
+        max_size_bytes = (SELECT MAX(size_bytes) FROM library_files WHERE track_id = NEW.track_id)
+    WHERE id = NEW.track_id;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_lib_files_ad AFTER DELETE ON library_files
+BEGIN
+    UPDATE library_tracks SET has_file = EXISTS (SELECT 1 FROM library_files WHERE track_id = OLD.track_id), max_size_bytes = (SELECT MAX(size_bytes) FROM library_files WHERE track_id = OLD.track_id) WHERE id = OLD.track_id;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_lib_files_au
+AFTER UPDATE OF track_id, size_bytes ON library_files
+WHEN OLD.track_id IS NOT NEW.track_id OR OLD.size_bytes IS NOT NEW.size_bytes
+BEGIN
+    UPDATE library_tracks SET has_file = EXISTS (SELECT 1 FROM library_files WHERE track_id = NEW.track_id), max_size_bytes = (SELECT MAX(size_bytes) FROM library_files WHERE track_id = NEW.track_id) WHERE id = NEW.track_id;
+    UPDATE library_tracks SET has_file = EXISTS (SELECT 1 FROM library_files WHERE track_id = OLD.track_id), max_size_bytes = (SELECT MAX(size_bytes) FROM library_files WHERE track_id = OLD.track_id) WHERE id = OLD.track_id;
+END;
