@@ -317,6 +317,7 @@ def _paged(
     db: Database,
     enrich: Callable[[Database, list[dict[str, Any]]], list[dict[str, Any]]],
     facets: Optional[LibraryFacetFilter] = None,
+    has_file: Optional[bool] = None,
 ) -> dict[str, Any]:
     key = _library_sort_key(kind, sort_key)
     rows, total = paging.page_library(
@@ -330,6 +331,7 @@ def _paged(
         monitored_only,
         _library_filters(kind, artist_id, album_id),
         facets=facets,
+        has_file=has_file,
     )
     return {
         "mode": "native",
@@ -351,6 +353,7 @@ def _index(
     album_id: Optional[str],
     db: Database,
     facets: Optional[LibraryFacetFilter] = None,
+    has_file: Optional[bool] = None,
 ) -> dict[str, Any]:
     key = _library_sort_key(kind, sort_key)
     total, groups = paging.index_library(
@@ -362,6 +365,7 @@ def _index(
         monitored_only,
         _library_filters(kind, artist_id, album_id),
         facets=facets,
+        has_file=has_file,
     )
     return {"sort_key": key, "sort_dir": sort_dir, "total": total, "groups": groups}
 
