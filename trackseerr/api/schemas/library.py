@@ -516,6 +516,15 @@ class FingerprintResponse(ApiModel):
 # ------------------------------------------------------------------------------------------------------ rename
 
 
+class RenameVerification(ApiModel):
+    status: str
+    score: Optional[float] = None
+    actual_track_id: Optional[str] = None
+    actual_album_id: Optional[str] = None
+    actual_title: Optional[str] = None
+    actual_artist: Optional[str] = None
+
+
 class RenamePreviewItem(ApiModel):
     file_id: str
     track_id: str
@@ -524,11 +533,28 @@ class RenamePreviewItem(ApiModel):
     needs_rename: bool
     reasons: list[str]
     default_selected: bool
+    verification: Optional[RenameVerification] = None
 
 
 class RenameApplyResponse(ApiModel):
     renamed_count: int
     errors: list[str]
+    blocked_count: int = 0
+
+
+class RenameVerifyStatus(ApiModel):
+    running: bool
+    total: int
+    done: int
+    verified: int
+    mismatched: int
+    unknown: int
+    errors: int
+    cached: int
+    message: Optional[str] = None
+    started_at: Optional[float] = None
+    finished_at: Optional[float] = None
+    api_key_set: bool
 
 
 # -------------------------------------------------------------------------------------------------------- retag

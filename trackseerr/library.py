@@ -1096,9 +1096,9 @@ def fingerprint_and_lookup(file_path: str | Path, api_key: str) -> dict[str, Any
     _acoustid_rate_limit()
     try:
         response = acoustid.lookup(api_key, fp, duration)
+        matches = _collect_matches(acoustid, response)
     except acoustid.WebServiceError as exc:
         logger.warning("fingerprint_and_lookup: AcoustID lookup failed for %s: %s", path, exc)
         return _lookup_result("error", duration, fp, [], str(exc)[:200] or "AcoustID lookup failed")
-    matches = _collect_matches(acoustid, response)
     return _lookup_result("ok" if matches else "no_result", duration, fp, matches, None)
 

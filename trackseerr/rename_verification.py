@@ -23,6 +23,7 @@ from trackseerr.rename_reasons import (
     FILE_TITLE,
     TRACK_NUMBER,
 )
+from trackseerr.storage_common import clean_library_name
 from trackseerr.task_manager import TRIGGER_MANUAL, record_task_run
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ MISMATCH = "mismatch"
 UNKNOWN = "unknown"
 
 RISKY_REASONS = frozenset({TRACK_NUMBER, FILE_TITLE, ALBUM_TITLE, ALBUM_YEAR, DISC_LAYOUT, COLLISION})
+KEY_REJECTED_MESSAGE = "AcoustID rejected the API key"
 UNAVAILABLE_MESSAGE = "Audio fingerprinting is unavailable (fpcalc / pyacoustid missing)"
 
 
@@ -64,6 +66,13 @@ def _find_library_hit(db: Any, ids: list[str], album_id: Optional[str]) -> Optio
     return None
 
 
+def _same_recording_other_album(hit: dict[str, Any], track: dict[str, Any]) -> bool:
+    """True when the library hit is on another album but carries the linked track's (cleaned) title."""
+    if hit.get("album_id") == track.get("album_id"):
+        return False
+    return clean_library_name(str(hit.get("title") or "")) == clean_library_name(str(track.get("title") or ""))
+
+
 def verdict_for(db: Any, fp_row: Optional[dict[str, Any]], track: dict[str, Any], current_path: str) -> Optional[dict[str, Any]]:
     """Compares a cached fingerprint row with the linked track. None when there is no usable (current) row."""
     if fp_row is None or fp_row.get("file_path") != current_path:
@@ -81,6 +90,8 @@ def verdict_for(db: Any, fp_row: Optional[dict[str, Any]], track: dict[str, Any]
         hit, rid = found
         if hit["id"] == track["id"]:
             return _verdict(VERIFIED, scores[rid])
+        if not target and _same_recording_other_album(hit, track):
+            return _verdict(UNKNOWN, None)  # a single and its album release share a recording: not a mismatch
         return _verdict(
             MISMATCH,
             scores[rid],
@@ -167,20 +178,31 @@ def _bump(**counts: int) -> None:
 _VERDICT_COUNTER = {VERIFIED: "verified", MISMATCH: "mismatched", UNKNOWN: "unknown"}
 
 
-def _verify_one(db: Any, file_id: str, api_key: str) -> None:
-    """Verifies one file and updates the counters. FingerprintUnavailable propagates."""
+def _verify_one(db: Any, file_id: str, api_key: str) -> Optional[dict[str, Any]]:
+    """Verifies one file and updates the counters; returns its fingerprint row (None when it had no file/track).
+
+    FingerprintUnavailable propagates.
+    """
     file_row = db.get_library_file(file_id)
     track = db.get_library_track(file_row["track_id"]) if file_row else None
     if not file_row or not track:
         _bump(errors=1, done=1)
-        return
+        return None
     fp_row = verify_file(db, file_row, api_key)
     if fp_row.get("status") == "error":
         _bump(errors=1, done=1)
-        return
+        return fp_row
     verdict = verdict_for(db, fp_row, track, file_row["file_path"])
     counter = _VERDICT_COUNTER.get(verdict["status"] if verdict else UNKNOWN, "unknown")
     _bump(**{counter: 1, "done": 1, "cached": 1 if fp_row.get("cached") else 0})
+    return fp_row
+
+
+def _key_rejected(fp_row: Optional[dict[str, Any]]) -> bool:
+    """True when a fresh lookup failed because AcoustID rejected the API key."""
+    if not fp_row or fp_row.get("cached") or fp_row.get("status") != "error":
+        return False
+    return "invalid api key" in str(fp_row.get("error") or "").lower()
 
 
 def run_verification(
@@ -194,10 +216,17 @@ def run_verification(
         _state.clear()
         _state.update(_fresh_state(total=len(file_ids), running=True))
     try:
+        first_lookup_pending = True
         for file_id in file_ids:
             if should_stop and should_stop():
                 break
-            _verify_one(db, file_id, api_key)
+            fp_row = _verify_one(db, file_id, api_key)
+            if first_lookup_pending and fp_row and not fp_row.get("cached") and fp_row.get("error") != "file missing":
+                first_lookup_pending = False
+                if _key_rejected(fp_row):
+                    with _state_lock:
+                        _state["message"] = KEY_REJECTED_MESSAGE
+                    break
     except FingerprintUnavailable:
         with _state_lock:
             _state["message"] = UNAVAILABLE_MESSAGE

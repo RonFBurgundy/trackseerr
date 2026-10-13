@@ -133,6 +133,9 @@ class RenamePreviewRequest(BaseModel):
 class RenameApplyRequest(BaseModel):
     file_ids: list[str] = Field(default_factory=list)
 
+class RenameVerifyRequest(BaseModel):
+    file_ids: list[str] = Field(default_factory=list, max_length=5000)
+
 class RetagPreviewRequest(BaseModel):
     artist_id: Optional[str] = None
     album_id: Optional[str] = None

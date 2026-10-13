@@ -83,6 +83,15 @@ def test_fingerprint_and_lookup_webservice_error_keeps_fingerprint(tmp_path: Pat
     assert "boom" in res["error"]
 
 
+def test_fingerprint_and_lookup_parse_error_is_error_status(tmp_path: Path) -> None:
+    fake = _fake_acoustid()
+    fake.parse_lookup_result.side_effect = fake.WebServiceError("status: error, message: invalid API key")
+    res = _run_lookup(fake, tmp_path / "a.flac")
+    assert res["status"] == "error"
+    assert res["fingerprint"] == "AQAA-fp"
+    assert "invalid API key" in res["error"]
+
+
 def test_fingerprint_and_lookup_generation_error(tmp_path: Path) -> None:
     fake = _fake_acoustid()
     fake.fingerprint_file.side_effect = fake.FingerprintGenerationError("bad audio")
@@ -169,6 +178,16 @@ def test_verdict_unknown_without_target_recording_or_result(lib: Database) -> No
     for status in ("no_result", "error"):
         v2 = rv.verdict_for(lib, _fp(status=status), with_rec, "/m/a.flac")
         assert v2 is not None and v2["status"] == rv.UNKNOWN
+
+
+def test_verdict_unknown_when_same_title_on_other_album_without_target(lib: Database) -> None:
+    trk = _track(lib, "t1", "al1", None, title="Song!")
+    _track(lib, "t2", "al2", R2, title="Song")
+    v = rv.verdict_for(lib, _fp(matches=[_m(R2)]), trk, "/m/a.flac")
+    assert v is not None and v["status"] == rv.UNKNOWN
+    other = _track(lib, "t3", "al2", R3, title="Different")
+    v = rv.verdict_for(lib, _fp(matches=[_m(R3)]), trk, "/m/a.flac")
+    assert v is not None and v["status"] == rv.MISMATCH and other["id"] == v["actual_track_id"]
 
 
 def test_verdict_verified_when_hit_is_the_linked_track(lib: Database) -> None:
@@ -263,6 +282,18 @@ def test_run_verification_counts_and_stops_on_unavailable(lib: Database, tmp_pat
         out = rv.run_verification(lib, [third["id"], ok["id"]], "k")
     assert out["message"] == rv.UNAVAILABLE_MESSAGE
     assert out["running"] is False and out["done"] == 0
+
+
+def test_run_verification_stops_on_invalid_key(lib: Database, tmp_path: Path) -> None:
+    first = _file(lib, tmp_path, "f1", "t1", R1)
+    second = _file(lib, tmp_path, "f2", "t2", R2)
+    fake = _fake_acoustid()
+    fake.parse_lookup_result.side_effect = fake.WebServiceError("status: error, message: invalid API key")
+    with patch.dict("sys.modules", {"acoustid": fake}):
+        out = rv.run_verification(lib, [first["id"], second["id"]], "bad")
+    assert out["message"] == "AcoustID rejected the API key"
+    assert out["done"] == 1 and out["running"] is False
+    assert fake.lookup.call_count == 1
 
 
 def test_run_verification_honours_should_stop(lib: Database, tmp_path: Path) -> None:

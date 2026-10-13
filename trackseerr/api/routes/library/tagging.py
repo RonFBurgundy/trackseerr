@@ -28,6 +28,7 @@ from trackseerr.api.dependencies import (
 from trackseerr.api.schemas.library import (
     RenameApplyResponse,
     RenamePreviewItem,
+    RenameVerifyStatus,
     RetagApplyResponse,
     RetagPreviewItem,
 )
@@ -44,7 +45,21 @@ from trackseerr.library import (
 from trackseerr.job_tracker import track_job
 from trackseerr.task_manager import TRIGGER_MANUAL, record_task_run
 from trackseerr.naming import build_track_path, existing_artist_folder
-from trackseerr.rename_reasons import classify_rename, flag_collisions, is_default_selected, COLLISION
+from trackseerr.rename_reasons import (
+    AUDIO_MISMATCH,
+    COLLISION,
+    VERIFIED as VERIFIED_REASON,
+    classify_rename,
+    flag_collisions,
+    is_default_selected,
+)
+from trackseerr.rename_verification import (
+    MISMATCH,
+    VERIFIED,
+    get_verification_status,
+    start_verification,
+    verdict_for,
+)
 from trackseerr.storage import Database
 
 
@@ -53,7 +68,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 from ._shared import (validate_media_path, native_only, _album_total_discs)
-from .models import (RenamePreviewRequest, RenameApplyRequest, RetagPreviewRequest, RetagApplyRequest)
+from .models import (RenamePreviewRequest, RenameApplyRequest, RenameVerifyRequest, RetagPreviewRequest, RetagApplyRequest)
 
 _ART_STEMS = ("cover", "folder", "front")
 _ART_EXTS = (".jpg", ".jpeg", ".png", ".webp")
@@ -162,6 +177,26 @@ def _flag_collisions(rows: list[dict[str, Any]]) -> None:
             row["default_selected"] = False
 
 
+def _attach_verification(db: Database, rows: list[dict[str, Any]]) -> None:
+    """Adds the cached AcoustID verdict to rows that have a current cache entry, and adjusts reasons/selection."""
+    cached = db.get_file_fingerprints([r["file_id"] for r in rows])
+    for row in rows:
+        fp_row = cached.get(row["file_id"])
+        track = db.get_library_track(row["track_id"]) if fp_row else None
+        if not fp_row or not track:
+            continue
+        verdict = verdict_for(db, fp_row, track, row["current_path"])
+        if verdict is None:
+            continue
+        row["verification"] = verdict
+        if verdict["status"] == VERIFIED:
+            row["reasons"] = [*row["reasons"], VERIFIED_REASON]
+            row["default_selected"] = COLLISION not in row["reasons"]
+        elif verdict["status"] == MISMATCH:
+            row["reasons"] = [*row["reasons"], AUDIO_MISMATCH]
+            row["default_selected"] = False
+
+
 @router.post("/rename/preview", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=list[RenamePreviewItem], response_model_exclude_unset=True)
 def rename_preview(
     body: Optional[RenamePreviewRequest] = None,
@@ -189,6 +224,7 @@ def rename_preview(
             if row:
                 preview_diffs.append(row)
         _flag_collisions(preview_diffs)
+        _attach_verification(db, preview_diffs)
         return preview_diffs
 
     for t, f in db.iter_library_files_for_rename(_RENAME_PAGE_SIZE):
@@ -198,7 +234,38 @@ def rename_preview(
             if len(preview_diffs) >= limit:
                 break
     _flag_collisions(preview_diffs)
+    _attach_verification(db, preview_diffs)
     return preview_diffs
+
+
+_NO_KEY_MESSAGE = "Set an AcoustID API key in Settings → Media Management first"
+
+
+@router.post("/rename/verify", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=RenameVerifyStatus)
+def rename_verify(
+    body: RenameVerifyRequest,
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Starts a background AcoustID check of the given library files against the tracks they are linked to."""
+    key = str(db.get_media_management_settings().get("acoustid_api_key") or "").strip()
+    if not key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_NO_KEY_MESSAGE)
+    if not body.file_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files selected to verify")
+    if not start_verification(db, body.file_ids, key):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A verification is already running")
+    return {**get_verification_status(), "api_key_set": True}
+
+
+@router.get("/rename/verify/status", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=RenameVerifyStatus)
+def rename_verify_status(
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Reports the progress of the current or last AcoustID verification run."""
+    key = str(db.get_media_management_settings().get("acoustid_api_key") or "").strip()
+    return {**get_verification_status(), "api_key_set": bool(key)}
 
 
 def _is_art_file(p: Path) -> bool:
@@ -233,6 +300,18 @@ def _tidy_old_folder(old_parent: Path, new_parent: Path, root_dir: Path) -> None
         logger.debug("Could not tidy old folder %s: %s", old_parent, exc)
 
 
+def _mismatch_block(db: Database, fid: str, track: dict[str, Any], current_path_str: str) -> Optional[str]:
+    """An error message when the cached AcoustID verdict says the file's audio is not the track it is linked to."""
+    verdict = verdict_for(db, db.get_file_fingerprint(fid), track, current_path_str)
+    if not verdict or verdict["status"] != MISMATCH:
+        return None
+    actual = verdict.get("actual_title") or "a different track"
+    return (
+        f"Skipped '{Path(current_path_str).name}': the audio is {actual}, "
+        f"not '{track.get('title')}' — fix the file link first"
+    )
+
+
 @router.post("/rename/apply", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=RenameApplyResponse, response_model_exclude_unset=True)
 def rename_apply(
     body: RenameApplyRequest,
@@ -242,6 +321,7 @@ def rename_apply(
 ) -> dict[str, Any]:
     """Applies batch renaming to specified library files, moving them to their template-rendered destinations and updating the catalog."""
     renamed_count = 0
+    blocked_count = 0
     errors: list[str] = []
 
     media_settings = db.get_media_management_settings()
@@ -268,6 +348,12 @@ def rename_apply(
             track = db.get_library_track(f["track_id"])
             if not track:
                 errors.append(f"Track '{f['track_id']}' not found for file '{fid}'")
+                continue
+
+            blocked = _mismatch_block(db, fid, track, current_path_str)
+            if blocked:
+                errors.append(blocked)
+                blocked_count += 1
                 continue
 
             album = db.get_library_album(track["album_id"])
@@ -324,7 +410,7 @@ def rename_apply(
         except Exception as exc:
             logger.warning("Error refreshing media-server library: %s", exc)
 
-    return {"renamed_count": renamed_count, "errors": errors}
+    return {"renamed_count": renamed_count, "errors": errors, "blocked_count": blocked_count}
 
 TAG_DIFF_FIELDS: tuple[tuple[str, str], ...] = (
     ("artist", "artist"),
