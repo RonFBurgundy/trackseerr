@@ -1,10 +1,11 @@
 import React, { useId, useRef } from 'react';
-import { ArrowRight, AudioLines, Check, FileCheck, Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
+import { ArrowRight, AudioLines, Check, FileCheck, Link2, Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ObsidianModal, TapeDeckButton } from '@/components/ui';
+import { ObsidianModal, TactileSwitch, TapeDeckButton } from '@/components/ui';
 import { useRenamePreview } from '@/hooks/useRenamePreview';
+import { useRenameRelink } from '@/hooks/useRenameRelink';
 import { useRenameVerify } from '@/hooks/useRenameVerify';
-import type { RenamePreviewItem } from '@/services/renameService';
+import type { RenamePreviewItem, RenameRelinkFile } from '@/services/renameService';
 import { reasonInfo } from './renameReasons';
 
 export interface RenameScope {
@@ -73,6 +74,66 @@ const ReasonChip: React.FC<{ code: string }> = ({ code }) => {
   );
 };
 
+const LOSSLESS_CODECS = new Set(['flac', 'alac', 'wav', 'aiff', 'ape', 'wv']);
+
+/** Positive when `a` is the higher-quality file, negative when `b` is, 0 on a tie. */
+function compareQuality(a: RenameRelinkFile, b: RenameRelinkFile): number {
+  const lossless = (f: RenameRelinkFile): number =>
+    LOSSLESS_CODECS.has((f.codec ?? '').toLowerCase()) ? 1 : 0;
+  const steps: number[] = [
+    lossless(a) - lossless(b),
+    (a.bits_per_sample ?? 0) - (b.bits_per_sample ?? 0),
+    (a.sample_rate ?? 0) - (b.sample_rate ?? 0),
+    (a.bitrate ?? 0) - (b.bitrate ?? 0),
+    (a.size_bytes ?? 0) - (b.size_bytes ?? 0),
+  ];
+  return steps.find((n) => n !== 0) ?? 0;
+}
+
+function baseName(path: string): string {
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
+
+function fileFacts(file: RenameRelinkFile): string[] {
+  const facts: string[] = [];
+  const format = [file.quality_name, file.codec].filter((v): v is string => !!v);
+  if (format.length > 0) facts.push(format.join(' / '));
+  if (file.bitrate != null) facts.push(`${Math.round(file.bitrate)} kbps`);
+  const depth = [
+    file.bits_per_sample != null ? `${file.bits_per_sample}-bit` : null,
+    file.sample_rate != null ? `${Number((file.sample_rate / 1000).toFixed(1))} kHz` : null,
+  ].filter((v): v is string => v !== null);
+  if (depth.length > 0) facts.push(depth.join(' / '));
+  if (file.size_bytes != null) facts.push(`${(file.size_bytes / (1024 * 1024)).toFixed(1)} MB`);
+  return facts;
+}
+
+const RelinkFileCard: React.FC<{ heading: string; file: RenameRelinkFile; better: boolean }> = ({
+  heading,
+  file,
+  better,
+}) => (
+  <div className="min-w-0 space-y-1.5 rounded-[4px] border border-[var(--border-default)] bg-[var(--bg-card)] p-3 font-mono text-xs">
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-secondary)]">{heading}</span>
+      {better && (
+        <span className="rounded-[3px] border border-[#e5a00d]/50 bg-[#e5a00d]/10 px-1.5 py-0.5 text-[10px] leading-none text-[#ffc94d]">
+          Higher quality
+        </span>
+      )}
+    </div>
+    <p className="break-all text-white" title={file.file_path}>
+      {baseName(file.file_path)}
+    </p>
+    <ul className="space-y-0.5 text-[var(--text-secondary)]">
+      {fileFacts(file).map((fact) => (
+        <li key={fact}>{fact}</li>
+      ))}
+    </ul>
+  </div>
+);
+
 export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRenamed }) => {
   const selectAllId = useId();
   const isOpen = scope !== null;
@@ -115,6 +176,18 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
   const verifyTitle = keyMissing
     ? 'Set an AcoustID API key in Settings → Media Management'
     : 'Fingerprint the audio of risky renames and compare it with the linked track';
+
+  const {
+    busyFileId,
+    conflict,
+    error: relinkError,
+    preferQuality,
+    setPreferQuality,
+    relink,
+    resolve: resolveConflict,
+    dismissConflict,
+  } = useRenameRelink({ onRelinked: () => void reload() });
+  const conflictOrder = conflict ? compareQuality(conflict.existing, conflict.incoming) : 0;
 
   const parentRef = useRef<HTMLDivElement | null>(null);
 
@@ -332,7 +405,15 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                       None
                     </button>
                   </div>
-                  <div className="flex items-center gap-2 text-neutral-400">
+                  <div className="flex flex-wrap items-center gap-2 text-neutral-400">
+                    <TactileSwitch
+                      name="rename-relink-prefer-quality"
+                      label="Keep the higher-quality file when the right track already has one"
+                      title="Off: ask each time the right track already has a file"
+                      checked={preferQuality}
+                      onChange={setPreferQuality}
+                      className="max-w-[18rem] text-[11px] leading-tight"
+                    />
                     <span>
                       <strong className="text-white">{selectedIds.size}</strong> of {items.length} files selected
                     </span>
@@ -391,6 +472,11 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                     {verifyError}
                   </p>
                 )}
+                {relinkError && (
+                  <p role="alert" className="text-xs font-mono text-[var(--status-error)]">
+                    {relinkError}
+                  </p>
+                )}
 
                 {/* Virtualized List Container */}
                 <div
@@ -418,6 +504,8 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                       return (
                         <div
                           key={item.file_id}
+                          data-index={virtualRow.index}
+                          ref={rowVirtualizer.measureElement}
                           style={{
                             position: 'absolute',
                             top: 0,
@@ -473,13 +561,39 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                               </div>
                             </div>
                             {mismatch && item.verification && (
-                              <p className="mt-1 flex items-start gap-1.5 break-words font-mono text-[11px] text-[var(--status-error)]">
-                                <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0" />
-                                <span>
-                                  Audio is actually: {item.verification.actual_title ?? 'unknown track'}
-                                  {item.verification.actual_artist ? ` — ${item.verification.actual_artist}` : ''}
-                                </span>
-                              </p>
+                              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                <p className="flex items-start gap-1.5 break-words font-mono text-[11px] text-[var(--status-error)]">
+                                  <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0" />
+                                  <span>
+                                    Audio is actually: {item.verification.actual_title ?? 'unknown track'}
+                                    {item.verification.actual_artist ? ` — ${item.verification.actual_artist}` : ''}
+                                  </span>
+                                </p>
+                                {item.verification.actual_track_id ? (
+                                  <TapeDeckButton
+                                    size="sm"
+                                    disabled={busyFileId === item.file_id}
+                                    title={`Link this file to ${item.verification.actual_title ?? 'that track'} instead of its current track`}
+                                    onClick={() => {
+                                      const target = item.verification?.actual_track_id;
+                                      if (target) void relink(item.file_id, target);
+                                    }}
+                                    icon={
+                                      busyFileId === item.file_id ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      ) : (
+                                        <Link2 className="h-3 w-3" />
+                                      )
+                                    }
+                                  >
+                                    Relink to this track
+                                  </TapeDeckButton>
+                                ) : (
+                                  <span className="font-mono text-[11px] text-[var(--text-muted)]">
+                                    Not in your library — no track to relink to
+                                  </span>
+                                )}
+                              </div>
                             )}
                             <div className="tab-strip mt-1 h-4 overflow-x-auto">
                               {item.reasons.map((code) => (
@@ -497,6 +611,44 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
           </>
         )}
       </div>
+
+      <ObsidianModal
+        isOpen={conflict !== null}
+        onClose={dismissConflict}
+        title="The right track already has a file"
+        subtitle="Choose which file stays linked to that track"
+        maxWidth="sm:max-w-2xl"
+        footer={
+          <>
+            <TapeDeckButton onClick={dismissConflict} disabled={busyFileId !== null}>
+              Cancel
+            </TapeDeckButton>
+            <TapeDeckButton disabled={busyFileId !== null} onClick={() => void resolveConflict('keep_existing')}>
+              Keep existing
+            </TapeDeckButton>
+            <TapeDeckButton
+              variant="amber"
+              disabled={busyFileId !== null}
+              onClick={() => void resolveConflict('keep_incoming')}
+              icon={busyFileId !== null ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}
+            >
+              Keep this file
+            </TapeDeckButton>
+          </>
+        }
+      >
+        {conflict && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <RelinkFileCard heading="Already on that track" file={conflict.existing} better={conflictOrder > 0} />
+              <RelinkFileCard heading="This file" file={conflict.incoming} better={conflictOrder < 0} />
+            </div>
+            <p className="font-mono text-xs text-[var(--text-secondary)]">
+              The file you don't keep goes to the recycle bin.
+            </p>
+          </div>
+        )}
+      </ObsidianModal>
     </ObsidianModal>
   );
 };
