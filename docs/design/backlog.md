@@ -79,3 +79,9 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     requested track number, so a fresh scan of two new "[silence]" files (#90, #91) lands both on one track. The Lidarr
     import is guarded by an exact disc+number+title check. Fix: with a track number given, cross numbers only when the
     candidate row has no file yet (keeps renumbered catalog rows matching) — test with the scanner two-file case.
+15. **P2 · Retag modal doesn't scroll file paths horizontally** (desktop and mobile), so long file names are
+    truncated or unreachable. Apply the same fix the rename modal got: each row's path block in its own
+    `overflow-x-auto` container with a `w-max min-w-full whitespace-nowrap` inner wrapper, `tabIndex={0}` +
+    `role="group"` + `aria-label` for keyboard scrolling, full path in `title` (see
+    `frontend/src/components/library/RenameModal.tsx` ~L450-470). Target: `frontend/src/components/library/RetagModal.tsx`
+    file rows and the per-field diff values. Frontend skill applies.
