@@ -87,7 +87,9 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     file rows and the per-field diff values. Frontend skill applies.
 16. **P2 · Activity + Wanted item cards are cluttered (mobile first, desktop too).** On phones the per-item action
     buttons fill the right half of every card and squeeze the track details into a narrow left column (user
-    screenshot `Screenshot_20261012-214949.png`, Queue). Standardise ONE shared item-card component used by every
+    screenshot `Screenshot_20261012-214949.png`, Queue: a status word + Retry/Blocklist/Delete icon buttons take
+    ~55% of the width, so the artist truncates to "OK …"/"Her…"/"Ha…", the progress % clips to "1(", and a stalled
+    row's WARNING/STALLED badge + Manual Import button wrap the actions onto a second row). Standardise ONE shared item-card component used by every
     sub-page of Activity (Queue, Searches, History, Blocklist, Needs Review) and Wanted (incl. Calendar agenda rows):
     row 1 = full-width track details (title · artist · album, truncating); row 2 = at-a-glance status (status badge,
     quality/source chips, download progress bar for queue items); all actions in one ⋯ `OverflowMenu`
