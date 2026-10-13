@@ -468,7 +468,7 @@ def _submit_track(
     except RequestRejected as exc:
         # Admin-level submissions are never quota-limited and skip the duplicate check, but stay defensive.
         logger.info("List track request not created (%s): %s", exc.code, exc.detail)
-        if exc.code != "duplicate":
+        if exc.code not in ("duplicate", "in_library"):
             raise
     return None
 

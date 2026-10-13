@@ -571,6 +571,50 @@ class LibraryCatalogStoreMixin:
             row = cur.fetchone()
             return self._map_library_track(row) if row else None
 
+    def find_library_tracks_by_clean_title(
+        self,
+        clean_title: str,
+        artist_id: Optional[str] = None,
+        credited_artist: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Library tracks whose clean title is ``clean_title``, owned by ``artist_id`` or credited to ``credited_artist``.
+
+        The credit match covers compilation tracks filed under another album artist (primary or featured credit,
+        case-insensitive). Rows holding a file sort first, then those whose file meets the quality cutoff; each
+        row carries ``has_file``. Without an artist filter nothing is returned.
+        """
+        clean = clean_library_name(clean_title)
+        owners: list[str] = []
+        params: list[Any] = [clean]
+        if artist_id is not None:
+            owners.append("t.artist_id = ?")
+            params.append(str(artist_id))
+        if credited_artist:
+            owners.append(
+                "EXISTS (SELECT 1 FROM library_track_artists a WHERE a.track_id = t.id "
+                "AND lower(a.artist_name) = lower(?) AND a.role IN ('primary','featured'))"
+            )
+            params.append(credited_artist)
+        if not clean or not owners:
+            return []
+        has_file = "EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id)"
+        met = "EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id AND f.cutoff_met = 1)"
+        query = (
+            f"SELECT t.*, {has_file} AS has_file FROM library_tracks t "
+            f"WHERE t.clean_title = ? AND ({' OR '.join(owners)}) "
+            f"ORDER BY {has_file} DESC, {met} DESC LIMIT ?"
+        )
+        params.append(int(limit))
+        with self._lock:
+            rows = self.conn.execute(query, params).fetchall()
+            out: list[dict[str, Any]] = []
+            for row in rows:
+                track = self._map_library_track(row)
+                track["has_file"] = bool(row["has_file"])
+                out.append(track)
+            return out
+
     def get_library_track_by_title(
         self,
         album_id: str,

@@ -23,6 +23,7 @@ from trackseerr.item_history import (
     request_trigger,
     trigger_kwargs,
 )
+from trackseerr.library_availability import get_item_availability
 from trackseerr.library_manager import ModeChanged, dispatch_to_lidarr, native_is_configured, run_for_mode
 from trackseerr.models import MusicRequest, NotificationEvent, RequestStatus, UserPermission
 from trackseerr.notifications import notification_dispatcher
@@ -45,7 +46,7 @@ def user_request_lock(user_id: str) -> threading.RLock:
 
 
 class RequestRejected(Exception):
-    """Policy refused the request. ``code`` is ``quota`` or ``duplicate``; ``status_code`` mirrors the HTTP mapping."""
+    """Policy refused the request. ``code`` is ``quota``, ``duplicate`` or ``in_library``; ``status_code`` mirrors the HTTP mapping."""
 
     def __init__(self, code: str, status_code: int, detail: str) -> None:
         super().__init__(detail)
@@ -143,6 +144,30 @@ def _enforce_quota(db: Database, user: dict[str, Any], needs: dict[str, int]) ->
             raise RequestRejected("quota", 400, f"Request quota reached for {label} ({limit} per {window} {unit})")
 
 
+def _library_has(
+    db: Database,
+    item_type: str,
+    artist: str,
+    title: str,
+    album: Optional[str],
+    foreign_id: Optional[str],
+) -> Optional[str]:
+    """Why a request is pointless because the native library already holds the item, else None.
+
+    Only applies in native library mode. A track counts when it has a file (at cutoff or below it); an album only
+    when complete, since a partial album may still be requested.
+    """
+    if db.get_media_management_settings().get("library_mode", "native") != "native":
+        return None
+    if item_type == "album":
+        avail = get_item_availability(db, artist_name=artist, album_title=title, foreign_id=foreign_id)
+        return "Already in your library" if avail.get("status") == "available" else None
+    avail = get_item_availability(
+        db, artist_name=artist, album_title=album, track_title=title, foreign_id=foreign_id
+    )
+    return "Already in your library" if avail.get("status") in ("available", "cutoff_unmet") else None
+
+
 def submit_track_request(
     db: Database,
     config: Any,
@@ -162,7 +187,7 @@ def submit_track_request(
     lidarr_client: Any = None,
     trigger: Optional[GrabTrigger] = None,
 ) -> RequestSubmission:
-    """Apply request policy and create the request. Raises ``RequestRejected`` on quota or duplicate.
+    """Apply request policy and create the request. Raises ``RequestRejected`` on quota, duplicate or an item already in the library.
 
     Non-admins cannot choose a quality profile: it is dropped. The per-user lock covers only the
     count-check plus insert. Notifications and the native grab (network I/O) run after it is released; a caller
@@ -179,6 +204,9 @@ def submit_track_request(
         quality_profile_id = None
 
     kind = _quota_type(item_type)
+    in_library = _library_has(db, item_type, clean_artist, clean_title, clean_album, foreign_id)
+    if in_library:
+        raise RequestRejected("in_library", 409, in_library)
     with user_request_lock(user["id"]):
         if not is_admin:
             _enforce_quota(db, user, {kind: 1})
@@ -280,7 +308,8 @@ def submit_batch_requests(  # noqa: C901
     ``batch_id`` so they can be counted that way, and its approval follows the discography bit.
 
     Quota is checked for the whole batch before anything is inserted, so it is all-or-nothing. Items that
-    duplicate an active request of the user, or an earlier item in the batch, are skipped. Raises
+    duplicate an active request of the user, or an earlier item in the batch, or that the native library already
+    holds, are skipped. Raises
     ``RequestRejected`` with 422 for a malformed batch and 400 when a quota would be exceeded. Notifications and
     grabs are the caller's job (``run_submission_followups`` or equivalent) after this returns.
     """
@@ -322,6 +351,8 @@ def submit_batch_requests(  # noqa: C901
             if not is_admin and (key in existing_keys or (fid and fid in existing_fids)):
                 continue
             if key in seen_keys or (fid and fid in seen_fids):
+                continue
+            if _library_has(db, it.get("item_type") or "album", art, title, (it.get("album") or "").strip() or None, fid):
                 continue
             seen_keys.add(key)
             if fid:

@@ -227,7 +227,7 @@ def _queue_acquisition(
 
     Notifications and the native grab are deferred: the caller holds ``user_request_lock`` and must call
     ``run_submission_followups`` after releasing it. Returns the submission, or None when policy refused it
-    (duplicate); raises ``RequestRejected`` with
+    (duplicate or already in the library); raises ``RequestRejected`` with
     code ``quota`` once the owner's request quota is exhausted. Requests of users without AUTO_APPROVE are PENDING.
     """
     try:
@@ -246,8 +246,8 @@ def _queue_acquisition(
             ),
         )
     except RequestRejected as exc:
-        if exc.code == "duplicate":
-            logger.info("Mix acquisition skipped (duplicate) for %s - %s", track.artist, track.title)
+        if exc.code in ("duplicate", "in_library"):
+            logger.info("Mix acquisition skipped (%s) for %s - %s", exc.code, track.artist, track.title)
             return None
         raise
     db.add_mix_acquisition(config_row["id"], str(submission.request["id"]))
