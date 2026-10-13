@@ -123,6 +123,12 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     one by one by `backlog_worker._collect_unfulfilled_missing` (~L530) — no request card, no catalog monitoring, not
     shown in Wanted; `album`/`artist` mode monitors the album/artist via `apply_list_item`. First confirm on the real
     DB why none were grabbed (are rows written? `attempts`/`next_attempt_at` backoff? `lidarr_status`?).
+    **DB checked 2026-10-13 (backup 115154):** rows ARE written — 215 missing across 5 playlists (Classic rock 43,
+    Terror Reid 40, LCD 10, VIBES ONLY 116 in `track` mode, all `attempts=0`, `unmonitored`; Punk 6 in `album` mode, all
+    6 `list_applied_at` set). `auto_request=0` on every playlist (and it only affects listening playlists anyway). The
+    rows were created 11:40–11:48, after the running backlog sweep had already collected its item list, so they wait
+    for the next sweep behind ~hundreds of native monitored tracks — working as coded but invisible to the user. The
+    request-card change fixes visibility; also run `apply_playlist_missing` right after the first sync of a new playlist.
     **Decided with user 2026-10-13: request cards.** Make every playlist's missing tracks go through `submit_track_request` as the
     playlist owner (same as listening playlists: quota, duplicate and in-library guards, approval policy), so they
     appear as request cards with the playlist as source and the user can watch progress — `track` mode = request the
