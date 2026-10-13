@@ -2757,6 +2757,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/rename/relink": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rename Relink
+         * @description Relinks a file to the track its audio really is; a target that already has a file needs a ``conflict`` choice.
+         */
+        post: operations["rename_relink_api_library_rename_relink_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/rename/verify": {
         parameters: {
             query?: never;
@@ -12034,6 +12054,54 @@ export interface components {
              */
             limit: number;
         };
+        /** RenameRelinkConflictResponse */
+        RenameRelinkConflictResponse: {
+            /** Detail */
+            detail: string;
+            existing: components["schemas"]["RenameRelinkFile"];
+            incoming: components["schemas"]["RenameRelinkFile"];
+        };
+        /** RenameRelinkFile */
+        RenameRelinkFile: {
+            /** Bitrate */
+            bitrate?: number | null;
+            /** Bits Per Sample */
+            bits_per_sample?: number | null;
+            /** Codec */
+            codec?: string | null;
+            /** File Path */
+            file_path: string;
+            /** Id */
+            id: string;
+            /** Quality Name */
+            quality_name?: string | null;
+            /** Sample Rate */
+            sample_rate?: number | null;
+            /** Size Bytes */
+            size_bytes?: number | null;
+        };
+        /** RenameRelinkRequest */
+        RenameRelinkRequest: {
+            /** Conflict */
+            conflict?: ("keep_incoming" | "keep_existing" | "prefer_quality") | null;
+            /** File Id */
+            file_id: string;
+            /** Target Track Id */
+            target_track_id: string;
+        };
+        /** RenameRelinkResponse */
+        RenameRelinkResponse: {
+            /** Action */
+            action: string;
+            /** Kept File Id */
+            kept_file_id?: string | null;
+            /** Old Track Id */
+            old_track_id: string;
+            /** Recycled File Id */
+            recycled_file_id?: string | null;
+            /** Target Track Id */
+            target_track_id: string;
+        };
         /** RenameRequest */
         RenameRequest: {
             /** Title */
@@ -18692,6 +18760,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RenamePreviewItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_relink_api_library_rename_relink_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameRelinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenameRelinkResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenameRelinkConflictResponse"];
                 };
             };
             /** @description Validation Error */
