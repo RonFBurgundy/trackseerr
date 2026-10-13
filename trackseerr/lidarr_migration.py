@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from trackseerr.album_years import plausible_year
 from trackseerr.clients.lidarr import LidarrApiError, LidarrClient
 from trackseerr.models import (
     LibraryAlbum,
@@ -269,19 +270,9 @@ class LidarrMigrationJob:
             str(album["foreignAlbumId"]) if album.get("foreignAlbumId") is not None else None
         )
         release_date = album.get("releaseDate")
-        year: Optional[int] = None
-        if album.get("year") is not None:
-            try:
-                year = int(album["year"])
-            except (ValueError, TypeError):
-                pass
-        if year is None and release_date:
-            try:
-                prefix = str(release_date)[:4]
-                if prefix.isdigit():
-                    year = int(prefix)
-            except (ValueError, TypeError):
-                pass
+        year = plausible_year(album.get("year"))
+        if year is None:
+            year = plausible_year(release_date)
 
         monitored = bool(album.get("monitored", True))
         album_path = album.get("path")

@@ -303,3 +303,10 @@ class TestPathBuilder:
         assert ".." not in path.split("/")  # no component can climb; dots inside a joined name are harmless
         assert path.startswith("/music/")
         assert "etc/shadow" not in path
+
+
+def test_release_year_token_drops_implausible_year():
+    assert render_template("{Release Year}", {"year": 1884}) == ""
+    assert render_template("{Album Title}{ (Release Year)}", {"album": "A", "release_year": 1884}) == "A"
+    assert render_template("{Original Release Year}", {"original_year": 1884, "release_date": "1884-01-01"}) == ""
+    assert render_template("{Release Year}", {"release_date": "1975-02-03"}) == "1975"
