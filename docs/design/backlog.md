@@ -112,7 +112,7 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
 
 ## User QA list (2026-10-13)
 
-17. **P1 · Playlist missing tracks vanish silently — route them through the request loop.** User added several Spotify
+17. **DONE 2026-10-14 (40e3fad) · P1 · Playlist missing tracks vanish silently — route them through the request loop.** User added several Spotify
     playlists (some set to monitor tracks/albums, "auto-request missing" on) and has never seen a missing track become
     monitored or requested. Findings 2026-10-13 from the live logs: syncs (`Syncing playlist 'Classic rock' (148
     tracks)`, `LCD and Friends`, `VIBES ONLY`…) push to Plex and log nothing about missing tracks; every
@@ -171,7 +171,7 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     admin (self or another admin), render every toggle checked and disabled, and replace "Your own permissions cannot be
     changed here." with "Administrators hold every permission." Other admins keep only the admin toggle editable
     (subject to the server's last-admin guard). Unchecking it restores the stored bits. Frontend skill applies.
-23. **P1 · Playlists with no target users are never matched, so their missing tracks are never recorded.** Live log
+23. **DONE 2026-10-14 (eaabc2a; UI "no users assigned" flag still TODO) · P1 · Playlists with no target users are never matched, so their missing tracks are never recorded.** Live log
     2026-10-13: `Billboard Greatest Of All Time Hot 100` and `Rolling Stone's Top 500 Albums…` (2,678 tracks) logged
     `has no target users assigned; skipping` every cycle until the user assigned RonTube ~21:00. The `continue` at
     `trackseerr/api/routes/sync.py` ~L241 (inside the `not no_media_server` branch) skips the whole playlist, so
