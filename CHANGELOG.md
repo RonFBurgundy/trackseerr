@@ -49,6 +49,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Lists, panels and modals show the tape-deck loader with rotating messages while loading, instead of a plain spinner.
 - The Tasks page groups tasks by purpose (Library, Acquisition, Metadata & art, Maintenance, Playlists & listening) in collapsible sections, pins running tasks at the top, adds a filter box, and shows one compact row per task with details and run history a tap away.
 - Artist discographies follow the artist's metadata profile: releases outside it are hidden by default (the toolbox toggle still shows them), empty tabs disappear, and remixes get their own tab instead of landing in Studio.
 - Opening a section in the navigation menu now closes the others and scrolls it into view, so its pages are visible on a phone.
