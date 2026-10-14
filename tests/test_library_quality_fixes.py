@@ -645,9 +645,15 @@ def test_freshly_imported_file_needs_no_rename(env):
     dest = Path(_commit(env, src, write_tags=False)["destination_path"])
     # {Quality Full} is rendered from the catalog name, exactly as rename preview/apply do.
     assert dest.name == "02 - Aerodynamic (MP3 320).mp3"
-    assert env.post("/api/library/rename/preview", {}).json() == []  # library-wide lists only files needing a move
+    preview_all = env.post("/api/library/rename/preview", {}).json()
+    assert preview_all["items"] == []  # library-wide lists only files needing a move
+    assert preview_all["total"] == 0
+    assert preview_all["truncated"] is False
     album_id = env.db.list_library_tracks(limit=1)[0]["album_id"]
-    (row,) = env.post("/api/library/rename/preview", {"album_id": album_id}).json()
+    album_prev = env.post("/api/library/rename/preview", {"album_id": album_id}).json()
+    assert album_prev["total"] == 1
+    assert album_prev["truncated"] is False
+    (row,) = album_prev["items"]
     assert row["needs_rename"] is False
 
 

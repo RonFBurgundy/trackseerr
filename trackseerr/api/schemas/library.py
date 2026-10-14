@@ -536,6 +536,12 @@ class RenamePreviewItem(ApiModel):
     verification: Optional[RenameVerification] = None
 
 
+class RenamePreviewResponse(ApiModel):
+    items: list[RenamePreviewItem]
+    total: int
+    truncated: bool
+
+
 class RenameApplyResponse(ApiModel):
     renamed_count: int
     errors: list[str]

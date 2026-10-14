@@ -67,7 +67,11 @@ def _cache(db: Database, fid: str, path: Path, rids: list[str], file_path: str |
 def _preview(client: Any, headers: dict[str, str]) -> dict[str, dict[str, Any]]:
     resp = client.post("/api/library/rename/preview", json={"album_id": "alb"}, headers=headers)
     assert resp.status_code == 200
-    return {row["file_id"]: row for row in resp.json()}
+    data = resp.json()
+    assert "items" in data
+    assert "total" in data
+    assert "truncated" in data
+    return {row["file_id"]: row for row in data["items"]}
 
 
 @pytest.fixture

@@ -30,6 +30,7 @@ from trackseerr.api.dependencies import (
 from trackseerr.api.schemas.library import (
     RenameApplyResponse,
     RenamePreviewItem,
+    RenamePreviewResponse,
     RenameRelinkConflictResponse,
     RenameRelinkFile,
     RenameRelinkResponse,
@@ -202,16 +203,17 @@ def _attach_verification(db: Database, rows: list[dict[str, Any]]) -> None:
             row["default_selected"] = False
 
 
-@router.post("/rename/preview", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=list[RenamePreviewItem], response_model_exclude_unset=True)
+@router.post("/rename/preview", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=RenamePreviewResponse, response_model_exclude_unset=True)
 def rename_preview(
     body: Optional[RenamePreviewRequest] = None,
     db: Database = Depends(get_db),
     _admin: dict[str, Any] = Depends(require_admin),
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """Previews proposed file path changes from the naming templates.
 
-    Album/artist scope returns up to ``limit`` tracks, including ones already in place. Library-wide scope scans the
-    whole library and returns only files that need a move, up to ``limit`` of them.
+    Album/artist scope returns up to ``limit`` tracks, including ones already in place, along with the total track count
+    and whether the results were truncated. Library-wide scope scans the whole library and returns only files that need a
+    move (up to ``limit``), reporting the true total count of files needing a rename and whether the results were truncated.
     """
     req = body or RenamePreviewRequest()
     limit = req.limit or 200
@@ -230,17 +232,21 @@ def rename_preview(
                 preview_diffs.append(row)
         _flag_collisions(preview_diffs)
         _attach_verification(db, preview_diffs)
-        return preview_diffs
+        total = len(tracks)
+        truncated = len(tracks) >= limit
+        return {"items": preview_diffs, "total": total, "truncated": truncated}
 
+    total = 0
     for t, f in db.iter_library_files_for_rename(_RENAME_PAGE_SIZE):
         row = _preview_row(db, t, f, media_settings, caches)
         if row and row["needs_rename"]:
-            preview_diffs.append(row)
-            if len(preview_diffs) >= limit:
-                break
+            total += 1
+            if len(preview_diffs) < limit:
+                preview_diffs.append(row)
     _flag_collisions(preview_diffs)
     _attach_verification(db, preview_diffs)
-    return preview_diffs
+    truncated = total > len(preview_diffs)
+    return {"items": preview_diffs, "total": total, "truncated": truncated}
 
 
 _NO_KEY_MESSAGE = "Set an AcoustID API key in Settings → Media Management first"

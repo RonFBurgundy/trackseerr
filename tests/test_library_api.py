@@ -764,7 +764,10 @@ def test_rename_preview_and_apply(
         headers=admin_headers,
     )
     assert resp_prev.status_code == 200
-    diffs = resp_prev.json()
+    prev_body = resp_prev.json()
+    assert prev_body["total"] == 1
+    assert prev_body["truncated"] is False
+    diffs = prev_body["items"]
     assert len(diffs) == 1
     diff = diffs[0]
     assert diff["file_id"] == "fl-20"
@@ -978,7 +981,10 @@ def test_rename_preview_library_wide_scans_past_limit(
 
     resp = client.post("/api/library/rename/preview", json={"limit": 2}, headers=headers)
     assert resp.status_code == 200
-    rows = resp.json()
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["truncated"] is False
+    rows = data["items"]
     assert [r["file_id"] for r in rows] == ["rf-6"]
     assert rows[0]["needs_rename"] is True
 
@@ -1009,7 +1015,10 @@ def test_rename_preview_library_wide_walks_album_by_album(
 
     resp = client.post("/api/library/rename/preview", json={"limit": 2}, headers=headers)
     assert resp.status_code == 200
-    assert [r["file_id"] for r in resp.json()] == ["f-a1", "f-a2"]
+    data = resp.json()
+    assert data["total"] == 4
+    assert data["truncated"] is True
+    assert [r["file_id"] for r in data["items"]] == ["f-a1", "f-a2"]
 
 
 def test_rename_preview_library_wide_returns_only_changes(
@@ -1024,7 +1033,10 @@ def test_rename_preview_library_wide_returns_only_changes(
 
     resp = client.post("/api/library/rename/preview", json={}, headers=headers)
     assert resp.status_code == 200
-    assert resp.json() == []
+    data = resp.json()
+    assert data["items"] == []
+    assert data["total"] == 0
+    assert data["truncated"] is False
 
 
 def test_rename_preview_library_wide_skips_tracks_without_files(
@@ -1046,7 +1058,10 @@ def test_rename_preview_library_wide_skips_tracks_without_files(
 
     resp = client.post("/api/library/rename/preview", json={}, headers=headers)
     assert resp.status_code == 200
-    assert sorted(r["file_id"] for r in resp.json()) == ["rf-1", "rf-2"]
+    data = resp.json()
+    assert data["total"] == 2
+    assert data["truncated"] is False
+    assert sorted(r["file_id"] for r in data["items"]) == ["rf-1", "rf-2"]
 
 
 def test_rename_preview_does_not_touch_filesystem(
@@ -1069,7 +1084,10 @@ def test_rename_preview_does_not_touch_filesystem(
     monkeypatch.setattr(Path, "resolve", guarded)
     resp = client.post("/api/library/rename/preview", json={}, headers=headers)
     assert resp.status_code == 200
-    assert [r["file_id"] for r in resp.json()] == ["rf-1"]
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["truncated"] is False
+    assert [r["file_id"] for r in data["items"]] == ["rf-1"]
 
 
 def _seed_mumford(db: Database, root: Path, idx: int = 1, title: str = "Closer") -> str:
@@ -1098,13 +1116,23 @@ def test_rename_preview_keeps_existing_artist_folder(
     test_db.update_media_management_settings({"artist_folder_format": "{Artist CleanName}"})
     _seed_mumford(test_db, root)
 
-    assert client.post("/api/library/rename/preview", json={}, headers=headers).json() == []
-    rows = client.post("/api/library/rename/preview", json={"artist_id": "ma"}, headers=headers).json()
+    data1 = client.post("/api/library/rename/preview", json={}, headers=headers).json()
+    assert data1["items"] == []
+    assert data1["total"] == 0
+    assert data1["truncated"] is False
+
+    data2 = client.post("/api/library/rename/preview", json={"artist_id": "ma"}, headers=headers).json()
+    assert data2["total"] == 1
+    assert data2["truncated"] is False
+    rows = data2["items"]
     assert rows[0]["proposed_path"] == str(root / "Mumford & Sons" / "Closer (2000)" / "01 - Song 1.flac")
     assert rows[0]["needs_rename"] is False and rows[0]["reasons"] == []
 
     test_db.update_media_management_settings({"rename_artist_folders": True})
-    rows = client.post("/api/library/rename/preview", json={}, headers=headers).json()
+    data3 = client.post("/api/library/rename/preview", json={}, headers=headers).json()
+    assert data3["total"] == 1
+    assert data3["truncated"] is False
+    rows = data3["items"]
     assert [r["file_id"] for r in rows] == ["mf-1"]
     assert rows[0]["proposed_path"].startswith(str(root / "Mumford and Sons") + "/")
     assert rows[0]["reasons"] == ["artist_folder"]
@@ -1127,7 +1155,10 @@ def test_rename_preview_flags_collisions_and_unselects_them(
         wrong = root / "Wrong" / f"{n}.flac"
         test_db.upsert_library_file({"id": f"cf-{n}", "track_id": f"ct-{n}", "file_path": str(wrong),
                                      "relative_path": wrong.name, "codec": "FLAC"})
-    rows = client.post("/api/library/rename/preview", json={}, headers=headers).json()
+    data = client.post("/api/library/rename/preview", json={}, headers=headers).json()
+    assert data["total"] == 2
+    assert data["truncated"] is False
+    rows = data["items"]
     assert len(rows) == 2
     assert rows[0]["proposed_path"] == rows[1]["proposed_path"]
     for r in rows:
@@ -1184,7 +1215,10 @@ def test_rename_preview_library_wide_has_no_per_track_lookups(
     monkeypatch.setattr(test_db, "get_library_file_for_track", boom)
     resp = client.post("/api/library/rename/preview", json={"limit": 1000}, headers=headers)
     assert resp.status_code == 200
-    assert len(resp.json()) == 300
+    data = resp.json()
+    assert data["total"] == 300
+    assert data["truncated"] is False
+    assert len(data["items"]) == 300
 
 
 def test_rename_preview_album_scope_unchanged(
@@ -1198,9 +1232,48 @@ def test_rename_preview_album_scope_unchanged(
 
     resp = client.post("/api/library/rename/preview", json={"album_id": "rb-1"}, headers=headers)
     assert resp.status_code == 200
-    rows = resp.json()
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["truncated"] is False
+    rows = data["items"]
     assert len(rows) == 1
     assert rows[0]["needs_rename"] is False
+
+
+def test_rename_preview_library_wide_reports_total_beyond_limit(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    for i in range(1, 4):
+        _seed_rename_track(test_db, i, f"Artist{i}", root / "Wrong" / f"{i}.flac")
+
+    resp = client.post("/api/library/rename/preview", json={"limit": 2}, headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["items"]) == 2
+    assert data["total"] == 3
+    assert data["truncated"] is True
+
+
+def test_rename_preview_not_truncated_under_limit(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    for i in range(1, 3):
+        _seed_rename_track(test_db, i, f"Artist{i}", root / "Wrong" / f"{i}.flac")
+
+    resp = client.post("/api/library/rename/preview", json={"limit": 5}, headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["items"]) == 2
+    assert data["total"] == 2
+    assert data["truncated"] is False
 
 
 def _apply_rename(client, headers, file_id: str):
