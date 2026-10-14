@@ -159,6 +159,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
 
   const isSelf = String(currentUserId) === user.id;
   const isLocal = user.auth_type === 'local';
+  const userIsAdmin = (permissions & PERMISSION_ADMIN) !== 0;
 
   const run = async (fn: () => Promise<void>, okMsg: string) => {
     setError(null);
@@ -259,21 +260,30 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
             </legend>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
               {PERMISSION_FLAGS.map((flag) => {
-                const lockedAdmin = flag.bit === PERMISSION_ADMIN && isSelf;
+                const isAdminFlag = flag.bit === PERMISSION_ADMIN;
+                const lockedAdmin = isAdminFlag && isSelf;
+                const lockedByAdmin = !isAdminFlag && userIsAdmin;
+                const isLocked = lockedAdmin || lockedByAdmin;
+                const isChecked = lockedByAdmin || (permissions & flag.bit) !== 0;
+                const tooltip = lockedAdmin
+                  ? 'You cannot change your own admin permission'
+                  : lockedByAdmin
+                    ? 'Administrators hold every permission'
+                    : undefined;
                 return (
                   <label
                     key={flag.bit}
                     className={`flex items-center gap-3 min-h-[36px] sm:min-h-[32px] text-xs font-mono ${
-                      lockedAdmin ? 'opacity-60' : 'cursor-pointer'
+                      isLocked ? 'opacity-60' : 'cursor-pointer'
                     }`}
-                    title={lockedAdmin ? 'You cannot change your own admin permission' : undefined}
+                    title={tooltip}
                   >
                     <input
                       id={`edit-user-permission-${flag.bit}`}
                       name={`permission-${flag.bit}`}
                       type="checkbox"
-                      checked={(permissions & flag.bit) !== 0}
-                      disabled={lockedAdmin}
+                      checked={isChecked}
+                      disabled={isLocked}
                       onChange={(e) => togglePermission(flag.bit, e.target.checked)}
                       className="accent-[var(--accent-amber)]"
                     />
@@ -285,9 +295,9 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                 );
               })}
             </div>
-            {isSelf && (
+            {userIsAdmin && (
               <p className="text-[11px] font-mono text-[var(--text-muted)] mt-1">
-                Your own permissions cannot be changed here.
+                Administrators hold every permission.
               </p>
             )}
           </fieldset>
