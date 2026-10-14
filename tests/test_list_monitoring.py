@@ -537,6 +537,12 @@ def _backlog_calls(db: Database) -> list[Any]:
     return [c.kwargs for c in grab.call_args_list]
 
 
+@pytest.fixture
+def search_sources_ready(monkeypatch):
+    monkeypatch.setattr("trackseerr.backlog_worker.search_unavailable_reason", lambda db: None)
+
+
+@pytest.mark.usefixtures("search_sources_ready")
 def test_backlog_searches_missing_track_in_track_mode(db):
     _playlist(db, "track")
     assert [c["title"] for c in _backlog_calls(db)] == ["Airbag"]
@@ -553,6 +559,7 @@ def test_backlog_skips_missing_tracks_of_none_mode_playlist(db):
     assert _backlog_calls(db) == []
 
 
+@pytest.mark.usefixtures("search_sources_ready")
 def test_backlog_skips_applied_tracks_of_album_mode_but_searches_unapplied(db):
     _playlist(db, "album", [
         {"title": "Airbag", "artist": "Radiohead", "album": "OK Computer"},
@@ -563,6 +570,7 @@ def test_backlog_skips_applied_tracks_of_album_mode_but_searches_unapplied(db):
     assert [c["title"] for c in _backlog_calls(db)] == ["Lucky"]  # unresolved one still falls back to a lone search
 
 
+@pytest.mark.usefixtures("search_sources_ready")
 def test_backlog_end_to_end_album_mode_searches_the_monitored_catalog_track_not_a_lone_track(db):
     _playlist(db, "album")
     apply_playlist_missing(db, None, "pl-1", enricher=make_enricher())

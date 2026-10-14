@@ -361,6 +361,12 @@ def test_pending_delay_gate_keeps_the_trigger_until_release(db, library, clients
     assert ev["trigger"] == "playlist" and ev["actor_user_id"] == "user-alice"
 
 
+@pytest.fixture
+def search_sources_ready(monkeypatch):
+    monkeypatch.setattr("trackseerr.backlog_worker.search_unavailable_reason", lambda db: None)
+
+
+@pytest.mark.usefixtures("search_sources_ready")
 def test_backlog_worker_threads_wanted_and_upgrade_triggers(db, users):
     db.create_request(
         MusicRequest(
@@ -378,6 +384,7 @@ def test_backlog_worker_threads_wanted_and_upgrade_triggers(db, users):
         assert isinstance(call.kwargs["trigger"], GrabTrigger) and call.kwargs["trigger"].kind == "wanted"
 
 
+@pytest.mark.usefixtures("search_sources_ready")
 def test_manual_wanted_search_threads_actor_and_issue_replacement_kind(db, library):
     from trackseerr.backlog_worker import ReplacementSpec, _search_trigger
 

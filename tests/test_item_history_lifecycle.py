@@ -351,6 +351,12 @@ def test_issue_open_and_resolve_events(db, app_client):
     assert resolved["details"]["status"] == "resolved" and resolved["track_id"] == "trk-1"
 
 
+@pytest.fixture
+def search_sources_ready(monkeypatch):
+    monkeypatch.setattr("trackseerr.backlog_worker.search_unavailable_reason", lambda db: None)
+
+
+@pytest.mark.usefixtures("search_sources_ready")
 def test_issue_replacement_search_is_an_issue_trigger_with_the_admin_as_actor(db, app_client):
     from trackseerr.acquisition_coordinator import acquisition_coordinator
 
