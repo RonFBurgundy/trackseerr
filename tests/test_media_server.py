@@ -570,6 +570,42 @@ def test_library_import_since_last_sync_forces_rematch(tmp_path):
     assert out["stats"]["skipped_unchanged"] == 0
 
 
+def _import_file(db):
+    db.upsert_library_artist({"id": "a1", "name": "Known Artist", "monitored": True})
+    db.upsert_library_album({"id": "al1", "artist_id": "a1", "title": "Alb", "year": 2000})
+    db.upsert_library_track({"id": "t1", "album_id": "al1", "artist_id": "a1", "title": "Known Song"})
+    db.upsert_library_file(
+        {"id": "f1", "track_id": "t1", "file_path": "/m/a.flac", "relative_path": "a.flac", "codec": "FLAC",
+         "quality_name": "FLAC", "size_bytes": 1}
+    )
+
+
+def test_import_just_before_last_sync_still_rematches(tmp_path):
+    env = _unchanged_env(tmp_path)
+    state = SyncState()
+    with patch("trackseerr.api.routes.sync.match_playlist_tracks_native", return_value=_native_result()) as native:
+        _run_sync(env, state)
+        _import_file(env.db)
+        _sql(env.db, "UPDATE playlists SET last_synced_at = datetime('now', '-1 hours') WHERE id = 'imp_skip'")
+        _sql(env.db, "UPDATE library_files SET updated_at = datetime('now', '-1 hours', '-5 minutes')")
+        out = _run_sync(env, state)
+    assert native.call_count == 2
+    assert out["stats"]["skipped_unchanged"] == 0
+
+
+def test_import_well_before_last_sync_is_skipped(tmp_path):
+    env = _unchanged_env(tmp_path)
+    state = SyncState()
+    with patch("trackseerr.api.routes.sync.match_playlist_tracks_native", return_value=_native_result()) as native:
+        _run_sync(env, state)
+        _import_file(env.db)
+        _sql(env.db, "UPDATE playlists SET last_synced_at = datetime('now', '-1 hours') WHERE id = 'imp_skip'")
+        _sql(env.db, "UPDATE library_files SET updated_at = datetime('now', '-3 hours')")
+        out = _run_sync(env, state)
+    native.assert_called_once()
+    assert out["stats"]["skipped_unchanged"] == 1
+
+
 def test_force_rematches(tmp_path):
     env = _unchanged_env(tmp_path)
     state = SyncState()

@@ -92,6 +92,7 @@ def _effective_tracks(db: Database, tracks: list[Track], playlist_name: str) -> 
 
 
 _FULL_RESYNC_AFTER = timedelta(hours=24)  # an unchanged playlist is still fully resynced once a day
+_IMPORT_RESCAN_GRACE = timedelta(minutes=30)  # library changes this close to a sync may predate the media-server scan
 
 
 def _sync_fingerprint(tracks: list[Track], target_usernames: list[str], push: bool, monitor_mode: Optional[str]) -> str:
@@ -306,7 +307,11 @@ class SyncState:
     def _unchanged_since_last_sync(
         db: Database, pl: dict[str, Any], fingerprint: str, latest_library_change: Optional[str]
     ) -> bool:
-        """True when the last sync succeeded, is under a day old, and neither inputs nor the library changed since."""
+        """True when the last sync succeeded, is under a day old, and neither inputs nor the library changed since.
+
+        The library counts as changed while its newest change is within ``_IMPORT_RESCAN_GRACE`` before the last
+        sync: a media server may not have scanned a freshly imported file when that sync ran.
+        """
         if pl.get("sync_status") != "success":
             return False
         stored, last_synced_at = db.get_playlist_sync_fingerprint(pl["id"])
@@ -318,7 +323,13 @@ class SyncState:
             return False  # unparseable timestamp: resync rather than trust it
         if datetime.now(timezone.utc) - synced > _FULL_RESYNC_AFTER:
             return False
-        return latest_library_change is None or latest_library_change <= last_synced_at
+        if latest_library_change is None:
+            return True
+        try:
+            changed = datetime.strptime(latest_library_change, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return False
+        return changed <= synced - _IMPORT_RESCAN_GRACE
 
     def _sync_one(
         self,
