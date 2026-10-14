@@ -13,7 +13,10 @@ import pytest
 from fastapi.testclient import TestClient
 import httpx
 
-from trackseerr.acquisition_coordinator import acquisition_coordinator
+from trackseerr.acquisition_coordinator import (
+    acquisition_coordinator,
+    search_unavailable_reason,
+)
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db, get_lidarr_client, get_plex_client
 from trackseerr.auth import create_session_token, get_or_create_secret_key
@@ -236,6 +239,27 @@ class TestWantedBacklogWorker:
             status=RequestStatus.PENDING,
         )
         test_db.create_request(req)
+
+        # Seed enabled indexer and download client so search gate passes
+        test_db.create_indexer(
+            {
+                "id": "idx-sweep-1",
+                "name": "Prowlarr",
+                "indexer_type": "torznab",
+                "host_url": "http://127.0.0.1:9696/1",
+                "api_key": "key",
+                "enabled": True,
+            }
+        )
+        test_db.create_download_client(
+            {
+                "id": "c-sweep-1",
+                "name": "qBit",
+                "driver_type": "qbittorrent",
+                "host_url": "http://127.0.0.1:8080",
+                "enabled": True,
+            }
+        )
 
         # 2. Seed unmonitored missing track
         test_db.upsert_playlist("pl-1", "My Playlist", "spotify")
@@ -712,3 +736,144 @@ class TestSystemStatusWorkerTelemetry:
         assert "interval_seconds" in rw
         assert "releases_scanned" in rw
         assert "grabs_triggered" in rw
+
+
+# =============================================================================
+# 6. Search Readiness Gate Tests
+# =============================================================================
+
+
+class TestSearchReadinessGate:
+    def test_reason_none_with_torznab_indexer_and_qbittorrent_client(self, test_db):
+        """When an enabled torznab indexer and enabled qbittorrent client exist, reason is None."""
+        test_db.create_indexer({
+            "name": "Prowlarr Torrent",
+            "indexer_type": "torznab",
+            "host_url": "http://127.0.0.1:9696/1",
+            "api_key": "key",
+            "enabled": True,
+        })
+        test_db.create_download_client({
+            "name": "qBittorrent",
+            "driver_type": "qbittorrent",
+            "host_url": "http://127.0.0.1:8080",
+            "enabled": True,
+        })
+        assert search_unavailable_reason(test_db) is None
+
+    def test_reason_none_with_only_slskd_client(self, test_db):
+        """When only an enabled slskd client is configured, reason is None."""
+        test_db.create_download_client({
+            "name": "slskd",
+            "driver_type": "slskd",
+            "host_url": "http://127.0.0.1:5030",
+            "api_key": "key",
+            "enabled": True,
+        })
+        assert search_unavailable_reason(test_db) is None
+
+    def test_reason_when_nothing_configured(self, test_db):
+        """When no indexers and no clients exist, reason indicates no indexers or Soulseek client."""
+        reason = search_unavailable_reason(test_db)
+        assert reason == "no indexers or Soulseek client configured"
+
+    def test_reason_when_usenet_indexer_has_only_torrent_client(self, test_db):
+        """When only usenet indexers exist with a torrent client, returns usenet client missing reason."""
+        test_db.create_indexer({
+            "name": "Newznab",
+            "indexer_type": "newznab",
+            "host_url": "http://127.0.0.1:5076",
+            "api_key": "key",
+            "enabled": True,
+        })
+        test_db.create_download_client({
+            "name": "qBittorrent",
+            "driver_type": "qbittorrent",
+            "host_url": "http://127.0.0.1:8080",
+            "enabled": True,
+        })
+        reason = search_unavailable_reason(test_db)
+        assert reason == "no download client for usenet indexers"
+
+    def test_disabled_indexer_and_client_do_not_count(self, test_db):
+        """Disabled indexers and clients are ignored when determining readiness."""
+        test_db.create_indexer({
+            "name": "Torznab Disabled",
+            "indexer_type": "torznab",
+            "host_url": "http://127.0.0.1:9696/1",
+            "api_key": "key",
+            "enabled": False,
+        })
+        test_db.create_download_client({
+            "name": "qBittorrent Disabled",
+            "driver_type": "qbittorrent",
+            "host_url": "http://127.0.0.1:8080",
+            "enabled": False,
+        })
+        reason = search_unavailable_reason(test_db)
+        assert reason == "no indexers or Soulseek client configured"
+
+    def test_backlog_poll_skips_without_sources_and_logs_once(self, test_db, caplog):
+        """WantedBacklogWorker skips when not ready, logs INFO only once on repeats, and does not call _sweep."""
+        worker = WantedBacklogWorker()
+        caplog.clear()
+
+        with patch.object(worker, "_sweep") as mock_sweep:
+            with caplog.at_level("INFO"):
+                res1 = worker.poll_once(test_db)
+                assert res1.get("skipped") == "no indexers or Soulseek client configured"
+                assert res1.get("items_checked") == 0
+                mock_sweep.assert_not_called()
+
+                res2 = worker.poll_once(test_db)
+                assert res2.get("skipped") == "no indexers or Soulseek client configured"
+                mock_sweep.assert_not_called()
+
+        info_logs = [r for r in caplog.records if r.levelname == "INFO" and "WantedBacklogWorker" in r.message]
+        assert len(info_logs) == 1
+        assert "no indexers or Soulseek client configured — skipping" in info_logs[0].message
+
+    def test_rss_poll_skips_without_sources(self, test_db):
+        """RSSSyncWorker skips when not ready and does not call _sync."""
+        worker = RSSSyncWorker()
+
+        with patch.object(worker, "_sync") as mock_sync:
+            res = worker.poll_once(test_db)
+            assert res.get("skipped") == "no indexers or Soulseek client configured"
+            assert res.get("releases_scanned") == 0
+            assert res.get("grabs_triggered") == 0
+            mock_sync.assert_not_called()
+
+    def test_search_wanted_tracks_returns_zero_without_sources(self, test_db):
+        """search_wanted_tracks returns 0 without calling mark_tracks_searched when gated."""
+        worker = WantedBacklogWorker()
+        targets = [{"artist": "Daft Punk", "title": "Get Lucky", "track_id": "trk-1"}]
+
+        with patch.object(test_db, "mark_tracks_searched") as mock_mark:
+            res = worker.search_wanted_tracks(test_db, targets)
+            assert res == 0
+            mock_mark.assert_not_called()
+
+    def test_backlog_poll_runs_when_sources_exist(self, test_db):
+        """WantedBacklogWorker executes _sweep when sources exist."""
+        test_db.create_indexer({
+            "name": "Prowlarr Torrent",
+            "indexer_type": "torznab",
+            "host_url": "http://127.0.0.1:9696/1",
+            "api_key": "key",
+            "enabled": True,
+        })
+        test_db.create_download_client({
+            "name": "qBittorrent",
+            "driver_type": "qbittorrent",
+            "host_url": "http://127.0.0.1:8080",
+            "enabled": True,
+        })
+
+        worker = WantedBacklogWorker()
+        with patch.object(worker, "_sweep", return_value={"items_checked": 1, "items_grabbed": 0, "errors": 0}) as mock_sweep:
+            res = worker.poll_once(test_db)
+            assert "skipped" not in res
+            assert res.get("items_checked") == 1
+            mock_sweep.assert_called_once()
+

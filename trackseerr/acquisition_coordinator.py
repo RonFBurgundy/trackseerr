@@ -183,6 +183,52 @@ def _client_serves(group: str, client: dict[str, Any]) -> bool:
     return driver_type == "slskd"
 
 
+def search_unavailable_reason(db: Any) -> Optional[str]:
+    """Returns None when search and grab are viable, or a human explanation when not.
+
+    Viable means:
+      - At least one enabled slskd download client is configured (slskd searches and grabs itself), OR
+      - At least one enabled indexer has a matching enabled download client serving its protocol group.
+
+    Fails open (returns None) on sqlite3.Error reading tables to avoid silently stopping acquisition on DB hiccups.
+    """
+    try:
+        indexers = db.list_indexers(enabled_only=True)
+        clients = db.list_download_clients(enabled_only=True)
+    except sqlite3.Error as e:
+        logger.warning("search_unavailable_reason: DB error querying indexers/clients, failing open: %s", e)
+        return None
+
+    # Check for enabled slskd client first (slskd can search and grab itself)
+    if any(_client_serves("slskd", c) for c in clients):
+        return None
+
+    groups: set[str] = set()
+    for idx in indexers:
+        idx_type = idx.get("indexer_type") or "torznab"
+        grp = _protocol_group(idx_type)
+        if grp:
+            groups.add(grp)
+
+    if not groups:
+        return "no indexers or Soulseek client configured"
+
+    viable_groups = {grp for grp in groups if any(_client_serves(grp, c) for c in clients)}
+    if viable_groups:
+        return None
+
+    # No indexer protocol has a matching client
+    has_torrent = "torrent" in groups
+    has_usenet = "usenet" in groups
+    if has_torrent and has_usenet:
+        return "no download client for torrent or usenet indexers"
+    if has_torrent:
+        return "no download client for torrent indexers"
+    if has_usenet:
+        return "no download client for usenet indexers"
+    return "no indexers or Soulseek client configured"
+
+
 def _client_priority(client: dict[str, Any]) -> int:
     try:
         return int(client.get("priority") or 1)

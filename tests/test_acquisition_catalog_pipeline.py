@@ -579,6 +579,21 @@ def test_wanted_backlog_worker_catalog_missing_tracks_sweep(test_db: Database):
     assert missing[0]["artist_name"] == "Led Zeppelin"
     assert missing[0]["track_title"] == "Stairway to Heaven"
 
+    # Seed enabled indexer and download client so search gate passes
+    test_db.create_indexer({
+        "name": "Prowlarr",
+        "indexer_type": "torznab",
+        "host_url": "http://127.0.0.1:9696/1",
+        "api_key": "key",
+        "enabled": True,
+    })
+    test_db.create_download_client({
+        "name": "qBittorrent",
+        "driver_type": "qbittorrent",
+        "host_url": "http://127.0.0.1:8080",
+        "enabled": True,
+    })
+
     # Run backlog worker sweep with mocked search_and_grab
     backlog = WantedBacklogWorker()
     backlog.pace_delay = 0.0
@@ -651,6 +666,21 @@ def test_wanted_backlog_worker_catalog_cutoff_unmet_sweep(test_db: Database):
     assert len(unmet) == 1
     assert unmet[0]["track_id"] == "trk-lithium"
     assert unmet[0]["quality_name"] == "MP3 192"
+
+    # Seed enabled indexer and download client so search gate passes
+    test_db.create_indexer({
+        "name": "Prowlarr",
+        "indexer_type": "torznab",
+        "host_url": "http://127.0.0.1:9696/1",
+        "api_key": "key",
+        "enabled": True,
+    })
+    test_db.create_download_client({
+        "name": "qBittorrent",
+        "driver_type": "qbittorrent",
+        "host_url": "http://127.0.0.1:8080",
+        "enabled": True,
+    })
 
     backlog = WantedBacklogWorker()
     backlog.pace_delay = 0.0

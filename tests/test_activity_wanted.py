@@ -146,6 +146,20 @@ def _library(db):
     file("f-ok", "t-ok", "FLAC 16bit", True)
     file("f-low", "t-low", "MP3 192", False)
 
+    db.create_indexer({
+        "name": "Prowlarr",
+        "indexer_type": "torznab",
+        "host_url": "http://127.0.0.1:9696/1",
+        "api_key": "key",
+        "enabled": True,
+    })
+    db.create_download_client({
+        "name": "qBittorrent",
+        "driver_type": "qbittorrent",
+        "host_url": "http://127.0.0.1:8080",
+        "enabled": True,
+    })
+
 
 # -------------------------------------------------------------------------------------- migration / history seed
 
