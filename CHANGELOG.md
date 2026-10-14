@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- The rename dialog warns when Plex's "Empty trash automatically after every scan" is on, since a scan during the rename could delete play counts and ratings for moved tracks.
 - Scheduled tasks (playlist sync, Wanted sweep, RSS sync, artist refresh, art backfill, mixes, seed cleanup, recycle bin, backups, update check) can be paused and resumed from the Tasks page without changing their schedule.
 - Manual runs of the track credits backfill, artwork backfill and artist refresh can be cancelled from the Tasks page; they stop after the current item. Shutting down also stops manual runs instead of waiting for them.
 - Wanted lists show when each item was added and can be sorted by it, newest first (not available when Lidarr manages the library).
@@ -50,6 +51,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- The library-wide rename preview says how many files need a rename in total when it shows only the first 5,000.
 - Every remaining browser checkbox, radio button and slider (permissions, rename/retag, profiles, notifications, logs, calendar, mixes, user presets) now uses the app's own switches, selection boxes and sliders.
 - Activity (Queue, Searches, History, Blocklist, Needs Review), Wanted and album cards use one compact layout on every screen: details get the full width, all actions sit in one ⋯ menu, extra details open with a chevron, and items needing attention get a tappable badge and an amber dot on the menu.
 - Lists, panels and modals show the tape-deck loader with rotating messages while loading, instead of a plain spinner.

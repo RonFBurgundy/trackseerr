@@ -61,12 +61,12 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
    same path). The preview now labels these and leaves them unticked.
 8. **P2 · Library-wide retag pass writing MusicBrainz IDs** into every file (recording, release, release group,
    artist, album artist) once the data is clean — this is what makes Plex/Jellyfin/Picard match reliably.
-9. **P2 · Plex play history across folder moves.** Before the user's one-time "Rename artist folders" cleanup,
+9. **DONE 2026-10-14 · P2 · Plex play history across folder moves.** Before the user's one-time "Rename artist folders" cleanup,
    check how Trackseerr's Plex integration handles moved files (Plex tracks by path; moves can reset play counts/
    ratings) and whether a Plex rescan/refresh call after rename keeps them.
-10. **P3 · New downloads with no catalog match** still render the artist folder from the format (no artist row);
+10. **DONE 2026-10-14 · P3 · New downloads with no catalog match** still render the artist folder from the format (no artist row);
     look up the library artist by name/MBID so they land in the existing folder too.
-11. **P3 · Rename preview response has no total** — the UI counts returned rows; add a total if the 5,000 cap is hit.
+11. **DONE 2026-10-14 · P3 · Rename preview response has no total** — the UI counts returned rows; add a total if the 5,000 cap is hit.
 12. **DONE 2026-10-14 · P2 · Guard against browser-default controls regressing.** Two layers: (a) a global safety net in
     `frontend/src/index.css` — `input[type=checkbox], input[type=radio], input[type=range] { accent-color:
     var(--accent-amber) }` so a stray native control can never render blue; (b) a CI check (small node script next to
