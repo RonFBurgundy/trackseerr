@@ -88,7 +88,8 @@ def test_m4a_tag_write_round_trip_on_copy(m4a_root):
 def test_m4a_rename_preview_and_apply_keep_extension(api, m4a_root):
     configure_roots(api.db, m4a_root)
     run_scan(api.db, m4a_root)
-    prev = api.post("/api/library/rename/preview", {}).json()
+    res_data = api.post("/api/library/rename/preview", {}).json()
+    prev = res_data["items"]
     assert {Path(d["proposed_path"]).suffix for d in prev} == {".m4a"}
     dance = next(d for d in prev if "Dance" in d["current_path"])
     assert Path(dance["proposed_path"]).parent == m4a_root / "Fall Out Boy" / "From Under the Cork Tree (2005)"
@@ -134,7 +135,8 @@ def test_untagged_wavs_with_different_names_stay_separate_tracks(db, wav_root):
 def test_wav_rename_preview_keeps_wav_extension(api, wav_root):
     configure_roots(api.db, wav_root)
     run_scan(api.db, wav_root)
-    prev = api.post("/api/library/rename/preview", {}).json()
+    res_data = api.post("/api/library/rename/preview", {}).json()
+    prev = res_data["items"]
     assert prev and {Path(d["proposed_path"]).suffix for d in prev} == {".wav"}
     assert all("Unknown Artist" in d["proposed_path"] for d in prev)
 

@@ -261,7 +261,7 @@ def scanned_env(api, library_copy):
 def _preview(api) -> dict[str, dict]:
     res = api.post("/api/library/rename/preview", {})
     assert res.status_code == 200
-    return {Path(d["current_path"]).name: d for d in res.json()}
+    return {Path(d["current_path"]).name: d for d in res.json()["items"]}
 
 
 def test_preview_proposes_default_layout_without_touching_disk(scanned_env):
@@ -280,14 +280,14 @@ def test_freshly_imported_file_needs_no_rename(env, copy_discovery):
     api, _, staging = env
     (src,) = copy_discovery(["02 Aerodynamic.mp3"], staging)
     api.post("/api/library/manual-import/commit", {"items": [_item(src, track_number=2)]})
-    prev = api.post("/api/library/rename/preview", {}).json()
+    prev = api.post("/api/library/rename/preview", {}).json()["items"]
     assert [d["needs_rename"] for d in prev] == [False]
 
 
 def test_preview_lists_one_file_per_track_so_extra_duplicates_are_not_offered(scanned_env):
     api, _ = scanned_env
     snap = snapshot(api.db)
-    prev = api.post("/api/library/rename/preview", {}).json()
+    prev = api.post("/api/library/rename/preview", {}).json()["items"]
     assert len(prev) == len(snap["tracks"]) < len(snap["files"])
 
 
@@ -295,14 +295,14 @@ def test_preview_scoped_to_album(scanned_env):
     api, _ = scanned_env
     snap = snapshot(api.db)
     album = next(a for a in snap["albums"] if a["title"] == "Discovery")
-    scoped = api.post("/api/library/rename/preview", {"album_id": album["id"]}).json()
+    scoped = api.post("/api/library/rename/preview", {"album_id": album["id"]}).json()["items"]
     expected = [t for t in snap["tracks"] if t["album_id"] == album["id"]]
     assert len(scoped) == len(expected)
 
 
 def test_apply_moves_files_updates_catalog_and_is_idempotent(scanned_env):
     api, root = scanned_env
-    prev = api.post("/api/library/rename/preview", {}).json()
+    prev = api.post("/api/library/rename/preview", {}).json()["items"]
     ids = [d["file_id"] for d in prev]
 
     res = api.post("/api/library/rename/apply", {"file_ids": ids}).json()
@@ -316,7 +316,7 @@ def test_apply_moves_files_updates_catalog_and_is_idempotent(scanned_env):
         assert api.db.get_library_file(d["file_id"])["file_path"] == d["proposed_path"]
 
     # A second preview finds nothing left to do; a second apply renames nothing.
-    again = api.post("/api/library/rename/preview", {}).json()
+    again = api.post("/api/library/rename/preview", {}).json()["items"]
     assert [d["needs_rename"] for d in again] == [False] * len(again)
     assert api.post("/api/library/rename/apply", {"file_ids": ids}).json()["renamed_count"] == 0
 
