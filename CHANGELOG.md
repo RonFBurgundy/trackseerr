@@ -72,6 +72,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Editing an administrator no longer shows permission toggles that look editable but don't save; they show as held and locked.
 - The Wanted sweep, RSS sync and manual Wanted searches no longer run when no indexer has a matching download client (or no Soulseek client is set up); the Tasks page shows why they were skipped.
 - Playlist "find in library" on Plex now finds tracks by artist name (and "artist title" searches), and returns results faster.
 - Library scans no longer merge two tracks that share a title on the same album (such as repeated "[silence]" bonus tracks); each keeps its own file.
