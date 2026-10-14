@@ -180,7 +180,7 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     missing rows (and run `apply_playlist_missing`); skip only the media-server push, logging that once per playlist.
     The UI should flag a playlist with no targets ("not pushed to Plex — no users assigned") on its card. Test: a
     mocked sync with Plex configured and zero targets records missing rows and makes no Plex calls.
-24. **P2 · Playlist sync rematches every list every cycle.** The sync task runs every `wait_seconds` (`task_manager._sync_interval`
+24. **DONE 2026-10-14 (per-playlist intervals not done; hash skip + 30 min import grace + daily resync instead) · P2 · Playlist sync rematches every list every cycle.** The sync task runs every `wait_seconds` (`task_manager._sync_interval`
     ~L256). Live log shows full cycles at 20:44, 20:54, 21:04 (10 min) rescraping and rematching every playlist. The
     2,678-track Rolling Stone list alone takes many minutes, so a cycle can approach or overrun the next tick on the
     user's small host. Options, cheapest first: skip the match/push only when BOTH the scraped track list hash is
