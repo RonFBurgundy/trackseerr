@@ -13711,6 +13711,8 @@ export interface components {
         };
         /** WantedRecord */
         WantedRecord: {
+            /** Added At */
+            added_at?: string | null;
             /** Album */
             album?: string | null;
             /** Album Id */
