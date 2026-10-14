@@ -44,8 +44,9 @@ LIDARR_QUEUE_SORT = {
 }
 LIDARR_HISTORY_SORT = {"date": "date"}
 LIDARR_BLOCKLIST_SORT = {"date": "date", "artist": "artists.sortName"}
-# ``last_searched_at`` has no Lidarr sort key (``albums.lastSearchTime`` is not a sortable column), so it is absent
-# here and the Wanted routes answer it with a 422 in lidarr mode.
+# ``last_searched_at`` and ``added_at`` have no Lidarr sort key (``albums.lastSearchTime`` is not a sortable column;
+# added date is not exposed on Lidarr wanted endpoints), so they are absent here and the Wanted routes answer them
+# with a 422 in lidarr mode.
 LIDARR_WANTED_SORT = {
     "artist": "artists.sortName",
     "album": "albums.title",
@@ -308,6 +309,7 @@ def native_wanted_record(row: dict[str, Any], kind: str) -> dict[str, Any]:
         "release_date": row.get("release_date"),
         "monitored": bool(row.get("monitored", 1)),
         "last_searched_at": _iso(row.get("last_searched_at")),
+        "added_at": _iso(row.get("added_at")),
     }
     if kind == "cutoff":
         rec["current_quality"] = row.get("current_quality")

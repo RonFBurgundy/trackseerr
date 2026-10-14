@@ -599,6 +599,7 @@ class TestNativeBlocklist:
 class TestNativeWanted:
     def test_missing_excludes_unmonitored_and_files(self, api, test_db, admin_h):
         _library(test_db)
+        raw_created = test_db.conn.execute("SELECT created_at FROM library_tracks WHERE id = 't-missing'").fetchone()[0]
         body = api.get("/api/wanted/missing", headers=admin_h).json()
         assert body["mode"] == "native" and body["total"] == 2 and body["sort_key"] == "artist"
         assert [r["id"] for r in body["records"]] == ["t-missing", "t-missing-b"]
@@ -607,6 +608,7 @@ class TestNativeWanted:
             "id": "t-missing", "source": "native", "artist": "Alpha", "album": "First", "album_id": "al-1",
             "title": "Missing One",
             "item_type": "track", "release_date": "2001", "monitored": True, "last_searched_at": None,
+            "added_at": activity_service._iso(raw_created),
         }
 
     def test_missing_excludes_unmonitored_artist_and_album(self, api, test_db, admin_h):
@@ -624,11 +626,15 @@ class TestNativeWanted:
             ("album", "desc", ["t-missing-b", "t-missing"]),
             ("release_date", "desc", ["t-missing-b", "t-missing"]),
             ("last_searched_at", "asc", ["t-missing", "t-missing-b"]),
+            ("added_at", "desc", ["t-missing-b", "t-missing"]),
+            ("added_at", "asc", ["t-missing", "t-missing-b"]),
         ],
     )
     def test_missing_sorting(self, api, test_db, admin_h, key, direction, expected):
         _library(test_db)
         test_db.conn.execute("UPDATE library_tracks SET last_searched_at='2026-01-02 00:00:00' WHERE id='t-missing-b'")
+        test_db.conn.execute("UPDATE library_tracks SET created_at='2026-01-01 00:00:00' WHERE id='t-missing'")
+        test_db.conn.execute("UPDATE library_tracks SET created_at='2026-02-01 00:00:00' WHERE id='t-missing-b'")
         test_db.conn.commit()
         ids = [r["id"] for r in api.get(f"/api/wanted/missing?sort_key={key}&sort_dir={direction}", headers=admin_h).json()["records"]]
         assert ids == expected
@@ -647,7 +653,7 @@ class TestNativeWanted:
         rec = body["records"][0]
         assert rec["current_quality"] == "MP3 192" and rec["cutoff_quality"]
         assert set(rec) >= {"id", "source", "artist", "album", "title", "item_type", "release_date", "monitored",
-                            "last_searched_at", "current_quality", "cutoff_quality"}
+                            "last_searched_at", "added_at", "current_quality", "cutoff_quality"}
         # a profile that forbids upgrades drops the row, whether assigned to the artist or inherited as default
         profile = test_db.get_default_quality_profile()["id"]
         test_db.conn.execute("UPDATE quality_profiles SET upgrade_allowed = 0 WHERE id = ?", (profile,))
@@ -753,6 +759,16 @@ class TestNativeWanted:
     def test_search_bad_body_422(self, api, admin_h, payload):
         assert api.post("/api/wanted/search", json=payload, headers=admin_h).status_code == 422
 
+    def test_missing_index_supports_added_at(self, api, test_db, admin_h):
+        _library(test_db)
+        res = api.get("/api/wanted/missing/index?sort_key=added_at&sort_dir=desc", headers=admin_h)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["sort_key"] == "added_at"
+        assert data["sort_dir"] == "desc"
+        assert data["total"] == 2
+        assert "groups" in data
+
 
 # -------------------------------------------------------------------------------------------- lidarr mode
 
@@ -834,6 +850,13 @@ class TestLidarrMode:
         lidarr_http.get.return_value = _resp(payload=_page([]))
         assert api.get("/api/wanted/cutoff?sort_key=release_date", headers=admin_h).status_code == 200
         assert "sortKey=albums.releaseDate" in lidarr_http.get.call_args.args[0]
+
+    def test_wanted_added_at_sort_is_422_in_lidarr_mode(self, api, admin_h, lidarr_http):
+        res = api.get("/api/wanted/missing?sort_key=added_at", headers=admin_h)
+        assert res.status_code == 422
+        assert "cannot sort" in res.json()["detail"]
+        assert "added_at" in res.json()["detail"]
+        lidarr_http.get.assert_not_called()
 
     def test_history_can_mark_failed_only_for_grabs(self, api, admin_h, lidarr_http):
         recs = [
