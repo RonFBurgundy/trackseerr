@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { Download, Trash2, Loader2, Search, AlertTriangle, Settings2 } from 'lucide-react';
-import { TapeDeckButton, ActionBar, TabStrip, ToastBanner } from '@/components/ui';
+import { TapeDeckButton, ActionBar, TabStrip, ToastBanner, TactileSwitch } from '@/components/ui';
 import { PageFrame } from '@/components/layout';
 import { useSystemLogs } from '@/hooks/useSystemLogs';
 import { useToast } from '@/hooks/useToast';
@@ -110,29 +110,21 @@ export const SystemLogsPanel: React.FC = () => {
             />
           </div>
 
-          <label htmlFor={autoScrollId} className="flex items-center gap-1.5 min-h-[36px] sm:min-h-0 text-xs font-mono text-neutral-400 cursor-pointer select-none">
-            <input
-              id={autoScrollId}
-              name="log-auto-scroll"
-              type="checkbox"
-              checked={autoScroll}
-              onChange={(e) => setAutoScroll(e.target.checked)}
-              className="accent-[#e5a00d] rounded"
-            />
-            <span>Auto-scroll</span>
-          </label>
+          <TactileSwitch
+            id={autoScrollId}
+            name="log-auto-scroll"
+            label="Auto-scroll"
+            checked={autoScroll}
+            onChange={setAutoScroll}
+          />
 
-          <label htmlFor={eventsId} className="flex items-center gap-1.5 min-h-[36px] sm:min-h-0 text-xs font-mono text-neutral-400 cursor-pointer select-none">
-            <input
-              id={eventsId}
-              name="log-show-events"
-              type="checkbox"
-              checked={logsHook.showEvents}
-              onChange={(e) => logsHook.setShowEvents(e.target.checked)}
-              className="accent-[#e5a00d] rounded"
-            />
-            <span>Events</span>
-          </label>
+          <TactileSwitch
+            id={eventsId}
+            name="log-show-events"
+            label="Events"
+            checked={logsHook.showEvents}
+            onChange={(checked) => logsHook.setShowEvents(checked)}
+          />
 
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-[2px] bg-[#141414] border border-[#242424] text-[10px] font-mono">
             <span className={`w-2 h-2 rounded-full ${logsHook.isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-neutral-600'}`} />

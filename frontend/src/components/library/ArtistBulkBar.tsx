@@ -6,7 +6,7 @@ import { MONITOR_OPTIONS, MONITOR_OPTION_HINTS, MONITOR_OPTION_LABELS, type Moni
 import type { UseBulkSelectionReturn } from '@/hooks/useBulkSelection';
 import type { ArtistBulkPatch, UseArtistBulkEditReturn } from '@/hooks/useArtistBulkEdit';
 import { useTags } from '@/hooks/useTags';
-import { ConfirmDialog, TagPicker, TapeDeckButton } from '@/components/ui';
+import { ConfirmDialog, TactileSwitch, TagPicker, TapeDeckButton } from '@/components/ui';
 import { BulkEditSheet, BulkField, bulkSelectClass } from './BulkEditSheet';
 
 /** Sentinel for "No change" in every field. */
@@ -293,24 +293,18 @@ export const ArtistBulkBar: React.FC<ArtistBulkBarProps> = ({
           />
         </div>
         {cascadeRelevant && (
-          <label
-            htmlFor={field('albums')}
-            className="col-span-2 flex min-h-[36px] cursor-pointer items-center gap-2 text-xs font-mono text-neutral-300 sm:col-span-1 sm:min-h-0"
-          >
-            <input
-              id={field('albums')}
-              name="bulk-apply-to-albums"
-              type="checkbox"
-              checked={applyToAlbums}
-              disabled={edit.busy}
-              onChange={(e) => {
-                setApplyTouched(true);
-                setApplyToAlbums(e.target.checked);
-              }}
-              className="h-5 w-5 accent-[#e5a00d]"
-            />
-            Also apply to existing albums
-          </label>
+          <TactileSwitch
+            id={field('albums')}
+            name="bulk-apply-to-albums"
+            label="Also apply to existing albums"
+            checked={applyToAlbums}
+            disabled={edit.busy}
+            onChange={(checked) => {
+              setApplyTouched(true);
+              setApplyToAlbums(checked);
+            }}
+            className="col-span-2 sm:col-span-1"
+          />
         )}
       </BulkEditSheet>
       <ConfirmDialog

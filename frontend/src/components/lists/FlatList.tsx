@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { ListSortDir } from '@/types/activity';
@@ -213,7 +213,6 @@ function TruncatedCell({ value }: { value: React.ReactNode }): React.ReactElemen
 
 function RowInner<T>(props: RowProps<T>) {
   const { item, rowKey, columns, selectable, selected, onToggle, rowActions, tone, card } = props;
-  const rowUid = useId();
   if (card) return <CardInner {...props} card={card} />;
   return (
     <div
@@ -225,14 +224,12 @@ function RowInner<T>(props: RowProps<T>) {
     >
       {selectable && (
         <div role="cell" className="flex items-center min-h-[36px] lg:min-h-0">
-          <input
-            type="checkbox"
-            id={`${rowUid}-select`}
+          <SelectionCheckbox
+            inline
             name="select-row"
             checked={selected}
             onChange={() => onToggle(rowKey)}
-            aria-label="Select row"
-            className="h-4 w-4 accent-[#e5a00d] cursor-pointer"
+            label="Select row"
           />
         </div>
       )}
@@ -326,8 +323,6 @@ export function FlatList<T>({
 }: FlatListProps<T>): React.ReactElement {
   const { total, loading, error, getItem, ensureRange, version, generation, reload, retry, bindScroller } = list;
   const selectable = selectedKeys !== undefined && onSelectedKeysChange !== undefined;
-  const listUid = useId();
-  const selectAllRef = useRef<HTMLInputElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const [headerH, setHeaderH] = useState<number>(0);
@@ -426,10 +421,6 @@ export function FlatList<T>({
   const selectedCount = selectedKeys ? loaded.reduce((n, it) => n + (selectedKeys.has(getKey(it)) ? 1 : 0), 0) : 0;
   const allSelected = loaded.length > 0 && selectedCount === loaded.length;
 
-  useEffect(() => {
-    if (selectAllRef.current) selectAllRef.current.indeterminate = selectedCount > 0 && !allSelected;
-  }, [selectedCount, allSelected]);
-
   const toggleKey = useCallback(
     (key: ListKey) => {
       if (!selectedKeys || !onSelectedKeysChange) return;
@@ -506,16 +497,13 @@ export function FlatList<T>({
                 >
                   {selectable && (
                     <div role="columnheader">
-                      <input
-                        ref={selectAllRef}
-                        id={`${listUid}-select-all-desktop`}
+                      <SelectionCheckbox
+                        inline
                         name="select-all-loaded"
-                        type="checkbox"
                         checked={allSelected}
                         onChange={toggleAll}
                         disabled={loaded.length === 0}
-                        aria-label="Select all loaded rows"
-                        className="h-4 w-4 accent-[#e5a00d] cursor-pointer"
+                        label="Select all loaded rows"
                       />
                     </div>
                   )}
@@ -552,19 +540,17 @@ export function FlatList<T>({
               {(!hideMobileSortBar || selectable) && (
               <div className={`${layout === 'card' ? 'flex' : 'lg:hidden flex'} items-center gap-1.5 overflow-x-auto px-2 py-1.5 bg-[#121212] border-b border-[#2a2a2a]`}>
                 {selectable && (
-                  <label className="flex items-center gap-1.5 text-[10px] uppercase font-mono text-neutral-400 shrink-0 min-h-[36px] pr-2">
-                    <input
-                      id={`${listUid}-select-all-mobile`}
+                  <div className="flex items-center gap-1.5 text-[10px] uppercase font-mono text-neutral-400 shrink-0 min-h-[36px] pr-2">
+                    <SelectionCheckbox
+                      inline
                       name="select-all-loaded"
-                      type="checkbox"
                       checked={allSelected}
                       onChange={toggleAll}
                       disabled={loaded.length === 0}
-                      aria-label="Select all loaded rows"
-                      className="h-4 w-4 accent-[#e5a00d]"
+                      label="Select all loaded rows"
                     />
-                    All
-                  </label>
+                    <span>All</span>
+                  </div>
                 )}
                 {!hideMobileSortBar &&
                   columns

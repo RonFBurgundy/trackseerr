@@ -3,7 +3,7 @@ import { Fingerprint, Loader2, Search } from 'lucide-react';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { errorMessage } from '@/services/apiClient';
 import { searchManualImportAlbums } from '@/services/manualImportService';
-import { TapeDeckButton } from '@/components/ui';
+import { SelectionCheckbox, TapeDeckButton } from '@/components/ui';
 import type { ManualImportAlbumHit, ManualImportRow, MatchStrength } from '@/types/manualImport';
 
 const STRENGTH_CLASS: Record<MatchStrength, string> = {
@@ -135,15 +135,14 @@ export const ManualImportRowView = React.memo<ManualImportRowViewProps>(function
   return (
     <li className={`p-2.5 sm:p-3 rounded-[4px] border bg-[var(--bg-card)] ${duplicate ? 'border-[var(--status-error)]/60' : 'border-[var(--border-default)]'}`}>
       <div className="flex items-start gap-2.5">
-        <input
-          id={`${baseId}-check`}
+        <SelectionCheckbox
+          inline
           name={`manual-import-select-${key}`}
-          type="checkbox"
-          aria-label={`Import ${row.item.filename}`}
+          label={`Import ${row.item.filename}`}
           checked={row.checked}
           disabled={disabled || imported || row.selectedTrackId === null}
           onChange={() => onToggle(key)}
-          className="mt-1 h-4 w-4 shrink-0 accent-[#e5a00d]"
+          className="mt-0.5"
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronLeft, ChevronRight, Loader2, Rss } from 'lucide-react';
 import { PageFrame } from '@/components/layout';
-import { TapeDeckButton, ToastBanner } from '@/components/ui';
+import { TactileSwitch, TapeDeckButton, ToastBanner } from '@/components/ui';
 import { CalendarAgenda, CalendarGrid, CalendarSubscribeModal } from '@/components/calendar';
 import { useCalendar } from '@/hooks/useCalendar';
 import { useRefreshHandler } from '@/hooks/useRefreshHandler';
@@ -84,20 +84,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onNavigate, tabs }) 
             {/* Actions & Filters */}
             <div className="flex items-center gap-2">
               {/* Show unmonitored toggle */}
-              <label
-                htmlFor="calendar-show-unmonitored"
-                className="flex items-center gap-1.5 px-2 py-1 rounded-[3px] bg-[#141414] border border-[#222222] hover:border-[var(--border-hover)] cursor-pointer text-xs font-mono select-none"
-              >
-                <input
-                  id="calendar-show-unmonitored"
-                  name="calendar_show_unmonitored"
-                  type="checkbox"
-                  checked={showUnmonitored}
-                  onChange={toggleUnmonitored}
-                  className="rounded-[2px] bg-[#0a0a0a] border-[#333333] text-[var(--accent-amber)] focus:ring-0 focus:ring-offset-0 cursor-pointer h-3.5 w-3.5"
-                />
-                <span className="text-[var(--text-secondary)] text-[11px] sm:text-xs">Show unmonitored</span>
-              </label>
+              <TactileSwitch
+                id="calendar-show-unmonitored"
+                name="calendar_show_unmonitored"
+                label="Show unmonitored"
+                checked={showUnmonitored}
+                onChange={toggleUnmonitored}
+              />
 
               {/* Subscribe button */}
               <TapeDeckButton
