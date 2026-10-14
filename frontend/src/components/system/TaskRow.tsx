@@ -1,5 +1,5 @@
 import React from 'react';
-import { Loader2, Play, Square, ChevronDown } from 'lucide-react';
+import { Loader2, Play, Square, ChevronDown, Pause, PlayCircle } from 'lucide-react';
 import { TapeDeckButton } from '@/components/ui';
 import { parseServerTimestamp, relativeTime } from '@/components/issues/issueFormat';
 import type { ScheduledTaskItem } from '@/types/models';
@@ -16,11 +16,13 @@ export interface TaskRowProps {
   now: number;
   isTriggering: boolean;
   isCancelling: boolean;
+  isPausing: boolean;
   isSavingSchedule: boolean;
   expanded: boolean;
   onToggleExpanded: (taskId: string) => void;
   onRun: (taskId: string) => void;
   onCancel: (taskId: string) => void;
+  onPause: (taskId: string, paused: boolean) => void;
   onSchedule: (taskId: string, intervalSeconds: number | null) => void;
 }
 
@@ -50,11 +52,13 @@ export const TaskRow: React.FC<TaskRowProps> = React.memo(
     now,
     isTriggering,
     isCancelling,
+    isPausing,
     isSavingSchedule,
     expanded,
     onToggleExpanded,
     onRun,
     onCancel,
+    onPause,
     onSchedule,
   }) => {
     const isRunning = task.status === 'running';
@@ -129,6 +133,26 @@ export const TaskRow: React.FC<TaskRowProps> = React.memo(
           </button>
 
           <div className="flex items-center gap-2 shrink-0">
+            {task.can_pause && (
+              <TapeDeckButton
+                size="sm"
+                disabled={isPausing}
+                onClick={() => onPause(task.id, !task.paused)}
+                aria-label={task.paused ? `Resume ${task.name}` : `Pause ${task.name}`}
+                collapseLabel
+                icon={
+                  isPausing ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : task.paused ? (
+                    <PlayCircle className="h-3.5 w-3.5" />
+                  ) : (
+                    <Pause className="h-3.5 w-3.5" />
+                  )
+                }
+              >
+                {task.paused ? 'Resume' : 'Pause'}
+              </TapeDeckButton>
+            )}
             {task.can_trigger && (
               <TapeDeckButton
                 size="sm"

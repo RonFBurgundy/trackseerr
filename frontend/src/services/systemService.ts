@@ -99,6 +99,19 @@ export async function cancelScheduledTask(
   );
 }
 
+export async function setTaskPaused(
+  taskId: string,
+  paused: boolean
+): Promise<Schema<'TaskActionResult'>> {
+  return await apiRequest<Schema<'TaskActionResult'>>(
+    `/api/system/tasks/${encodeURIComponent(taskId)}/pause`,
+    {
+      method: 'PUT',
+      body: { paused },
+    }
+  );
+}
+
 export async function getLidarrHealth(): Promise<LidarrHealth> {
   return apiRequest<LidarrHealth>('/api/system/lidarr-health');
 }
