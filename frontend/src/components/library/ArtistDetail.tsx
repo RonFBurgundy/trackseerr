@@ -11,6 +11,7 @@ import {
   Radio,
   RefreshCw,
   Search,
+  Shuffle,
   Tag,
   User,
 } from 'lucide-react';
@@ -36,7 +37,7 @@ import { ArtistRestOfDiscography } from './ArtistRestOfDiscography';
 import { ArtistTagsRow } from './ArtistTagsRow';
 import { genreNames } from './genres';
 
-type DiscographyTab = 'studio' | 'singles_eps' | 'live' | 'compilations';
+type DiscographyTab = 'studio' | 'singles_eps' | 'live' | 'remixes' | 'compilations';
 
 export interface ArtistDetailProps {
   artistId: number | string;
@@ -81,15 +82,37 @@ const SINGLE_TYPES = ['single', 'ep', 'singles', 'eps'];
 const STUDIO_TYPES = ['album', 'studio'];
 
 function categorize(albums: AlbumItem[]): Record<DiscographyTab, AlbumItem[]> {
-  const type = (a: AlbumItem): string => (a.album_type ?? '').toLowerCase();
-  return {
-    studio: albums.filter((a) => !a.album_type || STUDIO_TYPES.includes(type(a))),
-    singles_eps: albums.filter((a) => a.album_type && SINGLE_TYPES.includes(type(a))),
-    live: albums.filter((a) => a.album_type && type(a) === 'live'),
-    compilations: albums.filter(
-      (a) => a.album_type && ![...STUDIO_TYPES, ...SINGLE_TYPES, 'live'].includes(type(a))
-    ),
+  const result: Record<DiscographyTab, AlbumItem[]> = {
+    studio: [],
+    singles_eps: [],
+    live: [],
+    remixes: [],
+    compilations: [],
   };
+
+  for (const album of albums) {
+    const secTypes = (album.secondary_types ?? []).map((t) => t.toLowerCase());
+    if (secTypes.includes('remix') || secTypes.includes('dj-mix')) {
+      result.remixes.push(album);
+    } else if (secTypes.includes('live')) {
+      result.live.push(album);
+    } else if (secTypes.includes('compilation')) {
+      result.compilations.push(album);
+    } else {
+      const type = (album.album_type ?? '').toLowerCase();
+      if (!album.album_type || STUDIO_TYPES.includes(type)) {
+        result.studio.push(album);
+      } else if (SINGLE_TYPES.includes(type)) {
+        result.singles_eps.push(album);
+      } else if (type === 'live') {
+        result.live.push(album);
+      } else {
+        result.compilations.push(album);
+      }
+    }
+  }
+
+  return result;
 }
 
 export const ArtistDetail: React.FC<ArtistDetailProps> = ({
@@ -126,6 +149,11 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   const [hideOutside, setHideOutside] = useState<boolean>(false);
   const metadataProfiles = useMetadataProfiles(isAdmin && !lidarrMode, onToast);
   const metadataProfileId = artist?.metadata_profile_id ?? null;
+
+  useEffect(() => {
+    setHideOutside(metadataProfileId !== null);
+  }, [artist?.id, metadataProfileId]);
+
   const dryRun = useMetadataProfileDryRun(artistId, onToast);
   const [pendingProfile, setPendingProfile] = useState<{ id: number | null; preview: MetadataProfilePreview } | null>(null);
   const [profileBusy, setProfileBusy] = useState<boolean>(false);
@@ -175,17 +203,28 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
 
   const profilePreview = useMetadataProfilePreview(artistId, metadataProfileId, artist?.albums?.length ?? 0);
   const hasOutside = metadataProfileId !== null && (artist?.albums ?? []).some((a) => a.in_profile === false);
-  const albums = useMemo(
-    () => (hideOutside && hasOutside ? categorized[tab].filter((a) => a.in_profile !== false) : categorized[tab]),
-    [categorized, tab, hideOutside, hasOutside]
-  );
+  const filteredCategorized = useMemo(() => {
+    if (!hideOutside || !hasOutside) return categorized;
+    const res: Record<DiscographyTab, AlbumItem[]> = {
+      studio: categorized.studio.filter((a) => a.in_profile !== false),
+      singles_eps: categorized.singles_eps.filter((a) => a.in_profile !== false),
+      live: categorized.live.filter((a) => a.in_profile !== false),
+      remixes: categorized.remixes.filter((a) => a.in_profile !== false),
+      compilations: categorized.compilations.filter((a) => a.in_profile !== false),
+    };
+    return res;
+  }, [categorized, hideOutside, hasOutside]);
 
-  // A filter that empties the open tab jumps to the first tab that still has matches.
+  const albums = filteredCategorized[tab];
+
+  // A filter that empties the open tab (or hiding outside profile) jumps to the first tab that still has matches.
   useEffect(() => {
-    if (!filter.active || filter.searching || categorized[tab].length > 0) return;
-    const next = (['studio', 'singles_eps', 'live', 'compilations'] as const).find((id) => categorized[id].length > 0);
+    if (filteredCategorized[tab].length > 0) return;
+    const next = (['studio', 'singles_eps', 'live', 'remixes', 'compilations'] as const).find(
+      (id) => filteredCategorized[id].length > 0
+    );
     if (next) setTab(next);
-  }, [filter.active, filter.searching, categorized, tab]);
+  }, [filteredCategorized, tab]);
 
   const canBulkEdit = isAdmin && !lidarrMode;
   const selection = useBulkSelection();
@@ -239,12 +278,21 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
     (o) => !lidarrMode || (o.value !== 'existing' && o.value !== 'future')
   );
 
-  const tabs: Array<{ id: DiscographyTab; full: string; short: string; icon: React.ReactNode }> = [
+  const allTabs: Array<{ id: DiscographyTab; full: string; short: string; icon: React.ReactNode }> = [
     { id: 'studio', full: 'Studio Albums', short: 'Studio', icon: <Disc className="h-3.5 w-3.5" /> },
     { id: 'singles_eps', full: 'EPs & Singles', short: 'Singles', icon: <Music className="h-3.5 w-3.5" /> },
     { id: 'live', full: 'Live Recordings', short: 'Live', icon: <Radio className="h-3.5 w-3.5" /> },
+    { id: 'remixes', full: 'Remixes', short: 'Remixes', icon: <Shuffle className="h-3.5 w-3.5" /> },
     { id: 'compilations', full: 'Compilations & Box Sets', short: 'Compilations', icon: <HardDrive className="h-3.5 w-3.5" /> },
   ];
+
+  const visibleTabs = useMemo(() => {
+    const withCounts = allTabs.filter((t) => filteredCategorized[t.id].length > 0);
+    if (withCounts.length === 0) {
+      return allTabs.filter((t) => t.id === tab);
+    }
+    return withCounts;
+  }, [allTabs, filteredCategorized, tab]);
 
   const artistToolItems: OverflowMenuItem[] = [];
   if (canBulkEdit && !loading && !selection.active) {
@@ -472,10 +520,10 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
 
         <div className="relative z-10 flex items-center gap-1.5 border-t border-[#1f1f1f] p-1 sm:p-1.5">
           <TabStrip className="min-w-0 flex-1">
-            {tabs.map((t) => (
+            {visibleTabs.map((t) => (
               <TapeDeckButton key={t.id} size="sm" active={tab === t.id} onClick={() => setTab(t.id)} icon={t.icon}>
                 <span className="hidden sm:inline">{t.full}</span>
-                <span className="sm:hidden">{t.short}</span> ({categorized[t.id].length})
+                <span className="sm:hidden">{t.short}</span> ({filteredCategorized[t.id].length})
               </TapeDeckButton>
             ))}
           </TabStrip>
