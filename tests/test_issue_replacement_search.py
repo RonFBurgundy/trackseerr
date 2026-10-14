@@ -53,6 +53,12 @@ def _run(db, replacement=None):
     return res
 
 
+@pytest.fixture
+def search_sources_ready(monkeypatch):
+    monkeypatch.setattr("trackseerr.backlog_worker.search_unavailable_reason", lambda db: None)
+
+
+@pytest.mark.usefixtures("search_sources_ready")
 class TestBacklogReplacementKwargs:
     def _search(self, db, replacement):
         with patch.object(

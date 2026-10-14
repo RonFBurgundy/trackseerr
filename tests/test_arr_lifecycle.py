@@ -948,12 +948,18 @@ class TestAcquisitionWorkerCutoffAndCleanup:
         assert updated_dl["status"] == DownloadStatus.IMPORTED.value
 
 
+@pytest.fixture
+def search_sources_ready(monkeypatch):
+    monkeypatch.setattr("trackseerr.backlog_worker.search_unavailable_reason", lambda db: None)
+
+
 # ---------------------------------------------------------------------------
 # 5. TestBacklogAndRSSQualityUpgrades
 # ---------------------------------------------------------------------------
 class TestBacklogAndRSSQualityUpgrades:
     """Integration tests for WantedBacklogWorker and RSSSyncWorker quality upgrades."""
 
+    @pytest.mark.usefixtures("search_sources_ready")
     def test_backlog_worker_includes_cutoff_unmet_requests(
         self,
         test_db: Database,
