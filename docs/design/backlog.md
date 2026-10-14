@@ -16,12 +16,12 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
 
 ## User QA list (2026-10-12)
 
-1. **P2 · Searches run with no indexers or clients configured.** Wanted sweep / RSS / backlog search monitored tracks
+1. **DONE 2026-10-14 · P2 · Searches run with no indexers or clients configured.** Wanted sweep / RSS / backlog search monitored tracks
    right after onboarding or a Lidarr import, burning CPU and filling logs. Gate every search task on "≥1 enabled
    indexer AND ≥1 enabled download client for that protocol"; skip with one INFO line ("no indexers configured —
    skipping") instead of per-item logs. Show the reason on the Tasks page. Start: `trackseerr/backlog_worker.py`,
    RSS sync, `task_manager.py`.
-2. **P2 · Tasks can't be paused, cancelled or ended gracefully.** Add cancel (and pause/resume for interval tasks) to
+2. **DONE 2026-10-14 · P2 · Tasks can't be paused, cancelled or ended gracefully.** Add cancel (and pause/resume for interval tasks) to
    the task manager: a per-run stop event checked between items, a "Cancel" button on the Tasks page, and a graceful
    shutdown that signals all running tasks to stop at the next item instead of waiting minutes (e.g. switching to
    Trackseerr mid-run). Manual tasks currently pass `should_stop=None` (credits backfill, art backfill) — wire them.
@@ -43,11 +43,11 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
    tracks paged/index endpoints (`trackseerr/api/routes/library/browse.py` `/tracks/paged`, `/tracks/index`): likely
    OFFSET paging + sort over all catalog tracks instead of tracks-with-files, missing indexes on sort/search columns,
    or N+1 lookups. Same fix pattern as the rename preview (keyset paging, drive from library_files when "owned only").
-5. **P3 · Use the tape-deck loader + messages instead of plain spinners.** Library modal, track/artist pages, Wanted
+5. **DONE 2026-10-14 · P3 · Use the tape-deck loader + messages instead of plain spinners.** Library modal, track/artist pages, Wanted
    and its sub-pages, Activity sub-pages, etc. Idea: tape deck with rotating messages overlaid on the skeleton while
    content loads. Find the existing tape-deck loader/messages (App.tsx / views use them) and make one shared
    `<PageLoader>` used everywhere a spinner is shown. Frontend skill applies.
-6. **P3 · Nav drawer: opening a section should collapse the others** (accordion). With Library expanded, tapping
+6. **DONE 2026-10-14 · P3 · Nav drawer: opening a section should collapse the others** (accordion). With Library expanded, tapping
    Settings leaves its sub-pages below the fold. Frontend skill applies; find the drawer under
    `frontend/src/components/layout`.
 
@@ -67,14 +67,14 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
 10. **P3 · New downloads with no catalog match** still render the artist folder from the format (no artist row);
     look up the library artist by name/MBID so they land in the existing folder too.
 11. **P3 · Rename preview response has no total** — the UI counts returned rows; add a total if the 5,000 cap is hit.
-12. **P2 · Guard against browser-default controls regressing.** Two layers: (a) a global safety net in
+12. **DONE 2026-10-14 · P2 · Guard against browser-default controls regressing.** Two layers: (a) a global safety net in
     `frontend/src/index.css` — `input[type=checkbox], input[type=radio], input[type=range] { accent-color:
     var(--accent-amber) }` so a stray native control can never render blue; (b) a CI check (small node script next to
     `frontend/scripts/gen-api.mjs`, run in the CI workflow beside `check:api`) failing on `blue-|indigo-|sky-` Tailwind
     classes or a raw checkbox/radio outside `components/ui`. Rule already added to the frontend skill (Phase 4d #5,
     Phase 6 gate 7).
 13. **DONE 2026-10-13 · P3 · Housekeeping:** an 8-day-old `tsc -w` process from another session is running on the host.
-14. **P2 · Scanner can still merge same-title tracks on one disc.** `_pick_title_match`
+14. **DONE 2026-10-14 · P2 · Scanner can still merge same-title tracks on one disc.** `_pick_title_match`
     (`trackseerr/library_catalog_store.py`) returns the first same-disc row with that title when no row has the
     requested track number, so a fresh scan of two new "[silence]" files (#90, #91) lands both on one track. The Lidarr
     import is guarded by an exact disc+number+title check. Fix: with a track number given, cross numbers only when the
@@ -85,7 +85,7 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     `role="group"` + `aria-label` for keyboard scrolling, full path in `title` (see
     `frontend/src/components/library/RenameModal.tsx` ~L450-470). Target: `frontend/src/components/library/RetagModal.tsx`
     file rows and the per-field diff values. Frontend skill applies.
-16. **P2 · Activity, Wanted and album item cards are cluttered (mobile first, desktop too).** On phones the per-item
+16. **DONE 2026-10-14 · P2 · Activity, Wanted and album item cards are cluttered (mobile first, desktop too).** On phones the per-item
     action buttons fill the right half of every card and squeeze the track details into a narrow left column (user
     screenshot `Screenshot_20261012-214949.png`, Queue: a status word + Retry/Blocklist/Delete icon buttons take
     ~55% of the width, so the artist truncates to "OK …"/"Her…"/"Ha…", the progress % clips to "1(", and a stalled
@@ -136,7 +136,7 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     the list") to say exactly which happens. Sync should log one summary line per playlist (`N missing, M requested,
     K already requested/owned`) and the Tasks page should show it. No new task needed — `apply_playlist_missing`
     already runs after each sync (`list_monitoring.py` ~L670).
-18. **P2 · Plex playlist "find in library" search returns nothing for artist names.** Searching "offspring" gives zero
+18. **DONE 2026-10-14 · P2 · Plex playlist "find in library" search returns nothing for artist names.** Searching "offspring" gives zero
     results on a library with many Offspring tracks. `clients/plex.py` `search_library_tracks` calls
     `server.search(query, mediatype="track")`, which matches track *titles* only, then calls `item.artist()` and
     `item.album()` per result (two extra HTTP round-trips each — slow on a big library), and swallows errors with a
@@ -145,16 +145,16 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     merge/dedupe, read `grandparentTitle`/`parentTitle` instead of fetching, log the root cause on errors. Consider
     matching against Trackseerr's own library index first (already fast after #4) and resolving to Plex rating keys.
     Test with mocked plexapi results for artist-only, title-only and "artist title" queries.
-19. **P2 · Playlist sync cards too tall for admins with many sync targets.** Each card lists every user target with
+19. **DONE 2026-10-14 · P2 · Playlist sync cards too tall for admins with many sync targets.** Each card lists every user target with
     its toggle. Put the targets behind a chevron, collapsed by default; expanding shows the toggles, collapsing hides
     them again. Collapsed header shows a count ("3 of 7 users"). Reuse the chevron-expand pattern from the item-card
     work (#16). Frontend skill applies; find the card under `frontend/src/components/playlists`.
-20. **P3 · Wanted → Missing needs "date added / monitored" sort.** Show when each item entered the backlog and allow
+20. **DONE 2026-10-14 · P3 · Wanted → Missing needs "date added / monitored" sort.** Show when each item entered the backlog and allow
     sorting by it (newest first) next to the existing sorts. Needs a timestamp on the monitored item (check whether
     catalog tracks already store `monitored_at`/`added_at`; if not, a schema migration that backfills from
     `created_at`), exposed by `/api/wanted/missing` (`trackseerr/api/routes/wanted.py` ~L67) with a `sort=added`
     option, and a column/chip on `wanted/WantedPanel.tsx`. Backend then frontend handoff; regen API types.
-21. **P2 · Artist discography tabs ignore the metadata profile.** User applied a profile (primary album/ep/single,
+21. **DONE 2026-10-14 · P2 · Artist discography tabs ignore the metadata profile.** User applied a profile (primary album/ep/single,
     secondary studio/remix) and still sees Live and Compilations tabs full of dimmed out-of-profile albums. Tabs are
     hardcoded and split on `album_type` only (`categorize()` + `tabs` in `frontend/src/components/library/ArtistDetail.tsx`
     ~L82 / ~L243); "Hide outside profile" (~L126, ~L258) is off by default and not remembered. Agreed fix: when the
@@ -163,7 +163,7 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     (`album_type` vs `secondary_types` on the album payload). Remix releases currently seem to land in Studio, and
     categorizing by secondary type may need `secondary_types` exposed on the album item (backend + gen:api if so).
     Don't relabel tabs. A tab is a release type. Frontend skill applies.
-22. **P3 · Admin's own permission toggles look editable but saves drop them.** In `frontend/src/components/admin/UserEditModal.tsx`
+22. **DONE 2026-10-14 · P3 · Admin's own permission toggles look editable but saves drop them.** In `frontend/src/components/admin/UserEditModal.tsx`
     only the admin bit is disabled for yourself (`lockedAdmin`, ~L262). The other toggles stay clickable, but `save`
     leaves `permissions` out of the payload when `isSelf` (~L192), so ticks show "Changes saved." and nothing is stored.
     The server only forbids changing your own admin bit (`admin_users.py` ~L310), and `has_permission`
@@ -171,7 +171,7 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     admin (self or another admin), render every toggle checked and disabled, and replace "Your own permissions cannot be
     changed here." with "Administrators hold every permission." Other admins keep only the admin toggle editable
     (subject to the server's last-admin guard). Unchecking it restores the stored bits. Frontend skill applies.
-23. **DONE 2026-10-14 (eaabc2a; UI "no users assigned" flag still TODO) · P1 · Playlists with no target users are never matched, so their missing tracks are never recorded.** Live log
+23. **DONE 2026-10-14 (eaabc2a; UI "no users assigned" flag done 2026-10-14) · P1 · Playlists with no target users are never matched, so their missing tracks are never recorded.** Live log
     2026-10-13: `Billboard Greatest Of All Time Hot 100` and `Rolling Stone's Top 500 Albums…` (2,678 tracks) logged
     `has no target users assigned; skipping` every cycle until the user assigned RonTube ~21:00. The `continue` at
     `trackseerr/api/routes/sync.py` ~L241 (inside the `not no_media_server` branch) skips the whole playlist, so
