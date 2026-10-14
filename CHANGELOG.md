@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- Missing tracks from Spotify and Deezer playlists set to "track" monitoring are now requested automatically as the playlist's owner, so they show up as request cards you can follow (quota and approval rules apply). Each sync logs how many were requested, already owned or waiting.
 - The library Tracks tab has an "Owned only" switch, on by default, listing just the tracks you have files for; turn it off to include missing catalog tracks.
 - Rename preview: a file whose audio AcoustID identifies as a different track in your library gets a "Relink to this track" button. If that track already has a file, you choose which to keep (or switch on "Keep the higher-quality file"); the other goes to the recycle bin.
 - The rename preview can check risky moves with AcoustID: "Verify risky" fingerprints those files (about 3 per second, in the background) and compares the audio with the track each file is linked to. Confirmed files are marked "Audio verified" and pre-selected; files whose audio is a different track show what it really is and can't be renamed until relinked. Results are cached, so re-checking is instant. Needs an AcoustID API key in Media Management.
@@ -138,6 +139,7 @@ tags belong to that project.
 
 ### Added
 
+- Missing tracks from Spotify and Deezer playlists set to "track" monitoring are now requested automatically as the playlist's owner, so they show up as request cards you can follow (quota and approval rules apply). Each sync logs how many were requested, already owned or waiting.
 - Native library management: monitored artists and albums, missing and cutoff-unmet lists, upgrades, rename preview and apply, tag writing on import.
 - Acquisition through Torznab and Newznab indexers, qBittorrent, SABnzbd and slskd, with RSS sync, interactive search, a blocklist and failed-download handling.
 - Quality, metadata, delay and release profiles, and custom formats.
