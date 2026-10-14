@@ -16,6 +16,7 @@ import {
   FormField,
   MachinedCard,
   ObsidianModal,
+  PageLoader,
   StatusMessage,
   TapeDeckButton,
   inputClass,
@@ -215,10 +216,7 @@ export const BackupPanel: React.FC<BackupPanelProps> = ({ onToast }) => {
 
         {/* Backup List Table */}
         {isLoading && backups.length === 0 ? (
-          <div className="py-12 flex justify-center text-neutral-400 font-mono text-xs">
-            <Loader2 className="h-5 w-5 animate-spin text-[#e5a00d] mr-2" />
-            Loading backups...
-          </div>
+          <PageLoader message="Loading backups" />
         ) : backups.length === 0 ? (
           <div className="py-10 text-center text-neutral-400 font-mono text-xs border border-dashed border-[#222222] rounded-[4px]">
             No database backups found. Click &quot;Back up now&quot; to generate an initial snapshot.

@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Loader2, ScanSearch } from 'lucide-react';
-import { TactileSwitch, TapeDeckButton } from '@/components/ui';
+import { PageLoader, TactileSwitch, TapeDeckButton } from '@/components/ui';
 import { PageActionsPortal } from '@/components/layout';
 import { ManualImportModal } from '@/components/manualImport';
 import { formatDateTime } from '@/components/lists';
@@ -68,11 +68,7 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
   );
 
   if (loading && !data) {
-    return (
-      <div className="flex items-center justify-center gap-2 py-10 text-xs font-mono uppercase tracking-widest text-[var(--text-secondary)]">
-        <Loader2 className="h-5 w-5 animate-spin text-[var(--accent-amber)]" /> Loading
-      </div>
-    );
+    return <PageLoader />;
   }
   if (!data) {
     return (
