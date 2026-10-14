@@ -217,6 +217,10 @@ class TestPlexClientExpansion:
         mock_server_instance = MagicMock()
         mock_plex_server_cls.return_value = mock_server_instance
 
+        mock_section = MagicMock()
+        mock_section.type = "artist"
+        mock_server_instance.library.sections.return_value = [mock_section]
+
         plex = PlexClient("http://fake-plex:32400", "token")
         mock_track = MagicMock()
         mock_track.ratingKey = 101
@@ -224,13 +228,9 @@ class TestPlexClientExpansion:
         mock_track.grandparentTitle = "David Bowie"
         mock_track.parentTitle = "Ziggy Stardust"
         mock_track.duration = 250000
+        mock_track.thumb = "/thumb/101.jpg"
 
-        mock_artist = MagicMock(title="David Bowie")
-        mock_album = MagicMock(title="Ziggy Stardust")
-        mock_track.artist.return_value = mock_artist
-        mock_track.album.return_value = mock_album
-
-        mock_server_instance.search.return_value = [mock_track]
+        mock_section.searchTracks.return_value = [mock_track]
 
         results = plex.search_library_tracks("Starman", limit=10)
         assert len(results) == 1
@@ -238,6 +238,185 @@ class TestPlexClientExpansion:
         assert results[0]["title"] == "Starman"
         assert results[0]["artist"] == "David Bowie"
         assert results[0]["album"] == "Ziggy Stardust"
+
+    @patch("trackseerr.clients.plex.PlexServer")
+    def test_plex_search_matches_artist_only_query(self, mock_plex_server_cls):
+        mock_server = MagicMock()
+        mock_plex_server_cls.return_value = mock_server
+        mock_section = MagicMock()
+        mock_section.type = "artist"
+        mock_server.library.sections.return_value = [mock_section]
+
+        offspring_track = MagicMock()
+        offspring_track.ratingKey = 201
+        offspring_track.title = "Come Out and Play"
+        offspring_track.grandparentTitle = "Offspring"
+        offspring_track.parentTitle = "Smash"
+        offspring_track.duration = 197000
+        offspring_track.thumb = ""
+
+        def search_side_effect(**kwargs):
+            if kwargs.get("filters") == {"artist.title": "offspring"}:
+                return [offspring_track]
+            return []
+
+        mock_section.searchTracks.side_effect = search_side_effect
+
+        plex = PlexClient("http://fake-plex:32400", "token")
+        results = plex.search_library_tracks("offspring", limit=10)
+
+        assert len(results) == 1
+        assert results[0]["rating_key"] == "201"
+        assert results[0]["artist"] == "Offspring"
+        assert results[0]["title"] == "Come Out and Play"
+
+    @patch("trackseerr.clients.plex.PlexServer")
+    def test_plex_search_matches_title_only_query(self, mock_plex_server_cls):
+        mock_server = MagicMock()
+        mock_plex_server_cls.return_value = mock_server
+        mock_section = MagicMock()
+        mock_section.type = "artist"
+        mock_server.library.sections.return_value = [mock_section]
+
+        track = MagicMock()
+        track.ratingKey = 301
+        track.title = "Self Esteem"
+        track.grandparentTitle = "The Offspring"
+        track.parentTitle = "Smash"
+        track.duration = 257000
+        track.thumb = ""
+
+        def search_side_effect(**kwargs):
+            if kwargs.get("title") == "Self Esteem":
+                return [track]
+            return []
+
+        mock_section.searchTracks.side_effect = search_side_effect
+
+        plex = PlexClient("http://fake-plex:32400", "token")
+        results = plex.search_library_tracks("Self Esteem", limit=10)
+
+        assert len(results) == 1
+        assert results[0]["rating_key"] == "301"
+        assert results[0]["title"] == "Self Esteem"
+
+    @patch("trackseerr.clients.plex.PlexServer")
+    def test_plex_search_artist_and_title_query(self, mock_plex_server_cls):
+        mock_server = MagicMock()
+        mock_plex_server_cls.return_value = mock_server
+        mock_section = MagicMock()
+        mock_section.type = "artist"
+        mock_server.library.sections.return_value = [mock_section]
+
+        split_match = MagicMock()
+        split_match.ratingKey = 401
+        split_match.title = "Self Esteem"
+        split_match.grandparentTitle = "Offspring"
+        split_match.parentTitle = "Smash"
+
+        other_match = MagicMock()
+        other_match.ratingKey = 402
+        other_match.title = "Offspring Self Esteem"
+        other_match.grandparentTitle = "Various"
+        other_match.parentTitle = "Compilation"
+
+        def search_side_effect(**kwargs):
+            if kwargs.get("title") == "self esteem" and kwargs.get("filters") == {"artist.title": "offspring"}:
+                return [split_match]
+            if kwargs.get("title") == "offspring self esteem":
+                return [other_match]
+            return []
+
+        mock_section.searchTracks.side_effect = search_side_effect
+
+        plex = PlexClient("http://fake-plex:32400", "token")
+        results = plex.search_library_tracks("offspring self esteem", limit=10)
+
+        assert len(results) == 2
+        # Split query result must come first
+        assert results[0]["rating_key"] == "401"
+        assert results[0]["title"] == "Self Esteem"
+        assert results[1]["rating_key"] == "402"
+
+    @patch("trackseerr.clients.plex.PlexServer")
+    def test_plex_search_dedupes_and_caps_at_limit(self, mock_plex_server_cls):
+        mock_server = MagicMock()
+        mock_plex_server_cls.return_value = mock_server
+        mock_section = MagicMock()
+        mock_section.type = "artist"
+        mock_server.library.sections.return_value = [mock_section]
+
+        track1 = MagicMock(ratingKey=501, title="Track 1", grandparentTitle="Artist", parentTitle="Album")
+        track2 = MagicMock(ratingKey=502, title="Track 2", grandparentTitle="Artist", parentTitle="Album")
+        track3 = MagicMock(ratingKey=503, title="Track 3", grandparentTitle="Artist", parentTitle="Album")
+
+        # Title query returns track1 and track2; artist query returns track1 (duplicate) and track3
+        def search_side_effect(**kwargs):
+            if "title" in kwargs and "filters" not in kwargs:
+                return [track1, track2]
+            if kwargs.get("filters") == {"artist.title": "query"}:
+                return [track1, track3]
+            return []
+
+        mock_section.searchTracks.side_effect = search_side_effect
+
+        plex = PlexClient("http://fake-plex:32400", "token")
+        results = plex.search_library_tracks("query", limit=2)
+
+        # Should dedupe track1 and cap at limit 2
+        assert len(results) == 2
+        assert [r["rating_key"] for r in results] == ["501", "502"]
+
+    @patch("trackseerr.clients.plex.PlexServer")
+    def test_plex_search_reads_attributes_without_extra_calls(self, mock_plex_server_cls):
+        mock_server = MagicMock()
+        mock_plex_server_cls.return_value = mock_server
+        mock_section = MagicMock()
+        mock_section.type = "artist"
+        mock_server.library.sections.return_value = [mock_section]
+
+        track = MagicMock()
+        track.ratingKey = 601
+        track.title = "Attribute Only"
+        track.grandparentTitle = "Grandparent Artist"
+        track.parentTitle = "Parent Album"
+        mock_section.searchTracks.return_value = [track]
+
+        plex = PlexClient("http://fake-plex:32400", "token")
+        results = plex.search_library_tracks("Attribute Only", limit=10)
+
+        assert len(results) == 1
+        assert results[0]["artist"] == "Grandparent Artist"
+        assert results[0]["album"] == "Parent Album"
+        track.artist.assert_not_called()
+        track.album.assert_not_called()
+
+    @patch("trackseerr.clients.plex.PlexServer")
+    def test_plex_search_one_failing_query_does_not_drop_others(self, mock_plex_server_cls):
+        from plexapi.exceptions import BadRequest
+
+        mock_server = MagicMock()
+        mock_plex_server_cls.return_value = mock_server
+        mock_section = MagicMock()
+        mock_section.type = "artist"
+        mock_server.library.sections.return_value = [mock_section]
+
+        good_track = MagicMock(ratingKey=701, title="Good Track", grandparentTitle="Artist", parentTitle="Album")
+
+        def search_side_effect(**kwargs):
+            if "title" in kwargs and "filters" not in kwargs:
+                raise BadRequest("Invalid title query")
+            if kwargs.get("filters") == {"artist.title": "query"}:
+                return [good_track]
+            return []
+
+        mock_section.searchTracks.side_effect = search_side_effect
+
+        plex = PlexClient("http://fake-plex:32400", "token")
+        results = plex.search_library_tracks("query", limit=10)
+
+        assert len(results) == 1
+        assert results[0]["rating_key"] == "701"
 
 
 

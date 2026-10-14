@@ -148,6 +148,48 @@ def music_sections(server: Any, preferred: Optional[str] = None) -> list[Any]:
     return sections
 
 
+def _search_section_tracks(section: Any, clean_query: str, limit: int) -> list[Any]:
+    """Execute split, title, and artist queries against a Plex music section."""
+    results: list[Any] = []
+    words = clean_query.split()
+
+    # (c) multi-word split queries: artist prefix and title suffix (at most 3 splits)
+    if len(words) > 1:
+        num_splits = min(len(words) - 1, 3)
+        for i in range(1, num_splits + 1):
+            artist_prefix = " ".join(words[:i])
+            title_suffix = " ".join(words[i:])
+            try:
+                split_res = section.searchTracks(title=title_suffix, filters={"artist.title": artist_prefix})
+                if split_res:
+                    results.extend(split_res)
+            except PLEX_ERRORS as e:
+                logger.warning(
+                    "Plex split search ('%s' / '%s') failed: %s",
+                    artist_prefix,
+                    title_suffix,
+                    safe_exc(e),
+                )
+
+    # (a) title matches
+    try:
+        title_res = section.searchTracks(title=clean_query, maxresults=limit)
+        if title_res:
+            results.extend(title_res)
+    except PLEX_ERRORS as e:
+        logger.warning("Plex title search ('%s') failed: %s", clean_query, safe_exc(e))
+
+    # (b) artist matches
+    try:
+        artist_res = section.searchTracks(filters={"artist.title": clean_query}, maxresults=limit)
+        if artist_res:
+            results.extend(artist_res)
+    except PLEX_ERRORS as e:
+        logger.warning("Plex artist search ('%s') failed: %s", clean_query, safe_exc(e))
+
+    return results
+
+
 class PlexClient:
     """Manages interactions with the Plex Media Server."""
 
@@ -971,29 +1013,27 @@ class PlexClient:
         if not query or not query.strip():
             return []
         clean_query = query.strip()
-        try:
-            results = self.server.search(clean_query, mediatype="track", limit=limit)
-            tracks_out = []
-            for item in results:
-                artist_name = ""
-                try:
-                    cand_artist = item.artist()
-                    if cand_artist:
-                        artist_name = getattr(cand_artist, "title", "")
-                except Exception:
-                    artist_name = getattr(item, "grandparentTitle", "") or getattr(item, "originalTitle", "")
+        sections = music_sections(self.server, getattr(self, "music_section", None))
+        if not sections:
+            return []
 
-                album_name = ""
-                try:
-                    cand_album = item.album()
-                    if cand_album:
-                        album_name = getattr(cand_album, "title", "")
-                except Exception:
-                    album_name = getattr(item, "parentTitle", "")
+        seen_keys: set[str] = set()
+        tracks_out: list[dict[str, Any]] = []
+
+        for section in sections:
+            results = _search_section_tracks(section, clean_query, limit)
+            for item in results:
+                rk = str(getattr(item, "ratingKey", ""))
+                if not rk or rk in seen_keys:
+                    continue
+                seen_keys.add(rk)
+
+                artist_name = getattr(item, "grandparentTitle", "") or getattr(item, "originalTitle", "")
+                album_name = getattr(item, "parentTitle", "")
 
                 tracks_out.append(
                     {
-                        "rating_key": str(getattr(item, "ratingKey", "")),
+                        "rating_key": rk,
                         "title": getattr(item, "title", "Unknown"),
                         "artist": artist_name or "Unknown Artist",
                         "album": album_name or "",
@@ -1001,10 +1041,10 @@ class PlexClient:
                         "thumb": getattr(item, "thumb", ""),
                     }
                 )
-            return tracks_out
-        except Exception as e:
-            logger.error("Error searching Plex library tracks for '%s': %s", clean_query, safe_exc(e))
-            return []
+                if len(tracks_out) >= limit:
+                    return tracks_out
+
+        return tracks_out
 
     def refresh_music_library(self, section_name: Optional[str] = None) -> bool:
         """Triggers a library section refresh on Plex Media Server."""
