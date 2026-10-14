@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { FeaturedChart } from '@/types/models';
 import { useFeaturedCharts } from '@/hooks/useFeaturedCharts';
-import { TapeDeckButton } from '@/components/ui';
+import { PageLoader, TapeDeckButton } from '@/components/ui';
 import { errorMessage } from '@/services/apiClient';
 
 export interface FeaturedChartsTabProps {
@@ -42,12 +42,7 @@ export const FeaturedChartsTab: React.FC<FeaturedChartsTabProps> = ({ enabled, o
   };
 
   if (isLoading && charts.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-8 text-neutral-400">
-        <Loader2 className="h-6 w-6 animate-spin text-[#e5a00d] mb-2" />
-        <span className="text-xs font-mono">Loading featured charts...</span>
-      </div>
-    );
+    return <PageLoader message="Loading featured charts" />;
   }
 
   return (

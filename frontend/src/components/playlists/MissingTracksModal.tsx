@@ -6,7 +6,7 @@ import {
   Loader2,
   Search,
 } from 'lucide-react';
-import { ObsidianModal, TapeDeckButton } from '@/components/ui';
+import { ObsidianModal, PageLoader, TapeDeckButton } from '@/components/ui';
 import type { MissingTrack, MediaTrackHit } from '@/services/missingService';
 import { errorMessage } from '@/services/apiClient';
 
@@ -209,10 +209,7 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
             </form>
 
             {isSearching ? (
-              <div className="flex flex-col items-center justify-center gap-2 py-10 text-xs font-mono uppercase tracking-widest text-[var(--text-secondary)]">
-                <Loader2 className="h-5 w-5 animate-spin text-[var(--accent-amber)]" />
-                <span>Searching Plex library...</span>
-              </div>
+              <PageLoader size="sm" message="Searching Plex library" />
             ) : results.length === 0 ? (
               <div className="py-8 text-center text-xs font-mono text-neutral-500">
                 No matching tracks found in library for "{query}".

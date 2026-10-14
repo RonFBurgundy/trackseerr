@@ -1,6 +1,6 @@
 import React from 'react';
 import { Check, Loader2, Pause, Play, Plus } from 'lucide-react';
-import { ObsidianModal, TapeDeckButton } from '@/components/ui';
+import { ObsidianModal, PageLoader, TapeDeckButton } from '@/components/ui';
 import { IssueReportButton } from '@/components/issues';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
 import type { AudioPreviewTrack, DiscoveryItem, DiscoveryTrackDetail } from '@/types/models';
@@ -201,9 +201,7 @@ export const DiscoveryTrackModal: React.FC<DiscoveryTrackModalProps> = ({
         </div>
 
         {isLoading && (
-          <div className="flex justify-center py-4" role="status" aria-label="Loading track details">
-            <Loader2 className="h-5 w-5 animate-spin text-[#e5a00d]" />
-          </div>
+          <PageLoader size="sm" />
         )}
         {error && !isLoading && (
           <p className="rounded-[4px] border border-red-800/50 bg-red-950/40 p-3 font-mono text-xs text-red-300">{error}</p>

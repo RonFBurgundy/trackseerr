@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowRight, History, Loader2, RotateCcw } from 'lucide-react';
-import { ObsidianModal, TapeDeckButton } from '@/components/ui';
+import { ObsidianModal, PageLoader, TapeDeckButton } from '@/components/ui';
 import type { MatchOverride } from '@/services/missingService';
 import { errorMessage } from '@/services/apiClient';
 
@@ -58,10 +58,7 @@ export const MatchOverridesModal: React.FC<MatchOverridesModalProps> = ({
         )}
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center gap-2 py-12 text-xs font-mono uppercase tracking-widest text-[var(--text-secondary)]">
-            <Loader2 className="h-5 w-5 animate-spin text-[var(--accent-amber)]" />
-            <span>Loading match overrides...</span>
-          </div>
+          <PageLoader size="sm" message="Loading match overrides" />
         ) : overrides.length === 0 ? (
           <div className="py-12 text-center space-y-2">
             <History className="h-8 w-8 text-[var(--text-muted)] mx-auto opacity-70" />
