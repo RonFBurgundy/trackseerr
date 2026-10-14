@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- Scheduled tasks (playlist sync, Wanted sweep, RSS sync, artist refresh, art backfill, mixes, seed cleanup, recycle bin, backups, update check) can be paused and resumed from the Tasks page without changing their schedule.
 - Manual runs of the track credits backfill, artwork backfill and artist refresh can be cancelled from the Tasks page; they stop after the current item. Shutting down also stops manual runs instead of waiting for them.
 - Wanted lists show when each item was added and can be sorted by it, newest first (not available when Lidarr manages the library).
 - Missing tracks from Spotify and Deezer playlists set to "track" monitoring are now requested automatically as the playlist's owner, so they show up as request cards you can follow (quota and approval rules apply). Each sync logs how many were requested, already owned or waiting.
