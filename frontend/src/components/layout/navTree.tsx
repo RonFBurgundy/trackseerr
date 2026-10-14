@@ -239,6 +239,3 @@ export function collapseSiblingsKeys(nodes: NavNode[], key: string): string[] {
   };
   return walk(nodes) ?? [];
 }
-
-
-

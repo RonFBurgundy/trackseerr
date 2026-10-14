@@ -207,25 +207,24 @@ const HubPanel: React.FC<NavHubProps> = ({
   };
 
   const toggle = (key: string): void => {
-    let opened = false;
+    const opening = !expanded.has(key);
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-        for (const desc of findDescendantGroupKeys(tree, key)) {
-          next.delete(desc);
-        }
-      } else {
-        opened = true;
+      if (opening) {
         next.add(key);
         for (const siblingKey of collapseSiblingsKeys(tree, key)) {
           next.delete(siblingKey);
+        }
+      } else {
+        next.delete(key);
+        for (const desc of findDescendantGroupKeys(tree, key)) {
+          next.delete(desc);
         }
       }
       return next;
     });
 
-    if (opened) {
+    if (opening) {
       requestAnimationFrame(() => {
         const btn = panelRef.current?.querySelector<HTMLElement>(`button[data-nav-key="${key}"]`);
         if (!btn) return;
