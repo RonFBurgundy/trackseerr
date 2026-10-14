@@ -9,6 +9,7 @@
     "lint": "tsc --noEmit",
     "gen:api": "node scripts/gen-api.mjs",
     "check:api": "node scripts/gen-api.mjs --check",
+    "check:ui": "node scripts/check-ui-guard.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

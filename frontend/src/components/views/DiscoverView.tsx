@@ -278,7 +278,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                       Requested
                     </span>
                   ) : isProcessing ? (
-                    <span className="absolute top-2 left-2 px-2 py-0.5 rounded-[2px] text-[10px] font-mono font-bold bg-blue-500/90 text-white flex items-center gap-1 shadow-md z-10">
+                    <span className="absolute top-2 left-2 px-2 py-0.5 rounded-[2px] text-[10px] font-mono font-bold bg-info-500/90 text-white flex items-center gap-1 shadow-md z-10">
                       <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" /> Processing
                     </span>
                   ) : null}
@@ -345,7 +345,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                       size="sm"
                       variant="default"
                       disabled
-                      className="w-full text-blue-400 border-blue-500/30"
+                      className="w-full text-info-400 border-info-500/30"
                       icon={<Loader2 className="h-3.5 w-3.5 animate-spin" />}
                     >
                       Processing

@@ -158,7 +158,7 @@ export const SystemLogsPanel: React.FC = () => {
 
           {filteredLogs.map((log, idx) => {
             const lvl = (log.level || '').toUpperCase();
-            let lvlColor = 'text-sky-400';
+            let lvlColor = 'text-info-400';
             if (lvl === 'ERROR') lvlColor = 'text-red-400 font-bold';
             else if (lvl === 'WARN' || lvl === 'WARNING') lvlColor = 'text-amber-400 font-bold';
             else if (lvl === 'DEBUG') lvlColor = 'text-neutral-500';

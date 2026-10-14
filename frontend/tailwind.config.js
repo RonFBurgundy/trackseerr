@@ -20,6 +20,14 @@ export default {
           led: "#e5a00d",
           ledGlow: "rgba(229, 160, 13, 0.25)",
         },
+        // In-progress / informational status colour. Restyle here, never with raw blue/sky classes.
+        info: {
+          300: "#93c5fd",
+          400: "#60a5fa",
+          500: "#3b82f6",
+          800: "#1e40af",
+          950: "#172554",
+        },
       },
       borderRadius: {
         fillet: "4px",

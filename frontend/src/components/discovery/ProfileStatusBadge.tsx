@@ -30,7 +30,7 @@ export const ProfileStatusBadge: React.FC<ProfileStatusBadgeProps> = React.memo(
     return <span className={`${BASE} bg-[#e5a00d]/90 text-black ${className}`}>Requested</span>;
   }
   if (status === 'processing') {
-    return <span className={`${BASE} bg-blue-500/90 text-white ${className}`}>Processing</span>;
+    return <span className={`${BASE} bg-info-500/90 text-white ${className}`}>Processing</span>;
   }
   if (status === 'rejected') {
     return <span className={`${BASE} bg-red-950/60 text-red-300 border border-red-800/50 ${className}`}>Rejected</span>;

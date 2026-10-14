@@ -121,7 +121,7 @@ export const DiscoveryTrackModal: React.FC<DiscoveryTrackModalProps> = ({
                 Album Requested
               </TapeDeckButton>
             ) : albumBusy ? (
-              <TapeDeckButton size="md" disabled className="border-blue-500/30 text-blue-400" icon={<Loader2 className="h-4 w-4 animate-spin" />}>
+              <TapeDeckButton size="md" disabled className="border-info-500/30 text-info-400" icon={<Loader2 className="h-4 w-4 animate-spin" />}>
                 Processing
               </TapeDeckButton>
             ) : (
