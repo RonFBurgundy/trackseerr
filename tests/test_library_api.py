@@ -1286,3 +1286,40 @@ def test_rename_apply_never_removes_root(
     assert res["renamed_count"] == 1
     assert root.is_dir()
     assert (root / "Artist1" / "Closer (2000)" / "01 - Song 1.flac").exists()
+
+
+# =========================================================================
+# 10. Rename Safety Warnings Endpoint
+# =========================================================================
+
+def test_rename_safety_with_warnings(app_and_client, test_db: Database, test_config: Config, seeded_users):
+    app, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    mock_server = MagicMock()
+    mock_server.rename_warnings.return_value = ["Warning 1", "Warning 2"]
+
+    with patch("trackseerr.api.routes.library.tagging.as_media_server", return_value=mock_server):
+        res = client.get("/api/library/rename/safety", headers=admin_headers)
+
+    assert res.status_code == 200
+    assert res.json() == {"warnings": ["Warning 1", "Warning 2"]}
+
+
+def test_rename_safety_no_media_server(app_and_client, test_db: Database, test_config: Config, seeded_users):
+    app, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    app.dependency_overrides[get_plex_client] = lambda: None
+    res = client.get("/api/library/rename/safety", headers=admin_headers)
+
+    assert res.status_code == 200
+    assert res.json() == {"warnings": []}
+
+
+def test_rename_safety_forbidden_for_non_admin(app_and_client, test_db: Database, test_config: Config, seeded_users):
+    _, client = app_and_client
+    alice_headers = _auth_headers(seeded_users["alice"], test_db, test_config)
+
+    res = client.get("/api/library/rename/safety", headers=alice_headers)
+    assert res.status_code == 403
