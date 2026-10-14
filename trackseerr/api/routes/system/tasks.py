@@ -69,17 +69,20 @@ from trackseerr.task_manager import (
     GROUP_LABELS,
     GROUP_ORDER,
     KIND_INTERVAL,
+    PAUSABLE_TASKS,
     TASKS,
     TRIGGER_MANUAL,
     RunHandle,
     default_interval_seconds,
     effective_interval_seconds,
     format_interval,
+    is_paused,
     next_run_at,
     parse_iso,
     record_task_run,
     schedule_disabled,
     set_interval_override,
+    set_paused,
 )
 
 
@@ -99,6 +102,8 @@ class ScheduledTaskItem(ApiModel):
     last_run_at: Optional[str] = None
     can_trigger: bool = True
     can_cancel: bool = False
+    can_pause: bool = False
+    paused: bool = False
     schedule_kind: str = "manual"  # "interval" | "continuous" | "manual"
     group: str = "maintenance"
     group_label: str = "Maintenance"
@@ -349,6 +354,11 @@ def get_all_scheduled_tasks(
                 else "Automatic recycle bin cleanup is off (cleanup days is 0)."
             )
 
+        can_pause = spec.id in PAUSABLE_TASKS and not unscheduled
+        paused = bool(can_pause and is_paused(db, spec.id))
+        if paused and status_val != "running":
+            status_val = "paused"
+
         tasks.append(
             ScheduledTaskItem(
                 id=spec.id,
@@ -359,6 +369,8 @@ def get_all_scheduled_tasks(
                 last_run_at=last_run,
                 can_trigger=spec.id in _MANUAL_RUNNABLE,
                 can_cancel=can_cancel,
+                can_pause=can_pause,
+                paused=paused,
                 schedule_kind="manual" if unscheduled else spec.kind,
                 group=spec.group,
                 group_label=GROUP_LABELS.get(spec.group, "Maintenance"),
@@ -367,7 +379,7 @@ def get_all_scheduled_tasks(
                 interval_presets=[] if unscheduled else list(spec.presets),
                 editable=spec.editable and not unscheduled,
                 next_run_at=None
-                if (status_val == "running" or unscheduled)
+                if (status_val in ("running", "paused") or unscheduled)
                 else next_run_at(spec, effective, last_finished),
                 last_run_status=(finished_row or {}).get("status"),
                 last_duration_ms=(finished_row or {}).get("duration_ms"),
@@ -444,6 +456,53 @@ def set_task_schedule(
     except sqlite3.Error as ev_err:
         logger.warning("Failed to record task_schedule_changed event: %s", safe_exc(ev_err))
     return next(item for item in get_all_scheduled_tasks(db, config) if item.id == task_id)
+
+
+def _record_task_event(db: Database, task_id: str, kind: str, message: str) -> None:
+    try:
+        db.record_event(
+            kind,
+            message,
+            source="TaskManager",
+            severity="info",
+            details={"task_id": task_id},
+        )
+    except sqlite3.Error as exc:
+        logger.warning("Failed to record %s event: %s", kind, safe_exc(exc))
+
+
+class TaskPauseUpdate(BaseModel):
+    """Body of ``PUT /tasks/{task_id}/pause``."""
+
+    model_config = ConfigDict(extra="forbid")
+    paused: bool
+
+
+@router.put(
+    "/tasks/{task_id}/pause",
+    response_model=TaskActionResult,
+    summary="Pause or resume a scheduled interval task",
+)
+def set_task_pause(
+    task_id: str,
+    body: TaskPauseUpdate,
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> TaskActionResult:
+    """Pauses or resumes a scheduled interval task (admin required)."""
+    if task_id not in TASKS:
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+    if task_id not in PAUSABLE_TASKS:
+        raise HTTPException(status_code=400, detail=f"Task '{task_id}' cannot be paused")
+    try:
+        set_paused(db, task_id, body.paused)
+    except sqlite3.Error as exc:
+        logger.error("Could not update pause state for '%s': %s", task_id, safe_exc(exc))
+        raise HTTPException(status_code=500, detail="Could not update pause state")
+    action_kind = "task_paused" if body.paused else "task_resumed"
+    action_msg = f"Scheduled task '{task_id}' " + ("paused" if body.paused else "resumed") + " by admin"
+    _record_task_event(db, task_id, action_kind, action_msg)
+    return TaskActionResult(success=True, message="Paused" if body.paused else "Resumed")
 
 
 @router.get(
@@ -803,16 +862,7 @@ def get_lidarr_health(
 
 
 def _record_cancel_event(db: Database, task_id: str) -> None:
-    try:
-        db.record_event(
-            "task_cancelled",
-            f"Scheduled task '{task_id}' cancelled by admin",
-            source="TaskManager",
-            severity="info",
-            details={"task_id": task_id},
-        )
-    except sqlite3.Error as exc:
-        logger.warning("Failed to record task_cancelled event: %s", safe_exc(exc))
+    _record_task_event(db, task_id, "task_cancelled", f"Scheduled task '{task_id}' cancelled by admin")
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=TaskActionResult, response_model_exclude_unset=True, summary="Cancel a running scheduled task")
