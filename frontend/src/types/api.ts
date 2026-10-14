@@ -2778,6 +2778,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/rename/safety": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Rename Safety
+         * @description Reports warnings about media-server settings that could drop play history or ratings during a rename.
+         */
+        get: operations["rename_safety_api_library_rename_safety_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/rename/verify": {
         parameters: {
             query?: never;
@@ -12137,6 +12157,11 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** RenameSafetyResponse */
+        RenameSafetyResponse: {
+            /** Warnings */
+            warnings?: string[];
+        };
         /** RenameVerification */
         RenameVerification: {
             /** Actual Album Id */
@@ -18876,6 +18901,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_safety_api_library_rename_safety_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenameSafetyResponse"];
                 };
             };
         };
