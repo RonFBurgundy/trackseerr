@@ -260,33 +260,30 @@ def fetch_listening_tracks(db: Any, config: Any, playlist: dict[str, Any]) -> li
     return tracks
 
 
-def auto_request_missing(db: Any, config: Any, playlist: dict[str, Any]) -> dict[str, int]:
-    """Requests a listening playlist's missing tracks as its owner, when the playlist opted in and the owner may.
+def request_missing_tracks(db: Any, config: Any, playlist: dict[str, Any], owner: dict[str, Any]) -> dict[str, int]:
+    """Requests a playlist's not-yet-applied missing tracks as ``owner`` and stamps each one handled.
 
-    The owner's rights are re-read on every call; a revoked permission silently stops requesting without touching
-    the stored opt-in. Quota, duplicate and approval policy are those of ``submit_track_request``; the first quota
-    rejection ends the pass (logged once) and the rest are retried on the next sync. Returns apply-style counts.
+    Quota, duplicate, in-library and approval policy are those of ``submit_track_request``; the first quota
+    rejection ends the pass (logged once) and the rest are retried on the next sync. A track that is already
+    requested or owned is stamped and counted as ``existing``. Returns apply-style counts.
     """
-    counts = {"applied": 0, "unresolved": 0, "pending": 0, "failed": 0}
-    if not playlist.get("auto_request"):
-        return counts
+    counts = {"applied": 0, "existing": 0, "unresolved": 0, "pending": 0, "failed": 0}
     playlist_id = str(playlist["id"])
-    owner_id = playlist.get("creator_id")
-    owner = db.get_user(str(owner_id)) if owner_id else None
-    if owner is None or not user_may_auto_request(owner):
-        logger.info("Playlist %s: owner may no longer auto-request tracks; skipping requests", playlist_id)
-        return counts
     trigger = GrabTrigger(
         TRIGGER_PLAYLIST, ref=playlist_id, label=playlist.get("name"), actor_user_id=str(owner["id"])
     )
     for row in (t for t in db.get_missing_tracks(playlist_id) if not t.get("list_applied_at")):
         track_id = int(row["id"])
+        title = str(row.get("title") or "").strip()
+        if not title:
+            counts["unresolved"] += 1
+            continue
         try:
             submit_track_request(
                 db,
                 config,
                 owner,
-                str(row.get("title") or ""),
+                title,
                 str(row.get("artist") or ""),
                 str(row.get("album") or "") or None,
                 source="playlist",
@@ -296,7 +293,7 @@ def auto_request_missing(db: Any, config: Any, playlist: dict[str, Any]) -> dict
             if exc.code in ("duplicate", "in_library"):
                 # Already requested or owned: remember it so the sync stops asking.
                 db.mark_missing_tracks_list_applied([track_id])
-                counts["applied"] += 1
+                counts["existing"] += 1
                 continue
             logger.info("Playlist %s: request quota reached, no further requests this sync (%s)", playlist_id, exc.detail)
             counts["pending"] += 1
@@ -310,6 +307,24 @@ def auto_request_missing(db: Any, config: Any, playlist: dict[str, Any]) -> dict
     return counts
 
 
+def auto_request_missing(db: Any, config: Any, playlist: dict[str, Any]) -> dict[str, int]:
+    """Requests a listening playlist's missing tracks as its owner, when the playlist opted in and the owner may.
+
+    The owner's rights are re-read on every call; a revoked permission silently stops requesting without touching
+    the stored opt-in. The requesting itself is ``request_missing_tracks``. Returns apply-style counts.
+    """
+    counts = {"applied": 0, "existing": 0, "unresolved": 0, "pending": 0, "failed": 0}
+    if not playlist.get("auto_request"):
+        return counts
+    playlist_id = str(playlist["id"])
+    owner_id = playlist.get("creator_id")
+    owner = db.get_user(str(owner_id)) if owner_id else None
+    if owner is None or not user_may_auto_request(owner):
+        logger.info("Playlist %s: owner may no longer auto-request tracks; skipping requests", playlist_id)
+        return counts
+    return request_missing_tracks(db, config, playlist, owner)
+
+
 __all__ = [
     "LISTENING_SERVICES",
     "ListeningSourceError",
@@ -319,6 +334,7 @@ __all__ = [
     "fetch_listening_tracks",
     "list_sources",
     "playlist_id_for",
+    "request_missing_tracks",
     "resolve_created_for_slug",
     "validate_source",
 ]

@@ -386,14 +386,23 @@ def test_duplicate_is_treated_as_requested(db, config):
     pid = _listening_row(db)
     with patch(SUBMIT, side_effect=RequestRejected("duplicate", 409, "dup")) as submit:
         counts = apply_playlist_missing(db, config, pid)
-    assert submit.call_count == 3 and counts["applied"] == 3
+    assert submit.call_count == 3 and counts["existing"] == 3 and counts["applied"] == 0
+    assert all(t["list_applied_at"] for t in db.get_missing_tracks(pid))
+
+
+def test_in_library_rejection_counts_as_existing(db, config):
+    pid = _listening_row(db)
+    with patch(SUBMIT, side_effect=RequestRejected("in_library", 409, "owned")) as submit:
+        counts = apply_playlist_missing(db, config, pid)
+    assert submit.call_count == 3 and counts["existing"] == 3 and counts["applied"] == 0
+    assert all(t["list_applied_at"] for t in db.get_missing_tracks(pid))
 
 
 def test_one_bad_item_does_not_stop_the_rest(db, config):
     pid = _listening_row(db)
     with patch(SUBMIT, side_effect=[RuntimeError("boom"), None, None]) as submit:
         counts = apply_playlist_missing(db, config, pid)
-    assert submit.call_count == 3 and counts == {"applied": 2, "unresolved": 0, "pending": 0, "failed": 1}
+    assert submit.call_count == 3 and counts == {"applied": 2, "existing": 0, "unresolved": 0, "pending": 0, "failed": 1}
 
 
 def test_revoked_permission_stops_requests_but_keeps_the_opt_in(db, config):
