@@ -154,3 +154,12 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     catalog tracks already store `monitored_at`/`added_at`; if not, a schema migration that backfills from
     `created_at`), exposed by `/api/wanted/missing` (`trackseerr/api/routes/wanted.py` ~L67) with a `sort=added`
     option, and a column/chip on `wanted/WantedPanel.tsx`. Backend then frontend handoff; regen API types.
+21. **P2 · Artist discography tabs ignore the metadata profile.** User applied a profile (primary album/ep/single,
+    secondary studio/remix) and still sees Live and Compilations tabs full of dimmed out-of-profile albums. Tabs are
+    hardcoded and split on `album_type` only (`categorize()` + `tabs` in `frontend/src/components/library/ArtistDetail.tsx`
+    ~L82 / ~L243); "Hide outside profile" (~L126, ~L258) is off by default and not remembered. Agreed fix: when the
+    artist has a profile, default hide-outside to on (toggle still shows excluded albums); hide any tab with no
+    in-profile albums; add a Remixes tab when the profile allows `remix`. First confirm how remix releases are stored
+    (`album_type` vs `secondary_types` on the album payload). Remix releases currently seem to land in Studio, and
+    categorizing by secondary type may need `secondary_types` exposed on the album item (backend + gen:api if so).
+    Don't relabel tabs. A tab is a release type. Frontend skill applies.
