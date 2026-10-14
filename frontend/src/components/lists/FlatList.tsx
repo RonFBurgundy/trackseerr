@@ -5,10 +5,11 @@ import type { ListSortDir } from '@/types/activity';
 import type { ListKey, VirtualPagedList } from '@/hooks/useVirtualPagedList';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useFillViewportHeight } from '@/hooks/useFillViewportHeight';
-import { TapeDeckButton } from '@/components/ui';
+import { SelectionCheckbox, TapeDeckButton, type OverflowMenuItem } from '@/components/ui';
 import { ListViewportContext, type ListViewport } from './ListViewportContext';
 import { ListErrorBar, ListStates } from './ListStates';
 import { cancelJumpsOnUserScroll, createScrollJumper } from './scrollJump';
+import { ItemCard } from './ItemCard';
 
 export interface FlatListColumn<T> {
   key: string;
@@ -69,9 +70,19 @@ export interface FlatListProps<T> {
   mobileLayout?: 'compact' | 'stacked';
   /** Hide the column-sort chip row on mobile (when the panel already offers a sort control). Default false. */
   hideMobileSortBar?: boolean;
+  /**
+   * Layout mode: `table` (default, desktop sticky-header grid, mobile card) or
+   * `card` (ItemCard on all viewports without desktop grid header, with sort bar on all viewports).
+   */
+  layout?: 'table' | 'card';
+  rowMenu?: (item: T) => OverflowMenuItem[];
+  rowMenuLabel?: (item: T) => string;
+  rowMonitor?: (item: T) => React.ReactNode;
+  rowDetails?: (item: T) => React.ReactNode | null;
+  rowAttention?: (item: T) => { label: string; onSelect: () => void } | null;
 }
 
-interface MobileCardLayout<T> {
+export interface MobileCardLayout<T> {
   title: FlatListColumn<T>;
   sub: ReadonlyArray<FlatListColumn<T>>;
   meta: ReadonlyArray<FlatListColumn<T>>;
@@ -79,7 +90,7 @@ interface MobileCardLayout<T> {
 }
 
 /** Splits the columns into the compact card's lines. Null when no column can be the title. */
-function buildMobileLayout<T>(columns: ReadonlyArray<FlatListColumn<T>>): MobileCardLayout<T> | null {
+export function buildMobileLayout<T>(columns: ReadonlyArray<FlatListColumn<T>>): MobileCardLayout<T> | null {
   const roleOf = (c: FlatListColumn<T>): MobileRole => c.mobile ?? (c.hideOnMobile ? 'hide' : 'sub');
   const visible = columns.filter((c) => roleOf(c) !== 'hide');
   const title = visible.find((c) => c.mobile === 'title') ?? visible.find((c) => c.mobile === undefined) ?? visible[0];
@@ -97,7 +108,7 @@ function buildMobileLayout<T>(columns: ReadonlyArray<FlatListColumn<T>>): Mobile
 const COMPACT_ROW_PX = 64;
 const COMPACT_ROW_META_PX = 72;
 
-const TONE_CLASS: Record<'warning' | 'error', string> = {
+export const TONE_CLASS: Record<'warning' | 'error', string> = {
   warning: 'border-l-[#e5a00d]',
   error: 'border-l-red-500',
 };
@@ -151,7 +162,6 @@ function CardInner<T>({
   rowActions,
   tone,
 }: RowProps<T> & { card: MobileCardLayout<T> }) {
-  const rowUid = useId();
   const actions = rowActions ? rowActions(item) : null;
   const hasEnd = card.end.length > 0 || actions !== null;
   return (
@@ -165,14 +175,11 @@ function CardInner<T>({
     >
       {selectable && (
         <div role="cell" className="shrink-0 flex items-center justify-center w-6 self-stretch">
-          <input
-            type="checkbox"
-            id={`${rowUid}-select`}
-            name="select-row"
+          <SelectionCheckbox
+            inline
             checked={selected}
+            label="Select row"
             onChange={() => onToggle(rowKey)}
-            aria-label="Select row"
-            className="h-5 w-5 accent-[#e5a00d] cursor-pointer"
           />
         </div>
       )}
@@ -310,6 +317,12 @@ export function FlatList<T>({
   maxHeight,
   mobileLayout = 'stacked',
   hideMobileSortBar = false,
+  layout = 'table',
+  rowMenu,
+  rowMenuLabel,
+  rowMonitor,
+  rowDetails,
+  rowAttention,
 }: FlatListProps<T>): React.ReactElement {
   const { total, loading, error, getItem, ensureRange, version, generation, reload, retry, bindScroller } = list;
   const selectable = selectedKeys !== undefined && onSelectedKeysChange !== undefined;
@@ -323,17 +336,37 @@ export function FlatList<T>({
   const fillHeight = useFillViewportHeight(wrapperRef);
   const jumperRef = useRef(createScrollJumper());
 
-  const card = useMemo(
-    (): MobileCardLayout<T> | null => (!isDesktop && mobileLayout === 'compact' ? buildMobileLayout(columns) : null),
-    [isDesktop, mobileLayout, columns]
+  const isCard = layout === 'card';
+  const cardLayout = useMemo(
+    (): MobileCardLayout<T> | null => (isCard ? buildMobileLayout(columns) : null),
+    [isCard, columns]
   );
 
+  const card = useMemo(
+    (): MobileCardLayout<T> | null =>
+      isCard ? null : (!isDesktop && mobileLayout === 'compact' ? buildMobileLayout(columns) : null),
+    [isCard, isDesktop, mobileLayout, columns]
+  );
+
+  const [expandedKeys, setExpandedKeys] = useState<ReadonlySet<ListKey>>(new Set());
+  const toggleExpand = useCallback((key: ListKey) => {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
   const estimate = useMemo((): number => {
+    if (isCard) {
+      return cardLayout?.meta.length ? COMPACT_ROW_META_PX : COMPACT_ROW_PX;
+    }
     if (isDesktop) return DESKTOP_ROW_ESTIMATE_PX;
     if (card) return card.meta.length > 0 ? COMPACT_ROW_META_PX : COMPACT_ROW_PX;
     const mobileCols = columns.filter((c) => !c.hideOnMobile).length;
     return 22 + mobileCols * 24 + (rowActions ? 44 : 0) + (selectable ? 44 : 0);
-  }, [isDesktop, card, columns, rowActions, selectable]);
+  }, [isCard, cardLayout, isDesktop, card, columns, rowActions, selectable]);
 
   const virtualizer = useVirtualizer({
     count: total,
@@ -466,56 +499,58 @@ export function FlatList<T>({
           >
             <div ref={headerRef} className="sticky top-0 z-10">
               {/* Desktop header */}
-              <div
-                role="row"
-                className="hidden lg:grid lg:[grid-template-columns:var(--cols)] xl:[grid-template-columns:var(--cols-xl)] gap-3 items-center px-3 py-2 bg-[#121212] border-b border-[#2a2a2a] text-[10px] uppercase tracking-wider text-neutral-400 font-mono"
-              >
-                {selectable && (
-                  <div role="columnheader">
-                    <input
-                      ref={selectAllRef}
-                      id={`${listUid}-select-all-desktop`}
-                      name="select-all-loaded"
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={toggleAll}
-                      disabled={loaded.length === 0}
-                      aria-label="Select all loaded rows"
-                      className="h-4 w-4 accent-[#e5a00d] cursor-pointer"
-                    />
-                  </div>
-                )}
-                {columns.map((col) => (
-                  <div
-                    key={col.key}
-                    role="columnheader"
-                    aria-sort={
-                      col.sortable && col.key === sortKey ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined
-                    }
-                    className={`${col.xlOnly ? 'hidden xl:block ' : ''}${col.align === 'right' ? 'text-right' : ''}`}
-                  >
-                    {col.sortable ? (
-                      <button
-                        type="button"
-                        onClick={() => handleSort(col)}
-                        className={`inline-flex items-center gap-1 uppercase tracking-wider hover:text-white ${
-                          col.key === sortKey ? 'text-white' : ''
-                        }`}
-                      >
-                        {col.label}
-                        {sortIndicator(col)}
-                      </button>
-                    ) : (
-                      col.label
-                    )}
-                  </div>
-                ))}
-                {rowActions && <div role="columnheader" className="text-right">{actionsLabel}</div>}
-              </div>
+              {layout !== 'card' && (
+                <div
+                  role="row"
+                  className="hidden lg:grid lg:[grid-template-columns:var(--cols)] xl:[grid-template-columns:var(--cols-xl)] gap-3 items-center px-3 py-2 bg-[#121212] border-b border-[#2a2a2a] text-[10px] uppercase tracking-wider text-neutral-400 font-mono"
+                >
+                  {selectable && (
+                    <div role="columnheader">
+                      <input
+                        ref={selectAllRef}
+                        id={`${listUid}-select-all-desktop`}
+                        name="select-all-loaded"
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={toggleAll}
+                        disabled={loaded.length === 0}
+                        aria-label="Select all loaded rows"
+                        className="h-4 w-4 accent-[#e5a00d] cursor-pointer"
+                      />
+                    </div>
+                  )}
+                  {columns.map((col) => (
+                    <div
+                      key={col.key}
+                      role="columnheader"
+                      aria-sort={
+                        col.sortable && col.key === sortKey ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined
+                      }
+                      className={`${col.xlOnly ? 'hidden xl:block ' : ''}${col.align === 'right' ? 'text-right' : ''}`}
+                    >
+                      {col.sortable ? (
+                        <button
+                          type="button"
+                          onClick={() => handleSort(col)}
+                          className={`inline-flex items-center gap-1 uppercase tracking-wider hover:text-white ${
+                            col.key === sortKey ? 'text-white' : ''
+                          }`}
+                        >
+                          {col.label}
+                          {sortIndicator(col)}
+                        </button>
+                      ) : (
+                        col.label
+                      )}
+                    </div>
+                  ))}
+                  {rowActions && <div role="columnheader" className="text-right">{actionsLabel}</div>}
+                </div>
+              )}
 
-              {/* Mobile sort bar */}
+              {/* Sort bar (all viewports when layout="card", below lg when layout="table") */}
               {(!hideMobileSortBar || selectable) && (
-              <div className="lg:hidden flex items-center gap-1.5 overflow-x-auto px-2 py-1.5 bg-[#121212] border-b border-[#2a2a2a]">
+              <div className={`${layout === 'card' ? 'flex' : 'lg:hidden flex'} items-center gap-1.5 overflow-x-auto px-2 py-1.5 bg-[#121212] border-b border-[#2a2a2a]`}>
                 {selectable && (
                   <label className="flex items-center gap-1.5 text-[10px] uppercase font-mono text-neutral-400 shrink-0 min-h-[36px] pr-2">
                     <input
@@ -582,17 +617,35 @@ export function FlatList<T>({
                       style={{ transform: `translateY(${vi.start - headerH}px)` }}
                     >
                       {item !== undefined ? (
-                        <Row<T>
-                          item={item}
-                          rowKey={key}
-                          columns={columns}
-                          selectable={selectable}
-                          selected={selectedKeys?.has(key) ?? false}
-                          onToggle={toggleKey}
-                          rowActions={rowActions}
-                          tone={rowTone ? rowTone(item) : null}
-                          card={card}
-                        />
+                        layout === 'card' && cardLayout ? (
+                          <ItemCard<T>
+                            item={item}
+                            columns={cardLayout}
+                            tone={rowTone ? rowTone(item) : null}
+                            selectable={selectable}
+                            selected={selectedKeys?.has(key) ?? false}
+                            onToggle={() => toggleKey(key)}
+                            menu={rowMenu ? rowMenu(item) : undefined}
+                            menuLabel={rowMenuLabel ? rowMenuLabel(item) : 'Row actions'}
+                            monitor={rowMonitor ? rowMonitor(item) : undefined}
+                            details={rowDetails ? rowDetails(item) : null}
+                            attention={rowAttention ? rowAttention(item) : null}
+                            expanded={expandedKeys.has(key)}
+                            onToggleExpand={() => toggleExpand(key)}
+                          />
+                        ) : (
+                          <Row<T>
+                            item={item}
+                            rowKey={key}
+                            columns={columns}
+                            selectable={selectable}
+                            selected={selectedKeys?.has(key) ?? false}
+                            onToggle={toggleKey}
+                            rowActions={rowActions}
+                            tone={rowTone ? rowTone(item) : null}
+                            card={card}
+                          />
+                        )
                       ) : (
                         <PlaceholderRow height={estimate} />
                       )}
