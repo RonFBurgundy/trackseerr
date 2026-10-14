@@ -439,21 +439,41 @@ class PlaylistStoreMixin:
     # Sync Results & Missing Tracks
     # -------------------------------------------------------------------------
 
+    def get_playlist_sync_fingerprint(self, playlist_id: str) -> tuple[Optional[str], Optional[str]]:
+        """Returns ``(sync_fingerprint, last_synced_at)`` for a playlist; ``(None, None)`` if it does not exist."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT sync_fingerprint, last_synced_at FROM playlists WHERE id = ?", (str(playlist_id),)
+            ).fetchone()
+        if row is None:
+            return None, None
+        return row["sync_fingerprint"], row["last_synced_at"]
+
+    def latest_library_file_change(self) -> Optional[str]:
+        """Newest ``library_files.updated_at`` (SQLite CURRENT_TIMESTAMP text), or None for an empty library."""
+        with self._lock:
+            row = self.conn.execute("SELECT MAX(updated_at) FROM library_files").fetchone()
+        return row[0] if row and row[0] else None
+
     def record_sync_result(
         self,
         playlist_id: str,
         status: str,
         missing_tracks: Optional[list[Union[Track, dict[str, Any]]]] = None,
+        fingerprint: Optional[str] = None,
     ) -> None:
+        """Records a sync outcome. ``fingerprint`` is kept only for a successful sync; any other status clears it."""
         p_id = str(playlist_id)
+        stored_fingerprint = fingerprint if str(status) == "success" else None
         with self._lock:
             self.conn.execute(
                 """
                 UPDATE playlists
-                SET sync_status = ?, last_synced_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                SET sync_status = ?, last_synced_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
+                    sync_fingerprint = ?
                 WHERE id = ?
                 """,
-                (str(status), p_id),
+                (str(status), stored_fingerprint, p_id),
             )
             # Preserve existing lidarr_status across sync cycles
             existing_lidarr_status: dict[tuple[str, str], str] = {}

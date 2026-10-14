@@ -15,6 +15,7 @@ class SyncRunStats(ApiModel):
     success_count: int
     total_matched: int
     total_missing: int
+    skipped_unchanged: int = 0
 
 
 class SyncStatusResponse(ApiModel):

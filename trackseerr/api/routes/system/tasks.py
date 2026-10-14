@@ -588,6 +588,7 @@ def run_scheduled_task(  # noqa: C901, PLR0915
                     plex_client=plex_client,
                     spotify_client=spotify_client,
                     deezer_client=deezer_client,
+                    force=True,
                 )
             )
 
