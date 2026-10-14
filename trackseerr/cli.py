@@ -28,6 +28,7 @@ from .redaction import RedactLogFilter, redact_sensitive_query, redact_text, saf
 from .security import safe_data_path
 from .storage import Database
 from .sync import SyncCoordinator
+from . import task_manager
 from .task_manager import (
     TRIGGER_SCHEDULED,
     effective_interval_seconds,
@@ -881,6 +882,9 @@ def _serve(
 
             gateway_link_worker.stop()
         if role != "gateway":
+            signalled = task_manager.cancel_all_manual_runs()
+            if signalled > 0:
+                logger.info("Signalled %d running manual task(s) to stop", signalled)
             for label, module_name, attr in (
                 ("AcquisitionWorker", "acquisition_worker", "acquisition_worker"),
                 ("ArtistRefreshWorker", "artist_refresh_worker", "artist_refresh_worker"),
