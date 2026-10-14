@@ -47,6 +47,10 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
 
+      - name: Check UI guard (no stray blue classes or native controls)
+        run: npm run check:ui
+        working-directory: frontend
+
       - name: Typecheck frontend
         run: npx tsc --noEmit
         working-directory: frontend
