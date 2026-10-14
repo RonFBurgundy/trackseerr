@@ -1,7 +1,7 @@
 import React, { useId, useRef } from 'react';
 import { ArrowRight, Check, Image, Loader2, RefreshCw, Tag } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ObsidianModal, TapeDeckButton } from '@/components/ui';
+import { ObsidianModal, SelectionCheckbox, TactileSwitch, TapeDeckButton } from '@/components/ui';
 import { useRetagPreview } from '@/hooks/useRetagPreview';
 import type { RetagPreviewItem, RetagFieldDiff } from '@/services/retagService';
 
@@ -56,7 +56,6 @@ function formatFieldName(field: string): string {
 }
 
 export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagged }) => {
-  const selectAllId = useId();
   const embedArtId = useId();
   const isOpen = scope !== null;
 
@@ -92,7 +91,6 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
 
   const selectableItems = items.filter((item) => !item.skipped_reason);
   const allSelected = selectableItems.length > 0 && selectedIds.size === selectableItems.length;
-  const isIndeterminate = selectedIds.size > 0 && !allSelected;
 
   const handleApply = async () => {
     const res = await apply();
@@ -236,23 +234,17 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
                 {/* Header Toolbar */}
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#222222] pb-2 text-xs font-mono">
                   <div className="flex items-center gap-2">
-                    <input
-                      id={selectAllId}
+                    <SelectionCheckbox
                       name="retag-select-all"
-                      type="checkbox"
                       checked={allSelected}
-                      ref={(el) => {
-                        if (el) el.indeterminate = isIndeterminate;
+                      onChange={() => {
+                        if (allSelected) selectNone();
+                        else selectAll();
                       }}
-                      onChange={(e) => {
-                        if (e.target.checked) selectAll();
-                        else selectNone();
-                      }}
-                      className="h-5 w-5 accent-[#e5a00d] cursor-pointer"
+                      label="Select all"
+                      inline
                     />
-                    <label htmlFor={selectAllId} className="cursor-pointer text-neutral-300">
-                      Select all
-                    </label>
+                    <span className="text-neutral-300">Select all</span>
                     <span className="text-neutral-500">•</span>
                     <button
                       type="button"
@@ -273,18 +265,14 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
 
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-1.5 text-neutral-300">
-                      <input
+                      <Image className="h-3.5 w-3.5 text-neutral-400 shrink-0" />
+                      <TactileSwitch
                         id={embedArtId}
                         name="retag-embed-art"
-                        type="checkbox"
+                        label="Embed artwork"
                         checked={embedArt}
-                        onChange={(e) => setEmbedArt(e.target.checked)}
-                        className="h-5 w-5 accent-[#e5a00d] cursor-pointer"
+                        onChange={setEmbedArt}
                       />
-                      <label htmlFor={embedArtId} className="cursor-pointer flex items-center gap-1 text-xs">
-                        <Image className="h-3.5 w-3.5 text-neutral-400" />
-                        <span>Embed artwork</span>
-                      </label>
                     </div>
 
                     <span className="text-neutral-500">•</span>
@@ -325,7 +313,6 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
                       const item: RetagPreviewItem = items[virtualRow.index];
                       const isSelected = selectedIds.has(item.file_id);
                       const isSkipped = Boolean(item.skipped_reason);
-                      const checkboxId = `retag-item-${item.file_id}`;
                       const diffList: RetagFieldDiff[] = item.changes ?? item.diffs ?? [];
 
                       return (
@@ -345,19 +332,14 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
                           }`}
                         >
                           <div className="pt-0.5 shrink-0">
-                            <input
-                              id={checkboxId}
+                            <SelectionCheckbox
                               name={`retag-file-${item.file_id}`}
-                              type="checkbox"
                               checked={isSelected}
                               disabled={isSkipped}
                               onChange={() => toggleSelect(item.file_id)}
-                              aria-label={`Select retag for ${item.path}`}
-                              className="h-5 w-5 accent-[#e5a00d] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                              label={`Select retag for ${item.path}`}
+                              inline
                             />
-                            <label htmlFor={checkboxId} className="sr-only">
-                              Select retag for {item.path}
-                            </label>
                           </div>
 
                           <div className="min-w-0 flex-1 space-y-1.5 font-mono text-[11px] leading-tight">

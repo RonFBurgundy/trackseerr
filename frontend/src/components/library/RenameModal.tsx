@@ -1,7 +1,7 @@
-import React, { useId, useRef } from 'react';
+import React, { useRef } from 'react';
 import { ArrowRight, AudioLines, Check, FileCheck, Link2, Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ObsidianModal, TactileSwitch, TapeDeckButton } from '@/components/ui';
+import { ObsidianModal, SelectionCheckbox, TactileSwitch, TapeDeckButton } from '@/components/ui';
 import { useRenamePreview } from '@/hooks/useRenamePreview';
 import { useRenameRelink } from '@/hooks/useRenameRelink';
 import { useRenameVerify } from '@/hooks/useRenameVerify';
@@ -135,7 +135,6 @@ const RelinkFileCard: React.FC<{ heading: string; file: RenameRelinkFile; better
 );
 
 export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRenamed }) => {
-  const selectAllId = useId();
   const isOpen = scope !== null;
   const {
     items,
@@ -203,7 +202,6 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
     0
   );
   const allSelected = filteredItems.length > 0 && selectedInView === filteredItems.length;
-  const isIndeterminate = selectedInView > 0 && !allSelected;
   const reasonCodes = Object.keys(reasonCounts).sort((a, b) => reasonCounts[b] - reasonCounts[a]);
 
   const handleApply = async () => {
@@ -362,23 +360,17 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                 {/* Header Toolbar */}
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#222222] pb-2 text-xs font-mono">
                   <div className="flex items-center gap-2">
-                    <input
-                      id={selectAllId}
+                    <SelectionCheckbox
                       name="rename-select-all"
-                      type="checkbox"
                       checked={allSelected}
-                      ref={(el) => {
-                        if (el) el.indeterminate = isIndeterminate;
+                      onChange={() => {
+                        if (allSelected) selectNone();
+                        else selectAll();
                       }}
-                      onChange={(e) => {
-                        if (e.target.checked) selectAll();
-                        else selectNone();
-                      }}
-                      className="h-5 w-5 accent-[#e5a00d] cursor-pointer"
+                      label="Select all"
+                      inline
                     />
-                    <label htmlFor={selectAllId} className="cursor-pointer text-neutral-300">
-                      Select all
-                    </label>
+                    <span className="text-neutral-300">Select all</span>
                     <span className="text-neutral-500">•</span>
                     <button
                       type="button"
@@ -497,7 +489,6 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                     {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                       const item: RenamePreviewItem = filteredItems[virtualRow.index];
                       const isSelected = selectedIds.has(item.file_id);
-                      const checkboxId = `rename-item-${item.file_id}`;
                       const diff = diffPaths(item.current_path, item.proposed_path);
                       const mismatch = item.verification?.status === 'mismatch';
 
@@ -517,22 +508,15 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                             isSelected ? 'bg-[#181818]' : 'hover:bg-[#141414]'
                           }`}
                         >
-                          <div className="pt-0.5 shrink-0">
-                            <input
-                              id={checkboxId}
+                          <div className="pt-0.5 shrink-0" title={mismatch ? 'Blocked: the audio is a different track' : undefined}>
+                            <SelectionCheckbox
                               name={`rename-file-${item.file_id}`}
-                              type="checkbox"
                               checked={isSelected}
                               disabled={mismatch}
-                              aria-disabled={mismatch}
-                              title={mismatch ? 'Blocked: the audio is a different track' : undefined}
                               onChange={() => toggleSelect(item.file_id)}
-                              aria-label={`Select rename for ${item.proposed_path}`}
-                              className="h-5 w-5 accent-[#e5a00d] cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                              label={`Select rename for ${item.proposed_path}`}
+                              inline
                             />
-                            <label htmlFor={checkboxId} className="sr-only">
-                              Select rename for {item.proposed_path}
-                            </label>
                           </div>
 
                           <div className="min-w-0 flex-1">

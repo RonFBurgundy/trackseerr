@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { Upload, Plus, Trash2, Loader2 } from 'lucide-react';
-import { TapeDeckButton, MachinedCard } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, SelectionCheckbox, TactileSwitch } from '@/components/ui';
 import { useItunesImport } from '@/hooks/useItunesImport';
 import { LIST_MONITOR_MODES, LIST_MONITOR_MODE_LABELS, type ListMonitorMode } from '@/types/importLists';
 import { inputClass, labelClass } from './formClasses';
@@ -12,7 +12,6 @@ const MONITOR_HELP: Readonly<Record<ListMonitorMode, string>> = {
   artist: 'Add the artist of every unmatched song. Admin only. Can create a very large number of requests.',
 };
 
-const checkClass = 'h-5 w-5 accent-[#e5a00d] shrink-0';
 
 export const ItunesImportCard: React.FC = () => {
   const imp = useItunesImport();
@@ -78,15 +77,18 @@ export const ItunesImportCard: React.FC = () => {
               </div>
             </div>
             <div className="max-h-80 overflow-y-auto border border-[#2a2a2a] rounded-[3px] divide-y divide-[#222222]">
-              {imp.preview.playlists.map((p, i) => (
-                <label key={p.key} className="flex items-center gap-3 px-3 min-h-[36px] cursor-pointer hover:bg-[#1c1c1c]">
-                  <input
-                    id={`itunes-playlist-${i}`}
+              {imp.preview.playlists.map((p) => (
+                <div
+                  key={p.key}
+                  onClick={() => imp.toggle(p.key)}
+                  className="flex items-center gap-3 px-3 min-h-[36px] cursor-pointer hover:bg-[#1c1c1c]"
+                >
+                  <SelectionCheckbox
                     name="playlist"
-                    type="checkbox"
-                    className={checkClass}
                     checked={imp.selected.has(p.key)}
                     onChange={() => imp.toggle(p.key)}
+                    label={p.name}
+                    inline
                   />
                   <span className="min-w-0 flex-1 truncate text-sm text-white" title={p.name}>{p.name}</span>
                   {p.is_smart && (
@@ -95,7 +97,7 @@ export const ItunesImportCard: React.FC = () => {
                     </span>
                   )}
                   <span className="text-xs font-mono text-neutral-400 tabular-nums">{p.item_count}</span>
-                </label>
+                </div>
               ))}
             </div>
           </div>
@@ -173,15 +175,26 @@ export const ItunesImportCard: React.FC = () => {
             </div>
           </div>
 
-          <label className="flex items-center gap-3 min-h-[36px] cursor-pointer text-sm text-neutral-200">
-            <input id="itunes-include-folders" name="include-folders" type="checkbox" className={checkClass} checked={imp.includeFolders} onChange={(e) => imp.setIncludeFolders(e.target.checked)} />
-            Prefix playlist names with their folder ("Folder / Playlist")
-          </label>
+          <div className="flex items-center min-h-[36px] text-sm text-neutral-200">
+            <TactileSwitch
+              id="itunes-include-folders"
+              name="include-folders"
+              label='Prefix playlist names with their folder ("Folder / Playlist")'
+              checked={imp.includeFolders}
+              onChange={imp.setIncludeFolders}
+            />
+          </div>
           <div>
-            <label className="flex items-center gap-3 min-h-[36px] text-sm text-neutral-500">
-              <input id="itunes-import-play-stats" name="import-play-stats" type="checkbox" className={checkClass} checked={imp.importPlayStats} disabled onChange={() => undefined} />
-              Import play counts and ratings
-            </label>
+            <div className="flex items-center min-h-[36px] text-sm text-neutral-500">
+              <TactileSwitch
+                id="itunes-import-play-stats"
+                name="import-play-stats"
+                label="Import play counts and ratings"
+                checked={imp.importPlayStats}
+                disabled
+                onChange={() => undefined}
+              />
+            </div>
             <p className="text-[11px] font-mono text-neutral-500">
               Not available: the library keeps no per-track play count or rating store.
             </p>
