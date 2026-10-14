@@ -101,3 +101,67 @@ export function statusTone(status: string | null | undefined): BadgeTone {
 export function statusLabel(status: string | null | undefined): string {
   return status ? status.replace(/_/g, ' ') : EM_DASH;
 }
+
+export interface TaskGroup {
+  key: string;
+  label: string;
+  tasks: ScheduledTaskItem[];
+  runningCount?: number;
+}
+
+export interface GroupedTasks {
+  running: ScheduledTaskItem[];
+  groups: TaskGroup[];
+}
+
+/**
+ * Filter tasks by name or description (case-insensitive) and group them.
+ * Running tasks are segregated into `running` and not repeated in group tasks.
+ * Groups appear in order of first appearance from the tasks list.
+ */
+export function groupTasks(tasks: ScheduledTaskItem[], query?: string): GroupedTasks {
+  const q = query?.trim().toLowerCase() ?? '';
+
+  const matches = (task: ScheduledTaskItem): boolean => {
+    if (!q) return true;
+    const nameMatch = task.name.toLowerCase().includes(q);
+    const descMatch = (task.description ?? '').toLowerCase().includes(q);
+    return nameMatch || descMatch;
+  };
+
+  const filtered = q ? tasks.filter(matches) : tasks;
+
+  const running: ScheduledTaskItem[] = [];
+  const groupMap = new Map<string, TaskGroup>();
+
+  for (const task of filtered) {
+    if (task.status === 'running') {
+      running.push(task);
+    }
+
+    const groupKey = task.group || 'other';
+    const groupLabel = task.group_label || task.group || 'Other';
+
+    let group = groupMap.get(groupKey);
+    if (!group) {
+      group = {
+        key: groupKey,
+        label: groupLabel,
+        tasks: [],
+        runningCount: 0,
+      };
+      groupMap.set(groupKey, group);
+    }
+
+    if (task.status === 'running') {
+      group.runningCount = (group.runningCount ?? 0) + 1;
+    } else {
+      group.tasks.push(task);
+    }
+  }
+
+  // Only retain groups that have matching tasks
+  const groups = Array.from(groupMap.values()).filter((g) => g.tasks.length > 0);
+
+  return { running, groups };
+}
