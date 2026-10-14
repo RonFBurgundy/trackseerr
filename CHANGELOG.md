@@ -47,6 +47,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Playlist sync skips playlists whose source list, users and your library haven't changed since the last sync, so big lists no longer rematch every 10 minutes. Newly imported music still triggers a rematch, and every playlist is fully resynced once a day; "Sync now" always syncs everything.
 - Sorting and searching the library Tracks list is now near-instant on large libraries (hundreds of thousands of catalog tracks), and no longer stalls other pages while it runs. The first start after updating builds a new search index, which can take a minute on a big library.
 - New installs use the Trackseerr naming preset: artist and album names exactly as written (accents and & kept), Lidarr's handling of characters a filesystem can't store (? → !, * → -, / → +), a "?" at the end of a track title dropped as Lidarr does, and "..." in titles kept. "Lidarr Standard" is now "Lidarr Default" with Lidarr's real out-of-the-box naming, every preset explains who it is for, and the unused "clean artist names" setting is gone.
 - A failed download (torrent, Usenet or Soulseek) now searches for the track again right away instead of waiting for the next wanted sweep; a failed album download re-searches its tracks.

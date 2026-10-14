@@ -13006,6 +13006,11 @@ export interface components {
         };
         /** SyncRunStats */
         SyncRunStats: {
+            /**
+             * Skipped Unchanged
+             * @default 0
+             */
+            skipped_unchanged: number;
             /** Success Count */
             success_count: number;
             /** Total Matched */
