@@ -54,6 +54,21 @@ def _presets(minimum: int, maximum: Optional[int] = None) -> tuple[int, ...]:
     return tuple(p for p in ALL_PRESETS if p >= minimum and (maximum is None or p <= maximum))
 
 
+GROUP_LIBRARY = "library"
+GROUP_ACQUISITION = "acquisition"
+GROUP_METADATA = "metadata"
+GROUP_MAINTENANCE = "maintenance"
+GROUP_PLAYLISTS = "playlists"
+GROUP_ORDER = (GROUP_LIBRARY, GROUP_ACQUISITION, GROUP_METADATA, GROUP_MAINTENANCE, GROUP_PLAYLISTS)
+GROUP_LABELS = {
+    GROUP_LIBRARY: "Library",
+    GROUP_ACQUISITION: "Acquisition",
+    GROUP_METADATA: "Metadata & art",
+    GROUP_MAINTENANCE: "Maintenance",
+    GROUP_PLAYLISTS: "Playlists & listening",
+}
+
+
 @dataclass(frozen=True)
 class TaskSpec:
     id: str
@@ -62,6 +77,7 @@ class TaskSpec:
     kind: str
     default_interval_seconds: Optional[int] = None  # code default; config/env may override it (see _CONFIG_INTERVALS)
     presets: tuple[int, ...] = ()  # empty = schedule not editable
+    group: str = GROUP_MAINTENANCE
 
     @property
     def editable(self) -> bool:
@@ -78,12 +94,14 @@ TASKS: dict[str, TaskSpec] = {
             "Media Library Disk Scanner",
             "Scans local audio storage, extracts Mutagen tags, and indexes media into the library catalog.",
             KIND_MANUAL,
+            group=GROUP_LIBRARY,
         ),
         TaskSpec(
             "lidarr_migration",
             "Lidarr Library Import",
             "Imports the Lidarr catalog (artists, albums, tracks, files) into TrackSeerr and switches the library manager to TrackSeerr when it finishes.",
             KIND_MANUAL,
+            group=GROUP_LIBRARY,
         ),
         # Calls Spotify/Deezer/Plex: not more often than every 15m to stay clear of rate limits. Config: WAIT_SECONDS.
         TaskSpec(
@@ -93,6 +111,7 @@ TASKS: dict[str, TaskSpec] = {
             KIND_INTERVAL,
             _DAY,
             _presets(15 * _MIN),
+            group=GROUP_PLAYLISTS,
         ),
         # Searches indexers per wanted item: >=15m so indexer API limits are respected.
         # Config: BACKLOG_SEARCH_INTERVAL_MINUTES.
@@ -103,6 +122,7 @@ TASKS: dict[str, TaskSpec] = {
             KIND_INTERVAL,
             _HOUR,
             _presets(15 * _MIN),
+            group=GROUP_ACQUISITION,
         ),
         # RSS feeds are cheap but indexers ban aggressive polling: >=15m; beyond 6h it stops being "recent releases".
         # Config: RSS_SYNC_INTERVAL_MINUTES.
@@ -113,6 +133,7 @@ TASKS: dict[str, TaskSpec] = {
             KIND_INTERVAL,
             15 * _MIN,
             _presets(15 * _MIN, 6 * _HOUR),
+            group=GROUP_ACQUISITION,
         ),
         # Paced pushes into Lidarr (MusicBrainz rate limits): >=15m. Settings: Lidarr auto-trickle interval.
         TaskSpec(
@@ -122,6 +143,7 @@ TASKS: dict[str, TaskSpec] = {
             KIND_INTERVAL,
             30 * _MIN,
             _presets(15 * _MIN),
+            group=GROUP_LIBRARY,
         ),
         # Polls active download clients every few seconds; only ticks that found downloads are recorded.
         TaskSpec(
@@ -129,6 +151,7 @@ TASKS: dict[str, TaskSpec] = {
             "Acquisition Worker",
             "Monitors active download clients, processes finished downloads, tags audio files, and moves them to the library.",
             KIND_CONTINUOUS,
+            group=GROUP_ACQUISITION,
         ),
         # Hits MusicBrainz/Deezer for every stale artist: >=6h (the worker also skips artists refreshed recently).
         TaskSpec(
@@ -138,6 +161,7 @@ TASKS: dict[str, TaskSpec] = {
             KIND_INTERVAL,
             _DAY,
             _presets(6 * _HOUR),
+            group=GROUP_METADATA,
         ),
         # Local file stats only and missing-only, so it may run often (>=1h); also triggered by scans and Lidarr imports.
         TaskSpec(
@@ -147,6 +171,7 @@ TASKS: dict[str, TaskSpec] = {
             KIND_INTERVAL,
             _DAY,
             _presets(_HOUR),
+            group=GROUP_METADATA,
         ),
         # Talks to download clients and deletes files: >=1h is plenty frequent.
         TaskSpec(
@@ -156,6 +181,7 @@ TASKS: dict[str, TaskSpec] = {
             KIND_INTERVAL,
             _DAY,
             _presets(_HOUR),
+            group=GROUP_MAINTENANCE,
         ),
         # Walks the whole music folder and the media server index: heavy, so daily at most.
         TaskSpec(
@@ -165,6 +191,7 @@ TASKS: dict[str, TaskSpec] = {
             KIND_INTERVAL,
             7 * _DAY,
             _presets(_DAY),
+            group=GROUP_MAINTENANCE,
         ),
         # Directory pruning by age; the retention days setting decides what is deleted, this only sets how often to look.
         TaskSpec(
@@ -174,6 +201,7 @@ TASKS: dict[str, TaskSpec] = {
             KIND_INTERVAL,
             _DAY,
             _presets(6 * _HOUR),
+            group=GROUP_MAINTENANCE,
         ),
         # Polls every minute, but each stuck request backs off on its own schedule; only sweeps that re-sent
         # something are recorded.
@@ -182,6 +210,7 @@ TASKS: dict[str, TaskSpec] = {
             "Retry Stuck Lidarr Requests",
             "Re-sends approved requests Lidarr could not finish yet (releases still loading, rate limits, failed monitoring) on a backoff schedule. Each stuck request backs off on its own schedule (2m, 5m, 15m, 1h, 6h, then daily); Lidarr is contacted only for requests that are due.",
             KIND_CONTINUOUS,
+            group=GROUP_ACQUISITION,
         ),
         # Polls every minute for delay-profile releases whose wait has passed; only ticks that released something
         # are recorded.
@@ -190,6 +219,7 @@ TASKS: dict[str, TaskSpec] = {
             "Delay-Profile Pending Releases",
             "Grabs releases held back by a delay profile once their wait is over, after re-checking they are still wanted.",
             KIND_CONTINUOUS,
+            group=GROUP_ACQUISITION,
         ),
         # Wakes every 5 minutes; each import list has its own schedule, so only ticks that synced a list are recorded.
         TaskSpec(
@@ -197,6 +227,7 @@ TASKS: dict[str, TaskSpec] = {
             "Import List Sync",
             "Syncs the import lists (Spotify, Last.fm, ListenBrainz and others) that are due.",
             KIND_CONTINUOUS,
+            group=GROUP_ACQUISITION,
         ),
         # Regenerates tailored mixes that are due. Generation reads listening history only: 30m to daily.
         TaskSpec(
@@ -206,6 +237,7 @@ TASKS: dict[str, TaskSpec] = {
             KIND_INTERVAL,
             _HOUR,
             _presets(30 * _MIN, _DAY),
+            group=GROUP_PLAYLISTS,
         ),
         # Ticks every 30s; the history poll and forward retries gate themselves, so only ticks that did work are
         # recorded.
@@ -214,6 +246,7 @@ TASKS: dict[str, TaskSpec] = {
             "Scrobble Sync",
             "Polls the media server play history and forwards scrobbles to Last.fm and ListenBrainz, retrying failures.",
             KIND_CONTINUOUS,
+            group=GROUP_PLAYLISTS,
         ),
         # Database snapshot and retention pruning: weekly default, editable presets (1d, 3d, 7d, 14d).
         TaskSpec(
@@ -223,6 +256,7 @@ TASKS: dict[str, TaskSpec] = {
             KIND_INTERVAL,
             7 * _DAY,
             _presets(_DAY),
+            group=GROUP_MAINTENANCE,
         ),
         # Software update check against GitHub releases: 12h default interval, editable presets.
         TaskSpec(
@@ -232,6 +266,7 @@ TASKS: dict[str, TaskSpec] = {
             KIND_INTERVAL,
             12 * _HOUR,
             _presets(6 * _HOUR),
+            group=GROUP_MAINTENANCE,
         ),
         TaskSpec(
             "track_credits_backfill",
@@ -239,6 +274,7 @@ TASKS: dict[str, TaskSpec] = {
             "Fills per-track artist credits (performer, featured, remixer) from MusicBrainz and file tags for "
             "tracks that have none. Safe to re-run.",
             KIND_MANUAL,
+            group=GROUP_LIBRARY,
         ),
     )
 }
@@ -365,6 +401,10 @@ class RunHandle:
         self.cancelled = False
         self.failed: Optional[str] = None  # set when the run ended badly without raising
         self.discard = False  # the run turned out to be a no-op: remove the row
+        self.stop_event = threading.Event()
+
+    def should_stop(self) -> bool:
+        return self.stop_event.is_set()
 
     def apply_result(self, result: Any) -> None:
         """Takes the outcome from a worker's result dict (``status == already_running`` discards the run)."""
@@ -376,6 +416,47 @@ class RunHandle:
         from trackseerr.job_tracker import summarize_result
 
         self.message = summarize_result(result)
+
+
+_manual_runs: dict[str, RunHandle] = {}
+_manual_runs_lock = threading.Lock()
+
+
+def register_manual_run(task_id: str, handle: RunHandle) -> None:
+    with _manual_runs_lock:
+        _manual_runs[task_id] = handle
+
+
+def unregister_manual_run(task_id: str, handle: RunHandle) -> None:
+    with _manual_runs_lock:
+        if _manual_runs.get(task_id) is handle:
+            _manual_runs.pop(task_id, None)
+
+
+def request_cancel(task_id: str) -> bool:
+    with _manual_runs_lock:
+        handle = _manual_runs.get(task_id)
+        if handle is None:
+            return False
+        handle.stop_event.set()
+    logger.info("Cancellation requested for manual run of task '%s'", task_id)
+    return True
+
+
+def is_cancellable(task_id: str) -> bool:
+    with _manual_runs_lock:
+        return task_id in _manual_runs
+
+
+def cancel_all_manual_runs() -> int:
+    with _manual_runs_lock:
+        handles = list(_manual_runs.values())
+        for handle in handles:
+            handle.stop_event.set()
+        count = len(handles)
+    if count > 0:
+        logger.info("Cancellation requested for %d manual task run(s)", count)
+    return count
 
 
 def _now_iso() -> str:

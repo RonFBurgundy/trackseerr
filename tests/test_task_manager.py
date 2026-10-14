@@ -861,3 +861,146 @@ def test_activity_shows_running_lidarr_migration(db, monkeypatch):
     entry = body["running"][0]
     assert entry["name"] == "Lidarr Library Import"
     assert entry["progress"].total == 10 and entry["progress"].current == 4
+
+
+def test_every_task_has_a_known_group():
+    for task_id, spec in task_manager.TASKS.items():
+        assert spec.group in task_manager.GROUP_ORDER, f"Task {task_id} has unknown group {spec.group}"
+        assert spec.group in task_manager.GROUP_LABELS
+        assert isinstance(task_manager.GROUP_LABELS[spec.group], str)
+
+
+def test_request_cancel_sets_the_handle_event_and_unregister_is_identity_safe():
+    task_id = "test_custom_task"
+    handle_a = task_manager.RunHandle()
+    handle_b = task_manager.RunHandle()
+
+    assert not task_manager.is_cancellable(task_id)
+    assert not task_manager.request_cancel(task_id)
+
+    task_manager.register_manual_run(task_id, handle_a)
+    assert task_manager.is_cancellable(task_id)
+    assert not handle_a.should_stop()
+
+    # Unregister with a different handle object should NOT unregister handle_a
+    task_manager.unregister_manual_run(task_id, handle_b)
+    assert task_manager.is_cancellable(task_id)
+
+    # Cancel sets the event
+    assert task_manager.request_cancel(task_id) is True
+    assert handle_a.should_stop() is True
+
+    # Unregister with handle_a removes it
+    task_manager.unregister_manual_run(task_id, handle_a)
+    assert not task_manager.is_cancellable(task_id)
+    assert task_manager.request_cancel(task_id) is False
+
+
+def test_cancel_all_manual_runs_signals_every_registered_run():
+    handle_1 = task_manager.RunHandle()
+    handle_2 = task_manager.RunHandle()
+    task_manager.register_manual_run("task_1", handle_1)
+    task_manager.register_manual_run("task_2", handle_2)
+    try:
+        assert not handle_1.should_stop()
+        assert not handle_2.should_stop()
+        count = task_manager.cancel_all_manual_runs()
+        assert count >= 2
+        assert handle_1.should_stop() is True
+        assert handle_2.should_stop() is True
+    finally:
+        task_manager.unregister_manual_run("task_1", handle_1)
+        task_manager.unregister_manual_run("task_2", handle_2)
+
+
+def test_manual_run_cancelled_mid_body_is_recorded_cancelled(app_and_client, seeded_users, secret_key, test_db):
+    _, client = app_and_client
+    cookies = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
+    task_id = "track_credits_backfill"
+
+    started_event = threading.Event()
+    finished_event = threading.Event()
+
+    def body(run: task_manager.RunHandle) -> None:
+        started_event.set()
+        t0 = time.monotonic()
+        while not run.should_stop() and (time.monotonic() - t0 < 5.0):
+            time.sleep(0.01)
+        run.message = "stopped mid run"
+        finished_event.set()
+
+    from trackseerr.api.routes.system.tasks import _run_manual
+
+    _run_manual(test_db, task_id, "TestManualCancelThread", body)
+
+    assert started_event.wait(timeout=5.0), "body did not start in time"
+
+    resp = client.post(f"/api/system/tasks/{task_id}/cancel", cookies=cookies)
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+    assert "Cancelling" in resp.json()["message"]
+
+    assert finished_event.wait(timeout=5.0), "body did not finish in time"
+
+    deadline = time.monotonic() + 5.0
+    status = None
+    message = None
+    while time.monotonic() < deadline:
+        runs = test_db.list_task_runs(task_id, _iso(timedelta(days=-1)))
+        if runs and runs[0]["status"] != "running":
+            status = runs[0]["status"]
+            message = runs[0]["message"]
+            break
+        time.sleep(0.02)
+
+    assert status == "cancelled"
+    assert message and "(cancelled)" in message
+
+
+def test_cancel_with_nothing_running_is_400(app_and_client, seeded_users, secret_key, test_db):
+    _, client = app_and_client
+    cookies = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
+    resp = client.post("/api/system/tasks/track_credits_backfill/cancel", cookies=cookies)
+    assert resp.status_code == 400
+
+
+def test_task_list_has_groups_and_is_ordered_by_group(app_and_client, seeded_users, secret_key, test_db):
+    _, client = app_and_client
+    cookies = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
+    resp = client.get("/api/system/tasks", cookies=cookies)
+    assert resp.status_code == 200
+    tasks = resp.json()
+    assert len(tasks) > 0
+
+    group_indices = []
+    for item in tasks:
+        assert "group" in item
+        assert "group_label" in item
+        assert item["group"] in task_manager.GROUP_ORDER
+        assert item["group_label"] == task_manager.GROUP_LABELS[item["group"]]
+        group_indices.append(task_manager.GROUP_ORDER.index(item["group"]))
+
+    assert group_indices == sorted(group_indices)
+
+
+def test_credits_backfill_manual_run_passes_should_stop(app_and_client, seeded_users, secret_key, test_db, monkeypatch):
+    _, client = app_and_client
+    cookies = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
+
+    called_event = threading.Event()
+    passed_args = {}
+
+    def fake_run_credits_backfill(db, enricher, *, should_stop=None):
+        passed_args["should_stop"] = should_stop
+        called_event.set()
+        return {"albums": 0, "tracks_musicbrainz": 0, "tracks_tags": 0, "tracks_skipped": 0, "errors": 0}
+
+    import trackseerr.track_credits_backfill
+
+    monkeypatch.setattr(trackseerr.track_credits_backfill, "run_credits_backfill", fake_run_credits_backfill)
+
+    resp = client.post("/api/system/tasks/track_credits_backfill/run", cookies=cookies)
+    assert resp.status_code == 200
+    assert called_event.wait(timeout=5.0)
+    assert callable(passed_args.get("should_stop"))
+    assert passed_args["should_stop"]() is False

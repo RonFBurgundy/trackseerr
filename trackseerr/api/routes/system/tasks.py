@@ -57,7 +57,7 @@ from trackseerr.config import (
     Config,
 )
 from trackseerr.job_tracker import job_tracker, summarize_result, track_job
-from trackseerr import library_manager
+from trackseerr import library_manager, task_manager
 from trackseerr.library_manager import MODE_LIDARR, MODE_NATIVE, build_lidarr_client, get_library_mode
 from trackseerr.library_scanner import library_scanner
 from trackseerr.lidarr_migration import lidarr_migration_job
@@ -66,6 +66,8 @@ from trackseerr.mix_worker import mix_worker
 from trackseerr.scrobble_worker import scrobble_worker
 from trackseerr.storage import Database
 from trackseerr.task_manager import (
+    GROUP_LABELS,
+    GROUP_ORDER,
     KIND_INTERVAL,
     TASKS,
     TRIGGER_MANUAL,
@@ -98,6 +100,8 @@ class ScheduledTaskItem(ApiModel):
     can_trigger: bool = True
     can_cancel: bool = False
     schedule_kind: str = "manual"  # "interval" | "continuous" | "manual"
+    group: str = "maintenance"
+    group_label: str = "Maintenance"
     interval_seconds: Optional[int] = None  # the interval in force (override > config/env > default)
     default_interval_seconds: Optional[int] = None  # what resetting the schedule returns to
     interval_presets: list[int] = []  # allowed values for PUT /tasks/{id}/schedule; empty when not editable
@@ -308,6 +312,7 @@ def get_all_scheduled_tasks(
         if spec.id == "lidarr_request_retry" and not lidarr_mode:
             continue  # Lidarr mode only
         status_val, worker_last, can_cancel = runtime.get(spec.id, ("idle", None, False))
+        can_cancel = bool(can_cancel or task_manager.is_cancellable(spec.id))
         latest_row = latest.get(spec.id)
         finished_row = finished.get(spec.id)
         db_running = bool(latest_row and latest_row.get("status") == "running")
@@ -355,6 +360,8 @@ def get_all_scheduled_tasks(
                 can_trigger=spec.id in _MANUAL_RUNNABLE,
                 can_cancel=can_cancel,
                 schedule_kind="manual" if unscheduled else spec.kind,
+                group=spec.group,
+                group_label=GROUP_LABELS.get(spec.group, "Maintenance"),
                 interval_seconds=effective,
                 default_interval_seconds=None if unscheduled else default_interval_seconds(db, config, spec.id),
                 interval_presets=[] if unscheduled else list(spec.presets),
@@ -368,6 +375,15 @@ def get_all_scheduled_tasks(
                 progress=_task_progress(spec.id, status_val == "running"),
             )
         )
+
+    tasks.sort(
+        key=lambda t: (
+            GROUP_ORDER.index(t.group) if t.group in GROUP_ORDER else 999,
+            1 if t.schedule_kind == "manual" else 0,
+            t.next_run_at or "~",
+            t.name,
+        )
+    )
 
     return tasks
 
@@ -500,7 +516,14 @@ def _run_manual(db: Database, task_id: str, thread_name: str, body: Callable[[Ru
             _running_tasks.add(task_id)
         try:
             with record_task_run(db, task_id, TRIGGER_MANUAL) as run:
-                body(run)
+                task_manager.register_manual_run(task_id, run)
+                try:
+                    body(run)
+                    if run.should_stop():
+                        run.cancelled = True
+                        run.message = ((run.message or "") + " (cancelled)").strip()
+                finally:
+                    task_manager.unregister_manual_run(task_id, run)
         except Exception as exc:  # the run is recorded as failed and logged by record_task_run; keep the thread quiet
             logger.debug("Manual run of '%s' ended with %s", task_id, safe_exc(exc), exc_info=True)
         finally:
@@ -654,12 +677,15 @@ def run_scheduled_task(  # noqa: C901, PLR0915
             _running_tasks.add("art_thumbnail_backfill")
 
         def _art_backfill_thread():
+            handle = RunHandle()
+            task_manager.register_manual_run("art_thumbnail_backfill", handle)
             try:
                 # Records its own run (trigger manual) and refuses to overlap another backfill.
-                art_pipeline.run_backfill_task(db, TRIGGER_MANUAL)
+                art_pipeline.run_backfill_task(db, TRIGGER_MANUAL, should_stop=handle.should_stop)
             except Exception as exc:  # the run is recorded as failed; keep the thread from dying silently
                 logger.error("Artwork thumbnail backfill failed: %s", safe_exc(exc))
             finally:
+                task_manager.unregister_manual_run("art_thumbnail_backfill", handle)
                 with _tasks_lock:
                     _running_tasks.discard("art_thumbnail_backfill")
 
@@ -709,7 +735,7 @@ def run_scheduled_task(  # noqa: C901, PLR0915
             from trackseerr.mb_metadata_store import get_shared_enricher
             from trackseerr.track_credits_backfill import run_credits_backfill
 
-            counts = run_credits_backfill(db, get_shared_enricher(db))
+            counts = run_credits_backfill(db, get_shared_enricher(db), should_stop=run.should_stop)
             run.message = ", ".join(f"{k}={v}" for k, v in counts.items())
 
         _run_manual(db, task_id, "ManualTrackCreditsTask", _credits)
@@ -764,6 +790,19 @@ def get_lidarr_health(
         return unreachable
 
 
+def _record_cancel_event(db: Database, task_id: str) -> None:
+    try:
+        db.record_event(
+            "task_cancelled",
+            f"Scheduled task '{task_id}' cancelled by admin",
+            source="TaskManager",
+            severity="info",
+            details={"task_id": task_id},
+        )
+    except sqlite3.Error as exc:
+        logger.warning("Failed to record task_cancelled event: %s", safe_exc(exc))
+
+
 @router.post("/tasks/{task_id}/cancel", response_model=TaskActionResult, response_model_exclude_unset=True, summary="Cancel a running scheduled task")
 def cancel_scheduled_task(
     task_id: str,
@@ -776,61 +815,29 @@ def cancel_scheduled_task(
 
     if task_id == "filesystem_scan":
         library_scanner.cancel_scan()
-        try:
-            db.record_event(
-                "task_cancelled",
-                "Scheduled task 'filesystem_scan' cancelled by admin",
-                source="TaskManager",
-                severity="info",
-                details={"task_id": "filesystem_scan"},
-            )
-        except Exception as ev_err:
-            logger.warning("Failed to record task_cancelled event: %s", ev_err)
+        _record_cancel_event(db, task_id)
         return {"success": True, "message": "Filesystem scan cancelled"}
 
     elif task_id == "lidarr_auto_trickle":
         lidarr_worker.cancel()
-        try:
-            db.record_event(
-                "task_cancelled",
-                "Scheduled task 'lidarr_auto_trickle' cancelled by admin",
-                source="TaskManager",
-                severity="info",
-                details={"task_id": "lidarr_auto_trickle"},
-            )
-        except Exception as ev_err:
-            logger.warning("Failed to record task_cancelled event: %s", ev_err)
+        _record_cancel_event(db, task_id)
         return {"success": True, "message": "Lidarr trickle worker cancelled"}
 
     elif task_id == "backup":
         from trackseerr.backup import cancel_backup
 
         cancel_backup()
-        try:
-            db.record_event(
-                "task_cancelled",
-                "Scheduled task 'backup' cancelled by admin",
-                source="TaskManager",
-                severity="info",
-                details={"task_id": "backup"},
-            )
-        except Exception as ev_err:
-            logger.warning("Failed to record task_cancelled event: %s", ev_err)
+        _record_cancel_event(db, task_id)
         return {"success": True, "message": "Backup task cancelled"}
 
     elif task_id == "lidarr_migration":
         lidarr_migration_job.cancel()
-        try:
-            db.record_event(
-                "task_cancelled",
-                "Scheduled task 'lidarr_migration' cancelled by admin",
-                source="TaskManager",
-                severity="info",
-                details={"task_id": "lidarr_migration"},
-            )
-        except Exception as ev_err:
-            logger.warning("Failed to record task_cancelled event: %s", ev_err)
+        _record_cancel_event(db, task_id)
         return {"success": True, "message": "Lidarr import cancelled"}
+
+    elif task_manager.request_cancel(task_id):
+        _record_cancel_event(db, task_id)
+        return {"success": True, "message": "Cancelling — stops after the current item"}
 
     else:
         raise HTTPException(
