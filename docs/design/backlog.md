@@ -163,3 +163,11 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     (`album_type` vs `secondary_types` on the album payload). Remix releases currently seem to land in Studio, and
     categorizing by secondary type may need `secondary_types` exposed on the album item (backend + gen:api if so).
     Don't relabel tabs. A tab is a release type. Frontend skill applies.
+22. **P3 · Admin's own permission toggles look editable but saves drop them.** In `frontend/src/components/admin/UserEditModal.tsx`
+    only the admin bit is disabled for yourself (`lockedAdmin`, ~L262). The other toggles stay clickable, but `save`
+    leaves `permissions` out of the payload when `isSelf` (~L192), so ticks show "Changes saved." and nothing is stored.
+    The server only forbids changing your own admin bit (`admin_users.py` ~L310), and `has_permission`
+    (`api/dependencies.py` ~L586) grants every permission to admins anyway. Fix (UI-only): when the edited user is an
+    admin (self or another admin), render every toggle checked and disabled, and replace "Your own permissions cannot be
+    changed here." with "Administrators hold every permission." Other admins keep only the admin toggle editable
+    (subject to the server's last-admin guard). Unchecking it restores the stored bits. Frontend skill applies.
