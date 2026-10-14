@@ -82,6 +82,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Downloads that don't match a catalog album now land in the artist's existing folder (matched by MusicBrainz ID or name) instead of a second, differently named folder.
 - Editing an administrator no longer shows permission toggles that look editable but don't save; they show as held and locked.
 - The Wanted sweep, RSS sync and manual Wanted searches no longer run when no indexer has a matching download client (or no Soulseek client is set up); the Tasks page shows why they were skipped.
 - Playlist "find in library" on Plex now finds tracks by artist name (and "artist title" searches), and returns results faster.
