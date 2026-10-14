@@ -209,6 +209,10 @@ class MediaServer(ABC):
         """Music library folder roots as the server sees them; empty when unknown or relative."""
         return []
 
+    def rename_warnings(self) -> list[str]:
+        """Human-readable warnings about media-server settings that could lose data on rename."""
+        return []
+
 
 def as_media_server(server_or_client: Any, music_section: Optional[str] = None) -> Optional[MediaServer]:
     """Normalise whatever a flow was handed into a :class:`MediaServer`.

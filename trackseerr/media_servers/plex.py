@@ -214,6 +214,30 @@ class PlexMediaServer(MediaServer):
     def library_roots(self) -> list[str]:
         return [str(loc) for s in self._music_sections() for loc in (getattr(s, "locations", None) or []) if loc]
 
+    def rename_warnings(self) -> list[str]:
+        """Warn when Plex settings could cause play history or ratings to be dropped mid-rename."""
+        try:
+            settings = self._client.server.settings
+            auto_empty_trash = bool(getattr(settings.get("autoEmptyTrash"), "value", False))
+            fs_events = bool(getattr(settings.get("FSEventLibraryUpdatesEnabled"), "value", False))
+        except (PlexApiException, requests.RequestException) as exc:
+            logger.warning("Could not check Plex server settings for rename safety: %s", safe_exc(exc))
+            return []
+
+        if not auto_empty_trash:
+            return []
+
+        warnings = [
+            "Plex empties its trash after every scan. A scan during the rename could delete play "
+            "counts and ratings for moved tracks — turn off \"Empty trash automatically after every scan\" in Plex "
+            "(Settings → Library) before renaming."
+        ]
+        if fs_events:
+            warnings.append(
+                "Plex is also watching folders for changes, which makes a mid-rename scan likely."
+            )
+        return warnings
+
 
 def plex_extras(server: Optional[MediaServer]) -> Optional[PlexClient]:
     """The raw :class:`PlexClient` when ``server`` is Plex, else None. The one gate to Plex-only features."""

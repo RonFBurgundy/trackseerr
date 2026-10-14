@@ -34,6 +34,7 @@ from trackseerr.api.schemas.library import (
     RenameRelinkConflictResponse,
     RenameRelinkFile,
     RenameRelinkResponse,
+    RenameSafetyResponse,
     RenameVerifyStatus,
     RetagApplyResponse,
     RetagPreviewItem,
@@ -277,6 +278,17 @@ def rename_verify_status(
     """Reports the progress of the current or last AcoustID verification run."""
     key = str(db.get_media_management_settings().get("acoustid_api_key") or "").strip()
     return {**get_verification_status(), "api_key_set": bool(key)}
+
+
+@router.get("/rename/safety", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=RenameSafetyResponse)
+def rename_safety(
+    plex_client: Optional[Any] = Depends(get_media_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Reports warnings about media-server settings that could drop play history or ratings during a rename."""
+    server = as_media_server(plex_client)
+    warnings = server.rename_warnings() if server else []
+    return {"warnings": warnings}
 
 
 @router.post(

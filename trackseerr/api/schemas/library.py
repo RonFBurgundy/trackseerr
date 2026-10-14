@@ -542,6 +542,10 @@ class RenamePreviewResponse(ApiModel):
     truncated: bool
 
 
+class RenameSafetyResponse(ApiModel):
+    warnings: list[str] = Field(default_factory=list)
+
+
 class RenameApplyResponse(ApiModel):
     renamed_count: int
     errors: list[str]

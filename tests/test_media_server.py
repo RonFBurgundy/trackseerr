@@ -747,3 +747,66 @@ def test_direct_import_without_media_server_records_missing(tmp_path):
     assert res.status_code == 201, res.text
     assert res.json()["missing_count"] == 1 and res.json()["matched_count"] == 0
     assert [m["title"] for m in env.db.get_missing_tracks(res.json()["id"])] == ["Lost"]
+
+
+# ----------------------------------------------------------------------------- rename safety warnings
+
+
+def _mock_plex_adapter(settings_dict):
+    server = MagicMock()
+    server.settings.get.side_effect = lambda key: SimpleNamespace(value=settings_dict.get(key, False))
+    client = MagicMock()
+    client.server = server
+    return PlexMediaServer(client)
+
+
+def test_plex_rename_warnings_auto_empty_trash_true():
+    adapter = _mock_plex_adapter({"autoEmptyTrash": True, "FSEventLibraryUpdatesEnabled": False})
+    warnings = adapter.rename_warnings()
+    assert len(warnings) == 1
+    assert "Empty trash automatically after every scan" in warnings[0]
+    assert "watching folders" not in warnings[0]
+
+
+def test_plex_rename_warnings_both_true():
+    adapter = _mock_plex_adapter({"autoEmptyTrash": True, "FSEventLibraryUpdatesEnabled": True})
+    warnings = adapter.rename_warnings()
+    assert len(warnings) == 2
+    assert "Empty trash automatically after every scan" in warnings[0]
+    assert "watching folders" in warnings[1]
+
+
+def test_plex_rename_warnings_both_false():
+    adapter = _mock_plex_adapter({"autoEmptyTrash": False, "FSEventLibraryUpdatesEnabled": False})
+    assert adapter.rename_warnings() == []
+
+
+def test_plex_rename_warnings_auto_empty_trash_false_fs_events_true():
+    adapter = _mock_plex_adapter({"autoEmptyTrash": False, "FSEventLibraryUpdatesEnabled": True})
+    assert adapter.rename_warnings() == []
+
+
+def test_plex_rename_warnings_exception_returns_empty_and_logs(caplog):
+    import requests
+    server = MagicMock()
+    server.settings.get.side_effect = requests.exceptions.ConnectionError("offline")
+    client = MagicMock()
+    client.server = server
+    adapter = PlexMediaServer(client)
+
+    with caplog.at_level(logging.WARNING):
+        warnings = adapter.rename_warnings()
+
+    assert warnings == []
+    assert any("ConnectionError" in record.getMessage() for record in caplog.records)
+
+
+def test_base_and_jellyfin_rename_warnings_empty():
+    import httpx
+    from tests.test_media_server_contract import Backend, FakeMediaServer
+    from trackseerr.media_servers.jellyfin import JellyfinMediaServer
+
+    fake = FakeMediaServer(Backend())
+    assert fake.rename_warnings() == []
+    jellyfin = JellyfinMediaServer("http://jellyfin:8096", "test-key", transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+    assert jellyfin.rename_warnings() == []
