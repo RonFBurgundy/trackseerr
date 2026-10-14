@@ -20,6 +20,13 @@ export const LIST_MONITOR_MODE_HELP: Readonly<Record<ListMonitorMode, string>> =
   none: 'Match only, never search',
 };
 
+export const PLAYLIST_MONITOR_MODE_HELP: Readonly<Record<ListMonitorMode, string>> = {
+  track: 'Missing songs become requests from the playlist owner',
+  album: 'Missing songs become requests and their whole album is monitored',
+  artist: 'Missing songs become requests and the artist is added with the chosen monitor option',
+  none: 'Match only: missing songs are listed, never requested',
+};
+
 export type ProviderFieldType = 'text' | 'secret' | 'select' | 'number';
 
 export type ProviderField = Narrow<Schema<'ProviderField'>, { type: ProviderFieldType }>;

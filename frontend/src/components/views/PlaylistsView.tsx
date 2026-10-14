@@ -14,6 +14,7 @@ import {
   TrendingUp,
   FileUp,
   ListMusic,
+  ChevronDown,
 } from 'lucide-react';
 import type { Schema } from '@/types/apiSchema';
 import type { DiscoveryItem, Playlist, User } from '@/types/models';
@@ -34,7 +35,7 @@ import {
 } from '@/components/ui';
 import { PlaylistTracksModal } from '@/components/playlists/PlaylistTracksModal';
 import { PageFrame } from '@/components/layout';
-import { LIST_MONITOR_MODES, type ListMonitorMode } from '@/types/importLists';
+import { LIST_MONITOR_MODES, PLAYLIST_MONITOR_MODE_HELP, type ListMonitorMode } from '@/types/importLists';
 
 /** Album and artist modes add to the library without a quota, so the server only accepts them from admins. */
 const NON_ADMIN_MONITOR_MODES: ReadonlyArray<ListMonitorMode> = ['track', 'none'];
@@ -139,6 +140,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   const [selectedMissingPlaylistName, setSelectedMissingPlaylistName] = useState<string>('');
   const [tracksModalPlaylist, setTracksModalPlaylist] = useState<{ id: string; name: string } | null>(null);
   const [isOverridesModalOpen, setIsOverridesModalOpen] = useState<boolean>(false);
+  const [openTargets, setOpenTargets] = useState<ReadonlySet<string>>(new Set());
 
   const selectedMissingTracks = useMemo(
     () => (selectedMissingPlaylistId ? missingHook.missingTracks.filter((t) => t.playlist_id === selectedMissingPlaylistId) : []),
@@ -392,6 +394,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                       value={pl.monitor_mode}
                       onChange={(m) => void onSetMonitorMode(pl, m)}
                     />
+                    <p className="text-[11px] font-mono text-neutral-500">{PLAYLIST_MONITOR_MODE_HELP[pl.monitor_mode]}</p>
                     {!isAdmin && !canAutoRequest && (
                       <p className="text-[11px] font-mono text-neutral-500">{AUTO_REQUEST_DENIED_REASON}</p>
                     )}
@@ -407,32 +410,114 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
               )}
               {hasMediaServer && canTargetUsers && (
                 <div className="space-y-2 pt-3 border-t border-[#1f1f1f]">
-                  <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-mono">
-                    Sync Targets
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {targetUsers.map((u) => {
-                      const uIdStr = String(u.id);
-                      const isTarget = pl.targets.includes(uIdStr);
-                      const canEdit = isAdmin || u.id === currentUserId;
+                  {targetUsers.length > 1 ? (
+                    (() => {
+                      const plIdStr = String(pl.id);
+                      const isOpen = openTargets.has(plIdStr);
+                      const assignedCount = targetUsers.filter((u) => pl.targets.includes(String(u.id))).length;
+                      const containerId = `pl-targets-${pl.id}`;
 
                       return (
-                        <button
-                          key={u.id}
-                          type="button"
-                          disabled={!canEdit}
-                          onClick={() => handleTargetClick(pl, uIdStr)}
-                          className={`target-pill px-2.5 py-1 rounded-[3px] text-xs font-mono transition-all ${
-                            isTarget
-                              ? 'bg-[#e5a00d]/20 border border-[#e5a00d] text-[#e5a00d]'
-                              : 'bg-[#121212] border border-[#222222] text-neutral-500 hover:text-neutral-300'
-                          } ${!canEdit ? 'cursor-default opacity-80' : 'cursor-pointer'}`}
-                        >
-                          {u.username}
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            aria-expanded={isOpen}
+                            aria-controls={containerId}
+                            onClick={() => {
+                              setOpenTargets((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(plIdStr)) {
+                                  next.delete(plIdStr);
+                                } else {
+                                  next.add(plIdStr);
+                                }
+                                return next;
+                              });
+                            }}
+                            className="w-full min-h-[44px] flex items-center justify-between text-left rounded-[3px] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#e5a00d]"
+                          >
+                            <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-mono">
+                              Sync Targets
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] font-mono text-neutral-500">
+                                {assignedCount} of {targetUsers.length} users
+                              </span>
+                              <ChevronDown
+                                className={`h-4 w-4 text-neutral-400 transition-transform duration-150 ${
+                                  isOpen ? 'rotate-180' : ''
+                                }`}
+                              />
+                            </div>
+                          </button>
+                          {pl.targets.length === 0 && (
+                            <p className="text-[11px] font-mono text-[#e5a00d]">
+                              Not pushed to {serverLabel} — no users assigned
+                            </p>
+                          )}
+                          {isOpen && (
+                            <div id={containerId} className="flex flex-wrap gap-1.5">
+                              {targetUsers.map((u) => {
+                                const uIdStr = String(u.id);
+                                const isTarget = pl.targets.includes(uIdStr);
+                                const canEdit = isAdmin || u.id === currentUserId;
+
+                                return (
+                                  <button
+                                    key={u.id}
+                                    type="button"
+                                    disabled={!canEdit}
+                                    onClick={() => handleTargetClick(pl, uIdStr)}
+                                    className={`target-pill px-2.5 py-1 rounded-[3px] text-xs font-mono transition-all ${
+                                      isTarget
+                                        ? 'bg-[#e5a00d]/20 border border-[#e5a00d] text-[#e5a00d]'
+                                        : 'bg-[#121212] border border-[#222222] text-neutral-500 hover:text-neutral-300'
+                                    } ${!canEdit ? 'cursor-default opacity-80' : 'cursor-pointer'}`}
+                                  >
+                                    {u.username}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </>
                       );
-                    })}
-                  </div>
+                    })()
+                  ) : (
+                    <>
+                      <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-mono">
+                        Sync Targets
+                      </span>
+                      {pl.targets.length === 0 && (
+                        <p className="text-[11px] font-mono text-[#e5a00d]">
+                          Not pushed to {serverLabel} — no users assigned
+                        </p>
+                      )}
+                      <div className="flex flex-wrap gap-1.5">
+                        {targetUsers.map((u) => {
+                          const uIdStr = String(u.id);
+                          const isTarget = pl.targets.includes(uIdStr);
+                          const canEdit = isAdmin || u.id === currentUserId;
+
+                          return (
+                            <button
+                              key={u.id}
+                              type="button"
+                              disabled={!canEdit}
+                              onClick={() => handleTargetClick(pl, uIdStr)}
+                              className={`target-pill px-2.5 py-1 rounded-[3px] text-xs font-mono transition-all ${
+                                isTarget
+                                  ? 'bg-[#e5a00d]/20 border border-[#e5a00d] text-[#e5a00d]'
+                                  : 'bg-[#121212] border border-[#222222] text-neutral-500 hover:text-neutral-300'
+                              } ${!canEdit ? 'cursor-default opacity-80' : 'cursor-pointer'}`}
+                            >
+                              {u.username}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
