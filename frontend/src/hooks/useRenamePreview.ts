@@ -19,6 +19,8 @@ export interface UseRenamePreviewOptions {
 export interface UseRenamePreviewReturn {
   items: RenamePreviewItem[];
   allPreviewItems: RenamePreviewItem[];
+  total: number;
+  truncated: boolean;
   loading: boolean;
   applying: boolean;
   error: string | null;
@@ -53,6 +55,8 @@ export function useRenamePreview({
 }: UseRenamePreviewOptions): UseRenamePreviewReturn {
   const [allPreviewItems, setAllPreviewItems] = useState<RenamePreviewItem[]>([]);
   const [items, setItems] = useState<RenamePreviewItem[]>([]);
+  const [total, setTotal] = useState<number>(0);
+  const [truncated, setTruncated] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [applying, setApplying] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,9 +75,11 @@ export function useRenamePreview({
         album_id: albumId ?? undefined,
         limit: 5000,
       });
-      setAllPreviewItems(data);
+      setAllPreviewItems(data.items);
+      setTotal(data.total);
+      setTruncated(data.truncated);
       // Filter only files that would change
-      const changing = data.filter((item) => item.needs_rename);
+      const changing = data.items.filter((item) => item.needs_rename);
       setItems(changing);
       setSelectedIds(
         new Set(changing.filter((item) => item.default_selected).map((item) => item.file_id))
@@ -83,6 +89,8 @@ export function useRenamePreview({
       setError(errorMessage(err, 'Failed to generate rename preview'));
       setAllPreviewItems([]);
       setItems([]);
+      setTotal(0);
+      setTruncated(false);
       setSelectedIds(new Set());
     } finally {
       setLoading(false);
@@ -189,6 +197,8 @@ export function useRenamePreview({
   return {
     items,
     allPreviewItems,
+    total,
+    truncated,
     loading,
     applying,
     error,
