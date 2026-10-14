@@ -183,7 +183,10 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
 24. **P2 · Playlist sync rematches every list every cycle.** The sync task runs every `wait_seconds` (`task_manager._sync_interval`
     ~L256). Live log shows full cycles at 20:44, 20:54, 21:04 (10 min) rescraping and rematching every playlist. The
     2,678-track Rolling Stone list alone takes many minutes, so a cycle can approach or overrun the next tick on the
-    user's small host. Options, cheapest first: skip the match/push when the scraped track list hash is
-    unchanged since the last successful sync (store the hash on the playlist row); run each playlist on its own
+    user's small host. Options, cheapest first: skip the match/push only when BOTH the scraped track list hash is
+    unchanged since the last successful sync (store the hash on the playlist row) AND none of the playlist's missing
+    tracks has been acquired since then (user, 2026-10-14: a newly imported track must still land in the Plex
+    playlist; e.g. a `missing_tracks` row fulfilled, or any library import after `last_synced_at` matching one of its
+    missing rows). If either changed, rematch and push. Run each playlist on its own
     interval with a slower default for large lists; make sure a cycle never starts while the previous one is still
     running (check the task manager's overlap guard). Log per-playlist duration so the Tasks page can show it.
