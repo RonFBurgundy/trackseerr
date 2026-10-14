@@ -6,6 +6,7 @@ import {
   ObsidianModal,
   StatusMessage,
   TapeDeckButton,
+  SegmentedChoice,
   inputClass,
 } from '@/components/ui';
 import { PERMISSION_PRESETS } from '@/types/account';
@@ -128,22 +129,13 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ isOpen, onClos
             <legend className="text-xs uppercase font-mono tracking-wider text-[var(--text-secondary)] mb-1.5">
               Permissions preset
             </legend>
-            {PERMISSION_PRESETS.map((p) => (
-              <label
-                key={p.id}
-                className="flex items-center gap-3 min-h-[36px] sm:min-h-0 cursor-pointer text-xs font-mono"
-              >
-                <input
-                  id={`create-user-preset-${p.id}`}
-                  type="radio"
-                  name="preset"
-                  checked={presetId === p.id}
-                  onChange={() => setPresetId(p.id)}
-                  className="accent-[var(--accent-amber)]"
-                />
-                {p.label}
-              </label>
-            ))}
+            <SegmentedChoice
+              name="preset"
+              ariaLabel="Permissions preset"
+              options={PERMISSION_PRESETS}
+              value={presetId}
+              onChange={setPresetId}
+            />
             <p className="text-[11px] font-mono text-[var(--text-muted)]">
               Fine-tune permissions and quotas after creating the user.
             </p>

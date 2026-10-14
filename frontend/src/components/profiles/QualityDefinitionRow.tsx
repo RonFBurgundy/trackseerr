@@ -1,9 +1,8 @@
 import React, { useId, useState } from 'react';
 import { Loader2, RotateCcw, Save } from 'lucide-react';
-import { MachinedCard, TapeDeckButton } from '@/components/ui';
+import { MachinedCard, TapeDeckButton, KbpsSlider } from '@/components/ui';
 import type { QualityDefinition, QualityDefinitionInput } from '@/types/qualityDefinitions';
 import { compactInputClass, compactLabelClass } from '@/components/settings/formClasses';
-import { KbpsSlider } from './KbpsSlider';
 import { formatMbPerMin, scaleFor } from './qualityScales';
 
 const MAX_KBPS = 100000;
