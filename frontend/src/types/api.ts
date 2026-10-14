@@ -12470,6 +12470,16 @@ export interface components {
              * @default false
              */
             editable: boolean;
+            /**
+             * Group
+             * @default maintenance
+             */
+            group: string;
+            /**
+             * Group Label
+             * @default Maintenance
+             */
+            group_label: string;
             /** Id */
             id: string;
             /** Interval */

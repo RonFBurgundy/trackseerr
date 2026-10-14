@@ -13,6 +13,8 @@ heading becomes the version and date.
 
 ### Added
 
+- Manual runs of the track credits backfill, artwork backfill and artist refresh can be cancelled from the Tasks page; they stop after the current item. Shutting down also stops manual runs instead of waiting for them.
+- Wanted lists show when each item was added and can be sorted by it, newest first (not available when Lidarr manages the library).
 - Missing tracks from Spotify and Deezer playlists set to "track" monitoring are now requested automatically as the playlist's owner, so they show up as request cards you can follow (quota and approval rules apply). Each sync logs how many were requested, already owned or waiting.
 - The library Tracks tab has an "Owned only" switch, on by default, listing just the tracks you have files for; turn it off to include missing catalog tracks.
 - Rename preview: a file whose audio AcoustID identifies as a different track in your library gets a "Relink to this track" button. If that track already has a file, you choose which to keep (or switch on "Keep the higher-quality file"); the other goes to the recycle bin.
