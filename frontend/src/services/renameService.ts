@@ -12,6 +12,7 @@ export type RenameRelinkRequest = Schema<'RenameRelinkRequest'>;
 export type RenameRelinkResponse = Schema<'RenameRelinkResponse'>;
 export type RenameRelinkFile = Schema<'RenameRelinkFile'>;
 export type RenameRelinkConflictResponse = Schema<'RenameRelinkConflictResponse'>;
+export type RenameSafetyResponse = Schema<'RenameSafetyResponse'>;
 
 export type RelinkOutcome =
   | { kind: 'ok'; data: RenameRelinkResponse }
@@ -94,4 +95,12 @@ export async function relinkFile(request: RenameRelinkRequest): Promise<RelinkOu
     }
     return { kind: 'error', message: errorMessage(err, 'Relink failed') };
   }
+}
+
+/**
+ * Returns media-server settings warnings that could drop play counts/ratings when files move.
+ */
+export async function getRenameSafety(): Promise<RenameSafetyResponse> {
+  const res = await apiRequest<RenameSafetyResponse>('/api/library/rename/safety');
+  return res || { warnings: [] };
 }

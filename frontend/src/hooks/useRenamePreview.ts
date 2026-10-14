@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   getRenamePreview,
   applyRename,
+  getRenameSafety,
   type RenamePreviewItem,
   type RenameApplyResponse,
 } from '@/services/renameService';
@@ -41,6 +42,7 @@ export interface UseRenamePreviewReturn {
   selectNone: () => void;
   /** file_ids of proposed moves with at least one risky reason, i.e. worth verifying by audio. */
   riskyIds: string[];
+  safetyWarnings: string[];
   setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   apply: () => Promise<RenameApplyResponse | null>;
   result: RenameApplyResponse | null;
@@ -63,12 +65,18 @@ export function useRenamePreview({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activeReasons, setActiveReasons] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<RenameApplyResponse | null>(null);
+  const [safetyWarnings, setSafetyWarnings] = useState<string[]>([]);
 
   const reload = useCallback(async (): Promise<void> => {
     if (!enabled) return;
     setLoading(true);
     setError(null);
     setResult(null);
+
+    const safetyPromise = getRenameSafety()
+      .then((res) => setSafetyWarnings(res.warnings ?? []))
+      .catch(() => setSafetyWarnings([]));
+
     try {
       const data = await getRenamePreview({
         artist_id: artistId ?? undefined,
@@ -93,6 +101,7 @@ export function useRenamePreview({
       setTruncated(false);
       setSelectedIds(new Set());
     } finally {
+      await safetyPromise;
       setLoading(false);
     }
   }, [artistId, albumId, enabled]);
@@ -213,6 +222,7 @@ export function useRenamePreview({
     selectSafe,
     selectNone,
     riskyIds,
+    safetyWarnings,
     setSelectedIds,
     apply,
     result,

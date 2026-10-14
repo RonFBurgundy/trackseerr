@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { ArrowRight, AudioLines, Check, FileCheck, Link2, Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
+import { AlertTriangle, ArrowRight, AudioLines, Check, FileCheck, Link2, Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ObsidianModal, SelectionCheckbox, TactileSwitch, TapeDeckButton } from '@/components/ui';
 import { useRenamePreview } from '@/hooks/useRenamePreview';
@@ -159,6 +159,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
     reload,
     resetResult,
     riskyIds,
+    safetyWarnings,
   } = useRenamePreview({
     artistId: scope?.artistId,
     albumId: scope?.albumId,
@@ -315,6 +316,24 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
               </div>
             ) : (
               <div className="space-y-3">
+                {safetyWarnings.length > 0 && (
+                  <div
+                    role="note"
+                    className="p-3 rounded-[3px] border border-[var(--accent-amber)]/50 bg-[var(--accent-amber)]/10 text-xs font-mono text-[var(--accent-amber)] space-y-1"
+                  >
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        {safetyWarnings.map((warning, idx) => (
+                          <p key={idx} className="text-xs font-mono">
+                            {warning}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <p className="text-xs font-mono text-neutral-400">
                   {truncated ? (
                     <>
