@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CopyBox, ObsidianModal, StatusMessage, TapeDeckButton } from '@/components/ui';
+import { CopyBox, ObsidianModal, StatusMessage, TactileSwitch, TapeDeckButton } from '@/components/ui';
 
 export interface RecoveryCodesModalProps {
   codes: string[] | null;
@@ -40,20 +40,16 @@ export const RecoveryCodesModal: React.FC<RecoveryCodesModalProps> = ({ codes, o
           safe. They will not be shown again.
         </p>
         <CopyBox value={(codes ?? []).join('\n')} multiline />
-        <label className="flex items-center gap-3 min-h-[36px] cursor-pointer text-xs font-mono">
-          <input
-            id="recovery-codes-saved"
-            name="recovery-codes-saved"
-            type="checkbox"
-            checked={saved}
-            onChange={(e) => {
-              setSaved(e.target.checked);
-              setNag(false);
-            }}
-            className="h-4 w-4 accent-[var(--accent-amber)]"
-          />
-          I've saved them
-        </label>
+        <TactileSwitch
+          id="recovery-codes-saved"
+          name="recovery-codes-saved"
+          label="I've saved them"
+          checked={saved}
+          onChange={(checked) => {
+            setSaved(checked);
+            setNag(false);
+          }}
+        />
         {nag && <StatusMessage variant="error">Confirm that you have saved your codes first.</StatusMessage>}
       </div>
     </ObsidianModal>
