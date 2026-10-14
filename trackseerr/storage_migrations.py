@@ -68,6 +68,7 @@ class MigrationsMixin:
                 (79, self._migration_v79),
                 (80, self._migration_v80),
                 (81, self._migration_v81),
+                (82, self._migration_v82),
             ]
 
             applied = 0
@@ -155,6 +156,12 @@ class MigrationsMixin:
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN replace_illegal_characters INTEGER NOT NULL DEFAULT 1"
             )
+
+    def _migration_v82(self, cur: sqlite3.Cursor) -> None:
+        """v82: playlists.sync_fingerprint, the hash of the inputs of the last successful sync (skip-unchanged)."""
+        cur.execute("PRAGMA table_info(playlists)")
+        if "sync_fingerprint" not in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE playlists ADD COLUMN sync_fingerprint TEXT")
 
     def _migration_v81(self, cur: sqlite3.Cursor) -> None:
         """v81: Tracks list speed: has_file + denormalized sort columns, trigram search table, composite indexes.

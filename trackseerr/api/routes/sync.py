@@ -1,11 +1,13 @@
 """Background sync routes and SSE live log streaming."""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 import sqlite3
+import hashlib
 import threading
+import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
@@ -89,6 +91,21 @@ def _effective_tracks(db: Database, tracks: list[Track], playlist_name: str) -> 
         return list(tracks), {}, set()
 
 
+_FULL_RESYNC_AFTER = timedelta(hours=24)  # an unchanged playlist is still fully resynced once a day
+_IMPORT_RESCAN_GRACE = timedelta(minutes=30)  # library changes this close to a sync may predate the media-server scan
+
+
+def _sync_fingerprint(tracks: list[Track], target_usernames: list[str], push: bool, monitor_mode: Optional[str]) -> str:
+    """Hash of everything that decides a playlist's sync result apart from the library: tracks, targets, push, mode."""
+    payload = {
+        "tracks": [[t.title, t.artist, t.album, t.url, t.duration_seconds] for t in tracks],
+        "targets": sorted(target_usernames),
+        "push": push,
+        "monitor_mode": monitor_mode or "",
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
 class SyncState:
     """Manages active sync status, statistics, and log streaming."""
 
@@ -101,6 +118,7 @@ class SyncState:
             "success_count": 0,
             "total_matched": 0,
             "total_missing": 0,
+            "skipped_unchanged": 0,
         }
         self.log_handler = BroadcastLogHandler()
         formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -225,13 +243,14 @@ class SyncState:
         original_by_effective: dict[int, Track],
         ignored_ids: set[int],
         stats: dict[str, int],
+        fingerprint: str,
     ) -> None:
         """Matches a playlist against the native library and records its missing tracks; nothing is pushed."""
         pl_id = pl["id"]
         try:
             matched, missing = match_playlist_tracks_native(db, tracks)
             missing = restore_missing(missing, original_by_effective, ignored_ids)
-            db.record_sync_result(playlist_id=pl_id, status="success", missing_tracks=missing)
+            db.record_sync_result(playlist_id=pl_id, status="success", missing_tracks=missing, fingerprint=fingerprint)
             apply_playlist_missing_safely(db, config, pl_id)
             stats["success_count"] += 1
             stats["total_matched"] += len(matched)
@@ -241,16 +260,164 @@ class SyncState:
             logger.debug("Native match traceback", exc_info=True)
             db.record_sync_result(playlist_id=pl_id, status="failed")
 
+    @staticmethod
+    def _push_playlist(
+        db: Database,
+        config: Config,
+        server: Any,
+        pl: dict[str, Any],
+        model_playlist: Playlist,
+        target_usernames: list[str],
+        skip_rating_keys: Optional[set[str]],
+        original_by_effective: dict[int, Track],
+        ignored_ids: set[int],
+        stats: dict[str, int],
+        fingerprint: str,
+    ) -> None:
+        """Pushes a playlist to the media server for its target users and records the outcome."""
+        pl_id = pl["id"]
+        try:
+            results = server.sync_playlist(
+                model_playlist,
+                target_usernames,
+                PlaylistSyncOptions.from_config(config, db=db, skip_item_ids=skip_rating_keys),
+            )
+            matched, missing = server.match_playlist_tracks(
+                model_playlist.tracks, threshold=config.search_similarity_threshold
+            )
+            missing = restore_missing(missing, original_by_effective, ignored_ids)
+            success = any(r.success for r in results) if results else False
+            db.record_sync_result(
+                playlist_id=pl_id,
+                status="success" if success else "failed",
+                missing_tracks=missing,
+                fingerprint=fingerprint,
+            )
+            apply_playlist_missing_safely(db, config, pl_id)
+            if success:
+                stats["success_count"] += 1
+            stats["total_matched"] += len(matched)
+            stats["total_missing"] += len(missing)
+        except Exception as e:
+            logger.error("Error syncing playlist '%s' to Plex: %s", pl["name"], describe_error(e))
+            logger.debug("Playlist sync traceback", exc_info=True)
+            db.record_sync_result(playlist_id=pl_id, status="failed")
+
+    @staticmethod
+    def _unchanged_since_last_sync(
+        db: Database, pl: dict[str, Any], fingerprint: str, latest_library_change: Optional[str]
+    ) -> bool:
+        """True when the last sync succeeded, is under a day old, and neither inputs nor the library changed since.
+
+        The library counts as changed while its newest change is within ``_IMPORT_RESCAN_GRACE`` before the last
+        sync: a media server may not have scanned a freshly imported file when that sync ran.
+        """
+        if pl.get("sync_status") != "success":
+            return False
+        stored, last_synced_at = db.get_playlist_sync_fingerprint(pl["id"])
+        if not stored or stored != fingerprint or not last_synced_at:
+            return False
+        try:
+            synced = datetime.strptime(last_synced_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return False  # unparseable timestamp: resync rather than trust it
+        if datetime.now(timezone.utc) - synced > _FULL_RESYNC_AFTER:
+            return False
+        if latest_library_change is None:
+            return True
+        try:
+            changed = datetime.strptime(latest_library_change, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return False
+        return changed <= synced - _IMPORT_RESCAN_GRACE
+
+    def _sync_one(
+        self,
+        db: Database,
+        config: Config,
+        plex_client: Optional[PlexClient],
+        server: Any,
+        spotify_client: Optional[SpotifyClient],
+        deezer_client: Optional[DeezerClient],
+        pl: dict[str, Any],
+        stats: dict[str, int],
+        force: bool,
+        latest_library_change: Optional[str],
+    ) -> None:
+        """Syncs one playlist: loads its tracks, skips it when nothing changed, else matches (and pushes) it."""
+        pl_id = pl["id"]
+        # Target users only matter for pushing to a media server; without targets (or without a
+        # media server) the playlist is still matched against the native library.
+        no_media_server = config.media_server_type == MEDIA_SERVER_NONE
+        target_usernames = [] if no_media_server else self._resolve_targets(db, pl)
+        push = bool(target_usernames)
+
+        skip_rating_keys: Optional[set[str]] = None
+        if pl.get("service", "spotify") == "plex":
+            skip_rating_keys = self._refresh_adopted_playlist(db, plex_client, pl)
+        try:
+            tracks = self._load_source_tracks(db, config, pl, spotify_client, deezer_client)
+        except SmartCollectionError as e:
+            logger.info("Smart collection '%s' skipped: %s", pl["name"], e)
+            db.record_sync_result(pl_id, status="error")
+            return
+        except Exception as e:
+            logger.error("Failed to fetch tracks for playlist '%s' (%s): %s", pl["name"], pl_id, safe_exc(e))
+            db.record_sync_result(pl_id, status="error")
+            return
+
+        tracks, original_by_effective, ignored_ids = _effective_tracks(db, tracks, pl["name"])
+        fingerprint = _sync_fingerprint(tracks, target_usernames, push, pl.get("monitor_mode"))
+        if not force and self._unchanged_since_last_sync(db, pl, fingerprint, latest_library_change):
+            stats["skipped_unchanged"] += 1
+            logger.debug("Playlist '%s' unchanged since last sync; skipped", pl["name"])
+            return
+
+        started = time.monotonic()
+        matched_before, missing_before = stats["total_matched"], stats["total_missing"]
+        model_playlist = Playlist(
+            id=pl_id,
+            name=pl["name"],
+            tracks=tracks,
+            description=pl.get("description", ""),
+            poster=pl.get("poster_url", ""),
+        )
+        if no_media_server or not push:
+            # Nothing is pushed (no media server, or no target users): the source playlist is matched
+            # against the native library so its missing tracks reach monitoring / wanted.
+            self._match_natively(db, config, pl, tracks, original_by_effective, ignored_ids, stats, fingerprint)
+        elif server:
+            self._push_playlist(
+                db, config, server, pl, model_playlist, target_usernames, skip_rating_keys,
+                original_by_effective, ignored_ids, stats, fingerprint,
+            )
+        else:
+            logger.warning("Plex client not available; recorded simulated sync for '%s'", pl["name"])
+            db.record_sync_result(playlist_id=pl_id, status="unconfigured")
+            return
+        logger.info(
+            "Playlist '%s' synced in %.1fs (%d matched, %d missing)",
+            pl["name"],
+            time.monotonic() - started,
+            stats["total_matched"] - matched_before,
+            stats["total_missing"] - missing_before,
+        )
+
     @tracked("playlist_sync", "Plex Playlist Sync")
-    def execute_sync(  # noqa: C901, PLR0915
+    def execute_sync(
         self,
         db: Database,
         config: Config,
         plex_client: Optional[PlexClient],
         spotify_client: Optional[SpotifyClient],
         deezer_client: Optional[DeezerClient],
+        force: bool = False,
     ) -> dict[str, Any]:
-        """Runs synchronization across all enabled database playlists."""
+        """Runs synchronization across all enabled database playlists.
+
+        Unless ``force``, a playlist whose inputs, targets and library are unchanged since its last
+        successful sync (under 24 h ago) is skipped; any library import since then forces a rematch.
+        """
         if self.is_syncing:
             return {"status": "already_running"}
 
@@ -261,6 +428,7 @@ class SyncState:
             "success_count": 0,
             "total_matched": 0,
             "total_missing": 0,
+            "skipped_unchanged": 0,
         }
 
         try:
@@ -274,87 +442,28 @@ class SyncState:
                     logger.warning("Mix snapshot refresh failed: %s", e.safe_detail)
             playlists = db.list_playlists(enabled_only=True)
             stats["total_playlists"] = len(playlists)
+            latest_library_change = db.latest_library_file_change()
 
-            no_media_server = config.media_server_type == MEDIA_SERVER_NONE
             for pl in playlists:
-                pl_id = pl["id"]
-                # Target users only matter for pushing to a media server; without targets (or without a
-                # media server) the playlist is still matched against the native library.
-                target_usernames = [] if no_media_server else self._resolve_targets(db, pl)
-                push = bool(target_usernames)
-
-                tracks: list[Track] = []
-                service = pl.get("service", "spotify")
-                skip_rating_keys: Optional[set[str]] = None
-                if service == "plex":
-                    skip_rating_keys = self._refresh_adopted_playlist(db, plex_client, pl)
-                try:
-                    tracks = self._load_source_tracks(db, config, pl, spotify_client, deezer_client)
-                except SmartCollectionError as e:
-                    logger.info("Smart collection '%s' skipped: %s", pl["name"], e)
-                    db.record_sync_result(pl_id, status="error")
-                    continue
-                except Exception as e:
-                    logger.error("Failed to fetch tracks for playlist '%s' (%s): %s", pl["name"], pl_id, safe_exc(e))
-                    db.record_sync_result(pl_id, status="error")
-                    continue
-
-                tracks, original_by_effective, ignored_ids = _effective_tracks(db, tracks, pl["name"])
-                model_playlist = Playlist(
-                    id=pl_id,
-                    name=pl["name"],
-                    tracks=tracks,
-                    description=pl.get("description", ""),
-                    poster=pl.get("poster_url", ""),
+                self._sync_one(
+                    db, config, plex_client, server, spotify_client, deezer_client,
+                    pl, stats, force, latest_library_change,
                 )
-
-                if no_media_server or not push:
-                    # Nothing is pushed (no media server, or no target users): the source playlist is matched
-                    # against the native library so its missing tracks reach monitoring / wanted.
-                    self._match_natively(db, config, pl, tracks, original_by_effective, ignored_ids, stats)
-                elif server:
-                    try:
-                        results = server.sync_playlist(
-                            model_playlist,
-                            target_usernames,
-                            PlaylistSyncOptions.from_config(config, db=db, skip_item_ids=skip_rating_keys),
-                        )
-                        matched, missing = server.match_playlist_tracks(
-                            tracks, threshold=config.search_similarity_threshold
-                        )
-                        missing = restore_missing(missing, original_by_effective, ignored_ids)
-                        success = any(r.success for r in results) if results else False
-                        db.record_sync_result(
-                            playlist_id=pl_id,
-                            status="success" if success else "failed",
-                            missing_tracks=missing,
-                        )
-                        apply_playlist_missing_safely(db, config, pl_id)
-                        if success:
-                            stats["success_count"] += 1
-                        stats["total_matched"] += len(matched)
-                        stats["total_missing"] += len(missing)
-                    except Exception as e:
-                        logger.error("Error syncing playlist '%s' to Plex: %s", pl["name"], describe_error(e))
-                        logger.debug("Playlist sync traceback", exc_info=True)
-                        db.record_sync_result(playlist_id=pl_id, status="failed")
-                else:
-                    logger.warning("Plex client not available; recorded simulated sync for '%s'", pl["name"])
-                    db.record_sync_result(playlist_id=pl_id, status="unconfigured")
 
             self.last_run_stats = stats
             self.last_run_at = datetime.now(timezone.utc).isoformat()
             logger.info(
-                "Background sync complete: %d/%d succeeded, %d matched, %d missing",
+                "Background sync complete: %d/%d succeeded, %d matched, %d missing, %d skipped unchanged",
                 stats["success_count"],
                 stats["total_playlists"],
                 stats["total_matched"],
                 stats["total_missing"],
+                stats["skipped_unchanged"],
             )
             try:
                 db.record_event(
                     "sync_completed",
-                    f"Playlist sync completed: {stats['total_playlists']} playlists processed ({stats['total_matched']} matched, {stats['total_missing']} missing)",
+                    f"Playlist sync completed: {stats['total_playlists']} playlists processed ({stats['total_matched']} matched, {stats['total_missing']} missing, {stats['skipped_unchanged']} unchanged)",
                     source="SyncCoordinator",
                     severity="info",
                 )
@@ -397,6 +506,7 @@ def trigger_sync(
         plex_client=plex_client,
         spotify_client=spotify_client,
         deezer_client=deezer_client,
+        force=True,
     )
 
     return {

@@ -463,7 +463,7 @@ CREATE TABLE playlists (
                 sync_status TEXT NOT NULL DEFAULT 'never_synced',
                 created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
-            , creator_id TEXT REFERENCES users(id), tracks_json TEXT, monitor_mode TEXT NOT NULL DEFAULT 'track', source_kind TEXT, source_ref TEXT, auto_request INTEGER NOT NULL DEFAULT 0);
+            , creator_id TEXT REFERENCES users(id), tracks_json TEXT, monitor_mode TEXT NOT NULL DEFAULT 'track', source_kind TEXT, source_ref TEXT, auto_request INTEGER NOT NULL DEFAULT 0, sync_fingerprint TEXT);
 CREATE TABLE plex_mix_snapshots (
                 id TEXT PRIMARY KEY,
                 plex_user TEXT NOT NULL,

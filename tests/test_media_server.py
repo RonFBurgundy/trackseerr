@@ -494,6 +494,157 @@ def test_sync_with_no_media_server_needs_no_target_users(tmp_path):
     assert [m["title"] for m in env.db.get_missing_tracks("imp_y")] == ["T"]
 
 
+def _unchanged_env(tmp_path, tracks=None):
+    """No-media-server env with one stored-list playlist, plus the native matcher patch target."""
+    env = build_client(tmp_path)
+    env.db.upsert_playlist("imp_skip", "SkipMe", service="spotify")
+    _set_tracks(env.db, tracks or _TWO_TRACKS_NATIVE)
+    return env
+
+
+_TWO_TRACKS_NATIVE = [{"title": "Known Song", "artist": "Known Artist"}, {"title": "Unknown Song", "artist": "Nobody"}]
+
+
+def _set_tracks(db, tracks):
+    with db._lock:
+        db.conn.execute("UPDATE playlists SET tracks_json = ? WHERE id = ?", (json.dumps(tracks), "imp_skip"))
+        db.conn.commit()
+
+
+def _sql(db, sql, *args):
+    with db._lock:
+        db.conn.execute(sql, args)
+        db.conn.commit()
+
+
+def _run_sync(env, state, **kwargs):
+    return state.execute_sync(db=env.db, config=env.cfg, plex_client=None, spotify_client=None, deezer_client=None, **kwargs)
+
+
+def _native_result():
+    return (
+        [Track(title="Known Song", artist="Known Artist", album="")],
+        [Track(title="Unknown Song", artist="Nobody", album="")],
+    )
+
+
+def test_second_sync_skips_unchanged_playlist(tmp_path):
+    env = _unchanged_env(tmp_path)
+    state = SyncState()
+    with patch("trackseerr.api.routes.sync.match_playlist_tracks_native", return_value=_native_result()) as native:
+        first = _run_sync(env, state)
+        second = _run_sync(env, state)
+    native.assert_called_once()
+    assert first["stats"]["skipped_unchanged"] == 0
+    assert second["stats"]["skipped_unchanged"] == 1
+    assert [m["title"] for m in env.db.get_missing_tracks("imp_skip")] == ["Unknown Song"]
+
+
+def test_changed_source_tracks_rematch(tmp_path):
+    env = _unchanged_env(tmp_path)
+    state = SyncState()
+    with patch("trackseerr.api.routes.sync.match_playlist_tracks_native", return_value=_native_result()) as native:
+        _run_sync(env, state)
+        _set_tracks(env.db, [{"title": "Another", "artist": "Else"}])
+        out = _run_sync(env, state)
+    assert native.call_count == 2
+    assert out["stats"]["skipped_unchanged"] == 0
+
+
+def test_library_import_since_last_sync_forces_rematch(tmp_path):
+    env = _unchanged_env(tmp_path)
+    state = SyncState()
+    with patch("trackseerr.api.routes.sync.match_playlist_tracks_native", return_value=_native_result()) as native:
+        _run_sync(env, state)
+        env.db.upsert_library_artist({"id": "a1", "name": "Known Artist", "monitored": True})
+        env.db.upsert_library_album({"id": "al1", "artist_id": "a1", "title": "Alb", "year": 2000})
+        env.db.upsert_library_track({"id": "t1", "album_id": "al1", "artist_id": "a1", "title": "Known Song"})
+        env.db.upsert_library_file(
+            {"id": "f1", "track_id": "t1", "file_path": "/m/a.flac", "relative_path": "a.flac", "codec": "FLAC",
+             "quality_name": "FLAC", "size_bytes": 1}
+        )
+        _sql(env.db, "UPDATE library_files SET updated_at = '2999-01-01 00:00:00'")
+        _sql(env.db, "UPDATE playlists SET last_synced_at = '2998-01-01 00:00:00' WHERE id = 'imp_skip'")
+        out = _run_sync(env, state)
+    assert native.call_count == 2
+    assert out["stats"]["skipped_unchanged"] == 0
+
+
+def _import_file(db):
+    db.upsert_library_artist({"id": "a1", "name": "Known Artist", "monitored": True})
+    db.upsert_library_album({"id": "al1", "artist_id": "a1", "title": "Alb", "year": 2000})
+    db.upsert_library_track({"id": "t1", "album_id": "al1", "artist_id": "a1", "title": "Known Song"})
+    db.upsert_library_file(
+        {"id": "f1", "track_id": "t1", "file_path": "/m/a.flac", "relative_path": "a.flac", "codec": "FLAC",
+         "quality_name": "FLAC", "size_bytes": 1}
+    )
+
+
+def test_import_just_before_last_sync_still_rematches(tmp_path):
+    env = _unchanged_env(tmp_path)
+    state = SyncState()
+    with patch("trackseerr.api.routes.sync.match_playlist_tracks_native", return_value=_native_result()) as native:
+        _run_sync(env, state)
+        _import_file(env.db)
+        _sql(env.db, "UPDATE playlists SET last_synced_at = datetime('now', '-1 hours') WHERE id = 'imp_skip'")
+        _sql(env.db, "UPDATE library_files SET updated_at = datetime('now', '-1 hours', '-5 minutes')")
+        out = _run_sync(env, state)
+    assert native.call_count == 2
+    assert out["stats"]["skipped_unchanged"] == 0
+
+
+def test_import_well_before_last_sync_is_skipped(tmp_path):
+    env = _unchanged_env(tmp_path)
+    state = SyncState()
+    with patch("trackseerr.api.routes.sync.match_playlist_tracks_native", return_value=_native_result()) as native:
+        _run_sync(env, state)
+        _import_file(env.db)
+        _sql(env.db, "UPDATE playlists SET last_synced_at = datetime('now', '-1 hours') WHERE id = 'imp_skip'")
+        _sql(env.db, "UPDATE library_files SET updated_at = datetime('now', '-3 hours')")
+        out = _run_sync(env, state)
+    native.assert_called_once()
+    assert out["stats"]["skipped_unchanged"] == 1
+
+
+def test_force_rematches(tmp_path):
+    env = _unchanged_env(tmp_path)
+    state = SyncState()
+    with patch("trackseerr.api.routes.sync.match_playlist_tracks_native", return_value=_native_result()) as native:
+        _run_sync(env, state)
+        out = _run_sync(env, state, force=True)
+    assert native.call_count == 2
+    assert out["stats"]["skipped_unchanged"] == 0
+
+
+def test_failed_sync_clears_fingerprint_and_retries(tmp_path):
+    env = _unchanged_env(tmp_path)
+    state = SyncState()
+    with patch(
+        "trackseerr.api.routes.sync.match_playlist_tracks_native",
+        side_effect=[RuntimeError("boom"), _native_result(), _native_result()],
+    ) as native:
+        _run_sync(env, state)
+        assert env.db.get_playlist("imp_skip")["sync_status"] == "failed"
+        assert env.db.get_playlist_sync_fingerprint("imp_skip")[0] is None
+        out = _run_sync(env, state)
+        assert out["stats"]["success_count"] == 1
+        assert env.db.get_playlist_sync_fingerprint("imp_skip")[0]
+        again = _run_sync(env, state)
+    assert native.call_count == 2
+    assert again["stats"]["skipped_unchanged"] == 1
+
+
+def test_stale_fingerprint_older_than_a_day_rematches(tmp_path):
+    env = _unchanged_env(tmp_path)
+    state = SyncState()
+    with patch("trackseerr.api.routes.sync.match_playlist_tracks_native", return_value=_native_result()) as native:
+        _run_sync(env, state)
+        _sql(env.db, "UPDATE playlists SET last_synced_at = datetime('now', '-2 days') WHERE id = 'imp_skip'")
+        out = _run_sync(env, state)
+    assert native.call_count == 2
+    assert out["stats"]["skipped_unchanged"] == 0
+
+
 def _plex_env(tmp_path, playlist_id: str, tracks: list[dict]):
     """A Plex-configured env with one spotify playlist holding ``tracks`` as its stored list."""
     plex = MagicMock()
