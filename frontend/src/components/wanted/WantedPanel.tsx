@@ -85,9 +85,9 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
 
   const lidarrMode = list.mode === 'lidarr';
 
-  // If the manager flips to Lidarr while the unsortable column is the active sort, fall back to the default.
+  // If the manager flips to Lidarr while an unsortable column is the active sort, fall back to the default.
   useEffect(() => {
-    if (lidarrMode && sortKey === 'last_searched_at') {
+    if (lidarrMode && (sortKey === 'last_searched_at' || sortKey === 'added_at')) {
       setSortKey('artist');
       setSortDir('asc');
     }
@@ -99,8 +99,9 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
       { key: 'album', label: 'Album', sortable: true, width: 'minmax(0,1.1fr)', mobile: 'sub', render: (r) => orDash(r.album) },
       { key: 'title', label: 'Title', sortable: true, width: 'minmax(0,1.2fr)', mobile: 'sub', render: (r) => (r.item_type === 'album' ? '-' : orDash(r.title)) },
       { key: 'release_date', label: 'Release date', sortable: true, width: '120px', mobile: 'meta', render: (r) => formatCalendarDate(r.release_date) },
-      // Lidarr has no sort key for the last search time, so the column stays plain in lidarr mode.
+      // Lidarr has no sort key for last search time or added time, so these columns stay plain in lidarr mode.
       { key: 'last_searched_at', label: 'Last searched', sortable: !lidarrMode, width: '150px', mobile: 'meta', render: (r) => formatDateTime(r.last_searched_at) },
+      { key: 'added_at', label: 'Added', sortable: !lidarrMode, width: '150px', mobile: 'meta', render: (r) => formatDateTime(r.added_at) },
     ];
     if (isCutoff) {
       cols.push(
