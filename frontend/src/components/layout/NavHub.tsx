@@ -3,7 +3,7 @@ import { ChevronDown, X, LogOut, Shield, User as UserIcon, Bell } from 'lucide-r
 import type { AppRoute, Navigate } from '@/hooks/useAppRoute';
 import type { DeploymentTier, User, UserQuota } from '@/types/models';
 import { TapeDeckButton, QuotaBadge } from '@/components/ui';
-import { activeAncestorKeys, buildNavTree, routesEqual } from './navTree';
+import { activeAncestorKeys, buildNavTree, collapseSiblingsKeys, findDescendantGroupKeys, routesEqual } from './navTree';
 import type { NavNode } from './navTree';
 import { NavSearch } from './NavSearch';
 import type { NavSearchEntry } from './navSearchIndex';
@@ -106,6 +106,7 @@ const NodeRow: React.FC<NodeRowProps> = ({ node, depth, route, expanded, onToggl
       {node.children ? (
         <button
           type="button"
+          data-nav-key={node.key}
           className={rowClass}
           aria-expanded={isOpen}
           aria-controls={panelId}
@@ -205,13 +206,34 @@ const HubPanel: React.FC<NavHubProps> = ({
     }
   };
 
-  const toggle = (key: string): void =>
+  const toggle = (key: string): void => {
+    let opened = false;
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (next.has(key)) {
+        next.delete(key);
+        for (const desc of findDescendantGroupKeys(tree, key)) {
+          next.delete(desc);
+        }
+      } else {
+        opened = true;
+        next.add(key);
+        for (const siblingKey of collapseSiblingsKeys(tree, key)) {
+          next.delete(siblingKey);
+        }
+      }
       return next;
     });
+
+    if (opened) {
+      requestAnimationFrame(() => {
+        const btn = panelRef.current?.querySelector<HTMLElement>(`button[data-nav-key="${key}"]`);
+        if (!btn) return;
+        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        btn.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion ? 'auto' : 'smooth' });
+      });
+    }
+  };
 
   const go = (target: AppRoute): void => {
     onNavigate(target);

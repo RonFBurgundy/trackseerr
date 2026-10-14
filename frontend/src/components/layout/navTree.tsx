@@ -180,3 +180,65 @@ export function activeAncestorKeys(nodes: NavNode[], route: AppRoute): string[] 
   return walk(nodes, []) ?? [];
 }
 
+/** Collects the key of a group node and all its descendant group keys. */
+export function collectGroupKeys(node: NavNode): string[] {
+  if (!node.children) return [];
+  const keys: string[] = [node.key];
+  for (const child of node.children) {
+    keys.push(...collectGroupKeys(child));
+  }
+  return keys;
+}
+
+/** Recursively finds a node with the given key anywhere in the tree. */
+export function findNavNode(nodes: NavNode[], key: string): NavNode | null {
+  for (const node of nodes) {
+    if (node.key === key) return node;
+    if (node.children) {
+      const found = findNavNode(node.children, key);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/** Returns the keys of all descendant groups of the node with key `key`. */
+export function findDescendantGroupKeys(nodes: NavNode[], key: string): string[] {
+  const node = findNavNode(nodes, key);
+  if (!node || !node.children) return [];
+  const keys: string[] = [];
+  for (const child of node.children) {
+    keys.push(...collectGroupKeys(child));
+  }
+  return keys;
+}
+
+/**
+ * Returns the keys of every node that shares a parent with `key` (excluding `key` itself)
+ * plus all of those siblings' descendant group keys. Returns `[]` when `key` is not found.
+ */
+export function collapseSiblingsKeys(nodes: NavNode[], key: string): string[] {
+  const walk = (list: NavNode[]): string[] | null => {
+    const hasKey = list.some((n) => n.key === key);
+    if (hasKey) {
+      const keys: string[] = [];
+      for (const sibling of list) {
+        if (sibling.key !== key) {
+          keys.push(...collectGroupKeys(sibling));
+        }
+      }
+      return keys;
+    }
+    for (const node of list) {
+      if (node.children) {
+        const found = walk(node.children);
+        if (found !== null) return found;
+      }
+    }
+    return null;
+  };
+  return walk(nodes) ?? [];
+}
+
+
+
