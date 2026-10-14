@@ -2747,8 +2747,9 @@ export interface paths {
          * Rename Preview
          * @description Previews proposed file path changes from the naming templates.
          *
-         *     Album/artist scope returns up to ``limit`` tracks, including ones already in place. Library-wide scope scans the
-         *     whole library and returns only files that need a move, up to ``limit`` of them.
+         *     Album/artist scope returns up to ``limit`` tracks, including ones already in place, along with the total track count
+         *     and whether the results were truncated. Library-wide scope scans the whole library and returns only files that need a
+         *     move (up to ``limit``), reporting the true total count of files needing a rename and whether the results were truncated.
          */
         post: operations["rename_preview_api_library_rename_preview_post"];
         delete?: never;
@@ -12074,6 +12075,15 @@ export interface components {
              */
             limit: number;
         };
+        /** RenamePreviewResponse */
+        RenamePreviewResponse: {
+            /** Items */
+            items: components["schemas"]["RenamePreviewItem"][];
+            /** Total */
+            total: number;
+            /** Truncated */
+            truncated: boolean;
+        };
         /** RenameRelinkConflictResponse */
         RenameRelinkConflictResponse: {
             /** Detail */
@@ -18814,7 +18824,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RenamePreviewItem"][];
+                    "application/json": components["schemas"]["RenamePreviewResponse"];
                 };
             };
             /** @description Validation Error */
