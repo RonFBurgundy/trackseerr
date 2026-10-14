@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import type { ActivitySearchRecord } from '@/types/activity';
 import { getActivitySearches } from '@/services/activityService';
 import { useVirtualPagedList, type FetchPage } from '@/hooks/useVirtualPagedList';
@@ -127,6 +127,31 @@ export const ActivitySearchesPanel: React.FC<ActivityPanelProps> = () => {
     []
   );
 
+  const rowDetails = useCallback((r: ActivitySearchRecord): React.ReactNode | null => {
+    const details: { label: string; value: string }[] = [];
+    if (r.query_artist && r.query_album) {
+      details.push({ label: 'Artist', value: r.query_artist });
+      details.push({ label: 'Album', value: r.query_album });
+    }
+    if (r.duration_ms != null) {
+      details.push({ label: 'Took', value: `${(r.duration_ms / 1000).toFixed(1)}s` });
+    }
+    if (r.created_at) {
+      details.push({ label: 'When', value: formatDateTime(r.created_at) });
+    }
+
+    if (details.length === 0) return null;
+    return (
+      <div className="flex flex-col gap-0.5">
+        {details.map((d) => (
+          <div key={d.label}>
+            <span className="text-neutral-500">{d.label}:</span> {d.value}
+          </div>
+        ))}
+      </div>
+    );
+  }, []);
+
   const toolbar = (
     <>
       {FILTERS.map((f) => (
@@ -153,7 +178,8 @@ export const ActivitySearchesPanel: React.FC<ActivityPanelProps> = () => {
         sortKey="created_at"
         sortDir="desc"
         onSortChange={() => undefined}
-        mobileLayout="compact"
+        layout="card"
+        rowDetails={rowDetails}
         emptyMessage="No searches logged yet."
       />
     </ListPanel>

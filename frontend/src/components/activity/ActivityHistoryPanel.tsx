@@ -5,7 +5,7 @@ import { getActivityHistory, getActivityHistoryIndex, markHistoryFailed } from '
 import { errorMessage } from '@/services/apiClient';
 import { pagedFetcher, useVirtualPagedList } from '@/hooks/useVirtualPagedList';
 import { useGroupIndex } from '@/hooks/useGroupIndex';
-import { ConfirmDangerButton, TapeDeckButton, TabStrip } from '@/components/ui';
+import { ConfirmDialog, TapeDeckButton, TabStrip, type OverflowMenuItem } from '@/components/ui';
 import { FlatList, ListPanel, ScrubberRail, formatDateTime, orDash, type FlatListColumn } from '@/components/lists';
 import type { ActivityPanelProps } from './ActivityQueuePanel';
 import { LibraryLink } from './LibraryLink';
@@ -48,6 +48,7 @@ export const ActivityHistoryPanel: React.FC<ActivityPanelProps> = ({ onToast }) 
   const [sortKey, setSortKey] = useState<string>('date');
   const [sortDir, setSortDir] = useState<ListSortDir>('desc');
   const [event, setEvent] = useState<string>('');
+  const [failingId, setFailingId] = useState<string | number | null>(null);
   const [busyId, setBusyId] = useState<string | number | null>(null);
 
   const filters = useMemo(() => ({ event }), [event]);
@@ -69,6 +70,7 @@ export const ActivityHistoryPanel: React.FC<ActivityPanelProps> = ({ onToast }) 
           onToast(res.message || 'Failed to mark as failed', 'error');
           return;
         }
+        setFailingId(null);
         onToast(res.message || 'Marked as failed');
         void refresh();
       } catch (err: unknown) {
@@ -94,19 +96,46 @@ export const ActivityHistoryPanel: React.FC<ActivityPanelProps> = ({ onToast }) 
     []
   );
 
-  const rowActions = useCallback(
-    (r: ActivityHistoryRecord): React.ReactNode =>
-      r.event === 'grabbed' && r.can_mark_failed ? (
-        <ConfirmDangerButton
-          icon={<AlertOctagon className="h-3.5 w-3.5" />}
-          ariaLabel="Mark as failed"
-          confirmLabel="Mark failed"
-          disabled={busyId === r.id}
-          onConfirm={() => void markFailed(r.id)}
-        />
-      ) : null,
-    [busyId, markFailed]
+  const rowMenu = useCallback(
+    (r: ActivityHistoryRecord): OverflowMenuItem[] => {
+      if (r.event === 'grabbed' && r.can_mark_failed) {
+        return [
+          {
+            key: 'mark-failed',
+            label: 'Mark as failed…',
+            icon: <AlertOctagon className="h-3.5 w-3.5" />,
+            disabled: busyId === r.id,
+            onSelect: () => setFailingId(r.id),
+          },
+        ];
+      }
+      return [];
+    },
+    [busyId]
   );
+
+  const rowMenuLabel = useCallback(
+    (r: ActivityHistoryRecord) => `Actions for ${r.artist || r.album || r.track || 'item'}`,
+    []
+  );
+
+  const rowDetails = useCallback((r: ActivityHistoryRecord): React.ReactNode | null => {
+    const details: { label: string; value: string }[] = [];
+    if (r.indexer) details.push({ label: 'Indexer', value: r.indexer });
+    if (r.client) details.push({ label: 'Client', value: r.client });
+    if (r.release_title) details.push({ label: 'Release', value: r.release_title });
+
+    if (details.length === 0) return null;
+    return (
+      <div className="flex flex-col gap-0.5">
+        {details.map((d) => (
+          <div key={d.label}>
+            <span className="text-neutral-500">{d.label}:</span> {d.value}
+          </div>
+        ))}
+      </div>
+    );
+  }, []);
 
   const toolbar = (
     <TabStrip aria-label="Filter by event">
@@ -131,13 +160,27 @@ export const ActivityHistoryPanel: React.FC<ActivityPanelProps> = ({ onToast }) 
         sortKey={sortKey}
         sortDir={sortDir}
         onSortChange={onSortChange}
-        rowActions={rowActions}
-        actionsWidth="112px"
-        actionsLabel=""
-        mobileLayout="compact"
+        layout="card"
+        rowMenu={rowMenu}
+        rowMenuLabel={rowMenuLabel}
+        rowDetails={rowDetails}
         emptyMessage={event ? `No ${event} events.` : 'No history yet.'}
         rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to date" />}
       />
+      <ConfirmDialog
+        isOpen={failingId !== null}
+        title="Mark as failed"
+        confirmLabel="Mark failed"
+        onConfirm={() => {
+          if (failingId !== null) void markFailed(failingId);
+        }}
+        onCancel={() => setFailingId(null)}
+        busy={failingId !== null && busyId === failingId}
+      >
+        <p className="text-xs font-mono text-neutral-300 py-1">
+          Mark this download as failed?
+        </p>
+      </ConfirmDialog>
     </ListPanel>
   );
 };
