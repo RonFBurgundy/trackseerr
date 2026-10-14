@@ -171,3 +171,19 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     admin (self or another admin), render every toggle checked and disabled, and replace "Your own permissions cannot be
     changed here." with "Administrators hold every permission." Other admins keep only the admin toggle editable
     (subject to the server's last-admin guard). Unchecking it restores the stored bits. Frontend skill applies.
+23. **P1 · Playlists with no target users are never matched, so their missing tracks are never recorded.** Live log
+    2026-10-13: `Billboard Greatest Of All Time Hot 100` and `Rolling Stone's Top 500 Albums…` (2,678 tracks) logged
+    `has no target users assigned; skipping` every cycle until the user assigned RonTube ~21:00. The `continue` at
+    `trackseerr/api/routes/sync.py` ~L241 (inside the `not no_media_server` branch) skips the whole playlist, so
+    library matching and `missing_tracks` writes never happen. The no-media-server path already matches without targets.
+    Fix: with a media server configured and no targets, still scrape, match against the native library and record
+    missing rows (and run `apply_playlist_missing`); skip only the media-server push, logging that once per playlist.
+    The UI should flag a playlist with no targets ("not pushed to Plex — no users assigned") on its card. Test: a
+    mocked sync with Plex configured and zero targets records missing rows and makes no Plex calls.
+24. **P2 · Playlist sync rematches every list every cycle.** The sync task runs every `wait_seconds` (`task_manager._sync_interval`
+    ~L256). Live log shows full cycles at 20:44, 20:54, 21:04 (10 min) rescraping and rematching every playlist. The
+    2,678-track Rolling Stone list alone takes many minutes, so a cycle can approach or overrun the next tick on the
+    user's small host. Options, cheapest first: skip the match/push when the scraped track list hash is
+    unchanged since the last successful sync (store the hash on the playlist row); run each playlist on its own
+    interval with a slower default for large lists; make sure a cycle never starts while the previous one is still
+    running (check the task manager's overlap guard). Log per-playlist duration so the Tasks page can show it.
