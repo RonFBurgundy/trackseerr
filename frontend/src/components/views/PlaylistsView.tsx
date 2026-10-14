@@ -97,6 +97,137 @@ export interface PlaylistsViewProps {
   onRequestItem?: (item: DiscoveryItem) => Promise<void>;
 }
 
+interface TargetPillsProps {
+  users: User[];
+  playlist: Playlist;
+  isAdmin: boolean;
+  currentUserId?: string;
+  onToggle: (userIdStr: string) => void;
+}
+
+const TargetPills: React.FC<TargetPillsProps> = ({
+  users,
+  playlist,
+  isAdmin,
+  currentUserId,
+  onToggle,
+}) => {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {users.map((u) => {
+        const uIdStr = String(u.id);
+        const isTarget = playlist.targets.includes(uIdStr);
+        const canEdit = isAdmin || u.id === currentUserId;
+
+        return (
+          <button
+            key={u.id}
+            type="button"
+            disabled={!canEdit}
+            onClick={() => onToggle(uIdStr)}
+            className={`target-pill px-2.5 py-1 rounded-[3px] text-xs font-mono transition-all ${
+              isTarget
+                ? 'bg-[#e5a00d]/20 border border-[#e5a00d] text-[#e5a00d]'
+                : 'bg-[#121212] border border-[#222222] text-neutral-500 hover:text-neutral-300'
+            } ${!canEdit ? 'cursor-default opacity-80' : 'cursor-pointer'}`}
+          >
+            {u.username}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
+interface SyncTargetsSectionProps {
+  playlist: Playlist;
+  users: User[];
+  isAdmin: boolean;
+  currentUserId?: string;
+  serverLabel: string;
+  isOpen: boolean;
+  onToggleOpen: () => void;
+  onToggleTarget: (userIdStr: string) => void;
+}
+
+const SyncTargetsSection: React.FC<SyncTargetsSectionProps> = ({
+  playlist,
+  users,
+  isAdmin,
+  currentUserId,
+  serverLabel,
+  isOpen,
+  onToggleOpen,
+  onToggleTarget,
+}) => {
+  const assignedCount = users.filter((u) => playlist.targets.includes(String(u.id))).length;
+  const containerId = `pl-targets-${playlist.id}`;
+
+  return (
+    <div className="space-y-2 pt-3 border-t border-[#1f1f1f]">
+      {users.length > 1 ? (
+        <>
+          <button
+            type="button"
+            aria-expanded={isOpen}
+            aria-controls={containerId}
+            onClick={onToggleOpen}
+            className="w-full min-h-[44px] flex items-center justify-between text-left rounded-[3px] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#e5a00d]"
+          >
+            <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-mono">
+              Sync Targets
+            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-mono text-neutral-500">
+                {assignedCount} of {users.length} users
+              </span>
+              <ChevronDown
+                className={`h-4 w-4 text-neutral-400 transition-transform duration-150 ${
+                  isOpen ? 'rotate-180' : ''
+                }`}
+              />
+            </div>
+          </button>
+          {playlist.targets.length === 0 && (
+            <p className="text-[11px] font-mono text-[#e5a00d]">
+              Not pushed to {serverLabel} — no users assigned
+            </p>
+          )}
+          {isOpen && (
+            <div id={containerId}>
+              <TargetPills
+                users={users}
+                playlist={playlist}
+                isAdmin={isAdmin}
+                currentUserId={currentUserId}
+                onToggle={onToggleTarget}
+              />
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-mono">
+            Sync Targets
+          </span>
+          {playlist.targets.length === 0 && (
+            <p className="text-[11px] font-mono text-[#e5a00d]">
+              Not pushed to {serverLabel} — no users assigned
+            </p>
+          )}
+          <TargetPills
+            users={users}
+            playlist={playlist}
+            isAdmin={isAdmin}
+            currentUserId={currentUserId}
+            onToggle={onToggleTarget}
+          />
+        </>
+      )}
+    </div>
+  );
+};
+
 const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   playlists,
   users,
@@ -409,116 +540,27 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                 </p>
               )}
               {hasMediaServer && canTargetUsers && (
-                <div className="space-y-2 pt-3 border-t border-[#1f1f1f]">
-                  {targetUsers.length > 1 ? (
-                    (() => {
-                      const plIdStr = String(pl.id);
-                      const isOpen = openTargets.has(plIdStr);
-                      const assignedCount = targetUsers.filter((u) => pl.targets.includes(String(u.id))).length;
-                      const containerId = `pl-targets-${pl.id}`;
-
-                      return (
-                        <>
-                          <button
-                            type="button"
-                            aria-expanded={isOpen}
-                            aria-controls={containerId}
-                            onClick={() => {
-                              setOpenTargets((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(plIdStr)) {
-                                  next.delete(plIdStr);
-                                } else {
-                                  next.add(plIdStr);
-                                }
-                                return next;
-                              });
-                            }}
-                            className="w-full min-h-[44px] flex items-center justify-between text-left rounded-[3px] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#e5a00d]"
-                          >
-                            <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-mono">
-                              Sync Targets
-                            </span>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[11px] font-mono text-neutral-500">
-                                {assignedCount} of {targetUsers.length} users
-                              </span>
-                              <ChevronDown
-                                className={`h-4 w-4 text-neutral-400 transition-transform duration-150 ${
-                                  isOpen ? 'rotate-180' : ''
-                                }`}
-                              />
-                            </div>
-                          </button>
-                          {pl.targets.length === 0 && (
-                            <p className="text-[11px] font-mono text-[#e5a00d]">
-                              Not pushed to {serverLabel} — no users assigned
-                            </p>
-                          )}
-                          {isOpen && (
-                            <div id={containerId} className="flex flex-wrap gap-1.5">
-                              {targetUsers.map((u) => {
-                                const uIdStr = String(u.id);
-                                const isTarget = pl.targets.includes(uIdStr);
-                                const canEdit = isAdmin || u.id === currentUserId;
-
-                                return (
-                                  <button
-                                    key={u.id}
-                                    type="button"
-                                    disabled={!canEdit}
-                                    onClick={() => handleTargetClick(pl, uIdStr)}
-                                    className={`target-pill px-2.5 py-1 rounded-[3px] text-xs font-mono transition-all ${
-                                      isTarget
-                                        ? 'bg-[#e5a00d]/20 border border-[#e5a00d] text-[#e5a00d]'
-                                        : 'bg-[#121212] border border-[#222222] text-neutral-500 hover:text-neutral-300'
-                                    } ${!canEdit ? 'cursor-default opacity-80' : 'cursor-pointer'}`}
-                                  >
-                                    {u.username}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </>
-                      );
-                    })()
-                  ) : (
-                    <>
-                      <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-mono">
-                        Sync Targets
-                      </span>
-                      {pl.targets.length === 0 && (
-                        <p className="text-[11px] font-mono text-[#e5a00d]">
-                          Not pushed to {serverLabel} — no users assigned
-                        </p>
-                      )}
-                      <div className="flex flex-wrap gap-1.5">
-                        {targetUsers.map((u) => {
-                          const uIdStr = String(u.id);
-                          const isTarget = pl.targets.includes(uIdStr);
-                          const canEdit = isAdmin || u.id === currentUserId;
-
-                          return (
-                            <button
-                              key={u.id}
-                              type="button"
-                              disabled={!canEdit}
-                              onClick={() => handleTargetClick(pl, uIdStr)}
-                              className={`target-pill px-2.5 py-1 rounded-[3px] text-xs font-mono transition-all ${
-                                isTarget
-                                  ? 'bg-[#e5a00d]/20 border border-[#e5a00d] text-[#e5a00d]'
-                                  : 'bg-[#121212] border border-[#222222] text-neutral-500 hover:text-neutral-300'
-                              } ${!canEdit ? 'cursor-default opacity-80' : 'cursor-pointer'}`}
-                            >
-                              {u.username}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
-                  )}
-                </div>
+                <SyncTargetsSection
+                  playlist={pl}
+                  users={targetUsers}
+                  isAdmin={isAdmin}
+                  currentUserId={currentUserId}
+                  serverLabel={serverLabel}
+                  isOpen={openTargets.has(String(pl.id))}
+                  onToggleOpen={() => {
+                    const plIdStr = String(pl.id);
+                    setOpenTargets((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(plIdStr)) {
+                        next.delete(plIdStr);
+                      } else {
+                        next.add(plIdStr);
+                      }
+                      return next;
+                    });
+                  }}
+                  onToggleTarget={(userIdStr) => handleTargetClick(pl, userIdStr)}
+                />
               )}
 
               {/* Actions */}
