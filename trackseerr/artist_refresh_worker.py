@@ -182,12 +182,16 @@ class ArtistRefreshWorker:
         enricher: Optional[MbidEnricherClient] = None,
         artist_ids: Optional[list[str]] = None,
         only_stale: bool = False,
+        should_stop: Optional[Callable[[], bool]] = None,
     ) -> dict[str, Any]:
         """Synchronously executes a refresh cycle across target artists with pacing.
 
         ``only_stale`` (scheduled sweeps) skips artists refreshed within the last ``interval_seconds``.
         """
         from trackseerr.artist_refresh import refresh_single_artist
+
+        def _stopping() -> bool:
+            return self._stop_event.is_set() or (should_stop is not None and should_stop())
 
         with self._run_lock:
             dc = discovery_client or get_shared_discovery_client(db)
@@ -219,7 +223,7 @@ class ArtistRefreshWorker:
             prev_tracks = initial_stats.get("track_count", 0)
 
             for idx, art in enumerate(target_artists):
-                if self._stop_event.is_set():
+                if _stopping():
                     logger.info("ArtistRefreshWorker: Stop event received, aborting cycle")
                     break
 
@@ -265,10 +269,10 @@ class ArtistRefreshWorker:
                         logger.warning("ArtistRefreshWorker: could not persist refresh time for %s: %s", art_id, exc)
 
                 # Pacing delay between artists
-                if idx < len(target_artists) - 1 and not self._stop_event.is_set():
+                if idx < len(target_artists) - 1 and not _stopping():
                     p_delay = self.pace_delay
                     slept = 0.0
-                    while slept < p_delay and not self._stop_event.is_set():
+                    while slept < p_delay and not _stopping():
                         step = min(0.2, p_delay - slept)
                         self._stop_event.wait(step)
                         slept += step

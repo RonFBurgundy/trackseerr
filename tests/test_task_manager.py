@@ -931,7 +931,7 @@ def test_manual_run_cancelled_mid_body_is_recorded_cancelled(app_and_client, see
 
     from trackseerr.api.routes.system.tasks import _run_manual
 
-    _run_manual(test_db, task_id, "TestManualCancelThread", body)
+    _run_manual(test_db, task_id, "TestManualCancelThread", body, cancellable=True)
 
     assert started_event.wait(timeout=5.0), "body did not start in time"
 
@@ -1004,3 +1004,91 @@ def test_credits_backfill_manual_run_passes_should_stop(app_and_client, seeded_u
     assert called_event.wait(timeout=5.0)
     assert callable(passed_args.get("should_stop"))
     assert passed_args["should_stop"]() is False
+
+
+def test_non_cancellable_manual_run_is_not_offered_cancel(app_and_client, seeded_users, secret_key, test_db):
+    _, client = app_and_client
+    cookies = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
+    task_id = "scrobble_sync"
+
+    started_event = threading.Event()
+    block_event = threading.Event()
+    finished_event = threading.Event()
+
+    def body(run: task_manager.RunHandle) -> None:
+        started_event.set()
+        block_event.wait(timeout=5.0)
+        run.message = "finished"
+        finished_event.set()
+
+    from trackseerr.api.routes.system.tasks import _run_manual
+
+    _run_manual(test_db, task_id, "TestNonCancellableThread", body, cancellable=False)
+
+    assert started_event.wait(timeout=5.0), "body did not start in time"
+    try:
+        assert task_manager.is_cancellable(task_id) is False
+        resp = client.post(f"/api/system/tasks/{task_id}/cancel", cookies=cookies)
+        assert resp.status_code == 400
+    finally:
+        block_event.set()
+        assert finished_event.wait(timeout=5.0), "body did not finish in time"
+
+
+def test_artist_refresh_manual_run_passes_should_stop(app_and_client, seeded_users, secret_key, test_db, monkeypatch):
+    _, client = app_and_client
+    cookies = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
+
+    called_event = threading.Event()
+    passed_args = {}
+
+    def fake_refresh_once(db=None, **kwargs):
+        passed_args.update(kwargs)
+        called_event.set()
+        return {"success": True, "refreshed_artists": 0, "errors": 0}
+
+    import trackseerr.artist_refresh_worker
+
+    monkeypatch.setattr(trackseerr.artist_refresh_worker.artist_refresh_worker, "refresh_once", fake_refresh_once)
+
+    resp = client.post("/api/system/tasks/artist_metadata_refresh/run", cookies=cookies)
+    assert resp.status_code == 200
+    assert called_event.wait(timeout=5.0)
+    assert callable(passed_args.get("should_stop"))
+    assert passed_args["should_stop"]() is False
+
+
+def test_refresh_once_stops_when_should_stop_is_true(test_db: Database, monkeypatch):
+    from trackseerr.artist_refresh_worker import ArtistRefreshWorker
+    from trackseerr.clients.discovery import DiscoveryClient
+    from trackseerr.clients.mbid_enricher import MbidEnricherClient
+
+    worker = ArtistRefreshWorker()
+    worker.pace_delay = 0.0
+
+    mock_discovery = MagicMock(spec=DiscoveryClient)
+    mock_discovery.stats.return_value = {"network_requests": 0, "cache_hits": 0}
+    mock_enricher = MagicMock(spec=MbidEnricherClient)
+    mock_enricher.stats.return_value = {"network_requests": 0, "cache_hits": 0}
+    mock_enricher.source_available.return_value = True
+
+    artist_1 = {"id": "art-1", "name": "Artist 1"}
+    artist_2 = {"id": "art-2", "name": "Artist 2"}
+
+    monkeypatch.setattr(test_db, "list_library_artists", lambda **kw: [artist_1, artist_2])
+    monkeypatch.setattr(test_db, "get_library_stats", lambda: {"album_count": 0, "track_count": 0})
+
+    import trackseerr.artist_refresh
+    mock_single = MagicMock()
+    monkeypatch.setattr(trackseerr.artist_refresh, "refresh_single_artist", mock_single)
+
+    res = worker.refresh_once(
+        db=test_db,
+        discovery_client=mock_discovery,
+        enricher=mock_enricher,
+        should_stop=lambda: True,
+    )
+
+    assert res["success"] is True
+    assert res["artists_checked"] == 0
+    mock_single.assert_not_called()

@@ -508,7 +508,13 @@ def get_system_resources(_admin: dict[str, Any] = Depends(require_admin)) -> dic
     return dict(process_stats.sample())
 
 
-def _run_manual(db: Database, task_id: str, thread_name: str, body: Callable[[RunHandle], None]) -> None:
+def _run_manual(
+    db: Database,
+    task_id: str,
+    thread_name: str,
+    body: Callable[[RunHandle], None],
+    cancellable: bool = False,
+) -> None:
     """Runs ``body`` on a thread under the task run history (trigger ``manual``) and the in-memory running set."""
 
     def _thread() -> None:
@@ -516,14 +522,16 @@ def _run_manual(db: Database, task_id: str, thread_name: str, body: Callable[[Ru
             _running_tasks.add(task_id)
         try:
             with record_task_run(db, task_id, TRIGGER_MANUAL) as run:
-                task_manager.register_manual_run(task_id, run)
+                if cancellable:
+                    task_manager.register_manual_run(task_id, run)
                 try:
                     body(run)
-                    if run.should_stop():
+                    if cancellable and run.should_stop():
                         run.cancelled = True
                         run.message = ((run.message or "") + " (cancelled)").strip()
                 finally:
-                    task_manager.unregister_manual_run(task_id, run)
+                    if cancellable:
+                        task_manager.unregister_manual_run(task_id, run)
         except Exception as exc:  # the run is recorded as failed and logged by record_task_run; keep the thread quiet
             logger.debug("Manual run of '%s' ended with %s", task_id, safe_exc(exc), exc_info=True)
         finally:
@@ -668,7 +676,11 @@ def run_scheduled_task(  # noqa: C901, PLR0915
         _run_manual(db, task_id, "ManualAcquisitionTask", _acq)
 
     elif task_id == "artist_metadata_refresh":
-        _run_manual(db, task_id, "ManualArtistRefreshTask", lambda run: run.apply_result(artist_refresh_worker.refresh_once(db=db)))
+        def _refresh(run: RunHandle) -> None:
+            res = artist_refresh_worker.refresh_once(db=db, should_stop=run.should_stop)
+            run.apply_result(res)
+
+        _run_manual(db, task_id, "ManualArtistRefreshTask", _refresh, cancellable=True)
 
     elif task_id == "art_thumbnail_backfill":
         with _tasks_lock:
@@ -738,7 +750,7 @@ def run_scheduled_task(  # noqa: C901, PLR0915
             counts = run_credits_backfill(db, get_shared_enricher(db), should_stop=run.should_stop)
             run.message = ", ".join(f"{k}={v}" for k, v in counts.items())
 
-        _run_manual(db, task_id, "ManualTrackCreditsTask", _credits)
+        _run_manual(db, task_id, "ManualTrackCreditsTask", _credits, cancellable=True)
 
     return {"success": True, "message": f"Task '{task_id}' dispatched successfully"}
 
