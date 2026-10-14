@@ -5904,6 +5904,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/system/tasks/{task_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Pause or resume a scheduled interval task
+         * @description Pauses or resumes a scheduled interval task (admin required).
+         */
+        put: operations["set_task_pause_api_system_tasks__task_id__pause_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/system/tasks/{task_id}/run": {
         parameters: {
             query?: never;
@@ -12455,6 +12475,11 @@ export interface components {
              */
             can_cancel: boolean;
             /**
+             * Can Pause
+             * @default false
+             */
+            can_pause: boolean;
+            /**
              * Can Trigger
              * @default true
              */
@@ -12501,6 +12526,11 @@ export interface components {
             name: string;
             /** Next Run At */
             next_run_at?: string | null;
+            /**
+             * Paused
+             * @default false
+             */
+            paused: boolean;
             progress?: components["schemas"]["TaskProgress"] | null;
             /**
              * Schedule Kind
@@ -13197,6 +13227,14 @@ export interface components {
             message: string;
             /** Success */
             success: boolean;
+        };
+        /**
+         * TaskPauseUpdate
+         * @description Body of ``PUT /tasks/{task_id}/pause``.
+         */
+        TaskPauseUpdate: {
+            /** Paused */
+            paused: boolean;
         };
         /**
          * TaskProgress
@@ -24438,6 +24476,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskActionResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_task_pause_api_system_tasks__task_id__pause_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskPauseUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
