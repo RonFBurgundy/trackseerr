@@ -22,10 +22,12 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
     error,
     runningIds,
     cancellingIds,
+    pausingIds,
     savingScheduleIds,
     refresh,
     run,
     cancel,
+    setPaused,
     setSchedule,
   } = useTaskManager(onToast);
 
@@ -64,6 +66,7 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
   const toggleExpanded = useCallback((taskId: string) => setExpandedId((cur) => (cur === taskId ? null : taskId)), []);
   const handleRun = useCallback((taskId: string) => void run(taskId), [run]);
   const handleCancel = useCallback((taskId: string) => void cancel(taskId), [cancel]);
+  const handlePause = useCallback((taskId: string, paused: boolean) => void setPaused(taskId, paused), [setPaused]);
   const handleSchedule = useCallback((taskId: string, seconds: number | null) => void setSchedule(taskId, seconds), [setSchedule]);
 
   const isGroupOpen = useCallback(
@@ -157,11 +160,13 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
                     now={now}
                     isTriggering={runningIds.has(task.id)}
                     isCancelling={cancellingIds.has(task.id)}
+                    isPausing={pausingIds.has(task.id)}
                     isSavingSchedule={savingScheduleIds.has(task.id)}
                     expanded={expandedId === task.id}
                     onToggleExpanded={toggleExpanded}
                     onRun={handleRun}
                     onCancel={handleCancel}
+                    onPause={handlePause}
                     onSchedule={handleSchedule}
                   />
                 ))}
@@ -185,11 +190,13 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
                     now={now}
                     isTriggering={runningIds.has(task.id)}
                     isCancelling={cancellingIds.has(task.id)}
+                    isPausing={pausingIds.has(task.id)}
                     isSavingSchedule={savingScheduleIds.has(task.id)}
                     expanded={expandedId === task.id}
                     onToggleExpanded={toggleExpanded}
                     onRun={handleRun}
                     onCancel={handleCancel}
+                    onPause={handlePause}
                     onSchedule={handleSchedule}
                   />
                 ))}

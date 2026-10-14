@@ -4,6 +4,7 @@ import {
   getScheduledTasks,
   triggerScheduledTask,
   cancelScheduledTask,
+  setTaskPaused,
   updateTaskSchedule,
 } from '@/services/systemService';
 import { errorMessage } from '@/services/apiClient';
@@ -21,10 +22,12 @@ export interface UseTaskManagerReturn {
   error: string | null;
   runningIds: ReadonlySet<string>;
   cancellingIds: ReadonlySet<string>;
+  pausingIds: ReadonlySet<string>;
   savingScheduleIds: ReadonlySet<string>;
   refresh: () => Promise<void>;
   run: (taskId: string) => Promise<void>;
   cancel: (taskId: string) => Promise<void>;
+  setPaused: (taskId: string, paused: boolean) => Promise<void>;
   /** `null` resets to the task's default interval. */
   setSchedule: (taskId: string, intervalSeconds: number | null) => Promise<void>;
 }
@@ -51,6 +54,7 @@ export function useTaskManager(onToast: ToastFn): UseTaskManagerReturn {
   const [error, setError] = useState<string | null>(null);
   const [runningIds, setRunningIds] = useState<ReadonlySet<string>>(new Set());
   const [cancellingIds, setCancellingIds] = useState<ReadonlySet<string>>(new Set());
+  const [pausingIds, setPausingIds] = useState<ReadonlySet<string>>(new Set());
   const [savingScheduleIds, setSavingScheduleIds] = useState<ReadonlySet<string>>(new Set());
   const mounted = useRef<boolean>(true);
   // A poll in flight when an optimistic edit lands must not clobber it with stale data.
@@ -128,6 +132,22 @@ export function useTaskManager(onToast: ToastFn): UseTaskManagerReturn {
     [onToast, load]
   );
 
+  const setPaused = useCallback(
+    async (taskId: string, paused: boolean): Promise<void> => {
+      setPausingIds((p) => withId(p, taskId));
+      try {
+        const res = await setTaskPaused(taskId, paused);
+        onToast(res.message, 'ok');
+        await load();
+      } catch (err: unknown) {
+        onToast(errorMessage(err, 'Failed to update task'), 'error');
+      } finally {
+        if (mounted.current) setPausingIds((p) => withoutId(p, taskId));
+      }
+    },
+    [onToast, load]
+  );
+
   const setSchedule = useCallback(
     async (taskId: string, intervalSeconds: number | null): Promise<void> => {
       const before = tasksRef.current.find((t) => t.id === taskId);
@@ -158,10 +178,12 @@ export function useTaskManager(onToast: ToastFn): UseTaskManagerReturn {
     error,
     runningIds,
     cancellingIds,
+    pausingIds,
     savingScheduleIds,
     refresh,
     run,
     cancel,
+    setPaused,
     setSchedule,
   };
 }
