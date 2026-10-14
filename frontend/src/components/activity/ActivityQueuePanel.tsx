@@ -1,11 +1,11 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { AlertTriangle, Ban, FolderInput, RotateCcw, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Ban, FolderInput, RotateCcw, Trash2 } from 'lucide-react';
 import type { ActivityQueueRecord, ActivitySeeding, ListSortDir } from '@/types/activity';
 import { getActivityQueue, removeActivityQueueItem, retryActivityQueueItem } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
 import { pagedFetcher, useVirtualPagedList } from '@/hooks/useVirtualPagedList';
 import { usePolling } from '@/hooks/usePolling';
-import { TapeDeckButton } from '@/components/ui';
+import { ConfirmDialog, TactileSwitch, type OverflowMenuItem } from '@/components/ui';
 import { SoulseekQueueDetail } from './SoulseekQueueDetail';
 import { ManualImportModal } from '@/components/manualImport';
 import type { ManualImportScope } from '@/types/manualImport';
@@ -176,95 +176,106 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
     []
   );
 
-  const rowActions = useCallback(
-    (r: ActivityQueueRecord): React.ReactNode => {
+  const rowMenu = useCallback(
+    (r: ActivityQueueRecord): OverflowMenuItem[] => {
       const busy = busyId === r.id;
-      if (removingId === r.id) {
-        return (
-          <div className="flex flex-col gap-1.5 w-full lg:items-end">
-            <label className="flex items-center gap-1.5 text-[10px] font-mono text-neutral-300 min-h-[32px]">
-              <input
-                id={`queue-remove-client-${r.id}`}
-                name="remove-from-client"
-                type="checkbox"
-                checked={removeFromClient}
-                onChange={(e) => setRemoveFromClient(e.target.checked)}
-                className="h-3.5 w-3.5 accent-[#e5a00d]"
-              />
-              Remove from client
-            </label>
-            <label className="flex items-center gap-1.5 text-[10px] font-mono text-neutral-300 min-h-[32px]">
-              <input
-                id={`queue-blocklist-${r.id}`}
-                name="blocklist-release"
-                type="checkbox"
-                checked={blocklist}
-                onChange={(e) => setBlocklist(e.target.checked)}
-                className="h-3.5 w-3.5 accent-[#e5a00d]"
-              />
-              Blocklist release
-            </label>
-            <div className="flex gap-1.5">
-              <TapeDeckButton size="sm" variant="danger" disabled={busy} onClick={() => void doRemove(r.id)}>
-                Remove
-              </TapeDeckButton>
-              <TapeDeckButton size="sm" disabled={busy} onClick={() => setRemovingId(null)} icon={<X className="h-3 w-3" />} aria-label="Cancel remove" />
-            </div>
-          </div>
-        );
+      const items: OverflowMenuItem[] = [];
+
+      if (r.source === 'native' && r.needs_manual_import && r.download_id) {
+        items.push({
+          key: 'manual-import',
+          label: 'Manual import',
+          icon: <FolderInput className="h-3.5 w-3.5" />,
+          highlight: true,
+          disabled: busy,
+          onSelect: () =>
+            setImportScope({
+              kind: 'download',
+              downloadId: r.download_id ?? '',
+              title: [r.artist, r.album ?? r.title].filter(Boolean).join(' \u2013 ') || 'Download',
+            }),
+        });
       }
-      return (
-        <>
-          {r.source === 'native' && r.needs_manual_import && r.download_id && (
-            <TapeDeckButton
-              size="sm"
-              variant="amber"
-              disabled={busy}
-              onClick={() =>
-                setImportScope({
-                  kind: 'download',
-                  downloadId: r.download_id ?? '',
-                  title: [r.artist, r.album ?? r.title].filter(Boolean).join(' \u2013 ') || 'Download',
-                })
-              }
-              icon={<FolderInput className="h-3.5 w-3.5" />}
-              title={`${r.unmatched_count} file(s) need manual import`}
-            >
-              Manual import
-            </TapeDeckButton>
-          )}
-          <TapeDeckButton
-            size="sm"
-            disabled={busy}
-            onClick={() => void doRetry(r.id)}
-            icon={<RotateCcw className="h-3.5 w-3.5" />}
-            aria-label="Retry"
-            title="Retry (search again)"
-          />
-          {r.source === 'native' && (
-            <TapeDeckButton
-              size="sm"
-              disabled={busy}
-              onClick={() => void doRetry(r.id, true)}
-              icon={<Ban className="h-3.5 w-3.5" />}
-              aria-label="Blocklist and search again"
-              title="Blocklist and search again"
-            />
-          )}
-          <TapeDeckButton
-            size="sm"
-            variant="danger"
-            disabled={busy}
-            onClick={() => setRemovingId(r.id)}
-            icon={<Trash2 className="h-3.5 w-3.5" />}
-            aria-label="Remove from queue"
-            title="Remove"
-          />
-        </>
-      );
+
+      items.push({
+        key: 'retry',
+        label: 'Retry (search again)',
+        icon: <RotateCcw className="h-3.5 w-3.5" />,
+        disabled: busy,
+        onSelect: () => void doRetry(r.id),
+      });
+
+      if (r.source === 'native') {
+        items.push({
+          key: 'blocklist',
+          label: 'Blocklist and search again',
+          icon: <Ban className="h-3.5 w-3.5" />,
+          disabled: busy,
+          onSelect: () => void doRetry(r.id, true),
+        });
+      }
+
+      items.push({
+        key: 'remove',
+        label: 'Remove…',
+        icon: <Trash2 className="h-3.5 w-3.5" />,
+        disabled: busy,
+        onSelect: () => setRemovingId(r.id),
+      });
+
+      return items;
     },
-    [busyId, removingId, removeFromClient, blocklist, doRemove, doRetry]
+    [busyId, doRetry]
   );
+
+  const rowAttention = useCallback(
+    (r: ActivityQueueRecord) => {
+      if (r.source === 'native' && r.needs_manual_import && r.download_id) {
+        return {
+          label: 'Manual import',
+          onSelect: () =>
+            setImportScope({
+              kind: 'download',
+              downloadId: r.download_id ?? '',
+              title: [r.artist, r.album ?? r.title].filter(Boolean).join(' \u2013 ') || 'Download',
+            }),
+        };
+      }
+      return null;
+    },
+    []
+  );
+
+  const rowMenuLabel = useCallback(
+    (r: ActivityQueueRecord) => `Actions for ${r.title || r.artist || 'item'}`,
+    []
+  );
+
+  const rowDetails = useCallback((r: ActivityQueueRecord): React.ReactNode | null => {
+    const details: { label: string; value: string }[] = [];
+    if (r.album) details.push({ label: 'Album', value: r.album });
+    if (r.protocol) details.push({ label: 'Protocol', value: r.protocol });
+    if (r.indexer) details.push({ label: 'Indexer', value: r.indexer });
+    if (r.client) details.push({ label: 'Client', value: r.client });
+    if (r.size_bytes != null || r.sizeleft_bytes != null) {
+      details.push({
+        label: 'Size',
+        value: `${formatBytes(r.sizeleft_bytes)} / ${formatBytes(r.size_bytes)}`,
+      });
+    }
+    if (r.added_at) details.push({ label: 'Added', value: formatDateTime(r.added_at) });
+
+    if (details.length === 0) return null;
+    return (
+      <div className="flex flex-col gap-0.5">
+        {details.map((d) => (
+          <div key={d.label}>
+            <span className="text-neutral-500">{d.label}:</span> {d.value}
+          </div>
+        ))}
+      </div>
+    );
+  }, []);
 
   return (
     <ListPanel title="Queue" description="Active and pending downloads. Refreshes every 5 seconds." mode={list.mode} total={list.total}>
@@ -276,9 +287,11 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
         sortKey={sortKey}
         sortDir={sortDir}
         onSortChange={onSortChange}
-        rowActions={rowActions}
-        actionsWidth="152px"
-        mobileLayout="compact"
+        layout="card"
+        rowMenu={rowMenu}
+        rowMenuLabel={rowMenuLabel}
+        rowAttention={rowAttention}
+        rowDetails={rowDetails}
         rowTone={rowTone}
         emptyMessage="The queue is empty."
         emptyHint="Approved requests appear here while they download."
@@ -291,6 +304,34 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
           void refresh();
         }}
       />
+      <ConfirmDialog
+        isOpen={removingId !== null}
+        title="Remove from queue"
+        confirmLabel="Remove"
+        onConfirm={() => {
+          if (removingId !== null) void doRemove(removingId);
+        }}
+        onCancel={() => setRemovingId(null)}
+        busy={removingId !== null && busyId === removingId}
+      >
+        <div className="space-y-3 py-1">
+          <p className="text-xs font-mono text-neutral-300">
+            Remove this item from the download queue?
+          </p>
+          <div className="flex flex-col gap-2.5">
+            <TactileSwitch
+              checked={removeFromClient}
+              onChange={setRemoveFromClient}
+              label="Remove from client"
+            />
+            <TactileSwitch
+              checked={blocklist}
+              onChange={setBlocklist}
+              label="Blocklist release"
+            />
+          </div>
+        </div>
+      </ConfirmDialog>
     </ListPanel>
   );
 };

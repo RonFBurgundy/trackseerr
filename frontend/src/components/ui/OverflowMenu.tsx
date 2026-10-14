@@ -9,6 +9,7 @@ export interface OverflowMenuItem {
   disabled?: boolean;
   /** Reflects a toggled state (role menuitemcheckbox). */
   checked?: boolean;
+  highlight?: boolean;
   onSelect: () => void;
 }
 
@@ -24,11 +25,12 @@ export interface OverflowMenuProps {
   items: OverflowMenuItem[];
   /** Accessible name of the trigger button. */
   label: string;
+  attention?: boolean;
   className?: string;
 }
 
 /** Three-dot trigger with a small popup menu. Escape and outside click close it. */
-export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, label, className = '' }) => {
+export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, label, attention = false, className = '' }) => {
   const [open, setOpen] = useState<boolean>(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -133,19 +135,27 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, label, classN
 
   if (items.length === 0) return null;
 
+  const triggerLabel = attention ? `${label} (needs attention)` : label;
+
   return (
     <div ref={rootRef} className={`relative ${className}`} onKeyDown={open ? onMenuKeyDown : undefined}>
       <button
         ref={triggerRef}
         type="button"
-        aria-label={label}
+        aria-label={triggerLabel}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex h-9 w-9 items-center justify-center rounded-[3px] text-neutral-400 hover:text-white hover:bg-[#1c1c1c] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#e5a00d]"
+        className="relative inline-flex h-9 w-9 items-center justify-center rounded-[3px] text-neutral-400 hover:text-white hover:bg-[#1c1c1c] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#e5a00d]"
       >
         <MoreVertical className="h-5 w-5" />
+        {attention && (
+          <span
+            aria-hidden="true"
+            className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-[#e5a00d]"
+          />
+        )}
       </button>
       {open &&
         createPortal(
@@ -168,7 +178,9 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, label, classN
                 close();
                 item.onSelect();
               }}
-              className="flex min-h-[36px] w-full items-center gap-2 px-3 text-left text-xs font-mono text-neutral-200 hover:bg-[#1c1c1c] disabled:opacity-50 focus:outline-none focus-visible:bg-[#1c1c1c]"
+              className={`flex min-h-[36px] w-full items-center gap-2 px-3 text-left text-xs font-mono ${
+                item.highlight ? 'text-[#e5a00d]' : 'text-neutral-200'
+              } hover:bg-[#1c1c1c] disabled:opacity-50 focus:outline-none focus-visible:bg-[#1c1c1c]`}
             >
               {item.icon}
               <span className="flex-1">{item.label}</span>

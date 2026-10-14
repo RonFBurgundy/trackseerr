@@ -1,4 +1,5 @@
 export * from './FlatList';
+export * from './ItemCard';
 export * from './VirtualGrid';
 export * from './ScrubberRail';
 export * from './ListViewportContext';
