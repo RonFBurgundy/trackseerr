@@ -22,3 +22,6 @@ export * from './TokenInput';
 export * from './TagPicker';
 export * from './CassetteLoader';
 export * from './PageLoader';
+export * from './KbpsSlider';
+export * from './RangeSlider';
+export * from './SegmentedChoice';

@@ -7,7 +7,7 @@ import type {
   MixTrackStatus,
   TailoredMixResult,
 } from '@/types/models';
-import { MachinedCard, TapeDeckButton, TactileSwitch } from '@/components/ui';
+import { MachinedCard, TapeDeckButton, TactileSwitch, RangeSlider } from '@/components/ui';
 
 const TYPE_LABEL: Record<MixConfig['mix_type'], string> = {
   discover_weekly: 'Discover Weekly',
@@ -87,19 +87,18 @@ export const MixCard: React.FC<MixCardProps> = ({
           <span>Familiar hits ↔ Deep discoveries</span>
           <span className="text-[#e5a00d]">{ratio}%</span>
         </label>
-        <input
+        <RangeSlider
           id={`${uid}-ratio`}
           name="discovery-ratio"
-          type="range"
           min={0}
           max={100}
           step={5}
           value={ratio}
           disabled={isBusy}
-          onChange={(e) => setRatio(Number(e.target.value))}
-          onPointerUp={() => void onUpdate(mix.id, { discovery_ratio: ratio / 100 })}
-          onKeyUp={() => void onUpdate(mix.id, { discovery_ratio: ratio / 100 })}
-          className="w-full h-8 sm:h-6 accent-[#e5a00d]"
+          ariaLabel="Familiar hits to deep discoveries ratio"
+          ariaValueText={`${ratio}%`}
+          onChange={(val) => setRatio(val)}
+          onCommit={(val) => void onUpdate(mix.id, { discovery_ratio: val / 100 })}
         />
       </div>
 
