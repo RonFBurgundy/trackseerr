@@ -20,7 +20,7 @@ export interface SystemStatusPanelProps {
 
 const HEALTH_STYLE: Record<LidarrHealthItem['type'], string> = {
   ok: 'text-green-400 border-green-800/40 bg-green-950/30',
-  notice: 'text-sky-300 border-sky-800/40 bg-sky-950/30',
+  notice: 'text-info-300 border-info-800/40 bg-info-950/30',
   warning: 'text-amber-300 border-amber-800/40 bg-amber-950/30',
   error: 'text-red-300 border-red-800/50 bg-red-950/40',
 };

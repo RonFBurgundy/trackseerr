@@ -35,7 +35,7 @@ export const ProfileRequestButton: React.FC<ProfileRequestButtonProps> = React.m
     }
     if (busy || status === 'processing') {
       return (
-        <TapeDeckButton size={size} disabled className={`text-blue-400 border-blue-500/30 ${className}`} icon={<Loader2 className={`${iconClass} animate-spin`} />}>
+        <TapeDeckButton size={size} disabled className={`text-info-400 border-info-500/30 ${className}`} icon={<Loader2 className={`${iconClass} animate-spin`} />}>
           Processing
         </TapeDeckButton>
       );

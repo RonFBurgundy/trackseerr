@@ -133,7 +133,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
       case 'approved':
       case 'processing':
         return (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[2px] bg-blue-950/60 border border-blue-800 text-blue-300 text-[11px] font-mono uppercase">
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[2px] bg-info-950/60 border border-info-800 text-info-300 text-[11px] font-mono uppercase">
             <CheckCircle2 className="h-3 w-3" /> Approved
           </span>
         );

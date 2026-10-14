@@ -18,7 +18,10 @@
   --accent-amber-glow: rgba(229, 160, 13, 0.25);
   --status-success: #22c55e;
   --status-error: #ef4444;
+  --status-info: #60a5fa;
 }
+
+input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color: var(--accent-amber); }
 
 /* House scrollbar: one rule for every scroll container (html, body, main, panels, modals). */
 * {
