@@ -193,6 +193,47 @@ def test_presets_respect_per_task_minimums():
         assert (spec.kind == task_manager.KIND_INTERVAL) == (spec.default_interval_seconds is not None)
 
 
+def test_pausable_tasks_are_interval_tasks():
+    expected = {
+        "playlist_sync",
+        "wanted_backlog_sweep",
+        "indexer_rss_sync",
+        "artist_metadata_refresh",
+        "art_thumbnail_backfill",
+        "mix_generation",
+        "seed_cleanup",
+        "recycle_bin_cleanup",
+        "backup",
+        "update_check",
+    }
+    assert task_manager.PAUSABLE_TASKS == expected
+    for tid in task_manager.PAUSABLE_TASKS:
+        assert tid in task_manager.TASKS
+        assert task_manager.TASKS[tid].kind == task_manager.KIND_INTERVAL
+
+
+def test_set_paused_round_trip_and_rejects_non_pausable(db):
+    assert task_manager.is_paused(db, "wanted_backlog_sweep") is False
+    task_manager.set_paused(db, "wanted_backlog_sweep", True)
+    assert task_manager.is_paused(db, "wanted_backlog_sweep") is True
+    assert db.get_kv(task_manager.pause_key("wanted_backlog_sweep")) == "1"
+
+    # interval_fn exposes .paused and .task_id
+    fn = task_manager.interval_fn(db, None, "wanted_backlog_sweep")
+    assert fn.task_id == "wanted_backlog_sweep"
+    assert callable(fn.paused)
+    assert fn.paused() is True
+
+    task_manager.set_paused(db, "wanted_backlog_sweep", False)
+    assert task_manager.is_paused(db, "wanted_backlog_sweep") is False
+    assert db.get_kv(task_manager.pause_key("wanted_backlog_sweep")) is None
+    assert fn.paused() is False
+
+    with pytest.raises(ValueError, match="cannot be paused"):
+        task_manager.set_paused(db, "filesystem_scan", True)
+    assert task_manager.is_paused(db, "filesystem_scan") is False
+
+
 def test_wait_for_next_cycle_picks_up_a_shorter_interval():
     stop = threading.Event()
     current = [3600.0]
@@ -208,6 +249,41 @@ def test_wait_for_next_cycle_extends_for_a_longer_interval_and_stops():
     threading.Timer(0.05, lambda: current.__setitem__(0, 3600.0)).start()
     threading.Timer(0.4, stop.set).start()
     assert task_manager.wait_for_next_cycle(stop, lambda: current[0], step=0.05) is True
+
+
+def test_wait_for_next_cycle_holds_while_paused_and_resumes():
+    stop = threading.Event()
+    paused = [True]
+
+    def interval():
+        return 0.05
+
+    interval.paused = lambda: paused[0]
+    interval.task_id = "wanted_backlog_sweep"
+
+    threading.Timer(0.1, lambda: paused.__setitem__(0, False)).start()
+    started = time.monotonic()
+    assert task_manager.wait_for_next_cycle(stop, interval, step=0.01) is False
+    elapsed = time.monotonic() - started
+    assert elapsed >= 0.08
+    assert elapsed < 3.0
+
+
+def test_wait_for_next_cycle_stop_wins_while_paused():
+    stop = threading.Event()
+
+    def interval():
+        return 0.05
+
+    interval.paused = lambda: True
+    interval.task_id = "wanted_backlog_sweep"
+
+    threading.Timer(0.1, stop.set).start()
+    started = time.monotonic()
+    assert task_manager.wait_for_next_cycle(stop, interval, step=0.01) is True
+    elapsed = time.monotonic() - started
+    assert elapsed >= 0.08
+    assert elapsed < 3.0
 
 
 def test_rss_worker_picks_up_a_changed_interval_without_restart(db):
@@ -319,6 +395,101 @@ def test_schedule_put_rejections(app_and_client, seeded_users, secret_key, test_
     assert _put(client, admin, "download_queue_monitor", 3600).status_code == 400  # continuous: not editable
     assert _put(client, alice, "indexer_rss_sync", 3600).status_code == 403
     assert test_db.get_kv(task_manager.override_key("indexer_rss_sync")) is None
+
+
+# ----------------------------------------------------------------------------- pause endpoint
+
+
+def _put_pause(client, cookies, task_id, paused):
+    return client.put(f"/api/system/tasks/{task_id}/pause", json={"paused": paused}, cookies=cookies)
+
+
+def test_pause_route_sets_status_paused_and_resume_clears(app_and_client, seeded_users, secret_key, test_db):
+    _, client = app_and_client
+    admin = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
+
+    # Seed a finished run for indexer_rss_sync so next_run_at is initially computed
+    now_iso = _iso(timedelta(minutes=-5))
+    run_id = test_db.start_task_run("indexer_rss_sync", "scheduled", now_iso)
+    test_db.finish_task_run(run_id, "success", now_iso, "ok", 100)
+
+    # Initially: can_pause is True, paused is False, status is idle, next_run_at is set
+    resp = client.get("/api/system/tasks", cookies=admin)
+    assert resp.status_code == 200
+    task_item = next(t for t in resp.json() if t["id"] == "indexer_rss_sync")
+    assert task_item["can_pause"] is True
+    assert task_item["paused"] is False
+    assert task_item["status"] == "idle"
+    assert task_item["next_run_at"] is not None
+
+    # Pause task
+    res = _put_pause(client, admin, "indexer_rss_sync", True)
+    assert res.status_code == 200
+    assert res.json() == {"success": True, "message": "Paused"}
+    assert test_db.get_kv(task_manager.pause_key("indexer_rss_sync")) == "1"
+
+    # GET /tasks shows paused, status == "paused", next_run_at is None
+    resp = client.get("/api/system/tasks", cookies=admin)
+    assert resp.status_code == 200
+    task_item = next(t for t in resp.json() if t["id"] == "indexer_rss_sync")
+    assert task_item["can_pause"] is True
+    assert task_item["paused"] is True
+    assert task_item["status"] == "paused"
+    assert task_item["next_run_at"] is None
+
+    # PUT pause false restores
+    res = _put_pause(client, admin, "indexer_rss_sync", False)
+    assert res.status_code == 200
+    assert res.json() == {"success": True, "message": "Resumed"}
+    assert test_db.get_kv(task_manager.pause_key("indexer_rss_sync")) is None
+
+    resp = client.get("/api/system/tasks", cookies=admin)
+    assert resp.status_code == 200
+    task_item = next(t for t in resp.json() if t["id"] == "indexer_rss_sync")
+    assert task_item["can_pause"] is True
+    assert task_item["paused"] is False
+    assert task_item["status"] == "idle"
+    assert task_item["next_run_at"] is not None
+
+
+def test_pause_route_400_for_non_pausable_and_404_for_unknown(app_and_client, seeded_users, secret_key, test_db):
+    _, client = app_and_client
+    admin = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
+    assert _put_pause(client, admin, "no_such_task", True).status_code == 404
+    assert _put_pause(client, admin, "filesystem_scan", True).status_code == 400
+    assert _put_pause(client, admin, "download_queue_monitor", True).status_code == 400
+    assert _put_pause(client, admin, "library_health", True).status_code == 400
+
+
+def test_pause_route_requires_admin(app_and_client, seeded_users, secret_key, test_db):
+    _, client = app_and_client
+    alice = create_auth_cookies(test_db, seeded_users["alice"], secret_key)
+    assert _put_pause(client, alice, "indexer_rss_sync", True).status_code == 403
+    assert test_db.get_kv(task_manager.pause_key("indexer_rss_sync")) is None
+
+
+def test_art_backfill_scheduler_skips_when_paused(db):
+    from trackseerr.art_pipeline import ArtBackfillScheduler
+
+    scheduler = ArtBackfillScheduler()
+    ran = []
+
+    def interval():
+        return 10.0
+
+    interval.paused = lambda: True
+    with patch("trackseerr.task_manager.seconds_until_due", return_value=0), patch(
+        "trackseerr.art_pipeline.run_backfill_task", side_effect=lambda *a, **kw: ran.append(1)
+    ):
+        scheduler.start(db, interval_fn=interval, initial_delay=0.01, poll_seconds=0.01)
+        try:
+            time.sleep(0.06)
+            assert len(ran) == 0
+            interval.paused = lambda: False
+            time.sleep(0.06)
+            assert len(ran) > 0
+        finally:
+            scheduler.stop()
 
 
 # ----------------------------------------------------------------------------- history / activity / resources

@@ -465,6 +465,11 @@ class ArtBackfillScheduler:
             if self._stop_event.wait(initial_delay):
                 return
             while not self._stop_event.is_set():
+                paused_fn = getattr(interval_fn, "paused", None)
+                if callable(paused_fn) and paused_fn():
+                    if self._stop_event.wait(poll_seconds):
+                        return
+                    continue
                 if seconds_until_due(db, _BACKFILL_TASK, interval_fn()) <= 0:
                     try:
                         run_backfill_task(db, "scheduled", should_stop=self._stop_event.is_set)

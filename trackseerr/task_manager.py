@@ -18,7 +18,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional, Protocol
 
 from trackseerr.redaction import redact_text, safe_exc
 
@@ -582,6 +582,48 @@ def record_finished_run(
 # Schedules
 # ---------------------------------------------------------------------------------------------------------------
 
+PAUSE_KEY_PREFIX = "task_paused:"
+PAUSABLE_TASKS: frozenset[str] = frozenset({
+    "playlist_sync",
+    "wanted_backlog_sweep",
+    "indexer_rss_sync",
+    "artist_metadata_refresh",
+    "art_thumbnail_backfill",
+    "mix_generation",
+    "seed_cleanup",
+    "recycle_bin_cleanup",
+    "backup",
+    "update_check",
+})
+
+for _pausable_id in PAUSABLE_TASKS:
+    assert _pausable_id in TASKS and TASKS[_pausable_id].kind == KIND_INTERVAL, (
+        f"Pausable task '{_pausable_id}' must be a KIND_INTERVAL task in TASKS"
+    )
+
+
+def pause_key(task_id: str) -> str:
+    return PAUSE_KEY_PREFIX + task_id
+
+
+def is_paused(db: Any, task_id: str) -> bool:
+    if task_id not in PAUSABLE_TASKS:
+        return False
+    try:
+        return db.get_kv(pause_key(task_id)) == "1"
+    except sqlite3.Error as exc:
+        logger.warning("Could not read the paused status of '%s': %s", task_id, safe_exc(exc))
+        return False
+
+
+def set_paused(db: Any, task_id: str, paused: bool) -> None:
+    if task_id not in PAUSABLE_TASKS:
+        raise ValueError(f"Task '{task_id}' cannot be paused")
+    if paused:
+        db.set_kv(pause_key(task_id), "1")
+    else:
+        db.delete_kv(pause_key(task_id))
+
 
 def override_key(task_id: str) -> str:
     return OVERRIDE_KEY_PREFIX + task_id
@@ -641,7 +683,15 @@ def effective_interval_seconds(db: Any, config: Any, task_id: str) -> Optional[i
     return default_interval_seconds(db, config, task_id)
 
 
-def interval_fn(db: Any, config: Any, task_id: str) -> Callable[[], float]:
+class IntervalCallable(Protocol):
+    task_id: str
+
+    def __call__(self) -> float: ...
+
+    def paused(self) -> bool: ...
+
+
+def interval_fn(db: Any, config: Any, task_id: str) -> IntervalCallable:
     """A callable returning the task's current effective interval. Falls back to the last good value on errors."""
     last: list[float] = [float(default_interval_seconds(db, config, task_id) or 60)]
 
@@ -655,20 +705,43 @@ def interval_fn(db: Any, config: Any, task_id: str) -> Callable[[], float]:
             last[0] = float(value)
         return last[0]
 
-    return current
+    current.task_id = task_id  # type: ignore[attr-defined]
+    current.paused = lambda: is_paused(db, task_id)  # type: ignore[attr-defined]
+    return current  # type: ignore[return-value]
 
 
-def wait_for_next_cycle(stop_event: threading.Event, interval: Callable[[], float], step: float = 1.0) -> bool:
+def wait_for_next_cycle(
+    stop_event: threading.Event,
+    interval: Callable[[], float],
+    step: float = 1.0,
+    task_id: str | None = None,
+) -> bool:
     """Sleeps until ``interval()`` seconds have passed, re-reading the interval every ``step`` seconds so a changed
     schedule takes effect at once (a shorter interval ends the sleep early, a longer one extends it).
+    If paused after the interval has elapsed, waits until resumed or stopped.
     Returns True when ``stop_event`` was set."""
     t0 = time.monotonic()
     while True:
         remaining = float(interval()) - (time.monotonic() - t0)
         if remaining <= 0:
-            return stop_event.is_set()
+            break
         if stop_event.wait(min(step, remaining)):
             return True
+
+    paused_fn = getattr(interval, "paused", None)
+    if callable(paused_fn) and paused_fn():
+        tid = task_id or getattr(interval, "task_id", None)
+        task_label = f"Task '{tid}'" if tid else "A paused task"
+        logger.info("%s is paused; holding until resumed", task_label)
+        while callable(paused_fn) and paused_fn():
+            if stop_event.wait(step):
+                return True
+        if stop_event.is_set():
+            return True
+        logger.info("%s resumed", task_label)
+        return False
+
+    return stop_event.is_set()
 
 
 def parse_iso(value: Any) -> Optional[datetime]:
