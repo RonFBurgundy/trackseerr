@@ -6,7 +6,7 @@ import { errorMessage } from '@/services/apiClient';
 import { pagedFetcher, useVirtualPagedList } from '@/hooks/useVirtualPagedList';
 import { useGroupIndex } from '@/hooks/useGroupIndex';
 import { useListSelection } from '@/hooks/useListSelection';
-import { ConfirmDangerButton, TapeDeckButton } from '@/components/ui';
+import { ConfirmDangerButton, TapeDeckButton, type OverflowMenuItem } from '@/components/ui';
 import { ManualImportModal } from '@/components/manualImport';
 import { ManualSearchModal } from '@/components/manualSearch';
 import type { ManualSearchTarget } from '@/types/manualSearch';
@@ -116,43 +116,64 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
   const searchAllCapped = list.mode === 'native' && list.total > MAX_NATIVE_SEARCH_ALL;
   const searchAllLabel = searchAllCapped ? `Search all (up to ${MAX_NATIVE_SEARCH_ALL})` : `Search all ${list.total}`;
 
-  const rowActions = useCallback(
-    (r: WantedRow): React.ReactNode =>
-      r.source === 'native' ? (
-        <>
-          <TapeDeckButton
-            size="sm"
-            onClick={() =>
-              setSearchTarget({
-                artist: r.artist ?? '',
-                album: r.album,
-                title: r.item_type === 'album' ? null : r.title,
-                itemType: r.item_type === 'album' ? 'album' : 'track',
-                albumId: r.album_id,
-                // Native wanted rows are tracks; r.id is the library track id.
-                trackId: r.item_type === 'track' ? r.id : undefined,
-              })
-            }
-            icon={<ListFilter className="h-3.5 w-3.5" />}
-            aria-label="Manual search"
-            title="Manual search"
-            collapseLabel
-          >
-            Search&hellip;
-          </TapeDeckButton>
-          {r.album_id ? (
-            <TapeDeckButton
-              size="sm"
-              onClick={() => setImportScope({ kind: 'album', albumId: r.album_id ?? '', title: r.album || 'Album' })}
-              icon={<FolderInput className="h-3.5 w-3.5" />}
-            >
-              Import files&hellip;
-            </TapeDeckButton>
-          ) : null}
-        </>
-      ) : null,
+  const rowMenu = useCallback(
+    (r: WantedRow): OverflowMenuItem[] => {
+      if (r.source !== 'native') return [];
+      const items: OverflowMenuItem[] = [
+        {
+          key: 'manual-search',
+          label: 'Manual search…',
+          icon: <ListFilter className="h-3.5 w-3.5" />,
+          onSelect: () =>
+            setSearchTarget({
+              artist: r.artist ?? '',
+              album: r.album,
+              title: r.item_type === 'album' ? null : r.title,
+              itemType: r.item_type === 'album' ? 'album' : 'track',
+              albumId: r.album_id,
+              // Native wanted rows are tracks; r.id is the library track id.
+              trackId: r.item_type === 'track' ? r.id : undefined,
+            }),
+        },
+      ];
+      if (r.album_id) {
+        items.push({
+          key: 'import-files',
+          label: 'Import files…',
+          icon: <FolderInput className="h-3.5 w-3.5" />,
+          onSelect: () =>
+            setImportScope({
+              kind: 'album',
+              albumId: r.album_id ?? '',
+              title: r.album || 'Album',
+            }),
+        });
+      }
+      return items;
+    },
     []
   );
+
+  const rowMenuLabel = useCallback(
+    (r: WantedRow) => `Actions for ${r.title || r.album || r.artist || 'item'}`,
+    []
+  );
+
+  const rowDetails = useCallback((r: WantedRow): React.ReactNode | null => {
+    const details: { label: string; value: string }[] = [];
+    if (r.added_at) details.push({ label: 'Added', value: formatDateTime(r.added_at) });
+
+    if (details.length === 0) return null;
+    return (
+      <div className="flex flex-col gap-0.5">
+        {details.map((d) => (
+          <div key={d.label}>
+            <span className="text-neutral-500">{d.label}:</span> {d.value}
+          </div>
+        ))}
+      </div>
+    );
+  }, []);
 
   const toolbar = (
     <>
@@ -202,9 +223,10 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
         onSortChange={onSortChange}
         selectedKeys={selected}
         onSelectedKeysChange={setSelected}
-        rowActions={rowActions}
-        actionsWidth="230px"
-        mobileLayout="compact"
+        layout="card"
+        rowMenu={rowMenu}
+        rowMenuLabel={rowMenuLabel}
+        rowDetails={rowDetails}
         emptyMessage={isCutoff ? 'Nothing is below its cutoff.' : 'Nothing is missing.'}
         rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
       />
