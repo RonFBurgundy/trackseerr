@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, RotateCw, AlertTriangle } from 'lucide-react';
-import { TapeDeckButton, MachinedCard, SearchBar } from '@/components/ui';
+import { TapeDeckButton, MachinedCard, SearchBar, PageLoader } from '@/components/ui';
 import { PageActionsPortal } from '@/components/layout';
 import { useTaskManager } from '@/hooks/useTaskManager';
 import { useNow } from '@/hooks/useNow';
@@ -205,9 +205,7 @@ export const SystemTasksPanel: React.FC<SystemTasksPanelProps> = ({ onToast }) =
         )}
 
         {isLoading && tasks.length === 0 && (
-          <div className="flex items-center justify-center gap-2 py-12 text-neutral-400 text-xs font-mono">
-            <Loader2 className="h-4 w-4 animate-spin text-[#e5a00d]" aria-hidden="true" /> Loading scheduled tasks...
-          </div>
+          <PageLoader message="Loading scheduled tasks" />
         )}
 
         {!isLoading && tasks.length === 0 && (

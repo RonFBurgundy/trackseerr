@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, Save, Lock } from 'lucide-react';
-import { MachinedCard, TapeDeckButton } from '@/components/ui';
+import { MachinedCard, PageLoader, TapeDeckButton } from '@/components/ui';
 import { inputClass, labelClass } from '@/components/settings/formClasses';
 import type { MediaServerSettings, MediaServerSettingsInput, SettableMediaServerType } from '@/types/mediaServer';
 import { useMediaServerSettings } from '@/hooks/useMediaServerSettings';
@@ -40,12 +40,7 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
   }, [settings]);
 
   if (hook.isLoading) {
-    return (
-      <div className="flex items-center gap-2 py-8 text-xs font-mono text-neutral-400">
-        <Loader2 className="h-4 w-4 animate-spin text-[#e5a00d]" />
-        <span>Reading media server settings...</span>
-      </div>
-    );
+    return <PageLoader message="Reading media server settings" />;
   }
 
   const locked = settings?.locked_by_env ?? false;

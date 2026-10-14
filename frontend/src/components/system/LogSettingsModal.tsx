@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, Save } from 'lucide-react';
-import { FormField, ObsidianModal, StatusMessage, TapeDeckButton, inputClass } from '@/components/ui';
+import { FormField, ObsidianModal, PageLoader, StatusMessage, TapeDeckButton, inputClass } from '@/components/ui';
 import type { LogSettings, LogSettingsUpdate } from '@/types/models';
 import { useLogSettings } from '@/hooks/useLogSettings';
 
@@ -89,9 +89,7 @@ export const LogSettingsModal: React.FC<LogSettingsModalProps> = React.memo(({ i
     >
       {error && <StatusMessage variant="error" className="mb-3">{error}</StatusMessage>}
       {isLoading && !draft && (
-        <div className="py-8 flex justify-center text-[var(--text-muted)]">
-          <Loader2 className="h-5 w-5 animate-spin" aria-label="Loading log settings" />
-        </div>
+        <PageLoader size="sm" />
       )}
       {settings && draft && (
         <div className="space-y-4">

@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useMemo, useState } from 'react';
 import { Loader2, Plus } from 'lucide-react';
-import { ObsidianModal, TabStrip, TapeDeckButton, TactileSwitch, ActionBar } from '@/components/ui';
+import { ObsidianModal, PageLoader, TabStrip, TapeDeckButton, TactileSwitch, ActionBar } from '@/components/ui';
 import { inputClass, labelClass } from '@/components/settings/formClasses';
 import { routeToHash, settingsRouteFor } from '@/hooks/useAppRoute';
 import { useListeningSources } from '@/hooks/useListeningSources';
@@ -262,10 +262,7 @@ export const ListeningPlaylistModal: React.FC<ListeningPlaylistModalProps> = ({
         </TabStrip>
 
         {isLoading && (
-          <div className="flex items-center gap-2 py-6 justify-center text-xs font-mono text-neutral-400">
-            <Loader2 className="h-4 w-4 animate-spin text-[var(--accent-amber)]" />
-            Loading your accounts...
-          </div>
+          <PageLoader size="sm" message="Loading your accounts" />
         )}
         {!isLoading && loadError && (
           <p role="alert" className="text-xs text-[var(--status-error)] font-mono">

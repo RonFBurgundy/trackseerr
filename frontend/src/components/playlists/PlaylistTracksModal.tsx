@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { AlertCircle, Check, Loader2 } from 'lucide-react';
-import { ObsidianModal, TapeDeckButton } from '@/components/ui';
+import { AlertCircle, Check } from 'lucide-react';
+import { ObsidianModal, PageLoader, TapeDeckButton } from '@/components/ui';
 import { usePlaylistTracks } from '@/hooks/usePlaylistTracks';
 import { createTrackAlias } from '@/services/trackFixService';
 import { errorMessage } from '@/services/apiClient';
@@ -115,10 +115,7 @@ export const PlaylistTracksModal: React.FC<PlaylistTracksModalProps> = ({
         </div>
 
         {loading && (
-          <div className="flex items-center justify-center gap-2 py-8 text-xs text-neutral-400 font-mono">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading tracks
-          </div>
+          <PageLoader size="sm" />
         )}
 
         {!loading && error && (
