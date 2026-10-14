@@ -174,12 +174,14 @@ class TestWebhookAndSelfHealingSync:
             [],  # No more missing tracks!
         )
 
+        # Library DB is not touched in this test so the rematch must be forced.
         res2 = sync_state.execute_sync(
             db=test_db,
             config=test_config,
             plex_client=mock_plex,
             spotify_client=None,
             deezer_client=None,
+            force=True,
         )
         assert res2["status"] == "success"
         assert res2["stats"]["success_count"] == 1

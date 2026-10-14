@@ -305,5 +305,5 @@ def test_sync_routes(client, admin, alice):
         assert hook["status"] == "triggered" and hook["fulfilled_requests"] == 0
     status = _ok(client.get("/api/sync/status", headers=admin))
     assert status["is_syncing"] is False and set(status["last_run_stats"]) == {
-        "total_playlists", "success_count", "total_matched", "total_missing"}
+        "total_playlists", "success_count", "total_matched", "total_missing", "skipped_unchanged"}
     assert client.get("/api/sync/status", headers=alice).status_code == 403
