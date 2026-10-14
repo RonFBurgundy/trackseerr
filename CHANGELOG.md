@@ -72,6 +72,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Library scans no longer merge two tracks that share a title on the same album (such as repeated "[silence]" bonus tracks); each keeps its own file.
 - Playlists with no users assigned are still matched against your library, so their missing tracks are recorded and can be requested; they just aren't pushed to Plex until you assign someone.
 - Requesting a track that's already in your library is refused ("Already in your library"), and search results now show the In library badge for tracks deep in a large artist's catalog, on another edition, or on a compilation credited to the artist. Playlists, mixes and import lists skip such tracks instead of requesting them.
 - The retag preview scrolls long file paths and tag values sideways instead of cutting them off.
