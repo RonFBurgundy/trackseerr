@@ -631,12 +631,17 @@ class LibraryCatalogStoreMixin:
         With ``disc_number`` the title matches prefer a row on the same disc (and number); a row from another disc is
         returned only when no track number is given, and the near-equal fallback only considers same-disc,
         same-number candidates. Without it, discs are ignored.
+
+        A same-title row with a different track number is reused only when it has no file yet (a renumbered catalog
+        track); otherwise it is a distinct track and the lookup misses.
         """
         clean = clean_library_name(title)
+        has_file = "EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) AS has_file"
         with self._lock:
             row = self._pick_title_match(
                 self.conn.execute(
-                    "SELECT * FROM library_tracks WHERE album_id = ? AND clean_title = ?", (str(album_id), clean)
+                    f"SELECT t.*, {has_file} FROM library_tracks t WHERE t.album_id = ? AND t.clean_title = ?",
+                    (str(album_id), clean),
                 ).fetchall(),
                 track_number,
                 disc_number,
@@ -647,7 +652,8 @@ class LibraryCatalogStoreMixin:
             if squashed:
                 row = self._pick_title_match(
                     self.conn.execute(
-                        "SELECT * FROM library_tracks WHERE album_id = ? AND REPLACE(clean_title, ' ', '') = ?",
+                        f"SELECT t.*, {has_file} FROM library_tracks t "
+                        "WHERE t.album_id = ? AND REPLACE(t.clean_title, ' ', '') = ?",
                         (str(album_id), squashed),
                     ).fetchall(),
                     track_number,
@@ -672,21 +678,31 @@ class LibraryCatalogStoreMixin:
     def _pick_title_match(
         rows: list[Any], track_number: Optional[int], disc_number: Optional[int]
     ) -> Optional[Any]:
-        """Chooses among same-title rows; with a disc, prefers the same disc and crosses discs only without a number."""
+        """Chooses among same-title rows; with a disc, prefers the same disc and crosses discs only without a number.
+
+        With a track number, a row holding that number wins. Otherwise only a candidate without a file is returned
+        (a renumbered catalog row); a row that already has a file is a different track, so the result is None.
+        Rows lacking the ``has_file`` key count as having no file.
+        """
         if not rows:
             return None
         if disc_number is None:
-            return rows[0]
-        pool = [r for r in rows if int(r["disc_number"] or 1) == int(disc_number)]
-        if not pool:
-            pool = rows if track_number is None else []
+            pool = list(rows)
+        else:
+            pool = [r for r in rows if int(r["disc_number"] or 1) == int(disc_number)]
+            if not pool:
+                pool = list(rows) if track_number is None else []
         if not pool:
             return None
-        if track_number is not None:
-            for r in pool:
-                if int(r["track_number"] or 1) == int(track_number):
-                    return r
-        return pool[0]
+        if track_number is None:
+            return pool[0]
+        for r in pool:
+            if int(r["track_number"] or 1) == int(track_number):
+                return r
+        for r in pool:
+            if not (r["has_file"] if "has_file" in r.keys() else False):
+                return r
+        return None
 
     def list_library_tracks(
         self,

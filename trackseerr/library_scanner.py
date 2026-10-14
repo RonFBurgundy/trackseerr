@@ -646,9 +646,19 @@ class LibraryScanner:
         mb_rec_id = metadata.get("musicbrainz_trackid")
         track_isrc = metadata.get("isrc")
         track_key = (album_id, track_title, tagged_track_number, int(disc_number))
-        track_row = run.track_cache.get(track_key) or run.db.get_library_track_by_title(
-            album_id, track_title, tagged_track_number, disc_number=int(disc_number)
-        )
+        track_row = run.track_cache.get(track_key)
+        if not track_row:
+            db_row = run.db.get_library_track_by_title(
+                album_id, track_title, tagged_track_number, disc_number=int(disc_number)
+            )
+            if (
+                db_row
+                and str(db_row.get("id")) in run.track_id_cache
+                and tagged_track_number is not None
+                and db_row.get("track_number") != tagged_track_number
+            ):
+                db_row = None
+            track_row = db_row
         if not track_row:
             track_id = str(uuid.uuid4())
             track_row = run.db.upsert_library_track(

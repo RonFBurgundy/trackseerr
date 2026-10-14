@@ -228,6 +228,34 @@ def test_track_lookup_matches_title_first_and_never_by_number_alone(db):
     assert db.get_library_track_by_title(album_id, "One More Time", track_number=9)["id"] == "t1"
 
 
+def test_same_title_different_number_does_not_reuse_a_track_with_a_file(db):
+    album_id = _seed_album(db)
+    _seed_track(db, "s90", "[silence]", 90)
+    db.upsert_library_file(
+        LibraryFile(id="f90", track_id="s90", file_path="/m/90.mp3", relative_path="90.mp3", codec="mp3")
+    )
+    assert db.get_library_track_by_title(album_id, "[silence]", track_number=91) is None
+    assert db.get_library_track_by_title(album_id, "[silence]", track_number=90)["id"] == "s90"
+
+
+def test_title_match_still_crosses_numbers_for_a_renumbered_track_without_file(db):
+    album_id = _seed_album(db)
+    _seed_track(db, "t1", "One More Time", 1)
+    assert db.get_library_track_by_title(album_id, "One More Time", track_number=9)["id"] == "t1"
+    assert db.get_library_track_by_title(album_id, "One More Time", track_number=9, disc_number=1)["id"] == "t1"
+
+
+def test_scan_keeps_two_same_title_tracks_separate(db, tmp_path):
+    album = tmp_path / "music" / "Daft Punk" / "Discovery"
+    for n in ("90", "91"):
+        make_mp3(album / f"{n}.mp3", TIT2="[silence]", TPE1="Daft Punk", TALB="Discovery", TRCK=n)
+    scan(db, tmp_path / "music")
+    tracks = db.list_library_tracks(limit=100)
+    assert sorted(t["track_number"] for t in tracks) == [90, 91]
+    for t in tracks:
+        assert len(db.list_library_files_for_track(t["id"])) == 1
+
+
 def test_track_lookup_number_is_a_tiebreaker_for_near_equal_titles(db):
     album_id = _seed_album(db)
     _seed_track(db, "t6", "Night Vision", 6)
