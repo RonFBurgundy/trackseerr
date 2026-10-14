@@ -24,6 +24,7 @@ from trackseerr.list_monitoring import (
     ListItem,
     apply_list_item,
     apply_playlist_missing,
+    apply_playlist_missing_safely,
     effective_level,
 )
 from trackseerr.models import (
@@ -32,11 +33,13 @@ from trackseerr.models import (
     DownloadDriverType,
     DownloadStatus,
     LibraryArtist,
+    UserPermission,
 )
 from trackseerr.request_submission import RequestRejected
 from trackseerr.storage import Database
 from tests.lidarr_fake import FastClock
 
+SUBMIT = "trackseerr.listening_playlists.submit_track_request"
 ART = "aaaaaaaa-0000-0000-0000-00000000000a"
 RG = "bbbbbbbb-0000-0000-0000-00000000000b"
 RG2 = "cccccccc-0000-0000-0000-00000000000c"
@@ -471,13 +474,49 @@ def test_playlist_artist_mode_applies_artist_level_with_creator_attribution(db):
     assert apply.call_args.args[2].kind == "track"
 
 
-@pytest.mark.parametrize("mode", ["track", "none"])
-def test_playlist_track_and_none_modes_apply_nothing(db, mode):
-    _playlist(db, mode)
+def test_playlist_none_mode_applies_nothing(db):
+    _playlist(db, "none")
     enr = make_enricher()
-    assert apply_playlist_missing(db, None, "pl-1", enricher=enr) == {"applied": 0, "unresolved": 0, "pending": 0, "failed": 0}
+    with patch(SUBMIT) as submit:
+        counts = apply_playlist_missing(db, None, "pl-1", enricher=enr)
+    assert counts == {"applied": 0, "existing": 0, "unresolved": 0, "pending": 0, "failed": 0}
+    submit.assert_not_called()
     enr.lookup_track_mbids.assert_not_called()
     assert db.get_missing_tracks("pl-1")[0]["list_applied_at"] is None
+
+
+def test_playlist_track_mode_requests_missing_tracks_as_creator(db):
+    _playlist(db, "track", [
+        {"title": "Airbag", "artist": "Radiohead", "album": "OK Computer"},
+        {"title": "Lucky", "artist": "Radiohead", "album": "OK Computer"},
+    ])
+    with patch(SUBMIT) as submit:
+        counts = apply_playlist_missing(db, None, "pl-1")
+        again = apply_playlist_missing(db, None, "pl-1")
+    assert counts["applied"] == 2 and submit.call_count == 2
+    assert [c.args[3] for c in submit.call_args_list] == ["Airbag", "Lucky"]
+    for call in submit.call_args_list:
+        assert call.args[2]["id"] == "admin-1" and call.kwargs["source"] == "playlist"
+    assert all(t["list_applied_at"] for t in db.get_missing_tracks("pl-1"))
+    assert again["applied"] == 0 and submit.call_count == 2
+
+
+def test_playlist_track_mode_without_creator_requests_as_oldest_admin(db):
+    db.upsert_playlist("pl-n", "Mix")
+    db.set_playlist_monitor_mode("pl-n", "track")
+    db.record_sync_result("pl-n", "success", [{"title": "Airbag", "artist": "Radiohead", "album": "OK Computer"}])
+    with patch(SUBMIT) as submit:
+        counts = apply_playlist_missing(db, None, "pl-n")
+    assert counts["applied"] == 1 and submit.call_args.args[2]["id"] == "admin-1"
+
+
+def test_apply_safely_logs_one_summary_line(db, caplog):
+    _playlist(db, "track")
+    with patch(SUBMIT), caplog.at_level("INFO", logger="trackseerr.list_monitoring"):
+        apply_playlist_missing_safely(db, None, "pl-1")
+        apply_playlist_missing_safely(db, None, "pl-1")  # nothing left to do: no second line
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Playlist 'Mix'")]
+    assert lines == ["Playlist 'Mix': 1 requested, 0 already requested/owned, 0 waiting (quota), 0 unresolved, 0 failed"]
 
 
 def test_playlist_unresolved_track_is_not_stamped_and_retried(db):
@@ -501,6 +540,12 @@ def _backlog_calls(db: Database) -> list[Any]:
 def test_backlog_searches_missing_track_in_track_mode(db):
     _playlist(db, "track")
     assert [c["title"] for c in _backlog_calls(db)] == ["Airbag"]
+
+
+def test_backlog_skips_requested_track_mode_rows(db):
+    _playlist(db, "track")
+    db.mark_missing_tracks_list_applied([db.get_missing_tracks("pl-1")[0]["id"]])
+    assert _backlog_calls(db) == []
 
 
 def test_backlog_skips_missing_tracks_of_none_mode_playlist(db):
@@ -737,17 +782,20 @@ def test_acquisition_leaves_existing_artist_untouched(db, tmp_path):
 
 
 def test_playlist_of_non_admin_creator_treats_album_and_artist_as_track(db):
-    """Defense in depth: a creator who is (or became) a non-admin gets no album/artist apply."""
+    """Defense in depth: a creator who is (or became) a non-admin gets no album/artist apply, only requests."""
+    db.update_user_admin_fields("user-alice", {"permissions": int(UserPermission.DEFAULT) | int(UserPermission.AUTO_REQUEST_PLAYLISTS)})
     for mode in ("album", "artist"):
         db.upsert_playlist("pl-x", "Mix", creator_id="user-alice")
         db.set_playlist_monitor_mode("pl-x", mode)
         db.record_sync_result("pl-x", "success", [{"title": "Airbag", "artist": "Radiohead", "album": "OK Computer"}])
         enr = make_enricher()
-        with patch("trackseerr.list_monitoring.apply_list_item") as apply:
+        with patch("trackseerr.list_monitoring.apply_list_item") as apply, patch(SUBMIT) as submit:
             counts = apply_playlist_missing(db, None, "pl-x", enricher=enr)
-        assert counts == {"applied": 0, "unresolved": 0, "pending": 0, "failed": 0}
+        assert counts == {"applied": 1, "existing": 0, "unresolved": 0, "pending": 0, "failed": 0}
         apply.assert_not_called()
-        assert db.get_missing_tracks("pl-x")[0]["list_applied_at"] is None
+        assert submit.call_count == 1 and submit.call_args.args[2]["id"] == "user-alice"
+        assert db.get_missing_tracks("pl-x")[0]["list_applied_at"]
+        db.record_sync_result("pl-x", "success", [])
     assert db.list_library_artists() == []
 
 
@@ -758,7 +806,10 @@ def test_playlist_of_demoted_admin_stops_applying(db):
     db.record_sync_result("pl-x", "success", [{"title": "Airbag", "artist": "Radiohead", "album": "OK Computer"}])
     db.upsert_user("admin-2", "boss", "b@example.com", is_admin=False)
     assert db.get_user("admin-2")["is_admin"] is False
-    assert apply_playlist_missing(db, None, "pl-x", enricher=make_enricher())["applied"] == 0
+    with patch(SUBMIT) as submit, patch("trackseerr.list_monitoring.apply_list_item") as apply:
+        counts = apply_playlist_missing(db, None, "pl-x", enricher=make_enricher())
+    apply.assert_not_called()  # no album/artist apply any more; the track is requested instead
+    assert counts["applied"] == submit.call_count
     assert db.list_library_artists() == []
 
 

@@ -595,19 +595,33 @@ def _creator_may_use_mode(db: Database, playlist: dict[str, Any]) -> bool:
     return bool(creator and creator.get("is_admin") and not creator.get("disabled"))
 
 
+def _request_as_owner(db: Database, config: Any, playlist: dict[str, Any]) -> dict[str, int]:
+    """Requests the playlist's missing tracks one by one as its creator (the oldest admin when it has none)."""
+    from trackseerr.listening_playlists import request_missing_tracks
+
+    creator_id = playlist.get("creator_id")
+    owner = db.get_user(str(creator_id)) if creator_id else list_actor(db, None)
+    if owner is None:
+        logger.info("Playlist %s: no user to request missing tracks as", playlist["id"])
+        return {"applied": 0, "existing": 0, "unresolved": 0, "pending": 0, "failed": 0}
+    return request_missing_tracks(db, config, playlist, owner)
+
+
 def apply_playlist_missing(
     db: Database, config: Any, playlist_id: str, *, enricher: Optional[MbidEnricherClient] = None
 ) -> dict[str, int]:
-    """Applies a playlist's not-yet-applied missing tracks at the playlist's monitor mode (album or artist).
+    """Applies a playlist's not-yet-applied missing tracks according to its monitor mode.
 
-    ``track`` mode is the existing backlog behaviour and ``none`` records nothing, so both return at once. So does
-    album/artist mode on a playlist whose creator is not (or no longer) an admin: it is treated as ``track``.
-    A track that resolves is stamped ``list_applied_at`` right after it applies (never applied again, and the
-    backlog skips it as a lone track). One that does not resolve stays unstamped: it is retried on the next sync
-    and meanwhile searched as a lone track. An unexpected error on one track is logged and counted as failed
-    without stopping the rest.
+    ``none`` records nothing. ``track`` mode requests each missing track as the playlist's creator (the oldest
+    admin when it has none) through the normal request flow, so quota, duplicate, in-library and approval policy
+    apply and the user sees a request card; album/artist mode on a playlist whose creator is not (or no longer)
+    an admin is treated as ``track``. Otherwise album/artist mode adds the track's album or artist.
+    A track that is handled is stamped ``list_applied_at`` right after (never applied again, and the backlog
+    skips it as a lone track). One that does not resolve stays unstamped: it is retried on the next sync and
+    meanwhile searched as a lone track. An unexpected error on one track is logged and counted as failed
+    without stopping the rest. Returns counts of ``applied``, ``existing``, ``unresolved``, ``pending``, ``failed``.
     """
-    counts = {"applied": 0, "unresolved": 0, "pending": 0, "failed": 0}
+    counts = {"applied": 0, "existing": 0, "unresolved": 0, "pending": 0, "failed": 0}
     playlist = db.get_playlist(playlist_id)
     if playlist is None:
         return counts
@@ -626,10 +640,10 @@ def apply_playlist_missing(
         )
         return counts
     if mode == "track":
-        return counts
+        return _request_as_owner(db, config, playlist)
     if not _creator_may_use_mode(db, playlist):
         logger.info("Playlist %s: creator is not an admin, treating monitor mode %r as 'track'", playlist_id, mode)
-        return counts
+        return _request_as_owner(db, config, playlist)
     actor = list_actor(db, playlist.get("creator_id"))
     todo = [t for t in db.get_missing_tracks(playlist_id) if not t.get("list_applied_at")]
     for row in todo:
@@ -667,7 +681,20 @@ def apply_playlist_missing(
 def apply_playlist_missing_safely(db: Database, config: Any, playlist_id: str) -> None:
     """``apply_playlist_missing`` for sync code paths: a failure is logged and never aborts the sync."""
     try:
-        apply_playlist_missing(db, config, playlist_id)
+        counts = apply_playlist_missing(db, config, playlist_id)
     except Exception as exc:  # the sync already succeeded; the cause is logged and the next sync retries
         logger.warning("Applying monitor mode for playlist %s failed: %s", playlist_id, safe_exc(exc))
         logger.debug("Playlist monitor-mode traceback", exc_info=True)
+        return
+    if not any(counts.values()):
+        return
+    playlist = db.get_playlist(playlist_id) or {}
+    logger.info(
+        "Playlist '%s': %d requested, %d already requested/owned, %d waiting (quota), %d unresolved, %d failed",
+        playlist.get("name") or playlist_id,
+        counts.get("applied", 0),
+        counts.get("existing", 0),
+        counts.get("pending", 0),
+        counts.get("unresolved", 0),
+        counts.get("failed", 0),
+    )

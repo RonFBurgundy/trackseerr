@@ -537,8 +537,9 @@ class WantedBacklogWorker:
             if ctx.stats is not None:
                 ctx.stats["errors"] += 1
 
-        # A playlist's monitor mode decides whether its missing tracks are searched one by one: "none" never,
-        # "album"/"artist" only until the list mode has taken them over (then the monitored album/artist is searched).
+        # A playlist's monitor mode decides whether its missing tracks are searched one by one: "none" never; any
+        # other mode only until the list apply has taken the row over (the request, or the monitored album/artist,
+        # then drives the search).
         try:
             playlist_modes = effective_playlist_modes(ctx.db)
         except Exception as e:
@@ -551,7 +552,7 @@ class WantedBacklogWorker:
             mode = playlist_modes.get(str(t.get("playlist_id")), "track")
             if mode == "none":
                 return False
-            return not (mode in ("album", "artist") and t.get("list_applied_at"))
+            return not t.get("list_applied_at")
 
         unfulfilled_missing = [
             t
