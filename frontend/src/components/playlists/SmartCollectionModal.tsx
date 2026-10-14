@@ -3,7 +3,7 @@ import { Loader2 } from 'lucide-react';
 import type { User } from '@/types/models';
 import type { LibraryFilters } from '@/types/libraryFilters';
 import { SMART_SORT_LABELS, type SmartSortOption } from '@/types/smartCollections';
-import { ObsidianModal, TapeDeckButton, FormField, inputClass } from '@/components/ui';
+import { ObsidianModal, SelectionCheckbox, TapeDeckButton, FormField, inputClass } from '@/components/ui';
 import { LibraryFilterFields } from '@/components/library/LibraryFilterFields';
 import { useLibraryFacets } from '@/hooks/useLibraryFacets';
 import { useTags } from '@/hooks/useTags';
@@ -256,28 +256,28 @@ export const SmartCollectionModal: React.FC<SmartCollectionModalProps> = ({
               {users.map((u) => {
                 const uIdStr = String(u.id);
                 const isTarget = editor.targets.includes(uIdStr);
+                const toggleTarget = () => {
+                  if (isTarget) {
+                    editor.setTargets(editor.targets.filter((id) => id !== uIdStr));
+                  } else {
+                    editor.setTargets([...editor.targets, uIdStr]);
+                  }
+                };
                 return (
-                  <label
+                  <div
                     key={u.id}
-                    htmlFor={`smart_target_${u.id}`}
+                    onClick={toggleTarget}
                     className="inline-flex items-center gap-2 cursor-pointer text-xs font-mono text-neutral-300 hover:text-white select-none"
                   >
-                    <input
-                      id={`smart_target_${u.id}`}
+                    <SelectionCheckbox
                       name="targets"
-                      type="checkbox"
                       checked={isTarget}
-                      onChange={() => {
-                        if (isTarget) {
-                          editor.setTargets(editor.targets.filter((id) => id !== uIdStr));
-                        } else {
-                          editor.setTargets([...editor.targets, uIdStr]);
-                        }
-                      }}
-                      className="accent-[var(--accent-amber)] rounded-[2px]"
+                      onChange={toggleTarget}
+                      label={u.username}
+                      inline
                     />
                     <span>{u.username}</span>
-                  </label>
+                  </div>
                 );
               })}
             </div>

@@ -6,6 +6,7 @@ import {
   MachinedCard,
   ObsidianModal,
   StatusMessage,
+  TactileSwitch,
   TapeDeckButton,
   inputClass,
 } from '@/components/ui';
@@ -66,17 +67,15 @@ const QuotaOverrideField: React.FC<QuotaOverrideFieldProps> = ({
         }}
         className={inputClass}
       />
-      <label className="flex items-center gap-2 min-h-[36px] sm:min-h-0 text-[11px] font-mono cursor-pointer">
-        <input
+      <div className="flex items-center min-h-[36px] sm:min-h-0 text-[11px] font-mono">
+        <TactileSwitch
           id={`${fieldId}-default`}
           name={`quota-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-use-default`}
-          type="checkbox"
+          label="Use default"
           checked={useDefault}
-          onChange={(e) => onChange(e.target.checked ? null : (effective ?? 0))}
-          className="accent-[var(--accent-amber)]"
+          onChange={(checked) => onChange(checked ? null : (effective ?? 0))}
         />
-        Use default
-      </label>
+      </div>
     </div>
   );
 };
@@ -271,27 +270,20 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                     ? 'Administrators hold every permission'
                     : undefined;
                 return (
-                  <label
+                  <div
                     key={flag.bit}
-                    className={`flex items-center gap-3 min-h-[36px] sm:min-h-[32px] text-xs font-mono ${
-                      isLocked ? 'opacity-60' : 'cursor-pointer'
-                    }`}
-                    title={tooltip}
+                    className="flex items-center min-h-[36px] sm:min-h-[32px] text-xs font-mono"
                   >
-                    <input
+                    <TactileSwitch
                       id={`edit-user-permission-${flag.bit}`}
                       name={`permission-${flag.bit}`}
-                      type="checkbox"
                       checked={isChecked}
                       disabled={isLocked}
-                      onChange={(e) => togglePermission(flag.bit, e.target.checked)}
-                      className="accent-[var(--accent-amber)]"
+                      onChange={(checked) => togglePermission(flag.bit, checked)}
+                      label={`${flag.label} (${flag.bit})`}
+                      title={tooltip}
                     />
-                    <span>
-                      {flag.label}
-                      <span className="text-[var(--text-muted)]"> ({flag.bit})</span>
-                    </span>
-                  </label>
+                  </div>
                 );
               })}
             </div>
