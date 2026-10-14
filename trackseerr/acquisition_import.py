@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -99,6 +100,38 @@ def _apply_catalog_album(
         metadata["album_type"] = "compilation"
     else:
         metadata.pop("album_type", None)
+
+
+def _existing_folder_for_tags(
+    db: Database,
+    metadata: dict[str, Any],
+    media_settings: dict[str, Any],
+) -> Optional[str]:
+    """Finds existing library artist folder for uncatalogued track tags when rename_artist_folders is off."""
+    if media_settings.get("rename_artist_folders"):
+        return None
+    if metadata.get("is_compilation"):
+        return None
+    try:
+        artist = None
+        mbid = metadata.get("musicbrainz_albumartistid") or metadata.get("musicbrainz_artistid")
+        if mbid:
+            artist = db.get_library_artist_by_mbid(str(mbid))
+        if not artist:
+            name = metadata.get("album_artist") or metadata.get("artist")
+            if name:
+                name_str = str(name)
+                artist = db.get_library_artist_by_name(name_str)
+                if not artist and "&" in name_str:
+                    artist = db.get_library_artist_by_name(name_str.replace("&", "and"))
+                if not artist and re.search(r"\band\b", name_str, flags=re.IGNORECASE):
+                    artist = db.get_library_artist_by_name(re.sub(r"\band\b", "&", name_str, flags=re.IGNORECASE))
+        if artist:
+            return existing_artist_folder(artist, media_settings)
+    except sqlite3.Error as e:
+        logger.warning("Failed to lookup existing artist folder for tags: %s", e)
+    return None
+
 
 
 def _quality_from_codec(meta: dict[str, Any]) -> Optional[str]:
@@ -661,6 +694,11 @@ class ImportPipelineMixin(ImportCatalogMixin):
         known_discs = [int(metadata.get("total_discs") or 1)]
         known_discs += [int(t.get("disc_number") or 1) for t in job.expected_tracks]
         metadata["total_discs"] = max(known_discs)
+
+        if not metadata.get("artist_folder"):
+            existing_f = _existing_folder_for_tags(db, metadata, ctx.media_settings)
+            if existing_f:
+                metadata["artist_folder"] = existing_f
 
         job.last_metadata = metadata
 

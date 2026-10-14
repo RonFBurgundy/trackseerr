@@ -14,7 +14,7 @@ Covers:
 
 from tests.audio_fixtures import write_flac
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
@@ -871,3 +871,143 @@ def test_import_lands_in_artist_existing_folder(test_db: Database, workspace_dir
 def test_import_renders_artist_folder_when_renaming_enabled(test_db: Database, workspace_dirs):
     rel = _import_one_for_mumford(test_db, workspace_dirs, rename_artist_folders=True)
     assert rel.parts[0] == "Mumford and Sons"
+
+
+def _import_uncatalogued(
+    test_db: Database,
+    workspace_dirs,
+    *,
+    rename_artist_folders: bool = False,
+    library_artist: Optional[LibraryArtist] = None,
+    meta_override: Optional[dict[str, Any]] = None,
+) -> Path:
+    """Imports one uncatalogued download (no expected catalog tracks) and returns its relative placed path."""
+    downloads_dir, music_dir = workspace_dirs
+    settings = test_db.get_media_management_settings()
+    settings.update({
+        "root_folder_path": str(music_dir),
+        "library_mode": "native",
+        "staging_folder_path": str(downloads_dir),
+        "enrich_mbids": False,
+        "write_audio_tags": False,
+        "artist_folder_format": "{Artist CleanName}",
+        "rename_artist_folders": rename_artist_folders,
+    })
+    test_db.update_media_management_settings(settings)
+    test_db.create_download_client(
+        DownloadClientConfig(id="c1", name="Slskd", driver_type=DownloadDriverType.SLSKD, host_url="http://slskd:5030")
+    )
+    if library_artist:
+        test_db.upsert_library_artist(library_artist)
+
+    # Active download with NO expected tracks (no track_id, no album_id)
+    test_db.create_active_download(
+        ActiveDownload(
+            id="dl-uncat-1",
+            client_id="c1",
+            title="Mumford and Sons - Tompkins Square Park",
+            artist="Mumford and Sons",
+            item_type="track",
+            status=DownloadStatus.COMPLETED.value,
+            download_hash="h-uncat",
+            track_id=None,
+            album_id=None,
+        )
+    )
+    dl = downloads_dir / "Mumford_Wilder_Mind_Uncat"
+    af = dl / "01 - Tompkins Square Park.flac"
+    dl.mkdir(parents=True, exist_ok=True)
+    write_flac(af)
+
+    driver = MagicMock()
+    driver.get_status.return_value = {
+        "status": DownloadStatus.COMPLETED.value,
+        "progress": 100.0,
+        "size_bytes": 1,
+        "speed_bps": 0,
+        "eta_seconds": 0,
+        "source_path": str(dl),
+        "error_message": None,
+    }
+
+    meta = {
+        "artist": "Mumford and Sons",
+        "title": "Tompkins Square Park",
+        "album": "Wilder Mind",
+        "year": "2015",
+        "track_number": 1,
+        "disc_number": 1,
+        "total_discs": 1,
+        "codec": "FLAC",
+        "bits_per_sample": 16,
+        "bitrate": 900,
+        "sample_rate": 44100,
+        "extension": ".flac",
+        "file_path": str(af),
+    }
+    if meta_override:
+        meta.update(meta_override)
+
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_import.inspect_audio_file", return_value=dict(meta)), \
+         patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=dict(meta)), \
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+        stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(downloads_dir))
+    assert stats["imported"] == 1
+    placed = list(music_dir.rglob("*.flac"))
+    assert len(placed) == 1
+    return placed[0].relative_to(music_dir)
+
+
+def test_uncatalogued_import_uses_existing_artist_folder_by_name(test_db: Database, workspace_dirs):
+    _, music_dir = workspace_dirs
+    art = LibraryArtist(id="art-1", name="Mumford & Sons", path=str(music_dir / "Mumford & Sons"))
+    rel = _import_uncatalogued(test_db, workspace_dirs, library_artist=art)
+    assert rel.parts[0] == "Mumford & Sons"
+
+
+def test_uncatalogued_import_matches_artist_by_mbid_first(test_db: Database, workspace_dirs):
+    _, music_dir = workspace_dirs
+    # Two artists: one matches the tag name, but another matches MBID
+    art_mbid = LibraryArtist(
+        id="art-mbid",
+        name="Target Artist",
+        mbid="mbid-12345",
+        path=str(music_dir / "Target Artist Existing Folder"),
+    )
+    art_name = LibraryArtist(
+        id="art-name",
+        name="Mumford and Sons",
+        path=str(music_dir / "Mumford and Sons Existing Folder"),
+    )
+    test_db.upsert_library_artist(art_name)
+    meta_override = {
+        "musicbrainz_artistid": "mbid-12345",
+    }
+    rel = _import_uncatalogued(
+        test_db,
+        workspace_dirs,
+        library_artist=art_mbid,
+        meta_override=meta_override,
+    )
+    assert rel.parts[0] == "Target Artist Existing Folder"
+
+
+def test_uncatalogued_import_renders_folder_when_rename_artist_folders_on(test_db: Database, workspace_dirs):
+    _, music_dir = workspace_dirs
+    art = LibraryArtist(id="art-1", name="Mumford & Sons", path=str(music_dir / "Mumford & Sons"))
+    rel = _import_uncatalogued(
+        test_db,
+        workspace_dirs,
+        rename_artist_folders=True,
+        library_artist=art,
+    )
+    # Format is {Artist CleanName}, so "Mumford and Sons" -> "Mumford and Sons"
+    assert rel.parts[0] == "Mumford and Sons"
+
+
+def test_uncatalogued_import_without_library_artist_renders_folder(test_db: Database, workspace_dirs):
+    # No library artist registered
+    rel = _import_uncatalogued(test_db, workspace_dirs, library_artist=None)
+    assert rel.parts[0] == "Mumford and Sons"
+
