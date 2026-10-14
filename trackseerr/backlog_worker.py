@@ -21,6 +21,7 @@ from trackseerr.acquisition_coordinator import (
     acquisition_coordinator,
     NoClientAvailable,
     candidate_rank,
+    search_unavailable_reason,
     _to_quality_profile,
 )
 from trackseerr.clients.acquisition import (
@@ -55,6 +56,33 @@ from trackseerr.seed_rules import apply_seed_rules_at_grab
 from trackseerr.storage import Database
 
 logger = logging.getLogger(__name__)
+
+
+def _gate_search(db: Database, worker_name: str, state: Any) -> Optional[str]:
+    """Checks whether search and grab sources are ready.
+
+    Logs ONE INFO "<worker>: <reason> — skipping" the first time the reason appears
+    (or when it changes), DEBUG on repeats, and an INFO "<worker>: search sources available again"
+    when it clears. Tracks last_reason on state (a worker instance or dict).
+    """
+    reason = search_unavailable_reason(db)
+    last_reason = getattr(state, "last_reason", None) if not isinstance(state, dict) else state.get("last_reason")
+
+    if reason:
+        if reason != last_reason:
+            logger.info("%s: %s — skipping", worker_name, reason)
+        else:
+            logger.debug("%s: %s — skipping", worker_name, reason)
+    else:
+        if last_reason is not None:
+            logger.info("%s: search sources available again", worker_name)
+
+    if isinstance(state, dict):
+        state["last_reason"] = reason
+    else:
+        setattr(state, "last_reason", reason)
+
+    return reason
 
 
 def effective_playlist_modes(db: Database) -> dict[str, str]:
@@ -260,6 +288,7 @@ class WantedBacklogWorker:
         self.errors: int = 0
         self.last_search_thread: Optional[threading.Thread] = None
         self._search_lock = threading.Lock()
+        self.last_reason: Optional[str] = None
 
     def is_running(self) -> bool:
         with self._lock:
@@ -343,13 +372,16 @@ class WantedBacklogWorker:
             self._is_running = False
 
     @tracked("wanted_backlog_sweep", "Monitored Missing & Upgrade Search Sweep")
-    def poll_once(self, db: Database) -> dict[str, int]:
+    def poll_once(self, db: Database) -> dict[str, Any]:
         """Executes a single sweep over unfulfilled requests and missing tracks."""
         with self._lock:
             self.last_run_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
         try:
             with work_guard(db, MODE_NATIVE):
+                reason = _gate_search(db, "WantedBacklogWorker", self)
+                if reason:
+                    return {"items_checked": 0, "items_grabbed": 0, "errors": 0, "skipped": reason}
                 return self._sweep(db)
         except ModeChanged:
             logger.debug("WantedBacklogWorker: library manager is Lidarr; skipping native backlog sweep")
@@ -410,6 +442,9 @@ class WantedBacklogWorker:
         releases are accepted unless ``require_better``, the delay profile is bypassed, and the grab is tagged with
         the issue id. The blocklist and quality profile still apply.
         """
+        reason = _gate_search(db, "WantedBacklogWorker", self)
+        if reason:
+            return 0
         runnable = [t for t in targets if (t.get("artist") or "").strip() and (t.get("title") or "").strip()]
         if not runnable:
             return 0
@@ -837,6 +872,7 @@ class RSSSyncWorker:
         self.releases_scanned: int = 0
         self.grabs_triggered: int = 0
         self.errors: int = 0
+        self.last_reason: Optional[str] = None
 
     def is_running(self) -> bool:
         with self._lock:
@@ -909,13 +945,16 @@ class RSSSyncWorker:
             self._is_running = False
 
     @tracked("indexer_rss_sync", "Torznab / Newznab RSS Sync")
-    def poll_once(self, db: Database) -> dict[str, int]:
+    def poll_once(self, db: Database) -> dict[str, Any]:
         """Polls indexer recent feeds and triggers grabs for matching requests."""
         with self._lock:
             self.last_run_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
         try:
             with work_guard(db, MODE_NATIVE):
+                reason = _gate_search(db, "RSSSyncWorker", self)
+                if reason:
+                    return {"releases_scanned": 0, "grabs_triggered": 0, "errors": 0, "skipped": reason}
                 return self._sync(db)
         except ModeChanged:
             logger.debug("RSSSyncWorker: library manager is Lidarr; skipping native RSS sync")
