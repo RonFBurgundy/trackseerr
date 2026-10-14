@@ -47,6 +47,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Opening a section in the navigation menu now closes the others and scrolls it into view, so its pages are visible on a phone.
 - Playlist cards fold their sync-target users behind a "N of M users" toggle, flag playlists that have no users assigned (so they are not pushed to the media server), and explain what each monitor mode does with missing songs.
 - Playlist sync skips playlists whose source list, users and your library haven't changed since the last sync, so big lists no longer rematch every 10 minutes. Newly imported music still triggers a rematch, and every playlist is fully resynced once a day; "Sync now" always syncs everything.
 - Sorting and searching the library Tracks list is now near-instant on large libraries (hundreds of thousands of catalog tracks), and no longer stalls other pages while it runs. The first start after updating builds a new search index, which can take a minute on a big library.
