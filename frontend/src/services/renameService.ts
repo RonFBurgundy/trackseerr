@@ -2,6 +2,7 @@ import type { Schema } from '@/types/apiSchema';
 import { ApiError, apiRequest, errorMessage } from './apiClient';
 
 export type RenamePreviewItem = Schema<'RenamePreviewItem'>;
+export type RenamePreviewResponse = Schema<'RenamePreviewResponse'>;
 export type RenamePreviewRequest = Schema<'RenamePreviewRequest'>;
 export type RenameApplyRequest = Schema<'RenameApplyRequest'>;
 export type RenameApplyResponse = Schema<'RenameApplyResponse'>;
@@ -40,12 +41,12 @@ function asConflictBody(body: unknown): RenameRelinkConflictResponse | null {
 /**
  * Previews proposed file path changes based on token naming templates.
  */
-export async function getRenamePreview(request?: RenamePreviewRequest): Promise<RenamePreviewItem[]> {
-  const res = await apiRequest<RenamePreviewItem[]>('/api/library/rename/preview', {
+export async function getRenamePreview(request?: RenamePreviewRequest): Promise<RenamePreviewResponse> {
+  const res = await apiRequest<RenamePreviewResponse>('/api/library/rename/preview', {
     method: 'POST',
     body: JSON.stringify(request ?? {}),
   });
-  return res || [];
+  return res || { items: [], total: 0, truncated: false };
 }
 
 /**

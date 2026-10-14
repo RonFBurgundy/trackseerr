@@ -138,6 +138,8 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
   const isOpen = scope !== null;
   const {
     items,
+    total,
+    truncated,
     filteredItems,
     reasonCounts,
     activeReasons,
@@ -314,8 +316,18 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
             ) : (
               <div className="space-y-3">
                 <p className="text-xs font-mono text-neutral-400">
-                  Showing <strong className="text-white">{items.length}</strong> proposed move
-                  {items.length === 1 ? '' : 's'}
+                  {truncated ? (
+                    <>
+                      Showing <strong className="text-white">{items.length}</strong> of{' '}
+                      <strong className="text-[var(--accent-amber)]">{total}</strong> proposed moves — apply these, then run the
+                      preview again for the rest.
+                    </>
+                  ) : (
+                    <>
+                      Showing <strong className="text-white">{items.length}</strong> proposed move
+                      {items.length === 1 ? '' : 's'}
+                    </>
+                  )}
                 </p>
 
                 {/* Reason filter bar */}
