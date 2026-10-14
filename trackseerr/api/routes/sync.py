@@ -94,6 +94,7 @@ class SyncState:
 
     def __init__(self) -> None:
         self.is_syncing: bool = False
+        self._no_target_logged: set[str] = set()
         self.last_run_at: Optional[str] = None
         self.last_run_stats: dict[str, Any] = {
             "total_playlists": 0,
@@ -196,6 +197,50 @@ class SyncState:
             return live or []
         return self._stored_tracks(pl)
 
+    def _resolve_targets(self, db: Database, pl: dict[str, Any]) -> list[str]:
+        """Usernames of the playlist's target users; empty means match-only (logged once per playlist)."""
+        pl_id = pl["id"]
+        usernames: list[str] = []
+        for uid in db.get_playlist_targets(pl_id):
+            user_row = db.get_user(uid)
+            if user_row:
+                usernames.append(user_row["username"])
+        if usernames:
+            self._no_target_logged.discard(pl_id)
+            return usernames
+        message = "Playlist '%s' has no target users; matching against the library only, not pushing to the media server"
+        if pl_id in self._no_target_logged:
+            logger.debug(message, pl["name"])
+        else:
+            self._no_target_logged.add(pl_id)
+            logger.info(message, pl["name"])
+        return usernames
+
+    @staticmethod
+    def _match_natively(
+        db: Database,
+        config: Config,
+        pl: dict[str, Any],
+        tracks: list[Track],
+        original_by_effective: dict[int, Track],
+        ignored_ids: set[int],
+        stats: dict[str, int],
+    ) -> None:
+        """Matches a playlist against the native library and records its missing tracks; nothing is pushed."""
+        pl_id = pl["id"]
+        try:
+            matched, missing = match_playlist_tracks_native(db, tracks)
+            missing = restore_missing(missing, original_by_effective, ignored_ids)
+            db.record_sync_result(playlist_id=pl_id, status="success", missing_tracks=missing)
+            apply_playlist_missing_safely(db, config, pl_id)
+            stats["success_count"] += 1
+            stats["total_matched"] += len(matched)
+            stats["total_missing"] += len(missing)
+        except Exception as e:  # one playlist must not stop the cycle; the root cause is logged
+            logger.error("Native library match failed for playlist '%s': %s", pl["name"], safe_exc(e))
+            logger.debug("Native match traceback", exc_info=True)
+            db.record_sync_result(playlist_id=pl_id, status="failed")
+
     @tracked("playlist_sync", "Plex Playlist Sync")
     def execute_sync(  # noqa: C901, PLR0915
         self,
@@ -233,23 +278,10 @@ class SyncState:
             no_media_server = config.media_server_type == MEDIA_SERVER_NONE
             for pl in playlists:
                 pl_id = pl["id"]
-                target_usernames: list[str] = []
-                if not no_media_server:
-                    # Target users only matter for pushing to a media server; without one the playlist is
-                    # still matched against the native library below.
-                    target_uids = db.get_playlist_targets(pl_id)
-                    if not target_uids:
-                        logger.info("Playlist '%s' has no target users assigned; skipping", pl["name"])
-                        continue
-
-                    for uid in target_uids:
-                        user_row = db.get_user(uid)
-                        if user_row:
-                            target_usernames.append(user_row["username"])
-
-                    if not target_usernames:
-                        logger.info("No valid usernames found for playlist '%s' targets", pl["name"])
-                        continue
+                # Target users only matter for pushing to a media server; without targets (or without a
+                # media server) the playlist is still matched against the native library.
+                target_usernames = [] if no_media_server else self._resolve_targets(db, pl)
+                push = bool(target_usernames)
 
                 tracks: list[Track] = []
                 service = pl.get("service", "spotify")
@@ -276,21 +308,10 @@ class SyncState:
                     poster=pl.get("poster_url", ""),
                 )
 
-                if no_media_server:
-                    # No media server: nothing is pushed, but the source playlist is matched against the native
-                    # library so its missing tracks reach monitoring / wanted.
-                    try:
-                        matched, missing = match_playlist_tracks_native(db, tracks)
-                        missing = restore_missing(missing, original_by_effective, ignored_ids)
-                        db.record_sync_result(playlist_id=pl_id, status="success", missing_tracks=missing)
-                        apply_playlist_missing_safely(db, config, pl_id)
-                        stats["success_count"] += 1
-                        stats["total_matched"] += len(matched)
-                        stats["total_missing"] += len(missing)
-                    except Exception as e:  # one playlist must not stop the cycle; the root cause is logged
-                        logger.error("Native library match failed for playlist '%s': %s", pl["name"], safe_exc(e))
-                        logger.debug("Native match traceback", exc_info=True)
-                        db.record_sync_result(playlist_id=pl_id, status="failed")
+                if no_media_server or not push:
+                    # Nothing is pushed (no media server, or no target users): the source playlist is matched
+                    # against the native library so its missing tracks reach monitoring / wanted.
+                    self._match_natively(db, config, pl, tracks, original_by_effective, ignored_ids, stats)
                 elif server:
                     try:
                         results = server.sync_playlist(

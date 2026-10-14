@@ -17,6 +17,7 @@ from trackseerr.api.routes.sync import SyncState
 from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.cli import main
 from trackseerr.config import Config, ConfigError
+from trackseerr.media_servers.plex import PlexMediaServer
 from trackseerr.models import Playlist, Track, UserPermission
 from trackseerr.storage import Database
 from trackseerr.sync import SyncCoordinator
@@ -491,6 +492,69 @@ def test_sync_with_no_media_server_needs_no_target_users(tmp_path):
     out = SyncState().execute_sync(db=env.db, config=env.cfg, plex_client=None, spotify_client=None, deezer_client=None)
     assert out["stats"]["total_missing"] == 1
     assert [m["title"] for m in env.db.get_missing_tracks("imp_y")] == ["T"]
+
+
+def _plex_env(tmp_path, playlist_id: str, tracks: list[dict]):
+    """A Plex-configured env with one spotify playlist holding ``tracks`` as its stored list."""
+    plex = MagicMock()
+    env = build_client(tmp_path, url="http://plex", token="tok", plex=plex)
+    env.plex = plex
+    env.db.upsert_playlist(playlist_id, "PlexList", service="spotify")
+    with env.db._lock:
+        env.db.conn.execute("UPDATE playlists SET tracks_json = ? WHERE id = ?", (json.dumps(tracks), playlist_id))
+        env.db.conn.commit()
+    return env
+
+
+_TWO_TRACKS = [{"title": "Known Song", "artist": "Known Artist"}, {"title": "Unknown Song", "artist": "Nobody"}]
+
+
+def test_sync_with_plex_and_no_targets_matches_without_pushing(tmp_path):
+    env = _plex_env(tmp_path, "imp_z", _TWO_TRACKS)
+    known, unknown = Track(title="Known Song", artist="Known Artist", album=""), Track(title="Unknown Song", artist="Nobody", album="")
+    with (
+        patch("trackseerr.api.routes.sync.refresh_mix_snapshots", return_value=0),
+        patch("trackseerr.api.routes.sync.match_playlist_tracks_native", return_value=([known], [unknown])) as native,
+        patch.object(PlexMediaServer, "sync_playlist") as push,
+        patch.object(PlexMediaServer, "match_playlist_tracks") as server_match,
+    ):
+        out = SyncState().execute_sync(db=env.db, config=env.cfg, plex_client=env.plex, spotify_client=None, deezer_client=None)
+    native.assert_called_once()
+    push.assert_not_called()
+    server_match.assert_not_called()
+    assert out["status"] == "success"
+    assert out["stats"]["total_missing"] == 1 and out["stats"]["success_count"] == 1
+    assert [m["title"] for m in env.db.get_missing_tracks("imp_z")] == ["Unknown Song"]
+
+
+def test_sync_no_targets_logs_once_per_playlist(tmp_path, caplog):
+    env = _plex_env(tmp_path, "imp_log", _TWO_TRACKS)
+    state = SyncState()
+    with (
+        patch("trackseerr.api.routes.sync.refresh_mix_snapshots", return_value=0),
+        patch("trackseerr.api.routes.sync.match_playlist_tracks_native", return_value=([], [])),
+        caplog.at_level(logging.INFO, logger="trackseerr"),
+    ):
+        for _ in range(2):
+            state.execute_sync(db=env.db, config=env.cfg, plex_client=env.plex, spotify_client=None, deezer_client=None)
+    assert len([r for r in caplog.records if "has no target users" in r.getMessage()]) == 1
+
+
+def test_sync_with_plex_and_targets_still_pushes(tmp_path):
+    env = _plex_env(tmp_path, "imp_push", _TWO_TRACKS)
+    user = env.db.upsert_user("u-target", "target", "t@x.io")
+    env.db.set_playlist_targets("imp_push", [user["id"]])
+    with (
+        patch("trackseerr.api.routes.sync.refresh_mix_snapshots", return_value=0),
+        patch("trackseerr.api.routes.sync.match_playlist_tracks_native") as native,
+        patch.object(PlexMediaServer, "sync_playlist", return_value=[SimpleNamespace(success=True)]) as push,
+        patch.object(PlexMediaServer, "match_playlist_tracks", return_value=([], [])),
+    ):
+        out = SyncState().execute_sync(db=env.db, config=env.cfg, plex_client=env.plex, spotify_client=None, deezer_client=None)
+    push.assert_called_once()
+    assert push.call_args.args[1] == ["target"]
+    native.assert_not_called()
+    assert out["stats"]["success_count"] == 1
 
 
 def test_coordinator_matches_natively_when_db_given_and_no_plex(tmp_path):
