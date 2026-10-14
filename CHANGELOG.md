@@ -49,6 +49,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Artist discographies follow the artist's metadata profile: releases outside it are hidden by default (the toolbox toggle still shows them), empty tabs disappear, and remixes get their own tab instead of landing in Studio.
 - Opening a section in the navigation menu now closes the others and scrolls it into view, so its pages are visible on a phone.
 - Playlist cards fold their sync-target users behind a "N of M users" toggle, flag playlists that have no users assigned (so they are not pushed to the media server), and explain what each monitor mode does with missing songs.
 - Playlist sync skips playlists whose source list, users and your library haven't changed since the last sync, so big lists no longer rematch every 10 minutes. Newly imported music still triggers a rematch, and every playlist is fully resynced once a day; "Sync now" always syncs everything.
