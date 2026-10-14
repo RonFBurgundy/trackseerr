@@ -50,6 +50,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Every remaining browser checkbox, radio button and slider (permissions, rename/retag, profiles, notifications, logs, calendar, mixes, user presets) now uses the app's own switches, selection boxes and sliders.
 - Activity (Queue, Searches, History, Blocklist, Needs Review), Wanted and album cards use one compact layout on every screen: details get the full width, all actions sit in one ⋯ menu, extra details open with a chevron, and items needing attention get a tappable badge and an amber dot on the menu.
 - Lists, panels and modals show the tape-deck loader with rotating messages while loading, instead of a plain spinner.
 - The Tasks page groups tasks by purpose (Library, Acquisition, Metadata & art, Maintenance, Playlists & listening) in collapsible sections, pins running tasks at the top, adds a filter box, and shows one compact row per task with details and run history a tap away.
