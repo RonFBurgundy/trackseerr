@@ -39,6 +39,21 @@ import { genreNames } from './genres';
 
 type DiscographyTab = 'studio' | 'singles_eps' | 'live' | 'remixes' | 'compilations';
 
+interface DiscographyTabDefinition {
+  id: DiscographyTab;
+  full: string;
+  short: string;
+  icon: React.ReactNode;
+}
+
+const ALL_DISCOGRAPHY_TABS: readonly DiscographyTabDefinition[] = [
+  { id: 'studio', full: 'Studio Albums', short: 'Studio', icon: <Disc className="h-3.5 w-3.5" /> },
+  { id: 'singles_eps', full: 'EPs & Singles', short: 'Singles', icon: <Music className="h-3.5 w-3.5" /> },
+  { id: 'live', full: 'Live Recordings', short: 'Live', icon: <Radio className="h-3.5 w-3.5" /> },
+  { id: 'remixes', full: 'Remixes', short: 'Remixes', icon: <Shuffle className="h-3.5 w-3.5" /> },
+  { id: 'compilations', full: 'Compilations & Box Sets', short: 'Compilations', icon: <HardDrive className="h-3.5 w-3.5" /> },
+];
+
 export interface ArtistDetailProps {
   artistId: number | string;
   isAdmin: boolean;
@@ -219,12 +234,12 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
 
   // A filter that empties the open tab (or hiding outside profile) jumps to the first tab that still has matches.
   useEffect(() => {
-    if (filteredCategorized[tab].length > 0) return;
+    if (filter.searching || filteredCategorized[tab].length > 0) return;
     const next = (['studio', 'singles_eps', 'live', 'remixes', 'compilations'] as const).find(
       (id) => filteredCategorized[id].length > 0
     );
     if (next) setTab(next);
-  }, [filteredCategorized, tab]);
+  }, [filter.searching, filteredCategorized, tab]);
 
   const canBulkEdit = isAdmin && !lidarrMode;
   const selection = useBulkSelection();
@@ -278,21 +293,13 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
     (o) => !lidarrMode || (o.value !== 'existing' && o.value !== 'future')
   );
 
-  const allTabs: Array<{ id: DiscographyTab; full: string; short: string; icon: React.ReactNode }> = [
-    { id: 'studio', full: 'Studio Albums', short: 'Studio', icon: <Disc className="h-3.5 w-3.5" /> },
-    { id: 'singles_eps', full: 'EPs & Singles', short: 'Singles', icon: <Music className="h-3.5 w-3.5" /> },
-    { id: 'live', full: 'Live Recordings', short: 'Live', icon: <Radio className="h-3.5 w-3.5" /> },
-    { id: 'remixes', full: 'Remixes', short: 'Remixes', icon: <Shuffle className="h-3.5 w-3.5" /> },
-    { id: 'compilations', full: 'Compilations & Box Sets', short: 'Compilations', icon: <HardDrive className="h-3.5 w-3.5" /> },
-  ];
-
   const visibleTabs = useMemo(() => {
-    const withCounts = allTabs.filter((t) => filteredCategorized[t.id].length > 0);
+    const withCounts = ALL_DISCOGRAPHY_TABS.filter((t) => filteredCategorized[t.id].length > 0);
     if (withCounts.length === 0) {
-      return allTabs.filter((t) => t.id === tab);
+      return ALL_DISCOGRAPHY_TABS.filter((t) => t.id === tab);
     }
     return withCounts;
-  }, [allTabs, filteredCategorized, tab]);
+  }, [filteredCategorized, tab]);
 
   const artistToolItems: OverflowMenuItem[] = [];
   if (canBulkEdit && !loading && !selection.active) {
