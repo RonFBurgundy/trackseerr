@@ -18,6 +18,7 @@ class WantedRecord(ApiModel):
     release_date: Optional[str] = None
     monitored: bool
     last_searched_at: Optional[str] = None
+    added_at: Optional[str] = None
     # Cutoff list only: the key is absent from the missing list.
     current_quality: Optional[str] = None
     cutoff_quality: Optional[str] = None

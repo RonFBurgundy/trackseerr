@@ -45,6 +45,7 @@ class ActivityStoreMixin:
         "title": "t.sort_title",
         "release_date": _WANTED_RELEASE_DATE,
         "last_searched_at": "t.last_searched_at",
+        "added_at": "t.created_at",
     }
     WANTED_INDEX_SORTS: dict[str, SortDef] = {
         "artist": SortDef("ar.sort_name", "name"),
@@ -52,6 +53,7 @@ class ActivityStoreMixin:
         "title": SortDef("t.sort_title", "name"),
         "release_date": SortDef(_WANTED_RELEASE_DATE, "date"),
         "last_searched_at": SortDef("t.last_searched_at", "date"),
+        "added_at": SortDef("t.created_at", "date"),
     }
     # Downloads the native queue shows: everything that still needs the worker, plus an explicit ``warning`` state.
     NATIVE_QUEUE_STATUSES: tuple[str, ...] = ("queued", "downloading", "importing", "completed", "warning")
@@ -352,6 +354,7 @@ class ActivityStoreMixin:
         SELECT t.id AS id, t.id AS track_id, t.album_id AS album_id, ar.name AS artist, al.title AS album,
                t.title AS title, COALESCE(NULLIF(al.release_date, ''), CAST(al.year AS TEXT)) AS release_date,
                t.monitored AS monitored, t.last_searched_at AS last_searched_at,
+               t.created_at AS added_at,
                ar.quality_profile_id AS quality_profile_id
     """
 
