@@ -40,17 +40,15 @@ const CheckList: React.FC<CheckListProps> = ({ legend, hint, prefix, options, se
         {options.map((o) => {
           const id = `${prefix}-${o.id}`;
           return (
-            <label key={o.id} htmlFor={id} className="flex min-h-[36px] cursor-pointer items-center gap-2 text-xs font-mono text-neutral-200">
-              <input
+            <div key={o.id} className="flex min-h-[36px] items-center">
+              <TactileSwitch
                 id={id}
                 name={`${prefix}[]`}
-                type="checkbox"
+                label={o.label}
                 checked={selected.includes(o.id)}
                 onChange={() => onToggle(o.id)}
-                className="h-5 w-5 accent-[#e5a00d]"
               />
-              <span className="truncate">{o.label}</span>
-            </label>
+            </div>
           );
         })}
       </div>

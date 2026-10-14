@@ -1,6 +1,6 @@
 import React, { useId, useState } from 'react';
 import { Loader2, Save } from 'lucide-react';
-import { ObsidianModal, TapeDeckButton, FormField } from '@/components/ui';
+import { ObsidianModal, TactileSwitch, TapeDeckButton, FormField } from '@/components/ui';
 import {
   RELEASE_PRIMARY_LABELS,
   RELEASE_PRIMARY_TYPES,
@@ -47,17 +47,15 @@ function CheckGroup<T extends string>({
         {options.map((o) => {
           const id = `${prefix}-${o.replace(/[^a-z0-9]+/g, '-')}`;
           return (
-            <label key={o} htmlFor={id} className="flex items-center gap-2 min-h-[36px] sm:min-h-[34px] text-xs font-mono text-neutral-200 cursor-pointer">
-              <input
+            <div key={o} className="flex items-center min-h-[36px] sm:min-h-[34px]">
+              <TactileSwitch
                 id={id}
                 name={`${prefix}[]`}
-                type="checkbox"
+                label={labels[o]}
                 checked={selected.includes(o)}
                 onChange={() => onToggle(o)}
-                className="h-5 w-5 accent-[#e5a00d]"
               />
-              {labels[o]}
-            </label>
+            </div>
           );
         })}
       </div>

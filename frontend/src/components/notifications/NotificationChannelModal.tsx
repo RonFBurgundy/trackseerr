@@ -133,18 +133,15 @@ export const NotificationChannelModal: React.FC<NotificationChannelModalProps> =
             {NOTIFICATION_EVENTS.map((ev) => {
               const id = `nc-event-${ev.id}`;
               return (
-                <label key={ev.id} htmlFor={id} className="flex items-center gap-2 min-h-[36px] text-xs font-mono text-neutral-200 cursor-pointer">
-                  <input
+                <div key={ev.id} className="flex items-center min-h-[36px]">
+                  <TactileSwitch
                     id={id}
                     name="events"
-                    type="checkbox"
-                    value={ev.id}
+                    label={ev.label}
                     checked={draft.events.includes(ev.id)}
                     onChange={() => editor.toggleEvent(ev.id)}
-                    className="h-4 w-4 accent-[#e5a00d]"
                   />
-                  {ev.label}
-                </label>
+                </div>
               );
             })}
           </div>

@@ -1,6 +1,6 @@
 import React, { useId } from 'react';
 import { Trash2 } from 'lucide-react';
-import { TapeDeckButton } from '@/components/ui';
+import { TactileSwitch, TapeDeckButton } from '@/components/ui';
 import { SPEC_SOURCES, SPEC_TYPES } from '@/types/customFormats';
 import { RELEASE_PROTOCOLS } from '@/types/qualityProfiles';
 import type { QualityDefinition } from '@/types/qualityDefinitions';
@@ -14,8 +14,6 @@ export interface CustomFormatSpecRowProps {
   qualities: readonly QualityDefinition[];
   draft: Pick<UseCustomFormatDraftReturn, 'patchSpec' | 'setSpecType' | 'setSpecField' | 'removeSpec'>;
 }
-
-const checkClass = 'h-5 w-5 accent-[#e5a00d]';
 
 /** One specification: type select, type-specific fields, negate and required. Unsupported specs are read-only. */
 export const CustomFormatSpecRow: React.FC<CustomFormatSpecRowProps> = ({ spec, index, qualities, draft }) => {
@@ -163,14 +161,20 @@ export const CustomFormatSpecRow: React.FC<CustomFormatSpecRowProps> = ({ spec, 
         )}
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-1">
-        <label htmlFor={`${uid}-negate`} className="inline-flex min-h-[32px] items-center gap-2 text-xs font-mono text-neutral-200">
-          <input id={`${uid}-negate`} name={`spec-${spec.key}-negate`} type="checkbox" checked={spec.negate} onChange={(e) => draft.patchSpec(spec.key, { negate: e.target.checked })} className={checkClass} />
-          Negate (match when it does not)
-        </label>
-        <label htmlFor={`${uid}-required`} className="inline-flex min-h-[32px] items-center gap-2 text-xs font-mono text-neutral-200">
-          <input id={`${uid}-required`} name={`spec-${spec.key}-required`} type="checkbox" checked={spec.required} onChange={(e) => draft.patchSpec(spec.key, { required: e.target.checked })} className={checkClass} />
-          Required
-        </label>
+        <TactileSwitch
+          id={`${uid}-negate`}
+          name={`spec-${spec.key}-negate`}
+          label="Negate (match when it does not)"
+          checked={spec.negate}
+          onChange={(checked) => draft.patchSpec(spec.key, { negate: checked })}
+        />
+        <TactileSwitch
+          id={`${uid}-required`}
+          name={`spec-${spec.key}-required`}
+          label="Required"
+          checked={spec.required}
+          onChange={(checked) => draft.patchSpec(spec.key, { required: checked })}
+        />
       </div>
     </div>
   );
