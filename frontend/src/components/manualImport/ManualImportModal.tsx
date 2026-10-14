@@ -1,7 +1,7 @@
 import React, { useId } from 'react';
 import { Check, FolderSearch, Loader2 } from 'lucide-react';
 import { useManualImport } from '@/hooks/useManualImport';
-import { ObsidianModal, TapeDeckButton } from '@/components/ui';
+import { ObsidianModal, PageLoader, TapeDeckButton } from '@/components/ui';
 import type { ManualImportScope } from '@/types/manualImport';
 import { ManualImportRowView } from './ManualImportRowView';
 
@@ -83,9 +83,7 @@ export const ManualImportModal: React.FC<ManualImportModalProps> = ({ scope, onC
         )}
 
         {mi.scanning && (
-          <div className="flex items-center justify-center gap-2 py-10 text-xs font-mono uppercase tracking-widest text-[var(--text-secondary)]">
-            <Loader2 className="h-5 w-5 animate-spin text-[var(--accent-amber)]" /> Scanning files
-          </div>
+          <PageLoader message="Scanning files" />
         )}
 
         {mi.scanError && (

@@ -21,3 +21,4 @@ export * from './SortableList';
 export * from './TokenInput';
 export * from './TagPicker';
 export * from './CassetteLoader';
+export * from './PageLoader';

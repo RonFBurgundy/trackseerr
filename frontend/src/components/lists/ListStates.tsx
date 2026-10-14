@@ -1,6 +1,6 @@
 import React from 'react';
-import { AlertTriangle, Inbox, Loader2 } from 'lucide-react';
-import { TapeDeckButton } from '@/components/ui';
+import { AlertTriangle, Inbox } from 'lucide-react';
+import { PageLoader, TapeDeckButton } from '@/components/ui';
 
 export interface ListStatesProps {
   total: number;
@@ -27,16 +27,7 @@ export const ListStates: React.FC<ListStatesProps> = ({ total, loading, error, e
     );
   }
   if (loading) {
-    return (
-      <div role="status" className="p-3 space-y-2">
-        {[0, 1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="h-10 rounded-[3px] bg-[#1a1a1a] animate-pulse" />
-        ))}
-        <div className="flex items-center justify-center gap-2 pt-1 text-[11px] font-mono text-neutral-400 uppercase">
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-[#e5a00d]" /> Loading
-        </div>
-      </div>
-    );
+    return <PageLoader size="sm" skeletonRows={6} />;
   }
   return (
     <div className="p-8 flex flex-col items-center gap-2 text-center">

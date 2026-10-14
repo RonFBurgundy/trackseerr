@@ -51,6 +51,7 @@ import {
   InvitePage,
   LocalLoginForm,
   CassetteLoader,
+  PageLoader,
   StartupScreen,
   WhatsNewModal,
   NotificationInboxModal,
@@ -364,10 +365,7 @@ const MainApp: React.FC = () => {
 
               <div className="space-y-3 pt-2">
                 {!mediaServer.isLoaded ? (
-                  <div className="flex items-center justify-center gap-2 text-xs font-mono text-neutral-400">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Loading...</span>
-                  </div>
+                  <PageLoader size="sm" />
                 ) : !mediaServer.isPlex ? (
                   /* No Plex (none, or a Subsonic server): there is no Plex to sign in with, local accounts only. */
                   <LocalLoginForm login={localLogin} />
