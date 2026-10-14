@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
-import { BookmarkPlus, ChevronDown, ChevronUp, Disc, FolderInput, History, Info, Loader2, Search, Sliders } from 'lucide-react';
+import { Bookmark, BookmarkPlus, ChevronDown, Disc, FolderInput, History, Info, Loader2, Search, Sliders } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
 import { useAlbumTracks } from '@/hooks/useAlbumTracks';
 import { textMatches } from '@/hooks/useDiscographyFilter';
@@ -9,8 +9,6 @@ import {
   MachinedCard,
   OverflowMenu,
   SelectionCheckbox,
-  TactileSwitch,
-  TapeDeckButton,
   type OverflowMenuItem,
 } from '@/components/ui';
 import { AlbumTrackList } from './AlbumTrackList';
@@ -158,11 +156,6 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
               <h4 className="font-bold text-[13px] sm:text-sm leading-tight text-white truncate" title={album.title ?? undefined}>
                 {album.title}
               </h4>
-              {expanded ? (
-                <ChevronUp className="hidden sm:block h-4 w-4 text-neutral-400 flex-shrink-0" />
-              ) : (
-                <ChevronDown className="hidden sm:block h-4 w-4 text-neutral-400 flex-shrink-0" />
-              )}
             </div>
             <p className="text-[11px] sm:text-xs text-neutral-400 font-mono mt-0.5">
               {album.release_date ? album.release_date.substring(0, 4) : (album.year ?? 'Unknown Year')} &bull;{' '}
@@ -182,7 +175,25 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
           </div>
         </div>
 
-        <div className="flex sm:hidden items-center flex-shrink-0 -my-1.5">
+        <div className="flex items-center flex-shrink-0 -my-1.5">
+          {isAdmin && (
+            <button
+              type="button"
+              aria-pressed={album.monitored === true}
+              aria-label={`${album.monitored ? 'Monitored' : 'Not monitored'} ${album.title ?? ''}`.trim()}
+              title={album.monitored ? 'Monitored for automated library acquisition' : 'Unmonitored'}
+              onClick={() => onToggleAlbumMonitored(album.id, album.monitored === true)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-[3px] text-neutral-400 hover:text-white focus:outline-none focus-visible:ring-1 focus-visible:ring-[#e5a00d]"
+            >
+              <Bookmark
+                className={`h-4 w-4 ${
+                  album.monitored === true
+                    ? 'fill-[#e5a00d] text-[#e5a00d]'
+                    : 'text-neutral-500'
+                }`}
+              />
+            </button>
+          )}
           <button
             type="button"
             aria-label={expanded ? `Hide tracks for ${album.title}` : `Show tracks for ${album.title}`}
@@ -198,75 +209,6 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
             )}
           </button>
           <OverflowMenu items={menuItems} label={`Actions for ${album.title}`} />
-        </div>
-
-        <div className="hidden sm:flex items-center gap-3 justify-end">
-          {isAdmin && (
-            <div className="flex items-center gap-2">
-              <TactileSwitch
-                checked={album.monitored === true}
-                onChange={() => onToggleAlbumMonitored(album.id, album.monitored === true)}
-                label={album.monitored ? 'Monitored' : 'Unmonitored'}
-                title={album.monitored ? 'Monitored for automated library acquisition' : 'Unmonitored'}
-              />
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            {isAdmin && lidarrMode && (
-              <TapeDeckButton
-                size="sm"
-                disabled={searching}
-                onClick={() => void lidarrSearch.searchAlbum(album.id)}
-                icon={searching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-                title="Ask Lidarr to search for this album"
-              >
-                Search
-              </TapeDeckButton>
-            )}
-            {isAdmin && !lidarrMode && (
-              <TapeDeckButton
-                size="sm"
-                onClick={() => onImportAlbum(album)}
-                icon={<FolderInput className="h-3.5 w-3.5" />}
-                title="Import files for this album"
-              >
-                Import
-              </TapeDeckButton>
-            )}
-            <TapeDeckButton
-              size="sm"
-              onClick={() => onOpenAlbum(album)}
-              icon={<Info className="h-3.5 w-3.5" />}
-              title="Album details"
-            >
-              Details
-            </TapeDeckButton>
-            {canCollect && (
-              <TapeDeckButton
-                size="sm"
-                onClick={() => onCollect(album)}
-                icon={<BookmarkPlus className="h-3.5 w-3.5 text-[#e5a00d]" />}
-                title="Add to Collection"
-              >
-                Collect
-              </TapeDeckButton>
-            )}
-            <TapeDeckButton
-              size="sm"
-              onClick={toggleExpanded}
-              icon={
-                loading ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : expanded ? (
-                  <ChevronUp className="h-3.5 w-3.5" />
-                ) : (
-                  <ChevronDown className="h-3.5 w-3.5" />
-                )
-              }
-            >
-              {expanded ? 'Collapse' : 'Tracks'}
-            </TapeDeckButton>
-          </div>
         </div>
       </div>
 
