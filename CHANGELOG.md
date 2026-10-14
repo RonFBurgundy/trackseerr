@@ -72,6 +72,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- The Wanted sweep, RSS sync and manual Wanted searches no longer run when no indexer has a matching download client (or no Soulseek client is set up); the Tasks page shows why they were skipped.
 - Playlist "find in library" on Plex now finds tracks by artist name (and "artist title" searches), and returns results faster.
 - Library scans no longer merge two tracks that share a title on the same album (such as repeated "[silence]" bonus tracks); each keeps its own file.
 - Playlists with no users assigned are still matched against your library, so their missing tracks are recorded and can be requested; they just aren't pushed to Plex until you assign someone.
