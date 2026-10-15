@@ -128,3 +128,5 @@ export * from './useManualSearch';
 export * from './useRenameRelink';
 export * from './useTracksOwnedOnly';
 export * from './useAddArtist';
+export * from './useMbSubmit';
+export * from './useMbReturn';

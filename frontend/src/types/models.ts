@@ -428,3 +428,9 @@ export type ArtistProfile = Omit<Schema<'ArtistProfileResponse'>, 'top_tracks' |
 
 /** Exactly one id identifies the artist; `libraryArtistId` is admin-only. */
 export type ArtistProfileTarget = { discoveryId: string } | { libraryArtistId: string };
+
+export type MbUnlinkedAlbum = Schema<'MbUnlinkedAlbum'>;
+export type MbUnlinkedPage = Schema<'MbUnlinkedPage'>;
+export type MbReleaseSeed = Schema<'MbReleaseSeed'>;
+export type MbLinkRequest = Schema<'MbLinkRequest'>;
+export type MbUnlinkedKind = 'no_release_group' | 'no_release';

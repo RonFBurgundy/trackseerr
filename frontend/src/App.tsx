@@ -27,6 +27,7 @@ import {
   useRefreshRegistry,
   usePullToRefresh,
   useUpdateCheck,
+  useMbReturn,
 } from '@/hooks';
 import type { AppRoute, MainTab, NavigateOptions } from '@/hooks';
 import {
@@ -55,6 +56,7 @@ import {
   StartupScreen,
   WhatsNewModal,
   NotificationInboxModal,
+  ToastBanner,
 } from '@/components';
 import {
   getPlaylists,
@@ -172,6 +174,11 @@ const MainApp: React.FC = () => {
     },
     [navigate]
   );
+
+  const mbReturn = useMbReturn({
+    enabled: auth.isAuthenticated && auth.canUseAdminUi,
+    onNavigate: handleNavigate,
+  });
 
   useEffect(() => {
     if (auth.isAuthenticated) {
@@ -660,6 +667,10 @@ const MainApp: React.FC = () => {
         onClose={() => setIsInboxOpen(false)}
         inboxHook={userNotifications}
       />
+
+      {mbReturn.toast && (
+        <ToastBanner message={mbReturn.toast.message} tone={mbReturn.toast.tone} />
+      )}
     </div>
     </RefreshContext.Provider>
   );

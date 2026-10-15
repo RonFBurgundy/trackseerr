@@ -1,8 +1,9 @@
 import React, { useCallback, useState } from 'react';
-import { BookmarkPlus, Disc, FileText, FolderInput, ListFilter, Loader2, Search, Tag, User } from 'lucide-react';
+import { BookmarkPlus, Disc, ExternalLink, FileText, FolderInput, ListFilter, Loader2, Search, Tag, User } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
 import { useAlbumTracks } from '@/hooks/useAlbumTracks';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
+import { useMbSubmit } from '@/hooks/useMbSubmit';
 import { errorMessage } from '@/services/apiClient';
 import { ObsidianModal, TapeDeckButton } from '@/components/ui';
 import { IssueReportButton } from '@/components/issues';
@@ -50,6 +51,7 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
   onToast,
 }) => {
   const { tracks, loading, error, patchMonitored } = useAlbumTracks(album ? album.id : null);
+  const mbSubmit = useMbSubmit();
   const lidarrSearch = useLidarrSearch(onToast);
   const [searchTarget, setSearchTarget] = useState<ManualSearchTarget | null>(null);
   const searching = album !== null && lidarrSearch.busyKey === `album:${album.id}`;
@@ -144,6 +146,29 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
                 title="Retag files for this album"
               >
                 Retag files&hellip;
+              </TapeDeckButton>
+            )}
+            {isAdmin && !lidarrMode && album && !album.mb_release_id && (
+              <TapeDeckButton
+                size="sm"
+                disabled={mbSubmit.isSubmitting}
+                onClick={async () => {
+                  try {
+                    await mbSubmit.submit(album.id);
+                  } catch (err: unknown) {
+                    onToast(errorMessage(err, 'Failed to submit to MusicBrainz'), 'error');
+                  }
+                }}
+                icon={
+                  mbSubmit.isSubmitting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  )
+                }
+                title="Opens MusicBrainz with this album prefilled"
+              >
+                Submit to MusicBrainz
               </TapeDeckButton>
             )}
             {isAdmin && album && (

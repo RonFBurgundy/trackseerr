@@ -10,6 +10,9 @@ import type {
   LibraryStats,
   ScanStatus,
   LidarrStatus,
+  MbReleaseSeed,
+  MbUnlinkedKind,
+  MbUnlinkedPage,
 } from '@/types/models';
 import type {
   BulkAlbumEditRequest,
@@ -335,4 +338,34 @@ export type LibraryFacetsResponse = Schema<'LibraryFacetsResponse'>;
 
 export async function getLibraryFacets(signal?: AbortSignal): Promise<Schema<'LibraryFacetsResponse'>> {
   return apiRequest<Schema<'LibraryFacetsResponse'>>('/api/library/facets', { signal });
+}
+
+export interface GetMbUnlinkedOptions {
+  page?: number;
+  pageSize?: number;
+  kind?: MbUnlinkedKind;
+  signal?: AbortSignal;
+}
+
+export async function getMbUnlinked(options: GetMbUnlinkedOptions = {}): Promise<MbUnlinkedPage> {
+  const params = new URLSearchParams();
+  if (options.page !== undefined) params.set('page', String(options.page));
+  if (options.pageSize !== undefined) params.set('page_size', String(options.pageSize));
+  if (options.kind) params.set('kind', options.kind);
+  const qs = params.toString();
+  return apiRequest<MbUnlinkedPage>(`/api/library/musicbrainz/unlinked${qs ? `?${qs}` : ''}`, { signal: options.signal });
+}
+
+export async function getMbReleaseSeed(albumId: string | number, redirectUri?: string, signal?: AbortSignal): Promise<MbReleaseSeed> {
+  const params = new URLSearchParams();
+  if (redirectUri) params.set('redirect_uri', redirectUri);
+  const qs = params.toString();
+  return apiRequest<MbReleaseSeed>(`/api/library/albums/${albumId}/musicbrainz-seed${qs ? `?${qs}` : ''}`, { signal });
+}
+
+export async function linkMbRelease(albumId: string | number, releaseMbid: string): Promise<AlbumItem> {
+  return apiRequest<AlbumItem>(`/api/library/albums/${albumId}/musicbrainz-link`, {
+    method: 'POST',
+    body: { release_mbid: releaseMbid },
+  });
 }
