@@ -2880,6 +2880,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/retag/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retag Library Endpoint
+         * @description Triggers whole-library retag as a background task.
+         */
+        post: operations["retag_library_endpoint_api_library_retag_library_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/retag/preview": {
         parameters: {
             query?: never;
@@ -19109,6 +19129,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retag_library_endpoint_api_library_retag_library_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskActionResult"];
                 };
             };
         };
