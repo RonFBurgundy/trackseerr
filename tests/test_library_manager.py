@@ -346,15 +346,20 @@ class TestRequestRouting:
             return_value={"success": False, "message": "none"},
         ) as grab, patch(
             "trackseerr.lidarr_queue.lidarr_worker.start_trickle", return_value={"status": "started"}
-        ) as trickle:
+        ) as trickle, patch(
+            "trackseerr.api.routes.requests.seed_request_catalog"
+        ) as seed_cat:
             assert client.post("/api/requests/req-a/approve", headers=headers).status_code == 200
             assert client.post("/api/requests/req-b/retry", headers=headers).status_code == 200
         if mode == "lidarr":
             grab.assert_not_called()
             assert trickle.call_count == 2
+            seed_cat.assert_not_called()
         else:
             assert grab.call_count == 2
             trickle.assert_not_called()
+            seed_cat.assert_called_once()
+            assert seed_cat.call_args.args[1]["id"] == "req-a"
 
     def test_lidarr_mode_without_lidarr_config_leaves_request_processing(
         self, app_and_client, test_db, test_config, seeded_users

@@ -449,7 +449,7 @@ CREATE TABLE music_requests (
                 release_date TEXT,
                 foreign_id TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, quality_profile_id TEXT REFERENCES quality_profiles(id), current_quality TEXT, cutoff_met INTEGER NOT NULL DEFAULT 1, batch_id TEXT, batch_kind TEXT, status_reason TEXT, status_message TEXT, "trigger" TEXT, "trigger_ref" TEXT, "trigger_label" TEXT, retry_attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, quality_profile_id TEXT REFERENCES quality_profiles(id), current_quality TEXT, cutoff_met INTEGER NOT NULL DEFAULT 1, batch_id TEXT, batch_kind TEXT, status_reason TEXT, status_message TEXT, "trigger" TEXT, "trigger_ref" TEXT, "trigger_label" TEXT, retry_attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT, catalog_track_id TEXT, catalog_album_id TEXT, catalog_seeded_at TEXT, catalog_seed_status TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
 CREATE TABLE playlists (
@@ -766,6 +766,7 @@ CREATE INDEX idx_internal_nonces_seen_at ON internal_nonces(seen_at);
 CREATE INDEX idx_user_invites_user ON user_invites(user_id, purpose);
 CREATE INDEX idx_login_attempts ON login_attempts(key, attempted_at);
 CREATE INDEX idx_requests_batch ON music_requests(user_id, batch_kind, batch_id);
+CREATE INDEX idx_music_requests_status_catalog_seeded_at ON music_requests(status, catalog_seeded_at);
 CREATE INDEX idx_login_attempts_at ON login_attempts(attempted_at);
 CREATE INDEX idx_download_history_created ON download_history(created_at);
 CREATE INDEX idx_download_history_event ON download_history(event, created_at);
