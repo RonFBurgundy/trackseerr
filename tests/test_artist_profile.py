@@ -195,6 +195,45 @@ def test_negative_cache_expires_after_one_day_but_positive_survives_six(db):
     assert disc.get_artist_details.call_count == 2  # the 6-day-old positive is still fresh: no third fetch
 
 
+def test_fresh_negative_cache_rechecks_library_by_name(db):
+    disc = _discovery(_details())
+    link1 = resolve_from_discovery(db, disc, "deezer:artist:399", enricher=_enricher(None))
+    assert link1.library_artist_id is None
+    assert disc.get_artist_details.call_count == 1
+
+    _artist(db, "a1", "Radiohead")
+    link2 = resolve_from_discovery(db, disc, "deezer:artist:399", enricher=_enricher(None))
+    assert link2.library_artist_id == "a1"
+    assert link2.confidence == "name"
+    assert disc.get_artist_details.call_count == 1
+
+
+def test_fresh_negative_cache_rechecks_library_by_mbid(db):
+    disc = _discovery(_details())
+    link1 = resolve_from_discovery(db, disc, "deezer:artist:399", enricher=_enricher(MBID))
+    assert link1.library_artist_id is None
+    assert disc.get_artist_details.call_count == 1
+
+    _artist(db, "a1", "Radiohead Renamed", mbid=MBID)
+    link2 = resolve_from_discovery(db, disc, "deezer:artist:399", enricher=_enricher(None))
+    assert link2.library_artist_id == "a1"
+    assert link2.confidence == "mbid"
+    assert disc.get_artist_details.call_count == 1
+
+
+def test_fresh_negative_recheck_respects_mbid_conflict(db):
+    disc = _discovery(_details())
+    link1 = resolve_from_discovery(db, disc, "deezer:artist:399", enricher=_enricher(MBID))
+    assert link1.library_artist_id is None
+    assert disc.get_artist_details.call_count == 1
+
+    _artist(db, "a1", "Radiohead", mbid=OTHER_MBID)
+    link2 = resolve_from_discovery(db, disc, "deezer:artist:399", enricher=_enricher(None))
+    assert link2.library_artist_id is None
+    assert link2.confidence == "none"
+    assert disc.get_artist_details.call_count == 1
+
+
 def test_discovery_failure_is_not_cached(db):
     disc = _discovery(None)
     link = resolve_from_discovery(db, disc, "deezer:artist:399", enricher=_enricher(None))
