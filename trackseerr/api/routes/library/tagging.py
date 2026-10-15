@@ -4,7 +4,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
@@ -27,6 +27,7 @@ from trackseerr.api.dependencies import (
     require_core_tier,
     track_admin_actor,
 )
+from trackseerr.api.schemas.system import TaskActionResult
 from trackseerr.api.schemas.library import (
     RenameApplyResponse,
     RenamePreviewItem,
@@ -538,10 +539,181 @@ TAG_DIFF_FIELDS: tuple[tuple[str, str], ...] = (
     ("discnumber", "disc_number"),
     ("totaldiscs", "total_discs"),
     ("musicbrainz_artistid", "musicbrainz_artistid"),
+    ("musicbrainz_albumartistid", "musicbrainz_albumartistid"),
     ("musicbrainz_albumid", "musicbrainz_albumid"),
     ("musicbrainz_releasegroupid", "musicbrainz_releasegroupid"),
     ("musicbrainz_trackid", "musicbrainz_trackid"),
 )
+
+VARIOUS_ARTISTS_MBID = "89ad4ac3-39f7-470e-963a-56509c546377"
+
+
+def _resolve_retag_album_artist_mbid(
+    db: Database,
+    album: dict[str, Any],
+    artist: dict[str, Any],
+    artist_cache: Optional[dict[str, dict[str, Any]]] = None,
+) -> Optional[str]:
+    if str(album.get("album_type") or "").strip().lower() == "compilation":
+        return VARIOUS_ARTISTS_MBID
+    alb_artist_id = album.get("artist_id")
+    if not alb_artist_id or alb_artist_id == artist.get("id"):
+        return artist.get("mbid")
+    cache = artist_cache if artist_cache is not None else {}
+    if alb_artist_id not in cache:
+        alb_art = db.get_library_artist(alb_artist_id)
+        if alb_art:
+            cache[alb_artist_id] = alb_art
+    album_artist = cache.get(alb_artist_id) or artist
+    return album_artist.get("mbid") if album_artist else None
+
+
+def _inspect_retag_file(
+    current_path_str: str,
+    root_dir: Path,
+    db: Database,
+    write_tags_enabled: bool,
+    keep_hardlinks: bool,
+    f: dict[str, Any],
+) -> tuple[Optional[Path], str, Optional[str], dict[str, Any]]:
+    rel_path = f.get("relative_path") or Path(current_path_str).name
+    skipped_reason: Optional[str] = None
+    current_meta: dict[str, Any] = {}
+
+    try:
+        p = validate_media_path(current_path_str, db=db)
+    except HTTPException:
+        return None, rel_path, "Path is outside the configured media roots", {}
+
+    try:
+        rel_path = str(p.relative_to(root_dir))
+    except ValueError:
+        rel_path = f.get("relative_path") or p.name
+
+    if not p.exists() or not p.is_file():
+        return p, rel_path, "File does not exist on disk", {}
+
+    if p.suffix.lower() not in (".flac", ".mp3", ".m4a", ".aac", ".mp4", ".ogg", ".opus"):
+        return p, rel_path, f"unsupported format ({p.suffix.lower()})", {}
+
+    try:
+        current_meta = inspect_audio_file(p)
+    except Exception as exc:
+        skipped_reason = f"unreadable: {safe_exc(exc)}"
+
+    if skipped_reason is None and keep_hardlinks:
+        try:
+            if p.stat().st_nlink > 1:
+                skipped_reason = "hardlink keep"
+        except OSError as exc:
+            skipped_reason = f"unreadable: {safe_exc(exc)}"
+
+    if skipped_reason is None and not write_tags_enabled:
+        skipped_reason = "write_audio_tags disabled in media management settings"
+
+    return p, rel_path, skipped_reason, current_meta
+
+
+def _compute_tag_diffs(
+    current_meta: dict[str, Any],
+    proposed_tags: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not current_meta:
+        return []
+    diffs: list[dict[str, Any]] = []
+    for tag_key, meta_key in TAG_DIFF_FIELDS:
+        proposed_val = proposed_tags.get(tag_key)
+        if proposed_val is None:
+            continue
+        current_val = current_meta.get(meta_key)
+        if tag_key == "date" and current_val is None:
+            current_val = current_meta.get("year")
+        if _tags_differ(tag_key, current_val, proposed_val):
+            diffs.append({
+                "field": tag_key,
+                "current": _format_diff_val(current_val),
+                "proposed": _format_diff_val(proposed_val),
+            })
+    return diffs
+
+
+def _evaluate_file_retag(
+    db: Database,
+    t: dict[str, Any],
+    f: dict[str, Any],
+    root_dir: Path,
+    write_tags_enabled: bool,
+    keep_hardlinks: bool,
+    artist_cache: dict[str, dict[str, Any]],
+    album_cache: dict[str, dict[str, Any]],
+    discs_cache: Optional[dict[str, int]] = None,
+) -> Optional[dict[str, Any]]:
+    current_path_str = f.get("file_path")
+    if not current_path_str:
+        return None
+
+    art_id = t["artist_id"]
+    if art_id not in artist_cache:
+        art = db.get_library_artist(art_id)
+        if art:
+            artist_cache[art_id] = art
+    artist = artist_cache.get(art_id)
+
+    alb_id = t["album_id"]
+    if alb_id not in album_cache:
+        alb = db.get_library_album(alb_id)
+        if alb:
+            album_cache[alb_id] = alb
+    album = album_cache.get(alb_id)
+
+    if not artist or not album:
+        return None
+
+    p, rel_path, skipped_reason, current_meta = _inspect_retag_file(
+        current_path_str, root_dir, db, write_tags_enabled, keep_hardlinks, f
+    )
+
+    if discs_cache is not None and alb_id in discs_cache:
+        total_discs = discs_cache[alb_id]
+    else:
+        total_discs = _album_total_discs(db, alb_id)
+        if discs_cache is not None:
+            discs_cache[alb_id] = total_discs
+
+    album_artist_mbid = _resolve_retag_album_artist_mbid(db, album, artist, artist_cache)
+
+    proposed_tags = build_tags_to_write(
+        artist=artist["name"],
+        album=album["title"],
+        title=t["title"],
+        date=album.get("release_date") or album.get("year"),
+        track_number=t.get("track_number"),
+        total_tracks=album.get("total_tracks"),
+        disc_number=t.get("disc_number"),
+        total_discs=total_discs,
+        musicbrainz_artistid=artist.get("mbid"),
+        musicbrainz_albumartistid=album_artist_mbid,
+        musicbrainz_albumid=album.get("mb_release_id"),
+        musicbrainz_releasegroupid=album.get("mb_release_group_id"),
+        musicbrainz_trackid=t.get("mb_recording_id"),
+    )
+
+    diffs = _compute_tag_diffs(current_meta, proposed_tags)
+
+    return {
+        "file_id": str(f["id"]),
+        "track_id": str(t["id"]),
+        "path": rel_path,
+        "resolved_path": p,
+        "changes": diffs,
+        "diffs": diffs,
+        "skipped_reason": skipped_reason,
+        "has_diff": bool(diffs),
+        "current_meta": current_meta,
+        "proposed_tags": proposed_tags,
+        "album": album,
+        "artist": artist,
+    }
 
 def _album_cover_bytes(album: dict[str, Any], file_path: Optional[Path] = None) -> Optional[bytes]:
     """Retrieves cover art image bytes for an album using cached, local, or remote sources."""
@@ -648,6 +820,7 @@ def retag_preview(  # noqa: C901, PLR0915
 
     artist_cache: dict[str, dict[str, Any]] = {}
     album_cache: dict[str, dict[str, Any]] = {}
+    discs_cache: dict[str, int] = {}
 
     preview_items: list[dict[str, Any]] = []
 
@@ -655,105 +828,30 @@ def retag_preview(  # noqa: C901, PLR0915
         f = db.get_library_file_for_track(t["id"])
         if not f:
             continue
-        current_path_str = f.get("file_path")
-        if not current_path_str:
-            continue
 
-        art_id = t["artist_id"]
-        if art_id not in artist_cache:
-            art = db.get_library_artist(art_id)
-            if art:
-                artist_cache[art_id] = art
-        artist = artist_cache.get(art_id)
-
-        alb_id = t["album_id"]
-        if alb_id not in album_cache:
-            alb = db.get_library_album(alb_id)
-            if alb:
-                album_cache[alb_id] = alb
-        album = album_cache.get(alb_id)
-
-        if not artist or not album:
-            continue
-
-        rel_path = f.get("relative_path") or Path(current_path_str).name
-        skipped_reason: Optional[str] = None
-        current_meta: dict[str, Any] = {}
-
-        try:
-            p = validate_media_path(current_path_str, db=db)
-        except HTTPException:
-            p = None
-            skipped_reason = "Path is outside the configured media roots"
-
-        if p is not None:
-            try:
-                rel_path = str(p.relative_to(root_dir))
-            except ValueError:
-                rel_path = f.get("relative_path") or p.name
-
-            if not p.exists() or not p.is_file():
-                skipped_reason = "File does not exist on disk"
-            elif p.suffix.lower() not in (".flac", ".mp3", ".m4a", ".aac", ".mp4", ".ogg", ".opus"):
-                skipped_reason = f"unsupported format ({p.suffix.lower()})"
-            else:
-                try:
-                    current_meta = inspect_audio_file(p)
-                except Exception as exc:
-                    skipped_reason = f"unreadable: {safe_exc(exc)}"
-
-            if skipped_reason is None:
-                if keep_hardlinks:
-                    try:
-                        if p.stat().st_nlink > 1:
-                            skipped_reason = "hardlink keep"
-                    except OSError as exc:
-                        skipped_reason = f"unreadable: {safe_exc(exc)}"
-                if skipped_reason is None and not write_tags_enabled:
-                    skipped_reason = "write_audio_tags disabled in media management settings"
-
-        # Compute proposed tags
-        total_discs = _album_total_discs(db, alb_id)
-        proposed_tags = build_tags_to_write(
-            artist=artist["name"],
-            album=album["title"],
-            title=t["title"],
-            date=album.get("release_date") or album.get("year"),
-            track_number=t.get("track_number"),
-            total_tracks=album.get("total_tracks"),
-            disc_number=t.get("disc_number"),
-            total_discs=total_discs,
-            musicbrainz_artistid=artist.get("mbid"),
-            musicbrainz_albumid=album.get("mb_release_id"),
-            musicbrainz_releasegroupid=album.get("mb_release_group_id"),
-            musicbrainz_trackid=t.get("mb_recording_id"),
+        res = _evaluate_file_retag(
+            db=db,
+            t=t,
+            f=f,
+            root_dir=root_dir,
+            write_tags_enabled=write_tags_enabled,
+            keep_hardlinks=keep_hardlinks,
+            artist_cache=artist_cache,
+            album_cache=album_cache,
+            discs_cache=discs_cache,
         )
-
-        diffs: list[dict[str, Any]] = []
-        if current_meta:
-            for tag_key, meta_key in TAG_DIFF_FIELDS:
-                proposed_val = proposed_tags.get(tag_key)
-                if proposed_val is None:
-                    continue
-                current_val = current_meta.get(meta_key)
-                if tag_key == "date" and current_val is None:
-                    current_val = current_meta.get("year")
-                if _tags_differ(tag_key, current_val, proposed_val):
-                    diffs.append({
-                        "field": tag_key,
-                        "current": _format_diff_val(current_val),
-                        "proposed": _format_diff_val(proposed_val),
-                    })
+        if not res:
+            continue
 
         # Files with no differences omitted; plus skipped_reason when the file will be skipped
-        if diffs or (not current_meta and skipped_reason is not None):
+        if res["diffs"] or (not res["current_meta"] and res["skipped_reason"] is not None):
             preview_items.append({
-                "file_id": str(f["id"]),
-                "track_id": str(t["id"]),
-                "path": rel_path,
-                "changes": diffs,
-                "diffs": diffs,
-                "skipped_reason": skipped_reason,
+                "file_id": res["file_id"],
+                "track_id": res["track_id"],
+                "path": res["path"],
+                "changes": res["diffs"],
+                "diffs": res["diffs"],
+                "skipped_reason": res["skipped_reason"],
             })
 
     return preview_items
@@ -789,6 +887,17 @@ def _update_retag_progress(
             run_handle.message = msg
 
 
+def _record_retag_error(run: _RetagRun, fid: str, err: str) -> None:
+    run.results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
+    run.errors.append(err)
+    run.error_count += 1
+
+
+def _record_retag_skip(run: _RetagRun, fid: str, skip_msg: str) -> None:
+    run.results.append({"file_id": fid, "status": "skipped", "message": skip_msg, "reason": skip_msg})
+    run.skipped_count += 1
+
+
 def _retag_one_file(
     run: _RetagRun,
     idx: int,
@@ -800,69 +909,48 @@ def _retag_one_file(
 
     f = run.db.get_library_file(fid)
     if not f:
-        err = f"Library file ID '{fid}' not found"
-        run.results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
-        run.errors.append(err)
-        run.error_count += 1
+        _record_retag_error(run, fid, f"Library file ID '{fid}' not found")
         return
 
     current_path_str = f.get("file_path")
     if not current_path_str:
-        err = f"Library file '{fid}' has no recorded file path"
-        run.results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
-        run.errors.append(err)
-        run.error_count += 1
+        _record_retag_error(run, fid, f"Library file '{fid}' has no recorded file path")
         return
 
     try:
         p = validate_media_path(current_path_str, db=run.db)
         if not p.exists() or not p.is_file():
-            err = f"File '{current_path_str}' does not exist on disk"
-            run.results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
-            run.errors.append(err)
-            run.error_count += 1
+            _record_retag_error(run, fid, f"File '{current_path_str}' does not exist on disk")
             return
 
         if p.suffix.lower() not in (".flac", ".mp3", ".m4a", ".aac", ".mp4", ".ogg", ".opus"):
-            skip_msg = f"unsupported format ({p.suffix.lower()})"
-            run.results.append({"file_id": fid, "status": "skipped", "message": skip_msg, "reason": skip_msg})
-            run.skipped_count += 1
+            _record_retag_skip(run, fid, f"unsupported format ({p.suffix.lower()})")
             return
 
         track = run.db.get_library_track(f["track_id"])
         if not track:
-            err = f"Track '{f['track_id']}' not found for file '{fid}'"
-            run.results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
-            run.errors.append(err)
-            run.error_count += 1
+            _record_retag_error(run, fid, f"Track '{f['track_id']}' not found for file '{fid}'")
             return
 
         album = run.db.get_library_album(track["album_id"])
         artist = run.db.get_library_artist(track["artist_id"])
         if not album or not artist:
-            err = f"Album or artist not found for track '{track['id']}'"
-            run.results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
-            run.errors.append(err)
-            run.error_count += 1
+            _record_retag_error(run, fid, f"Album or artist not found for track '{track['id']}'")
             return
 
         # Hard rule: Seeding safety check
-        # Call prepare_file_for_tagging(path, media_settings) and skip if False
         if not prepare_file_for_tagging(p, run.media_settings):
-            skip_msg = "hardlink keep"
-            run.results.append({"file_id": fid, "status": "skipped", "message": skip_msg, "reason": skip_msg})
-            run.skipped_count += 1
+            _record_retag_skip(run, fid, "hardlink keep")
             return
 
         # Check write tags vs embed art settings
         if not run.write_tags_setting and not run.embed_art_requested:
-            skip_msg = "write_audio_tags disabled in media management settings"
-            run.results.append({"file_id": fid, "status": "skipped", "message": skip_msg, "reason": skip_msg})
-            run.skipped_count += 1
+            _record_retag_skip(run, fid, "write_audio_tags disabled in media management settings")
             return
 
-        # Recompute proposed tags server-side (never trust client values)
         total_discs = _album_total_discs(run.db, track["album_id"])
+        album_artist_mbid = _resolve_retag_album_artist_mbid(run.db, album, artist)
+
         tags_to_write = build_tags_to_write(
             artist=artist["name"],
             album=album["title"],
@@ -873,6 +961,7 @@ def _retag_one_file(
             disc_number=track.get("disc_number"),
             total_discs=total_discs,
             musicbrainz_artistid=artist.get("mbid"),
+            musicbrainz_albumartistid=album_artist_mbid,
             musicbrainz_albumid=album.get("mb_release_id"),
             musicbrainz_releasegroupid=album.get("mb_release_group_id"),
             musicbrainz_trackid=track.get("mb_recording_id"),
@@ -881,9 +970,7 @@ def _retag_one_file(
         cover_bytes = _album_cover_bytes(album, file_path=p) if run.embed_art_requested else None
 
         if not run.write_tags_setting and run.embed_art_requested and not cover_bytes:
-            skip_msg = "no album cover art available to embed"
-            run.results.append({"file_id": fid, "status": "skipped", "message": skip_msg, "reason": skip_msg})
-            run.skipped_count += 1
+            _record_retag_skip(run, fid, "no album cover art available to embed")
             return
 
         ok = False
@@ -895,9 +982,7 @@ def _retag_one_file(
         if not ok:
             err = f"Failed to write audio tags to {p.name}"
             logger.warning("Retag apply failed for file %s: write_audio_tags returned False", p)
-            run.results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
-            run.errors.append(err)
-            run.error_count += 1
+            _record_retag_error(run, fid, err)
             return
 
         # Update size on catalog file
@@ -924,10 +1009,7 @@ def _retag_one_file(
 
     except Exception as exc:
         logger.exception("Failed to retag file ID %s (%s): %s", fid, current_path_str, redact_text(str(exc)))
-        err = f"Error retagging file '{fid}': {redact_text(str(exc))}"
-        run.results.append({"file_id": fid, "status": "error", "message": err, "reason": err})
-        run.errors.append(err)
-        run.error_count += 1
+        _record_retag_error(run, fid, f"Error retagging file '{fid}': {redact_text(str(exc))}")
 
 
 def _finish_retag(
@@ -1019,5 +1101,112 @@ def retag_apply(
             return _execute_apply(job_handle=job, run_handle=run)
     else:
         return _execute_apply()
+
+
+def retag_library(
+    db: Database,
+    plex_client: Optional[Any] = None,
+    should_stop: Optional[Callable[[], bool]] = None,
+) -> dict[str, int]:
+    """Iterates through all library files, computes tag diffs, and writes tags for files that differ from the catalog."""
+    media_settings = db.get_media_management_settings()
+    write_tags_enabled = bool(media_settings.get("write_audio_tags", True))
+    if not write_tags_enabled:
+        logger.info("write_audio_tags disabled in media management settings; skipping library retag")
+        return {"scanned": 0, "retagged": 0, "unchanged": 0, "skipped": 0, "errors": 0}
+
+    root_folder_str = media_settings.get("root_folder_path") or "/music"
+    root_dir = Path(root_folder_str).resolve()
+    keep_hardlinks = str(media_settings.get("torrent_hardlink_tags") or "copy_and_tag") == "keep_hardlink"
+
+    artist_cache: dict[str, dict[str, Any]] = {}
+    album_cache: dict[str, dict[str, Any]] = {}
+    discs_cache: dict[str, int] = {}
+
+    scanned = 0
+    retagged = 0
+    unchanged = 0
+    skipped = 0
+    errors = 0
+
+    run = _RetagRun(
+        db=db,
+        plex_client=plex_client,
+        body=RetagApplyRequest(file_ids=[], embed_art=False),
+        media_settings=media_settings,
+        write_tags_setting=True,
+        embed_art_requested=False,
+        total=0,
+    )
+
+    for t, f in db.iter_library_files_for_rename(1000):
+        if should_stop is not None and should_stop():
+            break
+
+        scanned += 1
+        res = _evaluate_file_retag(
+            db=db,
+            t=t,
+            f=f,
+            root_dir=root_dir,
+            write_tags_enabled=write_tags_enabled,
+            keep_hardlinks=keep_hardlinks,
+            artist_cache=artist_cache,
+            album_cache=album_cache,
+            discs_cache=discs_cache,
+        )
+
+        if not res:
+            skipped += 1
+            continue
+
+        if res["skipped_reason"]:
+            skipped += 1
+            continue
+
+        if not res["has_diff"]:
+            unchanged += 1
+            continue
+
+        prev_retagged = run.retagged_count
+        prev_skipped = run.skipped_count
+        prev_errors = run.error_count
+
+        _retag_one_file(run, scanned - 1, str(f["id"]))
+
+        if run.retagged_count > prev_retagged:
+            retagged += 1
+        elif run.error_count > prev_errors:
+            errors += 1
+        elif run.skipped_count > prev_skipped:
+            skipped += 1
+
+    _finish_retag(run)
+
+    return {
+        "scanned": scanned,
+        "retagged": retagged,
+        "unchanged": unchanged,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+
+@router.post(
+    "/retag/library",
+    dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)],
+    response_model=TaskActionResult,
+    response_model_exclude_unset=True,
+)
+def retag_library_endpoint(
+    db: Database = Depends(get_db),
+    plex_client: Optional[Any] = Depends(get_media_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Triggers whole-library retag as a background task."""
+    from trackseerr.api.routes.system.tasks import trigger_library_retag
+
+    return trigger_library_retag(db, plex_client)
+
 
 

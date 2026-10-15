@@ -742,3 +742,217 @@ def test_cover_lookup_oserror_falls_through(tmp_path: Path):
         result = _album_cover_bytes(album_dict, file_path=audio_file)
         assert result == folder_art_bytes
 
+
+def test_retag_preview_albumartist_mbid_diff_and_compilation_va_id(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    """Retag preview shows musicbrainz_albumartistid diff and uses VA id for compilations."""
+    app, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    music_dir = tmp_path / "music"
+
+    # 1. Standard album: artist has mbid, initial tag has no musicbrainz_albumartistid
+    _, file_path = _setup_library_track(
+        test_db,
+        music_dir,
+        artist_name="Daft Punk",
+        album_title="Discovery",
+        track_title="Aerodynamic",
+        artist_mbid="art-mbid-111",
+        initial_tags={"artist": "Daft Punk", "album": "Discovery", "title": "Aerodynamic", "musicbrainz_artistid": "art-mbid-111"},
+        file_name="track1.flac",
+    )
+
+    resp = client.post(
+        "/api/library/retag/preview",
+        json={"album_id": "alb-1"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) == 1
+    diffs = {d["field"]: d for d in items[0]["diffs"]}
+    assert "musicbrainz_albumartistid" in diffs
+    assert diffs["musicbrainz_albumartistid"]["proposed"] == "art-mbid-111"
+    assert diffs["musicbrainz_albumartistid"]["current"] is None
+
+    # 2. Compilation album: gets the VA id
+    test_db.upsert_library_album({
+        "id": "alb-comp",
+        "artist_id": "art-1",
+        "title": "Various Compilation",
+        "album_type": "compilation",
+        "year": 2020,
+        "monitored": True,
+    })
+    comp_track_file = music_dir / "comp_track.flac"
+    _create_minimal_flac(comp_track_file)
+    write_audio_tags(comp_track_file, {"artist": "Daft Punk", "album": "Various Compilation", "title": "Comp Track"})
+    test_db.upsert_library_track({
+        "id": "trk-comp",
+        "album_id": "alb-comp",
+        "artist_id": "art-1",
+        "title": "Comp Track",
+        "track_number": 1,
+        "disc_number": 1,
+        "monitored": True,
+    })
+    test_db.upsert_library_file({
+        "id": "fl-comp",
+        "track_id": "trk-comp",
+        "file_path": str(comp_track_file),
+    })
+
+    resp_comp = client.post(
+        "/api/library/retag/preview",
+        json={"album_id": "alb-comp"},
+        headers=admin_headers,
+    )
+    assert resp_comp.status_code == 200
+    comp_items = resp_comp.json()
+    assert len(comp_items) == 1
+    comp_diffs = {d["field"]: d for d in comp_items[0]["diffs"]}
+    assert "musicbrainz_albumartistid" in comp_diffs
+    assert comp_diffs["musicbrainz_albumartistid"]["proposed"] == "89ad4ac3-39f7-470e-963a-56509c546377"
+
+
+def test_retag_library_counts_and_options(test_db: Database, tmp_path: Path):
+    """retag_library with three files (one unchanged, one needing changes, one missing on disk).
+
+    Verifies:
+    - counts retagged 1, unchanged 1, skipped 1;
+    - stops when should_stop is True;
+    - does nothing when write_audio_tags is off.
+    """
+    from trackseerr.api.routes.library.tagging import retag_library
+
+    music_dir = tmp_path / "music_batch"
+    music_dir.mkdir(parents=True, exist_ok=True)
+
+    test_db.update_media_management_settings({
+        "root_folder_path": str(music_dir),
+        "write_audio_tags": True,
+        "torrent_hardlink_tags": "copy_and_tag",
+    })
+
+    art = test_db.upsert_library_artist({
+        "id": "art-batch",
+        "name": "Batch Artist",
+        "mbid": "mbid-batch-art",
+        "monitored": True,
+    })
+    alb = test_db.upsert_library_album({
+        "id": "alb-batch",
+        "artist_id": "art-batch",
+        "title": "Batch Album",
+        "year": 2022,
+        "release_date": "2022-01-01",
+        "total_tracks": 3,
+        "monitored": True,
+    })
+
+    # File 1: Unchanged (tags on disk match catalog perfectly)
+    file1 = music_dir / "t1.flac"
+    _create_minimal_flac(file1)
+    tags1 = {
+        "artist": "Batch Artist",
+        "album": "Batch Album",
+        "title": "Track 1",
+        "date": "2022-01-01",
+        "tracknumber": 1,
+        "totaltracks": 3,
+        "discnumber": 1,
+        "totaldiscs": 1,
+        "musicbrainz_artistid": "mbid-batch-art",
+        "musicbrainz_albumartistid": "mbid-batch-art",
+    }
+    write_audio_tags(file1, tags1)
+    test_db.upsert_library_track({
+        "id": "trk-b1",
+        "album_id": "alb-batch",
+        "artist_id": "art-batch",
+        "title": "Track 1",
+        "track_number": 1,
+        "disc_number": 1,
+        "monitored": True,
+    })
+    test_db.upsert_library_file({
+        "id": "fl-b1",
+        "track_id": "trk-b1",
+        "file_path": str(file1),
+    })
+
+    # File 2: Needing changes (tags on disk differ from catalog)
+    file2 = music_dir / "t2.flac"
+    _create_minimal_flac(file2)
+    tags2 = {"artist": "Old Artist", "title": "Old Title"}
+    write_audio_tags(file2, tags2)
+    test_db.upsert_library_track({
+        "id": "trk-b2",
+        "album_id": "alb-batch",
+        "artist_id": "art-batch",
+        "title": "Track 2",
+        "track_number": 2,
+        "disc_number": 1,
+        "monitored": True,
+    })
+    test_db.upsert_library_file({
+        "id": "fl-b2",
+        "track_id": "trk-b2",
+        "file_path": str(file2),
+    })
+
+    # File 3: Missing on disk
+    file3 = music_dir / "t3_missing.flac"
+    test_db.upsert_library_track({
+        "id": "trk-b3",
+        "album_id": "alb-batch",
+        "artist_id": "art-batch",
+        "title": "Track 3",
+        "track_number": 3,
+        "disc_number": 1,
+        "monitored": True,
+    })
+    test_db.upsert_library_file({
+        "id": "fl-b3",
+        "track_id": "trk-b3",
+        "file_path": str(file3),
+    })
+
+    # 1. Run retag_library -> retagged 1, unchanged 1, skipped 1
+    counts = retag_library(test_db)
+    assert counts == {
+        "scanned": 3,
+        "retagged": 1,
+        "unchanged": 1,
+        "skipped": 1,
+        "errors": 0,
+    }
+
+    # Verify file2 has been retagged
+    meta2 = inspect_audio_file(file2)
+    assert meta2["title"] == "Track 2"
+    assert meta2["artist"] == "Batch Artist"
+
+    # 2. Stops when should_stop is True
+    stopped_counts = retag_library(test_db, should_stop=lambda: True)
+    assert stopped_counts == {
+        "scanned": 0,
+        "retagged": 0,
+        "unchanged": 0,
+        "skipped": 0,
+        "errors": 0,
+    }
+
+    # 3. Does nothing when write_audio_tags is off
+    test_db.update_media_management_settings({"write_audio_tags": False})
+    off_counts = retag_library(test_db)
+    assert off_counts == {
+        "scanned": 0,
+        "retagged": 0,
+        "unchanged": 0,
+        "skipped": 0,
+        "errors": 0,
+    }
+
+

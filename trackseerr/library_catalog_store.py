@@ -822,7 +822,7 @@ class LibraryCatalogStoreMixin:
         Keyset-paginated (no OFFSET) and driven from ``library_files`` so tracks without a file are never touched.
         ``track`` carries id, artist_id, album_id, title, track_number and disc_number.
         """
-        cols = ("id", "artist_id", "album_id", "title", "track_number", "disc_number")
+        cols = ("id", "artist_id", "album_id", "title", "track_number", "disc_number", "mb_recording_id")
         select = "SELECT f.*, " + ", ".join(f"t.{c} AS t_{c}" for c in cols)
         order = "t.artist_id, t.album_id, t.disc_number, t.track_number, f.id"
         after: Optional[tuple[Any, ...]] = None

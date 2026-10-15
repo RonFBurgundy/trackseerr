@@ -357,6 +357,7 @@ class TestMutagenMbidTagging:
             "artist": "Daft Punk",
             "album": "Homework",
             "musicbrainz_artistid": "art-flac-111",
+            "musicbrainz_albumartistid": "art-flac-album-999",
             "musicbrainz_albumid": "alb-flac-222",
             "musicbrainz_releasegroupid": "rg-flac-333",
             "musicbrainz_trackid": "trk-flac-444",
@@ -368,6 +369,7 @@ class TestMutagenMbidTagging:
 
         audio = FLAC(str(flac_file))
         assert audio["musicbrainz_artistid"] == ["art-flac-111"]
+        assert audio["musicbrainz_albumartistid"] == ["art-flac-album-999"]
         assert audio["musicbrainz_albumid"] == ["alb-flac-222"]
         assert audio["musicbrainz_releasegroupid"] == ["rg-flac-333"]
         assert audio["musicbrainz_trackid"] == ["trk-flac-444"]
@@ -375,6 +377,7 @@ class TestMutagenMbidTagging:
 
         inspected = inspect_audio_file(flac_file)
         assert inspected["musicbrainz_artistid"] == "art-flac-111"
+        assert inspected["musicbrainz_albumartistid"] == "art-flac-album-999"
         assert inspected["musicbrainz_albumid"] == "alb-flac-222"
         assert inspected["musicbrainz_releasegroupid"] == "rg-flac-333"
         assert inspected["musicbrainz_trackid"] == "trk-flac-444"
@@ -389,6 +392,7 @@ class TestMutagenMbidTagging:
             "artist": "Daft Punk",
             "album": "Random Access Memories",
             "musicbrainz_artistid": "art-mp3-111",
+            "musicbrainz_albumartistid": "art-mp3-album-999",
             "musicbrainz_albumid": "alb-mp3-222",
             "musicbrainz_releasegroupid": "rg-mp3-333",
             "musicbrainz_trackid": "trk-mp3-444",
@@ -400,6 +404,7 @@ class TestMutagenMbidTagging:
 
         audio = MP3(str(mp3_file))
         assert audio.tags.get("TXXX:MusicBrainz Artist Id").text == ["art-mp3-111"]
+        assert audio.tags.get("TXXX:MusicBrainz Album Artist Id").text == ["art-mp3-album-999"]
         assert audio.tags.get("TXXX:MusicBrainz Album Id").text == ["alb-mp3-222"]
         assert audio.tags.get("TXXX:MusicBrainz Release Group Id").text == ["rg-mp3-333"]
         assert audio.tags.get("UFID:http://musicbrainz.org").data == b"trk-mp3-444"
@@ -407,6 +412,7 @@ class TestMutagenMbidTagging:
 
         inspected = inspect_audio_file(mp3_file)
         assert inspected["musicbrainz_artistid"] == "art-mp3-111"
+        assert inspected["musicbrainz_albumartistid"] == "art-mp3-album-999"
         assert inspected["musicbrainz_albumid"] == "alb-mp3-222"
         assert inspected["musicbrainz_releasegroupid"] == "rg-mp3-333"
         assert inspected["musicbrainz_trackid"] == "trk-mp3-444"

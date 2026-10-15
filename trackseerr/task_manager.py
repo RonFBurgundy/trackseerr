@@ -284,6 +284,13 @@ TASKS: dict[str, TaskSpec] = {
             KIND_MANUAL,
             group=GROUP_LIBRARY,
         ),
+        TaskSpec(
+            "library_retag",
+            "Library Retag",
+            "Rewrites tags (titles, numbers, dates and MusicBrainz IDs) on every library file whose tags differ from the catalog. Resumable and cancellable.",
+            KIND_MANUAL,
+            group=GROUP_LIBRARY,
+        ),
     )
 }
 
@@ -377,6 +384,7 @@ WORKER_THREAD_TASKS: dict[str, str] = {
     "ManualUpdateCheckTask": "update_check",
     "ManualTrackCreditsTask": "track_credits_backfill",
     "ManualMbReleaseMatchTask": "mb_release_match",
+    "ManualLibraryRetagTask": "library_retag",
     "LidarrMigrationThread": "lidarr_migration",
 }
 

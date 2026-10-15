@@ -504,6 +504,7 @@ def build_tags_to_write(
     disc_number: Optional[str | int] = None,
     total_discs: Optional[str | int] = None,
     musicbrainz_artistid: Optional[str] = None,
+    musicbrainz_albumartistid: Optional[str] = None,
     musicbrainz_albumid: Optional[str] = None,
     musicbrainz_releasegroupid: Optional[str] = None,
     musicbrainz_trackid: Optional[str] = None,
@@ -528,6 +529,11 @@ def build_tags_to_write(
         tags["musicbrainz_artistid"] = musicbrainz_artistid
     elif meta.get("musicbrainz_artistid"):
         tags["musicbrainz_artistid"] = meta.get("musicbrainz_artistid")
+
+    if musicbrainz_albumartistid is not None:
+        tags["musicbrainz_albumartistid"] = musicbrainz_albumartistid
+    elif meta.get("musicbrainz_albumartistid"):
+        tags["musicbrainz_albumartistid"] = meta.get("musicbrainz_albumartistid")
 
     if musicbrainz_albumid is not None:
         tags["musicbrainz_albumid"] = musicbrainz_albumid
@@ -564,6 +570,7 @@ class _TagValues:
     disc: Any = None
     total_discs: Any = None
     mb_artist: Any = None
+    mb_albumartist: Any = None
     mb_album: Any = None
     mb_releasegroup: Any = None
     mb_track: Any = None
@@ -599,6 +606,8 @@ def _write_flac_tags(  # noqa: C901
         audio["totaldiscs"] = [str(vals.total_discs)]
     if vals.mb_artist is not None:
         audio["musicbrainz_artistid"] = [str(vals.mb_artist)]
+    if vals.mb_albumartist is not None:
+        audio["musicbrainz_albumartistid"] = [str(vals.mb_albumartist)]
     if vals.mb_album is not None:
         audio["musicbrainz_albumid"] = [str(vals.mb_album)]
     if vals.mb_releasegroup is not None:
@@ -645,21 +654,15 @@ def _write_mp3_tags(
     if vals.disc is not None:
         disc_val = f"{vals.disc}/{vals.total_discs}" if vals.total_discs else str(vals.disc)
         audio.tags.setall("TPOS", [TPOS(encoding=3, text=[disc_val])])
-    if vals.mb_artist is not None:
-        audio.tags.setall(
-            "TXXX:MusicBrainz Artist Id",
-            [TXXX(encoding=3, desc="MusicBrainz Artist Id", text=[str(vals.mb_artist)])],
-        )
-    if vals.mb_album is not None:
-        audio.tags.setall(
-            "TXXX:MusicBrainz Album Id",
-            [TXXX(encoding=3, desc="MusicBrainz Album Id", text=[str(vals.mb_album)])],
-        )
-    if vals.mb_releasegroup is not None:
-        audio.tags.setall(
-            "TXXX:MusicBrainz Release Group Id",
-            [TXXX(encoding=3, desc="MusicBrainz Release Group Id", text=[str(vals.mb_releasegroup)])],
-        )
+    txxx_frames = (
+        ("TXXX:MusicBrainz Artist Id", "MusicBrainz Artist Id", vals.mb_artist),
+        ("TXXX:MusicBrainz Album Artist Id", "MusicBrainz Album Artist Id", vals.mb_albumartist),
+        ("TXXX:MusicBrainz Album Id", "MusicBrainz Album Id", vals.mb_album),
+        ("TXXX:MusicBrainz Release Group Id", "MusicBrainz Release Group Id", vals.mb_releasegroup),
+    )
+    for tag_id, desc, val in txxx_frames:
+        if val is not None:
+            audio.tags.setall(tag_id, [TXXX(encoding=3, desc=desc, text=[str(val)])])
     if vals.mb_track is not None:
         audio.tags.setall(
             "UFID:http://musicbrainz.org",
@@ -717,6 +720,8 @@ def _write_mp4_tags(  # noqa: C901
 
     if vals.mb_artist is not None:
         audio["----:com.apple.iTunes:MusicBrainz Artist Id"] = [str(vals.mb_artist).encode("utf-8")]
+    if vals.mb_albumartist is not None:
+        audio["----:com.apple.iTunes:MusicBrainz Album Artist Id"] = [str(vals.mb_albumartist).encode("utf-8")]
     if vals.mb_album is not None:
         audio["----:com.apple.iTunes:MusicBrainz Album Id"] = [str(vals.mb_album).encode("utf-8")]
     if vals.mb_releasegroup is not None:
@@ -772,6 +777,8 @@ def _write_ogg_tags(  # noqa: C901
         audio["totaldiscs"] = [str(vals.total_discs)]
     if vals.mb_artist is not None:
         audio["musicbrainz_artistid"] = [str(vals.mb_artist)]
+    if vals.mb_albumartist is not None:
+        audio["musicbrainz_albumartistid"] = [str(vals.mb_albumartist)]
     if vals.mb_album is not None:
         audio["musicbrainz_albumid"] = [str(vals.mb_album)]
     if vals.mb_releasegroup is not None:
@@ -821,6 +828,7 @@ def write_audio_tags(
         t_disc = tags.get("discnumber") or tags.get("disc_number")
         t_total_discs = tags.get("totaldiscs") or tags.get("total_discs")
         mb_artist = tags.get("musicbrainz_artistid")
+        mb_albumartist = tags.get("musicbrainz_albumartistid")
         mb_album = tags.get("musicbrainz_albumid")
         mb_releasegroup = tags.get("musicbrainz_releasegroupid")
         mb_track = tags.get("musicbrainz_trackid")
@@ -837,6 +845,7 @@ def write_audio_tags(
             disc=t_disc,
             total_discs=t_total_discs,
             mb_artist=mb_artist,
+            mb_albumartist=mb_albumartist,
             mb_album=mb_album,
             mb_releasegroup=mb_releasegroup,
             mb_track=mb_track,

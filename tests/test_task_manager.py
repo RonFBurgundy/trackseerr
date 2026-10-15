@@ -1263,3 +1263,31 @@ def test_refresh_once_stops_when_should_stop_is_true(test_db: Database, monkeypa
     assert res["success"] is True
     assert res["artists_checked"] == 0
     mock_single.assert_not_called()
+
+
+def test_retag_library_endpoint_trigger_and_running(app_and_client, seeded_users, secret_key, test_db, monkeypatch):
+    _, client = app_and_client
+    admin_cookies = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
+    user_cookies = create_auth_cookies(test_db, seeded_users["alice"], secret_key)
+
+    # 403 for non-admin
+    resp = client.post("/api/library/retag/library", cookies=user_cookies)
+    assert resp.status_code == 403
+
+    import trackseerr.api.routes.system.tasks as tasks_mod
+    from fastapi import HTTPException
+
+    mock_runner = MagicMock(return_value={"success": True, "message": "Task 'library_retag' dispatched successfully"})
+    monkeypatch.setattr(tasks_mod, "trigger_library_retag", mock_runner)
+
+    resp = client.post("/api/library/retag/library", cookies=admin_cookies)
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+    mock_runner.assert_called_once()
+
+    # 409 while running
+    mock_runner.side_effect = HTTPException(status_code=409, detail="Task 'library_retag' is already running")
+    resp_conflict = client.post("/api/library/retag/library", cookies=admin_cookies)
+    assert resp_conflict.status_code == 409
+    assert "already running" in resp_conflict.json()["detail"]
+
