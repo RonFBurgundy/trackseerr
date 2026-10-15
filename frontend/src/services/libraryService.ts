@@ -369,3 +369,7 @@ export async function linkMbRelease(albumId: string | number, releaseMbid: strin
     body: { release_mbid: releaseMbid },
   });
 }
+
+export async function getAcoustidContributions(signal?: AbortSignal): Promise<Schema<'AcoustidContributionsResponse'>> {
+  return apiRequest<Schema<'AcoustidContributionsResponse'>>('/api/library/acoustid/contributions', { signal });
+}
