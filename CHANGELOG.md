@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- The rename dialog can relink all selected audio-mismatch files to their suggested tracks in one go ("Relink suggested"), reporting any it skipped because the right track already has a file.
 - The rename preview labels tracks that would move between a Various Artists compilation folder and an artist folder ("Compilation link") and leaves them unticked.
 - The rename dialog warns when Plex's "Empty trash automatically after every scan" is on, since a scan during the rename could delete play counts and ratings for moved tracks.
 - Scheduled tasks (playlist sync, Wanted sweep, RSS sync, artist refresh, art backfill, mixes, seed cleanup, recycle bin, backups, update check) can be paused and resumed from the Tasks page without changing their schedule.
@@ -52,6 +53,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Relinking, verifying or applying in the rename dialog now refreshes only the affected rows instead of rescanning the whole library.
 - With "Rename artist folders" off, renames and imports keep an artist in the folder where most of their files already are, instead of a folder rendered from a differently spelled artist name.
 - Disc folders follow the discs you actually own: a single-disc rip of a multi-disc release no longer gets a "Disc 01" folder, in renames and new imports.
 - The library-wide rename preview says how many files need a rename in total when it shows only the first 5,000.
