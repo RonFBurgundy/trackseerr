@@ -24,6 +24,7 @@ export interface UseRenamePreviewReturn {
   truncated: boolean;
   loading: boolean;
   applying: boolean;
+  refreshing: boolean;
   error: string | null;
   selectedIds: Set<string>;
   toggleSelect: (fileId: string) => void;
@@ -47,6 +48,7 @@ export interface UseRenamePreviewReturn {
   apply: () => Promise<RenameApplyResponse | null>;
   result: RenameApplyResponse | null;
   reload: () => Promise<void>;
+  refreshFiles: (fileIds: string[]) => Promise<void>;
   resetResult: () => void;
 }
 
@@ -61,6 +63,7 @@ export function useRenamePreview({
   const [truncated, setTruncated] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [applying, setApplying] = useState<boolean>(false);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activeReasons, setActiveReasons] = useState<Set<string>>(new Set());
@@ -180,15 +183,93 @@ export function useRenamePreview({
     });
   }, [filteredItems]);
 
+  const refreshFiles = useCallback(async (fileIds: string[]): Promise<void> => {
+    const uniqueIds = Array.from(new Set(fileIds.filter((id) => typeof id === 'string' && id.length > 0)));
+    if (uniqueIds.length === 0) return;
+
+    setRefreshing(true);
+    try {
+      const CHUNK_SIZE = 1000;
+      const returnedItems: RenamePreviewItem[] = [];
+
+      for (let i = 0; i < uniqueIds.length; i += CHUNK_SIZE) {
+        const chunk = uniqueIds.slice(i, i + CHUNK_SIZE);
+        const data = await getRenamePreview({
+          file_ids: chunk,
+          limit: chunk.length,
+        });
+        if (data?.items) {
+          returnedItems.push(...data.items);
+        }
+      }
+
+      const returnedMap = new Map<string, RenamePreviewItem>();
+      for (const item of returnedItems) {
+        returnedMap.set(item.file_id, item);
+      }
+      const queriedSet = new Set(uniqueIds);
+
+      setAllPreviewItems((prev) => {
+        const next: RenamePreviewItem[] = [];
+        for (const item of prev) {
+          if (queriedSet.has(item.file_id)) {
+            const updated = returnedMap.get(item.file_id);
+            if (updated) {
+              next.push(updated);
+            }
+          } else {
+            next.push(item);
+          }
+        }
+        return next;
+      });
+
+      setItems((prev) => {
+        const next: RenamePreviewItem[] = [];
+        for (const item of prev) {
+          if (queriedSet.has(item.file_id)) {
+            const updated = returnedMap.get(item.file_id);
+            if (updated && updated.needs_rename) {
+              next.push(updated);
+            }
+          } else {
+            next.push(item);
+          }
+        }
+        const removedCount = prev.length - next.length;
+        if (removedCount > 0) {
+          setTotal((prevTotal) => Math.max(0, prevTotal - removedCount));
+        }
+        const survivingIds = new Set(next.map((item) => item.file_id));
+        setSelectedIds((prevSelected) => {
+          const nextSelected = new Set<string>();
+          for (const id of prevSelected) {
+            if (survivingIds.has(id)) {
+              nextSelected.add(id);
+            }
+          }
+          return nextSelected;
+        });
+        return next;
+      });
+    } catch (err: unknown) {
+      setError(errorMessage(err, 'Failed to refresh updated files'));
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
   const apply = useCallback(async (): Promise<RenameApplyResponse | null> => {
     if (selectedIds.size === 0) return null;
     setApplying(true);
     setError(null);
     try {
+      const appliedIds = Array.from(selectedIds);
       const res = await applyRename({
-        file_ids: Array.from(selectedIds),
+        file_ids: appliedIds,
       });
       setResult(res);
+      await refreshFiles(appliedIds);
       return res;
     } catch (err: unknown) {
       const msg = errorMessage(err, 'Failed to apply batch rename');
@@ -197,7 +278,7 @@ export function useRenamePreview({
     } finally {
       setApplying(false);
     }
-  }, [selectedIds]);
+  }, [selectedIds, refreshFiles]);
 
   const resetResult = useCallback(() => {
     setResult(null);
@@ -210,6 +291,7 @@ export function useRenamePreview({
     truncated,
     loading,
     applying,
+    refreshing,
     error,
     selectedIds,
     toggleSelect,
@@ -227,6 +309,7 @@ export function useRenamePreview({
     apply,
     result,
     reload,
+    refreshFiles,
     resetResult,
   };
 }

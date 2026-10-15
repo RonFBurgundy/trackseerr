@@ -3,7 +3,9 @@ import { ApiError, apiRequest, errorMessage } from './apiClient';
 
 export type RenamePreviewItem = Schema<'RenamePreviewItem'>;
 export type RenamePreviewResponse = Schema<'RenamePreviewResponse'>;
-export type RenamePreviewRequest = Schema<'RenamePreviewRequest'>;
+export type RenamePreviewRequest = Omit<Schema<'RenamePreviewRequest'>, 'limit'> & {
+  limit?: number;
+};
 export type RenameApplyRequest = Schema<'RenameApplyRequest'>;
 export type RenameApplyResponse = Schema<'RenameApplyResponse'>;
 export type RenameVerification = Schema<'RenameVerification'>;
@@ -13,6 +15,10 @@ export type RenameRelinkResponse = Schema<'RenameRelinkResponse'>;
 export type RenameRelinkFile = Schema<'RenameRelinkFile'>;
 export type RenameRelinkConflictResponse = Schema<'RenameRelinkConflictResponse'>;
 export type RenameSafetyResponse = Schema<'RenameSafetyResponse'>;
+export type RenameRelinkBatchItem = Schema<'RenameRelinkBatchItem'>;
+export type RenameRelinkBatchRequest = Schema<'RenameRelinkBatchRequest'>;
+export type RenameRelinkBatchResponse = Schema<'RenameRelinkBatchResponse'>;
+export type RenameRelinkBatchResult = Schema<'RenameRelinkBatchResult'>;
 
 export type RelinkOutcome =
   | { kind: 'ok'; data: RenameRelinkResponse }
@@ -95,6 +101,18 @@ export async function relinkFile(request: RenameRelinkRequest): Promise<RelinkOu
     }
     return { kind: 'error', message: errorMessage(err, 'Relink failed') };
   }
+}
+
+/**
+ * Batch-relinks up to 500 files to their target tracks.
+ */
+export async function relinkRenameBatch(
+  request: RenameRelinkBatchRequest
+): Promise<RenameRelinkBatchResponse> {
+  return apiRequest<RenameRelinkBatchResponse>('/api/library/rename/relink/batch', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
 }
 
 /**

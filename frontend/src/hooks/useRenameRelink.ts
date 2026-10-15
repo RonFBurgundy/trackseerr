@@ -3,6 +3,7 @@ import {
   relinkFile,
   type RenameRelinkFile,
   type RenameRelinkRequest,
+  type RenameRelinkResponse,
 } from '@/services/renameService';
 
 const PREFER_QUALITY_KEY = 'trackseerr.rename.relinkPreferQuality';
@@ -30,7 +31,7 @@ export interface RelinkConflict {
 }
 
 export interface UseRenameRelinkOptions {
-  onRelinked: () => void;
+  onRelinked: (fileId: string, response: RenameRelinkResponse) => void;
 }
 
 export interface UseRenameRelinkReturn {
@@ -49,7 +50,7 @@ export function useRenameRelink({ onRelinked }: UseRenameRelinkOptions): UseRena
   const [conflict, setConflict] = useState<RelinkConflict | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preferQuality, setPreferQualityState] = useState<boolean>(readPreferQuality);
-  const onRelinkedRef = useRef<() => void>(onRelinked);
+  const onRelinkedRef = useRef<(fileId: string, response: RenameRelinkResponse) => void>(onRelinked);
   onRelinkedRef.current = onRelinked;
 
   const setPreferQuality = useCallback((value: boolean): void => {
@@ -64,7 +65,7 @@ export function useRenameRelink({ onRelinked }: UseRenameRelinkOptions): UseRena
       const outcome = await relinkFile(request);
       if (outcome.kind === 'ok') {
         setConflict(null);
-        onRelinkedRef.current();
+        onRelinkedRef.current(request.file_id, outcome.data);
       } else if (outcome.kind === 'conflict') {
         setConflict({
           request,
