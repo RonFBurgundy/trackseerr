@@ -6,6 +6,21 @@ from typing import Any, Optional
 MIN_PLAUSIBLE_YEAR = 1900
 
 
+def is_placeholder_date(value: Any) -> bool:
+    """Return True for placeholder / sentinel date values (< 1000, e.g. year 0, 1, '0001-01-01...')."""
+    if value is None or isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value < 1000
+    text = str(value).strip()
+    if len(text) >= 4 and text[:4].isdigit():
+        if len(text) == 4 or not text[4].isdigit():
+            return int(text[:4]) < 1000
+    elif text.isdigit():
+        return int(text) < 1000
+    return False
+
+
 def plausible_year(value: Any) -> Optional[int]:
     """Coerce an int / numeric string / 'YYYY-MM-DD' to a year, or None when implausible."""
     if value is None or isinstance(value, bool):

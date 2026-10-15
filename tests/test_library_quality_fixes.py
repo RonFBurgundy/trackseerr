@@ -791,3 +791,42 @@ def test_upsert_library_album_rejects_sentinel_dates(db):
     assert plausible["year"] == 1971
     assert plausible["release_date"] == "1971-05-18"
 
+    future = db.upsert_library_album(
+        {
+            "artist_id": artist["id"],
+            "title": "Future Album",
+            "year": 2030,
+            "release_date": "2030-06-01",
+        }
+    )
+    assert future["year"] == 2030
+    assert future["release_date"] == "2030-06-01"
+
+
+def test_is_placeholder_date():
+    from trackseerr.album_years import is_placeholder_date
+
+    assert is_placeholder_date(0) is True
+    assert is_placeholder_date(1) is True
+    assert is_placeholder_date(999) is True
+    assert is_placeholder_date("0") is True
+    assert is_placeholder_date("1") is True
+    assert is_placeholder_date("0000") is True
+    assert is_placeholder_date("0001-01-01T00:00:00Z") is True
+    assert is_placeholder_date("0000-00-00") is True
+    assert is_placeholder_date("0999-12-31") is True
+
+    assert is_placeholder_date(1000) is False
+    assert is_placeholder_date(1971) is False
+    assert is_placeholder_date(2030) is False
+    assert is_placeholder_date("1000") is False
+    assert is_placeholder_date("1971-05-18") is False
+    assert is_placeholder_date("2030-06-01") is False
+    assert is_placeholder_date("2030-06-01T00:00:00Z") is False
+    assert is_placeholder_date(None) is False
+    assert is_placeholder_date("") is False
+    assert is_placeholder_date("invalid") is False
+    assert is_placeholder_date(True) is False
+    assert is_placeholder_date(False) is False
+
+
