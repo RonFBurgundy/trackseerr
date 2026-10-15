@@ -69,6 +69,7 @@ class MigrationsMixin:
                 (80, self._migration_v80),
                 (81, self._migration_v81),
                 (82, self._migration_v82),
+                (83, self._migration_v83),
             ]
 
             applied = 0
@@ -155,6 +156,18 @@ class MigrationsMixin:
         if "replace_illegal_characters" not in {row[1] for row in cur.fetchall()}:
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN replace_illegal_characters INTEGER NOT NULL DEFAULT 1"
+            )
+
+    def _migration_v83(self, cur: sqlite3.Cursor) -> None:
+        """v83: Clear implausible album year and release date sentinels (e.g. Lidarr's year 1 / 0001-01-01)."""
+        cur.execute("UPDATE library_albums SET year = NULL WHERE year IS NOT NULL AND year < 1000")
+        cur.execute(
+            "UPDATE library_albums SET release_date = NULL WHERE release_date LIKE '0001%' OR release_date LIKE '0000%'"
+        )
+        cur.execute("PRAGMA table_info(library_tracks)")
+        if "album_date" in {row[1] for row in cur.fetchall()}:
+            cur.execute(
+                "UPDATE library_tracks SET album_date = NULL WHERE album_date LIKE '0001%' OR album_date LIKE '0000%'"
             )
 
     def _migration_v82(self, cur: sqlite3.Cursor) -> None:

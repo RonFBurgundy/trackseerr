@@ -765,3 +765,29 @@ def test_same_title_on_two_discs_scans_into_two_tracks(db, tmp_path):
     scan(db, tmp_path / "music")
     tracks = db.list_library_tracks(limit=100)
     assert sorted((t["disc_number"], t["track_number"]) for t in tracks) == [(1, 8), (2, 8)]
+
+
+def test_upsert_library_album_rejects_sentinel_dates(db):
+    artist = db.upsert_library_artist({"name": "Test Artist"})
+    sentinel = db.upsert_library_album(
+        {
+            "artist_id": artist["id"],
+            "title": "Sentinel Album",
+            "year": 1,
+            "release_date": "0001-01-01T00:00:00Z",
+        }
+    )
+    assert sentinel["year"] is None
+    assert sentinel["release_date"] is None
+
+    plausible = db.upsert_library_album(
+        {
+            "artist_id": artist["id"],
+            "title": "Plausible Album",
+            "year": 1971,
+            "release_date": "1971-05-18",
+        }
+    )
+    assert plausible["year"] == 1971
+    assert plausible["release_date"] == "1971-05-18"
+

@@ -12,6 +12,7 @@ import uuid
 from collections.abc import Iterator
 from typing import Any, Optional, Union
 
+from trackseerr.album_years import plausible_year
 from trackseerr.library_monitoring import (
     normalize_secondary_types,
 )
@@ -44,8 +45,9 @@ class LibraryCatalogStoreMixin:
         clean_title = clean_library_name(d.get("clean_title") or title)
         sort_title = library_sort_key(title)
         foreign_album_id = str(d["foreign_album_id"]) if d.get("foreign_album_id") is not None else None
-        release_date = str(d["release_date"]) if d.get("release_date") is not None else None
-        year = int(d["year"]) if d.get("year") is not None else None
+        raw_release_date = str(d["release_date"]) if d.get("release_date") is not None else None
+        release_date = raw_release_date if raw_release_date is not None and plausible_year(raw_release_date) is not None else None
+        year = plausible_year(d.get("year"))
         album_type = str(d.get("album_type") or "album")
         monitored = 1 if d.get("monitored", True) else 0
         path = str(d["path"]) if d.get("path") is not None else None
