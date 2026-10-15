@@ -143,6 +143,7 @@ _MANUAL_RUNNABLE = {
     "backup",
     "update_check",
     "track_credits_backfill",
+    "library_retag",
 }
 
 
@@ -280,6 +281,7 @@ def get_all_scheduled_tasks(
         ),
         "art_thumbnail_backfill": ("running" if "art_thumbnail_backfill" in _running_tasks else "idle", None, False),
         "track_credits_backfill": ("running" if "track_credits_backfill" in _running_tasks else "idle", None, False),
+        "library_retag": ("running" if "library_retag" in _running_tasks else "idle", None, False),
         "seed_cleanup": (
             "running" if (sc_stat.get("running") or "seed_cleanup" in _running_tasks) else "idle",
             (sc_stat.get("last_run") or {}).get("finished_at"),
@@ -600,6 +602,44 @@ def _run_manual(
     threading.Thread(target=_thread, daemon=True, name=thread_name).start()
 
 
+def trigger_library_retag(
+    db: Database,
+    plex_client: Optional[Any] = None,
+) -> dict[str, Any]:
+    with _tasks_lock:
+        if "library_retag" in _running_tasks or task_manager.is_cancellable("library_retag"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Task 'library_retag' is already running",
+            )
+        _running_tasks.add("library_retag")
+
+    try:
+        try:
+            db.record_event(
+                "task_triggered",
+                "Scheduled task 'library_retag' triggered by admin",
+                source="TaskManager",
+                severity="info",
+                details={"task_id": "library_retag"},
+            )
+        except Exception as ev_err:
+            logger.warning("Failed to record task_triggered event: %s", ev_err)
+
+        def _retag(run: RunHandle) -> None:
+            from trackseerr.api.routes.library.tagging import retag_library
+
+            counts = retag_library(db, plex_client, should_stop=run.should_stop)
+            run.message = ", ".join(f"{k}={v}" for k, v in counts.items())
+
+        _run_manual(db, "library_retag", "ManualLibraryRetagTask", _retag, cancellable=True)
+        return {"success": True, "message": "Task 'library_retag' dispatched successfully"}
+    except Exception:
+        with _tasks_lock:
+            _running_tasks.discard("library_retag")
+        raise
+
+
 @router.post("/tasks/{task_id}/run", response_model=TaskActionResult, response_model_exclude_unset=True, summary="Trigger a scheduled task manually")
 def run_scheduled_task(  # noqa: C901, PLR0915
     task_id: str,
@@ -630,6 +670,9 @@ def run_scheduled_task(  # noqa: C901, PLR0915
             status_code=status.HTTP_409_CONFLICT,
             detail="Library manager is set to TrackSeerr; there are no Lidarr requests to retry.",
         )
+
+    if task_id == "library_retag":
+        return trigger_library_retag(db, plex_client)
 
     # The three tasks below record their own run (trigger manual) inside the function that starts them.
     if task_id == "seed_cleanup":
