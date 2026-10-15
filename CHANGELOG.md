@@ -13,6 +13,8 @@ heading becomes the version and date.
 
 ### Added
 
+- "Retag entire library" (retag dialog, or the "Library Retag" task) rewrites tags in the background on every file whose tags differ from the catalog, now including the MusicBrainz album-artist ID, so Plex, Jellyfin and Picard match reliably.
+- "MusicBrainz Release Match" task (Tasks page) picks the MusicBrainz release for each album from its release group, so files can carry release and recording IDs. Resumable; runs at MusicBrainz's ~1 request per second.
 - The rename dialog can relink all selected audio-mismatch files to their suggested tracks in one go ("Relink suggested"), reporting any it skipped because the right track already has a file.
 - The rename preview labels tracks that would move between a Various Artists compilation folder and an artist folder ("Compilation link") and leaves them unticked.
 - The rename dialog warns when Plex's "Empty trash automatically after every scan" is on, since a scan during the rename could delete play counts and ratings for moved tracks.

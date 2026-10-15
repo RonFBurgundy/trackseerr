@@ -59,7 +59,7 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
    changed; ~30 bad Lidarr metadata values (Rod Stewart "Every Picture Tells a Story" dated 1884, "Miley Cyrus" →
    "MILEY", Brent Cobb 2006) — an artist refresh from MusicBrainz should correct them; 9 collisions (two files →
    same path). The preview now labels these and leaves them unticked.
-8. **P2 · Library-wide retag pass writing MusicBrainz IDs** into every file (recording, release, release group,
+8. **DONE 2026-10-15 · P2 · Library-wide retag pass writing MusicBrainz IDs** into every file (recording, release, release group,
    artist, album artist) once the data is clean — this is what makes Plex/Jellyfin/Picard match reliably.
 9. **DONE 2026-10-14 · P2 · Plex play history across folder moves.** Before the user's one-time "Rename artist folders" cleanup,
    check how Trackseerr's Plex integration handles moved files (Plex tracks by path; moves can reset play counts/
