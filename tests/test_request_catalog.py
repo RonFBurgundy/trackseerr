@@ -166,6 +166,8 @@ def _create_req(
     album: str | None = None,
     foreign_id: str | None = None,
     status: RequestStatus = RequestStatus.PROCESSING,
+    batch_id: str | None = None,
+    batch_kind: str | None = None,
 ) -> dict[str, Any]:
     return db.create_request(
         MusicRequest(
@@ -177,6 +179,8 @@ def _create_req(
             album=album,
             foreign_id=foreign_id,
             status=status,
+            batch_id=batch_id,
+            batch_kind=batch_kind,
         )
     )
 
@@ -297,6 +301,142 @@ def test_album_request_monitors_album_and_all_tracks(test_db: Database, mock_dis
     artist = test_db.get_library_artist_by_name("Daft Punk")
     ram = test_db.get_library_album_by_title(artist["id"], "Random Access Memories")
     assert ram["monitored"] == 0
+
+
+def test_discography_batch_monitors_each_requested_album(test_db: Database, mock_discovery, mock_enricher) -> None:
+    batch_id = "batch-disco-1"
+    req1 = _create_req(
+        test_db,
+        req_id="req-disco-1",
+        artist="Daft Punk",
+        title="Discovery",
+        album="Discovery",
+        foreign_id="deezer:album:302127",
+        item_type="album",
+        status=RequestStatus.PROCESSING,
+        batch_id=batch_id,
+        batch_kind="discography",
+    )
+    req2 = _create_req(
+        test_db,
+        req_id="req-disco-2",
+        artist="Daft Punk",
+        title="Random Access Memories",
+        album="Random Access Memories",
+        foreign_id="deezer:album:302128",
+        item_type="album",
+        status=RequestStatus.PROCESSING,
+        batch_id=batch_id,
+        batch_kind="discography",
+    )
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("trackseerr.request_catalog.get_shared_discovery_client", lambda db: mock_discovery)
+        mp.setattr("trackseerr.request_catalog.get_shared_enricher", lambda db: mock_enricher)
+        counts = seed_pending_request_catalog(test_db, limit=50)
+
+    assert counts.get("seeded") == 2
+
+    # Artist ingested once (one library_artists row)
+    artists = test_db.conn.execute("SELECT id, name, monitored FROM library_artists").fetchall()
+    assert len(artists) == 1
+    assert artists[0][1] == "Daft Punk"
+    assert artists[0][2] == 1
+    artist_id = artists[0][0]
+
+    # Both albums monitored with all their tracks
+    alb_discovery = test_db.get_library_album_by_title(artist_id, "Discovery")
+    assert alb_discovery is not None
+    assert alb_discovery["monitored"] == 1
+    discovery_tracks = test_db.list_library_tracks(album_id=alb_discovery["id"])
+    assert len(discovery_tracks) == 2
+    assert all(t["monitored"] == 1 for t in discovery_tracks)
+
+    alb_ram = test_db.get_library_album_by_title(artist_id, "Random Access Memories")
+    assert alb_ram is not None
+    assert alb_ram["monitored"] == 1
+    ram_tracks = test_db.list_library_tracks(album_id=alb_ram["id"])
+    assert len(ram_tracks) == 2
+    assert all(t["monitored"] == 1 for t in ram_tracks)
+
+    # missing_track_count equals the total tracks of both albums (2 + 2 = 4)
+    stats = test_db.get_library_stats()
+    assert stats["missing_track_count"] == 4
+
+    # Both request rows seeded
+    for req_id in (req1["id"], req2["id"]):
+        row = test_db.conn.execute(
+            "SELECT catalog_track_id, catalog_album_id, catalog_seeded_at, catalog_seed_status FROM music_requests WHERE id = ?",
+            (req_id,),
+        ).fetchone()
+        assert row is not None
+        assert row[3] == "seeded"
+        assert row[2] is not None
+        assert row[1] is not None
+        assert row[0] is None
+
+
+def test_discography_batch_album_outside_catalog_is_unmatched(test_db: Database, mock_discovery, mock_enricher) -> None:
+    batch_id = "batch-disco-2"
+    req_known = _create_req(
+        test_db,
+        req_id="req-known",
+        artist="Daft Punk",
+        title="Discovery",
+        album="Discovery",
+        foreign_id="deezer:album:302127",
+        item_type="album",
+        status=RequestStatus.PROCESSING,
+        batch_id=batch_id,
+        batch_kind="discography",
+    )
+    req_unknown = _create_req(
+        test_db,
+        req_id="req-unknown",
+        artist="Daft Punk",
+        title="Nonexistent Album",
+        album="Nonexistent Album",
+        foreign_id="deezer:album:99999999",
+        item_type="album",
+        status=RequestStatus.PROCESSING,
+        batch_id=batch_id,
+        batch_kind="discography",
+    )
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("trackseerr.request_catalog.get_shared_discovery_client", lambda db: mock_discovery)
+        mp.setattr("trackseerr.request_catalog.get_shared_enricher", lambda db: mock_enricher)
+        counts = seed_pending_request_catalog(test_db, limit=50)
+
+    assert counts.get("seeded") == 1
+    assert counts.get("unmatched") == 1
+
+    # Known one seeded
+    row_known = test_db.conn.execute(
+        "SELECT catalog_track_id, catalog_album_id, catalog_seeded_at, catalog_seed_status FROM music_requests WHERE id = ?",
+        (req_known["id"],),
+    ).fetchone()
+    assert row_known is not None
+    assert row_known[3] == "seeded"
+    assert row_known[1] is not None
+
+    # Unknown one unmatched
+    row_unknown = test_db.conn.execute(
+        "SELECT catalog_track_id, catalog_album_id, catalog_seeded_at, catalog_seed_status FROM music_requests WHERE id = ?",
+        (req_unknown["id"],),
+    ).fetchone()
+    assert row_unknown is not None
+    assert row_unknown[3] == "unmatched"
+    assert row_unknown[1] is None
+
+    # The artist's other albums stay unmonitored (RAM is known to discovery metadata, but wasn't requested)
+    artist = test_db.get_library_artist_by_name("Daft Punk")
+    assert artist is not None
+    ram = test_db.get_library_album_by_title(artist["id"], "Random Access Memories")
+    assert ram is not None
+    assert ram["monitored"] == 0
+    ram_tracks = test_db.list_library_tracks(album_id=ram["id"])
+    assert all(t["monitored"] == 0 for t in ram_tracks)
 
 
 def test_album_request_existing_unmonitored_artist(test_db: Database, mock_discovery, mock_enricher) -> None:
