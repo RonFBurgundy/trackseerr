@@ -3,11 +3,39 @@ import type { Schema } from '@/types/apiSchema';
 import type { QuotaTypeKind, QuotaTypeStatus, RequestItem, UserQuota } from '@/types/models';
 import type { DiscographyBatchPayload } from '@/types/account';
 
-export async function getRequests(status?: string): Promise<RequestItem[]> {
-  const url = status && status !== 'all' ? `/api/requests?status=${encodeURIComponent(status)}` : '/api/requests';
-  const res = await apiRequest<Schema<'RequestListResponse'>>(url);
-  return res.requests || [];
+export interface GetRequestsParams {
+  status?: string;
+  source?: string;
+  page?: number;
+  pageSize?: number;
 }
+
+export async function getRequests(
+  params?: GetRequestsParams,
+  signal?: AbortSignal
+): Promise<Schema<'RequestListResponse'>> {
+  const query = new URLSearchParams();
+  if (params?.status && params.status !== 'all') {
+    query.set('status', params.status);
+  }
+  if (params?.source && params.source !== 'all') {
+    query.set('source', params.source);
+  }
+  if (params?.page !== undefined) {
+    query.set('page', String(params.page));
+  }
+  if (params?.pageSize !== undefined) {
+    query.set('page_size', String(params.pageSize));
+  }
+  const qs = query.toString();
+  const url = qs ? `/api/requests?${qs}` : '/api/requests';
+  return apiRequest<Schema<'RequestListResponse'>>(url, { signal });
+}
+
+export async function getRequestSources(signal?: AbortSignal): Promise<Schema<'RequestSourcesResponse'>> {
+  return apiRequest<Schema<'RequestSourcesResponse'>>('/api/requests/sources', { signal });
+}
+
 
 export interface CreateRequestPayload {
   title: string;
