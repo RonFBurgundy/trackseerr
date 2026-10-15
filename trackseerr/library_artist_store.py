@@ -76,8 +76,10 @@ class LibraryArtistStoreMixin:
         res = dict(row)
         res.pop("search_text", None)
         res.pop("search_clean", None)
+        has_file = bool(row["has_file"]) if "has_file" in row.keys() else False
         for column, _decl in TRACK_COLUMNS:  # list-speed denormalizations, not part of the track record
             res.pop(column, None)
+        res["has_file"] = has_file
         res["monitored"] = bool(res.get("monitored", 1))
         res["track_number"] = int(res.get("track_number", 1))
         res["disc_number"] = int(res.get("disc_number", 1))

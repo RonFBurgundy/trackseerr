@@ -727,6 +727,7 @@ class LibraryCatalogStoreMixin:
         query: Optional[str] = None,
         limit: int = 200,
         offset: int = 0,
+        has_file: Optional[bool] = None,
     ) -> list[dict[str, Any]]:
         """Lists library tracks filtered by album and/or artist with pagination."""
         sql = "SELECT * FROM library_tracks WHERE 1=1"
@@ -739,6 +740,11 @@ class LibraryCatalogStoreMixin:
             params.append(str(artist_id))
         if monitored_only:
             sql += " AND monitored = 1"
+        if has_file is not None:
+            if has_file:
+                sql += " AND (has_file = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = library_tracks.id))"
+            else:
+                sql += " AND (has_file = 0 AND NOT EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = library_tracks.id))"
         if query:
             clean_q = clean_library_name(query)
             sql += " AND (clean_title LIKE ? OR title LIKE ?)"
@@ -749,6 +755,64 @@ class LibraryCatalogStoreMixin:
         with self._lock:
             cur = self.conn.execute(sql, params)
             return [self._map_library_track(row) for row in cur.fetchall()]
+
+    def iter_albums_missing_release(
+        self, batch: int = 200
+    ) -> Iterator[dict[str, Any]]:
+        """Yields albums that have files, a release group ID, and no release ID, keyset-paginated by id."""
+        after_id: Optional[str] = None
+        while True:
+            sql = (
+                "SELECT a.id, a.title, a.mb_release_group_id, a.total_tracks "
+                "FROM library_albums a "
+                "WHERE a.mb_release_group_id IS NOT NULL AND a.mb_release_group_id != '' "
+                "AND (a.mb_release_id IS NULL OR a.mb_release_id = '') "
+                "AND EXISTS (SELECT 1 FROM library_tracks t WHERE t.album_id = a.id "
+                "AND (t.has_file = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id))) "
+            )
+            params: list[Any] = []
+            if after_id is not None:
+                sql += "AND a.id > ? "
+                params.append(str(after_id))
+            sql += "ORDER BY a.id ASC LIMIT ?"
+            params.append(int(batch))
+
+            with self._lock:
+                rows = self.conn.execute(sql, params).fetchall()
+
+            if not rows:
+                return
+
+            for row in rows:
+                yield {
+                    "id": str(row["id"]),
+                    "title": str(row["title"] or ""),
+                    "mb_release_group_id": str(row["mb_release_group_id"]),
+                    "total_tracks": int(row["total_tracks"]) if row["total_tracks"] is not None else None,
+                }
+
+            after_id = str(rows[-1]["id"])
+            if len(rows) < batch:
+                return
+
+    def set_album_mb_release_id(self, album_id: str, release_id: str) -> None:
+        """Sets library_albums.mb_release_id for an album."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE library_albums SET mb_release_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (str(release_id).strip(), str(album_id)),
+            )
+            self.conn.commit()
+
+    def set_track_mb_recording_id(self, track_id: str, recording_id: str) -> None:
+        """Fills library_tracks.mb_recording_id for a track, only when currently empty."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE library_tracks SET mb_recording_id = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND (mb_recording_id IS NULL OR mb_recording_id = '')",
+                (str(recording_id).strip(), str(track_id)),
+            )
+            self.conn.commit()
 
     def iter_library_files_for_rename(
         self, batch_size: int = 1000

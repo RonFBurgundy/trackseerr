@@ -143,6 +143,7 @@ _MANUAL_RUNNABLE = {
     "backup",
     "update_check",
     "track_credits_backfill",
+    "mb_release_match",
 }
 
 
@@ -280,6 +281,7 @@ def get_all_scheduled_tasks(
         ),
         "art_thumbnail_backfill": ("running" if "art_thumbnail_backfill" in _running_tasks else "idle", None, False),
         "track_credits_backfill": ("running" if "track_credits_backfill" in _running_tasks else "idle", None, False),
+        "mb_release_match": ("running" if "mb_release_match" in _running_tasks else "idle", None, False),
         "seed_cleanup": (
             "running" if (sc_stat.get("running") or "seed_cleanup" in _running_tasks) else "idle",
             (sc_stat.get("last_run") or {}).get("finished_at"),
@@ -810,6 +812,16 @@ def run_scheduled_task(  # noqa: C901, PLR0915
             run.message = ", ".join(f"{k}={v}" for k, v in counts.items())
 
         _run_manual(db, task_id, "ManualTrackCreditsTask", _credits, cancellable=True)
+
+    elif task_id == "mb_release_match":
+        def _match(run: RunHandle) -> None:
+            from trackseerr.mb_metadata_store import get_shared_enricher
+            from trackseerr.release_matching import match_album_releases
+
+            counts = match_album_releases(db, get_shared_enricher(db), should_stop=run.should_stop)
+            run.message = ", ".join(f"{k}={v}" for k, v in counts.items())
+
+        _run_manual(db, task_id, "ManualMbReleaseMatchTask", _match, cancellable=True)
 
     return {"success": True, "message": f"Task '{task_id}' dispatched successfully"}
 

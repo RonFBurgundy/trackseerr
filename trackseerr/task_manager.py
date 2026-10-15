@@ -276,6 +276,14 @@ TASKS: dict[str, TaskSpec] = {
             KIND_MANUAL,
             group=GROUP_LIBRARY,
         ),
+        TaskSpec(
+            "mb_release_match",
+            "MusicBrainz Release Match",
+            "Picks the MusicBrainz release for each album (from its release group) so retag can write release "
+            "and recording IDs. Resumable; ~1 request/second.",
+            KIND_MANUAL,
+            group=GROUP_LIBRARY,
+        ),
     )
 }
 
@@ -368,6 +376,7 @@ WORKER_THREAD_TASKS: dict[str, str] = {
     "UpdateCheckWorkerThread": "update_check",
     "ManualUpdateCheckTask": "update_check",
     "ManualTrackCreditsTask": "track_credits_backfill",
+    "ManualMbReleaseMatchTask": "mb_release_match",
     "LidarrMigrationThread": "lidarr_migration",
 }
 
