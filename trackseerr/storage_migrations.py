@@ -45,14 +45,10 @@ class MigrationsMixin:
                 self._seed_baseline(cur)
                 cur.execute(
                     "INSERT INTO schema_migrations (version) VALUES (?)",
-                    (BASELINE_VERSION,),
+                    (SCHEMA_VERSION,),
                 )
-                logger.info(
-                    "[boot] migrations: initialized fresh database at baseline v%d (head v%d)",
-                    BASELINE_VERSION,
-                    SCHEMA_VERSION,
-                )
-                current_version = BASELINE_VERSION
+                logger.info("[boot] migrations: initialized fresh database at baseline v%d", SCHEMA_VERSION)
+                current_version = SCHEMA_VERSION
             elif 0 < current_version < BASELINE_VERSION:
                 msg = (
                     f"Database schema v{current_version} predates the v{BASELINE_VERSION} baseline; "
