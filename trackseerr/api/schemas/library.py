@@ -604,6 +604,13 @@ class RenameVerifyStatus(ApiModel):
     api_key_set: bool
 
 
+class AcoustidContributionsResponse(ApiModel):
+    """Summary of AcoustID fingerprint contribution submissions and user-key configuration."""
+
+    counts: dict[str, int] = Field(default_factory=dict)
+    has_user_key: bool
+
+
 class RenameRelinkFile(ApiModel):
     id: str
     file_path: str

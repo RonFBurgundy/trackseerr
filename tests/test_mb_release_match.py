@@ -438,6 +438,12 @@ def test_task_manager_dispatches_mb_release_match(monkeypatch, tmp_path):
 
     monkeypatch.setattr(trackseerr.release_matching, "match_album_releases", fake_match)
 
+    list_resp = client.get("/api/system/tasks", cookies={"session_token": token})
+    assert list_resp.status_code == 200
+    task_ids = {t["id"] for t in list_resp.json()}
+    assert "mb_release_match" in task_ids
+    assert "acoustid_contribute" in task_ids
+
     resp = client.post("/api/system/tasks/mb_release_match/run", cookies={"session_token": token})
     assert resp.status_code == 200
     assert resp.json()["success"] is True

@@ -143,6 +143,7 @@ _MANUAL_RUNNABLE = {
     "backup",
     "update_check",
     "track_credits_backfill",
+    "acoustid_contribute",
     "mb_release_match",
     "library_retag",
 }
@@ -282,6 +283,7 @@ def get_all_scheduled_tasks(
         ),
         "art_thumbnail_backfill": ("running" if "art_thumbnail_backfill" in _running_tasks else "idle", None, False),
         "track_credits_backfill": ("running" if "track_credits_backfill" in _running_tasks else "idle", None, False),
+        "acoustid_contribute": ("running" if "acoustid_contribute" in _running_tasks else "idle", None, False),
         "mb_release_match": ("running" if "mb_release_match" in _running_tasks else "idle", None, False),
         "library_retag": ("running" if "library_retag" in _running_tasks else "idle", None, False),
         "seed_cleanup": (
@@ -855,6 +857,15 @@ def run_scheduled_task(  # noqa: C901, PLR0915
             run.message = ", ".join(f"{k}={v}" for k, v in counts.items())
 
         _run_manual(db, task_id, "ManualTrackCreditsTask", _credits, cancellable=True)
+
+    elif task_id == "acoustid_contribute":
+        def _contribute(run: RunHandle) -> None:
+            from trackseerr.acoustid_contrib import run_acoustid_contribution
+
+            counts = run_acoustid_contribution(db, should_stop=run.should_stop)
+            run.message = ", ".join(f"{k}={v}" for k, v in counts.items())
+
+        _run_manual(db, task_id, "ManualAcoustidContributeTask", _contribute, cancellable=True)
 
     elif task_id == "mb_release_match":
         def _match(run: RunHandle) -> None:

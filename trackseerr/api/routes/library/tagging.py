@@ -29,6 +29,7 @@ from trackseerr.api.dependencies import (
 )
 from trackseerr.api.schemas.system import TaskActionResult
 from trackseerr.api.schemas.library import (
+    AcoustidContributionsResponse,
     RenameApplyResponse,
     RenamePreviewItem,
     RenamePreviewResponse,
@@ -328,6 +329,23 @@ def rename_verify_status(
     """Reports the progress of the current or last AcoustID verification run."""
     key = str(db.get_media_management_settings().get("acoustid_api_key") or "").strip()
     return {**get_verification_status(), "api_key_set": bool(key)}
+
+
+@router.get(
+    "/acoustid/contributions",
+    dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)],
+    response_model=AcoustidContributionsResponse,
+)
+def acoustid_contributions(
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Summary of AcoustID fingerprint contribution submissions and user-key configuration."""
+    user_key = str(db.get_media_management_settings().get("acoustid_user_key") or "").strip()
+    return {
+        "counts": db.count_acoustid_submissions(),
+        "has_user_key": bool(user_key),
+    }
 
 
 @router.get("/rename/safety", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=RenameSafetyResponse)

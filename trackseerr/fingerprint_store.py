@@ -6,6 +6,7 @@ size and mtime still match what was fingerprinted.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 import json
 from typing import Any, Optional
 
@@ -129,3 +130,55 @@ class FingerprintStoreMixin:
                 "SELECT status, COUNT(*) AS n FROM acoustid_submissions GROUP BY status"
             ).fetchall()
         return {r["status"]: int(r["n"]) for r in rows}
+
+    def iter_acoustid_candidates(self, batch: int = 200) -> Iterator[dict[str, Any]]:
+        """Yields file rows eligible for AcoustID submission, keyset-paginated by file id.
+
+        Eligible files have a track with a non-empty mb_recording_id and either no
+        acoustid_submissions record or an error record with checked_at older than 7 days.
+        """
+        last_id: Optional[str] = None
+        while True:
+            params: list[Any] = []
+            after_clause = ""
+            if last_id is not None:
+                after_clause = " AND f.id > ?"
+                params.append(str(last_id))
+            params.append(int(batch))
+
+            with self._lock:
+                rows = self.conn.execute(
+                    f"""
+                    SELECT
+                        f.id,
+                        f.file_path,
+                        f.codec,
+                        f.bitrate,
+                        f.track_id,
+                        t.mb_recording_id,
+                        t.duration_seconds
+                    FROM library_files f
+                    JOIN library_tracks t ON f.track_id = t.id
+                    LEFT JOIN acoustid_submissions s ON f.id = s.file_id
+                    WHERE t.mb_recording_id IS NOT NULL AND TRIM(t.mb_recording_id) != ''
+                      AND (
+                          s.file_id IS NULL
+                          OR (s.status = 'error' AND (s.checked_at IS NULL OR datetime(s.checked_at) < datetime('now', '-7 days')))
+                      )
+                      {after_clause}
+                    ORDER BY f.id ASC
+                    LIMIT ?
+                    """,
+                    params,
+                ).fetchall()
+
+            if not rows:
+                return
+
+            for row in rows:
+                yield dict(row)
+
+            last_id = rows[-1]["id"]
+            if len(rows) < batch:
+                return
+

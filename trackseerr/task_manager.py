@@ -277,6 +277,15 @@ TASKS: dict[str, TaskSpec] = {
             group=GROUP_LIBRARY,
         ),
         TaskSpec(
+            "acoustid_contribute",
+            "AcoustID Contribution",
+            "Submits fingerprints of your files that have MusicBrainz recording IDs to AcoustID, "
+            "skipping ones AcoustID already knows or that look mislabeled. Needs an AcoustID user key (Media Management). "
+            "Resumable.",
+            KIND_MANUAL,
+            group=GROUP_METADATA,
+        ),
+        TaskSpec(
             "mb_release_match",
             "MusicBrainz Release Match",
             "Picks the MusicBrainz release for each album (from its release group) so retag can write release "
@@ -383,6 +392,7 @@ WORKER_THREAD_TASKS: dict[str, str] = {
     "UpdateCheckWorkerThread": "update_check",
     "ManualUpdateCheckTask": "update_check",
     "ManualTrackCreditsTask": "track_credits_backfill",
+    "ManualAcoustidContributeTask": "acoustid_contribute",
     "ManualMbReleaseMatchTask": "mb_release_match",
     "ManualLibraryRetagTask": "library_retag",
     "LidarrMigrationThread": "lidarr_migration",
