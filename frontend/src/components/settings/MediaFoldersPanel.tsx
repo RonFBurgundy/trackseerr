@@ -1,9 +1,12 @@
-import React, { useId, useState } from 'react';
-import { Eye, EyeOff, Loader2, RefreshCw, Save, Trash2 } from 'lucide-react';
+import React, { useEffect, useId, useState } from 'react';
+import { ArrowRight, ExternalLink, Eye, EyeOff, Loader2, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { ConfirmDialog, TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, FormField, MonitorOptionSelect } from '@/components/ui';
 import type { MediaManagementSettings, SeedCompleteAction } from '@/types/models';
+import type { Schema } from '@/types/apiSchema';
 import { useDownloadClientRoots } from '@/hooks/useDownloadClientRoots';
 import { updateMediaManagementSettings } from '@/services/settingsService';
+import { getAcoustidContributions } from '@/services/libraryService';
+import { routeToHash, settingsRouteFor } from '@/hooks/useAppRoute';
 import { NamingFormatsEditor } from '@/components/naming/NamingFormatsEditor';
 import { ApiError } from '@/services/apiClient';
 import { RecycleBinSection } from './RecycleBinSection';
@@ -29,6 +32,7 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
   const scanMonitorId = useId();
   const addMonitorId = useId();
   const acoustidKeyId = useId();
+  const acoustidUserKeyId = useId();
   const roots = useDownloadClientRoots();
   const [saveWarnings, setSaveWarnings] = useState<string[]>([]);
   const [showKey, setShowKey] = useState<boolean>(false);
@@ -40,6 +44,49 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
   const keyMasked = keyDraft === null && isMaskedKey(serverKey);
   const keyValue = keyDraft ?? serverKey;
   const keyConfigured = keyValue.trim().length > 0;
+
+  const [showUserKey, setShowUserKey] = useState<boolean>(false);
+  const [confirmRemoveUserKey, setConfirmRemoveUserKey] = useState<boolean>(false);
+  const [removingUserKey, setRemovingUserKey] = useState<boolean>(false);
+  const [userKeyDraft, setUserKeyDraft] = useState<string | null>(null);
+  const serverUserKey = settings?.acoustid_user_key ?? '';
+  const userKeyMasked = userKeyDraft === null && isMaskedKey(serverUserKey);
+  const userKeyValue = userKeyDraft ?? serverUserKey;
+  const userKeyConfigured = userKeyValue.trim().length > 0;
+
+  const [contributions, setContributions] = useState<Schema<'AcoustidContributionsResponse'> | null>(null);
+  const [loadingContributions, setLoadingContributions] = useState<boolean>(false);
+
+  useEffect(() => {
+    let active = true;
+    const loadContributions = async () => {
+      setLoadingContributions(true);
+      try {
+        const res = await getAcoustidContributions();
+        if (active) {
+          setContributions(res);
+        }
+      } catch {
+        if (active) {
+          setContributions(null);
+        }
+      } finally {
+        if (active) {
+          setLoadingContributions(false);
+        }
+      }
+    };
+
+    if (userKeyConfigured) {
+      void loadContributions();
+    } else {
+      setContributions(null);
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [userKeyConfigured]);
 
   const handleRemoveKey = async (): Promise<void> => {
     setRemovingKey(true);
@@ -57,6 +104,23 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
     }
   };
 
+  const handleRemoveUserKey = async (): Promise<void> => {
+    setRemovingUserKey(true);
+    try {
+      // An explicit empty string clears the stored key server-side.
+      const updated = await updateMediaManagementSettings({ acoustid_user_key: '' });
+      onChange((prev) => (prev ? { ...prev, acoustid_user_key: updated.acoustid_user_key ?? '' } : updated));
+      setUserKeyDraft(null);
+      setConfirmRemoveUserKey(false);
+      setContributions(null);
+      onToast('AcoustID user key removed');
+    } catch {
+      onToast('Failed to remove AcoustID user key', 'error');
+    } finally {
+      setRemovingUserKey(false);
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!settings) return;
@@ -66,17 +130,24 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
       const {
         library_mode: _libraryMode,
         acoustid_api_key: _serverKey,
+        acoustid_user_key: _serverUserKey,
         effective_recycle_bin_path: _effRecycle,
         effective_quarantine_folder_path: _effQuarantine,
         warnings: _warnings,
         ...rest
       } = settings;
       // Only an edited key is sent ('' clears it); the untouched/masked server value is omitted.
-      const payload: Partial<MediaManagementSettings> =
-        keyDraft === null ? rest : { ...rest, acoustid_api_key: keyDraft };
+      let payload: Partial<MediaManagementSettings> = rest;
+      if (keyDraft !== null) {
+        payload = { ...payload, acoustid_api_key: keyDraft };
+      }
+      if (userKeyDraft !== null) {
+        payload = { ...payload, acoustid_user_key: userKeyDraft };
+      }
       const updated = await updateMediaManagementSettings(payload);
       onChange(updated);
       setKeyDraft(null);
+      setUserKeyDraft(null);
       setSaveWarnings(updated.warnings ?? []);
       onToast('Media management settings saved');
     } catch (err) {
@@ -376,6 +447,81 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
             </p>
           </div>
           <div>
+            <label htmlFor={acoustidUserKeyId} className={labelClass}>AcoustID user key</label>
+            <div className="flex items-stretch gap-2">
+              <input
+                id={acoustidUserKeyId}
+                name="acoustid_user_key"
+                type={showUserKey ? 'text' : 'password'}
+                autoComplete="off"
+                spellCheck={false}
+                value={userKeyValue}
+                onChange={(e) => setUserKeyDraft(e.target.value)}
+                onFocus={() => {
+                  // Replacing a masked key discards the whole masked value, including its visible tail.
+                  if (userKeyMasked) setUserKeyDraft('');
+                }}
+                onBlur={() => {
+                  // Left empty after focusing a masked key: keep the configured key unchanged.
+                  if (userKeyDraft === '' && isMaskedKey(serverUserKey)) setUserKeyDraft(null);
+                }}
+                placeholder="User key"
+                className={`${inputClass} font-mono`}
+              />
+              <TapeDeckButton
+                type="button"
+                size="sm"
+                aria-label={showUserKey ? 'Hide AcoustID user key' : 'Show AcoustID user key'}
+                title={showUserKey ? 'Hide key' : 'Show key'}
+                onClick={() => setShowUserKey((v) => !v)}
+                icon={showUserKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              />
+              {serverUserKey.trim().length > 0 && (
+                <TapeDeckButton
+                  type="button"
+                  size="sm"
+                  aria-label="Remove AcoustID user key"
+                  title="Remove key"
+                  onClick={() => setConfirmRemoveUserKey(true)}
+                  icon={<Trash2 className="h-4 w-4" />}
+                >
+                  Remove key
+                </TapeDeckButton>
+              )}
+            </div>
+            <p className="text-[11px] text-neutral-500 font-mono mt-1">
+              {userKeyMasked ? 'A key is configured; click the field to replace it. ' : ''}
+              Lets TrackSeerr submit fingerprints of files that have MusicBrainz IDs to AcoustID, credited to you. Get yours at{' '}
+              <a
+                href="https://acoustid.org/api-key"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[var(--accent-amber)] hover:underline inline-flex items-center gap-0.5"
+              >
+                acoustid.org/api-key
+                <ExternalLink className="h-3 w-3" aria-hidden="true" />
+              </a>
+              .
+            </p>
+            {userKeyConfigured && (
+              <div className="mt-2 text-[11px] font-mono text-neutral-400 flex flex-wrap items-center gap-2">
+                <span>
+                  {loadingContributions
+                    ? 'Loading contributions\u2026'
+                    : `Submitted ${contributions?.counts?.pending ?? 0} \u00B7 imported ${contributions?.counts?.imported ?? 0} \u00B7 skipped ${contributions?.counts?.skipped ?? 0}`}
+                </span>
+                <span className="text-neutral-600">\u00B7</span>
+                <a
+                  href={routeToHash(settingsRouteFor('system', 'tasks'))}
+                  className="text-[var(--accent-amber)] hover:underline inline-flex items-center gap-1"
+                >
+                  Run &ldquo;AcoustID Contribution&rdquo; from the Tasks page
+                  <ArrowRight className="h-3 w-3" aria-hidden="true" />
+                </a>
+              </div>
+            )}
+          </div>
+          <div>
             <div className="flex items-center justify-between gap-3">
               <span className="text-xs font-mono text-neutral-300">Identify by fingerprint when tags are ambiguous</span>
               <TactileSwitch
@@ -416,6 +562,16 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
         busy={removingKey}
       >
         <p>Fingerprint identification stops until a new key is added.</p>
+      </ConfirmDialog>
+      <ConfirmDialog
+        isOpen={confirmRemoveUserKey}
+        title="Remove AcoustID user key?"
+        confirmLabel="Remove user key"
+        onConfirm={() => void handleRemoveUserKey()}
+        onCancel={() => setConfirmRemoveUserKey(false)}
+        busy={removingUserKey}
+      >
+        <p>TrackSeerr will stop submitting fingerprints credited to your AcoustID account.</p>
       </ConfirmDialog>
     </MachinedCard>
   );
