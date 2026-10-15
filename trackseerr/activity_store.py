@@ -35,7 +35,11 @@ class ActivityStoreMixin:
     }
     HISTORY_SORT_KEYS: dict[str, str] = {"date": "h.created_at"}
     HISTORY_EVENTS: tuple[str, ...] = ("grabbed", "imported", "failed", "deleted", "blocklisted", "upgraded")
-    BLOCKLIST_SORT_KEYS: dict[str, str] = {"date": "b.created_at", "artist": "b.artist COLLATE NOCASE"}
+    BLOCKLIST_SORT_KEYS: dict[str, str] = {"date": "b.created_at", "artist": "UPPER(COALESCE(b.artist, ''))"}
+    BLOCKLIST_INDEX_SORTS: dict[str, SortDef] = {
+        "date": SortDef("b.created_at", "date"),
+        "artist": SortDef("UPPER(COALESCE(b.artist, ''))", "name"),
+    }
     # Name sorts order by the persisted sort keys (articles and accents folded) so the scrubber index can group on
     # exactly the stored key the list is ordered by; ``WANTED_INDEX_SORTS`` below describes each key's grouping.
     _WANTED_RELEASE_DATE = "COALESCE(NULLIF(al.release_date, ''), CAST(al.year AS TEXT))"
@@ -395,10 +399,12 @@ class ActivityStoreMixin:
         with self._lock:
             return build_index(self.conn, frm, params, SortDef("h.created_at", "date"), sort_dir)
 
-    def blocklist_index(self, sort_dir: str) -> tuple[int, list[dict[str, Any]]]:
-        """``(total, groups)`` for ``download_blocklist`` ordered by date, matching ``list_blocklist_page``."""
+    def blocklist_index(self, sort_dir: str, sort_key: str = "date") -> tuple[int, list[dict[str, Any]]]:
+        """``(total, groups)`` for ``download_blocklist`` matching ``list_blocklist_page``."""
+        if sort_key not in self.BLOCKLIST_INDEX_SORTS:
+            raise ValueError(f"Unknown sort key: {sort_key!r}")
         with self._lock:
-            return build_index(self.conn, "FROM download_blocklist b", [], SortDef("b.created_at", "date"), sort_dir)
+            return build_index(self.conn, "FROM download_blocklist b", [], self.BLOCKLIST_INDEX_SORTS[sort_key], sort_dir)
 
     def list_wanted_search_targets(
         self, kind: Optional[str] = None, track_ids: Optional[list[str]] = None, limit: int = 1000

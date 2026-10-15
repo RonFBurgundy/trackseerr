@@ -20,6 +20,8 @@ from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.config import Config
 from trackseerr.list_index import (
     NULL_LABEL,
+    SortDef,
+    build_index,
     format_size,
     group_label_for_key,
     group_label_for_name,
@@ -146,18 +148,41 @@ def _get(api, headers, path, **params):
     return res.json()
 
 
+_WIDTH_FOR_MODE = {"hour": 13, "day": 10, "month": 7, "year": 4}
+_MONTH_NAMES = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _date_mode(groups):
+    labels = [g["label"] for g in groups if g["label"] != NULL_LABEL]
+    if any(re.fullmatch(r"\d{2}:00", lbl) for lbl in labels):
+        return "hour"
+    if any(re.fullmatch(r"\d{1,2} [A-Z][a-z]{2}", lbl) for lbl in labels):
+        return "day"
+    if any(re.fullmatch(r"[A-Z][a-z]{2} \d{4}", lbl) for lbl in labels):
+        return "month"
+    return "year"
+
+
 def _month_mode(groups):
-    return any(re.fullmatch(r"[A-Z][a-z]{2} \d{4}", g["label"]) for g in groups)
+    return _date_mode(groups) == "month"
 
 
-def _date_label(value, month_mode):
+def _date_label(value, mode):
     if not value:
         return NULL_LABEL
-    value = str(value)
-    if month_mode and len(value) >= 7:
-        names = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
-        return f"{names[int(value[5:7]) - 1]} {value[:4]}"
-    return value[:4]
+    s = str(value)
+    width = _WIDTH_FOR_MODE.get(mode, 4)
+    key = s[:width]
+    if len(key) == 13 and key[10] in (" ", "T") and key[11:13].isdigit():
+        return f"{key[11:13]}:00"
+    if len(key) == 10 and key[4] == "-" and key[7] == "-":
+        m = int(key[5:7])
+        d = int(key[8:10])
+        return f"{d} {_MONTH_NAMES[m - 1]}"
+    if len(key) == 7 and key[4] == "-":
+        m = int(key[5:7])
+        return f"{_MONTH_NAMES[m - 1]} {key[:4]}"
+    return key[:4]
 
 
 def _assert_index(api, headers, base, params, value_of, kind, records_key: str = "records"):
@@ -174,8 +199,8 @@ def _assert_index(api, headers, base, params, value_of, kind, records_key: str =
         assert g["offset"] == running and g["count"] > 0
         running += g["count"]
     if kind == "date":
-        month = _month_mode(groups)
-        label_of = lambda rec: _date_label(value_of(rec), month)  # noqa: E731
+        mode = _date_mode(groups)
+        label_of = lambda rec: _date_label(value_of(rec), mode)  # noqa: E731
     elif kind == "name":
         label_of = lambda rec: group_label_for_name(value_of(rec))  # noqa: E731
     else:
@@ -614,6 +639,59 @@ class TestHistoryIndex:
         assert api.get("/api/activity/history/index?event=bogus", headers=admin_h).status_code == 422
 
 
+class TestDateGranularity:
+    def test_day_groups_when_span_under_two_months(self, api, test_db, admin_h):
+        for i, day in enumerate([1, 2, 3, 4, 5]):
+            test_db.conn.execute(
+                "INSERT INTO download_history (id, event, created_at) VALUES (?, ?, ?)",
+                (f"h-{i}", "grabbed", f"2026-10-{day:02d} 12:00:00"),
+            )
+        test_db.conn.commit()
+        groups = _assert_index(
+            api,
+            admin_h,
+            "/api/activity/history",
+            {"sort_dir": "asc"},
+            lambda r: r["date"] and r["date"].replace("T", " "),
+            "date",
+        )
+        assert len(groups) >= 2
+        labels = [g["label"] for g in groups]
+        assert "3 Oct" in labels
+        assert all(re.fullmatch(r"\d{1,2} [A-Z][a-z]{2}", lbl) for lbl in labels)
+
+    def test_hour_groups_within_one_day(self, api, test_db, admin_h):
+        for i, hour in enumerate(["09", "12", "15"]):
+            test_db.conn.execute(
+                "INSERT INTO download_history (id, event, created_at) VALUES (?, ?, ?)",
+                (f"h-{i}", "grabbed", f"2026-10-03 {hour}:15:00"),
+            )
+        test_db.conn.commit()
+        groups = _assert_index(
+            api,
+            admin_h,
+            "/api/activity/history",
+            {"sort_dir": "asc"},
+            lambda r: r["date"] and r["date"].replace("T", " "),
+            "date",
+        )
+        assert len(groups) == 3
+        labels = [g["label"] for g in groups]
+        assert "09:00" in labels
+        assert all(re.fullmatch(r"\d{2}:00", lbl) for lbl in labels)
+
+    def test_bare_year_values_never_go_finer_than_month(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE t (d TEXT)")
+        conn.executemany("INSERT INTO t (d) VALUES (?)", [("2001",), ("2001",), ("2002",)])
+        total, groups = build_index(conn, "FROM t", [], SortDef("d", "date"), "asc")
+        assert total == 3
+        assert groups == [
+            {"label": "2001", "offset": 0, "count": 2},
+            {"label": "2002", "offset": 2, "count": 1},
+        ]
+
+
 def _seed_requests(db, users, n=40):
     for i in range(n):
         month = 1 + i % 4
@@ -691,8 +769,26 @@ class TestBlocklistIndex:
         )
         assert all(re.fullmatch(r"[A-Z][a-z]{2} 2026", g["label"]) for g in groups)
 
-    def test_artist_sort_rejected(self, api, admin_h):
-        assert api.get("/api/activity/blocklist/index?sort_key=artist", headers=admin_h).status_code == 422
+    @pytest.mark.parametrize("sort_dir", ["asc", "desc"])
+    def test_artist_sort_offsets_match(self, api, test_db, admin_h, sort_dir):
+        artists = ["lowercase artist", "9th Wonder", None, "Radiohead", "Zola Jesus"]
+        for i, name in enumerate(artists):
+            test_db.conn.execute(
+                "INSERT INTO download_blocklist (id, source_title, artist, album, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (f"bl-art-{i}", f"Rel {i}", name, f"Alb {i}", f"2026-10-0{1 + i} 12:00:00"),
+            )
+        test_db.conn.commit()
+        groups = _assert_index(
+            api,
+            admin_h,
+            "/api/activity/blocklist",
+            {"sort_key": "artist", "sort_dir": sort_dir},
+            lambda r: r["artist"],
+            "name",
+        )
+        labels = [g["label"] for g in groups]
+        assert "#" in labels
 
 
 def _seed_searches(db, n=40):

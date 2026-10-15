@@ -15,11 +15,13 @@ import re
 import sqlite3
 import unicodedata
 from dataclasses import dataclass
+from datetime import date
 from typing import Any, Optional, Sequence
 
 NULL_LABEL = "—"  # em dash: the group for rows with no value
 QUANTILE_BUCKETS = 10
 MONTH_SPAN_LIMIT = 24  # month buckets when the dates span this many months or fewer
+DAY_SPAN_LIMIT = 62  # day buckets when the dates span fewer than this many days
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 _ARTICLE_RE = re.compile(r"^(?:THE|AN|A)\s+")
@@ -129,8 +131,28 @@ def _count_label(low: int, high: Optional[int], unit: str) -> str:
     return f"{low}\u2013{high} {unit}"
 
 
+def _parse_day(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    s = str(value)
+    if len(s) < 10:
+        return None
+    try:
+        return date.fromisoformat(s[:10])
+    except ValueError:
+        return None
+
+
 def _date_label(key: str) -> str:
-    """``2026-03`` -> ``Mar 2026``; a year (or anything unparseable) is shown as-is."""
+    """``2026-03`` -> ``Mar 2026``, ``2026-10-15`` -> ``15 Oct``, ``2026-10-15 14`` -> ``14:00``; year as-is."""
+    if len(key) == 13 and key[10] in (" ", "T") and key[11:13].isdigit():
+        d = _parse_day(key[:10])
+        if d is not None:
+            return f"{key[11:13]}:00"
+    if len(key) == 10:
+        d = _parse_day(key)
+        if d is not None:
+            return f"{d.day} {_MONTHS[d.month - 1]}"
     if len(key) == 7 and key[4] == "-" and key[:4].isdigit() and key[5:].isdigit():
         month = int(key[5:])
         if 1 <= month <= 12:
@@ -164,15 +186,28 @@ def _year_month(value: str) -> Optional[tuple[int, int]]:
     return None
 
 
+def _date_width(bounds: Optional[tuple[Any, Any]]) -> int:
+    if not bounds or bounds[0] is None or bounds[1] is None:
+        return 4
+    low, high = _year_month(str(bounds[0])), _year_month(str(bounds[1]))
+    if not low or not high or (high[0] - low[0]) * 12 + (high[1] - low[1]) > MONTH_SPAN_LIMIT:
+        return 4
+    d_low, d_high = _parse_day(bounds[0]), _parse_day(bounds[1])
+    if d_low is None or d_high is None:
+        return 7
+    day_span = (d_high - d_low).days
+    if day_span >= DAY_SPAN_LIMIT:
+        return 7
+    if day_span >= 2:
+        return 10
+    return 13
+
+
 def _date_groups(conn: sqlite3.Connection, frm: str, params: Sequence[Any], expr: str) -> list[tuple[str, int]]:
     bounds = conn.execute(
         f"SELECT MIN(d), MAX(d) FROM (SELECT NULLIF({expr}, '') AS d {frm}) WHERE d IS NOT NULL", list(params)
     ).fetchone()
-    width = 4
-    if bounds and bounds[0] is not None and bounds[1] is not None:
-        low, high = _year_month(str(bounds[0])), _year_month(str(bounds[1]))
-        if low and high and (high[0] - low[0]) * 12 + (high[1] - low[1]) <= MONTH_SPAN_LIMIT:
-            width = 7
+    width = _date_width(bounds)
     rows = conn.execute(
         f"SELECT SUBSTR(NULLIF({expr}, ''), 1, {width}) AS k, COUNT(*) AS c {frm} GROUP BY k ORDER BY k",
         list(params),
