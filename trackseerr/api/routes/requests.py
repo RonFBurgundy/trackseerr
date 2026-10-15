@@ -26,6 +26,7 @@ from trackseerr.api.schemas.requests import (
     RequestDeleted,
     RequestListResponse,
     RequestRecord,
+    RequestSourcesResponse,
     RetryResult,
 )
 from trackseerr.clients.core_client import CoreClient
@@ -72,17 +73,46 @@ class BatchCreateMusicRequestBody(BaseModel):
     artist: Optional[str] = Field(default=None, max_length=512)
 
 
+@router.get("/sources", response_model=RequestSourcesResponse)
+def get_request_sources(
+    db: Database = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """Returns request counts grouped by source."""
+    can_manage = bool(current_user.get("is_admin")) or has_permission(current_user, UserPermission.MANAGE_REQUESTS)
+    user_id = None if can_manage else current_user["id"]
+    sources = db.count_request_sources(user_id=user_id)
+    return {"sources": sources}
+
+
 @router.get("", response_model=RequestListResponse, response_model_exclude_unset=True)
 def list_requests(
     status_filter: Optional[str] = Query(default=None, alias="status"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    source: Optional[str] = Query(None, max_length=32),
     db: Database = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
     """Lists requests. Non-admins see only their own requests; admins and request managers see all."""
     can_manage = bool(current_user.get("is_admin")) or has_permission(current_user, UserPermission.MANAGE_REQUESTS)
     user_id = None if can_manage else current_user["id"]
-    requests = db.list_requests(user_id=user_id, status=status_filter)
-    return {"requests": requests, "count": len(requests)}
+    offset = (page - 1) * page_size
+    total = db.count_requests(user_id=user_id, status=status_filter, source=source)
+    rows = db.list_requests(
+        user_id=user_id,
+        status=status_filter,
+        source=source,
+        limit=page_size,
+        offset=offset,
+    )
+    return {
+        "requests": rows,
+        "count": len(rows),
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=RequestRecord, response_model_exclude_unset=True)

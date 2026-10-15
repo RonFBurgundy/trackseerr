@@ -149,6 +149,45 @@ class TestMusicRequestsStorage:
         assert len(alice_pending) == 1
         assert alice_pending[0]["id"] == "req-1"
 
+    def test_storage_list_requests_paging_and_sources(self, test_db, seeded_users):
+        alice = seeded_users["alice"]
+        req1 = MusicRequest(
+            id="st-req-1",
+            user_id=alice["id"],
+            item_type="album",
+            title="Album 1",
+            artist="Artist 1",
+            trigger=None,
+        )
+        req2 = MusicRequest(
+            id="st-req-2",
+            user_id=alice["id"],
+            item_type="album",
+            title="Album 2",
+            artist="Artist 2",
+            trigger="playlist",
+            trigger_label="Road trip",
+        )
+        test_db.create_request(req1)
+        test_db.create_request(req2)
+
+        # Count
+        assert test_db.count_requests() == 2
+        assert test_db.count_requests(source="request") == 1
+        assert test_db.count_requests(source="playlist") == 1
+
+        # Sources
+        sources = test_db.count_request_sources()
+        source_map = {s["source"]: s["count"] for s in sources}
+        assert source_map == {"request": 1, "playlist": 1}
+
+        # Paging with limit and offset
+        p1 = test_db.list_requests(limit=1, offset=0)
+        assert len(p1) == 1
+        p2 = test_db.list_requests(limit=1, offset=1)
+        assert len(p2) == 1
+        assert p1[0]["id"] != p2[0]["id"]
+
     def test_update_request_status(self, test_db, seeded_users):
         alice = seeded_users["alice"]
         req = MusicRequest(
@@ -363,6 +402,206 @@ class TestMusicRequestsAPI:
         assert admin_resp.status_code == 200
         admin_data = admin_resp.json()
         assert admin_data["count"] == 2
+
+    def test_list_requests_paginates(self, app_and_client, test_db, test_config, seeded_users):
+        _, client = app_and_client
+        admin = seeded_users["admin"]
+        admin_headers = _auth_headers(admin, test_db, test_config)
+
+        # Create 120 requests
+        for i in range(120):
+            req = MusicRequest(
+                id=f"req-page-{i:03d}",
+                user_id=admin["id"],
+                item_type="album",
+                title=f"Paged Album {i:03d}",
+                artist="Artist Paging",
+                status=RequestStatus.PENDING,
+            )
+            test_db.create_request(req)
+
+        # Page 1: 50 items
+        resp1 = client.get("/api/requests?page=1&page_size=50", headers=admin_headers)
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        assert data1["total"] == 120
+        assert data1["count"] == 50
+        assert data1["page"] == 1
+        assert data1["page_size"] == 50
+        assert len(data1["requests"]) == 50
+
+        # Page 2: 50 items
+        resp2 = client.get("/api/requests?page=2&page_size=50", headers=admin_headers)
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        assert data2["total"] == 120
+        assert data2["count"] == 50
+        assert len(data2["requests"]) == 50
+
+        # Page 3: 20 items
+        resp3 = client.get("/api/requests?page=3&page_size=50", headers=admin_headers)
+        assert resp3.status_code == 200
+        data3 = resp3.json()
+        assert data3["total"] == 120
+        assert data3["count"] == 20
+        assert data3["page"] == 3
+        assert data3["page_size"] == 50
+        assert len(data3["requests"]) == 20
+
+        # Ensure no overlap between pages and full 120 coverage
+        ids1 = {r["id"] for r in data1["requests"]}
+        ids2 = {r["id"] for r in data2["requests"]}
+        ids3 = {r["id"] for r in data3["requests"]}
+        assert ids1.isdisjoint(ids2)
+        assert ids1.isdisjoint(ids3)
+        assert ids2.isdisjoint(ids3)
+        assert len(ids1 | ids2 | ids3) == 120
+
+    def test_list_requests_returns_trigger_fields(self, app_and_client, test_db, test_config, seeded_users):
+        _, client = app_and_client
+        admin = seeded_users["admin"]
+        admin_headers = _auth_headers(admin, test_db, test_config)
+
+        req = MusicRequest(
+            id="req-trig-fields",
+            user_id=admin["id"],
+            item_type="album",
+            title="Road Song",
+            artist="Cruiser",
+            trigger="playlist",
+            trigger_label="Road trip",
+            trigger_ref="pl-road-trip",
+            status=RequestStatus.PENDING,
+        )
+        test_db.create_request(req)
+
+        resp = client.get("/api/requests", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        row = next(r for r in data["requests"] if r["id"] == "req-trig-fields")
+        assert row["trigger"] == "playlist"
+        assert row["trigger_label"] == "Road trip"
+        assert row["trigger_ref"] == "pl-road-trip"
+
+    def test_list_requests_filter_source_request_includes_null(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
+        _, client = app_and_client
+        admin = seeded_users["admin"]
+        admin_headers = _auth_headers(admin, test_db, test_config)
+
+        req_null = MusicRequest(
+            id="req-source-null",
+            user_id=admin["id"],
+            item_type="album",
+            title="Null Trigger Album",
+            artist="Artist Null",
+            trigger=None,
+            status=RequestStatus.PENDING,
+        )
+        req_request = MusicRequest(
+            id="req-source-request",
+            user_id=admin["id"],
+            item_type="album",
+            title="Manual Request Album",
+            artist="Artist Req",
+            trigger="request",
+            status=RequestStatus.PENDING,
+        )
+        req_playlist = MusicRequest(
+            id="req-source-playlist",
+            user_id=admin["id"],
+            item_type="album",
+            title="Playlist Album",
+            artist="Artist Playlist",
+            trigger="playlist",
+            status=RequestStatus.PENDING,
+        )
+        test_db.create_request(req_null)
+        test_db.create_request(req_request)
+        test_db.create_request(req_playlist)
+
+        resp = client.get("/api/requests?source=request", headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        matched_ids = {r["id"] for r in data["requests"]}
+        assert "req-source-null" in matched_ids
+        assert "req-source-request" in matched_ids
+        assert "req-source-playlist" not in matched_ids
+
+    def test_request_sources_counts(self, app_and_client, test_db, test_config, seeded_users):
+        _, client = app_and_client
+        alice = seeded_users["alice"]
+        bob = seeded_users["bob"]
+        admin = seeded_users["admin"]
+        alice_headers = _auth_headers(alice, test_db, test_config)
+        admin_headers = _auth_headers(admin, test_db, test_config)
+
+        # Alice: 1 NULL (normalized to request), 1 'request', 1 'playlist'
+        test_db.create_request(
+            MusicRequest(
+                id="alice-req-1",
+                user_id=alice["id"],
+                item_type="album",
+                title="A1",
+                artist="Art1",
+                trigger=None,
+            )
+        )
+        test_db.create_request(
+            MusicRequest(
+                id="alice-req-2",
+                user_id=alice["id"],
+                item_type="album",
+                title="A2",
+                artist="Art2",
+                trigger="request",
+            )
+        )
+        test_db.create_request(
+            MusicRequest(
+                id="alice-req-3",
+                user_id=alice["id"],
+                item_type="album",
+                title="A3",
+                artist="Art3",
+                trigger="playlist",
+            )
+        )
+
+        # Bob: 1 'playlist', 1 'mix'
+        test_db.create_request(
+            MusicRequest(
+                id="bob-req-1",
+                user_id=bob["id"],
+                item_type="album",
+                title="B1",
+                artist="Art4",
+                trigger="playlist",
+            )
+        )
+        test_db.create_request(
+            MusicRequest(
+                id="bob-req-2",
+                user_id=bob["id"],
+                item_type="album",
+                title="B2",
+                artist="Art5",
+                trigger="mix",
+            )
+        )
+
+        # Non-admin alice sees only own sources: request: 2, playlist: 1
+        alice_resp = client.get("/api/requests/sources", headers=alice_headers)
+        assert alice_resp.status_code == 200
+        alice_sources = {item["source"]: item["count"] for item in alice_resp.json()["sources"]}
+        assert alice_sources == {"request": 2, "playlist": 1}
+
+        # Admin sees all sources: request: 2, playlist: 2, mix: 1
+        admin_resp = client.get("/api/requests/sources", headers=admin_headers)
+        assert admin_resp.status_code == 200
+        admin_sources = {item["source"]: item["count"] for item in admin_resp.json()["sources"]}
+        assert admin_sources == {"request": 2, "playlist": 2, "mix": 1}
 
     def test_quota_enforcement(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client
