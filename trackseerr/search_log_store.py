@@ -5,7 +5,9 @@ Mixed into ``storage.Database`` (uses ``self._lock`` / ``self.conn``). Rows olde
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
+
+from trackseerr.list_index import SortDef, build_index
 
 _COLUMNS = (
     "id", "created_at", "source_name", "source_type", "query_artist", "query_title", "query_album", "rung",
@@ -27,14 +29,11 @@ class SearchLogStoreMixin:
             self.conn.execute("DELETE FROM search_log WHERE created_at < datetime('now', ?)", (RETENTION,))
             self.conn.commit()
 
-    def list_search_log(
+    def _search_log_where(
         self,
-        page: int,
-        page_size: int,
-        source_type: Optional[str] = None,
-        request_id: Optional[str] = None,
-    ) -> tuple[list[dict[str, Any]], int]:
-        """Newest-first page of search rows plus the total matching count."""
+        source_type: str | None = None,
+        request_id: str | None = None,
+    ) -> tuple[str, list[Any]]:
         where: list[str] = []
         params: list[Any] = []
         if source_type:
@@ -44,6 +43,17 @@ class SearchLogStoreMixin:
             where.append("request_id = ?")
             params.append(request_id)
         clause = f" WHERE {' AND '.join(where)}" if where else ""
+        return clause, params
+
+    def list_search_log(
+        self,
+        page: int,
+        page_size: int,
+        source_type: str | None = None,
+        request_id: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Newest-first page of search rows plus the total matching count."""
+        clause, params = self._search_log_where(source_type=source_type, request_id=request_id)
         with self._lock:
             total = self.conn.execute(f"SELECT COUNT(*) FROM search_log{clause}", params).fetchone()[0]
             rows = self.conn.execute(
@@ -51,3 +61,14 @@ class SearchLogStoreMixin:
                 [*params, page_size, (page - 1) * page_size],
             ).fetchall()
         return [dict(r) for r in rows], int(total)
+
+    def search_log_index(
+        self,
+        sort_dir: str = "desc",
+        source_type: str | None = None,
+        request_id: str | None = None,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """(total, groups) for search_log ordered by created_at DESC, matching list_search_log."""
+        clause, params = self._search_log_where(source_type=source_type, request_id=request_id)
+        with self._lock:
+            return build_index(self.conn, f"FROM search_log{clause}", params, SortDef("created_at", "date"), sort_dir)

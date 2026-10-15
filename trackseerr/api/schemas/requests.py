@@ -7,6 +7,7 @@
 from typing import Optional
 
 from trackseerr.api.response_models import ApiModel
+from trackseerr.api.schemas.activity import HistoryIndexResponse as RequestIndexResponse  # same shape
 
 
 class RequestRecord(ApiModel):

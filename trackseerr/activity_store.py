@@ -395,6 +395,11 @@ class ActivityStoreMixin:
         with self._lock:
             return build_index(self.conn, frm, params, SortDef("h.created_at", "date"), sort_dir)
 
+    def blocklist_index(self, sort_dir: str) -> tuple[int, list[dict[str, Any]]]:
+        """``(total, groups)`` for ``download_blocklist`` ordered by date, matching ``list_blocklist_page``."""
+        with self._lock:
+            return build_index(self.conn, "FROM download_blocklist b", [], SortDef("b.created_at", "date"), sort_dir)
+
     def list_wanted_search_targets(
         self, kind: Optional[str] = None, track_ids: Optional[list[str]] = None, limit: int = 1000
     ) -> list[dict[str, Any]]:

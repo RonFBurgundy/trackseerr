@@ -160,7 +160,7 @@ def _date_label(value, month_mode):
     return value[:4]
 
 
-def _assert_index(api, headers, base, params, value_of, kind):
+def _assert_index(api, headers, base, params, value_of, kind, records_key: str = "records"):
     """Walks every group of ``<base>/index`` against ``<base>`` paged at page_size=1."""
     idx_path = base[: -len("/paged")] + "/index" if base.endswith("/paged") else base + "/index"
     idx = _get(api, headers, idx_path, **params)
@@ -181,10 +181,10 @@ def _assert_index(api, headers, base, params, value_of, kind):
     else:
         label_of = None
     for g in groups:
-        item = _get(api, headers, base, page=g["offset"] + 1, page_size=1, **params)["records"][0]
-        last = _get(api, headers, base, page=g["offset"] + g["count"], page_size=1, **params)["records"][0]
+        item = _get(api, headers, base, page=g["offset"] + 1, page_size=1, **params)[records_key][0]
+        last = _get(api, headers, base, page=g["offset"] + g["count"], page_size=1, **params)[records_key][0]
         before = (
-            _get(api, headers, base, page=g["offset"], page_size=1, **params)["records"][0] if g["offset"] else None
+            _get(api, headers, base, page=g["offset"], page_size=1, **params)[records_key][0] if g["offset"] else None
         )
         if label_of is not None:
             assert label_of(item) == g["label"], (g, item)
@@ -612,6 +612,122 @@ class TestHistoryIndex:
         assert body == {"sort_key": "date", "sort_dir": "desc", "total": 0, "groups": []}
         assert api.get("/api/activity/history/index?sort_key=artist", headers=admin_h).status_code == 422
         assert api.get("/api/activity/history/index?event=bogus", headers=admin_h).status_code == 422
+
+
+def _seed_requests(db, users, n=40):
+    for i in range(n):
+        month = 1 + i % 4
+        created = f"2026-0{month}-{10 + i % 15} 12:00:0{i % 10}"
+        u_id = users["admin"]["id"] if i % 2 == 0 else users["alice"]["id"]
+        status_val = "pending" if i % 3 == 0 else "approved"
+        db.conn.execute(
+            """
+            INSERT INTO music_requests (
+                id, user_id, item_type, title, artist, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (f"req-{i}", u_id, "album", f"Album {i}", f"Artist {i}", status_val, created, created),
+        )
+    db.conn.commit()
+
+
+class TestRequestsIndex:
+    @pytest.mark.parametrize("status_filter", [None, "pending"])
+    def test_offsets_match_paged_list(self, api, test_db, admin_h, users, status_filter):
+        _seed_requests(test_db, users)
+        params = {"sort_dir": "desc"}
+        if status_filter:
+            params["status"] = status_filter
+        groups = _assert_index(
+            api,
+            admin_h,
+            "/api/requests",
+            params,
+            lambda r: r["created_at"],
+            "date",
+            records_key="requests",
+        )
+        assert all(re.fullmatch(r"[A-Z][a-z]{2} 2026", g["label"]) for g in groups)
+
+    def test_non_manager_sees_only_own(self, api, test_db, test_config, users):
+        _seed_requests(test_db, users)
+        alice_h = _headers(users["alice"], test_db, test_config)
+        alice_idx = _get(api, alice_h, "/api/requests/index")
+        alice_requests = _get(api, alice_h, "/api/requests")
+        assert alice_idx["total"] == alice_requests["total"]
+        assert alice_idx["total"] == sum(1 for i in range(40) if i % 2 != 0)
+
+    def test_defaults(self, api, admin_h):
+        body = _get(api, admin_h, "/api/requests/index")
+        assert body == {"sort_key": "date", "sort_dir": "desc", "total": 0, "groups": []}
+
+
+def _seed_blocklist(db, n=40):
+    for i in range(n):
+        month = 1 + i % 4
+        created = f"2026-0{month}-{10 + i % 15} 12:00:0{i % 10}"
+        db.conn.execute(
+            """
+            INSERT INTO download_blocklist (
+                id, source_title, artist, album, created_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (f"bl-{i}", f"Release {i}", f"Artist {i}", f"Album {i}", created),
+        )
+    db.conn.commit()
+
+
+class TestBlocklistIndex:
+    @pytest.mark.parametrize("sort_dir", ["asc", "desc"])
+    def test_offsets_match_paged_list(self, api, test_db, admin_h, sort_dir):
+        _seed_blocklist(test_db)
+        groups = _assert_index(
+            api,
+            admin_h,
+            "/api/activity/blocklist",
+            {"sort_key": "date", "sort_dir": sort_dir},
+            lambda r: r["date"] and r["date"].replace("T", " "),
+            "date",
+        )
+        assert all(re.fullmatch(r"[A-Z][a-z]{2} 2026", g["label"]) for g in groups)
+
+    def test_artist_sort_rejected(self, api, admin_h):
+        assert api.get("/api/activity/blocklist/index?sort_key=artist", headers=admin_h).status_code == 422
+
+
+def _seed_searches(db, n=40):
+    for i in range(n):
+        month = 1 + i % 4
+        created = f"2026-0{month}-{10 + i % 15} 12:00:0{i % 10}"
+        stype = "torznab" if i % 2 == 0 else "slskd"
+        db.conn.execute(
+            """
+            INSERT INTO search_log (
+                created_at, source_name, source_type, query_artist, query_title
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (created, f"Indexer {i}", stype, f"Artist {i}", f"Title {i}"),
+        )
+    db.conn.commit()
+
+
+class TestSearchesIndex:
+    @pytest.mark.parametrize("source_type", [None, "torznab"])
+    def test_offsets_match_paged_list(self, api, test_db, admin_h, source_type):
+        _seed_searches(test_db)
+        params = {"sort_dir": "desc"}
+        if source_type:
+            params["source_type"] = source_type
+        groups = _assert_index(
+            api,
+            admin_h,
+            "/api/activity/searches",
+            params,
+            lambda r: r["created_at"],
+            "date",
+        )
+        assert all(re.fullmatch(r"[A-Z][a-z]{2} 2026", g["label"]) for g in groups)
+
 
 
 # ------------------------------------------------------------------------------- tier, auth, lidarr mode

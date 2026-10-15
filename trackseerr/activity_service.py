@@ -243,6 +243,11 @@ def native_history_index(db: Database, sort_dir: str, event: Optional[str]) -> d
     return {"sort_key": "date", "sort_dir": sort_dir, "total": total, "groups": groups}
 
 
+def native_blocklist_index(db: Database, sort_dir: str) -> dict[str, Any]:
+    total, groups = db.blocklist_index(sort_dir)
+    return {"sort_key": "date", "sort_dir": sort_dir, "total": total, "groups": groups}
+
+
 # ------------------------------------------------------------------------------------------- native: history etc.
 
 
