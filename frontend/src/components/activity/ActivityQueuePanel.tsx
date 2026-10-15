@@ -30,6 +30,7 @@ export interface ActivityPanelProps {
 const fetchQueue = pagedFetcher(getActivityQueue);
 const getKey = (r: ActivityQueueRecord): string | number => r.id;
 const rowTone = (r: ActivityQueueRecord): RowTone => (r.stalled ? 'warning' : null);
+const NO_GROUPS = [] as const;
 
 const SeedingLine: React.FC<{ seeding: ActivitySeeding }> = ({ seeding }) => {
   const ratio =
@@ -296,7 +297,7 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
         rowTone={rowTone}
         emptyMessage="The queue is empty."
         emptyHint="Approved requests appear here while they download."
-        rail={<ScrubberRail groups={[]} positionOnly ariaLabel="Scroll queue" />}
+        rail={<ScrubberRail groups={NO_GROUPS} ariaLabel="Scroll queue" />}
       />
       <ManualImportModal
         scope={importScope}

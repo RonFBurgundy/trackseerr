@@ -6,11 +6,25 @@ import { useListViewport, type ListViewport } from './ListViewportContext';
 export interface ScrubberRailProps {
   /** Group index for the list (`useGroupIndex`). Only these groups are shown. */
   groups: readonly GroupIndexGroup[];
-  /**
-   * With no groups, render a thin draggable position thumb instead of hiding. Default false: no groups, no rail.
-   */
-  positionOnly?: boolean;
   ariaLabel?: string;
+}
+
+/**
+ * Builds synthetic percent-labelled groups for lists with no group index (e.g. Queue, or Blocklist sorted by artist).
+ * Generates up to 10 buckets (`0%`..`90%` or equal fraction intervals), each carrying its item offset and count.
+ */
+export function positionGroups(total: number): GroupIndexGroup[] {
+  if (total < 2) return [];
+  const n = Math.min(10, total);
+  const groups: GroupIndexGroup[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const offset = Math.floor((i * total) / n);
+    const nextOffset = i === n - 1 ? total : Math.floor(((i + 1) * total) / n);
+    const count = nextOffset - offset;
+    const label = n === 10 ? `${i * 10}%` : `${Math.round((i * 100) / n)}%`;
+    groups.push({ offset, count, label });
+  }
+  return groups;
 }
 
 /** Index of the group containing `index` (the last group whose offset is <= index), by binary search. */
@@ -75,11 +89,12 @@ export function layoutRailItems(count: number, heightPx: number, minLabelGapPx: 
 }
 
 /**
- * Short form of a group label for the slim overlay rail (about 18px wide): `2010` -> `'10`, `Sep 2026` -> `Sep`, and
- * anything else its first three characters. The balloon always shows the full label.
+ * Short form of a group label for the slim overlay rail (about 18px wide): `2010` -> `'10`, `14:00` -> `14`, `Sep 2026` -> `Sep`,
+ * and anything else its first three characters. The balloon always shows the full label.
  */
 export function overlayLabel(label: string): string {
   if (/^\d{4}$/.test(label)) return `'${label.slice(2)}`;
+  if (/^\d{2}:\d{2}$/.test(label)) return label.slice(0, 2);
   return label.length > 3 ? label.slice(0, 3).trimEnd() : label;
 }
 
@@ -482,123 +497,26 @@ const GroupRail: React.FC<RailProps> = ({ groups, viewport, touch, ariaLabel }) 
   );
 };
 
-const PositionRail: React.FC<{ viewport: ListViewport; ariaLabel: string }> = ({ viewport, ariaLabel }) => {
-  const { scrollElement } = viewport;
-  const trackRef = useRef<HTMLDivElement | null>(null);
-  const thumbRef = useRef<HTMLDivElement | null>(null);
-  const draggingRef = useRef<boolean>(false);
-  const [percent, setPercent] = useState<number>(0);
-
-  const layout = useCallback((): void => {
-    const track = trackRef.current;
-    const thumb = thumbRef.current;
-    if (!track || !thumb || !scrollElement) return;
-    const trackH = track.clientHeight;
-    const scrollable = Math.max(1, scrollElement.scrollHeight - scrollElement.clientHeight);
-    const thumbH = clamp((scrollElement.clientHeight / scrollElement.scrollHeight) * trackH, 28, trackH);
-    const f = clamp(scrollElement.scrollTop / scrollable, 0, 1);
-    thumb.style.height = `${thumbH}px`;
-    thumb.style.transform = `translateY(${(f * (trackH - thumbH)).toFixed(1)}px)`;
-    setPercent((prev) => (Math.round(f * 100) === prev ? prev : Math.round(f * 100)));
-  }, [scrollElement]);
-
-  useEffect(() => {
-    if (!scrollElement) return undefined;
-    let raf: number | null = null;
-    const onScroll = (): void => {
-      if (raf === null) {
-        raf = requestAnimationFrame(() => {
-          raf = null;
-          layout();
-        });
-      }
-    };
-    layout();
-    scrollElement.addEventListener('scroll', onScroll, { passive: true });
-    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onScroll) : null;
-    observer?.observe(scrollElement);
-    return () => {
-      scrollElement.removeEventListener('scroll', onScroll);
-      observer?.disconnect();
-      if (raf !== null) cancelAnimationFrame(raf);
-    };
-  }, [scrollElement, layout, viewport.total]);
-
-  const scrubTo = (clientY: number): void => {
-    const track = trackRef.current;
-    if (!track || !scrollElement) return;
-    const rect = track.getBoundingClientRect();
-    const f = clamp((clientY - rect.top) / Math.max(1, rect.height), 0, 1);
-    scrollElement.scrollTop = f * (scrollElement.scrollHeight - scrollElement.clientHeight);
-  };
-
-  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (!scrollElement) return;
-    const page = scrollElement.clientHeight * 0.9;
-    if (e.key === 'ArrowUp') scrollElement.scrollTop -= 48;
-    else if (e.key === 'ArrowDown') scrollElement.scrollTop += 48;
-    else if (e.key === 'PageUp') scrollElement.scrollTop -= page;
-    else if (e.key === 'PageDown') scrollElement.scrollTop += page;
-    else if (e.key === 'Home') scrollElement.scrollTop = 0;
-    else if (e.key === 'End') scrollElement.scrollTop = scrollElement.scrollHeight;
-    else return;
-    e.preventDefault();
-  };
-
-  return (
-    <div
-      role="slider"
-      tabIndex={0}
-      aria-label={ariaLabel}
-      aria-orientation="vertical"
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={percent}
-      aria-valuetext={`${percent} percent`}
-      onKeyDown={onKeyDown}
-      onPointerDown={(e) => {
-        e.currentTarget.setPointerCapture(e.pointerId);
-        draggingRef.current = true;
-        scrubTo(e.clientY);
-      }}
-      onPointerMove={(e) => {
-        if (draggingRef.current) scrubTo(e.clientY);
-      }}
-      onPointerUp={(e) => {
-        draggingRef.current = false;
-        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-      }}
-      onPointerCancel={() => {
-        draggingRef.current = false;
-      }}
-      className="h-full touch-none select-none cursor-pointer rounded-[4px] border border-[#1f1f1f] bg-[#0d0d0d] py-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e5a00d]"
-      style={{
-        width: viewport.overlayRail ? OVERLAY_WIDTH_PX : 14,
-        boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.8), 0 1px 0 rgba(255,255,255,0.04)',
-      }}
-    >
-      <div ref={trackRef} className="relative h-full">
-        <div
-          ref={thumbRef}
-          className="absolute inset-x-0.5 rounded-[2px] border border-[#383838] bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c]"
-          style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08)' }}
-        />
-      </div>
-    </div>
-  );
-};
-
 /**
  * Right-side scrubber for virtualized lists. Mount it in the `rail` slot of FlatList / VirtualGrid; it reads the
- * list's viewport from context. It hides when the content fits or there are fewer than two groups, and while shown it
- * hides the list's native scrollbar (wheel, keyboard and touch scrolling keep working).
+ * list's viewport from context. When a list has no group index or fewer than two groups (e.g. Queue or Blocklist),
+ * synthetic percent-labelled groups (`positionGroups`) provide a fallback scrubber. It hides when the content fits
+ * or there are fewer than two effective groups, and while shown it hides the list's native scrollbar (wheel, keyboard
+ * and touch scrolling keep working).
  */
-export const ScrubberRail: React.FC<ScrubberRailProps> = ({ groups, positionOnly = false, ariaLabel = 'Jump to group' }) => {
+export const ScrubberRail: React.FC<ScrubberRailProps> = ({ groups, ariaLabel = 'Jump to group' }) => {
   const viewport = useListViewport();
   const touch = useMediaQuery('(pointer: coarse)');
-  const groupMode = groups.length >= 2;
-  const visible = viewport !== null && viewport.scrollElement !== null && !viewport.fits && (groupMode || positionOnly);
+  const effective = useMemo(
+    () => (groups.length >= 2 ? groups : positionGroups(viewport?.total ?? 0)),
+    [groups, viewport?.total],
+  );
   const scrollElement = viewport?.scrollElement ?? null;
+  const visible =
+    viewport !== null &&
+    scrollElement !== null &&
+    !viewport.fits &&
+    effective.length >= 2;
 
   const overlay = viewport?.overlayRail ?? false;
   useEffect(() => {
@@ -616,9 +534,5 @@ export const ScrubberRail: React.FC<ScrubberRailProps> = ({ groups, positionOnly
   }, [scrollElement, visible, overlay]);
 
   if (!viewport || !visible) return null;
-  return groupMode ? (
-    <GroupRail groups={groups} viewport={viewport} touch={touch} ariaLabel={ariaLabel} />
-  ) : (
-    <PositionRail viewport={viewport} ariaLabel={ariaLabel} />
-  );
+  return <GroupRail groups={effective} viewport={viewport} touch={touch} ariaLabel={ariaLabel} />;
 };
