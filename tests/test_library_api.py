@@ -1277,6 +1277,40 @@ def test_rename_preview_not_truncated_under_limit(
     assert data["truncated"] is False
 
 
+def test_rename_preview_targeted_file_ids(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+
+    # 1 file needing a rename (wrong location)
+    fid_wrong = _seed_rename_track(test_db, 1, "Artist1", root / "Wrong" / "1.flac")
+    # 1 file already in place (needs_rename is False)
+    fid_correct = _seed_rename_track(test_db, 2, "Artist2", root / "Artist2" / "Closer (2000)" / "02 - Song 2.flac")
+
+    # Request with both existing file IDs plus an unknown ID
+    resp = client.post(
+        "/api/library/rename/preview",
+        json={"file_ids": [fid_wrong, fid_correct, "unknown-file-id"]},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 2
+    assert data["truncated"] is False
+    assert len(data["items"]) == 2
+
+    by_id = {r["file_id"]: r for r in data["items"]}
+    assert fid_wrong in by_id
+    assert fid_correct in by_id
+    assert "unknown-file-id" not in by_id
+
+    assert by_id[fid_wrong]["needs_rename"] is True
+    assert by_id[fid_correct]["needs_rename"] is False
+
+
 def _apply_rename(client, headers, file_id: str):
     resp = client.post("/api/library/rename/apply", json={"file_ids": [file_id]}, headers=headers)
     assert resp.status_code == 200

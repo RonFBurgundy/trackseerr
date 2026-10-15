@@ -129,6 +129,7 @@ class RenamePreviewRequest(BaseModel):
     artist_id: Optional[str] = None
     album_id: Optional[str] = None
     limit: int = 200
+    file_ids: Optional[list[str]] = Field(default=None, max_length=1000)
 
 class RenameApplyRequest(BaseModel):
     file_ids: list[str] = Field(default_factory=list)
@@ -140,6 +141,14 @@ class RenameRelinkRequest(BaseModel):
     file_id: str
     target_track_id: str
     conflict: Optional[Literal["keep_incoming", "keep_existing", "prefer_quality"]] = None
+
+class RenameRelinkBatchItem(BaseModel):
+    file_id: str
+    target_track_id: str
+
+class RenameRelinkBatchRequest(BaseModel):
+    items: list[RenameRelinkBatchItem] = Field(max_length=500)
+    conflict: Optional[Literal["skip", "keep_incoming", "keep_existing", "prefer_quality"]] = "skip"
 
 class RetagPreviewRequest(BaseModel):
     artist_id: Optional[str] = None

@@ -127,3 +127,51 @@ def relink_file(db: Any, file_id: str, target_track_id: str, conflict: Optional[
     logger.info("Relinked file %s from track %s to %s", file_id, old["id"], target["id"])
     _record_relink(db, file_row, old, target)
     return result
+
+
+def relink_files(
+    db: Any,
+    items: list[Any],
+    conflict: Optional[str] = "skip",
+) -> dict[str, Any]:
+    """Relinks multiple files in sequence.
+
+    When ``conflict == 'skip'``, items that encounter a ``RelinkConflict`` are caught and marked as ``conflict_skipped``.
+    Otherwise, ``conflict`` is passed through to ``relink_file``.
+    """
+    results: list[dict[str, Any]] = []
+    relinked_count = 0
+    conflicts_skipped_count = 0
+    errors_count = 0
+
+    per_file_conflict = None if conflict == "skip" else conflict
+
+    for item in items:
+        file_id = item.file_id if hasattr(item, "file_id") else item["file_id"]
+        target_track_id = item.target_track_id if hasattr(item, "target_track_id") else item["target_track_id"]
+        res_entry: dict[str, Any] = {"file_id": file_id}
+        try:
+            res = relink_file(db, file_id, target_track_id, per_file_conflict)
+            res_entry["status"] = res.get("action", "relinked")
+            res_entry["kept_file_id"] = res.get("kept_file_id")
+            res_entry["recycled_file_id"] = res.get("recycled_file_id")
+            res_entry["old_track_id"] = res.get("old_track_id")
+            res_entry["target_track_id"] = res.get("target_track_id")
+            relinked_count += 1
+        except RelinkConflict:
+            res_entry["status"] = "conflict_skipped"
+            conflicts_skipped_count += 1
+        except (LookupError, ValueError) as exc:
+            res_entry["status"] = "error"
+            res_entry["message"] = str(exc)
+            errors_count += 1
+
+        results.append(res_entry)
+
+    return {
+        "results": results,
+        "relinked": relinked_count,
+        "conflicts_skipped": conflicts_skipped_count,
+        "errors": errors_count,
+    }
+
