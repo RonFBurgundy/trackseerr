@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { RequestItem, UserQuota } from '@/types/models';
 import type { Schema } from '@/types/apiSchema';
 import {
   getRequests,
+  getRequestSources,
   getUserQuota,
   createRequest as apiCreateRequest,
   approveRequest as apiApproveRequest,
@@ -10,6 +11,7 @@ import {
   deleteRequest as apiDeleteRequest,
   retryRequest as apiRetryRequest,
 } from '@/services/requestService';
+import { useVirtualPagedList, type FetchPage, type ListKey, type VirtualPagedList } from './useVirtualPagedList';
 
 export type RequestFilter = 'all' | 'pending' | 'approved' | 'fulfilled' | 'rejected';
 
@@ -26,12 +28,17 @@ export interface RequestableItem {
 }
 
 export interface UseRequestsReturn {
+  list: VirtualPagedList<RequestItem>;
   requests: RequestItem[];
   quota: UserQuota | null;
   filter: RequestFilter;
+  source: string;
+  sources: Schema<'RequestSourceCount'>[];
   isLoading: boolean;
   error: string | null;
+  total: number;
   setFilter: (filter: RequestFilter) => void;
+  setSource: (source: string) => void;
   submitRequest: (item: RequestableItem) => Promise<void>;
   approve: (id: string) => Promise<void>;
   reject: (id: string, reason?: string) => Promise<void>;
@@ -40,40 +47,87 @@ export interface UseRequestsReturn {
   refresh: () => Promise<void>;
 }
 
+const getKey = (item: RequestItem): ListKey => item.id;
+
 /** `enabled` must stay false until the user is signed in: every request route needs a session. */
 export function useRequests(enabled: boolean = true): UseRequestsReturn {
-  const [requests, setRequests] = useState<RequestItem[]>([]);
   const [quota, setQuota] = useState<UserQuota | null>(null);
   const [filter, setFilter] = useState<RequestFilter>('all');
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [source, setSource] = useState<string>('all');
+  const [sources, setSources] = useState<Schema<'RequestSourceCount'>[]>([]);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const fetchPage = useCallback<FetchPage<RequestItem>>(
+    async (req) => {
+      const res = await getRequests(
+        {
+          status: req.filters.status as string | undefined,
+          source: req.filters.source as string | undefined,
+          page: req.page,
+          pageSize: req.pageSize,
+        },
+        req.signal
+      );
+      return {
+        items: res.requests || [],
+        total: res.total ?? res.count ?? 0,
+      };
+    },
+    []
+  );
+
+  const filters = useMemo<Record<string, string>>(() => {
+    const f: Record<string, string> = {};
+    if (filter && filter !== 'all') f.status = filter;
+    if (source && source !== 'all') f.source = source;
+    return f;
+  }, [filter, source]);
+
+  const list = useVirtualPagedList<RequestItem>(fetchPage, {
+    sortKey: 'created_at',
+    sortDir: 'desc',
+    filters,
+    getKey,
+    enabled,
+  });
+
+  const loadSources = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const res = await getRequestSources(signal);
+      setSources(res.sources || []);
+    } catch {
+      // Background count fetch failure shouldn't crash the list
+    }
+  }, []);
+
+  const loadQuota = useCallback(async () => {
+    try {
+      const quotaData = await getUserQuota();
+      if (quotaData) setQuota(quotaData);
+    } catch {
+      // Ignore quota fetch error for unauthenticated/exempt
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const [reqData, quotaData] = await Promise.all([
-        getRequests(filter),
-        getUserQuota().catch(() => null),
-      ]);
-      setRequests(reqData);
-      if (quotaData) setQuota(quotaData);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to load requests';
-      setError(msg);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [filter]);
+    setActionError(null);
+    const pList = list.total === 0 ? (list.reload(), Promise.resolve()) : list.refresh();
+    await Promise.all([
+      pList,
+      loadSources(),
+      loadQuota(),
+    ]);
+  }, [list, loadSources, loadQuota]);
 
   useEffect(() => {
     if (!enabled) return;
-    void refresh();
-  }, [enabled, refresh]);
+    void loadSources();
+    void loadQuota();
+  }, [enabled, loadSources, loadQuota]);
 
   const submitRequest = useCallback(
     async (item: RequestableItem) => {
-      setError(null);
+      setActionError(null);
       try {
         await apiCreateRequest({
           title: item.title,
@@ -88,7 +142,7 @@ export function useRequests(enabled: boolean = true): UseRequestsReturn {
         await refresh();
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Failed to submit request';
-        setError(msg);
+        setActionError(msg);
         throw err;
       }
     },
@@ -97,68 +151,84 @@ export function useRequests(enabled: boolean = true): UseRequestsReturn {
 
   const approve = useCallback(
     async (id: string) => {
-      setError(null);
+      setActionError(null);
       try {
         await apiApproveRequest(id);
-        await refresh();
+        if (filter === 'pending') {
+          list.removeItems(new Set([id]));
+        } else {
+          await list.refresh();
+        }
+        await Promise.all([loadSources(), loadQuota()]);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Failed to approve request';
-        setError(msg);
+        setActionError(msg);
         throw err;
       }
     },
-    [refresh]
+    [filter, list, loadSources, loadQuota]
   );
 
   const reject = useCallback(
     async (id: string, reason?: string) => {
-      setError(null);
+      setActionError(null);
       try {
         await apiRejectRequest(id, reason);
-        await refresh();
+        if (filter === 'pending') {
+          list.removeItems(new Set([id]));
+        } else {
+          await list.refresh();
+        }
+        await Promise.all([loadSources(), loadQuota()]);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Failed to reject request';
-        setError(msg);
+        setActionError(msg);
         throw err;
       }
     },
-    [refresh]
+    [filter, list, loadSources, loadQuota]
   );
 
   const remove = useCallback(
     async (id: string) => {
-      setError(null);
+      setActionError(null);
       try {
         await apiDeleteRequest(id);
-        await refresh();
+        list.removeItems(new Set([id]));
+        await Promise.all([loadSources(), loadQuota()]);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Failed to delete request';
-        setError(msg);
+        setActionError(msg);
         throw err;
       }
     },
-    [refresh]
+    [list, loadSources, loadQuota]
   );
 
   const retry = useCallback(
     async (id: string) => {
-      setError(null);
+      setActionError(null);
       try {
         return await apiRetryRequest(id);
       } finally {
-        await refresh();
+        await Promise.all([list.refresh(), loadSources()]);
       }
     },
-    [refresh]
+    [list, loadSources]
   );
 
   return {
-    requests,
+    list,
+    requests: list.getLoadedItems(),
     quota,
     filter,
-    isLoading,
-    error,
+    source,
+    sources,
+    isLoading: list.loading,
+    error: actionError || list.error,
+    total: list.total,
     setFilter,
+    setSource,
     submitRequest,
     approve,
     reject,
