@@ -79,10 +79,15 @@ export const TaskRow: React.FC<TaskRowProps> = React.memo(
           >
             <div className="flex items-center justify-between gap-2 w-full sm:w-auto min-w-0">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="font-mono font-bold text-sm text-white truncate group-hover:text-[#e5a00d] transition-colors duration-75">
+                <span
+                  title={task.name}
+                  className="font-mono font-bold text-sm text-white break-words line-clamp-2 sm:line-clamp-none sm:truncate group-hover:text-[#e5a00d] transition-colors duration-75"
+                >
                   {task.name}
                 </span>
-                <TaskStatusBadge status={isRunning ? 'running' : task.status === 'idle' ? 'idle' : task.status} />
+                {!isRunning && (
+                  <TaskStatusBadge status={task.status === 'idle' ? 'idle' : task.status} />
+                )}
               </div>
               <ChevronDown
                 className={`h-4 w-4 text-neutral-400 sm:hidden transition-transform duration-150 shrink-0 ${
@@ -160,6 +165,7 @@ export const TaskRow: React.FC<TaskRowProps> = React.memo(
                 disabled={isRunning || isTriggering || isCancelling}
                 onClick={() => onRun(task.id)}
                 aria-label={`Run ${task.name} now`}
+                collapseLabel
                 icon={isTriggering ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
               >
                 Run now
@@ -172,6 +178,7 @@ export const TaskRow: React.FC<TaskRowProps> = React.memo(
                 disabled={isCancelling}
                 onClick={() => onCancel(task.id)}
                 aria-label={`Cancel ${task.name}`}
+                collapseLabel
                 icon={isCancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
               >
                 Cancel
