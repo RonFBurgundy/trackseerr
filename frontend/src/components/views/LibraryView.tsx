@@ -31,6 +31,7 @@ import {
   LibraryStatsBar,
   type LibrarySelectAction,
   LidarrMigrationBanner,
+  MbUnlinkedModal,
   RenameModal,
   type RenameScope,
   RetagModal,
@@ -138,6 +139,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const [retagScope, setRetagScope] = useState<RetagScope | null>(null);
   const [isAddArtistOpen, setIsAddArtistOpen] = useState<boolean>(false);
   const [addArtistInitialQuery, setAddArtistInitialQuery] = useState<string | undefined>(undefined);
+  const [isMbUnlinkedOpen, setIsMbUnlinkedOpen] = useState<boolean>(false);
   /** Data source reported by the paged artists/albums responses; used until the manager settings load. */
   const [listMode, setListMode] = useState<string | null>(null);
 
@@ -320,6 +322,17 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           onAdded={handleArtistAdded}
         />
       )}
+      {isAdmin && (
+        <MbUnlinkedModal
+          isOpen={isMbUnlinkedOpen}
+          onClose={() => setIsMbUnlinkedOpen(false)}
+          onOpenAlbum={(albumId) => {
+            setIsMbUnlinkedOpen(false);
+            onNavigate({ tab: 'library', sub: 'albums', detail: { albumId } });
+          }}
+          onToast={showToast}
+        />
+      )}
     </>
   );
 
@@ -411,6 +424,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       label: 'Add artist…',
       icon: <UserPlus className="h-3.5 w-3.5" />,
       onSelect: () => handleOpenAddArtist(),
+    });
+    toolItems.push({
+      key: 'musicbrainz-unlinked',
+      label: 'Not on MusicBrainz…',
+      icon: <Disc className="h-3.5 w-3.5" />,
+      disabled: lidarrMode,
+      onSelect: () => setIsMbUnlinkedOpen(true),
     });
   }
   if (pagedTab && isAdmin && !lidarrMode) {

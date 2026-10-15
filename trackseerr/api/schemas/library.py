@@ -63,6 +63,43 @@ class LibraryTrackRecord(ApiModel):
     source: Optional[str] = None  # "lidarr" in Lidarr mode
 
 
+class MbUnlinkedAlbum(ApiModel):
+    """An album lacking a MusicBrainz release link."""
+
+    id: str
+    title: str
+    artist_name: Optional[str] = None
+    artist_id: Optional[str] = None
+    year: Optional[int] = None
+    release_date: Optional[str] = None
+    track_count: int = 0
+    file_count: int = 0
+    mb_release_group_id: Optional[str] = None
+    foreign_album_id: Optional[str] = None
+
+
+class MbUnlinkedPage(ApiModel):
+    """Paginated list of unlinked MusicBrainz albums."""
+
+    items: list[MbUnlinkedAlbum]
+    total: int
+    page: int
+    page_size: int
+
+
+class MbReleaseSeed(ApiModel):
+    """Pre-filled MusicBrainz Add-Release seeding payload."""
+
+    action_url: str
+    fields: list[list[str]]
+
+
+class MbLinkRequest(ApiModel):
+    """Request payload to link an album to a MusicBrainz release."""
+
+    release_mbid: str
+
+
 class LibraryAlbumRecord(ApiModel):
     """A library album (native row plus enrichments, or Lidarr's mapped album)."""
 

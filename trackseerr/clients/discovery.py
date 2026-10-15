@@ -1094,6 +1094,8 @@ class DiscoveryClient:
                 "cover_url": cover,
                 "release_date": rel_date,
                 "label": label,
+                "upc": data.get("upc") or None,
+                "record_type": data.get("record_type") or None,
                 "genres": genres,
                 "duration_seconds": duration_sec,
                 "track_count": nb_tracks,

@@ -820,6 +820,56 @@ class MbidEnricherClient:
                 clean_mbid,
                 exc,
             )
+    def lookup_release_group_for_release(self, release_id: str) -> Optional[str]:
+        """Looks up the release-group MBID for a release, returning None if not found or not yet synced."""
+        if not release_id or not str(release_id).strip():
+            return None
+
+        clean_id = str(release_id).strip()
+        cache_key = f"release_rg_lookup:{clean_id.lower()}"
+        hit, cached_data = self._lookup(cache_key)
+        if hit:
+            return cached_data
+
+        try:
+            url = f"{self.base_url}/ws/2/release/{clean_id}"
+            params = {"fmt": "json", "inc": "release-groups"}
+            resp = self._request(url, params=params)
+            if resp is None or resp.status_code != 200:
+                if resp is not None and resp.status_code == 404:
+                    logger.info("Release %s not found on mirror (may not be synced yet)", clean_id)
+                    self._remember(cache_key, "release_rg_lookup", None)
+                else:
+                    logger.info("Release %s lookup returned status %s", clean_id, resp.status_code if resp else "None")
+                    self._set_cached(cache_key, None)
+                return None
+
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                logger.info(
+                    "MbidEnricherClient: lookup_release_group_for_release JSON decode failed for %s: %s",
+                    clean_id,
+                    exc,
+                )
+                self._set_cached(cache_key, None)
+                return None
+
+            if not isinstance(data, dict):
+                self._set_cached(cache_key, None)
+                return None
+
+            rg = data.get("release-group")
+            if isinstance(rg, dict) and rg.get("id"):
+                rg_id = str(rg["id"]).strip()
+                self._remember(cache_key, "release_rg_lookup", rg_id)
+                return rg_id
+
+            logger.info("Release %s has no release-group in response", clean_id)
+            self._set_cached(cache_key, None)
+            return None
+        except Exception as exc:
+            logger.info("MbidEnricherClient: lookup_release_group_for_release failed for '%s': %s", clean_id, exc)
             self._set_cached(cache_key, None)
             return None
 
