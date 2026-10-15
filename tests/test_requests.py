@@ -979,3 +979,57 @@ class TestMusicRequestsAPI:
         assert res_list.status_code == 200
         # 99901 has no requests of their own, so count is 0
         assert res_list.json()["count"] == 0
+
+    def test_native_approve_seeds_catalog(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
+        _, client = app_and_client
+        admin = seeded_users["admin"]
+        admin_headers = _auth_headers(admin, test_db, test_config)
+
+        res = client.post(
+            "/api/requests",
+            json={"item_type": "track", "title": "Test Track", "artist": "Test Artist"},
+            headers=admin_headers,
+        )
+        req_id = res.json()["id"]
+
+        with (
+            patch("trackseerr.api.routes.requests.native_is_configured", return_value=True),
+            patch("trackseerr.api.routes.requests.seed_request_catalog") as mock_seed,
+            patch("trackseerr.api.routes.requests.acquisition_coordinator.search_and_grab") as mock_grab,
+        ):
+            mock_grab.return_value = {"success": True}
+            appr = client.post(f"/api/requests/{req_id}/approve", headers=admin_headers)
+            assert appr.status_code == 200
+            assert mock_seed.called
+            args, _ = mock_seed.call_args
+            assert args[0] is test_db
+            assert args[1]["id"] == req_id
+            assert args[1]["title"] == "Test Track"
+            assert mock_grab.called
+
+    def test_native_approve_seed_failure_still_grabs(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
+        _, client = app_and_client
+        admin = seeded_users["admin"]
+        admin_headers = _auth_headers(admin, test_db, test_config)
+
+        res = client.post(
+            "/api/requests",
+            json={"item_type": "album", "title": "Test Album", "artist": "Test Artist"},
+            headers=admin_headers,
+        )
+        req_id = res.json()["id"]
+
+        with (
+            patch("trackseerr.api.routes.requests.native_is_configured", return_value=True),
+            patch("trackseerr.api.routes.requests.seed_request_catalog", side_effect=RuntimeError("Catalog seeding failure")),
+            patch("trackseerr.api.routes.requests.acquisition_coordinator.search_and_grab") as mock_grab,
+        ):
+            mock_grab.return_value = {"success": True}
+            appr = client.post(f"/api/requests/{req_id}/approve", headers=admin_headers)
+            assert appr.status_code == 200
+            assert appr.json()["status"] == "processing"
+            assert mock_grab.called

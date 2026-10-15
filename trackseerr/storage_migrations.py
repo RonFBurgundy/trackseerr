@@ -45,10 +45,14 @@ class MigrationsMixin:
                 self._seed_baseline(cur)
                 cur.execute(
                     "INSERT INTO schema_migrations (version) VALUES (?)",
-                    (SCHEMA_VERSION,),
+                    (BASELINE_VERSION,),
                 )
-                logger.info("[boot] migrations: initialized fresh database at baseline v%d", SCHEMA_VERSION)
-                current_version = SCHEMA_VERSION
+                logger.info(
+                    "[boot] migrations: initialized fresh database at baseline v%d (head v%d)",
+                    BASELINE_VERSION,
+                    SCHEMA_VERSION,
+                )
+                current_version = BASELINE_VERSION
             elif 0 < current_version < BASELINE_VERSION:
                 msg = (
                     f"Database schema v{current_version} predates the v{BASELINE_VERSION} baseline; "
@@ -70,6 +74,7 @@ class MigrationsMixin:
                 (81, self._migration_v81),
                 (82, self._migration_v82),
                 (83, self._migration_v83),
+                (84, self._migration_v84),
             ]
 
             applied = 0
@@ -157,6 +162,24 @@ class MigrationsMixin:
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN replace_illegal_characters INTEGER NOT NULL DEFAULT 1"
             )
+
+    def _migration_v84(self, cur: sqlite3.Cursor) -> None:
+        """v84: Add catalog tracking columns to music_requests."""
+        cur.execute("PRAGMA table_info(music_requests)")
+        existing_cols = {row[1] for row in cur.fetchall()}
+        columns = [
+            ("catalog_track_id", "TEXT"),
+            ("catalog_album_id", "TEXT"),
+            ("catalog_seeded_at", "TEXT"),
+            ("catalog_seed_status", "TEXT"),
+        ]
+        for col, col_type in columns:
+            if col not in existing_cols:
+                cur.execute(f"ALTER TABLE music_requests ADD COLUMN {col} {col_type}")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_music_requests_status_catalog_seeded_at "
+            "ON music_requests(status, catalog_seeded_at)"
+        )
 
     def _migration_v83(self, cur: sqlite3.Cursor) -> None:
         """v83: Clear implausible album year and release date sentinels (e.g. Lidarr's year 1 / 0001-01-01)."""
