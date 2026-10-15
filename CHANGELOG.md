@@ -13,6 +13,8 @@ heading becomes the version and date.
 
 ### Added
 
+- Admins can add and monitor an artist directly: "Add artist…" in the Library ⋯ menu, an "Add as artist" button when a library search finds little or nothing, and an "Add / monitor" button on a Discover artist page for artists not yet in the library (it becomes "Open in Library" once added).
+- Each request shows how it was made (manual, playlist with its name, mix, Wanted, discography…), and the Requests page can be filtered by that source.
 - "Retag entire library" (retag dialog, or the "Library Retag" task) rewrites tags in the background on every file whose tags differ from the catalog, now including the MusicBrainz album-artist ID, so Plex, Jellyfin and Picard match reliably.
 - "MusicBrainz Release Match" task (Tasks page) picks the MusicBrainz release for each album from its release group, so files can carry release and recording IDs. Resumable; runs at MusicBrainz's ~1 request per second.
 - The rename dialog can relink all selected audio-mismatch files to their suggested tracks in one go ("Relink suggested"), reporting any it skipped because the right track already has a file.
@@ -55,6 +57,8 @@ heading becomes the version and date.
 
 ### Changed
 
+- The Requests page loads in pages and scrolls smoothly with thousands of requests, instead of loading every request at once.
+- Approved requests (manual, automatic, playlist and discography) now add the artist to the library and monitor exactly what was requested, so they appear under Wanted → Missing and in the library's missing counts before anything downloads. Existing approved requests are picked up by the next Wanted sweep.
 - Relinking, verifying or applying in the rename dialog now refreshes only the affected rows instead of rescanning the whole library.
 - With "Rename artist folders" off, renames and imports keep an artist in the folder where most of their files already are, instead of a folder rendered from a differently spelled artist name.
 - Disc folders follow the discs you actually own: a single-disc rip of a multi-disc release no longer gets a "Disc 01" folder, in renames and new imports.
