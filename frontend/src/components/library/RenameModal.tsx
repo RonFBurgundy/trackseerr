@@ -1,11 +1,17 @@
-import React, { useRef } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowRight, AudioLines, Check, FileCheck, Link2, Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ObsidianModal, SelectionCheckbox, TactileSwitch, TapeDeckButton } from '@/components/ui';
 import { useRenamePreview } from '@/hooks/useRenamePreview';
 import { useRenameRelink } from '@/hooks/useRenameRelink';
 import { useRenameVerify } from '@/hooks/useRenameVerify';
-import type { RenamePreviewItem, RenameRelinkFile } from '@/services/renameService';
+import {
+  relinkRenameBatch,
+  type RenamePreviewItem,
+  type RenameRelinkBatchItem,
+  type RenameRelinkFile,
+} from '@/services/renameService';
+import { errorMessage } from '@/services/apiClient';
 import { reasonInfo } from './renameReasons';
 
 export interface RenameScope {
@@ -157,6 +163,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
     apply,
     result,
     reload,
+    refreshFiles,
     resetResult,
     riskyIds,
     safetyWarnings,
@@ -166,12 +173,25 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
     enabled: isOpen,
   });
 
+  const verifyingFileIdsRef = useRef<string[]>([]);
+
   const {
     status: verifyStatus,
     starting: verifyStarting,
     error: verifyError,
     start: startVerify,
-  } = useRenameVerify({ enabled: isOpen, onFinished: () => void reload() });
+  } = useRenameVerify({
+    enabled: isOpen,
+    onFinished: () => {
+      const ids = verifyingFileIdsRef.current;
+      if (ids.length > 0) {
+        void refreshFiles(ids);
+        verifyingFileIdsRef.current = [];
+      } else {
+        void reload();
+      }
+    },
+  });
   const verifyRunning = verifyStatus?.running === true;
   const keyMissing = verifyStatus?.api_key_set === false;
   const verifyDisabled = riskyIds.length === 0 || verifyRunning || verifyStarting || keyMissing;
@@ -188,8 +208,102 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
     relink,
     resolve: resolveConflict,
     dismissConflict,
-  } = useRenameRelink({ onRelinked: () => void reload() });
+  } = useRenameRelink({
+    onRelinked: (fileId, res) => {
+      const ids: string[] = [fileId];
+      if (res.kept_file_id) ids.push(res.kept_file_id);
+      if (res.recycled_file_id) ids.push(res.recycled_file_id);
+      void refreshFiles(ids);
+    },
+  });
   const conflictOrder = conflict ? compareQuality(conflict.existing, conflict.incoming) : 0;
+
+  const suggestedRelinkItems = useMemo(() => {
+    return items.filter(
+      (item) =>
+        selectedIds.has(item.file_id) &&
+        item.verification?.status === 'mismatch' &&
+        Boolean(item.verification?.actual_track_id)
+    );
+  }, [items, selectedIds]);
+  const suggestedCount = suggestedRelinkItems.length;
+
+  const [batchRelinking, setBatchRelinking] = useState<boolean>(false);
+  const [batchRelinkSummary, setBatchRelinkSummary] = useState<{
+    relinked: number;
+    conflictsSkipped: number;
+    errors: number;
+    errorMessages: string[];
+  } | null>(null);
+  const [batchRelinkError, setBatchRelinkError] = useState<string | null>(null);
+
+  const handleBatchRelink = async () => {
+    if (suggestedRelinkItems.length === 0 || batchRelinking) return;
+
+    setBatchRelinking(true);
+    setBatchRelinkError(null);
+    setBatchRelinkSummary(null);
+
+    const conflictChoice: 'prefer_quality' | 'skip' = preferQuality ? 'prefer_quality' : 'skip';
+    const batchItems: RenameRelinkBatchItem[] = suggestedRelinkItems.map((item) => ({
+      file_id: item.file_id,
+      target_track_id: item.verification!.actual_track_id!,
+    }));
+
+    const BATCH_SIZE = 500;
+    const chunks: RenameRelinkBatchItem[][] = [];
+    for (let i = 0; i < batchItems.length; i += BATCH_SIZE) {
+      chunks.push(batchItems.slice(i, i + BATCH_SIZE));
+    }
+
+    let relinked = 0;
+    let conflictsSkipped = 0;
+    let errors = 0;
+    const errorMessages: string[] = [];
+    const affectedIds = new Set<string>();
+
+    try {
+      for (const chunk of chunks) {
+        const res = await relinkRenameBatch({
+          items: chunk,
+          conflict: conflictChoice,
+        });
+        relinked += res.relinked;
+        conflictsSkipped += res.conflicts_skipped;
+        errors += res.errors;
+
+        for (const r of res.results) {
+          if (r.file_id) affectedIds.add(r.file_id);
+          if (r.kept_file_id) affectedIds.add(r.kept_file_id);
+          if (r.recycled_file_id) affectedIds.add(r.recycled_file_id);
+          if (r.status === 'error' && r.message) {
+            errorMessages.push(r.message);
+          }
+        }
+      }
+
+      setBatchRelinkSummary({
+        relinked,
+        conflictsSkipped,
+        errors,
+        errorMessages,
+      });
+
+      if (affectedIds.size > 0) {
+        await refreshFiles(Array.from(affectedIds));
+      }
+    } catch (err: unknown) {
+      setBatchRelinkError(errorMessage(err, 'Failed to relink suggested tracks'));
+    } finally {
+      setBatchRelinking(false);
+    }
+  };
+
+  const handleReload = async () => {
+    setBatchRelinkSummary(null);
+    setBatchRelinkError(null);
+    await reload();
+  };
 
   const parentRef = useRef<HTMLDivElement | null>(null);
 
@@ -215,6 +329,8 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
   };
 
   const handleClose = () => {
+    setBatchRelinkSummary(null);
+    setBatchRelinkError(null);
     resetResult();
     onClose();
   };
@@ -432,7 +548,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                     <TactileSwitch
                       name="rename-relink-prefer-quality"
                       label="Keep the higher-quality file when the right track already has one"
-                      title="Off: ask each time the right track already has a file"
+                      title="Off: ask each time the right track already has a file (skipped conflicts are reported in batch relink)"
                       checked={preferQuality}
                       onChange={setPreferQuality}
                       className="max-w-[18rem] text-[11px] leading-tight"
@@ -444,7 +560,10 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                       size="sm"
                       disabled={verifyDisabled}
                       title={verifyTitle}
-                      onClick={() => void startVerify(riskyIds)}
+                      onClick={() => {
+                        verifyingFileIdsRef.current = riskyIds;
+                        void startVerify(riskyIds);
+                      }}
                       icon={
                         verifyRunning || verifyStarting ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
@@ -455,7 +574,26 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                     >
                       Verify risky ({riskyIds.length})
                     </TapeDeckButton>
-                    <TapeDeckButton size="sm" onClick={() => void reload()} icon={<RefreshCw className="h-3 w-3" />} title="Reload preview">
+                    <TapeDeckButton
+                      size="sm"
+                      disabled={suggestedCount === 0 || batchRelinking}
+                      title={
+                        suggestedCount === 0
+                          ? 'No selected audio mismatches with known library tracks'
+                          : `Relink ${suggestedCount} selected audio mismatches to their identified tracks`
+                      }
+                      onClick={() => void handleBatchRelink()}
+                      icon={
+                        batchRelinking ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Link2 className="h-3 w-3" />
+                        )
+                      }
+                    >
+                      Relink suggested ({suggestedCount})
+                    </TapeDeckButton>
+                    <TapeDeckButton size="sm" onClick={() => void handleReload()} icon={<RefreshCw className="h-3 w-3" />} title="Reload preview">
                       Refresh
                     </TapeDeckButton>
                   </div>
@@ -499,6 +637,28 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                   <p role="alert" className="text-xs font-mono text-[var(--status-error)]">
                     {relinkError}
                   </p>
+                )}
+                {batchRelinkError && (
+                  <p role="alert" className="text-xs font-mono text-[var(--status-error)]">
+                    {batchRelinkError}
+                  </p>
+                )}
+                {batchRelinkSummary && (
+                  <div className="space-y-1 text-xs font-mono text-neutral-300">
+                    <p>
+                      Relinked {batchRelinkSummary.relinked} · skipped {batchRelinkSummary.conflictsSkipped}{' '}
+                      (right track already has a file) · {batchRelinkSummary.errors} errors
+                    </p>
+                    {batchRelinkSummary.errorMessages.length > 0 && (
+                      <ul className="text-[var(--status-error)] space-y-0.5 max-h-32 overflow-y-auto pl-4 list-disc">
+                        {batchRelinkSummary.errorMessages.map((msg, i) => (
+                          <li key={i} className="break-all">
+                            {msg}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 )}
 
                 {/* Virtualized List Container */}
