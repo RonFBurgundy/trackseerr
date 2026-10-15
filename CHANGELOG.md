@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- The rename preview labels tracks that would move between a Various Artists compilation folder and an artist folder ("Compilation link") and leaves them unticked.
 - The rename dialog warns when Plex's "Empty trash automatically after every scan" is on, since a scan during the rename could delete play counts and ratings for moved tracks.
 - Scheduled tasks (playlist sync, Wanted sweep, RSS sync, artist refresh, art backfill, mixes, seed cleanup, recycle bin, backups, update check) can be paused and resumed from the Tasks page without changing their schedule.
 - Manual runs of the track credits backfill, artwork backfill and artist refresh can be cancelled from the Tasks page; they stop after the current item. Shutting down also stops manual runs instead of waiting for them.
@@ -51,6 +52,8 @@ heading becomes the version and date.
 
 ### Changed
 
+- With "Rename artist folders" off, renames and imports keep an artist in the folder where most of their files already are, instead of a folder rendered from a differently spelled artist name.
+- Disc folders follow the discs you actually own: a single-disc rip of a multi-disc release no longer gets a "Disc 01" folder, in renames and new imports.
 - The library-wide rename preview says how many files need a rename in total when it shows only the first 5,000.
 - Every remaining browser checkbox, radio button and slider (permissions, rename/retag, profiles, notifications, logs, calendar, mixes, user presets) now uses the app's own switches, selection boxes and sliders.
 - Activity (Queue, Searches, History, Blocklist, Needs Review), Wanted and album cards use one compact layout on every screen: details get the full width, all actions sit in one ⋯ menu, extra details open with a chevron, and items needing attention get a tappable badge and an amber dot on the menu.
@@ -84,6 +87,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Albums no longer show a year of 1 (Lidarr's placeholder for "no date"); existing placeholder dates are cleared on upgrade.
 - Downloads that don't match a catalog album now land in the artist's existing folder (matched by MusicBrainz ID or name) instead of a second, differently named folder.
 - Editing an administrator no longer shows permission toggles that look editable but don't save; they show as held and locked.
 - The Wanted sweep, RSS sync and manual Wanted searches no longer run when no indexer has a matching download client (or no Soulseek client is set up); the Tasks page shows why they were skipped.
