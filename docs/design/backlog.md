@@ -217,3 +217,15 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     the album. No MB credentials in TrackSeerr. Backend: `mb-seed-backend` handoff; frontend next.
 30. **DONE 2026-10-15 · P3 · Submit AcoustID fingerprints** for files whose recording MBID is known, with the user's AcoustID user key
     (follow-up to #29).
+
+## User QA list (2026-10-15)
+
+31. **DONE 2026-10-15 · P2 · Discover "Add & monitor" never flips to "View in library".** The artist is ingested, but
+    `resolve_from_discovery` returns the fresh negative `artist_links` row (1-day TTL) without re-checking the local
+    library. Fix: a fresh negative row re-checks the library by cached MBID/name (local only). Branch `fix/artist-link-stale-negative`.
+32. **DONE 2026-10-15 · P3 · Mobile Tasks rows: titles truncated to 1-3 chars.** Icon-only Run/Cancel on phones, no
+    RUNNING badge while the progress bar shows, two-line titles. Branch `feat/task-row-mobile`.
+33. **DONE 2026-10-15 · P2 · Scrubber rail on every long list.** Requests, Blocklist, Searches get date-group indexes
+    (backend `feat/list-date-indexes`), then rails in the UI; Queue gets a position-only rail.
+34. **DONE 2026-10-15 · P3 · Library Retag and MusicBrainz Release Match report no progress** (`progress: null` while running,
+    so the bar is indeterminate for a 70-minute task). Add current/total via `job_tracker` and `_task_progress`.
