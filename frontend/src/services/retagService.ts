@@ -28,3 +28,13 @@ export async function applyRetag(request: RetagApplyRequest): Promise<RetagApply
     body: JSON.stringify(request),
   });
 }
+
+/**
+ * Starts a background task to retag the entire library.
+ */
+export async function startLibraryRetag(): Promise<Schema<'TaskActionResult'>> {
+  return apiRequest<Schema<'TaskActionResult'>>('/api/library/retag/library', {
+    method: 'POST',
+  });
+}
+

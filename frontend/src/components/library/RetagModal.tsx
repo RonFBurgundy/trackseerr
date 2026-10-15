@@ -1,9 +1,10 @@
-import React, { useId, useRef } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { ArrowRight, Check, Image, Loader2, RefreshCw, Tag } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ObsidianModal, SelectionCheckbox, TactileSwitch, TapeDeckButton } from '@/components/ui';
 import { useRetagPreview } from '@/hooks/useRetagPreview';
-import type { RetagPreviewItem, RetagFieldDiff } from '@/services/retagService';
+import { ApiError, errorMessage } from '@/services/apiClient';
+import { startLibraryRetag, type RetagPreviewItem, type RetagFieldDiff } from '@/services/retagService';
 
 export interface RetagScope {
   artistId?: string;
@@ -58,6 +59,12 @@ function formatFieldName(field: string): string {
 export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagged }) => {
   const embedArtId = useId();
   const isOpen = scope !== null;
+  const isLibraryWide = isOpen && !scope.artistId && !scope.albumId;
+
+  const [libraryRetagStarting, setLibraryRetagStarting] = useState<boolean>(false);
+  const [libraryRetagStarted, setLibraryRetagStarted] = useState<boolean>(false);
+  const [libraryRetagStatus, setLibraryRetagStatus] = useState<string | null>(null);
+  const [libraryRetagError, setLibraryRetagError] = useState<string | null>(null);
 
   const {
     items,
@@ -99,8 +106,31 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
     }
   };
 
+  const handleLibraryRetag = async () => {
+    if (libraryRetagStarting || libraryRetagStarted) return;
+    setLibraryRetagStarting(true);
+    setLibraryRetagError(null);
+    try {
+      const res = await startLibraryRetag();
+      setLibraryRetagStarted(true);
+      setLibraryRetagStatus(res?.message || 'Library retag started.');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setLibraryRetagError('A library retag is already running');
+      } else {
+        setLibraryRetagError(errorMessage(err, 'Failed to start library retag'));
+      }
+    } finally {
+      setLibraryRetagStarting(false);
+    }
+  };
+
   const handleClose = () => {
     resetResult();
+    setLibraryRetagStarting(false);
+    setLibraryRetagStarted(false);
+    setLibraryRetagStatus(null);
+    setLibraryRetagError(null);
     onClose();
   };
 
@@ -122,6 +152,8 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
     </>
   );
 
+  const displayError = error || libraryRetagError;
+
   return (
     <ObsidianModal
       isOpen={isOpen}
@@ -139,14 +171,51 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
           </div>
         )}
 
-        {error && (
+        {libraryRetagStatus && (
+          <div
+            role="status"
+            className="p-3 rounded-[3px] border border-[var(--status-success)]/50 bg-[var(--status-success)]/10 text-xs font-mono text-[var(--status-success)] flex items-center gap-2"
+          >
+            <Check className="h-4 w-4 shrink-0" />
+            <span>{libraryRetagStatus}</span>
+          </div>
+        )}
+
+        {displayError && (
           <div
             role="alert"
             className="p-3 rounded-[3px] border border-[var(--status-error)]/50 bg-[var(--status-error)]/10 text-xs font-mono text-[var(--status-error)]"
           >
-            {error}
+            {displayError}
           </div>
         )}
+
+        {isLibraryWide && !loading && !result && (
+          <div
+            role="note"
+            className="p-3 rounded-[3px] border border-[var(--accent-amber)]/50 bg-[var(--accent-amber)]/10 text-xs font-mono text-[var(--accent-amber)] space-y-2.5"
+          >
+            <p className="leading-relaxed">
+              Retag the whole library in the background — every file whose tags differ from the catalog. Run &quot;MusicBrainz Release Match&quot; on the Tasks page first so release IDs are written.
+            </p>
+            <div>
+              <TapeDeckButton
+                variant="amber"
+                size="sm"
+                icon={libraryRetagStarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Tag className="h-3.5 w-3.5" />}
+                disabled={libraryRetagStarting || libraryRetagStarted}
+                onClick={() => void handleLibraryRetag()}
+              >
+                {libraryRetagStarted
+                  ? 'Started — follow progress on the Tasks page'
+                  : libraryRetagStarting
+                  ? 'Starting...'
+                  : 'Retag entire library'}
+              </TapeDeckButton>
+            </div>
+          </div>
+        )}
+
 
         {/* Success / Result State */}
         {result && (
