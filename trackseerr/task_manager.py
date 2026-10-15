@@ -429,9 +429,15 @@ class RunHandle:
         self.failed: Optional[str] = None  # set when the run ended badly without raising
         self.discard = False  # the run turned out to be a no-op: remove the row
         self.stop_event = threading.Event()
+        self.progress_current: int = 0
+        self.progress_total: Optional[int] = None
 
     def should_stop(self) -> bool:
         return self.stop_event.is_set()
+
+    def set_progress(self, current: int, total: Optional[int] = None) -> None:
+        self.progress_current = current
+        self.progress_total = total
 
     def apply_result(self, result: Any) -> None:
         """Takes the outcome from a worker's result dict (``status == already_running`` discards the run)."""
@@ -473,6 +479,16 @@ def request_cancel(task_id: str) -> bool:
 def is_cancellable(task_id: str) -> bool:
     with _manual_runs_lock:
         return task_id in _manual_runs
+
+
+def manual_run_progress(task_id: str) -> Optional[tuple[int, Optional[int]]]:
+    with _manual_runs_lock:
+        handle = _manual_runs.get(task_id)
+        if handle is None:
+            return None
+        if handle.progress_total is not None or handle.progress_current > 0:
+            return (handle.progress_current, handle.progress_total)
+        return None
 
 
 def cancel_all_manual_runs() -> int:

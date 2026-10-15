@@ -1125,6 +1125,7 @@ def retag_library(
     db: Database,
     plex_client: Optional[Any] = None,
     should_stop: Optional[Callable[[], bool]] = None,
+    on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
 ) -> dict[str, int]:
     """Iterates through all library files, computes tag diffs, and writes tags for files that differ from the catalog."""
     media_settings = db.get_media_management_settings()
@@ -1132,6 +1133,11 @@ def retag_library(
     if not write_tags_enabled:
         logger.info("write_audio_tags disabled in media management settings; skipping library retag")
         return {"scanned": 0, "retagged": 0, "unchanged": 0, "skipped": 0, "errors": 0}
+
+    total: Optional[int] = None
+    if on_progress is not None:
+        total = db.count_library_files_with_track()
+        on_progress(0, total)
 
     root_folder_str = media_settings.get("root_folder_path") or "/music"
     root_dir = Path(root_folder_str).resolve()
@@ -1199,7 +1205,13 @@ def retag_library(
         elif run.skipped_count > prev_skipped:
             skipped += 1
 
+        if on_progress is not None and scanned % 100 == 0:
+            on_progress(scanned, total)
+
     _finish_retag(run)
+
+    if on_progress is not None:
+        on_progress(scanned, total)
 
     return {
         "scanned": scanned,

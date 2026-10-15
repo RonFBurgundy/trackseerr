@@ -756,6 +756,13 @@ class LibraryCatalogStoreMixin:
             cur = self.conn.execute(sql, params)
             return [self._map_library_track(row) for row in cur.fetchall()]
 
+    _ALBUMS_MISSING_RELEASE_WHERE = (
+        "a.mb_release_group_id IS NOT NULL AND a.mb_release_group_id != '' "
+        "AND (a.mb_release_id IS NULL OR a.mb_release_id = '') "
+        "AND EXISTS (SELECT 1 FROM library_tracks t WHERE t.album_id = a.id "
+        "AND (t.has_file = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id)))"
+    )
+
     def iter_albums_missing_release(
         self, batch: int = 200
     ) -> Iterator[dict[str, Any]]:
@@ -765,10 +772,7 @@ class LibraryCatalogStoreMixin:
             sql = (
                 "SELECT a.id, a.title, a.mb_release_group_id, a.total_tracks "
                 "FROM library_albums a "
-                "WHERE a.mb_release_group_id IS NOT NULL AND a.mb_release_group_id != '' "
-                "AND (a.mb_release_id IS NULL OR a.mb_release_id = '') "
-                "AND EXISTS (SELECT 1 FROM library_tracks t WHERE t.album_id = a.id "
-                "AND (t.has_file = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id))) "
+                f"WHERE {self._ALBUMS_MISSING_RELEASE_WHERE} "
             )
             params: list[Any] = []
             if after_id is not None:
@@ -794,6 +798,14 @@ class LibraryCatalogStoreMixin:
             after_id = str(rows[-1]["id"])
             if len(rows) < batch:
                 return
+
+    def count_albums_missing_release(self) -> int:
+        """Counts albums that have files, a release group ID, and no release ID."""
+        sql = f"SELECT COUNT(*) FROM library_albums a WHERE {self._ALBUMS_MISSING_RELEASE_WHERE}"
+        with self._lock:
+            cur = self.conn.execute(sql)
+            row = cur.fetchone()
+            return int(row[0]) if row else 0
 
     def set_album_mb_release_id(self, album_id: str, release_id: str) -> None:
         """Sets library_albums.mb_release_id for an album."""
@@ -924,6 +936,14 @@ class LibraryCatalogStoreMixin:
             after = (last["t_artist_id"], last["t_album_id"], last["t_disc_number"], last["t_track_number"], last["id"])
             if len(rows) < batch_size:
                 return
+
+    def count_library_files_with_track(self) -> int:
+        """Counts library files associated with a track."""
+        sql = "SELECT COUNT(*) FROM library_files f JOIN library_tracks t ON f.track_id = t.id"
+        with self._lock:
+            cur = self.conn.execute(sql)
+            row = cur.fetchone()
+            return int(row[0]) if row else 0
 
     def delete_library_track(self, track_id: str) -> bool:
         """Deletes a library track and cascades to child files (history is kept)."""

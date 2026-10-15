@@ -197,6 +197,14 @@ def _task_progress(task_id: str, running: bool) -> Optional[TaskProgress]:
     if task_id == "lidarr_migration" and lidarr_migration_job.is_running():
         processed, total, mig_message = lidarr_migration_job.progress_snapshot()
         return TaskProgress(current=processed, total=total or None, message=mig_message)
+    snap = task_manager.manual_run_progress(task_id)
+    if snap:
+        msg = job_tracker.running_message(task_id)
+        return TaskProgress(
+            current=snap[0],
+            total=snap[1] or None,
+            message=redact_text(msg) if msg else None,
+        )
     message = job_tracker.running_message(task_id)
     return TaskProgress(message=redact_text(message)) if message else None
 
@@ -633,7 +641,7 @@ def trigger_library_retag(
         def _retag(run: RunHandle) -> None:
             from trackseerr.api.routes.library.tagging import retag_library
 
-            counts = retag_library(db, plex_client, should_stop=run.should_stop)
+            counts = retag_library(db, plex_client, should_stop=run.should_stop, on_progress=run.set_progress)
             run.message = ", ".join(f"{k}={v}" for k, v in counts.items())
 
         _run_manual(db, "library_retag", "ManualLibraryRetagTask", _retag, cancellable=True)
@@ -872,7 +880,12 @@ def run_scheduled_task(  # noqa: C901, PLR0915
             from trackseerr.mb_metadata_store import get_shared_enricher
             from trackseerr.release_matching import match_album_releases
 
-            counts = match_album_releases(db, get_shared_enricher(db), should_stop=run.should_stop)
+            counts = match_album_releases(
+                db,
+                get_shared_enricher(db),
+                should_stop=run.should_stop,
+                on_progress=run.set_progress,
+            )
             run.message = ", ".join(f"{k}={v}" for k, v in counts.items())
 
         _run_manual(db, task_id, "ManualMbReleaseMatchTask", _match, cancellable=True)

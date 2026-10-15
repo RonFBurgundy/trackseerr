@@ -432,7 +432,7 @@ def test_task_manager_dispatches_mb_release_match(monkeypatch, tmp_path):
 
     called_event = threading.Event()
 
-    def fake_match(db, enricher, should_stop=None):
+    def fake_match(db, enricher, should_stop=None, on_progress=None):
         called_event.set()
         return {"albums": 1, "matched": 1, "no_match": 0, "no_releases": 0, "recordings_filled": 0, "errors": 0}
 
@@ -449,4 +449,40 @@ def test_task_manager_dispatches_mb_release_match(monkeypatch, tmp_path):
     assert resp.json()["success"] is True
     assert called_event.wait(timeout=5.0)
     database.close()
+
+
+def test_match_reports_progress(db: Database, tmp_path: Path):
+    _seed_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-p1",
+        rg_id="rg-p1",
+        tracks=[{"num": 1, "title": "Track 1", "file": True}],
+    )
+    _seed_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-p2",
+        rg_id="rg-p2",
+        tracks=[{"num": 1, "title": "Track 1", "file": True}],
+    )
+
+    enricher = MagicMock(spec=MbidEnricherClient)
+    rel1 = _make_release("rel-p1", track_count=1)
+    rel2 = _make_release("rel-p2", track_count=1)
+    enricher.get_release_group_releases.side_effect = lambda rgid: [rel1] if rgid == "rg-p1" else [rel2]
+
+    calls: list[tuple[int, int | None]] = []
+    counts = match_album_releases(
+        db,
+        enricher,
+        on_progress=lambda c, t: calls.append((c, t)),
+    )
+
+    assert counts["albums"] == 2
+    assert len(calls) >= 3
+    assert calls[0] == (0, 2)
+    assert calls[-1] == (2, 2)
+    assert calls == [(0, 2), (1, 2), (2, 2)]
+
 
