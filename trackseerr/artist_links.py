@@ -176,6 +176,39 @@ def _lookup_mbid_for_discovery(db: Database, discovery_id: str, enricher: Option
 # ---------------------------------------------------------------------------------------------------- resolution
 
 
+def _recheck_negative(
+    index: LibraryIndex, cached: dict[str, Any], discovery_artist_id: str
+) -> Optional[ArtistLink]:
+    name = str(cached.get("name") or "").strip()
+    mbid = cached.get("mbid")
+    if not name and not mbid:
+        return None
+
+    found: Optional[dict[str, Any]] = None
+    confidence = "none"
+    if mbid:
+        found = index.find_by_mbid(mbid)
+        if found:
+            confidence = "mbid"
+    if found is None and name:
+        candidate = index.find_by_clean_name(normalize_artist_name(name))
+        if candidate is not None:
+            known = _artist_mbid(candidate)
+            if not (mbid and known and known != mbid):
+                found, confidence = candidate, "name"
+
+    if found is None:
+        return None
+
+    return ArtistLink(
+        name=name,
+        discovery_id=discovery_artist_id,
+        library_artist_id=str(found["id"]),
+        mbid=mbid or _artist_mbid(found),
+        confidence=confidence,
+    )
+
+
 def resolve_from_discovery(
     db: Database,
     discovery: Any,
@@ -192,7 +225,14 @@ def resolve_from_discovery(
     cached = db.get_artist_link(discovery_id=discovery_artist_id)
     if cached and _is_fresh(cached):
         lib_id = cached.get("library_artist_id")
-        if not lib_id or index.get(lib_id) is not None:
+        if lib_id:
+            if index.get(lib_id) is not None:
+                return _from_row(cached)
+        else:
+            rechecked = _recheck_negative(index, cached, discovery_artist_id)
+            if rechecked is not None:
+                _store(db, rechecked)
+                return rechecked
             return _from_row(cached)
 
     if details is None:
