@@ -273,6 +273,60 @@ class RequestStoreMixin:
             )
             return [dict(r) for r in cur.fetchall()]
 
+    def list_requests_needing_catalog(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Approved requests in processing state whose catalog seeding has not run, oldest first."""
+        with self._lock:
+            cur = self.conn.execute(
+                """
+                SELECT r.id, r.user_id, r.item_type, r.title, r.artist, r.album,
+                       r.cover_url, r.preview_url, r.status, r.release_date, r.foreign_id,
+                       r.quality_profile_id, r.current_quality, r.cutoff_met,
+                       r.created_at, r.updated_at, r.batch_id, r.batch_kind, r.status_reason, r.status_message,
+                       r.next_attempt_at, r."trigger", r.trigger_ref, r.trigger_label,
+                       r.catalog_track_id, r.catalog_album_id, r.catalog_seeded_at, r.catalog_seed_status,
+                       u.username
+                FROM music_requests r
+                LEFT JOIN users u ON r.user_id = u.id
+                WHERE r.status = 'processing' AND r.catalog_seeded_at IS NULL
+                ORDER BY r.created_at ASC
+                LIMIT ?
+                """,
+                (int(limit),),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def set_request_catalog(
+        self,
+        request_id: str,
+        *,
+        status: str,
+        track_id: Optional[str] = None,
+        album_id: Optional[str] = None,
+    ) -> bool:
+        """Records catalog seeding outcome and timestamps it in UTC ISO format."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            cur = self.conn.execute(
+                """
+                UPDATE music_requests
+                SET catalog_track_id = ?,
+                    catalog_album_id = ?,
+                    catalog_seeded_at = ?,
+                    catalog_seed_status = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    str(track_id) if track_id is not None else None,
+                    str(album_id) if album_id is not None else None,
+                    now_iso,
+                    str(status),
+                    str(request_id),
+                ),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
     def delete_request(self, request_id: str) -> bool:
         """Deletes a request by ID."""
         with self._lock:

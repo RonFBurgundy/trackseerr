@@ -24,7 +24,7 @@ _NEAR_TITLE_RATIO = 0.8  # title similarity that lets a matching track number co
 _TRACK_DURATION_TOLERANCE = 2.0  # seconds: durations this close count as the same recording when merging tracks
 SEED_COMPLETE_ACTIONS = ("keep", "remove", "remove_and_delete")
 BASELINE_VERSION = 71  # the squashed baseline storage_schema.sql was cut at; older databases cannot upgrade
-SCHEMA_VERSION = 83  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
+SCHEMA_VERSION = 84  # head of the migration list in Database._migrate; bump with every new migration (tests import it)
 
 
 def _opt_float(value: Any) -> Optional[float]:

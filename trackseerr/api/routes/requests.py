@@ -33,6 +33,7 @@ from trackseerr.clients.lidarr import LidarrClient
 from trackseerr.config import Config
 from trackseerr.item_history import TRIGGER_REQUEST_APPROVED, TRIGGER_RETRY, request_trigger
 from trackseerr.library_manager import ModeChanged, dispatch_to_lidarr, native_is_configured, run_for_mode
+from trackseerr.mb_metadata_store import get_shared_discovery_client, get_shared_enricher
 from trackseerr.models import (
     NotificationEvent,
     RequestStatus,
@@ -46,6 +47,7 @@ from trackseerr.request_submission import (
     submit_batch_requests,
     submit_track_request,
 )
+from trackseerr.request_catalog import seed_request_catalog
 from trackseerr.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -331,6 +333,15 @@ def approve_request(
     def _native_approve() -> None:
         if not native_is_configured(db):
             return
+        try:
+            seed_request_catalog(
+                db,
+                req,
+                discovery_client=get_shared_discovery_client(db),
+                enricher=get_shared_enricher(db),
+            )
+        except Exception as e:
+            logger.error("Error seeding catalog for approved request %s (%s)", request_id, type(e).__name__)
         try:
             grab_res = acquisition_coordinator.search_and_grab(
                 artist=req["artist"],

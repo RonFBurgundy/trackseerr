@@ -52,6 +52,7 @@ from trackseerr.redaction import redact_text
 from trackseerr.job_tracker import tracked
 from trackseerr.task_manager import TRIGGER_SCHEDULED, TRIGGER_STARTUP, record_task_run, wait_for_next_cycle
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
+from trackseerr.request_catalog import seed_pending_request_catalog
 from trackseerr.seed_rules import apply_seed_rules_at_grab
 from trackseerr.storage import Database
 
@@ -379,10 +380,21 @@ class WantedBacklogWorker:
 
         try:
             with work_guard(db, MODE_NATIVE):
+                catalog_seeded = seed_pending_request_catalog(
+                    db, limit=50, should_stop=self._stop_event.is_set
+                )
                 reason = _gate_search(db, "WantedBacklogWorker", self)
                 if reason:
-                    return {"items_checked": 0, "items_grabbed": 0, "errors": 0, "skipped": reason}
-                return self._sweep(db)
+                    return {
+                        "items_checked": 0,
+                        "items_grabbed": 0,
+                        "errors": 0,
+                        "skipped": reason,
+                        "catalog_seeded": catalog_seeded,
+                    }
+                res = self._sweep(db)
+                res["catalog_seeded"] = catalog_seeded
+                return res
         except ModeChanged:
             logger.debug("WantedBacklogWorker: library manager is Lidarr; skipping native backlog sweep")
             return {"items_checked": 0, "items_grabbed": 0, "errors": 0, "skipped": "library manager is Lidarr"}
