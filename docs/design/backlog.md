@@ -53,7 +53,7 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
 
 ## Carried over from the 2026-10-12 rename/naming session
 
-7. **P2 · Rename preview leftovers after the naming fixes:** ~130 disc/track renumberings that come from Lidarr's
+7. **DONE 2026-10-15 · P2 · Rename preview leftovers after the naming fixes:** ~130 disc/track renumberings that come from Lidarr's
    own track lists (e.g. Baby Keem "The Melodic Blue" now 2 discs; Miami Horror "I Look to You" mapped to a remix
    track) — investigate whether the file→track mapping from the Lidarr import is wrong or Lidarr's release choice
    changed; ~30 bad Lidarr metadata values (Rod Stewart "Every Picture Tells a Story" dated 1884, "Miley Cyrus" →
