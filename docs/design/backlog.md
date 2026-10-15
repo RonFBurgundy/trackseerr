@@ -215,5 +215,5 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     button that opens MB's release editor prefilled (release editor seeding: tracklist, lengths, label, barcode,
     Deezer URL, edit note) — the user logs in to MB and reviews. MB redirects back with `release_mbid`, which links
     the album. No MB credentials in TrackSeerr. Backend: `mb-seed-backend` handoff; frontend next.
-30. **P3 · Submit AcoustID fingerprints** for files whose recording MBID is known, with the user's AcoustID user key
+30. **DONE 2026-10-15 · P3 · Submit AcoustID fingerprints** for files whose recording MBID is known, with the user's AcoustID user key
     (follow-up to #29).
