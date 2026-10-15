@@ -1,12 +1,13 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import type { ActivityBlocklistRecord, ListSortDir } from '@/types/activity';
-import { getActivityBlocklist, removeBlocklistItem } from '@/services/activityService';
+import { getActivityBlocklist, getActivityBlocklistIndex, removeBlocklistItem } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
 import { pagedFetcher, useVirtualPagedList, type ListKey } from '@/hooks/useVirtualPagedList';
+import { useGroupIndex } from '@/hooks/useGroupIndex';
 import { useListSelection } from '@/hooks/useListSelection';
 import { ConfirmDangerButton, ConfirmDialog, type OverflowMenuItem } from '@/components/ui';
-import { FlatList, ListPanel, formatDateTime, orDash, type FlatListColumn } from '@/components/lists';
+import { FlatList, ListPanel, ScrubberRail, formatDateTime, orDash, type FlatListColumn } from '@/components/lists';
 import type { ActivityPanelProps } from './ActivityQueuePanel';
 import { LibraryLink } from './LibraryLink';
 
@@ -23,6 +24,7 @@ export const ActivityBlocklistPanel: React.FC<ActivityPanelProps> = ({ onToast }
 
   const list = useVirtualPagedList<ActivityBlocklistRecord>(fetchBlocklist, { sortKey, sortDir, getKey });
   const { removeItems } = list;
+  const index = useGroupIndex(getActivityBlocklistIndex, { sortKey, sortDir, total: list.total, enabled: sortKey === 'date' });
 
   const onSortChange = useCallback((key: string, dir: ListSortDir) => {
     setSortKey(key);
@@ -149,6 +151,7 @@ export const ActivityBlocklistPanel: React.FC<ActivityPanelProps> = ({ onToast }
         rowMenuLabel={rowMenuLabel}
         rowDetails={rowDetails}
         emptyMessage="The blocklist is empty."
+        rail={<ScrubberRail groups={index.groups} positionOnly={sortKey !== 'date'} ariaLabel="Jump to date" />}
       />
       <ConfirmDialog
         isOpen={removingId !== null}

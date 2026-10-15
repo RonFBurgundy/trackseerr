@@ -108,6 +108,16 @@ export function getActivityHistoryIndex(q: IndexQuery, signal?: AbortSignal): Pr
   return apiRequest<GroupIndexResponse>(buildIndexUrl('/api/activity/history', q), { signal });
 }
 
+/** Group index for Blocklist (date groups). */
+export function getActivityBlocklistIndex(q: IndexQuery, signal?: AbortSignal): Promise<GroupIndexResponse> {
+  return apiRequest<GroupIndexResponse>(buildIndexUrl('/api/activity/blocklist', q), { signal });
+}
+
+/** Group index for Searches (date groups). */
+export function getActivitySearchesIndex(q: IndexQuery, signal?: AbortSignal): Promise<GroupIndexResponse> {
+  return apiRequest<GroupIndexResponse>(buildIndexUrl('/api/activity/searches', q), { signal });
+}
+
 /** Group index for a Wanted list. Native mode only; Lidarr mode answers `groups: []`. */
 export function getWantedIndex(
   list: WantedListName,

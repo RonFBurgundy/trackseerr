@@ -1,7 +1,9 @@
 import { apiRequest } from './apiClient';
+import { buildIndexUrl } from './listUrl';
 import type { Schema } from '@/types/apiSchema';
 import type { QuotaTypeKind, QuotaTypeStatus, RequestItem, UserQuota } from '@/types/models';
 import type { DiscographyBatchPayload } from '@/types/account';
+import type { GroupIndexResponse, IndexQuery } from '@/types/activity';
 
 export interface GetRequestsParams {
   status?: string;
@@ -30,6 +32,10 @@ export async function getRequests(
   const qs = query.toString();
   const url = qs ? `/api/requests?${qs}` : '/api/requests';
   return apiRequest<Schema<'RequestListResponse'>>(url, { signal });
+}
+
+export async function getRequestsIndex(q: IndexQuery, signal?: AbortSignal): Promise<GroupIndexResponse> {
+  return apiRequest<GroupIndexResponse>(buildIndexUrl('/api/requests', q), { signal });
 }
 
 export async function getRequestSources(signal?: AbortSignal): Promise<Schema<'RequestSourcesResponse'>> {
