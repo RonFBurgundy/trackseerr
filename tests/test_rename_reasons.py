@@ -72,3 +72,21 @@ def test_compilation_link_not_added_for_normal_artist_moves():
     assert got == ["artist_folder"]
     assert is_default_selected(got) is True
 
+
+def test_compilation_link_recognises_various_alias():
+    # Various/X/... -> Artist/X/... gets compilation_link
+    got = classify_rename("Various/X (2020)/01 - a.flac", "Artist/X (2020)/01 - a.flac")
+    assert "compilation_link" in got
+    assert "artist_folder" in got
+    assert is_default_selected(got) is False
+
+    # VA/... -> Artist/... gets compilation_link
+    got_va = classify_rename("VA/X (2020)/01 - a.flac", "Artist/X (2020)/01 - a.flac")
+    assert "compilation_link" in got_va
+    assert is_default_selected(got_va) is False
+
+    # Various Artists/... -> Various/... does NOT get compilation_link (both are compilation folders)
+    got_comp = classify_rename("Various Artists/X (2020)/01 - a.flac", "Various/X (2020)/01 - a.flac")
+    assert "compilation_link" not in got_comp
+
+

@@ -208,9 +208,21 @@ DEFAULT_COMPILATION_TRACK_FORMAT: str = _DEFAULT_PRESET["compilation_track_forma
 DEFAULT_COLON_REPLACEMENT: str = _DEFAULT_PRESET["colon_replacement_format"]
 DEFAULT_REPLACE_ILLEGAL: bool = _DEFAULT_PRESET["replace_illegal_characters"]
 VARIOUS_ARTISTS_FOLDER: str = "Various Artists"
+_VARIOUS_ARTISTS_ALIASES: frozenset[str] = frozenset({"various artists", "various", "va"})
+
+
+def is_various_artists_folder(name: str | None) -> bool:
+    """Returns True if the folder name is a recognised Various Artists alias (case-insensitive)."""
+    if not name:
+        return False
+    norm = name.strip().lower()
+    return norm in _VARIOUS_ARTISTS_ALIASES or norm == VARIOUS_ARTISTS_FOLDER.lower()
+
+
 _LEGACY_COMPILATION_TRACK_FORMAT = "{track:00} - {Artist Name} - {Track Title}{[ (Quality Full)]}"
 
 _LEGACY_FORMAT_KEYS = ("album_folder_format", "standard_track_format", "multi_disc_folder_format")
+
 
 
 def _uses_legacy_split_formats(settings: dict[str, Any]) -> bool:

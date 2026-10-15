@@ -7,7 +7,7 @@ import re
 from collections import Counter
 from collections.abc import Iterable, Sequence
 
-from trackseerr.naming import VARIOUS_ARTISTS_FOLDER
+from trackseerr.naming import is_various_artists_folder
 from trackseerr.storage_common import clean_library_name
 
 ARTIST_FOLDER = "artist_folder"
@@ -106,7 +106,7 @@ def classify_rename(current_rel: str, proposed_rel: str) -> list[str]:
     new_folders = new[1:-1]
     if len(cur) < 2 or cur[0] != new[0]:
         reasons.append(ARTIST_FOLDER)
-    if (cur[0] == VARIOUS_ARTISTS_FOLDER) ^ (new[0] == VARIOUS_ARTISTS_FOLDER):
+    if is_various_artists_folder(cur[0]) ^ is_various_artists_folder(new[0]):
         reasons.append(COMPILATION_LINK)
     if not cur_folders and new_folders:
         reasons.append(LOOSE_FILE)

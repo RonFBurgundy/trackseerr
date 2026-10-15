@@ -7,9 +7,9 @@ from collections import Counter
 from typing import Any
 
 from trackseerr.naming import (
-    VARIOUS_ARTISTS_FOLDER,
     _fixed_artist_folder,
     existing_artist_folder,
+    is_various_artists_folder,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ def _extract_artist_folder(path: str, norm_root: str) -> str | None:
     if len(parts) < 2:
         return None
     candidate = _fixed_artist_folder(parts[0])
-    if not candidate or candidate == VARIOUS_ARTISTS_FOLDER or candidate.lower() in ("various artists", "various"):
+    if not candidate or is_various_artists_folder(candidate):
         return None
     return candidate
 
