@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional, Union
 
+from trackseerr.list_index import SortDef, build_index
 from trackseerr.models import (
     MusicRequest,
     RequestStatus,
@@ -181,6 +182,20 @@ class RequestStoreMixin:
             cur = self.conn.execute(query, params)
             row = cur.fetchone()
             return int(row[0]) if row else 0
+
+    def requests_index(
+        self,
+        user_id: str | None = None,
+        status: RequestStatus | str | None = None,
+        *,
+        source: str | None = None,
+        sort_dir: str = "desc",
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """(total, groups) for music_requests ordered by created_at DESC, matching list_requests."""
+        where_sql, params = self._build_requests_where(user_id=user_id, status=status, source=source)
+        frm = f"FROM music_requests r WHERE {where_sql}"
+        with self._lock:
+            return build_index(self.conn, frm, params, SortDef("r.created_at", "date"), sort_dir)
 
     def count_request_sources(
         self, user_id: str | None = None

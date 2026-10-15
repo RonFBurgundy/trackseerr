@@ -241,6 +241,19 @@ def list_blocklist(
     return svc.native_blocklist(db, page, page_size, key, sort_dir)
 
 
+@router.get("/blocklist/index", response_model=HistoryIndexResponse, response_model_exclude_unset=True, summary="Scrubber groups for the download blocklist (native only)")
+def blocklist_index(
+    sort_key: Optional[str] = Query(None),
+    sort_dir: str = Query("desc", pattern=SORT_DIR_PATTERN),
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    validate_sort_key(sort_key, ("date",), "date")
+    if _is_lidarr(db):
+        return svc.empty_index("date", sort_dir)
+    return svc.native_blocklist_index(db, sort_dir)
+
+
 @router.get("/searches", response_model=SearchLogPage, summary="Log of indexer and Soulseek searches with their triggers")
 def list_searches(
     page: int = Query(1, ge=1, le=MAX_PAGE),
@@ -252,6 +265,18 @@ def list_searches(
 ) -> dict[str, Any]:
     records, total = db.list_search_log(page, page_size, source_type, request_id)
     return {"page": page, "page_size": page_size, "total": total, "records": records}
+
+
+@router.get("/searches/index", response_model=HistoryIndexResponse, response_model_exclude_unset=True, summary="Scrubber groups for search log")
+def searches_index(
+    source_type: Optional[str] = Query(None, pattern="^(torznab|newznab|slskd)$"),
+    request_id: Optional[str] = Query(None),
+    sort_dir: str = Query("desc", pattern=SORT_DIR_PATTERN),
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    total, groups = db.search_log_index(sort_dir=sort_dir, source_type=source_type, request_id=request_id)
+    return {"sort_key": "date", "sort_dir": sort_dir, "total": total, "groups": groups}
 
 
 @router.delete("/blocklist/{blocklist_id}", response_model=ActionResult, response_model_exclude_unset=True, summary="Remove an entry from the blocklist")

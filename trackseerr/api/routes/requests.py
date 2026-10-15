@@ -21,9 +21,11 @@ from trackseerr.api.dependencies import (
     require_admin_or_permission,
     require_user,
 )
+from trackseerr.api.routes.activity import SORT_DIR_PATTERN
 from trackseerr.api.schemas.requests import (
     BatchCreatedResponse,
     RequestDeleted,
+    RequestIndexResponse,
     RequestListResponse,
     RequestRecord,
     RequestSourcesResponse,
@@ -114,6 +116,26 @@ def list_requests(
         "total": total,
         "page": page,
         "page_size": page_size,
+    }
+
+
+@router.get("/index", response_model=RequestIndexResponse, response_model_exclude_unset=True)
+def requests_index(
+    status_filter: Optional[str] = Query(default=None, alias="status"),
+    source: Optional[str] = Query(None, max_length=32),
+    sort_dir: str = Query("desc", pattern=SORT_DIR_PATTERN),
+    db: Database = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """Scrubber groups for requests. Non-admins see only their own requests; admins and request managers see all."""
+    can_manage = bool(current_user.get("is_admin")) or has_permission(current_user, UserPermission.MANAGE_REQUESTS)
+    user_id = None if can_manage else current_user["id"]
+    total, groups = db.requests_index(user_id=user_id, status=status_filter, source=source, sort_dir=sort_dir)
+    return {
+        "sort_key": "date",
+        "sort_dir": sort_dir,
+        "total": total,
+        "groups": groups,
     }
 
 
