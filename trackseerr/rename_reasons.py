@@ -7,6 +7,7 @@ import re
 from collections import Counter
 from collections.abc import Iterable, Sequence
 
+from trackseerr.naming import VARIOUS_ARTISTS_FOLDER
 from trackseerr.storage_common import clean_library_name
 
 ARTIST_FOLDER = "artist_folder"
@@ -21,6 +22,7 @@ FILE_TITLE = "file_title"
 COLLISION = "collision"
 VERIFIED = "verified"
 AUDIO_MISMATCH = "audio_mismatch"
+COMPILATION_LINK = "compilation_link"
 
 # A move is pre-selected only when it is purely cosmetic or tidies a stray file: anything that touches numbering,
 # titles, years, disc layout or collisions needs a human decision.
@@ -104,6 +106,8 @@ def classify_rename(current_rel: str, proposed_rel: str) -> list[str]:
     new_folders = new[1:-1]
     if len(cur) < 2 or cur[0] != new[0]:
         reasons.append(ARTIST_FOLDER)
+    if (cur[0] == VARIOUS_ARTISTS_FOLDER) ^ (new[0] == VARIOUS_ARTISTS_FOLDER):
+        reasons.append(COMPILATION_LINK)
     if not cur_folders and new_folders:
         reasons.append(LOOSE_FILE)
     elif cur_folders and new_folders:

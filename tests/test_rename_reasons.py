@@ -27,6 +27,10 @@ CASES = [
     ("track_number", "Foo/Bar (2000)/01 - X.flac", "Foo/Bar (2000)/02 - X.flac", ["track_number"], False),
     ("no_change", "Foo/Bar (2000)/01 - X.flac", "Foo/Bar (2000)/01 - X.flac", [], True),
     ("prefixed_number_parsed", "Foo/Bar (2000)/Foo - Bar - 03 - X.flac", "Foo/Bar (2000)/03 - X.flac", [], True),
+    ("compilation_link_from_va", "Various Artists/Now 79 (2011)/01 - Song.flac",
+     "LMFAO/Now 79 (2011)/01 - Song.flac", ["artist_folder", "compilation_link"], False),
+    ("compilation_link_to_va", "Toots & The Maytals/Funky Kingston (1973)/01 - Song.flac",
+     "Various Artists/Funky Kingston (1973)/01 - Song.flac", ["artist_folder", "compilation_link"], False),
 ]
 
 
@@ -61,3 +65,10 @@ def test_build_track_path_uses_artist_folder_verbatim_but_rejects_unsafe_names()
     assert build_track_path(meta, settings).startswith("/music/Mumford and Sons/")
     for bad in ("../evil", "a/b", "a\\b", ".."):
         assert build_track_path({**meta, "artist_folder": bad}, settings).startswith("/music/Mumford and Sons/")
+
+
+def test_compilation_link_not_added_for_normal_artist_moves():
+    got = classify_rename("Crosby, Stills & Nash/Album/01.flac", "Crosby Stills and Nash/Album/01.flac")
+    assert got == ["artist_folder"]
+    assert is_default_selected(got) is True
+

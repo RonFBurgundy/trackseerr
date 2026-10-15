@@ -51,7 +51,8 @@ from trackseerr.library import (
 )
 from trackseerr.job_tracker import track_job
 from trackseerr.task_manager import TRIGGER_MANUAL, record_task_run
-from trackseerr.naming import build_track_path, existing_artist_folder
+from trackseerr.naming import build_track_path
+from trackseerr.artist_folders import resolve_artist_folder
 from trackseerr.rename_reasons import (
     AUDIO_MISMATCH,
     COLLISION,
@@ -82,6 +83,20 @@ _ART_EXTS = (".jpg", ".jpeg", ".png", ".webp")
 _RENAME_PAGE_SIZE = 1000
 
 
+def _cached_artist_folder(
+    db: Database,
+    artist: dict[str, Any],
+    media_settings: dict[str, Any],
+    caches: dict[str, dict[Any, Any]],
+) -> Optional[str]:
+    """Resolves and memoises the artist folder name in caches["artist_folders"]."""
+    folders = caches.setdefault("artist_folders", {})
+    art_id = artist.get("id") or artist.get("name")
+    if art_id not in folders:
+        folders[art_id] = resolve_artist_folder(db, artist, media_settings)
+    return folders[art_id]
+
+
 def _rename_meta(
     db: Database,
     track: dict[str, Any],
@@ -103,7 +118,7 @@ def _rename_meta(
     return {
         "artist": artist["name"],
         "album_artist": artist["name"],
-        "artist_folder": existing_artist_folder(artist, media_settings),
+        "artist_folder": _cached_artist_folder(db, artist, media_settings, caches),
         "album": album["title"],
         "title": track["title"],
         "track_number": track["track_number"],

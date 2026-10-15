@@ -65,7 +65,8 @@ from trackseerr.library import (
     resolve_collision,
     write_audio_tags,
 )
-from trackseerr.naming import build_track_path, existing_artist_folder
+from trackseerr.naming import build_track_path
+from trackseerr.artist_folders import resolve_artist_folder
 from trackseerr.quality import evaluate_release, parse_release_title
 from trackseerr.recycle_bin import (
     is_system_dirname,
@@ -726,7 +727,7 @@ def _commit_one_item(run: _CommitRun, item: ManualImportItem) -> None:
     meta["quality_full"] = quality_name  # same catalog source as rename preview/apply
     meta["artist"] = artist["name"]
     meta["album_artist"] = artist["name"]
-    meta["artist_folder"] = existing_artist_folder(artist, run.media_settings)
+    meta["artist_folder"] = resolve_artist_folder(run.db, artist, run.media_settings)
     meta["album"] = album["title"]
     meta["title"] = track["title"]
     meta["track_number"] = track["track_number"]

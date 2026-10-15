@@ -731,6 +731,7 @@ def test_rename_preview_and_apply(
         "root_folder_path": str(music_dir),
         "standard_track_format": "{track:00} - {Track Title}",
         "album_folder_format": "{Album Title} ({Release Year})",
+        "rename_artist_folders": True,
     })
 
     # Create file at a non-standard legacy path
@@ -1517,4 +1518,98 @@ def test_rename_preview_owned_disc_layout(
     assert items3["rt-sd-1"].endswith("Single Disc Artist/Single Disc Album (2020)/Disc 01/01 - Side A.flac")
     assert "Disc 02" in items3["rt-sd-2"]
     assert items3["rt-sd-2"].endswith("Single Disc Artist/Single Disc Album (2020)/Disc 02/01 - Side B.flac")
+
+
+def test_rename_preview_observed_artist_folder(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    _rename_settings(test_db, root)
+    test_db.update_media_management_settings({"artist_folder_format": "{Artist Name}"})
+
+    # Artist named "Crosby Stills and Nash", but files sit in "<root>/Crosby, Stills & Nash/"
+    test_db.upsert_library_artist({
+        "id": "csn",
+        "name": "Crosby Stills and Nash",
+        "monitored": True,
+        "path": str(root / "Crosby Stills and Nash"),
+    })
+    test_db.upsert_library_album({
+        "id": "csn-alb",
+        "artist_id": "csn",
+        "title": "Deja Vu",
+        "year": 1970,
+        "monitored": True,
+    })
+    test_db.upsert_library_track({
+        "id": "csn-trk-1",
+        "album_id": "csn-alb",
+        "artist_id": "csn",
+        "title": "Carry On",
+        "track_number": 1,
+        "disc_number": 1,
+        "monitored": True,
+    })
+    test_db.upsert_library_track({
+        "id": "csn-trk-2",
+        "album_id": "csn-alb",
+        "artist_id": "csn",
+        "title": "Teach Your Children",
+        "track_number": 2,
+        "disc_number": 1,
+        "monitored": True,
+    })
+
+    f1 = root / "Crosby, Stills & Nash" / "Deja Vu (1970)" / "01 - Carry On.flac"
+    f2 = root / "Crosby, Stills & Nash" / "Deja Vu (1970)" / "02 - Teach Your Children.flac"
+    test_db.upsert_library_file({
+        "id": "csn-f1", "track_id": "csn-trk-1", "file_path": str(f1), "relative_path": f1.name, "codec": "FLAC",
+    })
+    test_db.upsert_library_file({
+        "id": "csn-f2", "track_id": "csn-trk-2", "file_path": str(f2), "relative_path": f2.name, "codec": "FLAC",
+    })
+
+    # With rename_artist_folders=False, rename preview keeps "Crosby, Stills & Nash"
+    resp = client.post("/api/library/rename/preview", json={"artist_id": "csn"}, headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 2
+    assert all(r["proposed_path"].startswith(str(root / "Crosby, Stills & Nash") + "/") for r in data["items"])
+    assert all(r["needs_rename"] is False for r in data["items"])
+
+    # With rename_artist_folders on -> renders the name ("Crosby Stills and Nash")
+    test_db.update_media_management_settings({"rename_artist_folders": True})
+    resp_on = client.post("/api/library/rename/preview", json={"artist_id": "csn"}, headers=headers)
+    assert resp_on.status_code == 200
+    data_on = resp_on.json()
+    assert data_on["total"] == 2
+    assert all(r["proposed_path"].startswith(str(root / "Crosby Stills and Nash") + "/") for r in data_on["items"])
+    assert all(r["reasons"] == ["artist_folder"] for r in data_on["items"])
+
+    # Files in two folders -> majority wins
+    test_db.update_media_management_settings({"rename_artist_folders": False})
+    test_db.upsert_library_track({
+        "id": "csn-trk-3",
+        "album_id": "csn-alb",
+        "artist_id": "csn",
+        "title": "Our House",
+        "track_number": 3,
+        "disc_number": 1,
+        "monitored": True,
+    })
+    f3 = root / "Other Folder" / "Deja Vu (1970)" / "03 - Our House.flac"
+    test_db.upsert_library_file({
+        "id": "csn-f3", "track_id": "csn-trk-3", "file_path": str(f3), "relative_path": f3.name, "codec": "FLAC",
+    })
+
+    resp_maj = client.post("/api/library/rename/preview", json={"artist_id": "csn"}, headers=headers)
+    assert resp_maj.status_code == 200
+    data_maj = resp_maj.json()
+    assert data_maj["total"] == 3
+    assert all(r["proposed_path"].startswith(str(root / "Crosby, Stills & Nash") + "/") for r in data_maj["items"])
+    f3_row = next(r for r in data_maj["items"] if r["file_id"] == "csn-f3")
+    assert f3_row["needs_rename"] is True
+    assert "artist_folder" in f3_row["reasons"]
 
