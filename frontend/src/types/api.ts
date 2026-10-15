@@ -1984,6 +1984,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/albums/{album_id}/musicbrainz-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Link Album Musicbrainz
+         * @description Links an album to a MusicBrainz release MBID.
+         */
+        post: operations["link_album_musicbrainz_api_library_albums__album_id__musicbrainz_link_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/albums/{album_id}/musicbrainz-seed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Album Musicbrainz Seed
+         * @description Builds prefilled form fields for seeding a release on MusicBrainz.
+         */
+        get: operations["get_album_musicbrainz_seed_api_library_albums__album_id__musicbrainz_seed_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/albums/{album_id}/search": {
         parameters: {
             query?: never;
@@ -2655,6 +2695,26 @@ export interface paths {
          * @description Retrieves current Lidarr migration job status (report name falls back to the newest report on disk).
          */
         get: operations["get_lidarr_migration_status_api_library_migrate_lidarr_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/musicbrainz/unlinked": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Musicbrainz Unlinked
+         * @description Lists albums without a MusicBrainz release link.
+         */
+        get: operations["list_musicbrainz_unlinked_api_library_musicbrainz_unlinked_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -10036,6 +10096,70 @@ export interface components {
              * @description Title of the track from source playlist
              */
             source_title: string;
+        };
+        /**
+         * MbLinkRequest
+         * @description Request payload to link an album to a MusicBrainz release.
+         */
+        MbLinkRequest: {
+            /** Release Mbid */
+            release_mbid: string;
+        };
+        /**
+         * MbReleaseSeed
+         * @description Pre-filled MusicBrainz Add-Release seeding payload.
+         */
+        MbReleaseSeed: {
+            /** Action Url */
+            action_url: string;
+            /** Fields */
+            fields: string[][];
+        };
+        /**
+         * MbUnlinkedAlbum
+         * @description An album lacking a MusicBrainz release link.
+         */
+        MbUnlinkedAlbum: {
+            /** Artist Id */
+            artist_id?: string | null;
+            /** Artist Name */
+            artist_name?: string | null;
+            /**
+             * File Count
+             * @default 0
+             */
+            file_count: number;
+            /** Foreign Album Id */
+            foreign_album_id?: string | null;
+            /** Id */
+            id: string;
+            /** Mb Release Group Id */
+            mb_release_group_id?: string | null;
+            /** Release Date */
+            release_date?: string | null;
+            /** Title */
+            title: string;
+            /**
+             * Track Count
+             * @default 0
+             */
+            track_count: number;
+            /** Year */
+            year?: number | null;
+        };
+        /**
+         * MbUnlinkedPage
+         * @description Paginated list of unlinked MusicBrainz albums.
+         */
+        MbUnlinkedPage: {
+            /** Items */
+            items: components["schemas"]["MbUnlinkedAlbum"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Total */
+            total: number;
         };
         /** MeResponse */
         MeResponse: {
@@ -17619,6 +17743,74 @@ export interface operations {
             };
         };
     };
+    link_album_musicbrainz_api_library_albums__album_id__musicbrainz_link_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                album_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MbLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryAlbumRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_album_musicbrainz_seed_api_library_albums__album_id__musicbrainz_seed_get: {
+        parameters: {
+            query?: {
+                redirect_uri?: string | null;
+            };
+            header?: never;
+            path: {
+                album_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MbReleaseSeed"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     search_album_api_library_albums__album_id__search_post: {
         parameters: {
             query?: never;
@@ -18801,6 +18993,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MigrationStatus"];
+                };
+            };
+        };
+    };
+    list_musicbrainz_unlinked_api_library_musicbrainz_unlinked_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                kind?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MbUnlinkedPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

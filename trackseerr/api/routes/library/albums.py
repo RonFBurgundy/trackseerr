@@ -12,6 +12,7 @@ from trackseerr import art_pipeline
 from trackseerr import lidarr_library
 from trackseerr.api.dependencies import (
     get_db,
+    get_discovery_client,
     get_lidarr_client,
     get_mbid_enricher,
     require_admin,
@@ -22,17 +23,22 @@ from trackseerr.api.schemas.library import (
     AlbumsUpdatedResponse,
     CommandResponse,
     LibraryAlbumRecord,
+    MbLinkRequest,
+    MbReleaseSeed,
+    MbUnlinkedPage,
     SuccessResponse,
 )
 from trackseerr.api.routes.activity import (
     lidarr_numeric_id,
     require_lidarr,
 )
+from trackseerr.clients.discovery import DiscoveryClient
 from trackseerr.clients.lidarr import (
     LidarrClient,
 )
 from trackseerr.album_track_hydration import hydrate_album_tracks
 from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.mb_seed import build_release_seed, link_album_release
 from trackseerr.storage import Database
 
 
@@ -215,4 +221,77 @@ def delete_album(
 
     success = db.delete_library_album(album_id)
     return {"success": success}
+
+
+@router.get(
+    "/musicbrainz/unlinked",
+    dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)],
+    response_model=MbUnlinkedPage,
+    response_model_exclude_unset=True,
+)
+def list_musicbrainz_unlinked(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    kind: Optional[str] = Query(None),
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Lists albums without a MusicBrainz release link."""
+    items, total = db.list_albums_without_mb_release(page=page, page_size=page_size, kind=kind)
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.get(
+    "/albums/{album_id}/musicbrainz-seed",
+    dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)],
+    response_model=MbReleaseSeed,
+    response_model_exclude_unset=True,
+)
+def get_album_musicbrainz_seed(
+    album_id: str,
+    redirect_uri: Optional[str] = Query(None),
+    db: Database = Depends(get_db),
+    discovery: DiscoveryClient = Depends(get_discovery_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Builds prefilled form fields for seeding a release on MusicBrainz."""
+    album = db.get_library_album(album_id)
+    if album is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+
+    clean_redirect: Optional[str] = None
+    if redirect_uri:
+        raw_uri = redirect_uri.strip()
+        if len(raw_uri) <= 2048 and raw_uri.startswith(("http://", "https://")):
+            clean_redirect = raw_uri
+
+    try:
+        return build_release_seed(db, discovery, album_id, redirect_uri=clean_redirect)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+
+
+@router.post(
+    "/albums/{album_id}/musicbrainz-link",
+    dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)],
+    response_model=LibraryAlbumRecord,
+    response_model_exclude_unset=True,
+)
+def link_album_musicbrainz(
+    album_id: str,
+    body: MbLinkRequest,
+    db: Database = Depends(get_db),
+    enricher: MbidEnricherClient = Depends(get_mbid_enricher),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Links an album to a MusicBrainz release MBID."""
+    album = db.get_library_album(album_id)
+    if album is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+
+    try:
+        return link_album_release(db, enricher, album_id, body.release_mbid)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+
 

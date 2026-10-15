@@ -804,6 +804,81 @@ class LibraryCatalogStoreMixin:
             )
             self.conn.commit()
 
+    def set_album_mb_release_group_id(self, album_id: str, release_group_id: str) -> None:
+        """Sets library_albums.mb_release_group_id for an album."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE library_albums SET mb_release_group_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (str(release_group_id).strip(), str(album_id)),
+            )
+            self.conn.commit()
+
+    def list_albums_without_mb_release(
+        self, *, page: int, page_size: int, kind: str | None = None
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Lists albums with at least one file and missing MusicBrainz release ID, paginated."""
+        page_num = max(1, int(page))
+        size = max(1, min(int(page_size), 200))
+        offset = (page_num - 1) * size
+
+        where_clauses = [
+            "(a.mb_release_id IS NULL OR a.mb_release_id = '')",
+            "EXISTS (SELECT 1 FROM library_tracks t WHERE t.album_id = a.id AND (t.has_file = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id)))",
+        ]
+        params: list[Any] = []
+
+        if kind == "no_release_group":
+            where_clauses.append("(a.mb_release_group_id IS NULL OR a.mb_release_group_id = '')")
+        elif kind == "no_release":
+            where_clauses.append("(a.mb_release_group_id IS NOT NULL AND a.mb_release_group_id != '')")
+
+        where_sql = " AND ".join(where_clauses)
+        count_sql = f"SELECT COUNT(*) FROM library_albums a WHERE {where_sql}"
+        select_sql = f"""
+            SELECT
+                a.id,
+                a.title,
+                ar.name AS artist_name,
+                a.artist_id,
+                a.year,
+                a.release_date,
+                COALESCE(a.total_tracks, (SELECT COUNT(*) FROM library_tracks t WHERE t.album_id = a.id)) AS track_count,
+                (SELECT COUNT(DISTINCT t.id) FROM library_tracks t WHERE t.album_id = a.id AND (t.has_file = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id))) AS file_count,
+                a.mb_release_group_id,
+                a.foreign_album_id
+            FROM library_albums a
+            LEFT JOIN library_artists ar ON ar.id = a.artist_id
+            WHERE {where_sql}
+            ORDER BY COALESCE(NULLIF(ar.sort_name, ''), ar.name, '') COLLATE NOCASE ASC,
+                     COALESCE(NULLIF(a.sort_title, ''), a.title, '') COLLATE NOCASE ASC,
+                     a.id ASC
+            LIMIT ? OFFSET ?
+        """
+
+        with self._lock:
+            cur = self.conn.execute(count_sql, params)
+            total = int(cur.fetchone()[0] or 0)
+
+            cur = self.conn.execute(select_sql, params + [size, offset])
+            rows = cur.fetchall()
+
+        items = [
+            {
+                "id": str(r["id"]),
+                "title": str(r["title"] or ""),
+                "artist_name": str(r["artist_name"]) if r["artist_name"] is not None else None,
+                "artist_id": str(r["artist_id"]) if r["artist_id"] is not None else None,
+                "year": int(r["year"]) if r["year"] is not None else None,
+                "release_date": str(r["release_date"]) if r["release_date"] is not None else None,
+                "track_count": int(r["track_count"] or 0),
+                "file_count": int(r["file_count"] or 0),
+                "mb_release_group_id": str(r["mb_release_group_id"]) if r["mb_release_group_id"] is not None else None,
+                "foreign_album_id": str(r["foreign_album_id"]) if r["foreign_album_id"] is not None else None,
+            }
+            for r in rows
+        ]
+        return items, total
+
     def set_track_mb_recording_id(self, track_id: str, recording_id: str) -> None:
         """Fills library_tracks.mb_recording_id for a track, only when currently empty."""
         with self._lock:
