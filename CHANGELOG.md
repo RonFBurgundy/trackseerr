@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- Contribute to MusicBrainz: "Not on MusicBrainz…" in the Library ⋯ menu lists albums you own that MusicBrainz lacks (or lacks this edition of). "Submit to MusicBrainz" opens MusicBrainz's Add Release form prefilled with the tracklist, track lengths, label, barcode and Deezer link; log in there, check it and submit, and you come back with the album linked to the new release. You can also paste a MusicBrainz release link to link an album by hand.
 - Admins can add and monitor an artist directly: "Add artist…" in the Library ⋯ menu, an "Add as artist" button when a library search finds little or nothing, and an "Add / monitor" button on a Discover artist page for artists not yet in the library (it becomes "Open in Library" once added).
 - Each request shows how it was made (manual, playlist with its name, mix, Wanted, discography…), and the Requests page can be filtered by that source.
 - "Retag entire library" (retag dialog, or the "Library Retag" task) rewrites tags in the background on every file whose tags differ from the catalog, now including the MusicBrainz album-artist ID, so Plex, Jellyfin and Picard match reliably.

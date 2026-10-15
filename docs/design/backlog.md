@@ -210,7 +210,7 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     discovery → pick → monitor options); an "Add artist" CTA when a library search returns few/no results; and on the
     Discover artist profile, a combo button — "Open in library" when the artist exists, "Add / monitor" (admin only)
     when it doesn't.
-29. **P2 · Contribute missing albums to MusicBrainz.** (user, 2026-10-15) A "Not on MusicBrainz" list (albums with
+29. **DONE 2026-10-15 · P2 · Contribute missing albums to MusicBrainz.** (user, 2026-10-15) A "Not on MusicBrainz" list (albums with
     files and no release MBID: no release group at all vs. missing edition), and per album a "Submit to MusicBrainz"
     button that opens MB's release editor prefilled (release editor seeding: tracklist, lengths, label, barcode,
     Deezer URL, edit note) — the user logs in to MB and reviews. MB redirects back with `release_mbid`, which links
