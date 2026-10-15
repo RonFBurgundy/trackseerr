@@ -207,6 +207,7 @@ DEFAULT_MULTI_DISC_TRACK_FORMAT: str = _DEFAULT_PRESET["multi_disc_track_format"
 DEFAULT_COMPILATION_TRACK_FORMAT: str = _DEFAULT_PRESET["compilation_track_format"]
 DEFAULT_COLON_REPLACEMENT: str = _DEFAULT_PRESET["colon_replacement_format"]
 DEFAULT_REPLACE_ILLEGAL: bool = _DEFAULT_PRESET["replace_illegal_characters"]
+VARIOUS_ARTISTS_FOLDER: str = "Various Artists"
 _LEGACY_COMPILATION_TRACK_FORMAT = "{track:00} - {Artist Name} - {Track Title}{[ (Quality Full)]}"
 
 _LEGACY_FORMAT_KEYS = ("album_folder_format", "standard_track_format", "multi_disc_folder_format")
@@ -823,6 +824,9 @@ def _fixed_artist_folder(value: Any) -> str:
     return name
 
 
+fixed_artist_folder = _fixed_artist_folder
+
+
 def existing_artist_folder(artist: dict[str, Any] | None, settings: dict[str, Any]) -> str | None:
     """Folder name of a library artist's existing directory, when rename should keep it.
 
@@ -872,10 +876,10 @@ def build_path_parts(
     artist_meta = meta
     if is_compilation and (not meta.get("artist") or album_artist.lower() in ("various artists", "various")):
         artist_meta = dict(meta)
-        artist_meta["artist"] = album_artist or "Various Artists"
+        artist_meta["artist"] = album_artist or VARIOUS_ARTISTS_FOLDER
     artist_component = _fixed_artist_folder(meta.get("artist_folder")) or render(artist_format, artist_meta)
     if not artist_component:
-        artist_component = "Various Artists" if is_compilation else "Unknown Artist"
+        artist_component = VARIOUS_ARTISTS_FOLDER if is_compilation else "Unknown Artist"
 
     # Track format -> folders + file name
     use_multi = _detect_multi_disc(meta) if multi_disc is None else multi_disc

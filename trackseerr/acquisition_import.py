@@ -45,7 +45,8 @@ from trackseerr.models import (
     NotificationEvent,
     RequestStatus,
 )
-from trackseerr.naming import build_track_path, existing_artist_folder
+from trackseerr.naming import build_track_path
+from trackseerr.artist_folders import resolve_artist_folder
 from trackseerr.notifications import notification_dispatcher
 from trackseerr.redaction import safe_exc
 from trackseerr.quality import evaluate_release, parse_release_title
@@ -76,6 +77,7 @@ def _apply_catalog_album(
     album: dict[str, Any],
     artist: Optional[dict[str, Any]],
     media_settings: Optional[dict[str, Any]] = None,
+    db: Optional[Database] = None,
 ) -> None:
     """Re-labels a catalog-matched file with the catalog album/artist so compilation tags can't misfile it.
 
@@ -85,7 +87,7 @@ def _apply_catalog_album(
     if artist:
         metadata["artist"] = artist["name"]
         metadata["album_artist"] = artist["name"]
-        metadata["artist_folder"] = existing_artist_folder(artist, media_settings or {})
+        metadata["artist_folder"] = resolve_artist_folder(db, artist, media_settings or {})
     if album.get("year"):
         metadata["release_year"] = metadata["year"] = album["year"]
     else:
@@ -127,7 +129,7 @@ def _existing_folder_for_tags(
                 if not artist and re.search(r"\band\b", name_str, flags=re.IGNORECASE):
                     artist = db.get_library_artist_by_name(re.sub(r"\band\b", "&", name_str, flags=re.IGNORECASE))
         if artist:
-            return existing_artist_folder(artist, media_settings)
+            return resolve_artist_folder(db, artist, media_settings)
     except sqlite3.Error as e:
         logger.warning("Failed to lookup existing artist folder for tags: %s", e)
     return None
@@ -681,6 +683,7 @@ class ImportPipelineMixin(ImportCatalogMixin):
                         job.target_album,
                         db.get_library_artist(job.target_album["artist_id"]),
                         ctx.media_settings,
+                        db=db,
                     )
 
         if job.expected_tracks and matched_expected_track is None:

@@ -69,6 +69,11 @@ export const RENAME_REASONS: Readonly<Record<string, RenameReasonInfo>> = {
     help: 'AcoustID identifies this audio as another track. Renaming is blocked until the file is linked to the right track.',
     risky: true,
   },
+  compilation_link: {
+    label: 'Compilation link',
+    help: 'Moves a track between a Various Artists compilation and an artist folder — the track is probably linked to the wrong album; check it before applying.',
+    risky: true,
+  },
 };
 
 export function reasonInfo(code: string): RenameReasonInfo {

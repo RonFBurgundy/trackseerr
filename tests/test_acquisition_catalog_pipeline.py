@@ -873,6 +873,76 @@ def test_import_renders_artist_folder_when_renaming_enabled(test_db: Database, w
     assert rel.parts[0] == "Mumford and Sons"
 
 
+def test_import_lands_in_artist_observed_folder(test_db: Database, workspace_dirs):
+    downloads_dir, music_dir = workspace_dirs
+    settings = test_db.get_media_management_settings()
+    settings.update({
+        "root_folder_path": str(music_dir), "library_mode": "native", "staging_folder_path": str(downloads_dir),
+        "enrich_mbids": False, "write_audio_tags": False, "artist_folder_format": "{Artist CleanName}",
+        "rename_artist_folders": False,
+    })
+    test_db.update_media_management_settings(settings)
+    test_db.create_download_client(
+        DownloadClientConfig(id="c1", name="Slskd", driver_type=DownloadDriverType.SLSKD, host_url="http://slskd:5030")
+    )
+    # Stored artist name is "Crosby Stills and Nash", with stored path matching that name
+    test_db.upsert_library_artist(
+        LibraryArtist(id="art-csn", name="Crosby Stills and Nash", path=str(music_dir / "Crosby Stills and Nash"))
+    )
+    test_db.upsert_library_album(
+        LibraryAlbum(id="alb-csn-1", artist_id="art-csn", title="Deja Vu", year=1970)
+    )
+    test_db.upsert_library_track(
+        LibraryTrack(id="trk-csn-1", album_id="alb-csn-1", artist_id="art-csn", title="Carry On",
+                     track_number=1, disc_number=1)
+    )
+    # Pre-existing file sits in "Crosby, Stills & Nash"
+    old_file = music_dir / "Crosby, Stills & Nash" / "Deja Vu (1970)" / "01 - Carry On.flac"
+    test_db.upsert_library_file({
+        "id": "f-csn-old", "track_id": "trk-csn-1", "file_path": str(old_file),
+        "relative_path": old_file.name, "codec": "FLAC",
+    })
+
+    # New download for another track of this artist
+    test_db.upsert_library_album(
+        LibraryAlbum(id="alb-csn-2", artist_id="art-csn", title="So Far", year=1974)
+    )
+    test_db.upsert_library_track(
+        LibraryTrack(id="trk-csn-2", album_id="alb-csn-2", artist_id="art-csn", title="Suite: Judy Blue Eyes",
+                     track_number=1, disc_number=1)
+    )
+    test_db.create_active_download(
+        ActiveDownload(id="dl-csn", client_id="c1", title="CSN So Far", artist="Crosby Stills and Nash",
+                       item_type="track", status=DownloadStatus.COMPLETED.value, download_hash="h-csn",
+                       track_id="trk-csn-2", album_id="alb-csn-2")
+    )
+    dl = downloads_dir / "CSN_So_Far"
+    af = dl / "01 - Suite Judy Blue Eyes.flac"
+    dl.mkdir(parents=True, exist_ok=True)
+    write_flac(af)
+    driver = MagicMock()
+    driver.get_status.return_value = {
+        "status": DownloadStatus.COMPLETED.value, "progress": 100.0, "size_bytes": 1, "speed_bps": 0,
+        "eta_seconds": 0, "source_path": str(dl), "error_message": None,
+    }
+    meta = {
+        "artist": "Crosby Stills and Nash", "title": "Suite: Judy Blue Eyes", "album": "So Far", "year": "1974",
+        "track_number": 1, "disc_number": 1, "total_discs": 1, "codec": "FLAC", "bits_per_sample": 16,
+        "bitrate": 900, "sample_rate": 44100, "extension": ".flac", "file_path": str(af),
+    }
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_import.inspect_audio_file", return_value=dict(meta)), \
+         patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=dict(meta)), \
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+        stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(downloads_dir))
+    assert stats["imported"] == 1
+    placed = [p for p in music_dir.rglob("*.flac") if p != old_file]
+    assert len(placed) == 1
+    rel = placed[0].relative_to(music_dir)
+    assert rel.parts[0] == "Crosby, Stills & Nash"
+
+
+
 def _import_uncatalogued(
     test_db: Database,
     workspace_dirs,

@@ -1074,6 +1074,21 @@ class LibraryCatalogStoreMixin:
             ).fetchall()
             return [(str(r["file_path"]), str(r["track_id"])) for r in rows]
 
+    def list_artist_file_paths(self, artist_id: str, limit: int = 5000) -> list[str]:
+        """File paths for an artist's tracks, bounded."""
+        with self._lock:
+            rows = self.conn.execute(
+                """
+                SELECT f.file_path
+                FROM library_files f
+                JOIN library_tracks t ON t.id = f.track_id
+                WHERE t.artist_id = ?
+                LIMIT ?
+                """,
+                (str(artist_id), int(limit)),
+            ).fetchall()
+            return [str(r["file_path"]) for r in rows if r["file_path"]]
+
     def delete_library_file(self, file_id: str) -> bool:
         """Deletes a library file record."""
         with self._lock:
