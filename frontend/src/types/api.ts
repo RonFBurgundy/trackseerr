@@ -4153,6 +4153,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/requests/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Request Sources
+         * @description Returns request counts grouped by source.
+         */
+        get: operations["get_request_sources_api_requests_sources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/requests/{request_id}": {
         parameters: {
             query?: never;
@@ -12314,8 +12334,14 @@ export interface components {
         RequestListResponse: {
             /** Count */
             count: number;
+            /** Page */
+            page?: number | null;
+            /** Page Size */
+            page_size?: number | null;
             /** Requests */
             requests: components["schemas"]["RequestRecord"][];
+            /** Total */
+            total?: number | null;
         };
         /** RequestRecord */
         RequestRecord: {
@@ -12369,6 +12395,18 @@ export interface components {
             user_id: string;
             /** Username */
             username?: string | null;
+        };
+        /** RequestSourceCount */
+        RequestSourceCount: {
+            /** Count */
+            count: number;
+            /** Source */
+            source: string;
+        };
+        /** RequestSourcesResponse */
+        RequestSourcesResponse: {
+            /** Sources */
+            sources: components["schemas"]["RequestSourceCount"][];
         };
         /** ResetPasswordResponse */
         ResetPasswordResponse: {
@@ -21325,6 +21363,9 @@ export interface operations {
         parameters: {
             query?: {
                 status?: string | null;
+                page?: number;
+                page_size?: number;
+                source?: string | null;
             };
             header?: never;
             path?: never;
@@ -21414,6 +21455,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_request_sources_api_requests_sources_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestSourcesResponse"];
                 };
             };
         };

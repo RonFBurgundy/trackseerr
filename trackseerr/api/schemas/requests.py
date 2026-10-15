@@ -1,8 +1,7 @@
 """Response models for ``/api/requests`` (``api/routes/requests.py``).
 
 ``RequestRecord`` is a ``music_requests`` row with the requester's username joined (``Database.get_request`` /
-``list_requests``). ``list_requests`` omits the trigger columns, so those are optional and the routes use
-``response_model_exclude_unset=True`` to keep them absent there.
+``list_requests``).
 """
 
 from typing import Optional
@@ -41,6 +40,18 @@ class RequestRecord(ApiModel):
 class RequestListResponse(ApiModel):
     requests: list[RequestRecord]
     count: int
+    total: Optional[int] = None
+    page: Optional[int] = None
+    page_size: Optional[int] = None
+
+
+class RequestSourceCount(ApiModel):
+    source: str
+    count: int
+
+
+class RequestSourcesResponse(ApiModel):
+    sources: list[RequestSourceCount]
 
 
 class BatchCreatedResponse(ApiModel):

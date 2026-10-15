@@ -101,34 +101,106 @@ class RequestStoreMixin:
         "rejected": ("rejected",),
     }
 
-    def list_requests(
-        self, user_id: Optional[str] = None, status: Optional[str] = None
-    ) -> list[dict[str, Any]]:
-        """Lists requests filtered by user_id and/or status with username joined."""
-        query = """
-            SELECT r.id, r.user_id, r.item_type, r.title, r.artist, r.album,
-                   r.cover_url, r.preview_url, r.status, r.release_date, r.foreign_id,
-                   r.quality_profile_id, r.current_quality, r.cutoff_met,
-                   r.created_at, r.updated_at, r.batch_id, r.batch_kind, r.status_reason, r.status_message,
-                   r.next_attempt_at, u.username
-            FROM music_requests r
-            LEFT JOIN users u ON r.user_id = u.id
-            WHERE 1=1
-        """
+    def _build_requests_where(
+        self,
+        user_id: str | None = None,
+        status: RequestStatus | str | None = None,
+        *,
+        source: str | None = None,
+    ) -> tuple[str, list[Any]]:
+        clauses = ["1=1"]
         params: list[Any] = []
         if user_id:
-            query += " AND r.user_id = ?"
+            clauses.append("r.user_id = ?")
             params.append(str(user_id))
         if status:
             status_val = status.value if hasattr(status, "value") else str(status)
             # UI tab names are not stored values: "approved" rows are stored as 'processing' and
             # "fulfilled" rows as 'available'.
             stored = self._REQUEST_STATUS_ALIASES.get(status_val.strip().lower(), (status_val,))
-            query += f" AND r.status IN ({','.join('?' * len(stored))})"
+            clauses.append(f"r.status IN ({','.join('?' * len(stored))})")
             params.extend(stored)
+        if source:
+            source_val = source.strip()
+            if source_val.lower() == "request":
+                clauses.append('(r."trigger" IS NULL OR r."trigger" IN (?, ?))')
+                params.extend(["request", "request_approved"])
+            else:
+                clauses.append('r."trigger" = ?')
+                params.append(source_val)
+        return " AND ".join(clauses), params
 
-        query += " ORDER BY r.created_at DESC"
+    def list_requests(
+        self,
+        user_id: str | None = None,
+        status: RequestStatus | str | None = None,
+        *,
+        source: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Lists requests filtered by user_id, status, and/or source with username joined."""
+        where_sql, params = self._build_requests_where(user_id=user_id, status=status, source=source)
+        query = f"""
+            SELECT r.id, r.user_id, r.item_type, r.title, r.artist, r.album,
+                   r.cover_url, r.preview_url, r.status, r.release_date, r.foreign_id,
+                   r.quality_profile_id, r.current_quality, r.cutoff_met,
+                   r.created_at, r.updated_at, r.batch_id, r.batch_kind, r.status_reason, r.status_message,
+                   r.next_attempt_at, r."trigger", r.trigger_ref, r.trigger_label, u.username
+            FROM music_requests r
+            LEFT JOIN users u ON r.user_id = u.id
+            WHERE {where_sql}
+            ORDER BY r.created_at DESC, r.id DESC
+        """
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            params.extend([int(limit), int(offset)])
+        elif offset:
+            query += " LIMIT -1 OFFSET ?"
+            params.append(int(offset))
 
+        with self._lock:
+            cur = self.conn.execute(query, params)
+            return [dict(row) for row in cur.fetchall()]
+
+    def count_requests(
+        self,
+        user_id: str | None = None,
+        status: RequestStatus | str | None = None,
+        *,
+        source: str | None = None,
+    ) -> int:
+        """Counts requests matching user_id, status, and/or source filters."""
+        where_sql, params = self._build_requests_where(user_id=user_id, status=status, source=source)
+        query = f"""
+            SELECT COUNT(*)
+            FROM music_requests r
+            WHERE {where_sql}
+        """
+        with self._lock:
+            cur = self.conn.execute(query, params)
+            row = cur.fetchone()
+            return int(row[0]) if row else 0
+
+    def count_request_sources(
+        self, user_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Counts requests grouped by source kind (normalized), scoped to user_id if provided."""
+        query = """
+            SELECT
+                CASE
+                    WHEN r."trigger" IS NULL OR r."trigger" IN ('request', 'request_approved') THEN 'request'
+                    ELSE r."trigger"
+                END AS source,
+                COUNT(*) AS count
+            FROM music_requests r
+            WHERE 1=1
+        """
+        params: list[Any] = []
+        if user_id:
+            query += " AND r.user_id = ?"
+            params.append(str(user_id))
+        query += " GROUP BY source ORDER BY count DESC, source ASC"
         with self._lock:
             cur = self.conn.execute(query, params)
             return [dict(row) for row in cur.fetchall()]
