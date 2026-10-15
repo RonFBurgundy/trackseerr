@@ -32,7 +32,9 @@ from trackseerr.api.dependencies import (
     get_discovery_client,
 )
 from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.artist_ingest import ingest_artist_native
 from trackseerr.clients.discovery import DiscoveryClient
+from trackseerr.clients.mbid_enricher import MbidEnricherClient
 from trackseerr.config import Config
 from trackseerr.models import (
     ActiveDownload,
@@ -782,3 +784,57 @@ def test_get_library_album_by_title_release_group_awareness(tmp_path: Path):
         assert db.get_library_album_by_title("a2", "Same", release_group_id="rg-y")["id"] == "unlinked"
     finally:
         db.close()
+
+
+def test_ingest_artist_native_direct_call(test_db: Database, mock_discovery_client):
+    mock_enricher = MagicMock(spec=MbidEnricherClient)
+    res = ingest_artist_native(
+        test_db,
+        mock_discovery_client,
+        mock_enricher,
+        foreign_artist_id="deezer:artist:27",
+        artist_name="Daft Punk",
+        monitor_option="all",
+        monitored=True,
+    )
+    assert res["name"] == "Daft Punk"
+    assert res["foreign_artist_id"] == "deezer:artist:27"
+    assert res["albums_ingested"] > 0
+    assert res["tracks_ingested"] > 0
+
+    artist = test_db.get_library_artist_by_foreign_id("deezer:artist:27")
+    assert artist is not None
+    assert artist["name"] == "Daft Punk"
+
+    albums = test_db.list_library_albums(artist_id=artist["id"])
+    assert len(albums) > 0
+
+    tracks = test_db.list_library_tracks(album_id=albums[0]["id"])
+    assert len(tracks) > 0
+
+
+def test_ingest_artist_native_existing_artist_short_circuits(test_db: Database, mock_discovery_client):
+    mock_enricher = MagicMock(spec=MbidEnricherClient)
+    pre_existing = test_db.upsert_library_artist(
+        LibraryArtist(
+            id="art-pre-existing-1",
+            name="Daft Punk",
+            foreign_artist_id="deezer:artist:27",
+            monitored=True,
+        )
+    )
+    res = ingest_artist_native(
+        test_db,
+        mock_discovery_client,
+        mock_enricher,
+        foreign_artist_id="deezer:artist:27",
+        artist_name="Daft Punk",
+    )
+    assert res["already_existed"] is True
+    assert res["id"] == pre_existing["id"]
+    assert res["albums_ingested"] == 0
+    assert res["tracks_ingested"] == 0
+
+    albums = test_db.list_library_albums(artist_id=pre_existing["id"])
+    assert len(albums) == 0
+
