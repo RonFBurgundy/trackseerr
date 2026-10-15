@@ -1168,6 +1168,9 @@ def retag_library(
             break
 
         scanned += 1
+        if on_progress is not None and scanned % 100 == 0:
+            on_progress(scanned, total)
+
         res = _evaluate_file_retag(
             db=db,
             t=t,
@@ -1204,9 +1207,6 @@ def retag_library(
             errors += 1
         elif run.skipped_count > prev_skipped:
             skipped += 1
-
-        if on_progress is not None and scanned % 100 == 0:
-            on_progress(scanned, total)
 
     _finish_retag(run)
 

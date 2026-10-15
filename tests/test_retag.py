@@ -1044,6 +1044,68 @@ def test_retag_library_reports_progress(test_db: Database, tmp_path: Path):
     assert calls[-1] == (2, 2)
 
 
+def test_retag_library_progress_advances_when_files_unchanged(
+    test_db: Database, test_config: Config, tmp_path: Path
+):
+    from trackseerr.api.routes.library.tagging import retag_library
+
+    music_dir = tmp_path / "music_batch_unchanged"
+    music_dir.mkdir(parents=True, exist_ok=True)
+
+    test_db.update_media_management_settings({
+        "root_folder_path": str(music_dir),
+        "write_audio_tags": True,
+        "torrent_hardlink_tags": "copy_and_tag",
+    })
+
+    test_db.upsert_library_artist({
+        "id": "art-unchanged",
+        "name": "Unchanged Artist",
+        "monitored": True,
+    })
+    test_db.upsert_library_album({
+        "id": "alb-unchanged",
+        "artist_id": "art-unchanged",
+        "title": "Unchanged Album",
+        "year": 2022,
+        "release_date": "2022-01-01",
+        "total_tracks": 105,
+        "monitored": True,
+    })
+
+    for i in range(1, 106):
+        test_db.upsert_library_track({
+            "id": f"trk-u{i}",
+            "album_id": "alb-unchanged",
+            "artist_id": "art-unchanged",
+            "title": f"Track {i}",
+            "track_number": i,
+            "disc_number": 1,
+            "monitored": True,
+        })
+        test_db.upsert_library_file({
+            "id": f"fl-u{i}",
+            "track_id": f"trk-u{i}",
+            "file_path": str(music_dir / f"u{i}.flac"),
+        })
+
+    calls: list[tuple[int, int | None]] = []
+    with patch(
+        "trackseerr.api.routes.library.tagging._evaluate_file_retag",
+        return_value={"skipped_reason": None, "has_diff": False},
+    ):
+        counts = retag_library(
+            test_db,
+            on_progress=lambda c, t: calls.append((c, t)),
+        )
+
+    assert counts["scanned"] == 105
+    assert counts["unchanged"] == 105
+    assert (100, 105) in calls
+    assert calls[0] == (0, 105)
+    assert calls[-1] == (105, 105)
+
+
 def test_task_progress_reads_manual_run():
     from trackseerr import task_manager
     from trackseerr.api.routes.system.tasks import _task_progress
