@@ -592,6 +592,23 @@ class RenameRelinkConflictResponse(ApiModel):
     incoming: RenameRelinkFile
 
 
+class RenameRelinkBatchResult(ApiModel):
+    file_id: str
+    status: str
+    message: Optional[str] = None
+    kept_file_id: Optional[str] = None
+    recycled_file_id: Optional[str] = None
+    old_track_id: Optional[str] = None
+    target_track_id: Optional[str] = None
+
+
+class RenameRelinkBatchResponse(ApiModel):
+    results: list[RenameRelinkBatchResult]
+    relinked: int
+    conflicts_skipped: int
+    errors: int
+
+
 # -------------------------------------------------------------------------------------------------------- retag
 
 

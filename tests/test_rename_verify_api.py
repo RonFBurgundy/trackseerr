@@ -184,3 +184,173 @@ def test_verify_routes_require_admin(app_and_client, test_db, test_config, seede
     headers = _auth_headers(seeded_users["alice"], test_db, test_config)
     assert client.post("/api/library/rename/verify", json={"file_ids": ["a"]}, headers=headers).status_code == 403
     assert client.get("/api/library/rename/verify/status", headers=headers).status_code == 403
+
+
+# =========================================================================
+# Batch Relink Tests
+# =========================================================================
+
+BATCH_RELINK_URL = "/api/library/rename/relink/batch"
+
+
+def _seed_two_for_relink(db: Database, root: Path, codec1: str = "FLAC", codec2: str = "FLAC") -> tuple[str, str]:
+    fid1, p1 = _seed(db, root, 1, R1, number=1)
+    fid2, p2 = _seed(db, root, 2, R2, number=2)
+    db.upsert_library_file({
+        "id": fid1, "track_id": "trk-1", "file_path": str(p1), "relative_path": f"old/{p1.name}",
+        "codec": codec1, "bitrate": 320 if codec1 == "MP3" else None, "size_bytes": 100,
+    })
+    db.upsert_library_file({
+        "id": fid2, "track_id": "trk-2", "file_path": str(p2), "relative_path": f"old/{p2.name}",
+        "codec": codec2, "bitrate": 320 if codec2 == "MP3" else None, "size_bytes": 100,
+    })
+    return fid1, fid2
+
+
+def test_batch_relink_two_clean(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, root = admin
+    # Seed 4 tracks: trk-1 with fl-1, trk-2 empty, trk-3 with fl-3, trk-4 empty
+    fid1, _ = _seed(test_db, root, 1, R1, number=1)
+    _seed(test_db, root, 2, R2, number=2)
+    test_db.delete_library_file("fl-2")
+
+    fid3, _ = _seed(test_db, root, 3, R1, number=3)
+    _seed(test_db, root, 4, R2, number=4)
+    test_db.delete_library_file("fl-4")
+
+    payload = {
+        "items": [
+            {"file_id": fid1, "target_track_id": "trk-2"},
+            {"file_id": fid3, "target_track_id": "trk-4"},
+        ],
+        "conflict": "skip",
+    }
+    resp = client.post(BATCH_RELINK_URL, json=payload, headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["relinked"] == 2
+    assert data["conflicts_skipped"] == 0
+    assert data["errors"] == 0
+    assert len(data["results"]) == 2
+    assert data["results"][0]["status"] == "relinked"
+    assert data["results"][0]["file_id"] == fid1
+    assert data["results"][0]["target_track_id"] == "trk-2"
+    assert data["results"][1]["status"] == "relinked"
+    assert data["results"][1]["file_id"] == fid3
+    assert data["results"][1]["target_track_id"] == "trk-4"
+    assert test_db.get_library_file(fid1)["track_id"] == "trk-2"
+    assert test_db.get_library_file(fid3)["track_id"] == "trk-4"
+
+
+def test_batch_relink_conflict_skip(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, root = admin
+    fid1, fid2 = _seed_two_for_relink(test_db, root)
+
+    payload = {
+        "items": [
+            {"file_id": fid1, "target_track_id": "trk-2"},
+        ],
+        "conflict": "skip",
+    }
+    resp = client.post(BATCH_RELINK_URL, json=payload, headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["relinked"] == 0
+    assert data["conflicts_skipped"] == 1
+    assert data["errors"] == 0
+    assert data["results"][0]["status"] == "conflict_skipped"
+    assert data["results"][0]["file_id"] == fid1
+    # Nothing changed
+    assert test_db.get_library_file(fid1)["track_id"] == "trk-1"
+    assert test_db.get_library_file(fid2)["track_id"] == "trk-2"
+
+
+def test_batch_relink_prefer_quality(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, root = admin
+    # Incoming fl-1 is FLAC, existing fl-2 is MP3
+    fid1, fid2 = _seed_two_for_relink(test_db, root, codec1="FLAC", codec2="MP3")
+
+    payload = {
+        "items": [
+            {"file_id": fid1, "target_track_id": "trk-2"},
+        ],
+        "conflict": "prefer_quality",
+    }
+    resp = client.post(BATCH_RELINK_URL, json=payload, headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["relinked"] == 1
+    assert data["conflicts_skipped"] == 0
+    assert data["errors"] == 0
+    assert data["results"][0]["status"] == "relinked"
+    assert data["results"][0]["kept_file_id"] == fid1
+    assert data["results"][0]["recycled_file_id"] == fid2
+    assert test_db.get_library_file(fid1)["track_id"] == "trk-2"
+
+
+def test_batch_relink_unknown_file_error(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, root = admin
+    _seed(test_db, root, 1, R1)
+
+    payload = {
+        "items": [
+            {"file_id": "nonexistent_file", "target_track_id": "trk-1"},
+        ],
+    }
+    resp = client.post(BATCH_RELINK_URL, json=payload, headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["relinked"] == 0
+    assert data["conflicts_skipped"] == 0
+    assert data["errors"] == 1
+    assert data["results"][0]["status"] == "error"
+    assert "File not found" in data["results"][0]["message"]
+
+
+def test_batch_relink_counts_correct(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, root = admin
+    # 1 clean relink (fl-1 -> trk-2 which is empty)
+    fid1, _ = _seed(test_db, root, 1, R1, number=1)
+    _seed(test_db, root, 2, R2, number=2)
+    test_db.delete_library_file("fl-2")
+
+    # 1 conflict (fl-3 -> trk-4 which has fl-4)
+    fid3, fid4 = _seed(test_db, root, 3, R1, number=3), _seed(test_db, root, 4, R2, number=4)
+
+    # 1 error (nonexistent file)
+    payload = {
+        "items": [
+            {"file_id": fid1, "target_track_id": "trk-2"},
+            {"file_id": fid3[0], "target_track_id": "trk-4"},
+            {"file_id": "unknown_file", "target_track_id": "trk-2"},
+        ],
+        "conflict": "skip",
+    }
+    resp = client.post(BATCH_RELINK_URL, json=payload, headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["relinked"] == 1
+    assert data["conflicts_skipped"] == 1
+    assert data["errors"] == 1
+    assert len(data["results"]) == 3
+
+
+def test_batch_relink_requires_admin(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    alice_headers = _auth_headers(seeded_users["alice"], test_db, test_config)
+    resp = client.post(BATCH_RELINK_URL, json={"items": []}, headers=alice_headers)
+    assert resp.status_code == 403
+
+
+def test_batch_relink_rejects_over_500_items(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, _ = admin
+    items = [{"file_id": f"f-{i}", "target_track_id": f"t-{i}"} for i in range(501)]
+    resp = client.post(BATCH_RELINK_URL, json={"items": items}, headers=headers)
+    assert resp.status_code == 422
+

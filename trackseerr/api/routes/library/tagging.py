@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 import httpx
 
 from trackseerr import art_pipeline
-from trackseerr.file_relink import RelinkConflict, relink_file
+from trackseerr.file_relink import RelinkConflict, relink_file, relink_files
 from trackseerr.item_history import emit
 from trackseerr.redaction import redact_text, safe_exc
 from trackseerr.import_files import (
@@ -31,6 +31,8 @@ from trackseerr.api.schemas.library import (
     RenameApplyResponse,
     RenamePreviewItem,
     RenamePreviewResponse,
+    RenameRelinkBatchResponse,
+    RenameRelinkBatchResult,
     RenameRelinkConflictResponse,
     RenameRelinkFile,
     RenameRelinkResponse,
@@ -76,7 +78,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 from ._shared import (validate_media_path, native_only, _album_total_discs, _album_owned_discs)
-from .models import (RenamePreviewRequest, RenameApplyRequest, RenameVerifyRequest, RenameRelinkRequest, RetagPreviewRequest, RetagApplyRequest)
+from .models import (RenamePreviewRequest, RenameApplyRequest, RenameVerifyRequest, RenameRelinkRequest, RenameRelinkBatchRequest, RetagPreviewRequest, RetagApplyRequest)
 
 _ART_STEMS = ("cover", "folder", "front")
 _ART_EXTS = (".jpg", ".jpeg", ".png", ".webp")
@@ -219,6 +221,28 @@ def _attach_verification(db: Database, rows: list[dict[str, Any]]) -> None:
             row["default_selected"] = False
 
 
+def _preview_targeted_files(
+    db: Database,
+    file_ids: list[str],
+    media_settings: dict[str, Any],
+    caches: dict[str, dict[Any, Any]],
+) -> list[dict[str, Any]]:
+    """Builds preview rows for a specific list of file IDs, including rows that no longer need a rename."""
+    rows: list[dict[str, Any]] = []
+    for fid in file_ids:
+        f = db.get_library_file(fid)
+        if not f:
+            continue
+        track_id = f.get("track_id")
+        t = db.get_library_track(str(track_id)) if track_id else None
+        if not t:
+            continue
+        row = _preview_row(db, t, f, media_settings, caches)
+        if row:
+            rows.append(row)
+    return rows
+
+
 @router.post("/rename/preview", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=RenamePreviewResponse, response_model_exclude_unset=True)
 def rename_preview(
     body: Optional[RenamePreviewRequest] = None,
@@ -227,15 +251,24 @@ def rename_preview(
 ) -> dict[str, Any]:
     """Previews proposed file path changes from the naming templates.
 
-    Album/artist scope returns up to ``limit`` tracks, including ones already in place, along with the total track count
-    and whether the results were truncated. Library-wide scope scans the whole library and returns only files that need a
-    move (up to ``limit``), reporting the true total count of files needing a rename and whether the results were truncated.
+    Targeted file_ids scope returns rows only for those files, including ones already in place, with total = len(items)
+    and truncated = False. Album/artist scope returns up to ``limit`` tracks, including ones already in place, along with
+    the total track count and whether the results were truncated. Library-wide scope scans the whole library and returns
+    only files that need a move (up to ``limit``), reporting the true total count of files needing a rename and whether
+    the results were truncated.
     """
     req = body or RenamePreviewRequest()
     limit = req.limit or 200
     media_settings = db.get_media_management_settings()
     caches: dict[str, dict[Any, Any]] = {}
-    preview_diffs: list[dict[str, Any]] = []
+
+    if req.file_ids is not None:
+        preview_diffs = _preview_targeted_files(db, req.file_ids, media_settings, caches)
+        _flag_collisions(preview_diffs)
+        _attach_verification(db, preview_diffs)
+        return {"items": preview_diffs, "total": len(preview_diffs), "truncated": False}
+
+    preview_diffs = []
 
     if req.album_id or req.artist_id:
         if req.album_id:
@@ -263,6 +296,7 @@ def rename_preview(
     _attach_verification(db, preview_diffs)
     truncated = total > len(preview_diffs)
     return {"items": preview_diffs, "total": total, "truncated": truncated}
+
 
 
 _NO_KEY_MESSAGE = "Set an AcoustID API key in Settings → Media Management first"
@@ -334,6 +368,20 @@ def rename_relink(
     except OSError as exc:
         logger.error("Relink of %s failed: %s", body.file_id, safe_exc(exc))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=redact_text(str(exc)))
+
+
+@router.post(
+    "/rename/relink/batch",
+    dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)],
+    response_model=RenameRelinkBatchResponse,
+)
+def rename_relink_batch(
+    body: RenameRelinkBatchRequest,
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> Any:
+    """Batch-relinks up to 500 files to their target tracks."""
+    return relink_files(db, body.items, body.conflict)
 
 
 def _is_art_file(p: Path) -> bool:
