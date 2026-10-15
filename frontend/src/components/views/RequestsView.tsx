@@ -12,7 +12,7 @@ import {
   type OverflowMenuItem,
 } from '@/components/ui';
 import { PageFrame } from '@/components/layout';
-import { FlatList, type FlatListColumn } from '@/components/lists';
+import { FlatList, ScrubberRail, type FlatListColumn } from '@/components/lists';
 import { AdminIssuesPanel, IssueReportButton, MyIssuesList, untilTime } from '@/components/issues';
 import { formatRequestSourceBadge, formatSourceLabel } from '@/components/requests';
 import { useToast } from '@/hooks/useToast';
@@ -536,6 +536,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
             rowDetails={rowDetails}
             rowTone={rowTone}
             emptyMessage="No requests in this queue."
+            rail={<ScrubberRail groups={requestsHook.index.groups} ariaLabel="Jump to date" />}
           />
         </div>
       )}

@@ -13,6 +13,7 @@ import {
   FlatList,
   ListPanel,
   ProgressMeter,
+  ScrubberRail,
   formatBytes,
   formatDateTime,
   formatEta,
@@ -295,6 +296,7 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
         rowTone={rowTone}
         emptyMessage="The queue is empty."
         emptyHint="Approved requests appear here while they download."
+        rail={<ScrubberRail groups={[]} positionOnly ariaLabel="Scroll queue" />}
       />
       <ManualImportModal
         scope={importScope}

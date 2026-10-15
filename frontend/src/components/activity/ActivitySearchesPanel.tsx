@@ -1,9 +1,10 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import type { ActivitySearchRecord } from '@/types/activity';
-import { getActivitySearches } from '@/services/activityService';
+import { getActivitySearches, getActivitySearchesIndex } from '@/services/activityService';
 import { useVirtualPagedList, type FetchPage } from '@/hooks/useVirtualPagedList';
+import { useGroupIndex } from '@/hooks/useGroupIndex';
 import { TapeDeckButton } from '@/components/ui';
-import { FlatList, ListPanel, formatDateTime, orDash, type FlatListColumn } from '@/components/lists';
+import { FlatList, ListPanel, ScrubberRail, formatDateTime, orDash, type FlatListColumn } from '@/components/lists';
 import type { ActivityPanelProps } from './ActivityQueuePanel';
 
 type SourceFilter = '' | 'slskd' | 'torznab' | 'newznab';
@@ -63,6 +64,7 @@ export const ActivitySearchesPanel: React.FC<ActivityPanelProps> = () => {
     filters,
     getKey,
   });
+  const index = useGroupIndex(getActivitySearchesIndex, { sortKey: 'created_at', sortDir: 'desc', filters, total: list.total });
 
   const columns = useMemo<FlatListColumn<ActivitySearchRecord>[]>(
     () => [
@@ -181,6 +183,7 @@ export const ActivitySearchesPanel: React.FC<ActivityPanelProps> = () => {
         layout="card"
         rowDetails={rowDetails}
         emptyMessage="No searches logged yet."
+        rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to date" />}
       />
     </ListPanel>
   );

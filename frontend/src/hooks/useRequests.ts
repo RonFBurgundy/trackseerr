@@ -3,6 +3,7 @@ import type { RequestItem, UserQuota } from '@/types/models';
 import type { Schema } from '@/types/apiSchema';
 import {
   getRequests,
+  getRequestsIndex,
   getRequestSources,
   getUserQuota,
   createRequest as apiCreateRequest,
@@ -12,6 +13,7 @@ import {
   retryRequest as apiRetryRequest,
 } from '@/services/requestService';
 import { useVirtualPagedList, type FetchPage, type ListKey, type VirtualPagedList } from './useVirtualPagedList';
+import { useGroupIndex, type UseGroupIndexReturn } from './useGroupIndex';
 
 export type RequestFilter = 'all' | 'pending' | 'approved' | 'fulfilled' | 'rejected';
 
@@ -30,6 +32,7 @@ export interface RequestableItem {
 export interface UseRequestsReturn {
   list: VirtualPagedList<RequestItem>;
   requests: RequestItem[];
+  index: UseGroupIndexReturn;
   quota: UserQuota | null;
   filter: RequestFilter;
   source: string;
@@ -88,6 +91,14 @@ export function useRequests(enabled: boolean = true): UseRequestsReturn {
     sortDir: 'desc',
     filters,
     getKey,
+    enabled,
+  });
+
+  const index = useGroupIndex(getRequestsIndex, {
+    sortKey: 'created_at',
+    sortDir: 'desc',
+    filters,
+    total: list.total,
     enabled,
   });
 
@@ -220,6 +231,7 @@ export function useRequests(enabled: boolean = true): UseRequestsReturn {
   return {
     list,
     requests: list.getLoadedItems(),
+    index,
     quota,
     filter,
     source,
