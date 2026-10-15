@@ -190,3 +190,23 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     missing rows). If either changed, rematch and push. Run each playlist on its own
     interval with a slower default for large lists; make sure a cycle never starts while the previous one is still
     running (check the task manager's overlap guard). Log per-playlist duration so the Tasks page can show it.
+25. **DONE 2026-10-15 · P1 · Approved requests never become Missing.** Native `approve_request` (`trackseerr/api/routes/requests.py`
+    ~L294, `_native_approve`) only runs a one-shot `acquisition_coordinator.search_and_grab`; no catalog rows are
+    written or monitored until a file imports (`acquisition_catalog.py` ~L205 `set_track_monitored`). Wanted→Missing
+    and library stats both count `t/al/ar.monitored = 1 AND no file` (`activity_store._WANTED_MISSING_FROM`,
+    `library_catalog_store.get_library_stats`), so every approved-but-not-yet-grabbed request is invisible there and
+    the numbers don't add up (user, 2026-10-15). Fix: on approve, resolve/ingest the artist + album into the catalog
+    and monitor just the requested track (album/discography requests: that album/all), Lidarr-style; then the
+    backlog worker, Wanted and stats all see it. Pending (unapproved) requests stay out of Missing but get their own
+    count on the stats card.
+26. **DONE 2026-10-15 · P2 · Requests list has no pagination.** `GET /api/requests` (`requests.py` ~L75) returns every row
+    (`request_store.list_requests`, no LIMIT); large playlist imports flood the page. Add page/page_size + total
+    (reuse `library_paging.py`), filter by status and source, frontend paged list.
+27. **DONE 2026-10-15 · P2 · Show how a request was made.** `music_requests` already stores `trigger`/`trigger_ref`/`trigger_label`
+    (set in `request_submission.py` ~L239) but the Requests UI never shows them. Badge each request: Playlist
+    (with name), Manual, Discography, Import list, etc.; filter by it (pairs with #26).
+28. **DONE 2026-10-15 · P2 · Admins can't add/monitor an artist directly.** `POST /api/library/artists/ingest` and
+    `libraryService.ingestArtist` exist but no UI calls them. Add: "Add artist" in the Library ⋯ toolbox (search
+    discovery → pick → monitor options); an "Add artist" CTA when a library search returns few/no results; and on the
+    Discover artist profile, a combo button — "Open in library" when the artist exists, "Add / monitor" (admin only)
+    when it doesn't.
