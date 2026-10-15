@@ -24,7 +24,7 @@ export const ActivityBlocklistPanel: React.FC<ActivityPanelProps> = ({ onToast }
 
   const list = useVirtualPagedList<ActivityBlocklistRecord>(fetchBlocklist, { sortKey, sortDir, getKey });
   const { removeItems } = list;
-  const index = useGroupIndex(getActivityBlocklistIndex, { sortKey, sortDir, total: list.total, enabled: sortKey === 'date' });
+  const index = useGroupIndex(getActivityBlocklistIndex, { sortKey, sortDir, total: list.total });
 
   const onSortChange = useCallback((key: string, dir: ListSortDir) => {
     setSortKey(key);
@@ -151,7 +151,7 @@ export const ActivityBlocklistPanel: React.FC<ActivityPanelProps> = ({ onToast }
         rowMenuLabel={rowMenuLabel}
         rowDetails={rowDetails}
         emptyMessage="The blocklist is empty."
-        rail={<ScrubberRail groups={index.groups} positionOnly={sortKey !== 'date'} ariaLabel="Jump to date" />}
+        rail={<ScrubberRail groups={index.groups} ariaLabel={sortKey === 'artist' ? 'Jump to artist' : 'Jump to date'} />}
       />
       <ConfirmDialog
         isOpen={removingId !== null}
