@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { CheckSquare, Disc, Eye, FileText, FolderInput, Layers, Loader2, Music, RefreshCw, SlidersHorizontal, Tag, User, X } from 'lucide-react';
+import { CheckSquare, Disc, Eye, FileText, FolderInput, Layers, Loader2, Music, RefreshCw, SlidersHorizontal, Tag, User, UserPlus, X } from 'lucide-react';
 import type { UseLibraryReturn, LibraryTab } from '@/hooks/useLibrary';
 import type { AppRoute, LibraryRoute, NavigateOptions } from '@/hooks/useAppRoute';
 import { useLibraryDrilldown } from '@/hooks/useLibraryDrilldown';
@@ -18,6 +18,7 @@ import { errorMessage } from '@/services/apiClient';
 import { PageFrame } from '@/components/layout';
 import { SearchBar, TapeDeckButton, TabStrip, ToastBanner, CassetteLoader, OverflowMenu, type OverflowMenuItem } from '@/components/ui';
 import {
+  AddArtistDialog,
   AddToCollectionModal,
   AlbumDetailModal,
   AlbumsPanel,
@@ -135,6 +136,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const [importScope, setImportScope] = useState<ManualImportScope | null>(null);
   const [renameScope, setRenameScope] = useState<RenameScope | null>(null);
   const [retagScope, setRetagScope] = useState<RetagScope | null>(null);
+  const [isAddArtistOpen, setIsAddArtistOpen] = useState<boolean>(false);
+  const [addArtistInitialQuery, setAddArtistInitialQuery] = useState<string | undefined>(undefined);
   /** Data source reported by the paged artists/albums responses; used until the manager settings load. */
   const [listMode, setListMode] = useState<string | null>(null);
 
@@ -226,6 +229,18 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     []
   );
 
+  const handleOpenAddArtist = useCallback((initialQuery?: string): void => {
+    setAddArtistInitialQuery(initialQuery);
+    setIsAddArtistOpen(true);
+  }, []);
+
+  const handleArtistAdded = useCallback(
+    (artistId: string): void => {
+      drill.openArtist(artistId);
+    },
+    [drill]
+  );
+
   const toastNode = toast ? <ToastBanner message={toast.message} tone={toast.tone} /> : null;
 
   // Modals are portaled and mounted once, whichever page is showing, so their triggers always find them.
@@ -292,6 +307,17 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           currentUserId={currentUserId}
           canTargetUsers={canTargetUsers}
           serverLabel={serverLabel}
+        />
+      )}
+      {isAdmin && (
+        <AddArtistDialog
+          open={isAddArtistOpen}
+          onClose={() => {
+            setIsAddArtistOpen(false);
+            setAddArtistInitialQuery(undefined);
+          }}
+          initialQuery={addArtistInitialQuery}
+          onAdded={handleArtistAdded}
         />
       )}
     </>
@@ -379,6 +405,14 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const pagedTab = activeTab !== 'collections';
 
   const toolItems: OverflowMenuItem[] = [];
+  if (isAdmin) {
+    toolItems.push({
+      key: 'add-artist',
+      label: 'Add artist…',
+      icon: <UserPlus className="h-3.5 w-3.5" />,
+      onSelect: () => handleOpenAddArtist(),
+    });
+  }
   if (pagedTab && isAdmin && !lidarrMode) {
     toolItems.push({
       key: 'filter',
@@ -538,6 +572,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           onModeChange={setListMode}
           onToast={showToast}
           onSelectActionChange={setSelectAction}
+          onAddArtist={handleOpenAddArtist}
         />
       )}
 

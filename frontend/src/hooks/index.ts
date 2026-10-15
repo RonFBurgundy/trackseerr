@@ -127,3 +127,4 @@ export * from './useFindTrack';
 export * from './useManualSearch';
 export * from './useRenameRelink';
 export * from './useTracksOwnedOnly';
+export * from './useAddArtist';

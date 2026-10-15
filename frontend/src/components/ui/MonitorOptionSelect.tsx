@@ -2,9 +2,11 @@ import React, { useId } from 'react';
 import { MONITOR_OPTIONS, type MonitorOption } from '@/types/monitoring';
 import { inputClass } from '@/components/settings/formClasses';
 
-export interface MonitorOptionSelectProps {
-  value: MonitorOption;
-  onChange: (value: MonitorOption) => void;
+export type MonitorSelectValue = MonitorOption | 'default';
+
+export interface MonitorOptionSelectProps<V extends MonitorSelectValue = MonitorOption> {
+  value: V;
+  onChange: (value: V) => void;
   id?: string;
   name?: string;
   /** Visible label rendered above the select. */
@@ -12,10 +14,12 @@ export interface MonitorOptionSelectProps {
   disabled?: boolean;
   'aria-label'?: string;
   className?: string;
+  defaultOptionLabel?: string;
+  defaultOptionValue?: V;
 }
 
 /** Select over the native library's monitor options (full width on mobile, 44px tall via the global input rule). */
-export const MonitorOptionSelect: React.FC<MonitorOptionSelectProps> = ({
+export function MonitorOptionSelect<V extends MonitorSelectValue = MonitorOption>({
   value,
   onChange,
   id,
@@ -23,26 +27,34 @@ export const MonitorOptionSelect: React.FC<MonitorOptionSelectProps> = ({
   label,
   disabled = false,
   className = '',
+  defaultOptionLabel,
+  defaultOptionValue,
   ...rest
-}) => {
+}: MonitorOptionSelectProps<V>): React.ReactElement {
   const generatedId = useId();
   const selectId = id ?? generatedId;
+  const defaultVal = defaultOptionValue ?? ('default' as V);
   const select = (
-  <select
-    id={selectId}
-    name={name}
-    value={value}
-    disabled={disabled}
-    aria-label={rest['aria-label'] ?? (label || id ? undefined : 'Monitor option')}
-    onChange={(e) => onChange(e.target.value as MonitorOption)}
-    className={`${inputClass} ${className}`}
-  >
-    {MONITOR_OPTIONS.map((o) => (
-      <option key={o.value} value={o.value}>
-        {o.label}
-      </option>
-    ))}
-  </select>
+    <select
+      id={selectId}
+      name={name}
+      value={value}
+      disabled={disabled}
+      aria-label={rest['aria-label'] ?? (label || id ? undefined : 'Monitor option')}
+      onChange={(e) => onChange(e.target.value as V)}
+      className={`${inputClass} ${className}`}
+    >
+      {defaultOptionLabel && (
+        <option value={defaultVal}>
+          {defaultOptionLabel}
+        </option>
+      )}
+      {MONITOR_OPTIONS.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
   );
   return label ? (
     <div>
@@ -54,4 +66,4 @@ export const MonitorOptionSelect: React.FC<MonitorOptionSelectProps> = ({
   ) : (
     select
   );
-};
+}

@@ -25,6 +25,7 @@ export interface VirtualGridProps<T> {
   captionHeight?: number;
   emptyMessage: string;
   emptyHint?: string;
+  emptyAction?: React.ReactNode;
   ariaLabel: string;
   /** Right-side rail slot; mount a `ScrubberRail` here. */
   rail?: React.ReactNode;
@@ -65,6 +66,7 @@ export function VirtualGrid<T>({
   captionHeight = 48,
   emptyMessage,
   emptyHint,
+  emptyAction,
   ariaLabel,
   rail,
   maxHeight,
@@ -178,6 +180,7 @@ export function VirtualGrid<T>({
               error={error}
               emptyMessage={emptyMessage}
               emptyHint={emptyHint}
+              emptyAction={emptyAction}
               onReload={reload}
             />
             {hasRows && (

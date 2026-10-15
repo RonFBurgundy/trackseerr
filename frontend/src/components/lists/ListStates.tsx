@@ -8,12 +8,13 @@ export interface ListStatesProps {
   error: string | null;
   emptyMessage: string;
   emptyHint?: string;
+  emptyAction?: React.ReactNode;
   /** Full reload; the retry for the whole-list error state. */
   onReload: () => void;
 }
 
 /** Initial-load skeleton, whole-list error and empty state shared by FlatList and VirtualGrid. Null when rows exist. */
-export const ListStates: React.FC<ListStatesProps> = ({ total, loading, error, emptyMessage, emptyHint, onReload }) => {
+export const ListStates: React.FC<ListStatesProps> = ({ total, loading, error, emptyMessage, emptyHint, emptyAction, onReload }) => {
   if (total > 0) return null;
   if (error !== null && !loading) {
     return (
@@ -34,6 +35,7 @@ export const ListStates: React.FC<ListStatesProps> = ({ total, loading, error, e
       <Inbox className="h-6 w-6 text-neutral-600" />
       <p className="text-xs font-mono text-neutral-300">{emptyMessage}</p>
       {emptyHint && <p className="text-[11px] font-mono text-neutral-500">{emptyHint}</p>}
+      {emptyAction}
     </div>
   );
 };
