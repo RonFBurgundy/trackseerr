@@ -1147,3 +1147,167 @@ class MbidEnricherClient:
             )
             self._set_cached(cache_key, [])
             return []
+
+    def _fetch_release_page(
+        self, clean_rg_id: str, offset: int, limit: int
+    ) -> tuple[Optional[dict[str, Any]], bool]:
+        url = f"{self.base_url}/ws/2/release"
+        params = {
+            "release-group": clean_rg_id,
+            "inc": "recordings+media",
+            "limit": limit,
+            "offset": offset,
+            "fmt": "json",
+        }
+        resp = self._request(url, params=params)
+        if resp is None or resp.status_code != 200:
+            return None, (resp is not None and resp.status_code == 404)
+        try:
+            data = resp.json()
+            return (data if isinstance(data, dict) else None), False
+        except ValueError:
+            return None, False
+
+    def _fetch_all_rg_releases(
+        self, clean_rg_id: str, cache_key: str
+    ) -> Optional[list[dict[str, Any]]]:
+        offset = 0
+        limit = 100
+        max_releases = 300
+        all_releases: list[dict[str, Any]] = []
+
+        while offset < max_releases:
+            data, is_404 = self._fetch_release_page(clean_rg_id, offset, limit)
+            if data is None:
+                if is_404:
+                    self._remember(cache_key, "rg_releases", [])
+                else:
+                    self._set_cached(cache_key, [])
+                return None
+
+            raw_releases = data.get("releases") or []
+            if not isinstance(raw_releases, list):
+                break
+
+            for rel in raw_releases:
+                if isinstance(rel, dict):
+                    parsed = _parse_compact_release(rel)
+                    if parsed:
+                        all_releases.append(parsed)
+
+            offset += len(raw_releases)
+            if len(raw_releases) < limit or len(all_releases) >= max_releases:
+                break
+            total_count = data.get("release-count")
+            if total_count is not None:
+                try:
+                    if offset >= int(total_count):
+                        break
+                except (ValueError, TypeError):
+                    pass
+
+        return all_releases[:max_releases]
+
+    def get_release_group_releases(
+        self, release_group_id: str, force: bool = False
+    ) -> list[dict[str, Any]]:
+        """Queries MusicBrainz / BrainzMash for all releases within a release group."""
+        if not release_group_id or not str(release_group_id).strip():
+            return []
+
+        clean_rg_id = str(release_group_id).strip()
+        if self._store is not None:
+            clean_rg_id = self._store.resolve_redirect(clean_rg_id)
+
+        cache_key = f"releases:rg:v1:{clean_rg_id.lower()}"
+        hit, cached_data = self._lookup(cache_key, force=force)
+        if hit and isinstance(cached_data, list):
+            return cached_data
+
+        try:
+            all_releases = self._fetch_all_rg_releases(clean_rg_id, cache_key)
+            if all_releases is not None:
+                self._remember(cache_key, "rg_releases", all_releases)
+                return all_releases
+            return []
+        except Exception as exc:
+            logger.warning(
+                "MbidEnricherClient: get_release_group_releases failed for '%s': %s",
+                clean_rg_id,
+                exc,
+            )
+            self._set_cached(cache_key, [])
+            return []
+
+
+def _parse_release_track(trk: dict[str, Any]) -> dict[str, Any]:
+    try:
+        trk_pos = int(trk.get("position") or 1)
+    except (ValueError, TypeError):
+        trk_pos = 1
+    trk_num = str(trk.get("number") if trk.get("number") is not None else trk_pos)
+    trk_title = str(trk.get("title") or "").strip()
+    rec_obj = trk.get("recording")
+    rec_id: Optional[str] = None
+    if isinstance(rec_obj, dict) and rec_obj.get("id"):
+        rec_id = str(rec_obj["id"]).strip() or None
+    length_ms = trk.get("length")
+    trk_len: Optional[int] = None
+    if length_ms is not None:
+        try:
+            trk_len = int(length_ms)
+        except (ValueError, TypeError):
+            trk_len = None
+    return {
+        "position": trk_pos,
+        "number": trk_num,
+        "title": trk_title,
+        "recording_id": rec_id,
+        "length": trk_len,
+    }
+
+
+def _parse_release_media(raw_media: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    media_list: list[dict[str, Any]] = []
+    for medium in raw_media:
+        if not isinstance(medium, dict):
+            continue
+        try:
+            med_pos = int(medium.get("position") or 1)
+        except (ValueError, TypeError):
+            med_pos = 1
+        raw_tracks = medium.get("tracks") or []
+        track_items = [
+            _parse_release_track(t) for t in raw_tracks if isinstance(t, dict)
+        ]
+        media_list.append({"position": med_pos, "tracks": track_items})
+    return media_list
+
+
+def _parse_compact_release(rel: dict[str, Any]) -> Optional[dict[str, Any]]:
+    rel_id = str(rel.get("id") or "").strip()
+    if not rel_id:
+        return None
+    title = str(rel.get("title") or "").strip()
+    status = str(rel["status"]).strip() if rel.get("status") is not None else None
+    date = str(rel["date"]).strip() if rel.get("date") is not None else None
+    country = str(rel["country"]).strip() if rel.get("country") is not None else None
+    media = _parse_release_media(rel.get("media") or [])
+    raw_tc = rel.get("track-count")
+    if raw_tc is not None:
+        try:
+            track_count = int(raw_tc)
+        except (ValueError, TypeError):
+            track_count = sum(len(m["tracks"]) for m in media)
+    else:
+        track_count = sum(len(m["tracks"]) for m in media)
+    return {
+        "id": rel_id,
+        "title": title,
+        "status": status,
+        "date": date,
+        "country": country,
+        "track_count": track_count,
+        "media": media,
+    }
+
