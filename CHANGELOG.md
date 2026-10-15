@@ -13,6 +13,8 @@ heading becomes the version and date.
 
 ### Added
 
+- The Requests page and the Activity Blocklist and Searches tabs have the fast-scroll date rail used in the Library and History; the Queue has a plain scroll rail.
+- "Library Retag" and "MusicBrainz Release Match" show how far along they are on the Tasks page.
 - Contribute to AcoustID: add your AcoustID user key in Media Management, then run "AcoustID Contribution" from the Tasks page to submit fingerprints of your files that have MusicBrainz recording IDs, credited to you. Files AcoustID already knows, files that fingerprint as a different recording, and files whose length doesn't match the track are skipped. Media Management shows how many were submitted, imported and skipped.
 - Contribute to MusicBrainz: "Not on MusicBrainz…" in the Library ⋯ menu lists albums you own that MusicBrainz lacks (or lacks this edition of). "Submit to MusicBrainz" opens MusicBrainz's Add Release form prefilled with the tracklist, track lengths, label, barcode and Deezer link; log in there, check it and submit, and you come back with the album linked to the new release. You can also paste a MusicBrainz release link to link an album by hand.
 - Admins can add and monitor an artist directly: "Add artist…" in the Library ⋯ menu, an "Add as artist" button when a library search finds little or nothing, and an "Add / monitor" button on a Discover artist page for artists not yet in the library (it becomes "Open in Library" once added).
@@ -59,6 +61,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- On phones, task rows on the Tasks page show icon-only Run and Cancel buttons and drop the Running badge while the progress bar shows, so task names have room (they wrap to two lines instead of being cut off).
 - The Requests page loads in pages and scrolls smoothly with thousands of requests, instead of loading every request at once.
 - Approved requests (manual, automatic, playlist and discography) now add the artist to the library and monitor exactly what was requested, so they appear under Wanted → Missing and in the library's missing counts before anything downloads. Existing approved requests are picked up by the next Wanted sweep.
 - Relinking, verifying or applying in the rename dialog now refreshes only the affected rows instead of rescanning the whole library.
@@ -97,6 +100,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- The "Add / monitor" button on a Discover artist page now switches to "Open in Library" as soon as the artist is added, instead of staying until the next day.
 - Albums no longer show a year of 1 (Lidarr's placeholder for "no date"); existing placeholder dates are cleared on upgrade.
 - Downloads that don't match a catalog album now land in the artist's existing folder (matched by MusicBrainz ID or name) instead of a second, differently named folder.
 - Editing an administrator no longer shows permission toggles that look editable but don't save; they show as held and locked.
