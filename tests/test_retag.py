@@ -956,3 +956,170 @@ def test_retag_library_counts_and_options(test_db: Database, tmp_path: Path):
     }
 
 
+def test_retag_library_reports_progress(test_db: Database, tmp_path: Path):
+    from trackseerr.api.routes.library.tagging import retag_library
+
+    music_dir = tmp_path / "music_batch_prog"
+    music_dir.mkdir(parents=True, exist_ok=True)
+
+    test_db.update_media_management_settings({
+        "root_folder_path": str(music_dir),
+        "write_audio_tags": True,
+        "torrent_hardlink_tags": "copy_and_tag",
+    })
+
+    test_db.upsert_library_artist({
+        "id": "art-prog",
+        "name": "Progress Artist",
+        "mbid": "mbid-prog-art",
+        "monitored": True,
+    })
+    test_db.upsert_library_album({
+        "id": "alb-prog",
+        "artist_id": "art-prog",
+        "title": "Progress Album",
+        "year": 2022,
+        "release_date": "2022-01-01",
+        "total_tracks": 2,
+        "monitored": True,
+    })
+
+    file1 = music_dir / "p1.flac"
+    _create_minimal_flac(file1)
+    tags1 = {
+        "artist": "Progress Artist",
+        "album": "Progress Album",
+        "title": "Track 1",
+        "date": "2022-01-01",
+        "tracknumber": 1,
+        "totaltracks": 2,
+        "discnumber": 1,
+        "totaldiscs": 1,
+        "musicbrainz_artistid": "mbid-prog-art",
+        "musicbrainz_albumartistid": "mbid-prog-art",
+    }
+    write_audio_tags(file1, tags1)
+    test_db.upsert_library_track({
+        "id": "trk-p1",
+        "album_id": "alb-prog",
+        "artist_id": "art-prog",
+        "title": "Track 1",
+        "track_number": 1,
+        "disc_number": 1,
+        "monitored": True,
+    })
+    test_db.upsert_library_file({
+        "id": "fl-p1",
+        "track_id": "trk-p1",
+        "file_path": str(file1),
+    })
+
+    file2 = music_dir / "p2.flac"
+    _create_minimal_flac(file2)
+    tags2 = {"artist": "Old Artist", "title": "Old Title"}
+    write_audio_tags(file2, tags2)
+    test_db.upsert_library_track({
+        "id": "trk-p2",
+        "album_id": "alb-prog",
+        "artist_id": "art-prog",
+        "title": "Track 2",
+        "track_number": 2,
+        "disc_number": 1,
+        "monitored": True,
+    })
+    test_db.upsert_library_file({
+        "id": "fl-p2",
+        "track_id": "trk-p2",
+        "file_path": str(file2),
+    })
+
+    calls: list[tuple[int, int | None]] = []
+    counts = retag_library(
+        test_db,
+        on_progress=lambda c, t: calls.append((c, t)),
+    )
+    assert counts["scanned"] == 2
+    assert len(calls) >= 2
+    assert calls[0] == (0, 2)
+    assert calls[-1] == (2, 2)
+
+
+def test_retag_library_progress_advances_when_files_unchanged(
+    test_db: Database, test_config: Config, tmp_path: Path
+):
+    from trackseerr.api.routes.library.tagging import retag_library
+
+    music_dir = tmp_path / "music_batch_unchanged"
+    music_dir.mkdir(parents=True, exist_ok=True)
+
+    test_db.update_media_management_settings({
+        "root_folder_path": str(music_dir),
+        "write_audio_tags": True,
+        "torrent_hardlink_tags": "copy_and_tag",
+    })
+
+    test_db.upsert_library_artist({
+        "id": "art-unchanged",
+        "name": "Unchanged Artist",
+        "monitored": True,
+    })
+    test_db.upsert_library_album({
+        "id": "alb-unchanged",
+        "artist_id": "art-unchanged",
+        "title": "Unchanged Album",
+        "year": 2022,
+        "release_date": "2022-01-01",
+        "total_tracks": 105,
+        "monitored": True,
+    })
+
+    for i in range(1, 106):
+        test_db.upsert_library_track({
+            "id": f"trk-u{i}",
+            "album_id": "alb-unchanged",
+            "artist_id": "art-unchanged",
+            "title": f"Track {i}",
+            "track_number": i,
+            "disc_number": 1,
+            "monitored": True,
+        })
+        test_db.upsert_library_file({
+            "id": f"fl-u{i}",
+            "track_id": f"trk-u{i}",
+            "file_path": str(music_dir / f"u{i}.flac"),
+        })
+
+    calls: list[tuple[int, int | None]] = []
+    with patch(
+        "trackseerr.api.routes.library.tagging._evaluate_file_retag",
+        return_value={"skipped_reason": None, "has_diff": False},
+    ):
+        counts = retag_library(
+            test_db,
+            on_progress=lambda c, t: calls.append((c, t)),
+        )
+
+    assert counts["scanned"] == 105
+    assert counts["unchanged"] == 105
+    assert (100, 105) in calls
+    assert calls[0] == (0, 105)
+    assert calls[-1] == (105, 105)
+
+
+def test_task_progress_reads_manual_run():
+    from trackseerr import task_manager
+    from trackseerr.api.routes.system.tasks import _task_progress
+
+    handle = task_manager.RunHandle()
+    task_manager.register_manual_run("library_retag", handle)
+    try:
+        handle.set_progress(5, 10)
+        prog = _task_progress("library_retag", True)
+        assert prog is not None
+        assert prog.current == 5
+        assert prog.total == 10
+    finally:
+        task_manager.unregister_manual_run("library_retag", handle)
+
+
+

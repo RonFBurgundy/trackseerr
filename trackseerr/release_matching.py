@@ -168,6 +168,7 @@ def match_album_releases(
     db: Any,
     enricher: Any,
     should_stop: Optional[Callable[[], bool]] = None,
+    on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
 ) -> dict[str, int]:
     """Iterates library albums missing a release ID and assigns the best release from MusicBrainz."""
     counts = {
@@ -179,6 +180,12 @@ def match_album_releases(
         "errors": 0,
     }
 
+    total: Optional[int] = None
+    if on_progress is not None:
+        total = db.count_albums_missing_release()
+        on_progress(0, total)
+
+    processed = 0
     for album in db.iter_albums_missing_release(batch=200):
         if should_stop is not None and should_stop():
             logger.info("MusicBrainz release match stopped early: %s", counts)
@@ -189,6 +196,10 @@ def match_album_releases(
         except sqlite3.Error as exc:
             counts["errors"] += 1
             logger.warning("MusicBrainz release match failed for album %s: %s", album.get("id"), exc)
+        finally:
+            processed += 1
+            if on_progress is not None:
+                on_progress(processed, total)
 
     logger.info("MusicBrainz release match finished: %s", counts)
     return counts
