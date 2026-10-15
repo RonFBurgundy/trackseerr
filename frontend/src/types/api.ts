@@ -569,6 +569,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/activity/blocklist/index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Scrubber groups for the download blocklist (native only) */
+        get: operations["blocklist_index_api_activity_blocklist_index_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/activity/blocklist/{blocklist_id}": {
         parameters: {
             query?: never;
@@ -697,6 +714,23 @@ export interface paths {
         };
         /** Log of indexer and Soulseek searches with their triggers */
         get: operations["list_searches_api_activity_searches_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/activity/searches/index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Scrubber groups for search log */
+        get: operations["searches_index_api_activity_searches_index_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4227,6 +4261,26 @@ export interface paths {
          *     Approved requests attempt native grab, falling back to Lidarr trickle worker.
          */
         post: operations["create_batch_requests_api_requests_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Requests Index
+         * @description Scrubber groups for requests. Non-admins see only their own requests; admins and request managers see all.
+         */
+        get: operations["requests_index_api_requests_index_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -15189,6 +15243,38 @@ export interface operations {
             };
         };
     };
+    blocklist_index_api_activity_blocklist_index_get: {
+        parameters: {
+            query?: {
+                sort_key?: string | null;
+                sort_dir?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryIndexResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     delete_blocklist_item_api_activity_blocklist__blocklist_id__delete: {
         parameters: {
             query?: never;
@@ -15441,6 +15527,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchLogPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    searches_index_api_activity_searches_index_get: {
+        parameters: {
+            query?: {
+                source_type?: string | null;
+                request_id?: string | null;
+                sort_dir?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryIndexResponse"];
                 };
             };
             /** @description Validation Error */
@@ -21730,6 +21849,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BatchCreatedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    requests_index_api_requests_index_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                source?: string | null;
+                sort_dir?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryIndexResponse"];
                 };
             };
             /** @description Validation Error */
