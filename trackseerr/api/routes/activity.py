@@ -248,10 +248,10 @@ def blocklist_index(
     db: Database = Depends(get_db),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
-    validate_sort_key(sort_key, ("date",), "date")
+    key = validate_sort_key(sort_key, svc.BLOCKLIST_SORT_KEYS, "date")
     if _is_lidarr(db):
-        return svc.empty_index("date", sort_dir)
-    return svc.native_blocklist_index(db, sort_dir)
+        return svc.empty_index(key, sort_dir)
+    return svc.native_blocklist_index(db, sort_dir, sort_key=key)
 
 
 @router.get("/searches", response_model=SearchLogPage, summary="Log of indexer and Soulseek searches with their triggers")
