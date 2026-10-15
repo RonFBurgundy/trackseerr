@@ -11,7 +11,7 @@ from typing import Optional
 from plexapi.exceptions import BadRequest, NotFound, Unauthorized
 
 _SENSITIVE_QUERY_RE = re.compile(
-    r"(?i)([?&](?:x-plex-token|token|apikey|api_key|state|sk|api_sig)=)[^&#\s\"]*"
+    r"(?i)((?:[?&]|^)(?:x-plex-token|token|apikey|api_key|acoustid_user_key|user_key|userkey|client|user|state|sk|api_sig)=)[^&#\s\"]*"
     # Bare ``X-Plex-Token=abc`` / ``X-Plex-Token: abc`` / ``'X-Plex-Token': 'abc'`` (headers, dict reprs).
     r"|(?<![\w-])(x-plex-token['\"]?\s*[=:]\s*['\"]?)[^&#\s\"',)]+"
 )
@@ -82,7 +82,7 @@ _AUTH_HEADER_BARE_RE = re.compile(
 )
 _SECRET_KEYS = (
     r"x-api-key|x-auth-token|x-plex-token|x-emby-token|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token"
-    r"|client[_-]?secret|secret|password|passwd|token"
+    r"|client[_-]?secret|acoustid[_-]?user[_-]?key|user[_-]?key|userkey|secret|password|passwd|token"
 )
 _SECRET_KV_QUOTED_RE = re.compile(
     r"""(?i)((?<![A-Za-z0-9])(?:%s)['"]?\s*[:=]\s*)(['"])[^'"\r\n]*\2""" % _SECRET_KEYS

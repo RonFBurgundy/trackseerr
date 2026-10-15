@@ -10202,6 +10202,11 @@ export interface components {
              */
             acoustid_api_key?: string | null;
             /**
+             * Acoustid User Key
+             * @description AcoustID user key for submitting fingerprints (masked on read)
+             */
+            acoustid_user_key?: string | null;
+            /**
              * Add Metadata Profile Id
              * @description Default metadata profile for added artists (null = none)
              */
@@ -10416,6 +10421,8 @@ export interface components {
         MediaManagementUpdateModel: {
             /** Acoustid Api Key */
             acoustid_api_key?: string | null;
+            /** Acoustid User Key */
+            acoustid_user_key?: string | null;
             /** Add Metadata Profile Id */
             add_metadata_profile_id?: number | null;
             /** Add Monitor Option */

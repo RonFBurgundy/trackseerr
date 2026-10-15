@@ -187,6 +187,7 @@ class MediaManagementSettingsModel(ApiModel):
     seed_time_limit_minutes: int | None = Field(None, description="Target seeding duration in minutes before transfer cleanup")
     enrich_mbids: bool = Field(True, description="Whether to enrich tracks and albums with MusicBrainz IDs")
     acoustid_api_key: str | None = Field(None, description="AcoustID API key for Chromaprint fingerprinting (masked on read)")
+    acoustid_user_key: str | None = Field(None, description="AcoustID user key for submitting fingerprints (masked on read)")
     fingerprint_on_weak_match: bool = Field(
         False, description="Fingerprint files via AcoustID during download import when the tag match is weak or missing"
     )
@@ -237,6 +238,7 @@ class MediaManagementUpdateModel(BaseModel):
     seed_time_limit_minutes: int | None = None
     enrich_mbids: bool | None = None
     acoustid_api_key: str | None = None
+    acoustid_user_key: str | None = None
     fingerprint_on_weak_match: bool | None = None
     mb_mirror_url: str | None = None
     prefer_local_artwork: bool | None = None
@@ -422,14 +424,40 @@ def _render_format_previews(settings: dict[str, Any]) -> dict[str, FormatPreview
 
 
 def _mask_media_management_secrets(settings: dict[str, Any]) -> dict[str, Any]:
-    """Returns a copy with the AcoustID key masked (trailing 4 chars visible), like the Lidarr key."""
+    """Returns a copy with AcoustID keys masked (trailing 4 chars visible), like the Lidarr key."""
     res = dict(settings)
     rec, quar = recycle_bin.effective_recycle_path(settings), recycle_bin.effective_quarantine_path(settings)
     res["effective_recycle_bin_path"] = str(rec) if rec else None
     res["effective_quarantine_folder_path"] = str(quar) if quar else None
     if res.get("acoustid_api_key"):
         res["acoustid_api_key"] = mask_secret(res["acoustid_api_key"])
+    if res.get("acoustid_user_key"):
+        res["acoustid_user_key"] = mask_secret(res["acoustid_user_key"])
     return res
+
+
+def _handle_secret_key_update(
+    field_name: str,
+    updates: dict[str, Any],
+    stored_settings: dict[str, Any],
+) -> None:
+    if field_name not in updates:
+        return
+    key = updates[field_name]
+    stored_key = stored_settings.get(field_name)
+    if key is None:
+        updates.pop(field_name)
+    elif stored_key and key == mask_secret(stored_key):
+        # The exact masked value echoed back by the UI must never overwrite the real key.
+        updates.pop(field_name)
+    elif MASK_MARKER in key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"'{field_name}' contains a masked placeholder that does not match the saved key; enter the full key",
+        )
+    else:
+        # An empty string clears the key.
+        updates[field_name] = key.strip() or None
 
 
 _STORAGE_PATH_KEYS = ("recycle_bin_path", "quarantine_folder_path", "root_folder_path", "staging_folder_path")
@@ -488,26 +516,13 @@ def update_media_management_settings(
         current = db.get_media_management_settings()
         return MediaManagementSettingsModel(**_declared(MediaManagementSettingsModel, _mask_media_management_secrets(current)))
 
-    if "acoustid_api_key" in updates:
-        key = updates["acoustid_api_key"]
-        stored_key = db.get_media_management_settings().get("acoustid_api_key")
-        if key is None:
-            updates.pop("acoustid_api_key")
-        elif stored_key and key == mask_secret(stored_key):
-            # The exact masked value echoed back by the UI must never overwrite the real key.
-            updates.pop("acoustid_api_key")
-        elif MASK_MARKER in key:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="'acoustid_api_key' contains a masked placeholder that does not match the saved key; enter the full key",
-            )
-        else:
-            # An empty string clears the key.
-            updates["acoustid_api_key"] = key.strip() or None
+    stored_settings = db.get_media_management_settings()
+    _handle_secret_key_update("acoustid_api_key", updates, stored_settings)
+    _handle_secret_key_update("acoustid_user_key", updates, stored_settings)
 
     warnings: list[str] = []
     if any(k in updates for k in _STORAGE_PATH_KEYS):
-        merged = {**db.get_media_management_settings(), **{k: v for k, v in updates.items() if v is not None}}
+        merged = {**stored_settings, **{k: v for k, v in updates.items() if v is not None}}
         try:
             client_roots = allowed_roots_for_all_clients(db, merged).roots
         except (sqlite3.Error, OSError, ValueError) as exc:

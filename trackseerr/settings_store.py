@@ -105,6 +105,9 @@ class SettingsStoreMixin:
             res["acoustid_api_key"] = (
                 str(res["acoustid_api_key"]) if res.get("acoustid_api_key") is not None else None
             )
+            res["acoustid_user_key"] = (
+                str(res["acoustid_user_key"]) if res.get("acoustid_user_key") is not None else None
+            )
             res["fingerprint_on_weak_match"] = bool(res.get("fingerprint_on_weak_match", 0))
             res["mb_mirror_url"] = str(res.get("mb_mirror_url") or "https://api.brainzmash.cc")
             res["prefer_local_artwork"] = bool(res.get("prefer_local_artwork", 1))
@@ -149,6 +152,7 @@ class SettingsStoreMixin:
             "seed_time_limit_minutes",
             "enrich_mbids",
             "acoustid_api_key",
+            "acoustid_user_key",
             "fingerprint_on_weak_match",
             "mb_mirror_url",
             "prefer_local_artwork",
@@ -211,7 +215,7 @@ class SettingsStoreMixin:
                     updates[k] = float(v) if v is not None else None
                 elif k == "seed_time_limit_minutes":
                     updates[k] = int(v) if v is not None else None
-                elif k == "acoustid_api_key":
+                elif k in ("acoustid_api_key", "acoustid_user_key"):
                     updates[k] = str(v) if v is not None else None
                 elif k == "import_bitrate_check":
                     if v is not None:

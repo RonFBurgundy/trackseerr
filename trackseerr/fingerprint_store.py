@@ -10,6 +10,9 @@ import json
 from typing import Any, Optional
 
 _COLUMNS = "file_id, file_path, size_bytes, mtime_ns, duration, fingerprint, status, matches_json, error, looked_up_at"
+_SUBMISSION_COLUMNS = (
+    "file_id, recording_mbid, fingerprint_hash, submission_id, status, reason, submitted_at, checked_at"
+)
 _CHUNK = 500
 
 
@@ -70,3 +73,59 @@ class FingerprintStoreMixin:
                 ),
             )
             self.conn.commit()
+
+    def get_acoustid_submission(self, file_id: str) -> Optional[dict[str, Any]]:
+        """The AcoustID submission row for a library file, or None."""
+        with self._lock:
+            row = self.conn.execute(
+                f"SELECT {_SUBMISSION_COLUMNS} FROM acoustid_submissions WHERE file_id = ?",
+                (str(file_id),),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_acoustid_submission(self, row: dict[str, Any]) -> None:
+        """Inserts or replaces the AcoustID submission record for ``row["file_id"]``."""
+        with self._lock:
+            self.conn.execute(
+                f"""
+                INSERT INTO acoustid_submissions ({_SUBMISSION_COLUMNS})
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(file_id) DO UPDATE SET
+                    recording_mbid = excluded.recording_mbid,
+                    fingerprint_hash = excluded.fingerprint_hash,
+                    submission_id = excluded.submission_id,
+                    status = excluded.status,
+                    reason = excluded.reason,
+                    submitted_at = excluded.submitted_at,
+                    checked_at = excluded.checked_at
+                """,
+                (
+                    str(row["file_id"]),
+                    str(row["recording_mbid"]),
+                    str(row["fingerprint_hash"]),
+                    row.get("submission_id"),
+                    str(row["status"]),
+                    row.get("reason"),
+                    row.get("submitted_at"),
+                    row.get("checked_at"),
+                ),
+            )
+            self.conn.commit()
+
+    def list_acoustid_submissions(self, status: str, limit: int = 100) -> list[dict[str, Any]]:
+        """Submissions filtered by status, up to limit."""
+        with self._lock:
+            cur = self.conn.execute(
+                f"SELECT {_SUBMISSION_COLUMNS} FROM acoustid_submissions WHERE status = ? "
+                "ORDER BY rowid ASC LIMIT ?",
+                (str(status), int(limit)),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def count_acoustid_submissions(self) -> dict[str, int]:
+        """Counts submissions grouped by status."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT status, COUNT(*) AS n FROM acoustid_submissions GROUP BY status"
+            ).fetchall()
+        return {r["status"]: int(r["n"]) for r in rows}

@@ -213,7 +213,7 @@ CREATE TABLE media_management_settings (
                 replace_illegal_characters INTEGER NOT NULL DEFAULT 1,
                 rename_artist_folders INTEGER NOT NULL DEFAULT 0,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            , staging_folder_path TEXT NOT NULL DEFAULT '', import_mode TEXT NOT NULL DEFAULT 'move', write_audio_tags INTEGER NOT NULL DEFAULT 1, embed_artwork INTEGER NOT NULL DEFAULT 1, save_cover_art_file INTEGER NOT NULL DEFAULT 1, delete_completed_transfers INTEGER NOT NULL DEFAULT 0, enable_quality_upgrades INTEGER NOT NULL DEFAULT 1, library_mode TEXT NOT NULL DEFAULT 'native', seed_ratio_limit REAL, seed_time_limit_minutes INTEGER, enrich_mbids INTEGER NOT NULL DEFAULT 1, acoustid_api_key TEXT, mb_mirror_url TEXT NOT NULL DEFAULT 'https://api.brainzmash.org', prefer_local_artwork INTEGER NOT NULL DEFAULT 1, scan_monitor_option TEXT NOT NULL DEFAULT 'existing', add_monitor_option TEXT NOT NULL DEFAULT 'all', add_metadata_profile_id INTEGER, import_bitrate_check TEXT NOT NULL DEFAULT 'warn', fingerprint_on_weak_match INTEGER NOT NULL DEFAULT 0, torrent_hardlink_tags TEXT NOT NULL DEFAULT 'copy_and_tag', seed_complete_action TEXT NOT NULL DEFAULT 'remove', recycle_bin_path TEXT NOT NULL DEFAULT '', recycle_bin_cleanup_days INTEGER NOT NULL DEFAULT 30, recycle_bin_permanent_delete INTEGER NOT NULL DEFAULT 0, quarantine_folder_path TEXT NOT NULL DEFAULT '', multi_disc_track_format TEXT NOT NULL DEFAULT '{Album Title}{ - [{Album Type}]}{ (Release Year)}/Disc {medium:00}/{track:00} - {Track Title}');
+            , staging_folder_path TEXT NOT NULL DEFAULT '', import_mode TEXT NOT NULL DEFAULT 'move', write_audio_tags INTEGER NOT NULL DEFAULT 1, embed_artwork INTEGER NOT NULL DEFAULT 1, save_cover_art_file INTEGER NOT NULL DEFAULT 1, delete_completed_transfers INTEGER NOT NULL DEFAULT 0, enable_quality_upgrades INTEGER NOT NULL DEFAULT 1, library_mode TEXT NOT NULL DEFAULT 'native', seed_ratio_limit REAL, seed_time_limit_minutes INTEGER, enrich_mbids INTEGER NOT NULL DEFAULT 1, acoustid_api_key TEXT, mb_mirror_url TEXT NOT NULL DEFAULT 'https://api.brainzmash.org', prefer_local_artwork INTEGER NOT NULL DEFAULT 1, scan_monitor_option TEXT NOT NULL DEFAULT 'existing', add_monitor_option TEXT NOT NULL DEFAULT 'all', add_metadata_profile_id INTEGER, import_bitrate_check TEXT NOT NULL DEFAULT 'warn', fingerprint_on_weak_match INTEGER NOT NULL DEFAULT 0, torrent_hardlink_tags TEXT NOT NULL DEFAULT 'copy_and_tag', seed_complete_action TEXT NOT NULL DEFAULT 'remove', recycle_bin_path TEXT NOT NULL DEFAULT '', recycle_bin_cleanup_days INTEGER NOT NULL DEFAULT 30, recycle_bin_permanent_delete INTEGER NOT NULL DEFAULT 0, quarantine_folder_path TEXT NOT NULL DEFAULT '', multi_disc_track_format TEXT NOT NULL DEFAULT '{Album Title}{ - [{Album Type}]}{ (Release Year)}/Disc {medium:00}/{track:00} - {Track Title}', acoustid_user_key TEXT);
 CREATE TABLE media_server_settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 type TEXT NOT NULL DEFAULT '',
@@ -742,6 +742,18 @@ CREATE TABLE file_fingerprints (
     error TEXT,
     looked_up_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
 );
+
+CREATE TABLE acoustid_submissions (
+    file_id TEXT PRIMARY KEY REFERENCES library_files(id) ON DELETE CASCADE,
+    recording_mbid TEXT NOT NULL,
+    fingerprint_hash TEXT NOT NULL,
+    submission_id INTEGER,
+    status TEXT NOT NULL,
+    reason TEXT,
+    submitted_at TEXT,
+    checked_at TEXT
+);
+CREATE INDEX idx_acoustid_submissions_status ON acoustid_submissions(status);
 
 CREATE INDEX idx_blocklist_hash ON download_blocklist(info_hash);
 CREATE INDEX idx_blocklist_title ON download_blocklist(source_title);

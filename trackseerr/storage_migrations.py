@@ -71,6 +71,7 @@ class MigrationsMixin:
                 (82, self._migration_v82),
                 (83, self._migration_v83),
                 (84, self._migration_v84),
+                (85, self._migration_v85),
             ]
 
             applied = 0
@@ -158,6 +159,29 @@ class MigrationsMixin:
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN replace_illegal_characters INTEGER NOT NULL DEFAULT 1"
             )
+
+    def _migration_v85(self, cur: sqlite3.Cursor) -> None:
+        """v85: AcoustID user key setting + submissions table."""
+        cur.execute("PRAGMA table_info(media_management_settings)")
+        if "acoustid_user_key" not in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE media_management_settings ADD COLUMN acoustid_user_key TEXT")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS acoustid_submissions (
+                file_id TEXT PRIMARY KEY REFERENCES library_files(id) ON DELETE CASCADE,
+                recording_mbid TEXT NOT NULL,
+                fingerprint_hash TEXT NOT NULL,
+                submission_id INTEGER,
+                status TEXT NOT NULL,
+                reason TEXT,
+                submitted_at TEXT,
+                checked_at TEXT
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_acoustid_submissions_status ON acoustid_submissions(status)"
+        )
 
     def _migration_v84(self, cur: sqlite3.Cursor) -> None:
         """v84: Add catalog tracking columns to music_requests."""

@@ -477,6 +477,32 @@ class TestLidarrSettingsAPI:
         assert r.status_code == 400
         assert test_db.get_media_management_settings()["acoustid_api_key"] == "acoustid-secret-1234"
 
+    def test_acoustid_user_key_exact_mask_kept_edited_mask_rejected(self, app_and_client, test_db, test_config, seeded_users):
+        _, client = app_and_client
+        h = _auth_headers(seeded_users["admin"], test_db, test_config)
+        test_db.update_media_management_settings({"acoustid_user_key": "acoustid-user-key-5678"})
+
+        # Masked on read
+        get_res = client.get("/api/settings/media-management", headers=h)
+        assert get_res.status_code == 200
+        masked = mask_secret("acoustid-user-key-5678")
+        assert get_res.json()["settings"]["acoustid_user_key"] == masked
+
+        # Exact mask kept
+        r = client.put("/api/settings/media-management", json={"acoustid_user_key": masked}, headers=h)
+        assert r.status_code == 200, r.text
+        assert test_db.get_media_management_settings()["acoustid_user_key"] == "acoustid-user-key-5678"
+
+        # Edited mask rejected with 400
+        r = client.put("/api/settings/media-management", json={"acoustid_user_key": "x" + masked}, headers=h)
+        assert r.status_code == 400
+        assert test_db.get_media_management_settings()["acoustid_user_key"] == "acoustid-user-key-5678"
+
+        # Empty clears
+        r = client.put("/api/settings/media-management", json={"acoustid_user_key": ""}, headers=h)
+        assert r.status_code == 200
+        assert test_db.get_media_management_settings()["acoustid_user_key"] is None
+
 
 class TestGeneralSettingsAPI:
     """Tests for GET /api/settings/general and POST /api/settings/general."""
