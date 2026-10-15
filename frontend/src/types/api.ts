@@ -2747,9 +2747,11 @@ export interface paths {
          * Rename Preview
          * @description Previews proposed file path changes from the naming templates.
          *
-         *     Album/artist scope returns up to ``limit`` tracks, including ones already in place, along with the total track count
-         *     and whether the results were truncated. Library-wide scope scans the whole library and returns only files that need a
-         *     move (up to ``limit``), reporting the true total count of files needing a rename and whether the results were truncated.
+         *     Targeted file_ids scope returns rows only for those files, including ones already in place, with total = len(items)
+         *     and truncated = False. Album/artist scope returns up to ``limit`` tracks, including ones already in place, along with
+         *     the total track count and whether the results were truncated. Library-wide scope scans the whole library and returns
+         *     only files that need a move (up to ``limit``), reporting the true total count of files needing a rename and whether
+         *     the results were truncated.
          */
         post: operations["rename_preview_api_library_rename_preview_post"];
         delete?: never;
@@ -2772,6 +2774,26 @@ export interface paths {
          * @description Relinks a file to the track its audio really is; a target that already has a file needs a ``conflict`` choice.
          */
         post: operations["rename_relink_api_library_rename_relink_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/rename/relink/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rename Relink Batch
+         * @description Batch-relinks up to 500 files to their target tracks.
+         */
+        post: operations["rename_relink_batch_api_library_rename_relink_batch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -12089,6 +12111,8 @@ export interface components {
             album_id?: string | null;
             /** Artist Id */
             artist_id?: string | null;
+            /** File Ids */
+            file_ids?: string[] | null;
             /**
              * Limit
              * @default 200
@@ -12103,6 +12127,51 @@ export interface components {
             total: number;
             /** Truncated */
             truncated: boolean;
+        };
+        /** RenameRelinkBatchItem */
+        RenameRelinkBatchItem: {
+            /** File Id */
+            file_id: string;
+            /** Target Track Id */
+            target_track_id: string;
+        };
+        /** RenameRelinkBatchRequest */
+        RenameRelinkBatchRequest: {
+            /**
+             * Conflict
+             * @default skip
+             */
+            conflict: ("skip" | "keep_incoming" | "keep_existing" | "prefer_quality") | null;
+            /** Items */
+            items: components["schemas"]["RenameRelinkBatchItem"][];
+        };
+        /** RenameRelinkBatchResponse */
+        RenameRelinkBatchResponse: {
+            /** Conflicts Skipped */
+            conflicts_skipped: number;
+            /** Errors */
+            errors: number;
+            /** Relinked */
+            relinked: number;
+            /** Results */
+            results: components["schemas"]["RenameRelinkBatchResult"][];
+        };
+        /** RenameRelinkBatchResult */
+        RenameRelinkBatchResult: {
+            /** File Id */
+            file_id: string;
+            /** Kept File Id */
+            kept_file_id?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Old Track Id */
+            old_track_id?: string | null;
+            /** Recycled File Id */
+            recycled_file_id?: string | null;
+            /** Status */
+            status: string;
+            /** Target Track Id */
+            target_track_id?: string | null;
         };
         /** RenameRelinkConflictResponse */
         RenameRelinkConflictResponse: {
@@ -18892,6 +18961,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RenameRelinkConflictResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_relink_batch_api_library_rename_relink_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameRelinkBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenameRelinkBatchResponse"];
                 };
             };
             /** @description Validation Error */
