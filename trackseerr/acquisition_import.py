@@ -690,9 +690,19 @@ class ImportPipelineMixin(ImportCatalogMixin):
             job.held_files.append(str(af))
             return
 
-        # Disc 1 of a multi-disc release must use the multi-disc format too.
-        known_discs = [int(metadata.get("total_discs") or 1)]
-        known_discs += [int(t.get("disc_number") or 1) for t in job.expected_tracks]
+        # Disc 1 of a multi-disc release must use the multi-disc format only when owned files span multiple discs.
+        known_discs: list[int] = [1]
+        try:
+            known_discs.append(int(metadata.get("disc_number") or 1))
+        except (TypeError, ValueError):
+            pass
+        for t in job.placed_to_track.values():
+            try:
+                known_discs.append(int(t.get("disc_number") or 1))
+            except (TypeError, ValueError):
+                pass
+        if job.target_album and job.target_album.get("id"):
+            known_discs.append(db.max_owned_disc(str(job.target_album["id"])))
         metadata["total_discs"] = max(known_discs)
 
         if not metadata.get("artist_folder"):

@@ -490,6 +490,19 @@ class LibraryCatalogStoreMixin:
             for r in rows
         ]
 
+    def max_owned_disc(self, album_id: str) -> int:
+        """Highest disc number among the album's tracks that have a file, minimum 1."""
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT MAX(t.disc_number) FROM library_tracks t "
+                "WHERE t.album_id = ? AND (t.has_file = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id))",
+                (str(album_id),),
+            )
+            row = cur.fetchone()
+            if row and row[0] is not None:
+                return max(1, int(row[0]))
+            return 1
+
     _CREDIT_COLUMNS = "track_id, position, artist_name, artist_mbid, role, join_phrase, source"
 
     @staticmethod

@@ -82,7 +82,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-from ._shared import (validate_media_path, native_only, _album_total_discs)
+from ._shared import (validate_media_path, native_only, _album_total_discs, _album_owned_discs)
 from .models import (ManualImportScanRequest, ManualImportCommitRequest, FingerprintRequest, ManualImportItem)
 
 def _scan_fallback_tags(p: Path) -> dict[str, Any]:
@@ -731,7 +731,7 @@ def _commit_one_item(run: _CommitRun, item: ManualImportItem) -> None:
     meta["title"] = track["title"]
     meta["track_number"] = track["track_number"]
     meta["disc_number"] = track["disc_number"]
-    meta["total_discs"] = _album_total_discs(run.db, album["id"], disc, inspected.get("total_discs"))
+    meta["total_discs"] = _album_owned_discs(run.db, album["id"], disc)
     if album.get("year"):
         meta["year"] = album["year"]
         meta["release_year"] = album["year"]

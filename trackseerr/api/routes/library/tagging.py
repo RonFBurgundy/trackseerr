@@ -74,7 +74,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-from ._shared import (validate_media_path, native_only, _album_total_discs)
+from ._shared import (validate_media_path, native_only, _album_total_discs, _album_owned_discs)
 from .models import (RenamePreviewRequest, RenameApplyRequest, RenameVerifyRequest, RenameRelinkRequest, RetagPreviewRequest, RetagApplyRequest)
 
 _ART_STEMS = ("cover", "folder", "front")
@@ -99,7 +99,7 @@ def _rename_meta(
     alb_id = track["album_id"]
     discs = caches.setdefault("discs", {})
     if alb_id not in discs:
-        discs[alb_id] = _album_total_discs(db, alb_id)
+        discs[alb_id] = _album_owned_discs(db, alb_id)
     return {
         "artist": artist["name"],
         "album_artist": artist["name"],

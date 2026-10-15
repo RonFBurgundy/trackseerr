@@ -1011,3 +1011,65 @@ def test_uncatalogued_import_without_library_artist_renders_folder(test_db: Data
     rel = _import_uncatalogued(test_db, workspace_dirs, library_artist=None)
     assert rel.parts[0] == "Mumford and Sons"
 
+
+def test_import_disc1_only_for_multidisc_album_lands_without_disc_folder(test_db: Database, workspace_dirs):
+    """Import of a disc-1-only download for a 2-disc catalog album lands without a Disc folder."""
+    downloads_dir, music_dir = workspace_dirs
+    settings = test_db.get_media_management_settings()
+    settings.update({
+        "root_folder_path": str(music_dir), "library_mode": "native",
+        "staging_folder_path": str(downloads_dir), "enrich_mbids": False, "write_audio_tags": False,
+        "standard_track_format": "{Album Title} ({Release Year})/{track:00} - {Track Title}",
+        "multi_disc_track_format": "{Album Title} ({Release Year})/Disc {medium:00}/{track:00} - {Track Title}",
+    })
+    test_db.update_media_management_settings(settings)
+    test_db.create_download_client(
+        DownloadClientConfig(id="c-sy", name="Slskd", driver_type=DownloadDriverType.SLSKD, host_url="http://slskd:5030")
+    )
+    test_db.upsert_library_artist(LibraryArtist(id="art-sy", name="Sonic Youth", path=str(music_dir / "Sonic Youth")))
+    test_db.upsert_library_album(
+        LibraryAlbum(id="alb-sy", artist_id="art-sy", title="Daydream Nation", year=1988, album_type="album")
+    )
+    # Catalog has disc 1 track and disc 2 track
+    test_db.upsert_library_track(
+        LibraryTrack(id="trk-sy-1", album_id="alb-sy", artist_id="art-sy", title="Teen Age Riot",
+                     track_number=1, disc_number=1)
+    )
+    test_db.upsert_library_track(
+        LibraryTrack(id="trk-sy-2", album_id="alb-sy", artist_id="art-sy", title="Eliminator Jr.",
+                     track_number=1, disc_number=2)
+    )
+    test_db.create_active_download(
+        ActiveDownload(id="dl-sy", client_id="c-sy", title="Sonic Youth - Daydream Nation", artist="Sonic Youth", item_type="album",
+                       status=DownloadStatus.COMPLETED.value, download_hash="h-sy", album_id="alb-sy")
+    )
+    dl = downloads_dir / "Sonic_Youth_Daydream_Nation"
+    af = dl / "01 - Teen Age Riot.flac"
+    dl.mkdir(parents=True, exist_ok=True)
+    write_flac(af)
+    driver = MagicMock()
+    driver.get_status.return_value = {
+        "status": DownloadStatus.COMPLETED.value, "progress": 100.0, "size_bytes": 1, "speed_bps": 0,
+        "eta_seconds": 0, "source_path": str(dl), "error_message": None,
+    }
+    meta = {
+        "artist": "Sonic Youth", "title": "Teen Age Riot", "album": "Daydream Nation",
+        "album_artist": "Sonic Youth", "compilation": False, "year": 1988,
+        "track_number": 1, "disc_number": 1, "total_discs": 2, "codec": "FLAC",
+        "bits_per_sample": 16, "bitrate": 900, "sample_rate": 44100, "extension": ".flac", "file_path": str(af),
+    }
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_import.inspect_audio_file", return_value=dict(meta)), \
+         patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=dict(meta)), \
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+        stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(downloads_dir))
+    assert stats["imported"] == 1
+    placed = list(music_dir.rglob("*.flac"))
+    assert len(placed) == 1
+    rel_parts = placed[0].relative_to(music_dir).parts
+    assert rel_parts[0] == "Sonic Youth"
+    assert rel_parts[1] == "Daydream Nation (1988)"
+    assert rel_parts[2] == "01 - Teen Age Riot.flac"
+    assert "Disc 01" not in rel_parts
+
+
