@@ -1396,3 +1396,125 @@ def test_rename_safety_forbidden_for_non_admin(app_and_client, test_db: Database
 
     res = client.get("/api/library/rename/safety", headers=alice_headers)
     assert res.status_code == 403
+
+
+def test_max_owned_disc(test_db: Database):
+    """max_owned_disc returns highest disc number among tracks with files, min 1."""
+    # 1. Non-existent album
+    assert test_db.max_owned_disc("unknown-album") == 1
+
+    # 2. Album with tracks on disc 1 and 2, but no files
+    test_db.upsert_library_artist({"id": "art-mod", "name": "Test Artist", "monitored": True})
+    test_db.upsert_library_album({"id": "alb-mod", "artist_id": "art-mod", "title": "Test Album", "monitored": True})
+    test_db.upsert_library_track({"id": "trk-mod-1", "album_id": "alb-mod", "artist_id": "art-mod", "title": "T1", "disc_number": 1})
+    test_db.upsert_library_track({"id": "trk-mod-2", "album_id": "alb-mod", "artist_id": "art-mod", "title": "T2", "disc_number": 2})
+    assert test_db.max_owned_disc("alb-mod") == 1
+
+    # 3. Add file on disc 1
+    test_db.upsert_library_file({
+        "id": "fil-mod-1", "track_id": "trk-mod-1", "file_path": "/tmp/f1.flac",
+        "relative_path": "f1.flac", "codec": "FLAC",
+    })
+    assert test_db.max_owned_disc("alb-mod") == 1
+
+    # 4. Add file on disc 2
+    test_db.upsert_library_file({
+        "id": "fil-mod-2", "track_id": "trk-mod-2", "file_path": "/tmp/f2.flac",
+        "relative_path": "f2.flac", "codec": "FLAC",
+    })
+    assert test_db.max_owned_disc("alb-mod") == 2
+
+    # 5. Delete file on disc 2
+    test_db.delete_library_file("fil-mod-2")
+    assert test_db.max_owned_disc("alb-mod") == 1
+
+
+def test_rename_preview_owned_disc_layout(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    """Rename preview disc layout follows owned files rather than catalog releases."""
+    app, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    root = tmp_path / "music"
+    test_db.update_media_management_settings({
+        "root_folder_path": str(root),
+        "standard_track_format": "{Album Title} ({Release Year})/{track:00} - {Track Title}",
+        "multi_disc_track_format": "{Album Title} ({Release Year})/Disc {medium:00}/{track:00} - {Track Title}",
+    })
+
+    # Case 1: Catalog has discs 1-2, but files only on disc 1 -> NO "Disc 01" folder
+    test_db.upsert_library_artist({"id": "ra-dn", "name": "Sonic Youth", "monitored": True})
+    test_db.upsert_library_album({"id": "rb-dn", "artist_id": "ra-dn", "title": "Daydream Nation", "year": 1988, "monitored": True})
+    test_db.upsert_library_track({
+        "id": "rt-dn-1", "album_id": "rb-dn", "artist_id": "ra-dn",
+        "title": "Teen Age Riot", "track_number": 1, "disc_number": 1, "monitored": True,
+    })
+    test_db.upsert_library_track({
+        "id": "rt-dn-2", "album_id": "rb-dn", "artist_id": "ra-dn",
+        "title": "Silver Rocket", "track_number": 1, "disc_number": 2, "monitored": True,
+    })
+    test_db.upsert_library_file({
+        "id": "rf-dn-1", "track_id": "rt-dn-1",
+        "file_path": str(root / "Sonic Youth" / "Daydream Nation (1988)" / "old_01.flac"),
+        "relative_path": "old_01.flac", "codec": "FLAC",
+    })
+
+    resp = client.post("/api/library/rename/preview", json={"album_id": "rb-dn"}, headers=headers)
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 1
+    # Single-disc rip of 2-disc catalog release has NO "Disc 01" in proposed path
+    prop_path = items[0]["proposed_path"]
+    assert "Disc 01" not in prop_path
+    assert prop_path.endswith("Sonic Youth/Daydream Nation (1988)/01 - Teen Age Riot.flac")
+
+    # Case 2: Same album with files on both disc 1 and disc 2 -> both under "Disc 01"/"Disc 02"
+    test_db.upsert_library_file({
+        "id": "rf-dn-2", "track_id": "rt-dn-2",
+        "file_path": str(root / "Sonic Youth" / "Daydream Nation (1988)" / "old_disc2.flac"),
+        "relative_path": "old_disc2.flac", "codec": "FLAC",
+    })
+
+    resp2 = client.post("/api/library/rename/preview", json={"album_id": "rb-dn"}, headers=headers)
+    assert resp2.status_code == 200
+    items2 = {item["track_id"]: item["proposed_path"] for item in resp2.json()["items"]}
+    assert len(items2) == 2
+    assert "Disc 01" in items2["rt-dn-1"]
+    assert items2["rt-dn-1"].endswith("Sonic Youth/Daydream Nation (1988)/Disc 01/01 - Teen Age Riot.flac")
+    assert "Disc 02" in items2["rt-dn-2"]
+    assert items2["rt-dn-2"].endswith("Sonic Youth/Daydream Nation (1988)/Disc 02/01 - Silver Rocket.flac")
+
+    # Case 3: Album whose catalog is single-disc but files carry disc 1 and 2 -> Disc folders kept
+    test_db.upsert_library_artist({"id": "ra-sd", "name": "Single Disc Artist", "monitored": True})
+    test_db.upsert_library_album({
+        "id": "rb-sd", "artist_id": "ra-sd", "title": "Single Disc Album", "year": 2020,
+        "total_tracks": 2, "monitored": True,
+    })
+    test_db.upsert_library_track({
+        "id": "rt-sd-1", "album_id": "rb-sd", "artist_id": "ra-sd",
+        "title": "Side A", "track_number": 1, "disc_number": 1, "monitored": True,
+    })
+    test_db.upsert_library_track({
+        "id": "rt-sd-2", "album_id": "rb-sd", "artist_id": "ra-sd",
+        "title": "Side B", "track_number": 1, "disc_number": 2, "monitored": True,
+    })
+    test_db.upsert_library_file({
+        "id": "rf-sd-1", "track_id": "rt-sd-1",
+        "file_path": str(root / "Single Disc Artist" / "Single Disc Album (2020)" / "old_a.flac"),
+        "relative_path": "old_a.flac", "codec": "FLAC",
+    })
+    test_db.upsert_library_file({
+        "id": "rf-sd-2", "track_id": "rt-sd-2",
+        "file_path": str(root / "Single Disc Artist" / "Single Disc Album (2020)" / "old_b.flac"),
+        "relative_path": "old_b.flac", "codec": "FLAC",
+    })
+
+    resp3 = client.post("/api/library/rename/preview", json={"album_id": "rb-sd"}, headers=headers)
+    assert resp3.status_code == 200
+    items3 = {item["track_id"]: item["proposed_path"] for item in resp3.json()["items"]}
+    assert len(items3) == 2
+    assert "Disc 01" in items3["rt-sd-1"]
+    assert items3["rt-sd-1"].endswith("Single Disc Artist/Single Disc Album (2020)/Disc 01/01 - Side A.flac")
+    assert "Disc 02" in items3["rt-sd-2"]
+    assert items3["rt-sd-2"].endswith("Single Disc Artist/Single Disc Album (2020)/Disc 02/01 - Side B.flac")
+

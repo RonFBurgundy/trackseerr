@@ -674,3 +674,20 @@ def _album_total_discs(db: Database, album_id: str, *extra: Any) -> int:
             pass
     return max([1, *discs])
 
+
+def _album_owned_discs(db: Database, album_id: str, *extra: Any) -> int:
+    """Highest disc number among the album's tracks that have a file, plus any extra hints, minimum 1.
+
+    Folder layout follows owned discs rather than catalog releases so single-disc rips of
+    multi-disc releases do not create redundant Disc 01 folders, while releases spanning multiple
+    owned discs retain Disc NN folders.
+    """
+    discs: list[int] = [db.max_owned_disc(album_id)]
+    for value in extra:
+        try:
+            if value is not None:
+                discs.append(int(value))
+        except (TypeError, ValueError):
+            pass
+    return max([1, *discs])
+
