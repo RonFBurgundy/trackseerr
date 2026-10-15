@@ -1,9 +1,11 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Disc, Library, Loader2, Plus, User } from 'lucide-react';
 import { MachinedCard, StatusMessage, TapeDeckButton, CassetteLoader } from '@/components/ui';
 import { DetailHeaderBar, PageFrame } from '@/components/layout';
 import { useArtistProfile } from '@/hooks/useArtistProfile';
 import { useProfileRequests } from '@/hooks/useProfileRequests';
+import { toForeignArtistId } from '@/hooks/useAddArtist';
+import { AddArtistDialog } from '@/components/library';
 import type { AppRoute } from '@/hooks/useAppRoute';
 import type {
   ArtistDiscographyAlbum,
@@ -114,11 +116,14 @@ interface HeroProps {
   bulkBusy: boolean;
   onOpenLibrary: () => void;
   onRequestMissing: () => void;
+  onAddArtist?: () => void;
 }
 
-const ProfileHero: React.FC<HeroProps> = React.memo(({ profile, isAdmin, missingCount, bulkBusy, onOpenLibrary, onRequestMissing }) => {
+const ProfileHero: React.FC<HeroProps> = React.memo(({ profile, isAdmin, missingCount, bulkBusy, onOpenLibrary, onRequestMissing, onAddArtist }) => {
   const { artist, library } = profile;
-  const showLibrary = isAdmin && library !== null && Boolean(artist.library_artist_id);
+  const inLibrary = Boolean(artist.library_artist_id);
+  const showLibrary = isAdmin && library !== null && inLibrary;
+  const showAdd = isAdmin && !inLibrary;
   return (
     <MachinedCard className="overflow-hidden">
       <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 p-2 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-x-4 sm:p-4">
@@ -147,6 +152,11 @@ const ProfileHero: React.FC<HeroProps> = React.memo(({ profile, isAdmin, missing
             {showLibrary && (
               <TapeDeckButton size="sm" onClick={onOpenLibrary} icon={<Library className="h-3.5 w-3.5" />}>
                 Open in Library
+              </TapeDeckButton>
+            )}
+            {showAdd && onAddArtist && (
+              <TapeDeckButton size="sm" onClick={onAddArtist} icon={<Plus className="h-3.5 w-3.5" />}>
+                Add / monitor
               </TapeDeckButton>
             )}
             {missingCount > 0 && (
@@ -191,6 +201,26 @@ export const ArtistProfileView: React.FC<ArtistProfileViewProps> = ({
   const artistName = profile?.artist.name ?? '';
   const artistImage = profile?.artist.image_url ?? undefined;
   const libraryArtistId = isAdmin ? profile?.artist.library_artist_id ?? null : null;
+
+  const [isAddArtistOpen, setIsAddArtistOpen] = useState(false);
+
+  const preselectedArtist = useMemo(() => {
+    if (!profile?.artist) return undefined;
+    const rawId = profile.artist.discovery_id ?? discoveryId;
+    return {
+      foreignArtistId: toForeignArtistId(rawId),
+      name: profile.artist.name,
+      imageUrl: profile.artist.image_url ?? undefined,
+    };
+  }, [profile, discoveryId]);
+
+  const handleArtistAdded = useCallback(
+    (_libraryArtistId: string): void => {
+      setIsAddArtistOpen(false);
+      void refetch();
+    },
+    [refetch]
+  );
 
   const missing = useMemo(
     () =>
@@ -286,68 +316,79 @@ export const ArtistProfileView: React.FC<ArtistProfileViewProps> = ({
   const libraryOnly = discography.library_only;
 
   return (
-    <PageFrame nav={header} bodyClassName="space-y-5" ariaLabel="Artist profile">
-      {requests.error && <StatusMessage variant="error">{requests.error}</StatusMessage>}
-      {error && <StatusMessage variant="error">{error}</StatusMessage>}
-      <ProfileHero
-        profile={profile}
-        isAdmin={isAdmin}
-        missingCount={missing.length}
-        bulkBusy={requests.bulkBusy}
-        onOpenLibrary={openLibrary}
-        onRequestMissing={handleRequestMissing}
-      />
+    <>
+      <PageFrame nav={header} bodyClassName="space-y-5" ariaLabel="Artist profile">
+        {requests.error && <StatusMessage variant="error">{requests.error}</StatusMessage>}
+        {error && <StatusMessage variant="error">{error}</StatusMessage>}
+        <ProfileHero
+          profile={profile}
+          isAdmin={isAdmin}
+          missingCount={missing.length}
+          bulkBusy={requests.bulkBusy}
+          onOpenLibrary={openLibrary}
+          onRequestMissing={handleRequestMissing}
+          onAddArtist={() => setIsAddArtistOpen(true)}
+        />
 
-      {topTracks.length > 0 && (
-        <section aria-label="Top tracks">
-          <SectionHeading title="Top tracks" count={topTracks.length} />
-          <ul className="divide-y divide-[#1f1f1f] overflow-hidden rounded-[4px] border border-[#1f1f1f]">
-            {topTracks.map((track, idx) => (
-              <ProfileTrackRow
-                key={track.id}
-                index={idx}
-                track={track}
-                status={effectiveStatus(track.status, track.id, requestedIds)}
-                busy={busyIds.has(track.id)}
-                isPlaying={isPreviewPlaying && currentPreviewTrackId === track.id}
-                onPlay={handlePlay}
-                onRequest={handleRequestTrack}
-                onOpen={handleOpenTrack}
-              />
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {GROUPS.map(({ key, title }) => {
-        const albums = discography[key];
-        if (albums.length === 0) return null;
-        return (
-          <section key={key} aria-label={title}>
-            <SectionHeading title={title} count={albums.length} />
-            <div className={GRID}>
-              {albums.map((album) => (
-                <ProfileAlbumCard
-                  key={album.id}
-                  album={album}
-                  status={effectiveStatus(album.status, album.id, requestedIds)}
-                  busy={busyIds.has(album.id)}
-                  onOpen={handleOpenAlbum}
-                  onRequest={handleRequestAlbum}
+        {topTracks.length > 0 && (
+          <section aria-label="Top tracks">
+            <SectionHeading title="Top tracks" count={topTracks.length} />
+            <ul className="divide-y divide-[#1f1f1f] overflow-hidden rounded-[4px] border border-[#1f1f1f]">
+              {topTracks.map((track, idx) => (
+                <ProfileTrackRow
+                  key={track.id}
+                  index={idx}
+                  track={track}
+                  status={effectiveStatus(track.status, track.id, requestedIds)}
+                  busy={busyIds.has(track.id)}
+                  isPlaying={isPreviewPlaying && currentPreviewTrackId === track.id}
+                  onPlay={handlePlay}
+                  onRequest={handleRequestTrack}
+                  onOpen={handleOpenTrack}
                 />
               ))}
-            </div>
+            </ul>
           </section>
-        );
-      })}
-
-      {libraryOnly.length > 0 && <LibraryOnlySection items={libraryOnly} onOpen={libraryArtistId ? openLibraryAlbum : undefined} />}
-
-      {topTracks.length === 0 &&
-        GROUPS.every(({ key }) => discography[key].length === 0) &&
-        libraryOnly.length === 0 && (
-          <p className="py-10 text-center font-mono text-sm text-neutral-500">No releases found for this artist.</p>
         )}
-    </PageFrame>
+
+        {GROUPS.map(({ key, title }) => {
+          const albums = discography[key];
+          if (albums.length === 0) return null;
+          return (
+            <section key={key} aria-label={title}>
+              <SectionHeading title={title} count={albums.length} />
+              <div className={GRID}>
+                {albums.map((album) => (
+                  <ProfileAlbumCard
+                    key={album.id}
+                    album={album}
+                    status={effectiveStatus(album.status, album.id, requestedIds)}
+                    busy={busyIds.has(album.id)}
+                    onOpen={handleOpenAlbum}
+                    onRequest={handleRequestAlbum}
+                  />
+                ))}
+              </div>
+            </section>
+          );
+        })}
+
+        {libraryOnly.length > 0 && <LibraryOnlySection items={libraryOnly} onOpen={libraryArtistId ? openLibraryAlbum : undefined} />}
+
+        {topTracks.length === 0 &&
+          GROUPS.every(({ key }) => discography[key].length === 0) &&
+          libraryOnly.length === 0 && (
+            <p className="py-10 text-center font-mono text-sm text-neutral-500">No releases found for this artist.</p>
+          )}
+      </PageFrame>
+      {isAdmin && preselectedArtist && (
+        <AddArtistDialog
+          open={isAddArtistOpen}
+          onClose={() => setIsAddArtistOpen(false)}
+          preselected={preselectedArtist}
+          onAdded={handleArtistAdded}
+        />
+      )}
+    </>
   );
 };

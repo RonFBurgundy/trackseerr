@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect } from 'react';
+import { Plus } from 'lucide-react';
 import type { ArtistItem } from '@/types/models';
 import { getArtistsIndex, getArtistsPaged } from '@/services/libraryService';
 import { pagedFetcher } from '@/hooks/useVirtualPagedList';
@@ -9,6 +10,7 @@ import { useArtistBulkEdit } from '@/hooks/useArtistBulkEdit';
 import { useQualityProfiles } from '@/hooks/useQualityProfiles';
 import { useMetadataProfiles } from '@/hooks/useMetadataProfiles';
 import { ScrubberRail, VirtualGrid } from '@/components/lists';
+import { TapeDeckButton } from '@/components/ui';
 import { LibrarySortControl } from './LibrarySortControl';
 import { LibraryToolbarPortal, type LibrarySelectAction } from './LibraryToolbarPortal';
 import { ArtistTile } from './ArtistTile';
@@ -43,6 +45,7 @@ export interface ArtistsPanelProps {
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
   onSelectActionChange: (action: LibrarySelectAction | null) => void;
   facets?: Readonly<Record<string, string | readonly string[]>>;
+  onAddArtist?: (initialQuery?: string) => void;
 }
 
 /** Artists as a virtualized cover grid with a scrubber; search and sort are server-side. */
@@ -58,6 +61,7 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
   onToast,
   onSelectActionChange,
   facets,
+  onAddArtist,
 }) => {
   const { list, index, sortKey, sortDir, changeSort } = useLibraryCatalog<ArtistItem>({
     fetchPage: fetchArtists,
@@ -150,9 +154,38 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
             ? 'No artists match your search.'
             : 'No artists found in library.'
         }
+        emptyAction={
+          isAdmin && query && onAddArtist ? (
+            <TapeDeckButton
+              size="sm"
+              icon={<Plus className="h-3.5 w-3.5" />}
+              onClick={() => onAddArtist(query)}
+            >
+              Add “{query}” as artist
+            </TapeDeckButton>
+          ) : undefined
+        }
         ariaLabel="Artists"
         rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
-        footer={footer}
+        footer={
+          <>
+            {isAdmin && query && list.total > 0 && list.total < 3 && onAddArtist && (
+              <div className="flex flex-col items-center gap-2 py-4 text-center">
+                <p className="font-mono text-xs text-neutral-400">
+                  {list.total === 1 ? '1 artist matches your search.' : `${list.total} artists match your search.`}
+                </p>
+                <TapeDeckButton
+                  size="sm"
+                  icon={<Plus className="h-3.5 w-3.5" />}
+                  onClick={() => onAddArtist(query)}
+                >
+                  Add “{query}” as artist
+                </TapeDeckButton>
+              </div>
+            )}
+            {footer}
+          </>
+        }
       />
     </section>
   );

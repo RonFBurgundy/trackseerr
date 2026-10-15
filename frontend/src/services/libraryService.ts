@@ -316,7 +316,7 @@ export async function bulkEditTracks(body: BulkTrackEditRequest): Promise<BulkTr
 export interface IngestArtistInput {
   foreign_artist_id: string;
   artist_name: string;
-  monitor_option: MonitorOption;
+  monitor_option?: MonitorOption;
   monitored?: boolean;
   quality_profile_id?: string | null;
   root_folder?: string | null;
@@ -324,9 +324,11 @@ export interface IngestArtistInput {
   metadata_profile_id?: number | null;
 }
 
+export type IngestArtistResponse = Schema<'IngestArtistResponse'>;
+
 /** Ingest an artist discography from discovery metadata into the native catalog. */
-export async function ingestArtist(input: IngestArtistInput): Promise<void> {
-  await apiRequest<void>('/api/library/artists/ingest', { method: 'POST', body: input });
+export async function ingestArtist(input: IngestArtistInput): Promise<Schema<'IngestArtistResponse'>> {
+  return apiRequest<Schema<'IngestArtistResponse'>>('/api/library/artists/ingest', { method: 'POST', body: input });
 }
 
 export type LibraryFacetsResponse = Schema<'LibraryFacetsResponse'>;
