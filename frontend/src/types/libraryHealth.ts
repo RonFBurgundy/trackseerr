@@ -38,3 +38,5 @@ export interface WeakMatchDetail {
 }
 
 export type LibraryHealthWeeklyResponse = Schema<'LibraryHealthWeekly'>;
+
+export type LibraryHealthShortened = Schema<'LibraryHealthShortened'>;

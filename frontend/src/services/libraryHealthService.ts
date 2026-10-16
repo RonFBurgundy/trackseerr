@@ -4,6 +4,7 @@ import type {
   LibraryHealthDismissRequest,
   LibraryHealthMappingRequest,
   LibraryHealthResponse,
+  LibraryHealthShortened,
   LibraryHealthStarted,
   LibraryHealthWeeklyResponse,
 } from '@/types/libraryHealth';
@@ -25,6 +26,10 @@ export function startLibraryHealthCheck(): Promise<LibraryHealthStarted> {
 
 export function dismissLibraryHealth(body: LibraryHealthDismissRequest): Promise<unknown> {
   return apiRequest<unknown>(`${BASE}/dismiss`, { method: 'POST', body });
+}
+
+export function shortenLibraryHealthFinding(findingId: string): Promise<LibraryHealthShortened> {
+  return apiRequest<LibraryHealthShortened>(`${BASE}/findings/${encodeURIComponent(findingId)}/shorten`, { method: 'POST' });
 }
 
 export function setLibraryHealthMapping(body: LibraryHealthMappingRequest): Promise<unknown> {
