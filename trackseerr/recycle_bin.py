@@ -22,6 +22,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from trackseerr.import_security import QUARANTINE_DIRNAME as LEGACY_QUARANTINE_DIRNAME
 from trackseerr.item_history import TRIGGER_RECYCLE_CLEANUP, download_trigger_kwargs, emit
+from trackseerr.naming import MAX_NAME_BYTES, truncate_utf8_bytes
 from trackseerr.redaction import safe_exc
 from trackseerr.task_manager import (
     TRIGGER_MANUAL,
@@ -117,13 +118,38 @@ class DisposeResult:
     reason: str = ""
 
 
+def _cap_component(name: str, suffix: str = "") -> str:
+    """Caps a path component (file or folder name) to MAX_NAME_BYTES UTF-8 encoded bytes.
+
+    If name + suffix fits within MAX_NAME_BYTES, returns name + suffix unchanged.
+    Otherwise, splits name into stem and ext via os.path.splitext, truncates stem to fit
+    (MAX_NAME_BYTES - len((ext + suffix).encode())), strips trailing spaces and dots,
+    falls back to 'file' if empty, and returns stem + suffix + ext.
+    """
+    if len((name + suffix).encode("utf-8", "surrogateescape")) <= MAX_NAME_BYTES:
+        return name + suffix
+    stem, ext = os.path.splitext(name)
+    max_stem_bytes = max(0, MAX_NAME_BYTES - len((ext + suffix).encode("utf-8", "surrogateescape")))
+    truncated_stem = truncate_utf8_bytes(stem, max_stem_bytes).rstrip(" .")
+    if not truncated_stem:
+        truncated_stem = "file"
+    return f"{truncated_stem}{suffix}{ext}"
+
+
 def _recycle_destination(recycle_root: Path, rel: Path, today: date) -> Path:
-    base = recycle_root / today.isoformat() / rel
+    capped_parts = [_cap_component(part) for part in rel.parts]
+    capped_rel = Path(*capped_parts)
+    base = recycle_root / today.isoformat() / capped_rel
     dest = base
+    original_name = rel.name
+    is_over_limit = len(original_name.encode("utf-8", "surrogateescape")) > MAX_NAME_BYTES
     i = 0
     while os.path.lexists(dest):
         i += 1
-        dest = base.with_name(f"{base.name}.{i}")
+        if is_over_limit:
+            dest = base.with_name(_cap_component(original_name, f".{i}"))
+        else:
+            dest = base.with_name(f"{base.name}.{i}")
     return dest
 
 
