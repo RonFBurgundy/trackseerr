@@ -41,6 +41,7 @@ from trackseerr.models import (
     DownloadClientConfig,
     IndexerConfig,
 )
+from trackseerr.mb_metadata_store import get_shared_enricher
 from trackseerr.security import is_safe_service_url
 from trackseerr.storage import Database
 
@@ -110,6 +111,16 @@ class EnvironmentStatus(ApiModel):
     uptime_seconds: float
 
 
+class MetadataSourceStatus(ApiModel):
+    host: str
+    role: str
+    requests_last_hour: int
+    rate_limit_rps: float
+    max_concurrency: int
+    paused_seconds_remaining: float
+    breaker_state: str
+
+
 class SystemStatusResponse(ApiModel):
     environment: EnvironmentStatus
     storage: list[DiskUsageItem]
@@ -118,6 +129,7 @@ class SystemStatusResponse(ApiModel):
     download_clients: list[ServicePingResult]
     indexers: list[ServicePingResult]
     workers: WorkerStatus
+    metadata_sources: list[MetadataSourceStatus] = []
 
 
 def _get_disk_metrics(config: Config, db: Database) -> list[DiskUsageItem]:
@@ -570,6 +582,27 @@ def get_media_server_status(
     return media_server_status(config, lambda: _connected_media_client(config))
 
 
+def _get_metadata_sources(db: Database) -> list[MetadataSourceStatus]:
+    """Collects rate limit and resilience telemetry for upstream metadata sources."""
+    try:
+        hosts_data = get_shared_enricher(db).stats()["hosts"]
+        return [
+            MetadataSourceStatus(
+                host=host,
+                role=str(info["role"]),
+                requests_last_hour=int(info["requests_last_hour"]),
+                rate_limit_rps=float(info["rate_limit_rps"]),
+                max_concurrency=int(info["max_concurrency"]),
+                paused_seconds_remaining=float(info["paused_seconds_remaining"]),
+                breaker_state=str(info["breaker_state"]),
+            )
+            for host, info in hosts_data.items()
+        ]
+    except (sqlite3.Error, KeyError, TypeError) as exc:
+        logger.warning("Failed to collect metadata source status: %s", exc)
+        return []
+
+
 @router.get("/status", response_model=SystemStatusResponse, summary="Get system status and diagnostics")
 @router.get("", response_model=SystemStatusResponse, include_in_schema=False)
 def get_system_status(
@@ -593,6 +626,7 @@ def get_system_status(
     download_clients = _ping_download_clients(db)
     indexers = _ping_indexers(db)
     workers = _get_worker_statuses()
+    metadata_sources = _get_metadata_sources(db)
 
     return SystemStatusResponse(
         environment=env_status,
@@ -602,4 +636,5 @@ def get_system_status(
         download_clients=download_clients,
         indexers=indexers,
         workers=workers,
+        metadata_sources=metadata_sources,
     )

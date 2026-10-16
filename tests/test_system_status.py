@@ -17,8 +17,17 @@ from trackseerr.api.routes.system.status import (
 )
 from trackseerr.api.routes.system.tasks import get_all_scheduled_tasks
 from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.clients.mbid_enricher import _reset_governors
 from trackseerr.config import Config
 from trackseerr.storage import Database
+
+
+@pytest.fixture(autouse=True)
+def _reset_mb_governors():
+    """Resets module-level governors before and after each test."""
+    _reset_governors()
+    yield
+    _reset_governors()
 
 
 @pytest.fixture
@@ -147,10 +156,47 @@ def test_admin_system_status_success(app_and_client, seeded_users, secret_key, t
     assert "lidarr_worker" in workers
     assert "sync_coordinator" in workers
 
+    # 7. Metadata sources
+    metadata_sources = data["metadata_sources"]
+    assert isinstance(metadata_sources, list)
+    assert len(metadata_sources) == 2
+    sources_by_host = {s["host"]: s for s in metadata_sources}
+    assert "api.brainzmash.cc" in sources_by_host
+    assert "musicbrainz.org" in sources_by_host
+    assert sources_by_host["api.brainzmash.cc"]["role"] == "mirror"
+    assert sources_by_host["musicbrainz.org"]["role"] == "fallback"
+    assert isinstance(sources_by_host["api.brainzmash.cc"]["requests_last_hour"], int)
+    assert isinstance(sources_by_host["api.brainzmash.cc"]["rate_limit_rps"], (int, float))
+    assert isinstance(sources_by_host["api.brainzmash.cc"]["max_concurrency"], int)
+    assert isinstance(sources_by_host["api.brainzmash.cc"]["paused_seconds_remaining"], (int, float))
+    assert sources_by_host["api.brainzmash.cc"]["breaker_state"] in ("closed", "open", "half_open")
+
     # Also verify the /api/system alias endpoint
     alias_resp = client.get("/api/system", cookies=cookies)
     assert alias_resp.status_code == 200
     assert alias_resp.json()["environment"]["version"] == "1.0.0"
+
+
+def test_system_status_includes_metadata_sources(app_and_client, seeded_users, secret_key, test_db):
+    """Status response includes metadata_sources with the mirror host and musicbrainz.org entries."""
+    _, client = app_and_client
+    cookies = create_auth_cookies(test_db, seeded_users["admin"], secret_key)
+    resp = client.get("/api/system/status", cookies=cookies)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "metadata_sources" in data
+    sources = {s["host"]: s for s in data["metadata_sources"]}
+    assert "api.brainzmash.cc" in sources
+    assert "musicbrainz.org" in sources
+    assert sources["api.brainzmash.cc"]["role"] == "mirror"
+    assert sources["musicbrainz.org"]["role"] == "fallback"
+    assert sources["api.brainzmash.cc"]["rate_limit_rps"] == 3.0
+    assert sources["api.brainzmash.cc"]["max_concurrency"] == 2
+    assert sources["musicbrainz.org"]["rate_limit_rps"] == 1.0
+    assert sources["musicbrainz.org"]["max_concurrency"] == 1
+    assert sources["api.brainzmash.cc"]["requests_last_hour"] >= 0
+    assert sources["api.brainzmash.cc"]["paused_seconds_remaining"] == 0.0
+    assert sources["api.brainzmash.cc"]["breaker_state"] == "closed"
 
 
 # =============================================================================

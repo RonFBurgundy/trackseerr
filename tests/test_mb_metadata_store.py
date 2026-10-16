@@ -8,7 +8,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.clients.mbid_enricher import (
+    MbidEnricherClient,
+    _reset_governors,
+)
 from trackseerr.mb_metadata_store import (
     MbMetadataStore,
     get_shared_enricher,
@@ -216,6 +219,7 @@ def test_failure_not_persisted(test_db: Database) -> None:
     assert row_bj is None
 
     # Subsequent fresh client retries and succeeds
+    _reset_governors()
     client_fresh = MbidEnricherClient(base_url="https://api.brainzmash.cc", store=store)
     r_ok = MagicMock(status_code=200)
     r_ok.json.return_value = {"artists": [{"id": "art-success", "name": "Bad JSON Artist"}]}
@@ -449,7 +453,11 @@ def test_stats_counts_requests_and_hits(test_db: Database) -> None:
     store = MbMetadataStore(test_db)
     client = MbidEnricherClient(base_url="https://api.brainzmash.cc", store=store)
     expected_breakers = {"api.brainzmash.cc": "closed", "musicbrainz.org": "closed"}
-    assert client.stats() == {"network_requests": 0, "cache_hits": 0, "breaker_state": expected_breakers}
+    s0 = client.stats()
+    assert s0["network_requests"] == 0
+    assert s0["cache_hits"] == 0
+    assert s0["breaker_state"] == expected_breakers
+    assert "hosts" in s0
 
     resp = MagicMock(status_code=200)
     resp.json.return_value = {"artists": [{"id": "art-1", "name": "Coldplay"}]}
@@ -457,18 +465,27 @@ def test_stats_counts_requests_and_hits(test_db: Database) -> None:
     with patch.object(client._session, "get", return_value=resp):
         res1 = client.lookup_artist_mbid("Coldplay")
         assert res1 == "art-1"
-        assert client.stats() == {"network_requests": 1, "cache_hits": 0, "breaker_state": expected_breakers}
+        s1 = client.stats()
+        assert s1["network_requests"] == 1
+        assert s1["cache_hits"] == 0
+        assert s1["breaker_state"] == expected_breakers
 
     # L1 cache hit
     res2 = client.lookup_artist_mbid("Coldplay")
     assert res2 == "art-1"
-    assert client.stats() == {"network_requests": 1, "cache_hits": 1, "breaker_state": expected_breakers}
+    s2 = client.stats()
+    assert s2["network_requests"] == 1
+    assert s2["cache_hits"] == 1
+    assert s2["breaker_state"] == expected_breakers
 
     # Clear L1 to force L2 store hit
     client._cache.clear()
     res3 = client.lookup_artist_mbid("Coldplay")
     assert res3 == "art-1"
-    assert client.stats() == {"network_requests": 1, "cache_hits": 2, "breaker_state": expected_breakers}
+    s3 = client.stats()
+    assert s3["network_requests"] == 1
+    assert s3["cache_hits"] == 2
+    assert s3["breaker_state"] == expected_breakers
 
     # Verify store.stats() groups by kind
     assert store.stats() == {"artist_lookup": 1}
