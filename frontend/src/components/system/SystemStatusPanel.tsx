@@ -7,7 +7,7 @@ import { useMediaServer } from '@/hooks/useMediaServer';
 import { useChangelog } from '@/hooks';
 import { formatBytes } from '@/components/lists/formatters';
 import type { LibraryManagerMode, LidarrHealthItem } from '@/types/models';
-import { formatDuration } from './formatters';
+import { formatDuration, formatPauseSeconds } from './formatters';
 import { ChangelogModal } from './ChangelogModal';
 import { UpdatesCard } from './UpdatesCard';
 import { useUpdateCheck, type UseUpdateCheckReturn } from '@/hooks';
@@ -120,6 +120,30 @@ export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, li
                   : `${indexersOnline} of ${status.indexers.length} online`}
               </span>
             </StatusRow>
+            {(status.metadata_sources ?? []).map((source) => {
+              const label =
+                source.role === 'mirror'
+                  ? `MusicBrainz mirror (${source.host}):`
+                  : `MusicBrainz fallback (${source.host}):`;
+              const baseText = `${source.requests_last_hour} requests in the last hour · limit ${source.rate_limit_rps}/s`;
+              let suffix = '';
+              let textColor = 'text-green-400';
+              if (source.paused_seconds_remaining > 0) {
+                suffix = ` · paused for ${formatPauseSeconds(source.paused_seconds_remaining)}`;
+                textColor = 'text-amber-400';
+              } else if (source.breaker_state === 'open') {
+                suffix = ' · not responding, retrying soon';
+                textColor = 'text-red-400';
+              }
+              return (
+                <StatusRow key={`${source.role}-${source.host}`} label={label}>
+                  <span className={textColor}>
+                    {baseText}
+                    {suffix}
+                  </span>
+                </StatusRow>
+              );
+            })}
             <StatusRow label="Acquisition Worker:">
               <WorkerState running={flag(status.workers.acquisition_worker, 'running')} />
             </StatusRow>

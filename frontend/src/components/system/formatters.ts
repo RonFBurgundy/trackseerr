@@ -14,3 +14,12 @@ export function formatDuration(ms?: number | null): string {
   if (m < 60) return `${m}m ${s}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
+
+export function formatPauseSeconds(seconds?: number | null): string {
+  if (seconds === null || seconds === undefined || seconds <= 0) return '0s';
+  const totalSeconds = Math.round(seconds);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}m ${s}s`;
+}
