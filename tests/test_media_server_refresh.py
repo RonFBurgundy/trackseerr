@@ -428,3 +428,52 @@ def test_library_roots_cached(monkeypatch):
     res2 = refresh_scheduler.to_server_folder(db, server, "/music/B/Y")
     assert res2 == "/music/B/Y"
     server.library_roots.assert_called_once()
+
+
+def test_requeued_full_overrides_pending_folder_timer(monkeypatch):
+    current_time = 1000.0
+    monkeypatch.setattr(refresh_scheduler, "_monotonic", lambda: current_time)
+    refresh_scheduler.configure(10)  # window = 600s
+
+    server = MagicMock(spec=MediaServer)
+    server.kind = "plex"
+    server.capabilities = MagicMock(folder_refresh=True)
+    server.library_roots.return_value = ["/music"]
+    db = MagicMock()
+    db.get_media_server_path_mapping.return_value = None
+    db.get_media_management_settings.return_value = {"root_folder_path": "/music"}
+
+    # 1. Fire a full rescan to establish last_full_fired
+    refresh_scheduler.request_library_refresh(server, reason="initial_full")
+    assert refresh_scheduler.flush_now() is True
+    server.refresh_library.assert_called_once()
+    server.refresh_library.reset_mock()
+
+    # 2. Advance time by 30 seconds
+    current_time += 30.0
+
+    # Fake refresh_paths that simulates an import arriving mid-call
+    def fake_refresh_paths(paths):
+        refresh_scheduler.request_library_refresh(
+            server, reason="mid_call_import", paths=["/music/Artist/Album2"], db=db
+        )
+        return False
+
+    server.refresh_paths.side_effect = fake_refresh_paths
+
+    # Request first folder batch
+    refresh_scheduler.request_library_refresh(
+        server, reason="folder_batch", paths=["/music/Artist/Album1"], db=db
+    )
+
+    # 3. Call flush_now() for the first batch
+    assert refresh_scheduler.flush_now() is True
+    server.refresh_paths.assert_called_once()
+    server.refresh_library.assert_not_called()
+
+    # Delay should be window remainder (600 - 30 = 570s), NOT 60s
+    expected_delay = 600.0 - 30.0
+    delay = refresh_scheduler.pending_delay()
+    assert delay is not None
+    assert abs(delay - expected_delay) < 1e-3
+

@@ -326,6 +326,9 @@ class RefreshScheduler:
                     delay = QUIET_SECONDS
                 else:
                     delay = max(QUIET_SECONDS, self._last_full_fired + self._window_seconds - now)
+                if self._timer is not None:
+                    self._timer.cancel()
+                    self._timer = None
                 self._schedule_locked(delay)
         else:
             logger.info(
