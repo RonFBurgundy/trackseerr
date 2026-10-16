@@ -23,7 +23,15 @@ from trackseerr.models import (
     MusicRequest,
     RequestStatus,
 )
+from trackseerr.media_servers import refresh_scheduler
 from trackseerr.storage import Database
+
+
+@pytest.fixture(autouse=True)
+def _reset_refresh_scheduler():
+    refresh_scheduler.reset_for_tests()
+    yield
+    refresh_scheduler.reset_for_tests()
 
 
 @pytest.fixture
@@ -255,6 +263,8 @@ def test_worker_poll_once_completed_and_organizes(test_db, workspace_dirs):
     assert updated_req["status"] == RequestStatus.AVAILABLE.value
 
     # Verify Plex library refresh pinged
+    mock_plex.refresh_music_library.assert_not_called()
+    assert refresh_scheduler.flush_now() is True
     mock_plex.refresh_music_library.assert_called_once()
 
 

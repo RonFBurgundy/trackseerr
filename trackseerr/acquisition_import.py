@@ -18,6 +18,7 @@ from trackseerr.clients.acquisition import is_torrent_driver_type
 from trackseerr.mb_metadata_store import get_shared_enricher
 from trackseerr.clients.plex import PlexClient
 from trackseerr.media_servers import as_media_server
+from trackseerr.media_servers.refresh_scheduler import request_library_refresh
 from trackseerr.download_roots import allowed_roots_for_client
 from trackseerr.import_security import (
     clear_exec_bits,
@@ -291,10 +292,7 @@ class ImportPipelineMixin(ImportCatalogMixin):
             logger.warning("Failed to dispatch ITEM_AVAILABLE notification for Lidarr import: %s", ex)
 
         if plex_client:
-            try:
-                as_media_server(plex_client).refresh_library()
-            except Exception as e:
-                logger.warning("Error refreshing Plex after Lidarr import: %s", e)
+            request_library_refresh(as_media_server(plex_client), reason="Lidarr import")
 
     def _import_ready_item(
         self,
@@ -1034,9 +1032,6 @@ class ImportPipelineMixin(ImportCatalogMixin):
 
         # Trigger Plex library refresh ping
         if ctx.plex_client:
-            try:
-                as_media_server(ctx.plex_client).refresh_library()
-            except Exception as e:
-                logger.warning("Error triggering Plex library refresh: %s", e)
+            request_library_refresh(as_media_server(ctx.plex_client), reason="import")
 
 

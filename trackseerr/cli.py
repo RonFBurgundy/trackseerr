@@ -935,6 +935,9 @@ def main() -> int:
 
     with boot_state.step_timer("config load", publish=False):
         config = Config.from_env()
+    from .media_servers import refresh_scheduler
+
+    refresh_scheduler.configure(config.media_server_refresh_minutes)
     setup_logging(config.log_level, config=config)
     logger.info("[boot] log level %s, config dir %s", config.log_level.upper(), config.config_dir)
 

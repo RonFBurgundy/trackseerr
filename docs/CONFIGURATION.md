@@ -64,6 +64,7 @@ See [Media servers](MEDIA_SERVERS.md) for what each server supports.
 | `PLEX_MACHINE_IDENTIFIER` | automatic | Plex server ID. Only needed if your account can reach more than one server and the wrong one is picked. |
 | `PLEX_MUSIC_SECTION` | first music library | Name of the Plex music library to use, for example `Music`. Not case-sensitive. If no music library has that name, TrackSeerr logs a warning and uses the first one. |
 | `PLEX_VERIFY_SSL` | `1` | `0` turns off certificate checks for a self-signed Plex certificate. `IGNORE_SSL=1` does the same. |
+| `MEDIA_SERVER_REFRESH_MINUTES` | `10` | How often, at most, Trackseerr asks your media server to rescan music after imports, renames and retags. Changes in between are batched into one rescan. `0` turns this off; use it if your media server already watches the folder for changes. |
 | `JELLYFIN_URL` | unset | Jellyfin address, including any base path, for example `http://jellyfin:8096`. |
 | `JELLYFIN_API_KEY` | unset | Jellyfin API key, from **Dashboard > API Keys** in Jellyfin. |
 | `JELLYFIN_USER` | first admin | Jellyfin account that gets playlists with no target user. Name or ID. |

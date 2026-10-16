@@ -104,6 +104,7 @@ class Config:
     jellyfin_user: str = ""  # default account for single-target sync (name or id); empty = the first administrator
     jellyfin_api_key: str = ""
     media_server_source: str = MEDIA_SERVER_SOURCE_ENV
+    media_server_refresh_minutes: int = 10
 
     write_missing_as_csv: bool = False
     append_service_suffix: bool = True
@@ -204,6 +205,13 @@ class Config:
         except ValueError:
             port = 5250
 
+        try:
+            refresh_min = int(os.getenv("MEDIA_SERVER_REFRESH_MINUTES", "10"))
+            if refresh_min < 0:
+                refresh_min = 0
+        except ValueError:
+            refresh_min = 10
+
         host = os.getenv("HOST", "0.0.0.0").strip() or "0.0.0.0"
         headless = _parse_bool(os.getenv("HEADLESS"), False)
 
@@ -220,6 +228,7 @@ class Config:
             jellyfin_url=os.getenv("JELLYFIN_URL", "").strip(),
             jellyfin_user=os.getenv("JELLYFIN_USER", "").strip(),
             jellyfin_api_key=os.getenv("JELLYFIN_API_KEY", "").strip(),
+            media_server_refresh_minutes=refresh_min,
             write_missing_as_csv=_parse_bool(os.getenv("WRITE_MISSING_AS_CSV"), False),
             append_service_suffix=_parse_bool(os.getenv("APPEND_SERVICE_SUFFIX"), True),
             add_playlist_poster=_parse_bool(os.getenv("ADD_PLAYLIST_POSTER"), True),

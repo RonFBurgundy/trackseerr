@@ -493,6 +493,31 @@ class TestLibraryAndUsers:
         assert h.server.refresh_library() is True
         assert h.backend.refreshes == 1
 
+    def test_jellyfin_refresh_only_music_folders(self) -> None:
+        state = jellyfin_state([])
+        state.virtual_folders = [
+            {"Name": "Music", "CollectionType": "music", "ItemId": "vf-music-1", "Locations": ["/music"]},
+            {"Name": "Movies", "CollectionType": "movies", "ItemId": "vf-movies-1", "Locations": ["/movies"]},
+        ]
+        fake = FakeJellyfin(state)
+        server = JellyfinMediaServer("http://srv", JELLYFIN_KEY, ADMIN, transport=fake.transport(), sleep=lambda _s: None)
+        assert server.refresh_library() is True
+        assert fake.state.scans == 1
+        assert fake.state.request_counts.get("POST /Items/vf-music-1/Refresh") == 1
+        assert "POST /Items/vf-movies-1/Refresh" not in fake.state.request_counts
+        assert "POST /Library/Refresh" not in fake.state.request_counts
+
+    def test_jellyfin_refresh_without_music_folder_returns_false(self) -> None:
+        state = jellyfin_state([])
+        state.virtual_folders = [
+            {"Name": "Movies", "CollectionType": "movies", "ItemId": "vf-movies-1", "Locations": ["/movies"]},
+        ]
+        fake = FakeJellyfin(state)
+        server = JellyfinMediaServer("http://srv", JELLYFIN_KEY, ADMIN, transport=fake.transport(), sleep=lambda _s: None)
+        assert server.refresh_library() is False
+        assert fake.state.scans == 0
+        assert "POST /Library/Refresh" not in fake.state.request_counts
+
     def test_list_users(self, h: Harness) -> None:
         users = h.server.list_users()
         assert [u.name for u in users] == [ADMIN, "kid"]

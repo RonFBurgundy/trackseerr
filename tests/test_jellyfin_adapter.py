@@ -141,11 +141,13 @@ def test_write_is_not_replayed_on_5xx_or_transport_failure():
     fake.state.respond_with = lambda m, p, n: httpx.Response(502) if m == "POST" else None
     with pytest.raises(MediaServerConnectionError):
         server.refresh_library()
-    assert fake.state.request_counts["POST /Library/Refresh"] == 1
+    assert fake.state.request_counts["POST /Items/vf-music/Refresh"] == 1
     fake.state.respond_with = None
     attempts = []
 
-    def slow():
+    def slow(req=None):
+        if req is not None and req.method != "POST":
+            return None
         attempts.append(1)
         return httpx.ReadTimeout("slow")
 

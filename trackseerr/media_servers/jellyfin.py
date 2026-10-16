@@ -442,7 +442,29 @@ class JellyfinMediaServer(MediaServer):
         return roots
 
     def refresh_library(self) -> bool:
-        self._request("POST", "/Library/Refresh")
+        folders = self._request("GET", "/Library/VirtualFolders")
+        posted = False
+        for folder in folders if isinstance(folders, list) else []:
+            if not isinstance(folder, dict):
+                continue
+            kind = str(folder.get("CollectionType") or "").lower()
+            if kind != "music":
+                continue
+            item_id = str(folder.get("ItemId") or folder.get("Id") or "").strip()
+            if not item_id:
+                continue
+            params = (
+                ("Recursive", "true"),
+                ("MetadataRefreshMode", "Default"),
+                ("ImageRefreshMode", "Default"),
+                ("ReplaceAllMetadata", "false"),
+                ("ReplaceAllImages", "false"),
+            )
+            self._request("POST", f"/Items/{item_id}/Refresh", params)
+            posted = True
+        if not posted:
+            logger.warning("Jellyfin: no music library found to refresh")
+            return False
         return True
 
     def list_users(self) -> list[ServerUser]:

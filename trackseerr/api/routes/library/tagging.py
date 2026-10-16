@@ -45,6 +45,7 @@ from trackseerr.api.schemas.library import (
     RetagPreviewItem,
 )
 from trackseerr.media_servers import as_media_server
+from trackseerr.media_servers.refresh_scheduler import request_library_refresh
 from trackseerr.library import (
     _extract_year,
     build_tags_to_write,
@@ -550,10 +551,7 @@ def rename_apply(
             errors.append(f"Error renaming file '{fid}': {redact_text(str(exc))}")
 
     if plex_client:
-        try:
-            as_media_server(plex_client).refresh_library()
-        except Exception as exc:
-            logger.warning("Error refreshing media-server library: %s", exc)
+        request_library_refresh(as_media_server(plex_client), reason="rename")
 
     return {"renamed_count": renamed_count, "errors": errors, "blocked_count": blocked_count}
 
@@ -1084,10 +1082,7 @@ def _finish_retag(
         )
 
     if run.plex_client and run.retagged_count > 0:
-        try:
-            as_media_server(run.plex_client).refresh_library()
-        except Exception as exc:
-            logger.warning("Error refreshing media-server library after retag: %s", exc)
+        request_library_refresh(as_media_server(run.plex_client), reason="retag")
 
     summary = f"Retagged {run.retagged_count} file(s), {run.skipped_count} skipped, {run.error_count} error(s)"
     if job_handle is not None:

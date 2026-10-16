@@ -50,6 +50,7 @@ from trackseerr.api.schemas.library import (
     ManualImportScanItem,
 )
 from trackseerr.media_servers import as_media_server
+from trackseerr.media_servers.refresh_scheduler import request_library_refresh
 from trackseerr.library_monitoring import (
     DEFAULT_MONITOR_OPTION,
 )
@@ -819,10 +820,7 @@ def manual_import_commit(
         download_cleared = _settle_download_after_manual_import(db, run.download_row, run.results, run.media_settings)
 
     if plex_client:
-        try:
-            as_media_server(plex_client).refresh_library()
-        except Exception as exc:
-            logger.warning("Error refreshing media-server library: %s", exc)
+        request_library_refresh(as_media_server(plex_client), reason="manual import")
 
     return {
         "imported_count": run.imported_count,
