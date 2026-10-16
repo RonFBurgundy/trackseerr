@@ -27,6 +27,10 @@ from trackseerr.storage_common import (
     SEED_COMPLETE_ACTIONS,
     _LEGACY_LIDARR_OVERRIDE_COLUMNS,
 )
+from trackseerr.track_credits import (
+    FEATURED_ARTIST_MODES,
+    REMIX_CREDIT_MODES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +127,13 @@ class SettingsStoreMixin:
             res["add_metadata_profile_id"] = (
                 int(res["add_metadata_profile_id"]) if res.get("add_metadata_profile_id") is not None else None
             )
+            remix = str(res.get("remix_credit") or "original")
+            res["remix_credit"] = remix if remix in REMIX_CREDIT_MODES else "original"
+            featured = str(res.get("featured_artists") or "in_title")
+            res["featured_artists"] = featured if featured in FEATURED_ARTIST_MODES else "in_title"
+            res["compilation_artist_folder"] = (
+                str(res.get("compilation_artist_folder") or "").strip() or "Various Artists"
+            )
             return res
 
     def update_media_management_settings(self, settings: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
@@ -164,6 +175,9 @@ class SettingsStoreMixin:
             "recycle_bin_cleanup_days",
             "recycle_bin_permanent_delete",
             "quarantine_folder_path",
+            "remix_credit",
+            "featured_artists",
+            "compilation_artist_folder",
         }
         if settings.get("recycle_bin_cleanup_days") is not None and int(settings["recycle_bin_cleanup_days"]) < 0:
             raise ValueError("recycle_bin_cleanup_days must be 0 or greater")
@@ -179,6 +193,16 @@ class SettingsStoreMixin:
                 validate_monitor_option(settings[opt_key])
         if settings.get("seed_complete_action") is not None and settings["seed_complete_action"] not in SEED_COMPLETE_ACTIONS:
             raise ValueError("seed_complete_action must be one of: " + ", ".join(SEED_COMPLETE_ACTIONS))
+        if settings.get("remix_credit") is not None and settings["remix_credit"] not in REMIX_CREDIT_MODES:
+            raise ValueError("remix_credit must be one of: " + ", ".join(REMIX_CREDIT_MODES))
+        if settings.get("featured_artists") is not None and settings["featured_artists"] not in FEATURED_ARTIST_MODES:
+            raise ValueError("featured_artists must be one of: " + ", ".join(FEATURED_ARTIST_MODES))
+        if settings.get("compilation_artist_folder") is not None:
+            caf = str(settings["compilation_artist_folder"]).strip()
+            if not caf:
+                raise ValueError("compilation_artist_folder must be non-empty")
+            if "/" in caf or "\\" in caf:
+                raise ValueError("compilation_artist_folder must not contain path separators")
         settings = dict(settings)
         legacy_delete = settings.pop("delete_completed_transfers", None)
         if legacy_delete is not None and settings.get("seed_complete_action") is None:
@@ -204,9 +228,10 @@ class SettingsStoreMixin:
                 elif k == "recycle_bin_cleanup_days":
                     if v is not None:
                         updates[k] = int(v)
-                elif k in ("recycle_bin_path", "quarantine_folder_path"):
+                elif k in ("recycle_bin_path", "quarantine_folder_path", "compilation_artist_folder"):
                     if v is not None:
                         updates[k] = str(v).strip()
+
                 elif k == "add_metadata_profile_id":
                     if v is not None and self.get_metadata_profile(int(v)) is None:
                         raise ValueError(f"Metadata profile {v} does not exist")

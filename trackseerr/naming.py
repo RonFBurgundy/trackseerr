@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from trackseerr.album_years import plausible_year
+from trackseerr.track_credits import apply_credit_style
 
 # Supported token names
 SUPPORTED_TOKENS: list[str] = [
@@ -95,7 +96,10 @@ PRESETS: dict[str, dict[str, Any]] = {
         "multi_disc_track_format": (
             "{Album Title}{ - [{Album Type}]}{ (Release Year)}/Disc {medium:00}/{track:00} - {Track Title}"
         ),
-        "compilation_track_format": "",
+        "compilation_track_format": "{track:00} - {Track ArtistName} - {Track Title}",
+        "compilation_artist_folder": "Various Artists",
+        "remix_credit": "original",
+        "featured_artists": "in_title",
         "root_folder_path": "/music",
         "colon_replacement_format": " - ",
         "replace_illegal_characters": True,
@@ -113,6 +117,9 @@ PRESETS: dict[str, dict[str, Any]] = {
             "{Artist Name} - {Album Title} - {track:00} - {Track Title}"
         ),
         "compilation_track_format": "",
+        "compilation_artist_folder": "Various Artists",
+        "remix_credit": "as_credited",
+        "featured_artists": "in_artist",
         "root_folder_path": "/music",
         "colon_replacement_format": " - ",
         "replace_illegal_characters": True,
@@ -124,7 +131,10 @@ PRESETS: dict[str, dict[str, Any]] = {
         "artist_folder_format": "{Artist Name}",
         "standard_track_format": "{Album Title}/{track:00} - {Track Title}",
         "multi_disc_track_format": "{Album Title}/{medium:0}{track:00} - {Track Title}",
-        "compilation_track_format": "",
+        "compilation_track_format": "{track:00} - {Track ArtistName} - {Track Title}",
+        "compilation_artist_folder": "Various Artists",
+        "remix_credit": "as_credited",
+        "featured_artists": "in_artist",
         "root_folder_path": "/music",
         "colon_replacement_format": " - ",
         "replace_illegal_characters": True,
@@ -141,40 +151,67 @@ PRESETS: dict[str, dict[str, Any]] = {
             "{Artist Name} - {Album Title} - {track:00} - {Track Title}"
         ),
         "compilation_track_format": "",
+        "compilation_artist_folder": "Various Artists",
+        "remix_credit": "as_credited",
+        "featured_artists": "in_artist",
         "root_folder_path": "/music",
         "colon_replacement_format": " - ",
         "replace_illegal_characters": True,
         "rename_artist_folders": False,
     },
-    "Clean Minimal": _legacy_preset(
-        artist_folder_format="{Artist CleanName}",
-        album_folder_format="{Album CleanTitle} ({Release Year})",
-        standard_track_format="{track:00} - {Track CleanTitle}",
-        compilation_track_format="{track:00} - {Artist CleanName} - {Track CleanTitle}",
-        multi_disc_folder_format="Disc {medium:0}",
-        root_folder_path="/music",
-        colon_replacement_format="_",
-        replace_illegal_characters=True,
-        rename_artist_folders=False,
-    ),
-    "Audiophile / Detailed": _legacy_preset(
-        artist_folder_format="{Artist Name}",
-        album_folder_format="{Album Title} ({Release Year}){[ - Album Type]}",
-        standard_track_format="{track:00} - {Track Title} [{MediaInfo AudioCodec} {MediaInfo BitDepth} {MediaInfo SampleRate}]",
-        compilation_track_format="{track:00} - {Artist Name} - {Track Title} [{MediaInfo AudioCodec} {MediaInfo BitDepth} {MediaInfo SampleRate}]",
-        multi_disc_folder_format="{Medium Format} {medium:00}",
-        root_folder_path="/music",
-        colon_replacement_format=" - ",
-        replace_illegal_characters=True,
-        rename_artist_folders=False,
-    ),
+    "Clean Minimal": {
+        **_legacy_preset(
+            artist_folder_format="{Artist CleanName}",
+            album_folder_format="{Album CleanTitle} ({Release Year})",
+            standard_track_format="{track:00} - {Track CleanTitle}",
+            compilation_track_format="{track:00} - {Artist CleanName} - {Track CleanTitle}",
+            multi_disc_folder_format="Disc {medium:0}",
+            root_folder_path="/music",
+            colon_replacement_format="_",
+            replace_illegal_characters=True,
+            rename_artist_folders=False,
+        ),
+        "remix_credit": "as_credited",
+        "featured_artists": "in_artist",
+        "compilation_artist_folder": "Various Artists",
+    },
+    "Audiophile / Detailed": {
+        **_legacy_preset(
+            artist_folder_format="{Artist Name}",
+            album_folder_format="{Album Title} ({Release Year}){[ - Album Type]}",
+            standard_track_format="{track:00} - {Track Title} [{MediaInfo AudioCodec} {MediaInfo BitDepth} {MediaInfo SampleRate}]",
+            compilation_track_format="{track:00} - {Artist Name} - {Track Title} [{MediaInfo AudioCodec} {MediaInfo BitDepth} {MediaInfo SampleRate}]",
+            multi_disc_folder_format="{Medium Format} {medium:00}",
+            root_folder_path="/music",
+            colon_replacement_format=" - ",
+            replace_illegal_characters=True,
+            rename_artist_folders=False,
+        ),
+        "remix_credit": "as_credited",
+        "featured_artists": "in_artist",
+        "compilation_artist_folder": "Various Artists",
+    },
+    "beets / Picard": {
+        "artist_folder_format": "{Artist Name}",
+        "standard_track_format": "{Album Title}/{track:00} {Track Title}",
+        "multi_disc_track_format": "{Album Title}/{medium:0}-{track:00} {Track Title}",
+        "compilation_track_format": "{track:00} {Track ArtistName} - {Track Title}",
+        "compilation_artist_folder": "Compilations",
+        "remix_credit": "as_credited",
+        "featured_artists": "in_artist",
+        "root_folder_path": "/music",
+        "colon_replacement_format": " - ",
+        "replace_illegal_characters": True,
+        "rename_artist_folders": False,
+    },
 }
 
 PRESET_DESCRIPTIONS: dict[str, str] = {
     "Trackseerr": (
         "Default. Built for a clean, readable library that matches MusicBrainz: names exactly as the artist writes "
         "them (accents and & kept), characters a filesystem can't store are replaced the way Lidarr does (? -> !, "
-        "* -> -, / -> +), album type and year on every album folder, Disc NN subfolders. File names stay stable across quality upgrades."
+        "* -> -, / -> +), album type and year on every album folder, Disc NN subfolders, and compilation files carry the track artist. "
+        "File names stay stable across quality upgrades."
     ),
     "TRaSH Guides": (
         "The community-recommended Lidarr setup: like Lidarr Default plus artist and album disambiguation, so "
@@ -197,6 +234,10 @@ PRESET_DESCRIPTIONS: dict[str, str] = {
         "Adds codec, bit depth and sample rate to every file name (e.g. [FLAC 24 96000]). Note: files are renamed "
         "whenever their quality changes, such as after an upgrade."
     ),
+    "beets / Picard": (
+        "MusicBrainz beets and Picard layout: compilations under one Compilations folder with the track artist in the file name, "
+        "artist names as credited."
+    ),
 }
 
 # Fresh-install defaults are exactly the Trackseerr preset.
@@ -207,6 +248,9 @@ DEFAULT_MULTI_DISC_TRACK_FORMAT: str = _DEFAULT_PRESET["multi_disc_track_format"
 DEFAULT_COMPILATION_TRACK_FORMAT: str = _DEFAULT_PRESET["compilation_track_format"]
 DEFAULT_COLON_REPLACEMENT: str = _DEFAULT_PRESET["colon_replacement_format"]
 DEFAULT_REPLACE_ILLEGAL: bool = _DEFAULT_PRESET["replace_illegal_characters"]
+DEFAULT_REMIX_CREDIT: str = _DEFAULT_PRESET["remix_credit"]
+DEFAULT_FEATURED_ARTISTS: str = _DEFAULT_PRESET["featured_artists"]
+DEFAULT_COMPILATION_ARTIST_FOLDER: str = _DEFAULT_PRESET["compilation_artist_folder"]
 VARIOUS_ARTISTS_FOLDER: str = "Various Artists"
 _VARIOUS_ARTISTS_ALIASES: frozenset[str] = frozenset({"various artists", "various", "va"})
 
@@ -857,6 +901,21 @@ def existing_artist_folder(artist: dict[str, Any] | None, settings: dict[str, An
     return _fixed_artist_folder(os.path.basename(norm)) or None
 
 
+def _apply_track_credits(meta: dict[str, Any], settings: dict[str, Any]) -> None:
+    """Applies credit styling to meta['track_artist'] and meta['title'] if track_credits is present."""
+    credits = meta.get("track_credits")
+    if not isinstance(credits, list) or not credits:
+        return
+    remix_credit = str(settings.get("remix_credit") or DEFAULT_REMIX_CREDIT)
+    featured_artists = str(settings.get("featured_artists") or DEFAULT_FEATURED_ARTISTS)
+    title_in = str(meta.get("title") or meta.get("track_title") or "")
+    artist, title = apply_credit_style(credits, title_in, remix_credit, featured_artists)
+    if artist:
+        meta["track_artist"] = artist
+    if title:
+        meta["title"] = title
+
+
 def build_path_parts(
     metadata: dict[str, Any],
     settings: dict[str, Any],
@@ -876,6 +935,7 @@ def build_path_parts(
     standard_format, multi_format = resolve_track_formats(settings)
 
     meta = dict(metadata)
+    _apply_track_credits(meta, settings)
     album_artist = str(meta.get("album_artist") or "").strip()
     is_compilation = _detect_compilation(meta)
 
@@ -885,13 +945,14 @@ def build_path_parts(
         return sanitize_component(raw, colon_replacement=colon_replacement, replace_illegal=replace_illegal)
 
     # Artist folder
+    va_folder = str(settings.get("compilation_artist_folder") or "").strip() or VARIOUS_ARTISTS_FOLDER
     artist_meta = meta
-    if is_compilation and (not meta.get("artist") or album_artist.lower() in ("various artists", "various")):
+    if is_compilation and (not meta.get("artist") or is_various_artists_folder(album_artist) or not album_artist):
         artist_meta = dict(meta)
-        artist_meta["artist"] = album_artist or VARIOUS_ARTISTS_FOLDER
+        artist_meta["artist"] = album_artist if (album_artist and not is_various_artists_folder(album_artist)) else va_folder
     artist_component = _fixed_artist_folder(meta.get("artist_folder")) or render(artist_format, artist_meta)
     if not artist_component:
-        artist_component = VARIOUS_ARTISTS_FOLDER if is_compilation else "Unknown Artist"
+        artist_component = va_folder if is_compilation else "Unknown Artist"
 
     # Track format -> folders + file name
     use_multi = _detect_multi_disc(meta) if multi_disc is None else multi_disc

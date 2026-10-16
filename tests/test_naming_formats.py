@@ -9,6 +9,7 @@ from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.config import Config
 from trackseerr.naming import (
     PRESETS,
+    build_path_parts,
     build_track_path,
     legacy_to_track_formats,
     render_template,
@@ -194,7 +195,12 @@ class TestPreviewApi:
         body = {k: PRESETS["Trackseerr"][k] for k in ("artist_folder_format", "standard_track_format", "multi_disc_track_format")}
         data = client.post("/api/settings/media-management/preview", json=body, headers=headers).json()
         fp = data["format_previews"]
-        assert set(fp) == {"artist_folder_format", "standard_track_format", "multi_disc_track_format"}
+        assert set(fp) == {
+            "artist_folder_format",
+            "standard_track_format",
+            "multi_disc_track_format",
+            "compilation_track_format",
+        }
         assert fp["artist_folder_format"]["format"] == "{Artist Name}"
         by_id = {s["sample_id"]: s["output"] for s in fp["artist_folder_format"]["samples"]}
         assert by_id["multi_disc"] == "The Beatles"
@@ -394,7 +400,13 @@ def test_preset_order_and_descriptions():
     from trackseerr.naming import PRESET_DESCRIPTIONS
 
     assert list(PRESETS) == [
-        "Trackseerr", "TRaSH Guides", "Plex", "Lidarr Default", "Clean Minimal", "Audiophile / Detailed",
+        "Trackseerr",
+        "TRaSH Guides",
+        "Plex",
+        "Lidarr Default",
+        "Clean Minimal",
+        "Audiophile / Detailed",
+        "beets / Picard",
     ]
     assert set(PRESET_DESCRIPTIONS) == set(PRESETS)
     assert PRESET_DESCRIPTIONS["Trackseerr"].startswith("Default.")
@@ -453,3 +465,64 @@ def test_clean_title_apostrophe_rules():
     assert clean_name("Lightnin' Luke") == "Lightnin Luke"
     assert clean_name("Don't Stop") == "Don't Stop"
     assert clean_name("Rock 'n' Roll") == "Rock 'n Roll"
+
+
+def test_trackseerr_preset_compilation_file_has_track_artist() -> None:
+    meta = {
+        "artist": "Yvonne Elliman",
+        "album_artist": "Various Artists",
+        "album": "Saturday Night Fever",
+        "release_year": 1977,
+        "track_number": 3,
+        "title": "If I Can't Have You",
+        "is_compilation": True,
+        "extension": ".flac",
+        "track_credits": [
+            {"artist_name": "Yvonne Elliman", "role": "primary", "join_phrase": "", "position": 1},
+        ],
+    }
+    settings = dict(PRESETS["Trackseerr"])
+    settings["root_folder_path"] = "/music"
+    parts = build_path_parts(meta, settings)
+    assert parts["artist"] == "Various Artists"
+    assert parts["folders"] == ["Saturday Night Fever (1977)"]
+    assert parts["file"] == "03 - Yvonne Elliman - If I Can't Have You.flac"
+    path = build_track_path(meta, settings)
+    assert path == "/music/Various Artists/Saturday Night Fever (1977)/03 - Yvonne Elliman - If I Can't Have You.flac"
+
+
+def test_compilation_artist_folder_setting() -> None:
+    meta = {
+        "artist": "Yvonne Elliman",
+        "album_artist": "Various Artists",
+        "album": "Saturday Night Fever",
+        "is_compilation": True,
+    }
+    settings = dict(PRESETS["Trackseerr"], compilation_artist_folder="Compilations")
+    parts = build_path_parts(meta, settings)
+    assert parts["artist"] == "Compilations"
+
+
+def test_real_album_artist_beats_compilation_folder() -> None:
+    meta = {
+        "artist": "Bee Gees",
+        "album_artist": "Bee Gees",
+        "album": "Greatest Hits",
+        "is_compilation": True,
+    }
+    settings = dict(PRESETS["Trackseerr"], compilation_artist_folder="Compilations")
+    parts = build_path_parts(meta, settings)
+    assert parts["artist"] == "Bee Gees"
+
+
+def test_every_preset_has_va_keys() -> None:
+    from trackseerr.track_credits import FEATURED_ARTIST_MODES, REMIX_CREDIT_MODES
+
+    assert len(PRESETS) == 7
+    for name, preset in PRESETS.items():
+        assert "remix_credit" in preset, f"Missing remix_credit in preset {name}"
+        assert preset["remix_credit"] in REMIX_CREDIT_MODES, f"Invalid remix_credit in {name}"
+        assert "featured_artists" in preset, f"Missing featured_artists in preset {name}"
+        assert preset["featured_artists"] in FEATURED_ARTIST_MODES, f"Invalid featured_artists in {name}"
+        assert "compilation_artist_folder" in preset, f"Missing compilation_artist_folder in {name}"
+        assert preset["compilation_artist_folder"].strip(), f"Empty compilation_artist_folder in {name}"

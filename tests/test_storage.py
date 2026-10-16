@@ -689,3 +689,36 @@ def test_fresh_database_seeds_quality_reference_data(tmp_path):
     finally:
         db.close()
 
+
+def test_migration_v86_va_naming_settings(tmp_path: Path) -> None:
+    # 1. Fresh DB has the 3 columns with defaults and new compilation_track_format default
+    db = Database(tmp_path / "fresh_v86.sqlite")
+    try:
+        cur = db.conn.execute("PRAGMA table_info(media_management_settings)")
+        cols = {row[1]: row for row in cur.fetchall()}
+        assert "remix_credit" in cols
+        assert "featured_artists" in cols
+        assert "compilation_artist_folder" in cols
+        s = db.get_media_management_settings()
+        assert s["remix_credit"] == "original"
+        assert s["featured_artists"] == "in_title"
+        assert s["compilation_artist_folder"] == "Various Artists"
+        assert s["compilation_track_format"] == "{track:00} - {Track ArtistName} - {Track Title}"
+    finally:
+        db.close()
+
+    # 2. Existing DB with empty compilation_track_format gets upgraded
+    db_upgrade = Database(tmp_path / "upgrade_v86.sqlite")
+    try:
+        db_upgrade.conn.execute("UPDATE media_management_settings SET compilation_track_format = '' WHERE id = 1")
+        db_upgrade.conn.commit()
+        with db_upgrade._lock:
+            cur = db_upgrade.conn.cursor()
+            db_upgrade._migration_v86(cur)
+            db_upgrade.conn.commit()
+        upgraded = db_upgrade.get_media_management_settings()
+        assert upgraded["compilation_track_format"] == "{track:00} - {Track ArtistName} - {Track Title}"
+    finally:
+        db_upgrade.close()
+
+

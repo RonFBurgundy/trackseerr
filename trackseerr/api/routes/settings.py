@@ -90,7 +90,7 @@ SAMPLE_PREVIEW_ITEMS: list[dict[str, Any]] = [
             "artist": "Queen",
             "album_artist": "Various Artists",
             "album": "Wayne's World: Music from the Motion Picture",
-            "title": "Bohemian Rhapsody",
+            "title": "Bohemian Rhapsody (feat. Wayne)",
             "release_year": 1992,
             "year": 1992,
             "album_type": "Soundtrack",
@@ -102,6 +102,20 @@ SAMPLE_PREVIEW_ITEMS: list[dict[str, Any]] = [
             "bitrate": "320kbps",
             "extension": ".mp3",
             "quality_full": "MP3 320kbps",
+            "track_credits": [
+                {
+                    "artist_name": "Queen",
+                    "role": "primary",
+                    "join_phrase": " feat. ",
+                    "position": 1,
+                },
+                {
+                    "artist_name": "Wayne",
+                    "role": "featured",
+                    "join_phrase": "",
+                    "position": 2,
+                },
+            ],
         },
     },
     {
@@ -155,6 +169,9 @@ class MediaManagementSettingsModel(ApiModel):
         "", description="Multi-disc track format: same as the standard format but for releases with more than one disc"
     )
     compilation_track_format: str = Field(..., description="Format for compilation track filenames")
+    remix_credit: str = Field("original", description="Track artist credit style for remixes: original, remixer, as_credited")
+    featured_artists: str = Field("in_title", description="Featured artist placement: in_title, in_artist, drop")
+    compilation_artist_folder: str = Field("Various Artists", description="Folder name for Various Artists compilations")
     multi_disc_folder_format: str = Field(..., description="Legacy multi-disc subdirectory format (superseded)")
     root_folder_path: str = Field("/data/media/music", description="Base music library folder")
     colon_replacement_format: str = Field(" - ", description="String to replace colons with")
@@ -218,6 +235,9 @@ class MediaManagementUpdateModel(BaseModel):
     album_folder_format: str | None = None
     standard_track_format: str | None = None
     compilation_track_format: str | None = None
+    remix_credit: str | None = None
+    featured_artists: str | None = None
+    compilation_artist_folder: str | None = None
     multi_disc_folder_format: str | None = None
     multi_disc_track_format: str | None = None
     root_folder_path: str | None = None
@@ -267,6 +287,9 @@ class PreviewRequestModel(BaseModel):
     album_folder_format: str | None = None
     standard_track_format: str | None = None
     compilation_track_format: str | None = None
+    remix_credit: str | None = None
+    featured_artists: str | None = None
+    compilation_artist_folder: str | None = None
     multi_disc_folder_format: str | None = None
     multi_disc_track_format: str | None = None
     root_folder_path: str | None = None
@@ -400,18 +423,23 @@ def _render_previews_for_settings(settings: dict[str, Any]) -> list[PreviewItemM
 
 
 def _render_format_previews(settings: dict[str, Any]) -> dict[str, FormatPreviewModel]:
-    """Renders each of the three formats against every sample input (in-memory, no filesystem access)."""
+    """Renders each of the formats against sample inputs (in-memory, no filesystem access)."""
     standard_fmt, multi_fmt = resolve_track_formats(settings)
     artist_fmt = str(settings.get("artist_folder_format") or "")
+    compilation_fmt = str(settings.get("compilation_track_format") or "")
     specs: list[tuple[str, str, str]] = [
         ("artist_folder_format", artist_fmt, "artist"),
         ("standard_track_format", standard_fmt, "track"),
         ("multi_disc_track_format", multi_fmt, "track"),
     ]
+    if compilation_fmt:
+        specs.append(("compilation_track_format", compilation_fmt, "track"))
     result: dict[str, FormatPreviewModel] = {}
     for key, fmt, kind in specs:
         samples: list[FormatSamplePreviewModel] = []
         for sample in SAMPLE_PREVIEW_ITEMS:
+            if key == "compilation_track_format" and not sample["metadata"].get("is_compilation"):
+                continue
             if key == "artist_folder_format":
                 parts = build_path_parts(sample["metadata"], settings)
                 output = parts["artist"]

@@ -9,7 +9,11 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
+REMIX_CREDIT_MODES = ("original", "remixer", "as_credited")
+FEATURED_ARTIST_MODES = ("in_title", "in_artist", "drop")
+
 _FEAT_RE = re.compile(r"\b(feat|ft|featuring)\b\.?", re.IGNORECASE)
+_TRAILING_FEAT_RE = re.compile(r"\s*[\(\[]\s*(?:feat|ft|featuring)\b\.?[^()\[\]]*[\)\]]\s*$", re.IGNORECASE)
 _TRAILING_GROUP_RE = re.compile(r"[\(\[]([^()\[\]]*)[\)\]]\s*$")
 _REMIX_WORDS = frozenset({"remix", "bootleg", "flip", "edit", "rework", "mix", "refix", "re-edit", "dub"})
 _GENERIC_WORDS = frozenset(
@@ -19,6 +23,95 @@ _GENERIC_WORDS = frozenset(
     }
 )
 _NAME_SPLIT_RE = re.compile(r"\s+&\s+|\s+x\s+|,\s+", re.IGNORECASE)
+
+
+def _credit_pos_key(pair: tuple[int, dict[str, Any]]) -> tuple[int, int]:
+    idx, c = pair
+    pos = c.get("position")
+    if pos is not None:
+        try:
+            return (int(pos), idx)
+        except (ValueError, TypeError):
+            pass
+    return (idx, idx)
+
+
+def _format_as_credited(credits: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for c in credits:
+        if c.get("role") in ("primary", "featured"):
+            name = str(c.get("artist_name") or "")
+            join = str(c.get("join_phrase") or "")
+            parts.append(name + join)
+    return "".join(parts).strip()
+
+
+def _join_primaries(primaries: list[dict[str, Any]]) -> str:
+    if len(primaries) == 1:
+        return str(primaries[0].get("artist_name") or "").strip()
+    primary_parts: list[str] = []
+    for i, p in enumerate(primaries):
+        name = str(p.get("artist_name") or "").strip()
+        primary_parts.append(name)
+        if i < len(primaries) - 1:
+            join = str(p.get("join_phrase") or "")
+            if join.strip() and not _FEAT_RE.search(join):
+                primary_parts.append(join)
+            else:
+                primary_parts.append(" & ")
+    return "".join(primary_parts).strip()
+
+
+def apply_credit_style(
+    credits: list[dict[str, Any]],
+    title: str,
+    remix_credit: str,
+    featured_artists: str,
+) -> tuple[Optional[str], str]:
+    """Pure credit formatting according to remix and featured artist modes."""
+    credits_sorted = [c for _, c in sorted(enumerate(credits or []), key=_credit_pos_key)]
+    primaries = [c for c in credits_sorted if c.get("role") == "primary"]
+    if not primaries:
+        return None, title
+
+    if remix_credit not in REMIX_CREDIT_MODES:
+        remix_credit = "original"
+    if featured_artists not in FEATURED_ARTIST_MODES:
+        featured_artists = "in_title"
+
+    if remix_credit == "as_credited":
+        artist = _format_as_credited(credits_sorted)
+        return (artist or None, title)
+
+    base = _join_primaries(primaries)
+    remixers = [c for c in credits_sorted if c.get("role") == "remixer"]
+    remixer_names = [
+        str(r.get("artist_name") or "").strip()
+        for r in remixers
+        if str(r.get("artist_name") or "").strip()
+    ]
+    if remix_credit == "remixer" and remixer_names:
+        base = " & ".join(remixer_names)
+
+    featured = [c for c in credits_sorted if c.get("role") == "featured"]
+    featured_names = [
+        str(f.get("artist_name") or "").strip()
+        for f in featured
+        if str(f.get("artist_name") or "").strip()
+    ]
+
+    out_title = title
+    if featured_artists in ("in_artist", "drop"):
+        out_title = _TRAILING_FEAT_RE.sub("", out_title).strip()
+
+    if featured_artists == "in_artist" and featured_names:
+        artist = f"{base} feat. {' & '.join(featured_names)}"
+    else:
+        artist = base
+
+    return (artist or None, out_title)
+
+
 
 
 def credits_from_mb_artist_credit(artist_credit: Any) -> list[dict[str, Any]]:

@@ -2,7 +2,12 @@
 
 import pytest
 
-from trackseerr.track_credits import build_track_credits, credits_from_mb_artist_credit, remixers_from_title
+from trackseerr.track_credits import (
+    apply_credit_style,
+    build_track_credits,
+    credits_from_mb_artist_credit,
+    remixers_from_title,
+)
 
 
 def _ac(*parts: tuple[str, str, str]) -> list[dict]:
@@ -100,3 +105,81 @@ def test_build_skips_remixer_already_credited() -> None:
 def test_build_no_credit_at_all() -> None:
     assert build_track_credits(None, "Song") == []
     assert build_track_credits([], "Song", tag_artist="  ") == []
+
+
+def test_apply_credit_style_original_joins_primaries() -> None:
+    credits = [
+        {"artist_name": "Bee Gees", "role": "primary", "join_phrase": " & ", "position": 1},
+        {"artist_name": "Yvonne Elliman", "role": "primary", "join_phrase": "", "position": 2},
+    ]
+    artist, title = apply_credit_style(credits, "Stayin' Alive", "original", "in_title")
+    assert artist == "Bee Gees & Yvonne Elliman"
+    assert title == "Stayin' Alive"
+
+
+def test_apply_credit_style_remixer_mode_uses_remixers() -> None:
+    credits = [
+        {"artist_name": "Original Artist", "role": "primary", "join_phrase": "", "position": 1},
+        {"artist_name": "Remix Master", "role": "remixer", "join_phrase": "", "position": 2},
+    ]
+    artist, title = apply_credit_style(credits, "Song (Remix Master Remix)", "remixer", "in_title")
+    assert artist == "Remix Master"
+    assert title == "Song (Remix Master Remix)"
+
+
+def test_apply_credit_style_remixer_mode_without_remixer_falls_back() -> None:
+    credits = [
+        {"artist_name": "Original Artist", "role": "primary", "join_phrase": "", "position": 1},
+    ]
+    artist, title = apply_credit_style(credits, "Song", "remixer", "in_title")
+    assert artist == "Original Artist"
+    assert title == "Song"
+
+
+def test_apply_credit_style_as_credited_keeps_join_phrases() -> None:
+    credits = [
+        {"artist_name": "Artist A", "role": "primary", "join_phrase": " feat. ", "position": 1},
+        {"artist_name": "Artist B", "role": "featured", "join_phrase": "", "position": 2},
+    ]
+    artist, title = apply_credit_style(credits, "Song", "as_credited", "drop")
+    assert artist == "Artist A feat. Artist B"
+    assert title == "Song"
+
+
+def test_featured_in_title_leaves_title() -> None:
+    credits = [
+        {"artist_name": "Main Artist", "role": "primary", "join_phrase": " feat. ", "position": 1},
+        {"artist_name": "Guest Artist", "role": "featured", "join_phrase": "", "position": 2},
+    ]
+    artist, title = apply_credit_style(credits, "Hit Song (feat. Guest Artist)", "original", "in_title")
+    assert artist == "Main Artist"
+    assert title == "Hit Song (feat. Guest Artist)"
+
+
+def test_featured_in_artist_moves_feat_and_strips_title() -> None:
+    credits = [
+        {"artist_name": "Main Artist", "role": "primary", "join_phrase": " feat. ", "position": 1},
+        {"artist_name": "Guest Artist", "role": "featured", "join_phrase": "", "position": 2},
+    ]
+    artist, title = apply_credit_style(credits, "Hit Song (feat. Guest Artist)", "original", "in_artist")
+    assert artist == "Main Artist feat. Guest Artist"
+    assert title == "Hit Song"
+
+
+def test_featured_drop_strips_title() -> None:
+    credits = [
+        {"artist_name": "Main Artist", "role": "primary", "join_phrase": " feat. ", "position": 1},
+        {"artist_name": "Guest Artist", "role": "featured", "join_phrase": "", "position": 2},
+    ]
+    artist, title = apply_credit_style(credits, "Hit Song (feat. Guest Artist)", "original", "drop")
+    assert artist == "Main Artist"
+    assert title == "Hit Song"
+
+
+def test_no_primary_returns_none() -> None:
+    credits = [
+        {"artist_name": "Remixer Only", "role": "remixer", "join_phrase": "", "position": 1},
+    ]
+    artist, title = apply_credit_style(credits, "Some Track", "original", "in_title")
+    assert artist is None
+    assert title == "Some Track"
