@@ -54,7 +54,7 @@ export async function getFeaturedCharts(): Promise<FeaturedChart[]> {
   return res || [];
 }
 
-/** A Spotify or Deezer playlist by link, a pasted list of `Artist - Title` lines, or an M3U file upload. */
+/** A Spotify, Deezer, or YouTube Music playlist by link, a pasted list of `Artist - Title` lines, or an M3U file upload. */
 export type ImportPlaylistPayload =
   | { source: 'link'; url: string; service?: string }
   | { source: 'tracks'; name: string; tracks: string[] }

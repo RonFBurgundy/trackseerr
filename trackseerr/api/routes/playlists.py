@@ -43,6 +43,8 @@ from trackseerr.clients.import_lists.base import ImportListError
 from trackseerr.media_servers import PlaylistSyncOptions, as_media_server, describe_error
 from trackseerr.clients.spotify import SpotifyClient
 from trackseerr.clients.spotify_scraper import SpotifyWebScraper
+from trackseerr.clients.youtube_music import get_shared_youtube_music_client
+from ytmusicapi.exceptions import YTMusicError
 from trackseerr.config import MEDIA_SERVER_NONE, Config
 from trackseerr.native_match import match_playlist_tracks_native
 from trackseerr.library_monitoring import validate_list_monitor_mode
@@ -65,6 +67,8 @@ from trackseerr.redaction import safe_exc
 from trackseerr.security import (
     extract_deezer_id,
     extract_spotify_id,
+    extract_youtube_music_id,
+    is_private_youtube_list,
     is_safe_image_url,
     sanitize_text,
 )
@@ -135,7 +139,7 @@ def _apply_missing_in_background(db: Database, config: Config, playlist_id: str)
 
 class PlaylistCreateRequest(BaseModel):
     url_or_id: str = Field(..., description="Spotify/Deezer URL, URI, or alphanumeric/numeric ID")
-    service: Optional[str] = Field(default=None, description="Optional service hint: 'spotify' or 'deezer'")
+    service: Optional[str] = Field(default=None, description="Optional service hint: 'spotify', 'deezer' or 'youtube_music'")
     targets: Optional[list[str]] = Field(default=None, description="Optional list of target user IDs")
 
 
@@ -354,12 +358,19 @@ def _fetch_tracks_snapshot(
     deezer_client: Optional[DeezerClient],
 ) -> Optional[str]:
     """JSON snapshot of the playlist's source tracks, or None when unavailable (a failed fetch never fails the add)."""
-    client = spotify_client if service == "spotify" else deezer_client if service == "deezer" else None
+    if service == "spotify":
+        client = spotify_client
+    elif service == "deezer":
+        client = deezer_client
+    elif service == "youtube_music":
+        client = get_shared_youtube_music_client()
+    else:
+        client = None
     if client is None:
         return None
     try:
         fetched = client.get_playlist_tracks(pl_id)
-    except (spotipy.exceptions.SpotifyException, requests.RequestException, ValueError, KeyError) as e:
+    except (spotipy.exceptions.SpotifyException, requests.RequestException, ValueError, KeyError, YTMusicError) as e:
         logger.warning("Could not load %s tracks for %s: %s", service, pl_id, e)
         return None
     if not isinstance(fetched, list) or not fetched:
@@ -392,52 +403,85 @@ def _snapshot_entries(playlist: dict[str, Any]) -> list[dict[str, Any]]:
     return [t for t in data if isinstance(t, dict)] if isinstance(data, list) else []
 
 
-@router.post("", response_model=PlaylistRecord, response_model_exclude_unset=True, status_code=status.HTTP_201_CREATED)
-def create_playlist(
-    req: PlaylistCreateRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    db: Database = Depends(get_db),
-    spotify_client: Optional[Union[SpotifyClient, SpotifyWebScraper]] = Depends(get_spotify_client),
-    deezer_client: Optional[DeezerClient] = Depends(get_deezer_client),
-) -> dict[str, Any]:
-    """Adds playlist via Spotify/Deezer URL or ID. Validates SSRF with extract_spotify_id / extract_deezer_id.
+def _resolve_playlist_source(url_or_id: str, service_hint: Optional[str]) -> tuple[str, str]:
+    if is_private_youtube_list(url_or_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Liked Music and Watch Later are private — share a public or unlisted playlist instead",
+        )
 
-    Extracts metadata and sets initial targets.
-    """
-    service_hint = req.service.lower().strip() if req.service else None
+    hint = service_hint.lower().strip() if service_hint else None
     pl_id: Optional[str] = None
     service: Optional[str] = None
 
-    if service_hint == "spotify":
-        pl_id = extract_spotify_id(req.url_or_id)
+    if hint == "spotify":
+        pl_id = extract_spotify_id(url_or_id)
         service = "spotify"
-    elif service_hint == "deezer":
-        pl_id = extract_deezer_id(req.url_or_id)
+    elif hint == "deezer":
+        pl_id = extract_deezer_id(url_or_id)
         service = "deezer"
+    elif hint == "youtube_music":
+        pl_id = extract_youtube_music_id(url_or_id)
+        service = "youtube_music"
     else:
-        sp_id = extract_spotify_id(req.url_or_id)
-        dz_id = extract_deezer_id(req.url_or_id)
+        sp_id = extract_spotify_id(url_or_id)
+        dz_id = extract_deezer_id(url_or_id)
+        yt_id = extract_youtube_music_id(url_or_id)
         if sp_id:
             pl_id = sp_id
             service = "spotify"
         elif dz_id:
             pl_id = dz_id
             service = "deezer"
+        elif yt_id:
+            pl_id = yt_id
+            service = "youtube_music"
 
     if not pl_id or not service:
-        logger.warning("Rejected invalid or malicious playlist input: '%s'", req.url_or_id)
+        logger.warning("Rejected invalid or malicious playlist input: '%s'", url_or_id)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid Spotify or Deezer playlist URL or ID (SSRF validation failed)",
+            detail="Invalid Spotify, Deezer or YouTube Music playlist URL or ID",
         )
+    return pl_id, service
 
-    existing = db.get_playlist(pl_id)
-    subscribed = _subscribe_to_existing(db, pl_id, existing, current_user, req.targets)
-    if subscribed is not None:
-        return subscribed
 
-    # Extract metadata using verified client
-    title = f"{service.title()} Playlist {pl_id}"
+def _validate_youtube_music_playlist(pl_id: str) -> list[Track]:
+    yt_client = get_shared_youtube_music_client()
+    try:
+        yt_meta = yt_client.get_playlist_by_id(pl_id)
+    except Exception as e:
+        logger.warning("Could not fetch YouTube Music metadata for %s: %s", pl_id, e)
+        yt_meta = None
+    if yt_meta is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Couldn't read this YouTube Music playlist. Make sure it is set to Public or Unlisted — private playlists can't be read.",
+        )
+    try:
+        yt_tracks = yt_client.get_playlist_tracks(pl_id)
+    except Exception as e:
+        logger.warning("Could not fetch YouTube Music tracks for %s: %s", pl_id, e)
+        yt_tracks = []
+    if not yt_tracks:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Couldn't read this YouTube Music playlist. Make sure it is set to Public or Unlisted — private playlists can't be read.",
+        )
+    return yt_tracks
+
+
+def _fetch_playlist_metadata(
+    service: str,
+    pl_id: str,
+    spotify_client: Optional[Union[SpotifyClient, SpotifyWebScraper]],
+    deezer_client: Optional[DeezerClient],
+) -> tuple[str, str, str]:
+    if service == "youtube_music":
+        default_title = f"YouTube Music Playlist {pl_id}"
+    else:
+        default_title = f"{service.title()} Playlist {pl_id}"
+    title = default_title
     description = ""
     poster_url = ""
 
@@ -459,11 +503,50 @@ def create_playlist(
                 poster_url = meta.poster
         except Exception as e:
             logger.warning("Could not fetch Deezer metadata for %s: %s", pl_id, e)
+    elif service == "youtube_music":
+        try:
+            meta = get_shared_youtube_music_client().get_playlist_by_id(pl_id)
+            if meta:
+                title = meta.name
+                description = meta.description
+                poster_url = meta.poster
+        except Exception as e:
+            logger.warning("Could not fetch YouTube Music metadata for %s: %s", pl_id, e)
 
-    clean_title = sanitize_text(title) or f"{service.title()} Playlist {pl_id}"
+    clean_title = sanitize_text(title) or default_title
     clean_desc = sanitize_text(description)
+    return clean_title, clean_desc, poster_url
 
-    snapshot_json = _fetch_tracks_snapshot(service, pl_id, spotify_client, deezer_client)
+
+@router.post("", response_model=PlaylistRecord, response_model_exclude_unset=True, status_code=status.HTTP_201_CREATED)
+def create_playlist(
+    req: PlaylistCreateRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    db: Database = Depends(get_db),
+    spotify_client: Optional[Union[SpotifyClient, SpotifyWebScraper]] = Depends(get_spotify_client),
+    deezer_client: Optional[DeezerClient] = Depends(get_deezer_client),
+) -> dict[str, Any]:
+    """Adds playlist via Spotify/Deezer/YouTube Music URL or ID. Validates SSRF.
+
+    Extracts metadata and sets initial targets.
+    """
+    pl_id, service = _resolve_playlist_source(req.url_or_id, req.service)
+
+    yt_tracks = _validate_youtube_music_playlist(pl_id) if service == "youtube_music" else []
+
+    existing = db.get_playlist(pl_id)
+    subscribed = _subscribe_to_existing(db, pl_id, existing, current_user, req.targets)
+    if subscribed is not None:
+        return subscribed
+
+    clean_title, clean_desc, poster_url = _fetch_playlist_metadata(service, pl_id, spotify_client, deezer_client)
+
+    if service == "youtube_music" and yt_tracks:
+        snapshot_json = json.dumps(
+            [{"title": t.title, "artist": t.artist, "album": t.album, "url": t.url} for t in yt_tracks]
+        )
+    else:
+        snapshot_json = _fetch_tracks_snapshot(service, pl_id, spotify_client, deezer_client)
 
     # Upsert playlist into DB with creator_id
     creator_id = str(current_user["id"])

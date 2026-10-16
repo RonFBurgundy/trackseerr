@@ -1,7 +1,7 @@
 """Playlist track snapshot on add, GET /api/playlists/{id}/tracks, and live re-fetch during sync."""
 
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -215,3 +215,117 @@ def test_sync_empty_live_result_keeps_snapshot(test_db, test_config, mock_spotif
     assert json.loads(test_db.get_playlist(PL_ID)["tracks_json"]) == stored
     # the stored track was still matched natively (it is not in the empty library, so it is missing)
     assert [m["title"] for m in test_db.get_missing_tracks(PL_ID)] == ["Song 1"]
+
+
+def test_create_youtube_music_playlist_stores_track_snapshot(app_and_client, test_db, secret_key):
+    _, client = app_and_client
+    yt_id = "PLrEnWoR732-DN6gk7442LupTXstgHpkoD"
+    yt_url = f"https://music.youtube.com/playlist?list={yt_id}"
+
+    mock_yt = MagicMock()
+    mock_yt.get_playlist_by_id.return_value = Playlist(
+        id=yt_id,
+        name="Indie Gems",
+        description="Best indie",
+        poster="https://img.youtube.com/poster.jpg",
+    )
+    mock_yt.get_playlist_tracks.return_value = [
+        Track(title="Song A", artist="Artist A", album="Album A", url="https://music.youtube.com/watch?v=1"),
+        Track(title="Song B", artist="Artist B", album="Album B", url="https://music.youtube.com/watch?v=2"),
+    ]
+
+    with patch("trackseerr.api.routes.playlists.get_shared_youtube_music_client", return_value=mock_yt):
+        ck = _cookies(test_db, "admin-1", "admin_user", True, secret_key)
+        resp = client.post("/api/playlists", json={"url_or_id": yt_url, "targets": ["admin-1"]}, cookies=ck)
+
+    assert resp.status_code == 201
+    stored = test_db.get_playlist(yt_id)
+    assert stored is not None
+    assert stored["service"] == "youtube_music"
+    assert stored["name"] == "Indie Gems"
+    tracks_data = json.loads(stored["tracks_json"])
+    assert len(tracks_data) == 2
+    assert tracks_data[0]["title"] == "Song A"
+    assert tracks_data[1]["title"] == "Song B"
+
+
+def test_create_youtube_music_liked_music_rejected_400(app_and_client, test_db, secret_key):
+    _, client = app_and_client
+    ck = _cookies(test_db, "admin-1", "admin_user", True, secret_key)
+
+    resp = client.post(
+        "/api/playlists",
+        json={"url_or_id": "https://music.youtube.com/playlist?list=LM"},
+        cookies=ck,
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Liked Music and Watch Later are private — share a public or unlisted playlist instead"
+
+    resp_raw = client.post(
+        "/api/playlists",
+        json={"url_or_id": "LM"},
+        cookies=ck,
+    )
+    assert resp_raw.status_code == 400
+    assert resp_raw.json()["detail"] == "Liked Music and Watch Later are private — share a public or unlisted playlist instead"
+
+
+def test_create_youtube_music_unreadable_or_empty_rejected_422(app_and_client, test_db, secret_key):
+    _, client = app_and_client
+    yt_id = "PLrEnWoR732-DN6gk7442LupTXstgHpkoD"
+    yt_url = f"https://music.youtube.com/playlist?list={yt_id}"
+    ck = _cookies(test_db, "admin-1", "admin_user", True, secret_key)
+
+    # 1. get_playlist_by_id returns None (private / unreadable)
+    mock_yt = MagicMock()
+    mock_yt.get_playlist_by_id.return_value = None
+
+    with patch("trackseerr.api.routes.playlists.get_shared_youtube_music_client", return_value=mock_yt):
+        resp = client.post("/api/playlists", json={"url_or_id": yt_url}, cookies=ck)
+
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Couldn't read this YouTube Music playlist. Make sure it is set to Public or Unlisted — private playlists can't be read."
+    assert test_db.get_playlist(yt_id) is None
+
+    # 2. get_playlist_tracks returns empty list
+    mock_yt.get_playlist_by_id.return_value = Playlist(id=yt_id, name="Empty PL")
+    mock_yt.get_playlist_tracks.return_value = []
+
+    with patch("trackseerr.api.routes.playlists.get_shared_youtube_music_client", return_value=mock_yt):
+        resp = client.post("/api/playlists", json={"url_or_id": yt_url}, cookies=ck)
+
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Couldn't read this YouTube Music playlist. Make sure it is set to Public or Unlisted — private playlists can't be read."
+    assert test_db.get_playlist(yt_id) is None
+
+
+def test_sync_youtube_music_loads_source_tracks(test_db, test_config):
+    yt_id = "PLrEnWoR732-DN6gk7442LupTXstgHpkoD"
+    old = [{"title": "Old Song", "artist": "Old Artist", "album": ""}]
+    test_db.upsert_playlist(
+        playlist_id=yt_id,
+        name="YT Mix",
+        service="youtube_music",
+        tracks_json=json.dumps(old),
+        creator_id="admin-1",
+    )
+
+    mock_yt = MagicMock()
+    mock_yt.get_playlist_tracks.return_value = [
+        Track(title="Live YT Song", artist="Live Artist", album="Live Album", url="https://music.youtube.com/watch?v=live1")
+    ]
+
+    with patch("trackseerr.api.routes.sync.get_shared_youtube_music_client", return_value=mock_yt):
+        res = sync_state.execute_sync(
+            db=test_db,
+            config=test_config,
+            plex_client=None,
+            spotify_client=None,
+            deezer_client=None,
+        )
+
+    assert res["status"] == "success"
+    mock_yt.get_playlist_tracks.assert_called_once_with(yt_id)
+    stored = json.loads(test_db.get_playlist(yt_id)["tracks_json"])
+    assert len(stored) == 1
+    assert stored[0]["title"] == "Live YT Song"

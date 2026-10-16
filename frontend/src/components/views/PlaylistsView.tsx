@@ -60,7 +60,14 @@ import {
   LISTENING_PROVIDER_LABELS,
   isListeningService,
 } from '@/types/listening';
+import { errorMessage } from '@/services/apiClient';
 import { isSmartCollection } from '@/types/smartCollections';
+
+const PLAYLIST_SERVICE_LABELS: Readonly<Record<string, string>> = {
+  spotify: 'Spotify',
+  deezer: 'Deezer',
+  youtube_music: 'YouTube Music',
+};
 
 const SMART_LIDARR_HINT = 'Smart collections need TrackSeerr as the library manager (Settings \u2192 Library)';
 import { TailoredMixesSection } from '@/components/mixes';
@@ -341,6 +348,8 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
       setPlaylistName('');
       setPlaylistUrl('');
       setPastedTracks('');
+    } catch (err) {
+      showToast(errorMessage(err, 'Could not add the playlist'), 'error');
     } finally {
       setIsSubmittingImport(false);
     }
@@ -449,7 +458,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                       ? 'Smart collection'
                       : isListeningService(pl.service)
                       ? LISTENING_PROVIDER_LABELS[pl.service]
-                      : pl.service}
+                      : PLAYLIST_SERVICE_LABELS[pl.service] || pl.service}
                   </span>
                   {onToggleActive && (
                     <div className="flex items-center gap-2">
@@ -738,7 +747,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                     htmlFor="import-playlist-url"
                     className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1"
                   >
-                    Playlist URL (Spotify or Deezer)
+                    Playlist URL (Spotify, Deezer or YouTube Music)
                   </label>
                   <input
                     id="import-playlist-url"
@@ -750,11 +759,14 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                       setPlaylistUrl(e.target.value);
                       if (importError) setImportError(null);
                     }}
-                    placeholder="https://open.spotify.com/playlist/... or https://www.deezer.com/playlist/..."
+                    placeholder="https://open.spotify.com/playlist/..., https://www.deezer.com/playlist/... or https://music.youtube.com/playlist?list=..."
                     className="w-full bg-[#0d0d0d] border border-[#2a2a2a] rounded-[3px] px-3 py-2 text-sm text-white focus:outline-none focus:border-[#e5a00d]"
                   />
                   <p className="text-[11px] text-neutral-500 font-mono mt-1">
                     Keyless Spotify: No Spotify API Key Needed!
+                  </p>
+                  <p className="text-[11px] text-neutral-500 font-mono mt-1">
+                    YouTube Music playlists must be Public or Unlisted (Share &rarr; set visibility). Liked Music and private playlists can&apos;t be read.
                   </p>
                 </div>
               </div>

@@ -28,6 +28,7 @@ from trackseerr.clients.plex import PlexClient
 from trackseerr.media_servers import MediaServerError, PlaylistSyncOptions, as_media_server, describe_error
 from trackseerr.media_servers.plex import read_playlist_items, refresh_mix_snapshots
 from trackseerr.clients.spotify import SpotifyClient
+from trackseerr.clients.youtube_music import get_shared_youtube_music_client
 from trackseerr.config import MEDIA_SERVER_NONE, Config
 from trackseerr.job_tracker import tracked
 from trackseerr.list_monitoring import apply_playlist_missing_safely
@@ -200,7 +201,15 @@ class SyncState:
             tracks = fetch_listening_tracks(db, config, pl)
             db.set_playlist_tracks_json(pl_id, self._tracks_to_json(tracks))
             return tracks
-        client = spotify_client if service == "spotify" else deezer_client if service == "deezer" else None
+        client = (
+            spotify_client
+            if service == "spotify"
+            else deezer_client
+            if service == "deezer"
+            else get_shared_youtube_music_client()
+            if service == "youtube_music"
+            else None
+        )
         if client is not None and not pl_id.startswith("imp_"):
             live = client.get_playlist_tracks(pl_id)
             if live:

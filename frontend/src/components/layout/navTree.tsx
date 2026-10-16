@@ -128,7 +128,7 @@ export function buildNavTree({ isAdmin, mfaEnrollmentRequired, reviewCount = 0, 
   tree.push({
     key: 'playlists',
     label: 'Playlists',
-    description: 'Synced playlists from Spotify, Deezer & more',
+    description: 'Synced playlists from Spotify, Deezer, YouTube Music & more',
     icon: <ListMusic className={ico} />,
     route: defaultRoute('playlists'),
   });
