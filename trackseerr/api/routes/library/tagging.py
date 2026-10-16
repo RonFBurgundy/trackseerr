@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -53,6 +54,7 @@ from trackseerr.library import (
     resolve_collision,
     write_audio_tags,
 )
+from trackseerr.track_credits import tag_artist_from_credits
 from trackseerr.job_tracker import track_job
 from trackseerr.task_manager import TRIGGER_MANUAL, record_task_run
 from trackseerr.naming import build_track_path
@@ -549,6 +551,7 @@ def rename_apply(
 
 TAG_DIFF_FIELDS: tuple[tuple[str, str], ...] = (
     ("artist", "artist"),
+    ("albumartist", "album_artist"),
     ("album", "album"),
     ("title", "title"),
     ("date", "date"),
@@ -644,6 +647,8 @@ def _compute_tag_diffs(
         if proposed_val is None:
             continue
         current_val = current_meta.get(meta_key)
+        if current_val is None and meta_key == "album_artist":
+            current_val = current_meta.get("albumartist")
         if tag_key == "date" and current_val is None:
             current_val = current_meta.get("year")
         if _tags_differ(tag_key, current_val, proposed_val):
@@ -653,6 +658,21 @@ def _compute_tag_diffs(
                 "proposed": _format_diff_val(proposed_val),
             })
     return diffs
+
+
+def _resolve_track_artist_and_mbid(
+    db: Database,
+    track_id: Any,
+    title: str,
+    media_settings: Optional[dict[str, Any]],
+) -> tuple[Optional[str], Optional[str]]:
+    m_settings = media_settings if media_settings is not None else db.get_media_management_settings()
+    try:
+        credits = db.list_track_artists(str(track_id))
+    except sqlite3.Error as exc:
+        logger.warning("Loading track artists for track %s failed: %s", track_id, exc)
+        credits = []
+    return tag_artist_from_credits(credits, title, m_settings)
 
 
 def _evaluate_file_retag(
@@ -665,6 +685,7 @@ def _evaluate_file_retag(
     artist_cache: dict[str, dict[str, Any]],
     album_cache: dict[str, dict[str, Any]],
     discs_cache: Optional[dict[str, int]] = None,
+    media_settings: Optional[dict[str, Any]] = None,
 ) -> Optional[dict[str, Any]]:
     current_path_str = f.get("file_path")
     if not current_path_str:
@@ -700,8 +721,11 @@ def _evaluate_file_retag(
 
     album_artist_mbid = _resolve_retag_album_artist_mbid(db, album, artist, artist_cache)
 
+    track_artist, track_mbid = _resolve_track_artist_and_mbid(db, t["id"], t["title"], media_settings)
+
     proposed_tags = build_tags_to_write(
-        artist=artist["name"],
+        artist=track_artist or artist["name"],
+        album_artist=artist["name"],
         album=album["title"],
         title=t["title"],
         date=album.get("release_date") or album.get("year"),
@@ -709,7 +733,7 @@ def _evaluate_file_retag(
         total_tracks=album.get("total_tracks"),
         disc_number=t.get("disc_number"),
         total_discs=total_discs,
-        musicbrainz_artistid=artist.get("mbid"),
+        musicbrainz_artistid=track_mbid or artist.get("mbid"),
         musicbrainz_albumartistid=album_artist_mbid,
         musicbrainz_albumid=album.get("mb_release_id"),
         musicbrainz_releasegroupid=album.get("mb_release_group_id"),
@@ -857,6 +881,7 @@ def retag_preview(  # noqa: C901, PLR0915
             artist_cache=artist_cache,
             album_cache=album_cache,
             discs_cache=discs_cache,
+            media_settings=media_settings,
         )
         if not res:
             continue
@@ -969,8 +994,13 @@ def _retag_one_file(
         total_discs = _album_total_discs(run.db, track["album_id"])
         album_artist_mbid = _resolve_retag_album_artist_mbid(run.db, album, artist)
 
+        track_artist, track_mbid = _resolve_track_artist_and_mbid(
+            run.db, track["id"], track["title"], run.media_settings
+        )
+
         tags_to_write = build_tags_to_write(
-            artist=artist["name"],
+            artist=track_artist or artist["name"],
+            album_artist=artist["name"],
             album=album["title"],
             title=track["title"],
             date=album.get("release_date") or album.get("year"),
@@ -978,7 +1008,7 @@ def _retag_one_file(
             total_tracks=album.get("total_tracks"),
             disc_number=track.get("disc_number"),
             total_discs=total_discs,
-            musicbrainz_artistid=artist.get("mbid"),
+            musicbrainz_artistid=track_mbid or artist.get("mbid"),
             musicbrainz_albumartistid=album_artist_mbid,
             musicbrainz_albumid=album.get("mb_release_id"),
             musicbrainz_releasegroupid=album.get("mb_release_group_id"),
@@ -1181,6 +1211,7 @@ def retag_library(
             artist_cache=artist_cache,
             album_cache=album_cache,
             discs_cache=discs_cache,
+            media_settings=media_settings,
         )
 
         if not res:

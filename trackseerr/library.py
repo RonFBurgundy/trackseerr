@@ -428,6 +428,7 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
         "artist": f.artist,
         "album": f.album,
         "album_artist": f.album_artist,
+        "albumartist": f.album_artist,
         "date": f.raw_date or (str(f.year) if f.year is not None else None),
         "year": f.year,
         "release_year": f.year,
@@ -496,6 +497,7 @@ def build_tags_to_write(
     audio_files_count: int = 1,
     *,
     artist: Optional[str] = None,
+    album_artist: Optional[str] = None,
     album: Optional[str] = None,
     title: Optional[str] = None,
     date: Optional[str | int] = None,
@@ -513,6 +515,7 @@ def build_tags_to_write(
     """Constructs the canonical tag dictionary for writing audio tags.
 
     Shared by both the importer (acquisition_worker) and bulk library retag.
+    ARTIST = track artist, ALBUMARTIST = album artist.
     """
     meta = metadata or {}
     tags: dict[str, Any] = {
@@ -525,35 +528,24 @@ def build_tags_to_write(
         "discnumber": disc_number if disc_number is not None else meta.get("disc_number"),
         "totaldiscs": total_discs if total_discs is not None else meta.get("total_discs"),
     }
-    if musicbrainz_artistid is not None:
-        tags["musicbrainz_artistid"] = musicbrainz_artistid
-    elif meta.get("musicbrainz_artistid"):
-        tags["musicbrainz_artistid"] = meta.get("musicbrainz_artistid")
+    if album_artist is not None:
+        tags["albumartist"] = album_artist
+    elif meta.get("albumartist") or meta.get("album_artist"):
+        tags["albumartist"] = meta.get("albumartist") or meta.get("album_artist")
 
-    if musicbrainz_albumartistid is not None:
-        tags["musicbrainz_albumartistid"] = musicbrainz_albumartistid
-    elif meta.get("musicbrainz_albumartistid"):
-        tags["musicbrainz_albumartistid"] = meta.get("musicbrainz_albumartistid")
-
-    if musicbrainz_albumid is not None:
-        tags["musicbrainz_albumid"] = musicbrainz_albumid
-    elif meta.get("musicbrainz_albumid"):
-        tags["musicbrainz_albumid"] = meta.get("musicbrainz_albumid")
-
-    if musicbrainz_releasegroupid is not None:
-        tags["musicbrainz_releasegroupid"] = musicbrainz_releasegroupid
-    elif meta.get("musicbrainz_releasegroupid"):
-        tags["musicbrainz_releasegroupid"] = meta.get("musicbrainz_releasegroupid")
-
-    if musicbrainz_trackid is not None:
-        tags["musicbrainz_trackid"] = musicbrainz_trackid
-    elif meta.get("musicbrainz_trackid"):
-        tags["musicbrainz_trackid"] = meta.get("musicbrainz_trackid")
-
-    if isrc is not None:
-        tags["isrc"] = isrc
-    elif meta.get("isrc"):
-        tags["isrc"] = meta.get("isrc")
+    opt_fields = (
+        ("musicbrainz_artistid", musicbrainz_artistid),
+        ("musicbrainz_albumartistid", musicbrainz_albumartistid),
+        ("musicbrainz_albumid", musicbrainz_albumid),
+        ("musicbrainz_releasegroupid", musicbrainz_releasegroupid),
+        ("musicbrainz_trackid", musicbrainz_trackid),
+        ("isrc", isrc),
+    )
+    for key, val in opt_fields:
+        if val is not None:
+            tags[key] = val
+        elif meta.get(key):
+            tags[key] = meta.get(key)
 
     return tags
 
