@@ -1,5 +1,8 @@
 """MusicBrainz (MBID) and BrainzMash metadata enrichment client with in-memory TTL caching."""
 
+import collections
+import datetime
+from email.utils import parsedate_to_datetime
 import logging
 import os
 import re
@@ -123,6 +126,180 @@ def _is_breaker_failure(resp: Optional[requests.Response]) -> bool:
     return resp.status_code in (429, 500, 502, 503, 504)
 
 
+def _get_mirror_rps() -> float:
+    raw = os.getenv("MUSICBRAINZ_MIRROR_RPS")
+    if raw is None or not raw.strip():
+        return 3.0
+    try:
+        val = float(raw)
+    except ValueError as exc:
+        logger.warning(
+            "Invalid MUSICBRAINZ_MIRROR_RPS '%s', falling back to default 3.0: %s",
+            raw,
+            exc,
+        )
+        return 3.0
+    return max(0.5, min(20.0, val))
+
+
+def _get_mirror_concurrency() -> int:
+    raw = os.getenv("MUSICBRAINZ_MIRROR_CONCURRENCY")
+    if raw is None or not raw.strip():
+        return 2
+    try:
+        val = int(raw)
+    except ValueError as exc:
+        logger.warning(
+            "Invalid MUSICBRAINZ_MIRROR_CONCURRENCY '%s', falling back to default 2: %s",
+            raw,
+            exc,
+        )
+        return 2
+    return max(1, min(8, val))
+
+
+class _HostGovernor:
+    """Thread-safe pacing, concurrency capping, pause tracking, and hourly metrics for a single host."""
+
+    def __init__(
+        self,
+        host: str,
+        rps: Optional[float] = None,
+        max_concurrency: Optional[int] = None,
+    ) -> None:
+        self.host = host
+        if host == "musicbrainz.org":
+            self.rate_limit_rps = 1.0 if rps is None else float(rps)
+            self.max_concurrency = 1 if max_concurrency is None else int(max_concurrency)
+        else:
+            self.rate_limit_rps = _get_mirror_rps() if rps is None else float(rps)
+            self.max_concurrency = _get_mirror_concurrency() if max_concurrency is None else int(max_concurrency)
+
+        self.min_interval = 1.0 / self.rate_limit_rps if self.rate_limit_rps > 0 else 0.0
+        self.semaphore = threading.BoundedSemaphore(self.max_concurrency)
+        self._last_request_time: float = -1000.0
+        self._pause_until: float = 0.0
+        self._request_timestamps: collections.deque[float] = collections.deque(maxlen=100_000)
+        self._lock = threading.Lock()
+
+    def acquire_slot(self) -> None:
+        """Blocks until the next pacing slot is available according to rate_limit_rps."""
+        if self.min_interval <= 0:
+            return
+        with self._lock:
+            now = time.monotonic()
+            scheduled_time = max(now, self._last_request_time + self.min_interval)
+            self._last_request_time = scheduled_time
+            wait_time = scheduled_time - now
+        if wait_time > 0:
+            time.sleep(wait_time)
+
+    def pause_for(self, seconds: float) -> None:
+        """Pauses requests to this host for the specified duration and logs a warning."""
+        duration = max(0.0, float(seconds))
+        with self._lock:
+            now = time.monotonic()
+            self._pause_until = max(self._pause_until, now + duration)
+        logger.warning("Host %s paused for %.1f seconds", self.host, duration)
+
+    def paused(self) -> bool:
+        """Returns True if this host is currently paused."""
+        with self._lock:
+            return time.monotonic() < self._pause_until
+
+    def pause_remaining(self) -> float:
+        """Returns seconds remaining in the current pause, or 0.0 if not paused."""
+        with self._lock:
+            remaining = self._pause_until - time.monotonic()
+            return max(0.0, remaining)
+
+    def record_request(self) -> None:
+        """Records a monotonic timestamp for an attempted request."""
+        with self._lock:
+            self._request_timestamps.append(time.monotonic())
+
+    def requests_last_hour(self) -> int:
+        """Returns number of requests made to this host in the last 3600 seconds."""
+        with self._lock:
+            now = time.monotonic()
+            cutoff = now - 3600.0
+            while self._request_timestamps and self._request_timestamps[0] <= cutoff:
+                self._request_timestamps.popleft()
+            return len(self._request_timestamps)
+
+
+_GOVERNORS: dict[str, _HostGovernor] = {}
+_GOVERNORS_LOCK = threading.Lock()
+
+
+def _governor(host: str) -> _HostGovernor:
+    """Returns the module-level _HostGovernor for the given host."""
+    clean_host = _extract_host(host)
+    with _GOVERNORS_LOCK:
+        if clean_host not in _GOVERNORS:
+            _GOVERNORS[clean_host] = _HostGovernor(clean_host)
+        return _GOVERNORS[clean_host]
+
+
+def _reset_governors() -> None:
+    """Resets all host governors (used in tests to clear state)."""
+    with _GOVERNORS_LOCK:
+        _GOVERNORS.clear()
+
+
+def _parse_retry_after(header_val: Any) -> float:
+    """Parses Retry-After header as seconds or HTTP-date, defaulting to 30.0s and clamped to [0.0, 600.0]."""
+    if header_val is None or not isinstance(header_val, (str, int, float)):
+        return 30.0
+    if isinstance(header_val, (int, float)):
+        return max(0.0, min(600.0, float(header_val)))
+    raw = str(header_val).strip()
+    if not raw:
+        return 30.0
+    try:
+        val = float(raw)
+        return max(0.0, min(600.0, val))
+    except (ValueError, TypeError):
+        pass
+
+    try:
+        target_dt = parsedate_to_datetime(raw)
+        if target_dt.tzinfo is None:
+            target_dt = target_dt.replace(tzinfo=datetime.timezone.utc)
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
+        seconds = (target_dt - now_dt).total_seconds()
+        return max(0.0, min(600.0, seconds))
+    except (ValueError, TypeError, IndexError) as exc:
+        logger.warning(
+            "Failed to parse Retry-After header '%s', defaulting to 30s: %s",
+            raw,
+            exc,
+        )
+        return 30.0
+
+
+def _handle_429_503(
+    host: str,
+    resp: requests.Response,
+    attempt: int,
+    max_retries: int,
+) -> bool:
+    """Pauses governor and determines if musicbrainz.org request should be retried."""
+    retry_hdr = resp.headers.get("Retry-After") if resp.headers else None
+    retry_after = _parse_retry_after(retry_hdr)
+    _governor(host).pause_for(retry_after)
+
+    if host != "musicbrainz.org":
+        # Mirror host: do not sleep and retry, return response so _request falls back
+        return False
+
+    # musicbrainz.org: keep retry behavior
+    if attempt < max_retries:
+        time.sleep(min(retry_after, 30.0))
+        return True
+    return False
+
+
 class MbidEnricherClient:
     """High-speed cached MBID resolver querying MusicBrainz REST mirrors and Cover Art Archive."""
 
@@ -143,8 +320,6 @@ class MbidEnricherClient:
         self.timeout = float(timeout)
         self.cache_ttl = float(cache_ttl)
         self._min_interval = float(min_interval)
-        self._last_request_time: float = 0.0
-        self._rate_limit_lock = threading.Lock()
         self._cache: dict[str, tuple[float, Any]] = {}
         self._lock = threading.RLock()
         self._store = store
@@ -188,59 +363,55 @@ class MbidEnricherClient:
             )
 
     def stats(self) -> dict[str, Any]:
-        """Returns thread-safe network request, cache hit counters, and circuit breaker states."""
+        """Returns thread-safe network request, cache hit counters, circuit breaker states, and host metrics."""
         with self._lock:
             breaker_states = {
                 host: breaker.state for host, breaker in self._breakers.items()
             }
+            mirror_host = _extract_host(self.base_url)
+            host_roles: list[tuple[str, str]] = []
+            if mirror_host != "musicbrainz.org":
+                host_roles.append((mirror_host, "mirror"))
+                host_roles.append(("musicbrainz.org", "fallback"))
+            else:
+                host_roles.append(("musicbrainz.org", "fallback"))
+
+            hosts: dict[str, dict[str, Any]] = {}
+            for host, role in host_roles:
+                gov = _governor(host)
+                breaker = self._get_breaker(host)
+                hosts[host] = {
+                    "role": role,
+                    "requests_last_hour": gov.requests_last_hour(),
+                    "rate_limit_rps": gov.rate_limit_rps,
+                    "max_concurrency": gov.max_concurrency,
+                    "paused_seconds_remaining": gov.pause_remaining(),
+                    "breaker_state": breaker.state,
+                }
+
             return {
                 "network_requests": self._network_requests,
                 "cache_hits": self._cache_hits,
                 "breaker_state": breaker_states,
+                "hosts": hosts,
             }
-
-    def _rate_limit(self, url: str) -> None:
-        """Enforces rate limiting (1 req/sec) when communicating with musicbrainz.org."""
-        if "musicbrainz.org" in url and self._min_interval > 0:
-            with self._rate_limit_lock:
-                now = time.time()
-                elapsed = now - self._last_request_time
-                if elapsed < self._min_interval:
-                    time.sleep(self._min_interval - elapsed)
-                self._last_request_time = time.time()
 
     def _do_http_call(
         self, url: str, params: Optional[dict[str, Any]] = None, max_retries: int = 1
     ) -> Optional[requests.Response]:
-        """Executes a single HTTP request with rate limiting and exponential backoff for 429/503."""
+        """Executes a single HTTP request with host governance and fallback pacing."""
+        host = _extract_host(url)
+        gov = _governor(host)
         for attempt in range(max_retries + 1):
-            self._rate_limit(url)
+            if self._min_interval > 0:
+                gov.acquire_slot()
             try:
-                with self._lock:
-                    self._network_requests += 1
-                resp = self._session.get(url, params=params, timeout=self.timeout)
-                if resp.status_code in (429, 503):
-                    logger.warning(
-                        "MbidEnricherClient: HTTP %d received for %s (attempt %d/%d)",
-                        resp.status_code,
-                        url,
-                        attempt + 1,
-                        max_retries + 1,
-                    )
-                    if attempt < max_retries:
-                        retry_after = 0.5
-                        try:
-                            retry_hdr = resp.headers.get("Retry-After") if resp.headers else None
-                            if retry_hdr:
-                                retry_after = float(retry_hdr)
-                        except (ValueError, TypeError):
-                            pass
-                        max_wait = 30.0 if "musicbrainz.org" in url else 1.0
-                        time.sleep(min(retry_after, max_wait))
-                        continue
-                    return resp
-                return resp
+                with gov.semaphore:
+                    with self._lock:
+                        self._network_requests += 1
+                    resp = self._session.get(url, params=params, timeout=self.timeout)
             except requests.RequestException as exc:
+                gov.record_request()
                 logger.warning(
                     "MbidEnricherClient: Network error for %s (attempt %d/%d): %s",
                     url,
@@ -253,31 +424,70 @@ class MbidEnricherClient:
                     continue
                 return None
             except Exception as exc:
+                gov.record_request()
                 logger.warning("MbidEnricherClient: Unexpected error for %s: %s", url, exc)
                 return None
+
+            gov.record_request()
+            if resp.status_code in (429, 503):
+                logger.warning(
+                    "MbidEnricherClient: HTTP %d received for %s (attempt %d/%d)",
+                    resp.status_code,
+                    url,
+                    attempt + 1,
+                    max_retries + 1,
+                )
+                if _handle_429_503(host, resp, attempt, max_retries):
+                    continue
+                return resp
+            return resp
         return None
 
     def _request(
         self, url: str, params: Optional[dict[str, Any]] = None, max_retries: int = 1
     ) -> Optional[requests.Response]:
-        """Executes HTTP request with circuit breakers and fallback to https://musicbrainz.org."""
+        """Executes HTTP request with circuit breakers, host pause checks, and fallback."""
         mirror_host = _extract_host(self.base_url)
         is_mirror_base = (self.base_url != "https://musicbrainz.org" and mirror_host != "musicbrainz.org")
 
         if not is_mirror_base:
             mb_breaker = self._get_breaker("musicbrainz.org")
-            if not mb_breaker.can_attempt():
+            mb_gov = _governor("musicbrainz.org")
+            if not mb_breaker.can_attempt() or mb_gov.paused():
                 return None
             resp = self._do_http_call(url, params=params, max_retries=max_retries)
             mb_breaker.record_result(_is_breaker_failure(resp))
             return resp
 
+        return self._request_with_mirror_fallback(url, params, max_retries, mirror_host)
+
+    def _request_with_mirror_fallback(
+        self,
+        url: str,
+        params: Optional[dict[str, Any]],
+        max_retries: int,
+        mirror_host: str,
+    ) -> Optional[requests.Response]:
+        """Executes mirror request, falling back to musicbrainz.org if mirror is unavailable or fails."""
         mirror_breaker = self._get_breaker(mirror_host)
         mb_breaker = self._get_breaker("musicbrainz.org")
-        fallback_url = "https://musicbrainz.org" + url[len(self.base_url):] if url.startswith(self.base_url) else None
+        mirror_gov = _governor(mirror_host)
+        mb_gov = _governor("musicbrainz.org")
+        fallback_url = (
+            "https://musicbrainz.org" + url[len(self.base_url):]
+            if url.startswith(self.base_url)
+            else None
+        )
 
-        if not mirror_breaker.can_attempt():
-            if fallback_url is None or not mb_breaker.can_attempt():
+        mirror_available = mirror_breaker.can_attempt() and not mirror_gov.paused()
+        fallback_available = (
+            fallback_url is not None
+            and mb_breaker.can_attempt()
+            and not mb_gov.paused()
+        )
+
+        if not mirror_available:
+            if not fallback_available or fallback_url is None:
                 return None
             fallback_resp = self._do_http_call(fallback_url, params=params, max_retries=max_retries)
             mb_breaker.record_result(_is_breaker_failure(fallback_resp))
@@ -289,9 +499,9 @@ class MbidEnricherClient:
         if resp is not None and resp.status_code == 200:
             return resp
 
-        is_error = resp is None or resp.status_code in (403, 500, 502, 503, 504)
+        is_error = resp is None or resp.status_code in (403, 429, 500, 502, 503, 504)
         if is_error and fallback_url is not None:
-            if not mb_breaker.can_attempt():
+            if not mb_breaker.can_attempt() or mb_gov.paused():
                 return resp
             logger.warning(
                 "MbidEnricherClient: Mirror request failed (status=%s), falling back to %s",
@@ -300,8 +510,6 @@ class MbidEnricherClient:
             )
             fallback_resp = self._do_http_call(fallback_url, params=params, max_retries=max_retries)
             mb_breaker.record_result(_is_breaker_failure(fallback_resp))
-            if fallback_resp is not None and fallback_resp.status_code == 200:
-                return fallback_resp
             return fallback_resp
 
         return resp
