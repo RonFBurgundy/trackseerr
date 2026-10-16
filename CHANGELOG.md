@@ -108,7 +108,7 @@ heading becomes the version and date.
 ### Fixed
 
 - When a download replaces a track whose old file has a very long name, the old file now goes to the recycle bin under a shortened name instead of being left behind in your library.
-- TrackSeerr no longer asks your media server to rescan after every single import. Imports, renames, retags and scans are grouped into one rescan at most every 10 minutes (set `MEDIA_SERVER_REFRESH_MINUTES`; `0` turns it off if your server already watches the folder). This stops Plex using large amounts of memory during big download batches. Jellyfin now rescans only its music libraries instead of every library.
+- TrackSeerr no longer asks your media server to rescan its whole library after every import. Like Sonarr, Radarr and Lidarr, it now asks Plex or Jellyfin to rescan only the album folders that changed, about a minute after imports, renames and retags. When it can't match a folder to the server's path, it falls back to one full music rescan at most every 10 minutes (set `MEDIA_SERVER_REFRESH_MINUTES`; `0` turns rescans off). Jellyfin full rescans now cover only music libraries. This stops large memory spikes in Plex and Jellyfin during big download batches.
 - Very long track or album titles no longer make file and folder names too long to save or move. Names are shortened to 200 bytes, extension included, so imports, renames and the Unraid mover stop failing on them. Run the rename preview once to shorten files already in your library.
 - Adding a playlist that fails (bad link, unreadable playlist) now shows an error message instead of doing nothing.
 - Installs still set to the old BrainzMash address (api.brainzmash.org) move to api.brainzmash.cc automatically, and entering the old address saves the new one.
