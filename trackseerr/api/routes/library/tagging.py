@@ -531,6 +531,7 @@ def rename_apply(
     media_settings = db.get_media_management_settings()
     root_folder_str = media_settings.get("root_folder_path") or "/music"
     root_dir = Path(root_folder_str).resolve()
+    renamed_paths: list[str] = []
 
     for fid in body.file_ids:
         f = db.get_library_file(fid)
@@ -572,13 +573,19 @@ def rename_apply(
 
             renamed_count += 1
             _tidy_old_folder(old_parent, new_path.parent, root_dir)
+            renamed_paths.extend([str(new_path), str(old_parent)])
 
         except Exception as exc:
             logger.exception("Failed to rename file ID %s: %s", fid, redact_text(str(exc)))
             errors.append(f"Error renaming file '{fid}': {redact_text(str(exc))}")
 
     if plex_client:
-        request_library_refresh(as_media_server(plex_client), reason="rename")
+        request_library_refresh(
+            as_media_server(plex_client),
+            reason="rename",
+            paths=renamed_paths,
+            db=db,
+        )
 
     return {"renamed_count": renamed_count, "errors": errors, "blocked_count": blocked_count}
 
@@ -1109,7 +1116,13 @@ def _finish_retag(
         )
 
     if run.plex_client and run.retagged_count > 0:
-        request_library_refresh(as_media_server(run.plex_client), reason="retag")
+        paths = [p for files in run.album_retagged_files.values() for p in files]
+        request_library_refresh(
+            as_media_server(run.plex_client),
+            reason="retag",
+            paths=paths,
+            db=run.db,
+        )
 
     summary = f"Retagged {run.retagged_count} file(s), {run.skipped_count} skipped, {run.error_count} error(s)"
     if job_handle is not None:

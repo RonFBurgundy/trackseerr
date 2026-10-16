@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -268,6 +269,18 @@ def test_refresh_music_paths_updates_matching_section(mock_server):
     sec2.update.assert_called_once_with(path="/data/flac/Artist/Album2")
 
 
+@patch("trackseerr.clients.plex.PlexServer")
+def test_refresh_music_paths_skips_paths_outside_sections(mock_server, caplog):
+    client = PlexClient("http://localhost:32400", "token")
+    sec1 = MagicMock(title="MP3", type="artist", locations=["/data/mp3"])
+    client.server.library.sections.return_value = [sec1]
+
+    with caplog.at_level(logging.WARNING):
+        count = client.refresh_music_paths(["/data/other/Artist/Album"])
+
+    assert count == 0
+    sec1.update.assert_not_called()
+    assert "Skipped 1 path(s) outside any music section locations" in caplog.text
 
 
 @patch("trackseerr.clients.plex.PlexServer")

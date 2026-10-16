@@ -12,6 +12,8 @@ from trackseerr.api.routes.library.tagging import _rename_meta
 from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.config import Config
 from trackseerr.library_health import KIND_LONG_NAME, shorten_long_name
+from trackseerr.media_servers import refresh_scheduler
+from trackseerr.media_servers.base import MediaServer
 from trackseerr.naming import MAX_NAME_BYTES, build_track_path, truncate_utf8_bytes
 from trackseerr.storage import Database
 
@@ -354,3 +356,35 @@ def test_wrong_kind_rejected(db, music_root):
 
     with pytest.raises(ValueError, match="Finding kind must be 'long_name'"):
         shorten_long_name(db, finding, music_root)
+
+
+def test_shorten_triggers_folder_rescan(db, music_root):
+    refresh_scheduler.reset_for_tests()
+    long_name = "Track_" + "a" * 219 + ".flac"
+    file_path = music_root / "Artist" / "Album" / long_name
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b"audio-data")
+
+    db.upsert_library_health_findings(
+        [{
+            "kind": KIND_LONG_NAME,
+            "cause": "name_too_long",
+            "group_key": "Artist/Album",
+            "path": str(file_path),
+            "detail": {"name_bytes": 230, "limit": MAX_NAME_BYTES, "is_dir": False},
+        }],
+        "2026-01-01T00:00:00Z",
+    )
+    finding = db.list_library_health_findings()[0]
+
+    server = MagicMock(spec=MediaServer)
+    server.kind = "plex"
+    server.capabilities = MagicMock(folder_refresh=True)
+    server.library_roots.return_value = [str(music_root)]
+    server.refresh_paths.return_value = True
+
+    res = shorten_long_name(db, finding, music_root, server=server)
+    assert res["method"] == "shorten"
+    assert refresh_scheduler.flush_now() is True
+    server.refresh_paths.assert_called_once_with([str(file_path.parent)])
+

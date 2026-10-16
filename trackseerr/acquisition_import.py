@@ -1032,6 +1032,11 @@ class ImportPipelineMixin(ImportCatalogMixin):
 
         # Trigger Plex library refresh ping
         if ctx.plex_client:
-            request_library_refresh(as_media_server(ctx.plex_client), reason="import")
+            request_library_refresh(
+                as_media_server(ctx.plex_client),
+                reason="import",
+                paths=job.imported_paths,
+                db=db,
+            )
 
 

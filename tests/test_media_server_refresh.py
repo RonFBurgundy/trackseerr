@@ -279,10 +279,102 @@ def test_refresh_paths_failure_falls_back_to_full(caplog):
 
     with caplog.at_level(logging.WARNING):
         assert refresh_scheduler.flush_now() is True
+        assert refresh_scheduler.flush_now() is True
 
     server.refresh_paths.assert_called_once()
     server.refresh_library.assert_called_once()
     assert "folder rescan failed" in caplog.text
+
+
+def test_missing_folder_walks_up_to_existing_parent(tmp_path):
+    root = tmp_path / "music"
+    artist = root / "Artist"
+    artist.mkdir(parents=True)
+    gone_album = artist / "GoneAlbum"
+
+    server = MagicMock(spec=MediaServer)
+    server.kind = "plex"
+    server.capabilities = MagicMock(folder_refresh=True)
+    server.library_roots.return_value = ["/data/music"]
+    server.refresh_paths.return_value = True
+
+    db = MagicMock()
+    db.get_media_server_path_mapping.return_value = None
+    db.get_media_management_settings.return_value = {"root_folder_path": str(root)}
+
+    refresh_scheduler.request_library_refresh(
+        server, reason="gone", paths=[str(gone_album)], db=db
+    )
+    assert refresh_scheduler.flush_now() is True
+    server.refresh_paths.assert_called_once_with(["/data/music/Artist"])
+
+
+def test_file_path_uses_its_folder(tmp_path):
+    root = tmp_path / "music"
+    album = root / "Artist" / "Album"
+    album.mkdir(parents=True)
+    track_file = album / "01 - Track.flac"
+    track_file.write_text("test")
+
+    server = MagicMock(spec=MediaServer)
+    server.kind = "plex"
+    server.capabilities = MagicMock(folder_refresh=True)
+    server.library_roots.return_value = ["/data/music"]
+    server.refresh_paths.return_value = True
+
+    db = MagicMock()
+    db.get_media_server_path_mapping.return_value = None
+    db.get_media_management_settings.return_value = {"root_folder_path": str(root)}
+
+    refresh_scheduler.request_library_refresh(
+        server, reason="track", paths=[str(track_file)], db=db
+    )
+    assert refresh_scheduler.flush_now() is True
+    server.refresh_paths.assert_called_once_with(["/data/music/Artist/Album"])
+
+
+def test_failed_folder_refresh_requeues_full_with_window(monkeypatch):
+    current_time = 1000.0
+    monkeypatch.setattr(refresh_scheduler, "_monotonic", lambda: current_time)
+    refresh_scheduler.configure(10)  # window = 600s
+
+    server = MagicMock(spec=MediaServer)
+    server.kind = "plex"
+    server.capabilities = MagicMock(folder_refresh=True)
+    server.library_roots.return_value = ["/music"]
+    server.refresh_paths.return_value = False
+
+    db = MagicMock()
+    db.get_media_server_path_mapping.return_value = None
+    db.get_media_management_settings.return_value = {"root_folder_path": "/music"}
+
+    # Initial full rescan
+    refresh_scheduler.request_library_refresh(server, reason="initial_full")
+    assert refresh_scheduler.flush_now() is True
+    server.refresh_library.assert_called_once()
+    server.refresh_library.reset_mock()
+
+    # Advance time by 30 seconds
+    current_time += 30.0
+    refresh_scheduler.request_library_refresh(
+        server, reason="folder_batch", paths=["/music/Artist/Album"], db=db
+    )
+
+    # Trigger folder refresh execution
+    assert refresh_scheduler.flush_now() is True
+    server.refresh_paths.assert_called_once()
+    # refresh_library should NOT be called immediately
+    server.refresh_library.assert_not_called()
+
+    # Delay should be window remainder (600 - 30 = 570s)
+    expected_delay = 600.0 - 30.0
+    delay = refresh_scheduler.pending_delay()
+    assert delay is not None
+    assert abs(delay - expected_delay) < 1e-3
+
+    # Now flush_now() calls refresh_library once
+    assert refresh_scheduler.flush_now() is True
+    server.refresh_library.assert_called_once()
 
 
 def test_over_100_folders_does_full_rescan():

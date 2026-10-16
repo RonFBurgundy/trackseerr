@@ -1089,11 +1089,15 @@ class PlexClient:
                     loc_parts = [c for c in loc_norm.split("/") if c]
                     if len(target_parts) >= len(loc_parts) and target_parts[:len(loc_parts)] == loc_parts:
                         return s
-            return secs[0]
+            return None
 
         sent = 0
+        skipped = 0
         for p in paths:
             sec = _pick_section(p)
+            if sec is None:
+                skipped += 1
+                continue
             try:
                 sec.update(path=p)
                 sent += 1
@@ -1104,6 +1108,11 @@ class PlexClient:
                     getattr(sec, "title", ""),
                     safe_exc(exc),
                 )
+        if skipped:
+            logger.warning(
+                "Skipped %d path(s) outside any music section locations",
+                skipped,
+            )
         logger.info("Triggered Plex path updates for %d folder(s)", sent)
         return sent
 
