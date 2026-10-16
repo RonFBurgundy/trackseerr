@@ -101,6 +101,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Installs still set to the old BrainzMash address (api.brainzmash.org) move to api.brainzmash.cc automatically, and entering the old address saves the new one.
 - Retag and import wrote the album artist into every track's ARTIST tag, so compilation tracks were tagged "Various Artists" and featured credits were lost. ARTIST now holds the track's credited artist and ALBUMARTIST the album artist; run a retag to repair files already tagged.
 - History and Missing (sorted by date added) showed no fast-scroll rail when all their dates fell in the same month.
 - The "Add / monitor" button on a Discover artist page now switches to "Open in Library" as soon as the artist is added, instead of staying until the next day.
