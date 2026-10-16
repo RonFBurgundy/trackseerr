@@ -3,6 +3,7 @@
 import pytest
 
 from trackseerr.naming import (
+    build_path_parts,
     build_track_path,
     format_quality,
     render_template,
@@ -165,26 +166,26 @@ class TestCrossPlatformSanitization:
         assert sanitize_component("Album Title....") == "Album Title"
         assert sanitize_component("  Track 01 . ") == "Track 01"
 
-    def test_255_byte_utf8_truncation(self):
+    def test_component_utf8_truncation_cap(self):
         # ASCII long component
         long_ascii = "A" * 300
         truncated_ascii = sanitize_component(long_ascii)
-        assert len(truncated_ascii.encode("utf-8")) == 255
-        assert truncated_ascii == "A" * 255
+        assert len(truncated_ascii.encode("utf-8")) == 200
+        assert truncated_ascii == "A" * 200
 
         # 3-byte CJK glyph boundary truncation
-        # 253 ASCII chars + 3-byte glyph ('世' is 3 bytes) -> 256 bytes total
-        cjk_str = ("B" * 253) + "世界"
+        # 198 ASCII chars + 3-byte glyph ('世' is 3 bytes) -> 201 bytes total
+        cjk_str = ("B" * 198) + "世界"
         truncated_cjk = sanitize_component(cjk_str)
         encoded_cjk = truncated_cjk.encode("utf-8")
-        assert len(encoded_cjk) <= 255
+        assert len(encoded_cjk) <= 200
         # Must decode cleanly without corrupting multi-byte code point
         assert truncated_cjk.encode("utf-8").decode("utf-8") == truncated_cjk
 
         # 4-byte Emoji boundary truncation
-        emoji_str = ("E" * 253) + "🎵🎶"
+        emoji_str = ("E" * 198) + "🎵🎶"
         truncated_emoji = sanitize_component(emoji_str)
-        assert len(truncated_emoji.encode("utf-8")) <= 255
+        assert len(truncated_emoji.encode("utf-8")) <= 200
         assert truncated_emoji.encode("utf-8").decode("utf-8") == truncated_emoji
 
 
@@ -303,6 +304,70 @@ class TestPathBuilder:
         assert ".." not in path.split("/")  # no component can climb; dots inside a joined name are harmless
         assert path.startswith("/music/")
         assert "etc/shadow" not in path
+
+    def test_long_title_with_extension_stays_under_cap(self, default_settings):
+        metadata = {
+            "artist": "Artist",
+            "album": "Album",
+            "title": "A" * 300,
+            "track_number": 1,
+            "extension": ".flac",
+        }
+        parts = build_path_parts(metadata, default_settings)
+        file_part = parts["file"]
+        assert file_part.endswith(".flac")
+        assert len(file_part.encode("utf-8")) <= 200
+        # No trailing space or dot before the extension
+        stem = file_part[:-len(".flac")]
+        assert not stem.endswith(" ")
+        assert not stem.endswith(".")
+
+    def test_long_cjk_title_with_extension_stays_under_cap(self, default_settings):
+        metadata = {
+            "artist": "Artist",
+            "album": "Album",
+            "title": "世" * 100,
+            "track_number": 1,
+            "extension": ".flac",
+        }
+        parts = build_path_parts(metadata, default_settings)
+        file_part = parts["file"]
+        assert file_part.endswith(".flac")
+        assert len(file_part.encode("utf-8")) <= 200
+        # Valid UTF-8
+        assert file_part.encode("utf-8").decode("utf-8") == file_part
+        stem = file_part[:-len(".flac")]
+        assert not stem.endswith(" ")
+        assert not stem.endswith(".")
+
+    def test_long_album_folder_capped(self, default_settings):
+        metadata = {
+            "artist": "Artist",
+            "album": "B" * 300,
+            "title": "Track",
+            "release_year": "2024",
+            "track_number": 1,
+            "extension": ".flac",
+        }
+        parts = build_path_parts(metadata, default_settings)
+        for folder in parts["folders"]:
+            assert len(folder.encode("utf-8")) <= 200
+
+    def test_short_names_unchanged(self, default_settings):
+        metadata = {
+            "artist": "Pink Floyd",
+            "album": "The Dark Side of the Moon",
+            "title": "Speak to Me",
+            "release_year": "1973",
+            "track_number": 1,
+            "disc_number": 1,
+            "total_discs": 1,
+            "codec": "FLAC",
+            "quality_full": "FLAC 24bit 96kHz",
+            "extension": ".flac",
+        }
+        path = build_track_path(metadata, default_settings)
+        assert path == "/music/Pink Floyd/The Dark Side of the Moon (1973)/01 - Speak to Me (FLAC 24bit 96kHz).flac"
 
 
 def test_release_year_token_drops_implausible_year():

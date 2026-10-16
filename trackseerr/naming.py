@@ -382,6 +382,10 @@ def format_quality(metadata: dict[str, Any]) -> str:  # noqa: C901
     return ""
 
 
+# Filesystems cap names at 255 bytes; 200 leaves room for temp suffixes tools add while moving files.
+MAX_NAME_BYTES = 200
+
+
 def truncate_utf8_bytes(s: str, max_bytes: int = 255) -> str:
     """Truncates a string to at most max_bytes when UTF-8 encoded without splitting multi-byte code points."""
     encoded = s.encode("utf-8")
@@ -404,7 +408,7 @@ def sanitize_component(name: str, colon_replacement: str = " - ", replace_illega
     - Dots inside a title are kept ('Flashdance... What a Feeling'); a component made only of dots ('..') becomes ''.
     - Strips ASCII control characters (0x00-0x1F).
     - Collapses redundant whitespace.
-    - Truncates to max 255 bytes on clean UTF-8 code point boundaries.
+    - Truncates to max 200 bytes on clean UTF-8 code point boundaries.
     - Strips leading spaces and dots, and trailing spaces and dots. Lidarr only trims trailing spaces from file
       names; trailing dots are stripped here as well because they break Windows/SMB (a deliberate difference).
     """
@@ -430,7 +434,7 @@ def sanitize_component(name: str, colon_replacement: str = " - ", replace_illega
         result = re.sub(r'[\\/<>?*|"]', "", result)
     result = re.sub(r"[\x00-\x1f]", "", result)
     result = re.sub(r"\s+", " ", result).strip()
-    result = truncate_utf8_bytes(result, 255)
+    result = truncate_utf8_bytes(result, MAX_NAME_BYTES)
     result = result.lstrip(" .").rstrip(" .")  # also guarantees a component is never '.' or '..'
     return result
 
@@ -980,8 +984,15 @@ def build_path_parts(
     if ext:
         if not ext.startswith("."):
             ext = f".{ext}"
+        ext_bytes = len(ext.encode("utf-8"))
+        max_stem_bytes = max(0, MAX_NAME_BYTES - ext_bytes)
         if not file_component.lower().endswith(ext.lower()):
-            file_component = f"{file_component}{ext}"
+            stem = truncate_utf8_bytes(file_component, max_stem_bytes).rstrip(" .")
+            file_component = f"{stem or 'Track'}{ext}"
+        elif len(file_component.encode("utf-8")) > MAX_NAME_BYTES:
+            raw_stem = file_component[:-len(ext)]
+            stem = truncate_utf8_bytes(raw_stem, max_stem_bytes).rstrip(" .")
+            file_component = f"{stem or 'Track'}{ext}"
 
     return {"artist": artist_component, "folders": folders, "file": file_component}
 
