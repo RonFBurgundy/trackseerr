@@ -62,6 +62,7 @@ class ServerCapabilities:
     mixes: bool = False
     search: bool = False
     file_paths: bool = False  # can list library file paths; an adapter may still raise MediaServerUnsupported at iteration
+    folder_refresh: bool = False
 
     def to_dict(self) -> dict[str, bool]:
         return {
@@ -187,6 +188,10 @@ class MediaServer(ABC):
     @abstractmethod
     def refresh_library(self) -> bool:
         """Ask the server to rescan its music library. True when a scan was triggered."""
+
+    def refresh_paths(self, server_paths: list[str]) -> bool:
+        """Ask the server to rescan specific folders under its library roots."""
+        raise MediaServerUnsupported(f"{self.kind or 'This media server'} cannot rescan single folders")
 
     @abstractmethod
     def search_tracks(self, query: str, limit: int = 20) -> list[dict[str, Any]]:

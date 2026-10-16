@@ -73,7 +73,7 @@ _httpx_logger = logging.getLogger("httpx")
 if not any(isinstance(f, _RedactHttpxUrls) for f in _httpx_logger.filters):
     _httpx_logger.addFilter(_RedactHttpxUrls())
 
-JELLYFIN_CAPABILITIES = ServerCapabilities(playlists=True, users=True, library_refresh=True, mixes=False, search=True, file_paths=True)
+JELLYFIN_CAPABILITIES = ServerCapabilities(playlists=True, users=True, library_refresh=True, mixes=False, search=True, file_paths=True, folder_refresh=True)
 
 CLIENT_NAME = "Trackseerr"
 _TICKS_PER_SECOND = 10_000_000
@@ -465,6 +465,11 @@ class JellyfinMediaServer(MediaServer):
         if not posted:
             logger.warning("Jellyfin: no music library found to refresh")
             return False
+        return True
+
+    def refresh_paths(self, server_paths: list[str]) -> bool:
+        body = {"Updates": [{"Path": p, "UpdateType": "Modified"} for p in server_paths]}
+        self._request("POST", "/Library/Media/Updated", json=body)
         return True
 
     def list_users(self) -> list[ServerUser]:

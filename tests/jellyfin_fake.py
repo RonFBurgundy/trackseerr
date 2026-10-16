@@ -69,6 +69,7 @@ class JellyfinState:
     calls: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)  # (method, path, query)
     headers_seen: list[str] = field(default_factory=list)
     urls_seen: list[str] = field(default_factory=list)
+    media_updates: list[dict[str, Any]] = field(default_factory=list)
     # Test hooks: ``transport_failure`` is raised instead of answering; ``respond_with`` may return a raw response
     # for (method, path, call number) (returning None falls through).
     transport_failure: Optional[Callable[[], Exception]] = None
@@ -144,6 +145,7 @@ class FakeJellyfin:
             route("GET", r"/Users", self._users),
             route("GET", r"/Items", self._items),
             route("GET", r"/Library/VirtualFolders", self._virtual_folders),
+            route("POST", r"/Library/Media/Updated", self._media_updated),
             route("POST", r"/Items/([^/]+)/Refresh", self._refresh_item),
             route("POST", r"/Library/Refresh", self._refresh),
             route("POST", r"/Playlists", self._create_playlist),
@@ -219,6 +221,12 @@ class FakeJellyfin:
 
     def _refresh(self, request: httpx.Request, query: dict[str, str]) -> httpx.Response:
         self.state.scans += 1
+        return httpx.Response(204)
+
+    def _media_updated(self, request: httpx.Request, query: dict[str, str]) -> httpx.Response:
+        import json
+        body = json.loads(request.content.decode("utf-8")) if request.content else {}
+        self.state.media_updates.append(body)
         return httpx.Response(204)
 
     def _visible(self, playlist_id: str, user_id: str) -> Optional[FakePlaylist]:

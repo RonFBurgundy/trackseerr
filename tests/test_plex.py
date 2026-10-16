@@ -253,6 +253,21 @@ def test_plex_client_refresh_music_library_honors_preferred_section(mock_server)
     sec1.update.assert_not_called()
 
 
+@patch("trackseerr.clients.plex.PlexServer")
+def test_refresh_music_paths_updates_matching_section(mock_server):
+    client = PlexClient("http://localhost:32400", "token")
+    sec1 = MagicMock(title="MP3", type="artist", locations=["/data/mp3"])
+    sec2 = MagicMock(title="FLAC", type="artist", locations=["/data/flac"])
+    client.server.library.sections.return_value = [sec1, sec2]
+
+    paths = ["/data/mp3/Artist/Album1", "/data/flac/Artist/Album2"]
+    count = client.refresh_music_paths(paths)
+
+    assert count == 2
+    sec1.update.assert_called_once_with(path="/data/mp3/Artist/Album1")
+    sec2.update.assert_called_once_with(path="/data/flac/Artist/Album2")
+
+
 
 
 @patch("trackseerr.clients.plex.PlexServer")
