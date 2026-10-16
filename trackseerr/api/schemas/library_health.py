@@ -79,3 +79,9 @@ class LibraryHealthMappingResponse(ApiModel):
 
 class LibraryHealthWeekly(ApiModel):
     weekly: bool
+
+
+class LibraryHealthShortened(ApiModel):
+    old_path: str
+    new_path: str
+    method: str

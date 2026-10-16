@@ -10,6 +10,7 @@ import logging
 import sqlite3
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, Optional, Union
 
 from trackseerr.album_years import is_placeholder_date, plausible_year
@@ -1205,6 +1206,49 @@ class LibraryCatalogStoreMixin:
             )
             row = cur.fetchone()
             return self._map_library_file(row) if row else None
+
+    def repoint_library_files_under(self, old_prefix: str, new_prefix: str, root_dir: str) -> int:
+        """Swaps old_prefix for new_prefix on all library_files matching old_prefix exactly or starting with old_prefix + '/'."""
+        old_clean = str(old_prefix).rstrip("/")
+        new_clean = str(new_prefix).rstrip("/")
+        prefix = old_clean + "/"
+        prefix_len = len(prefix)
+        root_path = Path(root_dir)
+
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT id, file_path FROM library_files WHERE file_path = ? OR substr(file_path, 1, ?) = ?",
+                (old_clean, prefix_len, prefix),
+            )
+            rows = cur.fetchall()
+            if not rows:
+                return 0
+
+            updates: list[tuple[str, str, str]] = []
+            for row in rows:
+                fid = row[0]
+                old_path = row[1]
+                if old_path == old_clean:
+                    new_path = new_clean
+                else:
+                    new_path = new_clean + "/" + old_path[prefix_len:]
+
+                try:
+                    rel_path = str(Path(new_path).relative_to(root_path))
+                except ValueError:
+                    try:
+                        rel_path = str(Path(new_path).resolve().relative_to(root_path.resolve()))
+                    except ValueError:
+                        rel_path = Path(new_path).name
+
+                updates.append((new_path, rel_path, fid))
+
+            self.conn.executemany(
+                "UPDATE library_files SET file_path = ?, relative_path = ? WHERE id = ?",
+                updates,
+            )
+            self.conn.commit()
+            return len(updates)
 
     def get_library_file_for_track(self, track_id: str) -> Optional[dict[str, Any]]:
         """Retrieves the file associated with a specific track ID."""

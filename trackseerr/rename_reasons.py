@@ -7,7 +7,7 @@ import re
 from collections import Counter
 from collections.abc import Iterable, Sequence
 
-from trackseerr.naming import is_various_artists_folder
+from trackseerr.naming import MAX_NAME_BYTES, is_various_artists_folder
 from trackseerr.storage_common import clean_library_name
 
 ARTIST_FOLDER = "artist_folder"
@@ -23,10 +23,11 @@ COLLISION = "collision"
 VERIFIED = "verified"
 AUDIO_MISMATCH = "audio_mismatch"
 COMPILATION_LINK = "compilation_link"
+NAME_TOO_LONG = "name_too_long"
 
 # A move is pre-selected only when it is purely cosmetic or tidies a stray file: anything that touches numbering,
 # titles, years, disc layout or collisions needs a human decision.
-SAFE_REASONS = frozenset({ARTIST_FOLDER, LOOSE_FILE, ALBUM_FOLDER_FORMAT, FILE_NAME_FORMAT})
+SAFE_REASONS = frozenset({ARTIST_FOLDER, LOOSE_FILE, ALBUM_FOLDER_FORMAT, FILE_NAME_FORMAT, NAME_TOO_LONG})
 
 _YEAR_RE = re.compile(r"\((\d{4})\)")
 _PREFIXED_NUMBER_RE = re.compile(r"^(?:.*? - )?(\d{1,3}) - (.+)$")
@@ -116,6 +117,8 @@ def classify_rename(current_rel: str, proposed_rel: str) -> list[str]:
     elif cur_folders:
         reasons.append(ALBUM_TITLE)  # the proposal drops the album folder entirely
     reasons += _file_reasons(cur[-1], new[-1])
+    if any(len(s.encode("utf-8")) > MAX_NAME_BYTES for s in cur):
+        reasons.append(NAME_TOO_LONG)
     return reasons
 
 

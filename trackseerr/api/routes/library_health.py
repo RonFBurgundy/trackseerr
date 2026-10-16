@@ -18,10 +18,12 @@ from trackseerr.api.schemas.library_health import (
     LibraryHealthDismissed,
     LibraryHealthMappingResponse,
     LibraryHealthResponse,
+    LibraryHealthShortened,
     LibraryHealthStarted,
     LibraryHealthWeekly,
 )
 from trackseerr.media_servers.base import MediaServer
+from trackseerr.redaction import safe_exc
 from trackseerr.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -86,6 +88,37 @@ def dismiss_library_health(body: DismissRequest, db: Database = Depends(get_db))
         else db.delete_library_health_findings_under(path)
     )
     return {"dismissed": True, "removed": removed}
+
+
+@router.post(
+    "/findings/{finding_id}/shorten",
+    response_model=LibraryHealthShortened,
+    response_model_exclude_unset=True,
+    summary="Shorten a file or folder name exceeding the length limit",
+)
+def shorten_finding(
+    finding_id: str,
+    db: Database = Depends(get_db),
+    server: Optional[MediaServer] = Depends(get_active_media_server),
+) -> dict[str, Any]:
+    finding = db.get_library_health_finding(finding_id)
+    if not finding:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Finding not found")
+    try:
+        return library_health.shorten_long_name(db, finding, music_root=_music_root(db), server=server)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The file or folder is gone; the finding was removed.",
+        ) from exc
+    except OSError as exc:
+        logger.exception("Failed to shorten %s: %s", finding.get("path"), safe_exc(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to shorten path: {safe_exc(exc)}",
+        ) from exc
 
 
 @router.put("/mapping", response_model=LibraryHealthMappingResponse, response_model_exclude_unset=True, summary="Save the media-server path mapping")

@@ -28,9 +28,12 @@ from trackseerr.task_manager import (
     record_task_run,
     wait_for_next_cycle,
 )
-from trackseerr.library import AUDIO_EXTENSIONS, inspect_audio_file
+from trackseerr.import_files import safe_atomic_move
+from trackseerr.item_history import emit
+from trackseerr.library import AUDIO_EXTENSIONS, inspect_audio_file, resolve_collision
 from trackseerr.media_servers.base import MediaServerError, MediaServerUnsupported
-from trackseerr.naming import MAX_NAME_BYTES
+from trackseerr.media_servers.refresh_scheduler import request_library_refresh
+from trackseerr.naming import MAX_NAME_BYTES, truncate_utf8_bytes
 from trackseerr.recycle_bin import EXCLUDED_DIRNAMES, is_system_dirname, is_system_filename
 from trackseerr.redaction import safe_exc
 
@@ -356,6 +359,176 @@ def _record_long_names(db: Any, music_root: Path, seen_at: str) -> int:
         db.upsert_library_health_findings(filtered[i : i + _SCAN_BATCH], seen_at)
     db.delete_library_health_findings_not_seen([KIND_LONG_NAME], seen_at)
     return len(filtered)
+
+
+def _shorten_folder(
+    db: Any,
+    resolved_path: Path,
+    raw_path_str: str,
+    music_root: Path,
+) -> Path:
+    folder_name = resolved_path.name
+    truncated_name = truncate_utf8_bytes(folder_name, MAX_NAME_BYTES).rstrip(" .")
+    if not truncated_name:
+        truncated_name = "Folder"
+
+    parent = resolved_path.parent
+    target_path = parent / truncated_name
+
+    if target_path.exists() and target_path.resolve() != resolved_path.resolve():
+        counter = 1
+        while True:
+            suffix_str = f" ({counter})"
+            max_stem = max(0, MAX_NAME_BYTES - len(suffix_str.encode("utf-8")))
+            candidate_name = f"{truncate_utf8_bytes(folder_name, max_stem).rstrip(' .')}{suffix_str}"
+            candidate_path = parent / candidate_name
+            if not candidate_path.exists():
+                target_path = candidate_path
+                break
+            counter += 1
+
+    os.rename(resolved_path, target_path)
+    db.repoint_library_files_under(str(resolved_path), str(target_path), str(music_root))
+    if raw_path_str != str(resolved_path):
+        db.repoint_library_files_under(raw_path_str, str(target_path), str(music_root))
+    return target_path
+
+
+def _shorten_file(
+    db: Any,
+    resolved_path: Path,
+    raw_path_str: str,
+    resolved_root: Path,
+) -> tuple[Path, str]:
+    file_row = db.get_library_file_by_path(str(resolved_path))
+    if not file_row and raw_path_str != str(resolved_path):
+        file_row = db.get_library_file_by_path(raw_path_str)
+
+    track = None
+    if file_row and file_row.get("track_id"):
+        track = db.get_library_track(file_row["track_id"])
+
+    candidate_path = None
+    if file_row and track:
+        from trackseerr.api.routes.library.tagging import rename_library_file
+
+        media_settings = db.get_media_management_settings()
+        try:
+            candidate_path = rename_library_file(db, file_row, track, media_settings, resolved_root)
+        except ValueError:
+            candidate_path = None
+
+        if candidate_path is not None and len(candidate_path.name.encode("utf-8")) <= MAX_NAME_BYTES:
+            return candidate_path, "rename"
+
+    current_file = candidate_path if (candidate_path is not None and candidate_path.exists()) else resolved_path
+    stem = current_file.stem
+    suffix = current_file.suffix
+    max_stem_bytes = max(0, MAX_NAME_BYTES - len(suffix.encode("utf-8")))
+    truncated_stem = truncate_utf8_bytes(stem, max_stem_bytes).rstrip(" .")
+    if not truncated_stem:
+        truncated_stem = "Track"
+
+    proposed_name = f"{truncated_stem}{suffix}"
+    proposed_path = current_file.parent / proposed_name
+    target_path = resolve_collision(proposed_path)
+    new_path = safe_atomic_move(current_file, target_path)
+
+    if not file_row:
+        file_row = db.get_library_file_by_path(str(current_file))
+    if file_row:
+        try:
+            rel_path = str(new_path.relative_to(resolved_root))
+        except ValueError:
+            rel_path = new_path.name
+
+        db.upsert_library_file({
+            "id": file_row["id"],
+            "track_id": file_row.get("track_id"),
+            "file_path": str(new_path),
+            "relative_path": rel_path,
+            "codec": file_row.get("codec"),
+            "bitrate": file_row.get("bitrate"),
+            "sample_rate": file_row.get("sample_rate"),
+            "bits_per_sample": file_row.get("bits_per_sample"),
+            "quality_name": file_row.get("quality_name"),
+            "size_bytes": new_path.stat().st_size if new_path.exists() else file_row.get("size_bytes", 0),
+            "cutoff_met": file_row.get("cutoff_met", True),
+        })
+
+    if track:
+        emit(
+            db,
+            "renamed" if new_path.parent == resolved_path.parent else "moved",
+            track_id=str(file_row["track_id"]),
+            message=f"{resolved_path.name} -> {new_path.name}",
+            details={"from": str(resolved_path), "to": str(new_path)},
+        )
+
+    return new_path, "shorten"
+
+
+def shorten_long_name(
+    db: Any,
+    finding: dict[str, Any],
+    music_root: Path,
+    server: Any = None,
+) -> dict[str, Any]:
+    """Shortens a file or folder whose name exceeds MAX_NAME_BYTES.
+
+    Returns {"old_path": str, "new_path": str, "method": "rename" | "shorten" | "shorten_folder"}.
+    """
+    if finding.get("kind") != KIND_LONG_NAME:
+        raise ValueError(f"Finding kind must be '{KIND_LONG_NAME}', got '{finding.get('kind')}'")
+
+    raw_path_str = finding.get("path")
+    if not raw_path_str:
+        raise ValueError("Finding path is missing")
+
+    raw_path = Path(raw_path_str)
+    resolved_root = music_root.resolve()
+    try:
+        resolved_path = raw_path.resolve()
+        if not resolved_path.is_relative_to(resolved_root):
+            raise ValueError(f"Path '{raw_path}' is outside music root '{music_root}'")
+    except (ValueError, RuntimeError) as exc:
+        if isinstance(exc, ValueError) and "outside music root" in str(exc):
+            raise
+        raise ValueError(f"Invalid path '{raw_path}': {exc}") from exc
+
+    if not resolved_path.exists():
+        db.delete_library_health_finding_by_path(raw_path_str, kind=KIND_LONG_NAME)
+        if str(resolved_path) != raw_path_str:
+            db.delete_library_health_finding_by_path(str(resolved_path), kind=KIND_LONG_NAME)
+        raise FileNotFoundError(f"Path '{raw_path_str}' does not exist on disk")
+
+    detail = finding.get("detail") or {}
+    is_dir = (isinstance(detail, dict) and detail.get("is_dir")) or resolved_path.is_dir()
+
+    if is_dir:
+        new_path = _shorten_folder(db, resolved_path, raw_path_str, music_root)
+        method = "shorten_folder"
+    else:
+        new_path, method = _shorten_file(db, resolved_path, raw_path_str, resolved_root)
+
+    db.delete_library_health_finding_by_path(raw_path_str, kind=KIND_LONG_NAME)
+    if str(resolved_path) != raw_path_str:
+        db.delete_library_health_finding_by_path(str(resolved_path), kind=KIND_LONG_NAME)
+    if is_dir:
+        db.delete_library_health_findings_under(raw_path_str)
+        if str(resolved_path) != raw_path_str:
+            db.delete_library_health_findings_under(str(resolved_path))
+
+    if server:
+        request_library_refresh(server, reason="rename")
+
+    logger.info("library health: shortened %s -> %s", raw_path_str, new_path)
+
+    return {
+        "old_path": str(resolved_path),
+        "new_path": str(new_path),
+        "method": method,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -733,6 +906,7 @@ __all__ = [
     "is_running",
     "record_weak_match",
     "run_check",
+    "shorten_long_name",
     "start_check_async",
     "weekly_due",
 ]
