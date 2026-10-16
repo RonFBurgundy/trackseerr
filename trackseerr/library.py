@@ -428,7 +428,6 @@ def inspect_audio_file(file_path: str | Path) -> dict[str, Any]:
         "artist": f.artist,
         "album": f.album,
         "album_artist": f.album_artist,
-        "albumartist": f.album_artist,
         "date": f.raw_date or (str(f.year) if f.year is not None else None),
         "year": f.year,
         "release_year": f.year,
