@@ -18,14 +18,17 @@ Open **Playlists** and click **Add Playlist**. There are six ways to add one.
 
 ### By Link
 
-Paste a Spotify or Deezer playlist URL, for example:
+Paste a Spotify, Deezer or YouTube Music playlist URL, for example:
 
 ```
 https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M
 https://www.deezer.com/playlist/1313621735
+https://music.youtube.com/playlist?list=PL...
 ```
 
-No Spotify API key is needed. TrackSeerr reads the public playlist page. Private playlists and Spotify Liked Songs cannot be read this way; use **Paste Tracks** for those.
+No Spotify API key or Google account is needed. TrackSeerr reads the public playlist. Private playlists, Spotify Liked Songs and YouTube Music Liked Music cannot be read this way; use **Paste Tracks** for those.
+
+A YouTube Music playlist must be set to Public or Unlisted. To check, open the playlist, choose **Share**, and look at its visibility. Unlisted keeps it out of search but lets TrackSeerr read it. If TrackSeerr cannot read a playlist, it tells you so and adds nothing.
 
 ### Featured
 

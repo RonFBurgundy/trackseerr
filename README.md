@@ -22,7 +22,7 @@ TrackSeerr is in active development. Features, settings, and the API still chang
 
 - **Discover.** Search artists, albums, and tracks. Browse charts and new releases. Play 30-second previews. No API keys needed.
 - **Request.** Users request a track, an album, or a whole discography. You set quotas and approve requests, or let trusted users skip approval.
-- **Playlists.** Import playlists from Spotify, Deezer, Last.fm, ListenBrainz, or plain text. TrackSeerr matches them to your library, keeps them in sync, and pushes them to your media server for each user.
+- **Playlists.** Import playlists from Spotify, Deezer, YouTube Music, Last.fm, ListenBrainz, or plain text. TrackSeerr matches them to your library, keeps them in sync, and pushes them to your media server for each user.
 - **Get the music.** Search Usenet and torrent indexers, or Soulseek, and download through SABnzbd, qBittorrent, or slskd. Or send requests to Lidarr.
 - **Manage the library.** Scan, tag, rename, and import files. Track quality and upgrade it over time. Find files your media server missed.
 - **Users.** Sign in with Plex or with a local account. Each user has their own requests, playlists, quotas, and scrobbling.
