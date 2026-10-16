@@ -13,6 +13,8 @@ heading becomes the version and date.
 
 ### Added
 
+- System → Status shows how many MusicBrainz requests went to the mirror and to musicbrainz.org in the last hour, the request limit, and whether TrackSeerr is pausing either one.
+- New page, External services, lists every outside server TrackSeerr talks to, when, and how much.
 - Add YouTube Music playlists by pasting their link, just like Spotify and Deezer — no account or API key needed. The playlist must be Public or Unlisted; private playlists and Liked Music are rejected with a message saying so. Playlists up to 10,000 tracks are read, and music-video titles like "Artist - Song (Official Video)" are cleaned up before matching.
 - Compilation files are named after each track's own artist: `Various Artists/Saturday Night Fever (1977)/03 - Yvonne Elliman - If I Can't Have You.flac`. Media Management adds the compilation artist folder name, who a remix is credited to (original artist, remixer, or as MusicBrainz credits it) and where featured artists go; every naming preset sets them, and a new "beets / Picard" preset files compilations under Compilations.
 - The Requests page and the Activity Blocklist, Searches and Queue tabs have the fast-scroll rail used in the Library. Date rails for events (requests, history, blocklist, searches, date added) read Today, Yesterday, the last few weekdays, then months and years, in your own timezone; release-date rails group by year, month or day depending on the spread, Blocklist sorted by artist jumps by letter, and lists with nothing to group by (the Queue) are labelled by position.
@@ -63,6 +65,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- TrackSeerr is gentler on the MusicBrainz mirror: at most 3 requests per second and 2 at a time (set with `MUSICBRAINZ_MIRROR_RPS` and `MUSICBRAINZ_MIRROR_CONCURRENCY`). When the mirror asks it to slow down, it waits as long as asked, and it stops asking a mirror that keeps refusing it.
 - On phones, task rows on the Tasks page show icon-only Run and Cancel buttons and drop the Running badge while the progress bar shows, so task names have room (they wrap to two lines instead of being cut off).
 - The Requests page loads in pages and scrolls smoothly with thousands of requests, instead of loading every request at once.
 - Approved requests (manual, automatic, playlist and discography) now add the artist to the library and monitor exactly what was requested, so they appear under Wanted → Missing and in the library's missing counts before anything downloads. Existing approved requests are picked up by the next Wanted sweep.
