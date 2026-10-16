@@ -766,6 +766,9 @@ def test_rename_preview_and_apply(
     })
 
     mock_plex = MagicMock()
+    mock_sec = MagicMock(type="artist", locations=[str(music_dir)], title="Music")
+    mock_plex.server.library.sections.return_value = [mock_sec]
+    mock_plex.refresh_music_paths.return_value = 1
     app.dependency_overrides[get_plex_client] = lambda: mock_plex
 
     # 1. Preview renaming
@@ -808,10 +811,14 @@ def test_rename_preview_and_apply(
     assert updated_fl["file_path"] == str(expected_path)
     assert updated_fl["relative_path"] == "Radiohead/The Bends (1995)/03 - High and Dry.flac"
 
-    # Plex refresh invoked
+    # Plex refresh invoked with old + new folders
     mock_plex.refresh_music_library.assert_not_called()
     assert refresh_scheduler.flush_now() is True
-    mock_plex.refresh_music_library.assert_called_once()
+    mock_plex.refresh_music_paths.assert_called_once()
+    called_paths = mock_plex.refresh_music_paths.call_args[0][0]
+    assert str(music_dir) in called_paths
+    assert str(expected_path.parent) in called_paths
+    mock_plex.refresh_music_library.assert_not_called()
 
 
 def test_rename_preview_compilation_uses_track_artist_credit(

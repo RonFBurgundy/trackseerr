@@ -123,6 +123,50 @@ def to_server_folder(db: Any, server: MediaServer, local: str) -> str | None:
     return _try_media_management_mapping(db, roots, local)
 
 
+def nearest_existing_folder(path: str) -> str:
+    """Maps a path to its nearest existing directory.
+
+    If the path is an existing file, returns its parent.
+    If the path is an existing directory, returns it.
+    If the directory no longer exists, walks up to the first existing ancestor.
+    If no ancestor above filesystem root exists, returns the path as-is.
+    """
+    p = os.path.abspath(path)
+    if os.path.isfile(p):
+        return os.path.dirname(p)
+    if os.path.isdir(p):
+        return p
+    cur = os.path.dirname(p)
+    root = os.path.abspath(os.sep)
+    while cur and cur != root:
+        if os.path.isdir(cur):
+            return cur
+        cur = os.path.dirname(cur)
+    return path
+
+
+def _resolve_and_translate_folders(
+    db: Any, server: MediaServer, paths: Iterable[str]
+) -> list[str] | None:
+    seen: set[str] = set()
+    candidate_folders: list[str] = []
+    for p in paths:
+        if not p:
+            continue
+        folder = nearest_existing_folder(p)
+        if folder not in seen:
+            seen.add(folder)
+            candidate_folders.append(folder)
+
+    translated: list[str] = []
+    for folder in candidate_folders:
+        t = to_server_folder(db, server, folder)
+        if t is None:
+            return None
+        translated.append(t)
+    return translated if translated else None
+
+
 class RefreshScheduler:
     """Coalesces library refresh requests per media server over a time window."""
 
@@ -154,6 +198,14 @@ class RefreshScheduler:
                 self._window_seconds = 10.0 * 60
             self._disabled_logged = False
 
+    def _schedule_locked(self, delay: float) -> None:
+        if self._timer is None:
+            self._pending_delay = delay
+            timer = threading.Timer(delay, self._fire)
+            timer.daemon = True
+            self._timer = timer
+            timer.start()
+
     def request_library_refresh(
         self,
         server: MediaServer | None,
@@ -169,14 +221,9 @@ class RefreshScheduler:
         translated_paths: list[str] = []
 
         if paths is not None and db is not None and can_folder:
-            all_translated = True
-            for p in paths:
-                t = to_server_folder(db, server, p)
-                if t is None:
-                    all_translated = False
-                    break
-                translated_paths.append(t)
-            if all_translated and translated_paths:
+            folders = _resolve_and_translate_folders(db, server, paths)
+            if folders is not None:
+                translated_paths = folders
                 is_folder_request = True
 
         with self._lock:
@@ -193,13 +240,7 @@ class RefreshScheduler:
 
             if is_folder_request and not self._pending_full:
                 self._pending_folders.update(translated_paths)
-                if self._timer is None:
-                    delay = QUIET_SECONDS
-                    self._pending_delay = delay
-                    timer = threading.Timer(delay, self._fire)
-                    timer.daemon = True
-                    self._timer = timer
-                    timer.start()
+                self._schedule_locked(QUIET_SECONDS)
             else:
                 was_folder_only = (not self._pending_full) and (self._timer is not None)
                 self._pending_full = True
@@ -210,17 +251,12 @@ class RefreshScheduler:
                     self._timer.cancel()
                     self._timer = None
 
-                if self._timer is None:
-                    now = _monotonic()
-                    if self._last_full_fired is None:
-                        delay = QUIET_SECONDS
-                    else:
-                        delay = max(QUIET_SECONDS, self._last_full_fired + self._window_seconds - now)
-                    self._pending_delay = delay
-                    timer = threading.Timer(delay, self._fire)
-                    timer.daemon = True
-                    self._timer = timer
-                    timer.start()
+                now = _monotonic()
+                if self._last_full_fired is None:
+                    delay = QUIET_SECONDS
+                else:
+                    delay = max(QUIET_SECONDS, self._last_full_fired + self._window_seconds - now)
+                self._schedule_locked(delay)
 
     def _fire(self) -> None:
         with self._lock:
@@ -266,19 +302,34 @@ class RefreshScheduler:
             if not ok:
                 failed = True
                 logger.warning(
-                    "Media server %s folder rescan returned False; falling back to full library rescan",
+                    "Media server %s folder rescan returned False; will retry as a full rescan",
                     kind,
                 )
         except (MediaServerUnsupported, MediaServerError, OSError, requests.RequestException) as exc:
             failed = True
             logger.warning(
-                "Media server %s folder rescan failed (%s); falling back to full library rescan",
+                "Media server %s folder rescan failed (%s); will retry as a full rescan",
                 kind,
                 safe_exc(exc),
             )
 
         if failed:
-            self._execute_full_refresh(server, kind, count, reasons_summary)
+            with self._lock:
+                self._pending_full = True
+                if self._pending_server is None:
+                    self._pending_server = server
+                self._pending_count += count
+                if reasons:
+                    self._pending_reasons.extend(reasons)
+                now = _monotonic()
+                if self._last_full_fired is None:
+                    delay = QUIET_SECONDS
+                else:
+                    delay = max(QUIET_SECONDS, self._last_full_fired + self._window_seconds - now)
+                if self._timer is not None:
+                    self._timer.cancel()
+                    self._timer = None
+                self._schedule_locked(delay)
         else:
             logger.info(
                 "Asked %s to rescan %d folder(s) (%d change(s) batched: %s)",

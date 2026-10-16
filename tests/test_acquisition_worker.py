@@ -224,6 +224,9 @@ def test_worker_poll_once_completed_and_organizes(test_db, workspace_dirs):
     }
 
     mock_plex = MagicMock()
+    mock_sec = MagicMock(type="artist", locations=[str(music_dir)], title="Music")
+    mock_plex.server.library.sections.return_value = [mock_sec]
+    mock_plex.refresh_music_paths.return_value = 1
     worker = AcquisitionWorker()
 
     mock_meta = {
@@ -262,10 +265,12 @@ def test_worker_poll_once_completed_and_organizes(test_db, workspace_dirs):
     assert updated_req is not None
     assert updated_req["status"] == RequestStatus.AVAILABLE.value
 
-    # Verify Plex library refresh pinged
+    # Verify Plex library refresh pinged with album folder
     mock_plex.refresh_music_library.assert_not_called()
     assert refresh_scheduler.flush_now() is True
-    mock_plex.refresh_music_library.assert_called_once()
+    expected_album_dir = str(Path(updated_dl["target_path"]).parent)
+    mock_plex.refresh_music_paths.assert_called_once_with([expected_album_dir])
+    mock_plex.refresh_music_library.assert_not_called()
 
 
 def test_import_of_replacement_grab_comments_on_issue(test_db, workspace_dirs):
