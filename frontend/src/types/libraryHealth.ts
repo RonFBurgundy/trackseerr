@@ -1,5 +1,5 @@
 import type { Narrow, Schema } from './apiSchema';
-export type LibraryHealthKind = 'server_unindexed' | 'server_stale' | 'weak_match' | 'orphan_torrent' | 'cleanup_failed';
+export type LibraryHealthKind = 'server_unindexed' | 'server_stale' | 'weak_match' | 'orphan_torrent' | 'cleanup_failed' | 'long_name';
 
 export type LibraryHealthFinding = Narrow<Schema<'LibraryHealthFinding'>, { kind: LibraryHealthKind; detail?: Record<string, unknown> | null }>;
 

@@ -74,6 +74,7 @@ class MigrationsMixin:
                 (85, self._migration_v85),
                 (86, self._migration_v86),
                 (87, self._migration_v87),
+                (88, self._migration_v88),
             ]
 
             applied = 0
@@ -207,6 +208,41 @@ class MigrationsMixin:
             "SET mb_mirror_url = 'https://api.brainzmash.cc' "
             "WHERE mb_mirror_url LIKE 'http%://api.brainzmash.org%'"
         )
+
+    def _migration_v88(self, cur: sqlite3.Cursor) -> None:
+        """v88: library_health_findings accepts kind 'long_name' (table rebuild; SQLite cannot alter a CHECK)."""
+        cur.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='library_health_findings'"
+        )
+        row = cur.fetchone()
+        if row and row[0] and "'long_name'" in row[0]:
+            return
+
+        cur.execute("""
+            CREATE TABLE library_health_findings_v88 (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL CHECK (kind IN ('server_unindexed', 'server_stale', 'weak_match', 'orphan_torrent', 'cleanup_failed', 'long_name')),
+                server_kind TEXT,
+                cause TEXT NOT NULL,
+                group_key TEXT NOT NULL,
+                path TEXT NOT NULL,
+                detail_json TEXT,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                dismissed INTEGER NOT NULL DEFAULT 0,
+                UNIQUE (kind, path)
+            )
+        """)
+        cur.execute("""
+            INSERT INTO library_health_findings_v88 (
+                id, kind, server_kind, cause, group_key, path, detail_json, first_seen, last_seen, dismissed
+            )
+            SELECT id, kind, server_kind, cause, group_key, path, detail_json, first_seen, last_seen, dismissed
+            FROM library_health_findings
+        """)
+        cur.execute("DROP TABLE library_health_findings")
+        cur.execute("ALTER TABLE library_health_findings_v88 RENAME TO library_health_findings")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_health_findings_group ON library_health_findings(group_key)")
 
     def _migration_v84(self, cur: sqlite3.Cursor) -> None:
         """v84: Add catalog tracking columns to music_requests."""

@@ -30,6 +30,7 @@ from trackseerr.task_manager import (
 )
 from trackseerr.library import AUDIO_EXTENSIONS, inspect_audio_file
 from trackseerr.media_servers.base import MediaServerError, MediaServerUnsupported
+from trackseerr.naming import MAX_NAME_BYTES
 from trackseerr.recycle_bin import EXCLUDED_DIRNAMES, is_system_dirname, is_system_filename
 from trackseerr.redaction import safe_exc
 
@@ -40,6 +41,7 @@ KIND_STALE = "server_stale"
 KIND_WEAK = "weak_match"
 KIND_ORPHAN_TORRENT = "orphan_torrent"
 KIND_CLEANUP_FAILED = "cleanup_failed"
+KIND_LONG_NAME = "long_name"
 
 CAUSE_FOLDER = "folder_not_in_server"
 CAUSE_NOT_SCANNED = "not_scanned_yet"
@@ -53,6 +55,7 @@ CAUSE_STALE = "stale_on_server"
 CAUSE_WEAK = "weak_tag_match"
 CAUSE_ORPHAN_TORRENT = "orphan_torrent"
 CAUSE_CLEANUP_FAILED = "cleanup_failed"
+CAUSE_LONG_NAME = "name_too_long"
 
 # Container extensions (no dot) each server type cannot play or index. Plex skips these; Jellyfin and Subsonic servers
 # index anything their ffmpeg/transcoder can read, so their sets are empty. These extensions are added to the disk walk
@@ -76,6 +79,7 @@ SUGGESTIONS: dict[str, str] = {
     CAUSE_WEAK: "Imported on a weak tag match. Check it and use Re-match if it landed on the wrong track.",
     CAUSE_ORPHAN_TORRENT: "This torrent is in TrackSeerr's category but TrackSeerr never grabbed or imported it. It is never removed automatically: remove it yourself, with or without its files.",
     CAUSE_CLEANUP_FAILED: "TrackSeerr could not remove this finished torrent after 3 attempts. Check the download client, then retry.",
+    CAUSE_LONG_NAME: "These names are too long for some file systems and tools, like the Unraid mover. Open Rename and apply it to shorten them.",
 }
 
 SUGGEST_SAMPLE = 500
@@ -130,6 +134,46 @@ def disk_inventory(music_root: Path, server_kind: str) -> dict[str, str]:
     exts = {e.lower() for e in AUDIO_EXTENSIONS}
     exts |= {"." + e for e in UNSUPPORTED_EXTENSIONS.get(server_kind, frozenset())}
     return {path_mapping.normalize_key(p): p for p in _walk_audio(music_root, frozenset(exts))}
+
+
+def long_name_findings(music_root: Path, limit: int = MAX_NAME_BYTES) -> list[dict[str, Any]]:
+    """Walk under music_root and return findings for all file and folder names exceeding limit UTF-8 bytes."""
+    findings: list[dict[str, Any]] = []
+    stack = [str(music_root)]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as it:
+                for entry in it:
+                    try:
+                        is_directory = entry.is_dir(follow_symlinks=False)
+                        if is_directory:
+                            if not is_system_dirname(entry.name) and entry.name not in EXCLUDED_DIRNAMES:
+                                stack.append(entry.path)
+                        elif is_system_filename(entry.name):
+                            continue
+
+                        name_bytes = len(entry.name.encode("utf-8", "surrogateescape"))
+                        if name_bytes > limit:
+                            findings.append(
+                                {
+                                    "kind": KIND_LONG_NAME,
+                                    "server_kind": None,
+                                    "cause": CAUSE_LONG_NAME,
+                                    "group_key": current,
+                                    "path": entry.path,
+                                    "detail": {
+                                        "name_bytes": name_bytes,
+                                        "limit": limit,
+                                        "is_dir": is_directory,
+                                    },
+                                }
+                            )
+                    except OSError as exc:
+                        logger.warning("library health: cannot stat %s: %s", entry.path, type(exc).__name__)
+        except OSError as exc:
+            logger.warning("library health: cannot read directory %s: %s", current, type(exc).__name__)
+    return findings
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +347,17 @@ class _Dismissed:
         return key in self.files or any(_under(key, f) for f in self.folders)
 
 
+def _record_long_names(db: Any, music_root: Path, seen_at: str) -> int:
+    """Find long file/folder names, filter dismissed, upsert, and prune un-seen. Returns count."""
+    rows = long_name_findings(music_root)
+    dismissed = _Dismissed(db.list_library_health_dismissals())
+    filtered = [r for r in rows if not dismissed.covers(r["path"])]
+    for i in range(0, len(filtered), _SCAN_BATCH):
+        db.upsert_library_health_findings(filtered[i : i + _SCAN_BATCH], seen_at)
+    db.delete_library_health_findings_not_seen([KIND_LONG_NAME], seen_at)
+    return len(filtered)
+
+
 # ---------------------------------------------------------------------------
 # The check
 # ---------------------------------------------------------------------------
@@ -342,13 +397,20 @@ def _execute(db: Any, server: Optional[Any], music_root: Path, now: datetime) ->
         "unindexed": 0,
         "stale": 0,
     }
+    if not music_root.is_dir():
+        return _finish(db, run, f"The music folder {music_root} does not exist.")
+
+    try:
+        count = _record_long_names(db, music_root, started)
+        logger.info("library health: recorded %d long_name findings", count)
+    except OSError as exc:
+        logger.warning("library health: failed checking long names: %s", type(exc).__name__)
+
     if server is None:
         return _finish(db, run, "No media server is configured.")
     server_kind = str(getattr(server, "kind", "") or "")
     if not server.capabilities.file_paths:
         return _finish(db, run, f"{server_kind or 'This media server'} does not expose library file paths.")
-    if not music_root.is_dir():
-        return _finish(db, run, f"The music folder {music_root} does not exist.")
 
     try:
         disk = disk_inventory(music_root, server_kind)
@@ -662,6 +724,7 @@ __all__ = [
     "LibraryHealthWorker",
     "library_health_worker",
     "KIND_CLEANUP_FAILED",
+    "KIND_LONG_NAME",
     "KIND_ORPHAN_TORRENT",
     "SUGGESTIONS",
     "UNSUPPORTED_EXTENSIONS",

@@ -5,6 +5,7 @@ export const CAUSE_LABELS: Readonly<Record<string, string>> = {
   folder_not_in_server: 'Folder not in the server library',
   not_scanned_yet: 'Not scanned yet',
   unsupported_format: 'Unsupported format',
+  name_too_long: 'Names too long',
   corrupt: 'Corrupt or unplayable files',
   missing_tags: 'Missing tags',
   unreadable_permissions: 'Unreadable (permissions)',
