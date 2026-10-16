@@ -586,3 +586,117 @@ def test_mapping_routes_save_clear_and_clear_auto_flag(client, db, config):
     assert client.delete("/api/library-health/mapping", headers=h).json() == {"mapping": None}
     assert db.get_media_server_path_mapping() is None
     assert client.put("/api/library-health/weekly", json={"enabled": False}, headers=h).json() == {"weekly": False}
+
+
+# ------------------------------------------------------------------ long name tests
+
+
+def test_long_file_name_flagged(db, music):
+    long_filename = "a" * 210 + ".flac"
+    short_filename = "short.flac"
+    long_file = touch(music / "Artist" / "Album" / long_filename)
+    touch(music / "Artist" / "Album" / short_filename)
+
+    run = check(db, None, music)
+    assert run["error"] == "No media server is configured."
+
+    found = findings(db)
+    assert str(long_file) in found
+    entry = found[str(long_file)]
+    assert entry["kind"] == lh.KIND_LONG_NAME
+    assert entry["cause"] == lh.CAUSE_LONG_NAME
+    assert entry["group_key"] == str(long_file.parent)
+    assert entry["detail"]["name_bytes"] == len(long_filename.encode("utf-8"))
+    assert entry["detail"]["name_bytes"] > 200
+    assert entry["detail"]["limit"] == 200
+    assert entry["detail"]["is_dir"] is False
+    assert len(found) == 1
+
+
+def test_long_folder_name_flagged_and_descended(db, music):
+    long_dirname = "d" * 215
+    long_covername = "c" * 205 + ".jpg"
+    long_dir = music / long_dirname
+    long_dir.mkdir(parents=True, exist_ok=True)
+    short_file = touch(long_dir / "track.flac")
+    long_cover = touch(long_dir / long_covername)
+
+    check(db, None, music)
+    found = findings(db)
+
+    assert str(long_dir) in found
+    dir_entry = found[str(long_dir)]
+    assert dir_entry["kind"] == lh.KIND_LONG_NAME
+    assert dir_entry["cause"] == lh.CAUSE_LONG_NAME
+    assert dir_entry["detail"]["is_dir"] is True
+    assert dir_entry["detail"]["name_bytes"] == 215
+
+    assert str(long_cover) in found
+    cover_entry = found[str(long_cover)]
+    assert cover_entry["kind"] == lh.KIND_LONG_NAME
+    assert cover_entry["cause"] == lh.CAUSE_LONG_NAME
+    assert cover_entry["detail"]["is_dir"] is False
+    assert cover_entry["detail"]["name_bytes"] == len(long_covername.encode("utf-8"))
+
+    assert str(short_file) not in found
+    assert len(found) == 2
+
+
+def test_multibyte_name_counts_bytes(db, music):
+    # 70 CJK characters: each 3 bytes in UTF-8 -> 210 bytes
+    long_cjk_name = "测" * 70 + ".flac"
+    # 60 CJK characters: each 3 bytes in UTF-8 -> 180 bytes
+    short_cjk_name = "测" * 60 + ".flac"
+
+    long_file = touch(music / "Artist" / long_cjk_name)
+    touch(music / "Artist" / short_cjk_name)
+
+    check(db, None, music)
+    found = findings(db)
+
+    assert str(long_file) in found
+    assert found[str(long_file)]["detail"]["name_bytes"] == len(long_cjk_name.encode("utf-8"))
+    assert found[str(long_file)]["detail"]["name_bytes"] > 200
+    assert len(found) == 1
+
+
+def test_long_names_checked_without_media_server(db, music):
+    long_name = "x" * 205 + ".mp3"
+    touch(music / long_name)
+
+    run = check(db, None, music)
+    assert run["error"] == "No media server is configured."
+    found = findings(db)
+    assert len(found) == 1
+    assert list(found.values())[0]["kind"] == lh.KIND_LONG_NAME
+
+
+def test_long_name_finding_cleared_after_rename(db, music):
+    long_name = "y" * 210 + ".flac"
+    file_path = touch(music / long_name)
+
+    check(db, None, music)
+    assert len(findings(db)) == 1
+
+    # Rename to short
+    short_path = music / "short.flac"
+    file_path.rename(short_path)
+
+    check(db, None, music)
+    assert len(findings(db)) == 0
+
+
+def test_dismissed_long_name_not_reported(db, music):
+    long_dir = music / ("f" * 210)
+    long_dir.mkdir(parents=True, exist_ok=True)
+    long_file = touch(long_dir / ("g" * 205 + ".flac"))
+
+    # Dismiss folder
+    db.add_library_health_dismissal("folder", str(long_dir))
+
+    check(db, None, music)
+    found = findings(db)
+    assert str(long_dir) not in found
+    assert str(long_file) not in found
+    assert len(found) == 0
+

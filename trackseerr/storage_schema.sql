@@ -151,7 +151,7 @@ CREATE TABLE library_health_dismissals (
             );
 CREATE TABLE "library_health_findings" (
                 id TEXT PRIMARY KEY,
-                kind TEXT NOT NULL CHECK (kind IN ('server_unindexed', 'server_stale', 'weak_match', 'orphan_torrent', 'cleanup_failed')),
+                kind TEXT NOT NULL CHECK (kind IN ('server_unindexed', 'server_stale', 'weak_match', 'orphan_torrent', 'cleanup_failed', 'long_name')),
                 server_kind TEXT,
                 cause TEXT NOT NULL,
                 group_key TEXT NOT NULL,
