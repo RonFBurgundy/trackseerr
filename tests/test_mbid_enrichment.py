@@ -119,7 +119,7 @@ class TestMbidEnricher:
     """Unit tests for MbidEnricherClient REST resolution, caching, and SSRF URLs."""
 
     def test_lookup_track_by_isrc(self):
-        client = MbidEnricherClient(base_url="https://api.brainzmash.org")
+        client = MbidEnricherClient(base_url="https://api.brainzmash.cc")
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -152,7 +152,7 @@ class TestMbidEnricher:
         assert "isrc:USSUB9600001" in kwargs["params"]["query"]
 
     def test_lookup_track_by_metadata_fallback(self):
-        client = MbidEnricherClient(base_url="https://api.brainzmash.org")
+        client = MbidEnricherClient(base_url="https://api.brainzmash.cc")
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -182,7 +182,7 @@ class TestMbidEnricher:
         assert result["musicbrainz_releasegroupid"] == "rg-6666"
 
     def test_caching_identical_call_makes_no_second_http_request(self):
-        client = MbidEnricherClient(base_url="https://api.brainzmash.org")
+        client = MbidEnricherClient(base_url="https://api.brainzmash.cc")
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -203,7 +203,7 @@ class TestMbidEnricher:
         assert mock_get.call_count == 1
 
     def test_graceful_failures_on_http_errors_and_timeout(self):
-        client = MbidEnricherClient(base_url="https://api.brainzmash.org")
+        client = MbidEnricherClient(base_url="https://api.brainzmash.cc")
 
         # 404
         r404 = MagicMock(status_code=404)
@@ -220,7 +220,7 @@ class TestMbidEnricher:
             assert client.lookup_track_mbids("Artist", "Album", "Title") is None
 
     def test_lookup_artist_and_album_mbids(self):
-        client = MbidEnricherClient(base_url="https://api.brainzmash.org")
+        client = MbidEnricherClient(base_url="https://api.brainzmash.cc")
 
         art_resp = MagicMock(status_code=200)
         art_resp.json.return_value = {"artists": [{"id": "art-found", "name": "Radiohead"}]}
@@ -248,7 +248,7 @@ class TestMbidEnricher:
         assert client.get_cover_art_url() is None
 
     def test_get_artist_discography(self):
-        client = MbidEnricherClient(base_url="https://api.brainzmash.org")
+        client = MbidEnricherClient(base_url="https://api.brainzmash.cc")
         mock_resp = MagicMock(status_code=200)
         mock_resp.json.return_value = {
             "release-groups": [
@@ -314,7 +314,7 @@ class TestMbidEnricher:
         assert years_by_id["rg-comp"] == 2008
 
     def test_get_artist_details(self):
-        client = MbidEnricherClient(base_url="https://api.brainzmash.org")
+        client = MbidEnricherClient(base_url="https://api.brainzmash.cc")
         mock_resp = MagicMock(status_code=200)
         mock_resp.json.return_value = {
             "id": "art-radiohead",

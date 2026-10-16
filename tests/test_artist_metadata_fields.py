@@ -91,7 +91,7 @@ def test_pre_baseline_db_is_refused(tmp_path: Path) -> None:
 def test_get_artist_details_parses_group_members_and_life_span(test_db: Database) -> None:
     """get_artist_details parses group members count, life span years, and includes artist-rels in inc."""
     store = MbMetadataStore(test_db)
-    client = MbidEnricherClient(base_url="https://api.brainzmash.org", store=store)
+    client = MbidEnricherClient(base_url="https://api.brainzmash.cc", store=store)
 
     resp_data = {
         "id": "a1",
@@ -150,7 +150,7 @@ def test_get_artist_details_parses_group_members_and_life_span(test_db: Database
 def test_get_artist_details_person_is_solo(test_db: Database) -> None:
     """get_artist_details with type Person returns member_count == 1 and artist_type == person."""
     store = MbMetadataStore(test_db)
-    client = MbidEnricherClient(base_url="https://api.brainzmash.org", store=store)
+    client = MbidEnricherClient(base_url="https://api.brainzmash.cc", store=store)
 
     resp_data = {
         "id": "p1",
@@ -174,7 +174,7 @@ def test_get_artist_details_person_is_solo(test_db: Database) -> None:
 def test_get_artist_details_unknown_type_and_bad_dates(test_db: Database) -> None:
     """get_artist_details handles missing type and unparseable life-span dates gracefully."""
     store = MbMetadataStore(test_db)
-    client = MbidEnricherClient(base_url="https://api.brainzmash.org", store=store)
+    client = MbidEnricherClient(base_url="https://api.brainzmash.cc", store=store)
 
     resp_data = {
         "id": "u1",

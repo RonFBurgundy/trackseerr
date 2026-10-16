@@ -722,3 +722,30 @@ def test_migration_v86_va_naming_settings(tmp_path: Path) -> None:
         db_upgrade.close()
 
 
+def test_v87_moves_old_brainzmash_host(tmp_path: Path) -> None:
+    db = Database(tmp_path / "v87.sqlite")
+    try:
+        # Verify fresh DB default
+        assert db.get_media_management_settings()["mb_mirror_url"] == "https://api.brainzmash.cc"
+
+        # Set to legacy .org host and run migration
+        db.conn.execute("UPDATE media_management_settings SET mb_mirror_url = 'https://api.brainzmash.org' WHERE id = 1")
+        db.conn.commit()
+        with db._lock:
+            cur = db.conn.cursor()
+            db._migration_v87(cur)
+            db.conn.commit()
+        assert db.get_media_management_settings()["mb_mirror_url"] == "https://api.brainzmash.cc"
+
+        # Custom mirror must be left untouched
+        db.conn.execute("UPDATE media_management_settings SET mb_mirror_url = 'https://mb.example.net' WHERE id = 1")
+        db.conn.commit()
+        with db._lock:
+            cur = db.conn.cursor()
+            db._migration_v87(cur)
+            db.conn.commit()
+        assert db.get_media_management_settings()["mb_mirror_url"] == "https://mb.example.net"
+    finally:
+        db.close()
+
+

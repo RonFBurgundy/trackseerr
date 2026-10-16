@@ -11,6 +11,7 @@ import logging
 import os
 import secrets
 import sqlite3
+import urllib.parse
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional, Union
@@ -33,6 +34,18 @@ from trackseerr.track_credits import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_mb_mirror_url(raw_url: str) -> str:
+    """Normalize BrainzMash mirror URL, redirecting legacy api.brainzmash.org to .cc."""
+    val = str(raw_url).strip()
+    try:
+        parsed = urllib.parse.urlparse(val)
+        if parsed.hostname == "api.brainzmash.org":
+            return "https://api.brainzmash.cc"
+    except Exception:
+        pass
+    return val
 
 
 class SettingsStoreMixin:
@@ -245,6 +258,9 @@ class SettingsStoreMixin:
                 elif k == "import_bitrate_check":
                     if v is not None:
                         updates[k] = normalize_check_mode(v)
+                elif k == "mb_mirror_url":
+                    if v is not None:
+                        updates[k] = _normalize_mb_mirror_url(v)
                 elif v is not None:
                     updates[k] = str(v)
 

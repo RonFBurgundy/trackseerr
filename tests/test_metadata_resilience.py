@@ -76,7 +76,7 @@ def test_json_decode_failure_logged(test_db: Database, caplog: pytest.LogCapture
 def test_breaker_opens_after_threshold_and_skips_mirror(test_db: Database) -> None:
     """Five consecutive upstream failures trip the circuit breaker; subsequent requests skip the mirror."""
     store = MbMetadataStore(test_db)
-    client = MbidEnricherClient(base_url="https://api.brainzmash.org", min_interval=0.0, store=store)
+    client = MbidEnricherClient(base_url="https://api.brainzmash.cc", min_interval=0.0, store=store)
 
     err_resp = MagicMock(status_code=500)
     err_resp.headers = {}
@@ -84,46 +84,46 @@ def test_breaker_opens_after_threshold_and_skips_mirror(test_db: Database) -> No
     ok_resp.json.return_value = {"artists": [{"id": "mbid-123"}]}
 
     def mock_get(url: str, *args: Any, **kwargs: Any) -> MagicMock:
-        if "api.brainzmash.org" in url:
+        if "api.brainzmash.cc" in url:
             return err_resp
         return ok_resp
 
     # Trigger 5 failures on mirror (fallback to musicbrainz.org succeeds)
     with patch.object(client._session, "get", side_effect=mock_get):
         for _ in range(5):
-            client._request("https://api.brainzmash.org/ws/2/artist?query=test")
+            client._request("https://api.brainzmash.cc/ws/2/artist?query=test")
 
     stats = client.stats()
-    assert stats["breaker_state"]["api.brainzmash.org"] == "open"
+    assert stats["breaker_state"]["api.brainzmash.cc"] == "open"
     assert stats["breaker_state"]["musicbrainz.org"] == "closed"
-    assert not client.source_available("api.brainzmash.org")
+    assert not client.source_available("api.brainzmash.cc")
     assert client.source_available("musicbrainz.org")
 
     # The 6th request should skip mirror and route directly to musicbrainz.org
     with patch.object(client._session, "get", return_value=ok_resp) as mock_network:
-        resp = client._request("https://api.brainzmash.org/ws/2/artist?query=test")
+        resp = client._request("https://api.brainzmash.cc/ws/2/artist?query=test")
         assert resp is not None
         assert resp.status_code == 200
-        # Verify the call was made to musicbrainz.org, not api.brainzmash.org
+        # Verify the call was made to musicbrainz.org, not api.brainzmash.cc
         assert mock_network.call_count == 1
         called_url = mock_network.call_args[0][0]
         assert "musicbrainz.org" in called_url
-        assert "api.brainzmash.org" not in called_url
+        assert "api.brainzmash.cc" not in called_url
 
 
 def test_breaker_both_open_no_network(test_db: Database) -> None:
     """When both mirror and fallback circuit breakers are open, requests fail immediately without network calls."""
     store = MbMetadataStore(test_db)
-    client = MbidEnricherClient(base_url="https://api.brainzmash.org", min_interval=0.0, store=store)
+    client = MbidEnricherClient(base_url="https://api.brainzmash.cc", min_interval=0.0, store=store)
 
     # Force trip both breakers
-    client._breakers["api.brainzmash.org"]._state = "open"
-    client._breakers["api.brainzmash.org"]._last_failure_time = time.monotonic()
+    client._breakers["api.brainzmash.cc"]._state = "open"
+    client._breakers["api.brainzmash.cc"]._last_failure_time = time.monotonic()
     client._breakers["musicbrainz.org"]._state = "open"
     client._breakers["musicbrainz.org"]._last_failure_time = time.monotonic()
 
     with patch.object(client._session, "get") as mock_get:
-        resp = client._request("https://api.brainzmash.org/ws/2/artist?query=test")
+        resp = client._request("https://api.brainzmash.cc/ws/2/artist?query=test")
         assert resp is None
         assert mock_get.call_count == 0
 
@@ -131,9 +131,9 @@ def test_breaker_both_open_no_network(test_db: Database) -> None:
 def test_breaker_half_open_recovers(test_db: Database) -> None:
     """After cooldown, circuit breaker enters half-open and closes upon a successful request."""
     store = MbMetadataStore(test_db)
-    client = MbidEnricherClient(base_url="https://api.brainzmash.org", min_interval=0.0, store=store)
+    client = MbidEnricherClient(base_url="https://api.brainzmash.cc", min_interval=0.0, store=store)
 
-    breaker = client._breakers["api.brainzmash.org"]
+    breaker = client._breakers["api.brainzmash.cc"]
     breaker._state = "open"
     # Set _last_failure_time to 305 seconds ago (cooldown is 300s)
     breaker._last_failure_time = time.monotonic() - 305.0
@@ -142,7 +142,7 @@ def test_breaker_half_open_recovers(test_db: Database) -> None:
 
     ok_resp = MagicMock(status_code=200)
     with patch.object(client._session, "get", return_value=ok_resp):
-        resp = client._request("https://api.brainzmash.org/ws/2/artist?query=test")
+        resp = client._request("https://api.brainzmash.cc/ws/2/artist?query=test")
         assert resp is not None
         assert resp.status_code == 200
 
@@ -153,16 +153,16 @@ def test_breaker_half_open_recovers(test_db: Database) -> None:
 def test_404_does_not_trip_breaker(test_db: Database) -> None:
     """HTTP 404 responses represent legitimate missing resources and do not count toward breaker failure threshold."""
     store = MbMetadataStore(test_db)
-    client = MbidEnricherClient(base_url="https://api.brainzmash.org", min_interval=0.0, store=store)
+    client = MbidEnricherClient(base_url="https://api.brainzmash.cc", min_interval=0.0, store=store)
 
     not_found_resp = MagicMock(status_code=404)
     not_found_resp.headers = {}
 
     with patch.object(client._session, "get", return_value=not_found_resp):
         for _ in range(10):
-            client._request("https://api.brainzmash.org/ws/2/artist/nonexistent")
+            client._request("https://api.brainzmash.cc/ws/2/artist/nonexistent")
 
-    breaker = client._breakers["api.brainzmash.org"]
+    breaker = client._breakers["api.brainzmash.cc"]
     assert breaker.state == "closed"
     assert breaker._consecutive_failures == 0
 

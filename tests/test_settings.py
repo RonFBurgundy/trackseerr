@@ -275,6 +275,19 @@ class TestMediaManagementAPI:
         assert get_data["featured_artists"] == "in_artist"
         assert get_data["compilation_artist_folder"] == "Compilations"
 
+    def test_put_mb_mirror_url_org_stores_cc(self, app_and_client, test_db, test_config, seeded_users):
+        _, client = app_and_client
+        admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+        resp = client.put(
+            "/api/settings/media-management",
+            json={"mb_mirror_url": "https://api.brainzmash.org"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["mb_mirror_url"] == "https://api.brainzmash.cc"
+        assert test_db.get_media_management_settings()["mb_mirror_url"] == "https://api.brainzmash.cc"
+
     def test_put_invalid_remix_credit_returns_4xx(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client
         admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
