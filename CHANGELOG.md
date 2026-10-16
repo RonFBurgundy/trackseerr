@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- Add YouTube Music playlists by pasting their link, just like Spotify and Deezer — no account or API key needed. The playlist must be Public or Unlisted; private playlists and Liked Music are rejected with a message saying so. Playlists up to 10,000 tracks are read, and music-video titles like "Artist - Song (Official Video)" are cleaned up before matching.
 - Compilation files are named after each track's own artist: `Various Artists/Saturday Night Fever (1977)/03 - Yvonne Elliman - If I Can't Have You.flac`. Media Management adds the compilation artist folder name, who a remix is credited to (original artist, remixer, or as MusicBrainz credits it) and where featured artists go; every naming preset sets them, and a new "beets / Picard" preset files compilations under Compilations.
 - The Requests page and the Activity Blocklist, Searches and Queue tabs have the fast-scroll rail used in the Library. Date rails for events (requests, history, blocklist, searches, date added) read Today, Yesterday, the last few weekdays, then months and years, in your own timezone; release-date rails group by year, month or day depending on the spread, Blocklist sorted by artist jumps by letter, and lists with nothing to group by (the Queue) are labelled by position.
 - "Library Retag" and "MusicBrainz Release Match" show how far along they are on the Tasks page.
@@ -101,6 +102,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Adding a playlist that fails (bad link, unreadable playlist) now shows an error message instead of doing nothing.
 - Installs still set to the old BrainzMash address (api.brainzmash.org) move to api.brainzmash.cc automatically, and entering the old address saves the new one.
 - Retag and import wrote the album artist into every track's ARTIST tag, so compilation tracks were tagged "Various Artists" and featured credits were lost. ARTIST now holds the track's credited artist and ALBUMARTIST the album artist; run a retag to repair files already tagged.
 - History and Missing (sorted by date added) showed no fast-scroll rail when all their dates fell in the same month.
