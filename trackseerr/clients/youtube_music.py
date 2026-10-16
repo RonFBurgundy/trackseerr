@@ -3,15 +3,21 @@
 import logging
 import re
 import threading
-from typing import Any, List, Optional
+import time
+from typing import Any
 
 import requests
 import ytmusicapi
-from ytmusicapi.exceptions import YTMusicError
+from ytmusicapi.exceptions import YTMusicError, YTMusicServerError
 
 from ..models import Playlist, Track
 
 logger = logging.getLogger(__name__)
+
+MAX_PLAYLIST_TRACKS = 10_000
+_RETRYABLE_STATUS_CODES = ("429", "502", "503", "504")
+
+_sleep = time.sleep
 
 _HANDLED_ERRORS = (
     YTMusicError,
@@ -63,9 +69,8 @@ def clean_video_title(title: str, artist: str) -> tuple[str, str]:
         left, right = cleaned_title.split(" - ", 1)
         left = left.strip()
         right = right.strip()
-        if left and right:
-            if left.casefold() == artist.strip().casefold() or _is_channel_like(artist):
-                return left, right
+        if left and right and (left.casefold() == artist.strip().casefold() or _is_channel_like(artist)):
+            return left, right
     return artist, cleaned_title
 
 
@@ -90,7 +95,7 @@ def _largest_thumbnail_url(thumbnails: list[dict[str, Any]]) -> str:
     return ""
 
 
-def _to_track(item: dict[str, Any]) -> Optional[Track]:
+def _to_track(item: dict[str, Any]) -> Track | None:
     """Map a raw ytmusicapi playlist track item to a Track model."""
     if not isinstance(item, dict):
         return None
@@ -125,7 +130,7 @@ def _to_track(item: dict[str, Any]) -> Optional[Track]:
         final_title = raw_title
 
     raw_duration = item.get("duration_seconds")
-    duration: Optional[float] = None
+    duration: float | None = None
     if isinstance(raw_duration, (int, float)):
         duration = float(raw_duration)
     elif isinstance(raw_duration, str):
@@ -147,8 +152,11 @@ def _to_track(item: dict[str, Any]) -> Optional[Track]:
 class YouTubeMusicClient:
     """Manages interactions with YouTube Music using unauthenticated ytmusicapi."""
 
-    def __init__(self) -> None:
-        self._ytmusic: Optional[ytmusicapi.YTMusic] = None
+    def __init__(self, cache_ttl_seconds: float = 300.0) -> None:
+        self.cache_ttl_seconds = cache_ttl_seconds
+        self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._cache_lock = threading.Lock()
+        self._ytmusic: ytmusicapi.YTMusic | None = None
         self._lock = threading.Lock()
 
     @property
@@ -161,10 +169,101 @@ class YouTubeMusicClient:
                     logger.info("Initialized unauthenticated YTMusic client")
         return self._ytmusic
 
-    def get_playlist_by_id(self, playlist_id: str, suffix: str = "") -> Optional[Playlist]:
+    def _load_playlist(self, playlist_id: str) -> dict[str, Any] | None:
+        """Load and cache raw playlist payload with retry/backoff on transient server errors."""
+        now = time.monotonic()
+        with self._cache_lock:
+            entry = self._cache.get(playlist_id)
+            if entry is not None:
+                cached_time, cached_payload = entry
+                if now - cached_time < self.cache_ttl_seconds:
+                    return cached_payload
+                del self._cache[playlist_id]
+
+        attempts = 0
+        max_attempts = 3
+        backoff_delays = (1, 2)
+
+        while attempts < max_attempts:
+            attempts += 1
+            try:
+                data = self.ytmusic.get_playlist(playlist_id, limit=MAX_PLAYLIST_TRACKS)
+                if not isinstance(data, dict):
+                    return None
+
+                track_count_raw = data.get("trackCount")
+                if track_count_raw is not None:
+                    try:
+                        track_count = int(track_count_raw)
+                        if track_count > MAX_PLAYLIST_TRACKS:
+                            logger.warning(
+                                "YouTube Music playlist '%s' track count (%d) exceeds cap (%d); limited to first %d tracks",
+                                playlist_id,
+                                track_count,
+                                MAX_PLAYLIST_TRACKS,
+                                MAX_PLAYLIST_TRACKS,
+                            )
+                    except (ValueError, TypeError):
+                        pass
+
+                with self._cache_lock:
+                    self._cache[playlist_id] = (time.monotonic(), data)
+                return data
+            except (requests.ConnectionError, requests.Timeout) as e:
+                if attempts < max_attempts:
+                    delay = backoff_delays[attempts - 1]
+                    logger.warning(
+                        "Transient network error fetching YouTube Music playlist '%s' (attempt %d/%d): %s. Retrying in %ds...",
+                        playlist_id,
+                        attempts,
+                        max_attempts,
+                        e,
+                        delay,
+                    )
+                    _sleep(delay)
+                else:
+                    logger.warning(
+                        "Failed fetching YouTube Music playlist '%s' after %d attempts: %s",
+                        playlist_id,
+                        max_attempts,
+                        e,
+                    )
+                    return None
+            except YTMusicServerError as e:
+                err_msg = str(e)
+                if any(code in err_msg for code in _RETRYABLE_STATUS_CODES):
+                    if attempts < max_attempts:
+                        delay = backoff_delays[attempts - 1]
+                        logger.warning(
+                            "Server error fetching YouTube Music playlist '%s' (attempt %d/%d): %s. Retrying in %ds...",
+                            playlist_id,
+                            attempts,
+                            max_attempts,
+                            e,
+                            delay,
+                        )
+                        _sleep(delay)
+                    else:
+                        logger.warning(
+                            "Failed fetching YouTube Music playlist '%s' after %d attempts: %s",
+                            playlist_id,
+                            max_attempts,
+                            e,
+                        )
+                        return None
+                else:
+                    logger.warning("Non-retryable YTMusicServerError fetching playlist '%s': %s", playlist_id, e)
+                    return None
+            except _HANDLED_ERRORS as e:
+                logger.warning("Failed fetching YouTube Music playlist '%s': %s", playlist_id, e)
+                return None
+
+        return None
+
+    def get_playlist_by_id(self, playlist_id: str, suffix: str = "") -> Playlist | None:
         """Fetch metadata for a single YouTube Music playlist by ID."""
         try:
-            data = self.ytmusic.get_playlist(playlist_id)
+            data = self._load_playlist(playlist_id)
             if not isinstance(data, dict):
                 return None
             title = data.get("title")
@@ -183,11 +282,11 @@ class YouTubeMusicClient:
             logger.error("Failed to fetch YouTube Music playlist with ID '%s': %s", playlist_id, e)
             return None
 
-    def get_playlist_tracks(self, playlist_id: str) -> List[Track]:
+    def get_playlist_tracks(self, playlist_id: str) -> list[Track]:
         """Fetch all tracks for a YouTube Music playlist."""
-        tracks: List[Track] = []
+        tracks: list[Track] = []
         try:
-            data = self.ytmusic.get_playlist(playlist_id, limit=None)
+            data = self._load_playlist(playlist_id)
             if not isinstance(data, dict):
                 return []
             raw_tracks = data.get("tracks") or []
@@ -203,7 +302,7 @@ class YouTubeMusicClient:
 
 
 _client_lock = threading.Lock()
-_shared_client: Optional[YouTubeMusicClient] = None
+_shared_client: YouTubeMusicClient | None = None
 
 
 def get_shared_youtube_music_client() -> YouTubeMusicClient:
