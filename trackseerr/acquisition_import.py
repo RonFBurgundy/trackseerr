@@ -48,6 +48,7 @@ from trackseerr.models import (
 )
 from trackseerr.naming import build_track_path
 from trackseerr.artist_folders import resolve_artist_folder
+from trackseerr.track_credits import naming_credits
 from trackseerr.notifications import notification_dispatcher
 from trackseerr.redaction import safe_exc
 from trackseerr.quality import evaluate_release, parse_release_title
@@ -660,6 +661,9 @@ class ImportPipelineMixin(ImportCatalogMixin):
         if not metadata.get("title"):
             metadata["title"] = job.item.get("title") or af.stem
 
+        tag_artist = metadata.get("artist")
+        tag_mbid = metadata.get("musicbrainz_artistid")
+
         # Reconcile against expected catalog tracks if present
         matched_expected_track = None
         file_weak_strength: Optional[str] = None
@@ -714,6 +718,13 @@ class ImportPipelineMixin(ImportCatalogMixin):
             if existing_f:
                 metadata["artist_folder"] = existing_f
 
+        metadata["track_credits"] = naming_credits(
+            db,
+            matched_expected_track.get("id") if matched_expected_track else None,
+            str(metadata.get("title") or ""),
+            tag_artist,
+            tag_mbid,
+        )
         job.last_metadata = metadata
 
         target_str = build_track_path(metadata, ctx.media_settings)
