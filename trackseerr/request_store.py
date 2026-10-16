@@ -195,7 +195,7 @@ class RequestStoreMixin:
         where_sql, params = self._build_requests_where(user_id=user_id, status=status, source=source)
         frm = f"FROM music_requests r WHERE {where_sql}"
         with self._lock:
-            return build_index(self.conn, frm, params, SortDef("r.created_at", "date"), sort_dir)
+            return build_index(self.conn, frm, params, SortDef("r.created_at", "event"), sort_dir)
 
     def count_request_sources(
         self, user_id: str | None = None

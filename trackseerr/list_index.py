@@ -11,18 +11,41 @@ Two pieces that have to agree exactly:
 
 from __future__ import annotations
 
+import logging
 import re
 import sqlite3
 import unicodedata
+from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional, Sequence
+
+logger = logging.getLogger(__name__)
 
 NULL_LABEL = "—"  # em dash: the group for rows with no value
 QUANTILE_BUCKETS = 10
 MONTH_SPAN_LIMIT = 24  # month buckets when the dates span this many months or fewer
 DAY_SPAN_LIMIT = 62  # day buckets when the dates span fewer than this many days
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+client_utc_offset: ContextVar[int] = ContextVar("client_utc_offset", default=0)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def parse_utc_offset(raw: Optional[str]) -> int:
+    if raw is None:
+        return 0
+    try:
+        val = int(raw)
+    except ValueError:
+        logger.debug("Failed to parse tz_offset %r, falling back to 0", raw)
+        return 0
+    return max(-840, min(840, val))
+
 
 _ARTICLE_RE = re.compile(r"^(?:THE|AN|A)\s+")
 # Letters NFKD does not decompose; folded so "Ørsted" files under O and "Æon" under A.
@@ -76,8 +99,9 @@ def escape_like(text: str) -> str:
 class SortDef:
     """One whitelisted sort: the SQL expression ordered by, and how its values are grouped.
 
-    ``kind``: ``name`` (the expression is a persisted sort key), ``date`` (text starting ``YYYY[-MM]``), ``size``
-    (bytes) or ``count`` (an integer; ``unit`` is the plural noun used in labels).
+    ``kind``: ``name`` (the expression is a persisted sort key), ``date`` (text starting ``YYYY[-MM]``), ``event``
+    (event timestamps grouped by recency tiers), ``size`` (bytes) or ``count`` (an integer; ``unit`` is the plural noun
+    used in labels).
     """
 
     expr: str
@@ -144,11 +168,7 @@ def _parse_day(value: Any) -> Optional[date]:
 
 
 def _date_label(key: str) -> str:
-    """``2026-03`` -> ``Mar 2026``, ``2026-10-15`` -> ``15 Oct``, ``2026-10-15 14`` -> ``14:00``; year as-is."""
-    if len(key) == 13 and key[10] in (" ", "T") and key[11:13].isdigit():
-        d = _parse_day(key[:10])
-        if d is not None:
-            return f"{key[11:13]}:00"
+    """``2026-03`` -> ``Mar 2026``, ``2026-10-15`` -> ``15 Oct``; year as-is."""
     if len(key) == 10:
         d = _parse_day(key)
         if d is not None:
@@ -158,6 +178,19 @@ def _date_label(key: str) -> str:
         if 1 <= month <= 12:
             return f"{_MONTHS[month - 1]} {key[:4]}"
     return key
+
+
+def _event_label(day: date, today: date) -> str:
+    diff = (today - day).days
+    if diff <= 0:
+        return "Today"
+    if diff == 1:
+        return "Yesterday"
+    if 2 <= diff <= 6:
+        return f"{_WEEKDAYS[day.weekday()]} {day.day}"
+    if day.year == today.year:
+        return _MONTHS[day.month - 1]
+    return str(day.year)
 
 
 # --------------------------------------------------------------------------------------------- group builders
@@ -198,9 +231,7 @@ def _date_width(bounds: Optional[tuple[Any, Any]]) -> int:
     day_span = (d_high - d_low).days
     if day_span >= DAY_SPAN_LIMIT:
         return 7
-    if day_span >= 2:
-        return 10
-    return 13
+    return 10
 
 
 def _date_groups(conn: sqlite3.Connection, frm: str, params: Sequence[Any], expr: str) -> list[tuple[str, int]]:
@@ -215,6 +246,25 @@ def _date_groups(conn: sqlite3.Connection, frm: str, params: Sequence[Any], expr
     groups: list[tuple[str, int]] = []
     for key, count in rows:
         label = NULL_LABEL if key is None else _date_label(str(key))
+        if groups and groups[-1][0] == label:
+            groups[-1] = (label, groups[-1][1] + int(count))
+        else:
+            groups.append((label, int(count)))
+    return groups
+
+
+def _event_groups(
+    conn: sqlite3.Connection, frm: str, params: Sequence[Any], expr: str
+) -> list[tuple[str, int]]:
+    offset = client_utc_offset.get()
+    rows = conn.execute(
+        f"SELECT date(NULLIF({expr}, ''), '{offset:+d} minutes') AS k, COUNT(*) AS c {frm} GROUP BY k ORDER BY k",
+        list(params),
+    ).fetchall()
+    today = (_utcnow() + timedelta(minutes=offset)).date()
+    groups: list[tuple[str, int]] = []
+    for key, count in rows:
+        label = NULL_LABEL if key is None else _event_label(date.fromisoformat(str(key)), today)
         if groups and groups[-1][0] == label:
             groups[-1] = (label, groups[-1][1] + int(count))
         else:
@@ -270,6 +320,8 @@ def build_index(
         asc = _name_groups(conn, frm, params, sort.expr)
     elif sort.kind == "date":
         asc = _date_groups(conn, frm, params, sort.expr)
+    elif sort.kind == "event":
+        asc = _event_groups(conn, frm, params, sort.expr)
     else:
         asc = _number_groups(conn, frm, params, sort)
     ordered = list(reversed(asc)) if str(sort_dir).lower() == "desc" else asc

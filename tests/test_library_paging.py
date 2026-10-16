@@ -8,6 +8,7 @@ and the item at ``offset - 1`` does not.
 import re
 import sqlite3
 import time
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -21,11 +22,15 @@ from trackseerr.config import Config
 from trackseerr.list_index import (
     NULL_LABEL,
     SortDef,
+    _event_label,
+    _utcnow,
     build_index,
+    client_utc_offset,
     format_size,
     group_label_for_key,
     group_label_for_name,
     library_sort_key,
+    parse_utc_offset,
 )
 from trackseerr.storage import Database
 
@@ -201,6 +206,25 @@ def _assert_index(api, headers, base, params, value_of, kind, records_key: str =
     if kind == "date":
         mode = _date_mode(groups)
         label_of = lambda rec: _date_label(value_of(rec), mode)  # noqa: E731
+    elif kind == "event":
+        offset = parse_utc_offset(str(params["tz_offset"])) if "tz_offset" in params else client_utc_offset.get()
+        today = (_utcnow() + timedelta(minutes=offset)).date()
+
+        def _ev_lbl(rec):
+            val = value_of(rec)
+            if not val:
+                return NULL_LABEL
+            s = str(val).strip()
+            if s.endswith("Z"):
+                dt = datetime.fromisoformat(s[:-1] + "+00:00")
+            elif len(s) > 19 and ("+" in s[19:] or "-" in s[19:]):
+                dt = datetime.fromisoformat(s)
+            else:
+                dt = datetime.fromisoformat(s.replace("Z", "")).replace(tzinfo=timezone.utc)
+            local_dt = dt + timedelta(minutes=offset)
+            return _event_label(local_dt.date(), today)
+
+        label_of = _ev_lbl
     elif kind == "name":
         label_of = lambda rec: group_label_for_name(value_of(rec))  # noqa: E731
     else:
@@ -472,9 +496,10 @@ class TestIndexProperty:
 
     @pytest.mark.parametrize("sort_dir", ["asc", "desc"])
     @pytest.mark.parametrize("kind", ["artists", "albums", "tracks"])
-    def test_added_at(self, api, admin_h, seeded, kind, sort_dir):
+    def test_added_at(self, api, admin_h, seeded, kind, sort_dir, monkeypatch):
+        monkeypatch.setattr("trackseerr.list_index._utcnow", lambda: datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc))
         _assert_index(api, admin_h, f"/api/library/{kind}/paged", {"sort_key": "added_at", "sort_dir": sort_dir},
-                      lambda r: r["created_at"], "date")
+                      lambda r: r["created_at"], "event")
 
     @pytest.mark.parametrize("sort_dir", ["asc", "desc"])
     def test_artist_album_count_quantiles(self, api, admin_h, seeded, sort_dir):
@@ -583,17 +608,17 @@ class TestWantedIndex:
             ("album", "name", lambda r: r["album"]),
             ("title", "name", lambda r: r["title"]),
             ("release_date", "date", lambda r: r["release_date"]),
-            ("last_searched_at", "date", lambda r: r["last_searched_at"]),
+            ("last_searched_at", "event", lambda r: r["last_searched_at"]),
         ],
     )
-    def test_offsets_match_paged_list(self, api, test_db, admin_h, kind, sort_dir, key, kind_of, value_of):
+    def test_offsets_match_paged_list(self, api, test_db, admin_h, kind, sort_dir, key, kind_of, value_of, monkeypatch):
+        monkeypatch.setattr("trackseerr.list_index._utcnow", lambda: datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc))
         _seed_wanted(test_db)
         total = _get(api, admin_h, f"/api/wanted/{kind}", page_size=1)["total"]
         assert total > 0
-        if kind_of == "date":
-            # last_searched_at is rendered as ISO-8601 with a 'T'; the bucket is the date prefix either way
+        if kind_of in ("date", "event"):
             groups = _assert_index(api, admin_h, f"/api/wanted/{kind}",
-                                   {"sort_key": key, "sort_dir": sort_dir}, value_of, "date")
+                                   {"sort_key": key, "sort_dir": sort_dir}, value_of, kind_of)
             assert sum(g["count"] for g in groups) == total
         else:
             _assert_index(api, admin_h, f"/api/wanted/{kind}", {"sort_key": key, "sort_dir": sort_dir},
@@ -625,12 +650,13 @@ def _seed_history(db, n=40):
 class TestHistoryIndex:
     @pytest.mark.parametrize("sort_dir", ["asc", "desc"])
     @pytest.mark.parametrize("event", [None, "grabbed"])
-    def test_offsets_match_paged_list(self, api, test_db, admin_h, sort_dir, event):
+    def test_offsets_match_paged_list(self, api, test_db, admin_h, sort_dir, event, monkeypatch):
+        monkeypatch.setattr("trackseerr.list_index._utcnow", lambda: datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc))
         _seed_history(test_db)
         groups = _assert_index(api, admin_h, "/api/activity/history",
                                {"sort_dir": sort_dir, **({"event": event} if event else {})},
-                               lambda r: r["date"] and r["date"].replace("T", " "), "date")
-        assert all(re.fullmatch(r"[A-Z][a-z]{2} 2026", g["label"]) for g in groups)
+                               lambda r: r["date"] and r["date"].replace("T", " "), "event")
+        assert all(re.fullmatch(r"[A-Z][a-z]{2}", g["label"]) for g in groups)
 
     def test_defaults_and_validation(self, api, admin_h):
         body = _get(api, admin_h, "/api/activity/history/index")
@@ -640,45 +666,24 @@ class TestHistoryIndex:
 
 
 class TestDateGranularity:
-    def test_day_groups_when_span_under_two_months(self, api, test_db, admin_h):
-        for i, day in enumerate([1, 2, 3, 4, 5]):
-            test_db.conn.execute(
-                "INSERT INTO download_history (id, event, created_at) VALUES (?, ?, ?)",
-                (f"h-{i}", "grabbed", f"2026-10-{day:02d} 12:00:00"),
-            )
-        test_db.conn.commit()
-        groups = _assert_index(
-            api,
-            admin_h,
-            "/api/activity/history",
-            {"sort_dir": "asc"},
-            lambda r: r["date"] and r["date"].replace("T", " "),
-            "date",
-        )
+    def test_span_day_groups_when_under_two_months(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE t (d TEXT)")
+        conn.executemany("INSERT INTO t (d) VALUES (?)", [(f"2026-10-{day:02d} 12:00:00",) for day in [1, 2, 3, 4, 5]])
+        total, groups = build_index(conn, "FROM t", [], SortDef("d", "date"), "asc")
+        assert total == 5
         assert len(groups) >= 2
         labels = [g["label"] for g in groups]
         assert "3 Oct" in labels
         assert all(re.fullmatch(r"\d{1,2} [A-Z][a-z]{2}", lbl) for lbl in labels)
 
-    def test_hour_groups_within_one_day(self, api, test_db, admin_h):
-        for i, hour in enumerate(["09", "12", "15"]):
-            test_db.conn.execute(
-                "INSERT INTO download_history (id, event, created_at) VALUES (?, ?, ?)",
-                (f"h-{i}", "grabbed", f"2026-10-03 {hour}:15:00"),
-            )
-        test_db.conn.commit()
-        groups = _assert_index(
-            api,
-            admin_h,
-            "/api/activity/history",
-            {"sort_dir": "asc"},
-            lambda r: r["date"] and r["date"].replace("T", " "),
-            "date",
-        )
-        assert len(groups) == 3
-        labels = [g["label"] for g in groups]
-        assert "09:00" in labels
-        assert all(re.fullmatch(r"\d{2}:00", lbl) for lbl in labels)
+    def test_date_kind_within_one_day_groups_by_day_not_hour(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE t (d TEXT)")
+        conn.executemany("INSERT INTO t (d) VALUES (?)", [(f"2026-10-03 {hour}:15:00",) for hour in ["09", "12", "15"]])
+        total, groups = build_index(conn, "FROM t", [], SortDef("d", "date"), "asc")
+        assert total == 3
+        assert groups == [{"label": "3 Oct", "offset": 0, "count": 3}]
 
     def test_bare_year_values_never_go_finer_than_month(self):
         conn = sqlite3.connect(":memory:")
@@ -690,6 +695,96 @@ class TestDateGranularity:
             {"label": "2001", "offset": 0, "count": 2},
             {"label": "2002", "offset": 2, "count": 1},
         ]
+
+    def test_event_tiers_labels(self, monkeypatch):
+        monkeypatch.setattr("trackseerr.list_index._utcnow", lambda: datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc))
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE t (d TEXT)")
+        rows = [
+            ("2026-10-16 10:00:00",),
+            ("2026-10-15 09:00:00",),
+            ("2026-10-13 08:00:00",),
+            ("2026-10-02 07:00:00",),
+            ("2026-09-20 06:00:00",),
+            ("2025-06-01 05:00:00",),
+            (None,),
+        ]
+        conn.executemany("INSERT INTO t (d) VALUES (?)", rows)
+        total_asc, groups_asc = build_index(conn, "FROM t", [], SortDef("d", "event"), "asc")
+        assert total_asc == 7
+        expected_labels_asc = ["—", "2025", "Sep", "Oct", "Tue 13", "Yesterday", "Today"]
+        assert [g["label"] for g in groups_asc] == expected_labels_asc
+        assert [g["count"] for g in groups_asc] == [1] * 7
+        assert [g["offset"] for g in groups_asc] == list(range(7))
+
+        total_desc, groups_desc = build_index(conn, "FROM t", [], SortDef("d", "event"), "desc")
+        assert total_desc == 7
+        expected_labels_desc = list(reversed(expected_labels_asc))
+        assert [g["label"] for g in groups_desc] == expected_labels_desc
+        assert [g["count"] for g in groups_desc] == [1] * 7
+        assert [g["offset"] for g in groups_desc] == list(range(7))
+
+    def test_event_tiers_timestamp_formats(self, monkeypatch):
+        monkeypatch.setattr("trackseerr.list_index._utcnow", lambda: datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc))
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE t (d TEXT)")
+        rows = [
+            ("2026-10-16 08:30:00",),
+            ("2026-10-16T14:20:00.123456+00:00",),
+            ("2026-10-16T22:00:00Z",),
+        ]
+        conn.executemany("INSERT INTO t (d) VALUES (?)", rows)
+        total, groups = build_index(conn, "FROM t", [], SortDef("d", "event"), "asc")
+        assert total == 3
+        assert groups == [{"label": "Today", "offset": 0, "count": 3}]
+
+    def test_event_tz_offset_shifts_today(self, monkeypatch):
+        monkeypatch.setattr("trackseerr.list_index._utcnow", lambda: datetime(2026, 10, 16, 2, 0, tzinfo=timezone.utc))
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE t (d TEXT)")
+        conn.execute("INSERT INTO t (d) VALUES (?)", ("2026-10-15 23:00:00",))
+
+        tok0 = client_utc_offset.set(0)
+        try:
+            total0, groups0 = build_index(conn, "FROM t", [], SortDef("d", "event"), "asc")
+            assert total0 == 1
+            assert groups0[0]["label"] == "Yesterday"
+        finally:
+            client_utc_offset.reset(tok0)
+
+        tok180 = client_utc_offset.set(180)
+        try:
+            total180, groups180 = build_index(conn, "FROM t", [], SortDef("d", "event"), "asc")
+            assert total180 == 1
+            assert groups180[0]["label"] == "Today"
+        finally:
+            client_utc_offset.reset(tok180)
+
+    def test_parse_utc_offset(self):
+        assert parse_utc_offset("120") == 120
+        assert parse_utc_offset("-300") == -300
+        assert parse_utc_offset("9999") == 840
+        assert parse_utc_offset("-9999") == -840
+        assert parse_utc_offset("abc") == 0
+        assert parse_utc_offset(None) == 0
+
+    def test_history_index_api_uses_tz_offset_query(self, api, test_db, admin_h, monkeypatch):
+        monkeypatch.setattr("trackseerr.list_index._utcnow", lambda: datetime(2026, 10, 16, 2, 0, tzinfo=timezone.utc))
+        test_db.conn.execute(
+            "INSERT INTO download_history (id, event, created_at) VALUES (?, ?, ?)",
+            ("h-tz", "grabbed", "2026-10-15 23:00:00"),
+        )
+        test_db.conn.commit()
+
+        res0 = api.get("/api/activity/history/index?sort_dir=desc&tz_offset=0", headers=admin_h)
+        assert res0.status_code == 200
+        assert res0.json()["groups"][0]["label"] == "Yesterday"
+
+        res = api.get("/api/activity/history/index?sort_dir=desc&tz_offset=180", headers=admin_h)
+        assert res.status_code == 200
+        body = res.json()
+        assert len(body["groups"]) >= 1
+        assert body["groups"][0]["label"] == "Today"
 
 
 def _seed_requests(db, users, n=40):
@@ -711,7 +806,8 @@ def _seed_requests(db, users, n=40):
 
 class TestRequestsIndex:
     @pytest.mark.parametrize("status_filter", [None, "pending"])
-    def test_offsets_match_paged_list(self, api, test_db, admin_h, users, status_filter):
+    def test_offsets_match_paged_list(self, api, test_db, admin_h, users, status_filter, monkeypatch):
+        monkeypatch.setattr("trackseerr.list_index._utcnow", lambda: datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc))
         _seed_requests(test_db, users)
         params = {"sort_dir": "desc"}
         if status_filter:
@@ -722,10 +818,10 @@ class TestRequestsIndex:
             "/api/requests",
             params,
             lambda r: r["created_at"],
-            "date",
+            "event",
             records_key="requests",
         )
-        assert all(re.fullmatch(r"[A-Z][a-z]{2} 2026", g["label"]) for g in groups)
+        assert all(re.fullmatch(r"[A-Z][a-z]{2}", g["label"]) for g in groups)
 
     def test_non_manager_sees_only_own(self, api, test_db, test_config, users):
         _seed_requests(test_db, users)
@@ -757,7 +853,8 @@ def _seed_blocklist(db, n=40):
 
 class TestBlocklistIndex:
     @pytest.mark.parametrize("sort_dir", ["asc", "desc"])
-    def test_offsets_match_paged_list(self, api, test_db, admin_h, sort_dir):
+    def test_offsets_match_paged_list(self, api, test_db, admin_h, sort_dir, monkeypatch):
+        monkeypatch.setattr("trackseerr.list_index._utcnow", lambda: datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc))
         _seed_blocklist(test_db)
         groups = _assert_index(
             api,
@@ -765,9 +862,9 @@ class TestBlocklistIndex:
             "/api/activity/blocklist",
             {"sort_key": "date", "sort_dir": sort_dir},
             lambda r: r["date"] and r["date"].replace("T", " "),
-            "date",
+            "event",
         )
-        assert all(re.fullmatch(r"[A-Z][a-z]{2} 2026", g["label"]) for g in groups)
+        assert all(re.fullmatch(r"[A-Z][a-z]{2}", g["label"]) for g in groups)
 
     @pytest.mark.parametrize("sort_dir", ["asc", "desc"])
     def test_artist_sort_offsets_match(self, api, test_db, admin_h, sort_dir):
@@ -809,7 +906,8 @@ def _seed_searches(db, n=40):
 
 class TestSearchesIndex:
     @pytest.mark.parametrize("source_type", [None, "torznab"])
-    def test_offsets_match_paged_list(self, api, test_db, admin_h, source_type):
+    def test_offsets_match_paged_list(self, api, test_db, admin_h, source_type, monkeypatch):
+        monkeypatch.setattr("trackseerr.list_index._utcnow", lambda: datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc))
         _seed_searches(test_db)
         params = {"sort_dir": "desc"}
         if source_type:
@@ -820,9 +918,9 @@ class TestSearchesIndex:
             "/api/activity/searches",
             params,
             lambda r: r["created_at"],
-            "date",
+            "event",
         )
-        assert all(re.fullmatch(r"[A-Z][a-z]{2} 2026", g["label"]) for g in groups)
+        assert all(re.fullmatch(r"[A-Z][a-z]{2}", g["label"]) for g in groups)
 
 
 

@@ -44,7 +44,7 @@ LIBRARY_LISTS: dict[str, LibraryListSpec] = {
         tiebreak="a.id",
         sorts={
             "name": SortDef("a.sort_name", "name"),
-            "added_at": SortDef("a.created_at", "date"),
+            "added_at": SortDef("a.created_at", "event"),
             "album_count": SortDef(
                 "(SELECT COUNT(*) FROM library_albums x WHERE x.artist_id = a.id)", "count", "albums"
             ),
@@ -66,7 +66,7 @@ LIBRARY_LISTS: dict[str, LibraryListSpec] = {
             "title": SortDef("al.sort_title", "name"),
             "artist": SortDef("COALESCE(ar.sort_name, '')", "name"),
             "release_date": SortDef(_ALBUM_DATE, "date"),
-            "added_at": SortDef("al.created_at", "date"),
+            "added_at": SortDef("al.created_at", "event"),
             "popularity": SortDef("COALESCE(ar.popularity, 0)", "count", "fans"),
         },
         default_sort="title",
@@ -87,7 +87,7 @@ LIBRARY_LISTS: dict[str, LibraryListSpec] = {
             "title": SortDef("t.sort_title", "name"),
             "artist": SortDef("t.artist_sort", "name"),
             "album": SortDef("t.album_sort", "name"),
-            "added_at": SortDef("t.created_at", "date"),
+            "added_at": SortDef("t.created_at", "event"),
             "size_bytes": SortDef("t.max_size_bytes", "size"),
             "year": SortDef("t.album_date", "date"),
             "popularity": SortDef("COALESCE(ar.popularity, 0)", "count", "fans"),

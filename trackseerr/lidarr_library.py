@@ -22,13 +22,22 @@ import time
 from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
 from urllib.parse import parse_qs, urlsplit
 
 from trackseerr.clients.lidarr import _COVER_FILE_RE, LidarrApiError, LidarrClient
 from trackseerr.mediacover import mediacover_service
-from trackseerr.list_index import SortDef, build_index, fold_search_text, library_sort_key, order_clause
+from trackseerr.list_index import (
+    SortDef,
+    _utcnow,
+    build_index,
+    client_utc_offset,
+    fold_search_text,
+    library_sort_key,
+    order_clause,
+)
 from trackseerr.storage import clean_library_name
 
 logger = logging.getLogger(__name__)
@@ -46,20 +55,20 @@ VALIDATOR_CACHE_SIZE = 2048
 
 ARTIST_SORTS: dict[str, SortDef] = {
     "name": SortDef("s_name", "name"),
-    "added_at": SortDef("s_added_at", "date"),
+    "added_at": SortDef("s_added_at", "event"),
     "album_count": SortDef("s_album_count", "count", "albums"),
 }
 ALBUM_SORTS: dict[str, SortDef] = {
     "title": SortDef("s_title", "name"),
     "artist": SortDef("s_artist", "name"),
     "release_date": SortDef("s_release_date", "date"),
-    "added_at": SortDef("s_added_at", "date"),
+    "added_at": SortDef("s_added_at", "event"),
 }
 TRACK_SORTS: dict[str, SortDef] = {
     "title": SortDef("s_title", "name"),
     "artist": SortDef("s_artist", "name"),
     "album": SortDef("s_album", "name"),
-    "added_at": SortDef("s_added_at", "date"),
+    "added_at": SortDef("s_added_at", "event"),
     "size_bytes": SortDef("s_size_bytes", "size"),
 }
 SORTS: dict[str, dict[str, SortDef]] = {"artists": ARTIST_SORTS, "albums": ALBUM_SORTS, "tracks": TRACK_SORTS}
@@ -344,12 +353,17 @@ class Ordered:
         self.sort_dir = sort_dir
         self.rows = rows
         self._index: Optional[tuple[int, list[dict[str, Any]]]] = None
+        self._index_key: Optional[tuple[int, date]] = None
         self._lock = threading.Lock()
 
     def index(self) -> tuple[int, list[dict[str, Any]]]:
+        offset = client_utc_offset.get()
+        today = (_utcnow() + timedelta(minutes=offset)).date()
+        key = (offset, today)
         with self._lock:
-            if self._index is None:
+            if self._index is None or self._index_key != key:
                 self._index = index_rows(self.kind, self.rows, self.sort_key, self.sort_dir)
+                self._index_key = key
             return self._index
 
 
