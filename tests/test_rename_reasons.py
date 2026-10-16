@@ -31,6 +31,8 @@ CASES = [
      "LMFAO/Now 79 (2011)/01 - Song.flac", ["artist_folder", "compilation_link"], False),
     ("compilation_link_to_va", "Toots & The Maytals/Funky Kingston (1973)/01 - Song.flac",
      "Various Artists/Funky Kingston (1973)/01 - Song.flac", ["artist_folder", "compilation_link"], False),
+    ("name_too_long", "Artist/Album (2000)/01 - " + "a" * 220 + ".flac",
+     "Artist/Album (2000)/01 - " + "a" * 220 + ".flac", ["name_too_long"], True),
 ]
 
 

@@ -458,6 +458,64 @@ def _mismatch_block(db: Database, fid: str, track: dict[str, Any], current_path_
     )
 
 
+def rename_library_file(
+    db: Any,
+    f: dict[str, Any],
+    track: dict[str, Any],
+    media_settings: dict[str, Any],
+    root_dir: Path | str,
+) -> Optional[Path]:
+    """Applies standard template rename to a library file row.
+
+    Returns the new Path, or None if already in place.
+    Raises ValueError if album or artist is missing.
+    """
+    album = db.get_library_album(track["album_id"])
+    artist = db.get_library_artist(track["artist_id"])
+    if not album or not artist:
+        raise ValueError(f"Album or artist not found for track '{track['id']}'")
+
+    current_path = Path(f["file_path"])
+    meta = _rename_meta(db, track, album, artist, f, str(current_path), {}, media_settings)
+    proposed = build_track_path(meta, media_settings)
+    validate_media_path(proposed, db=db)
+
+    if current_path.resolve() == Path(proposed).resolve():
+        return None  # Already matches target format
+
+    target_path = resolve_collision(proposed)
+    old_parent = current_path.parent
+    new_path = safe_atomic_move(current_path, target_path)
+
+    root_dir_path = Path(root_dir)
+    try:
+        rel_path = str(new_path.relative_to(root_dir_path))
+    except ValueError:
+        rel_path = new_path.name
+
+    db.upsert_library_file({
+        "id": f["id"],
+        "track_id": f["track_id"],
+        "file_path": str(new_path),
+        "relative_path": rel_path,
+        "codec": f.get("codec"),
+        "bitrate": f.get("bitrate"),
+        "sample_rate": f.get("sample_rate"),
+        "bits_per_sample": f.get("bits_per_sample"),
+        "quality_name": f.get("quality_name"),
+        "size_bytes": new_path.stat().st_size if new_path.exists() else f.get("size_bytes", 0),
+        "cutoff_met": f.get("cutoff_met", True),
+    })
+    emit(
+        db,
+        "renamed" if new_path.parent == old_parent else "moved",
+        track_id=str(f["track_id"]),
+        message=f"{current_path.name} -> {new_path.name}",
+        details={"from": str(current_path), "to": str(new_path)},
+    )
+    return new_path
+
+
 @router.post("/rename/apply", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=RenameApplyResponse, response_model_exclude_unset=True)
 def rename_apply(
     body: RenameApplyRequest,
@@ -502,48 +560,17 @@ def rename_apply(
                 blocked_count += 1
                 continue
 
-            album = db.get_library_album(track["album_id"])
-            artist = db.get_library_artist(track["artist_id"])
-            if not album or not artist:
-                errors.append(f"Album or artist not found for track '{track['id']}'")
+            old_parent = current_path.parent
+            try:
+                new_path = rename_library_file(db, f, track, media_settings, root_dir)
+            except ValueError as exc:
+                errors.append(str(exc))
                 continue
 
-            meta = _rename_meta(db, track, album, artist, f, str(current_path), {}, media_settings)
-            proposed = build_track_path(meta, media_settings)
-            validate_media_path(proposed, db=db)
+            if new_path is None:
+                continue
 
-            if current_path.resolve() == Path(proposed).resolve():
-                continue  # Already matches target format
-
-            target_path = resolve_collision(proposed)
-            old_parent = current_path.parent
-            new_path = safe_atomic_move(current_path, target_path)
-
-            try:
-                rel_path = str(new_path.relative_to(root_dir))
-            except ValueError:
-                rel_path = new_path.name
-
-            db.upsert_library_file({
-                "id": fid,
-                "track_id": f["track_id"],
-                "file_path": str(new_path),
-                "relative_path": rel_path,
-                "codec": f.get("codec"),
-                "bitrate": f.get("bitrate"),
-                "sample_rate": f.get("sample_rate"),
-                "bits_per_sample": f.get("bits_per_sample"),
-                "quality_name": f.get("quality_name"),
-                "size_bytes": new_path.stat().st_size if new_path.exists() else f.get("size_bytes", 0),
-                "cutoff_met": f.get("cutoff_met", True),
-            })
             renamed_count += 1
-            emit(
-                db, "renamed" if new_path.parent == old_parent else "moved", track_id=str(f["track_id"]),
-                message=f"{current_path.name} -> {new_path.name}",
-                details={"from": str(current_path), "to": str(new_path)},
-            )
-
             _tidy_old_folder(old_parent, new_path.parent, root_dir)
 
         except Exception as exc:
