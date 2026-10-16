@@ -494,7 +494,13 @@ class MbidEnricherClient:
             return fallback_resp
 
         resp = self._do_http_call(url, params=params, max_retries=max_retries)
-        mirror_breaker.record_result(_is_breaker_failure(resp))
+        mirror_was_open = (mirror_breaker.state == "open")
+        mirror_breaker.record_result(_is_breaker_failure(resp) or (resp is not None and resp.status_code == 403))
+        if not mirror_was_open and mirror_breaker.state == "open" and resp is not None and resp.status_code == 403:
+            logger.warning(
+                "Circuit breaker opened: mirror host %s is refusing requests (HTTP 403); using musicbrainz.org fallback",
+                mirror_host,
+            )
 
         if resp is not None and resp.status_code == 200:
             return resp

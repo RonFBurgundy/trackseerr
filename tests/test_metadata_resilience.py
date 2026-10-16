@@ -178,6 +178,79 @@ def test_404_does_not_trip_breaker(test_db: Database) -> None:
     assert breaker._consecutive_failures == 0
 
 
+def test_mirror_403s_open_breaker_and_use_fallback(
+    test_db: Database, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Mirror returning 403 five times opens its circuit breaker; the 6th call goes directly to musicbrainz.org."""
+    store = MbMetadataStore(test_db)
+    client = MbidEnricherClient(base_url="https://api.brainzmash.cc", min_interval=0.0, store=store)
+
+    resp_403 = MagicMock(status_code=403)
+    resp_403.headers = {}
+    ok_resp = MagicMock(status_code=200)
+    ok_resp.json.return_value = {"artists": [{"id": "mbid-123"}]}
+
+    def mock_get(url: str, *args: Any, **kwargs: Any) -> MagicMock:
+        if "api.brainzmash.cc" in url:
+            return resp_403
+        return ok_resp
+
+    with caplog.at_level(logging.WARNING):
+        with patch.object(client._session, "get", side_effect=mock_get):
+            for _ in range(5):
+                resp = client._request("https://api.brainzmash.cc/ws/2/artist?query=test")
+                assert resp is not None
+                assert resp.status_code == 200
+
+    breaker = client._breakers["api.brainzmash.cc"]
+    assert breaker.state == "open"
+    assert breaker._consecutive_failures == 5
+    assert not client.source_available("api.brainzmash.cc")
+    assert client.source_available("musicbrainz.org")
+
+    # Verify warning log when breaker opened on 403
+    warning_logs = [rec.message for rec in caplog.records if rec.levelno == logging.WARNING]
+    assert any(
+        "403" in msg and "refusing requests" in msg and "musicbrainz.org" in msg
+        for msg in warning_logs
+    )
+
+    # The 6th call should go straight to musicbrainz.org without touching the mirror
+    with patch.object(client._session, "get", return_value=ok_resp) as mock_network:
+        resp = client._request("https://api.brainzmash.cc/ws/2/artist?query=test")
+        assert resp is not None
+        assert resp.status_code == 200
+        assert mock_network.call_count == 1
+        called_url = mock_network.call_args[0][0]
+        assert "musicbrainz.org" in called_url
+        assert "api.brainzmash.cc" not in called_url
+
+
+def test_single_mirror_403_does_not_open_breaker(test_db: Database) -> None:
+    """A single HTTP 403 increments consecutive failures but does not trip the circuit breaker."""
+    store = MbMetadataStore(test_db)
+    client = MbidEnricherClient(base_url="https://api.brainzmash.cc", min_interval=0.0, store=store)
+
+    resp_403 = MagicMock(status_code=403)
+    resp_403.headers = {}
+    ok_resp = MagicMock(status_code=200)
+
+    def mock_get(url: str, *args: Any, **kwargs: Any) -> MagicMock:
+        if "api.brainzmash.cc" in url:
+            return resp_403
+        return ok_resp
+
+    with patch.object(client._session, "get", side_effect=mock_get):
+        resp = client._request("https://api.brainzmash.cc/ws/2/artist?query=test")
+        assert resp is not None
+        assert resp.status_code == 200
+
+    breaker = client._breakers["api.brainzmash.cc"]
+    assert breaker.state == "closed"
+    assert breaker._consecutive_failures == 1
+    assert client.source_available("api.brainzmash.cc")
+
+
 def test_musicbrainz_retry_after_honored_up_to_30s(test_db: Database) -> None:
     """musicbrainz.org honors Retry-After up to 30s cap on HTTP 429/503; higher values are capped at 30s."""
     store = MbMetadataStore(test_db)
