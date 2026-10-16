@@ -10320,6 +10320,12 @@ export interface components {
              */
             colon_replacement_format: string;
             /**
+             * Compilation Artist Folder
+             * @description Folder name for Various Artists compilations
+             * @default Various Artists
+             */
+            compilation_artist_folder: string;
+            /**
              * Compilation Track Format
              * @description Format for compilation track filenames
              */
@@ -10352,6 +10358,12 @@ export interface components {
              * @default true
              */
             enrich_mbids: boolean;
+            /**
+             * Featured Artists
+             * @description Featured artist placement: in_title, in_artist, drop
+             * @default in_title
+             */
+            featured_artists: string;
             /**
              * Fingerprint On Weak Match
              * @description Fingerprint files via AcoustID during download import when the tag match is weak or missing
@@ -10424,6 +10436,12 @@ export interface components {
              * @default false
              */
             recycle_bin_permanent_delete: boolean;
+            /**
+             * Remix Credit
+             * @description Track artist credit style for remixes: original, remixer, as_credited
+             * @default original
+             */
+            remix_credit: string;
             /**
              * Rename Artist Folders
              * @description Rename artist folders to the artist folder format; off keeps each artist's existing folder
@@ -10519,6 +10537,8 @@ export interface components {
             artist_folder_format?: string | null;
             /** Colon Replacement Format */
             colon_replacement_format?: string | null;
+            /** Compilation Artist Folder */
+            compilation_artist_folder?: string | null;
             /** Compilation Track Format */
             compilation_track_format?: string | null;
             /** Delete Completed Transfers */
@@ -10529,6 +10549,8 @@ export interface components {
             enable_quality_upgrades?: boolean | null;
             /** Enrich Mbids */
             enrich_mbids?: boolean | null;
+            /** Featured Artists */
+            featured_artists?: string | null;
             /** Fingerprint On Weak Match */
             fingerprint_on_weak_match?: boolean | null;
             /** Import Bitrate Check */
@@ -10553,6 +10575,8 @@ export interface components {
             recycle_bin_path?: string | null;
             /** Recycle Bin Permanent Delete */
             recycle_bin_permanent_delete?: boolean | null;
+            /** Remix Credit */
+            remix_credit?: string | null;
             /** Rename Artist Folders */
             rename_artist_folders?: boolean | null;
             /** Replace Illegal Characters */
@@ -11615,10 +11639,14 @@ export interface components {
             artist_folder_format?: string | null;
             /** Colon Replacement Format */
             colon_replacement_format?: string | null;
+            /** Compilation Artist Folder */
+            compilation_artist_folder?: string | null;
             /** Compilation Track Format */
             compilation_track_format?: string | null;
             /** Enable Quality Upgrades */
             enable_quality_upgrades?: boolean | null;
+            /** Featured Artists */
+            featured_artists?: string | null;
             /** Import Mode */
             import_mode?: ("move" | "hardlink" | "copy") | null;
             /** Library Mode */
@@ -11627,6 +11655,8 @@ export interface components {
             multi_disc_folder_format?: string | null;
             /** Multi Disc Track Format */
             multi_disc_track_format?: string | null;
+            /** Remix Credit */
+            remix_credit?: string | null;
             /** Rename Artist Folders */
             rename_artist_folders?: boolean | null;
             /** Replace Illegal Characters */
