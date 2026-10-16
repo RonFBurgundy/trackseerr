@@ -31,5 +31,6 @@ export function buildListUrl(path: string, q: ListQuery): string {
 export function buildIndexUrl(path: string, q: IndexQuery): string {
   const params = new URLSearchParams({ sort_key: q.sortKey, sort_dir: q.sortDir });
   appendFilters(params, q.filters);
+  params.set('tz_offset', String(-new Date().getTimezoneOffset()));
   return `${path}/index?${params.toString()}`;
 }

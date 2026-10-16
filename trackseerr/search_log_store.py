@@ -71,4 +71,4 @@ class SearchLogStoreMixin:
         """(total, groups) for search_log ordered by created_at DESC, matching list_search_log."""
         clause, params = self._search_log_where(source_type=source_type, request_id=request_id)
         with self._lock:
-            return build_index(self.conn, f"FROM search_log{clause}", params, SortDef("created_at", "date"), sort_dir)
+            return build_index(self.conn, f"FROM search_log{clause}", params, SortDef("created_at", "event"), sort_dir)

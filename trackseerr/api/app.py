@@ -66,6 +66,7 @@ from trackseerr.api.tier_middleware import (
     SECURITY_HEADERS,
     StartupGateMiddleware,
 )
+from trackseerr.api.client_tz import ClientTzOffsetMiddleware
 from trackseerr.api.dependencies import register_db
 from trackseerr.config import Config
 from trackseerr.internal_auth import MIN_SECRET_LENGTH, validate_secret_strength
@@ -181,6 +182,7 @@ def _attach_state(app: FastAPI, db: Optional[Database], config: Optional[Config]
 
 
 def _install_middleware(app: FastAPI) -> None:
+    app.add_middleware(ClientTzOffsetMiddleware)
     # 0. Two-tier security: hash signed bodies (all roles); deny-by-default guard (gateway role only, checked per request)
     # Added last = outermost: forged X-TS-* headers are refused on a gateway before the guard forwards anything.
     app.add_middleware(GatewayGuardMiddleware)

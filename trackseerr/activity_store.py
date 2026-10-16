@@ -37,7 +37,7 @@ class ActivityStoreMixin:
     HISTORY_EVENTS: tuple[str, ...] = ("grabbed", "imported", "failed", "deleted", "blocklisted", "upgraded")
     BLOCKLIST_SORT_KEYS: dict[str, str] = {"date": "b.created_at", "artist": "UPPER(COALESCE(b.artist, ''))"}
     BLOCKLIST_INDEX_SORTS: dict[str, SortDef] = {
-        "date": SortDef("b.created_at", "date"),
+        "date": SortDef("b.created_at", "event"),
         "artist": SortDef("UPPER(COALESCE(b.artist, ''))", "name"),
     }
     # Name sorts order by the persisted sort keys (articles and accents folded) so the scrubber index can group on
@@ -56,8 +56,8 @@ class ActivityStoreMixin:
         "album": SortDef("al.sort_title", "name"),
         "title": SortDef("t.sort_title", "name"),
         "release_date": SortDef(_WANTED_RELEASE_DATE, "date"),
-        "last_searched_at": SortDef("t.last_searched_at", "date"),
-        "added_at": SortDef("t.created_at", "date"),
+        "last_searched_at": SortDef("t.last_searched_at", "event"),
+        "added_at": SortDef("t.created_at", "event"),
     }
     # Downloads the native queue shows: everything that still needs the worker, plus an explicit ``warning`` state.
     NATIVE_QUEUE_STATUSES: tuple[str, ...] = ("queued", "downloading", "importing", "completed", "warning")
@@ -397,7 +397,7 @@ class ActivityStoreMixin:
         if event:
             frm, params = frm + " WHERE h.event = ?", [str(event)]
         with self._lock:
-            return build_index(self.conn, frm, params, SortDef("h.created_at", "date"), sort_dir)
+            return build_index(self.conn, frm, params, SortDef("h.created_at", "event"), sort_dir)
 
     def blocklist_index(self, sort_dir: str, sort_key: str = "date") -> tuple[int, list[dict[str, Any]]]:
         """``(total, groups)`` for ``download_blocklist`` matching ``list_blocklist_page``."""
