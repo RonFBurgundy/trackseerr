@@ -383,6 +383,8 @@ class TestPlaylistsEndpoints:
             "http://127.0.0.1:8080/evil",
             "https://attacker.com/open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M",
             "https://open.spotify.com@attacker.com/playlist/37i9dQZF1DXcBWIGoYBM5M",
+            "https://music.youtube.com.evil.com/playlist?list=PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "https://user@music.youtube.com/playlist?list=PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
             "file:///etc/passwd",
             "ftp://deezer.com/playlist/12345",
             "javascript:alert(1)",
@@ -398,7 +400,7 @@ class TestPlaylistsEndpoints:
                 cookies=auth["cookies"],
             )
             assert resp.status_code == 400, f"Expected 400 for {bad_input}, got {resp.status_code}"
-            assert "SSRF validation failed" in resp.json()["detail"]
+            assert resp.json()["detail"] == "Invalid Spotify, Deezer or YouTube Music playlist URL or ID"
 
     def test_create_spotify_playlist_success(
         self, app_and_client, seeded_users, test_db, secret_key
