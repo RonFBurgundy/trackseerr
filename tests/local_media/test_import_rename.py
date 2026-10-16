@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from trackseerr.library import inspect_audio_file
+from trackseerr.media_servers import refresh_scheduler
 from trackseerr.naming import sanitize_component
 
 from .conftest import audio_files, configure_roots, run_scan, set_id3, snapshot
@@ -25,11 +26,13 @@ QUALITY = "(MP3 320)"  # catalog quality name, the same source rename uses
 @pytest.fixture
 def env(api, tmp_path):
     """root = empty library root, staging = empty staging dir, both under tmp_path."""
+    refresh_scheduler.reset_for_tests()
     root, staging = tmp_path / "library", tmp_path / "staging"
     root.mkdir()
     staging.mkdir()
     configure_roots(api.db, root, staging)
-    return api, root, staging
+    yield api, root, staging
+    refresh_scheduler.reset_for_tests()
 
 
 def _item(path: Path, **kw) -> dict:
@@ -140,6 +143,8 @@ def test_commit_registers_catalog_rows_and_file(env, copy_discovery):
     assert f["file_path"] == res["destination_path"]
     assert f["relative_path"] == f"Daft Punk/Discovery (2001)/02 - Aerodynamic {QUALITY}.mp3"
     assert f["quality_name"] == "MP3 320" and f["bitrate"] == 320000
+    api.plex.refresh_music_library.assert_not_called()
+    assert refresh_scheduler.flush_now() is True
     api.plex.refresh_music_library.assert_called_once()
 
 

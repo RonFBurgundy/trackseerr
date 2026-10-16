@@ -39,6 +39,7 @@ from trackseerr.job_tracker import track_job
 from trackseerr.task_manager import TRIGGER_MANUAL, record_task_run
 from trackseerr.library_manager import ModeChanged, run_guarded
 from trackseerr.media_servers import as_media_server
+from trackseerr.media_servers.refresh_scheduler import request_library_refresh
 from trackseerr.item_history import TRIGGER_SCAN, GrabTrigger, emit, provenance
 from trackseerr.recycle_bin import is_excluded_entry, library_excluded_paths, prune_excluded_dirs
 from trackseerr.redaction import redact_text, safe_exc
@@ -939,13 +940,7 @@ class LibraryScanner:
 
         # Step f: Notify Plex client if available and scan was not cancelled
         if run.plex_client is not None and not self._stop_event.is_set():
-            try:
-                as_media_server(run.plex_client).refresh_library()
-            except Exception as exc:
-                logger.warning(
-                    "LibraryScanner: Error invoking media-server library refresh: %s",
-                    exc,
-                )
+            request_library_refresh(as_media_server(run.plex_client), reason="library scan")
 
         # Step g: Conclude scan
         if not self._stop_event.is_set():

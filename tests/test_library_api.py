@@ -19,7 +19,15 @@ from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.config import Config
 from trackseerr.library_scanner import library_scanner
 from trackseerr.lidarr_migration import lidarr_migration_job
+from trackseerr.media_servers import refresh_scheduler
 from trackseerr.storage import Database
+
+
+@pytest.fixture(autouse=True)
+def _reset_refresh_scheduler():
+    refresh_scheduler.reset_for_tests()
+    yield
+    refresh_scheduler.reset_for_tests()
 
 
 def _create_minimal_flac(path: Path) -> None:
@@ -652,6 +660,8 @@ def test_manual_import_scan_and_commit(
         assert db_file["codec"] == "FLAC"
 
         # Plex refresh triggered
+        mock_plex.refresh_music_library.assert_not_called()
+        assert refresh_scheduler.flush_now() is True
         mock_plex.refresh_music_library.assert_called_once()
 
 
@@ -799,6 +809,8 @@ def test_rename_preview_and_apply(
     assert updated_fl["relative_path"] == "Radiohead/The Bends (1995)/03 - High and Dry.flac"
 
     # Plex refresh invoked
+    mock_plex.refresh_music_library.assert_not_called()
+    assert refresh_scheduler.flush_now() is True
     mock_plex.refresh_music_library.assert_called_once()
 
 

@@ -76,6 +76,11 @@ class JellyfinState:
     request_counts: dict[str, int] = field(default_factory=dict)
     ignore_start_index: bool = False  # a misbehaving server that serves the first page for every StartIndex
     add_refused_for: set[str] = field(default_factory=set)  # user ids whose playlist writes answer 400 (no library access)
+    virtual_folders: list[dict[str, Any]] = field(
+        default_factory=lambda: [
+            {"Name": "Music", "CollectionType": "music", "ItemId": "vf-music", "Locations": ["/media/music"]}
+        ]
+    )
 
     def song(self, item_id: str) -> Optional[FakeAudio]:
         return next((s for s in self.songs if s.id == item_id), None)
@@ -104,7 +109,12 @@ class FakeJellyfin:
     def handle(self, request: httpx.Request) -> httpx.Response:
         st = self.state
         if st.transport_failure is not None:
-            raise st.transport_failure()
+            try:
+                err = st.transport_failure(request)
+            except TypeError:
+                err = st.transport_failure()
+            if err is not None:
+                raise err
         method, path = request.method, request.url.path
         query = dict(parse_qsl(request.url.query.decode(), keep_blank_values=True))
         st.urls_seen.append(str(request.url))
@@ -133,6 +143,8 @@ class FakeJellyfin:
             route("GET", r"/System/Info", self._system_info),
             route("GET", r"/Users", self._users),
             route("GET", r"/Items", self._items),
+            route("GET", r"/Library/VirtualFolders", self._virtual_folders),
+            route("POST", r"/Items/([^/]+)/Refresh", self._refresh_item),
             route("POST", r"/Library/Refresh", self._refresh),
             route("POST", r"/Playlists", self._create_playlist),
             route("GET", r"/Playlists/([^/]+)", lambda request, query, playlist_id: httpx.Response(400, text="Error processing request.")),
@@ -197,6 +209,13 @@ class FakeJellyfin:
             term = _clean(query["SearchTerm"]).strip()
             songs = [s for s in songs if term in _clean(s.title)]  # name only, like Jellyfin
         return self._json(self._page([self._audio_json(s) for s in songs], query, st.max_page))
+
+    def _virtual_folders(self, request: httpx.Request, query: dict[str, str]) -> httpx.Response:
+        return self._json(self.state.virtual_folders)
+
+    def _refresh_item(self, request: httpx.Request, query: dict[str, str], item_id: str) -> httpx.Response:
+        self.state.scans += 1
+        return httpx.Response(204)
 
     def _refresh(self, request: httpx.Request, query: dict[str, str]) -> httpx.Response:
         self.state.scans += 1

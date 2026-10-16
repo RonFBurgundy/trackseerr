@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from trackseerr.library_scanner import LibraryScanner
+from trackseerr.media_servers import refresh_scheduler
 from trackseerr.models import LibraryAlbum, LibraryArtist
 from trackseerr.storage import Database
 
@@ -357,14 +358,20 @@ def test_start_scan_background_execution(db: Database, scanner: LibraryScanner, 
 
 def test_plex_client_refresh_called_when_provided(db: Database, scanner: LibraryScanner, tmp_path: Path):
     """Verifies that refresh_music_library is called on the provided plex_client."""
-    music_dir = tmp_path / "music"
-    music_dir.mkdir(parents=True)
+    refresh_scheduler.reset_for_tests()
+    try:
+        music_dir = tmp_path / "music"
+        music_dir.mkdir(parents=True)
 
-    mock_plex = MagicMock()
+        mock_plex = MagicMock()
 
-    status = scanner.scan(db, root_folder=str(music_dir), plex_client=mock_plex)
-    assert status["status"] == "completed"
-    mock_plex.refresh_music_library.assert_called_once()
+        status = scanner.scan(db, root_folder=str(music_dir), plex_client=mock_plex)
+        assert status["status"] == "completed"
+        mock_plex.refresh_music_library.assert_not_called()
+        assert refresh_scheduler.flush_now() is True
+        mock_plex.refresh_music_library.assert_called_once()
+    finally:
+        refresh_scheduler.reset_for_tests()
 
 
 def _scan_tagged_files(db: Database, scanner: LibraryScanner, tmp_path: Path, artist: str, files: list[dict]) -> None:
