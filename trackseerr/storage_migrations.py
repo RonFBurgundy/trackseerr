@@ -73,6 +73,7 @@ class MigrationsMixin:
                 (84, self._migration_v84),
                 (85, self._migration_v85),
                 (86, self._migration_v86),
+                (87, self._migration_v87),
             ]
 
             applied = 0
@@ -197,6 +198,14 @@ class MigrationsMixin:
         cur.execute(
             "UPDATE media_management_settings SET compilation_track_format = '{track:00} - {Track ArtistName} - {Track Title}' "
             "WHERE compilation_track_format = ''"
+        )
+
+    def _migration_v87(self, cur: sqlite3.Cursor) -> None:
+        """v87: Retire old api.brainzmash.org host in media_management_settings."""
+        cur.execute(
+            "UPDATE media_management_settings "
+            "SET mb_mirror_url = 'https://api.brainzmash.cc' "
+            "WHERE mb_mirror_url LIKE 'http%://api.brainzmash.org%'"
         )
 
     def _migration_v84(self, cur: sqlite3.Cursor) -> None:
