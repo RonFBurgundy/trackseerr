@@ -130,8 +130,24 @@ It has since grown into its own project. It owes a lot to:
 
 - [Overseerr](https://github.com/sct/overseerr) and its successors, for the discovery, request, and quota model.
 - [Lidarr](https://github.com/Lidarr/Lidarr), [Sonarr](https://github.com/Sonarr/Sonarr), and the rest of the *arr projects, for naming templates, quality profiles, and the download lifecycle.
-- [Mutagen](https://github.com/quodlibet/mutagen), for reading and writing audio tags.
+- [Mutagen](https://github.com/quodlibet/mutagen) (Christoph Reiter and the Quod Libet team), for reading and writing audio tags.
 - [slskd](https://github.com/slskd/slskd), for a clean API to the Soulseek network.
+
+A lot of what TrackSeerr does rests on libraries and services built by independent developers, often one person in their spare time. Thank you:
+
+- [ytmusicapi](https://github.com/sigma67/ytmusicapi) by sigma67, for reading YouTube Music playlists without an account.
+- [deezer-python](https://github.com/browniebroke/deezer-python) by Bruno Alla, for the Deezer catalog and playlists.
+- [Spotipy](https://github.com/spotipy-dev/spotipy), started by Paul Lamere, for the Spotify Web API.
+- [python-plexapi](https://github.com/pushingkarmaorg/python-plexapi), started by Michael Shepanski, for talking to Plex.
+- [Chromaprint](https://github.com/acoustid/chromaprint) and [AcoustID](https://acoustid.org) by Lukáš Lalinský, for audio fingerprinting and the open fingerprint database.
+- [pyacoustid](https://github.com/beetbox/pyacoustid) by Adrian Sampson (of [beets](https://github.com/beetbox/beets)), for the Python side of AcoustID.
+- [mrab-regex](https://github.com/mrabarnett/mrab-regex) by Matthew Barnett, for Unicode-aware matching.
+- [FastAPI](https://github.com/fastapi/fastapi) by Sebastián Ramírez, for the API layer.
+- [pywebpush](https://github.com/web-push-libs/pywebpush) by JR Conlin, for push notifications.
+- [TanStack Virtual](https://github.com/TanStack/virtual) by Tanner Linsley, for the long, fast-scrolling lists.
+- [Lucide](https://github.com/lucide-icons/lucide), the community icon set grown from Cole Bemis's Feather.
+
+And to the [MetaBrainz Foundation](https://metabrainz.org) and the volunteers behind MusicBrainz, the Cover Art Archive and ListenBrainz, whose open data makes accurate tagging possible at all.
 
 ## License
 
