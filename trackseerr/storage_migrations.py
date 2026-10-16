@@ -72,6 +72,7 @@ class MigrationsMixin:
                 (83, self._migration_v83),
                 (84, self._migration_v84),
                 (85, self._migration_v85),
+                (86, self._migration_v86),
             ]
 
             applied = 0
@@ -181,6 +182,21 @@ class MigrationsMixin:
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_acoustid_submissions_status ON acoustid_submissions(status)"
+        )
+
+    def _migration_v86(self, cur: sqlite3.Cursor) -> None:
+        """v86: VA naming settings and default compilation track format."""
+        cur.execute("PRAGMA table_info(media_management_settings)")
+        existing = {row[1] for row in cur.fetchall()}
+        if "remix_credit" not in existing:
+            cur.execute("ALTER TABLE media_management_settings ADD COLUMN remix_credit TEXT NOT NULL DEFAULT 'original'")
+        if "featured_artists" not in existing:
+            cur.execute("ALTER TABLE media_management_settings ADD COLUMN featured_artists TEXT NOT NULL DEFAULT 'in_title'")
+        if "compilation_artist_folder" not in existing:
+            cur.execute("ALTER TABLE media_management_settings ADD COLUMN compilation_artist_folder TEXT NOT NULL DEFAULT 'Various Artists'")
+        cur.execute(
+            "UPDATE media_management_settings SET compilation_track_format = '{track:00} - {Track ArtistName} - {Track Title}' "
+            "WHERE compilation_track_format = ''"
         )
 
     def _migration_v84(self, cur: sqlite3.Cursor) -> None:

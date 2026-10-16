@@ -241,7 +241,62 @@ class TestMediaManagementAPI:
         # 3. Compilation track
         comp = previews_by_id["compilation"]
         assert comp["name"] == "Compilation / Various Artists Track"
-        assert comp["output_path"] == "/data/media/music/Various Artists/Wayne's World - Music from the Motion Picture - [Soundtrack] (1992)/01 - Bohemian Rhapsody.mp3"
+        assert (
+            comp["output_path"]
+            == "/data/media/music/Various Artists/Wayne's World - Music from the Motion Picture - [Soundtrack] (1992)/01 - Queen - Bohemian Rhapsody (feat. Wayne).mp3"
+        )
+
+    def test_put_va_naming_settings_round_trip(self, app_and_client, test_db, test_config, seeded_users):
+        _, client = app_and_client
+        admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+        payload = {
+            "remix_credit": "as_credited",
+            "featured_artists": "in_artist",
+            "compilation_artist_folder": "Compilations",
+        }
+        resp = client.put("/api/settings/media-management", json=payload, headers=admin_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["remix_credit"] == "as_credited"
+        assert data["featured_artists"] == "in_artist"
+        assert data["compilation_artist_folder"] == "Compilations"
+
+        # Verify DB directly and via GET
+        db_settings = test_db.get_media_management_settings()
+        assert db_settings["remix_credit"] == "as_credited"
+        assert db_settings["featured_artists"] == "in_artist"
+        assert db_settings["compilation_artist_folder"] == "Compilations"
+
+        get_resp = client.get("/api/settings/media-management", headers=admin_headers)
+        assert get_resp.status_code == 200
+        get_data = get_resp.json()["settings"]
+        assert get_data["remix_credit"] == "as_credited"
+        assert get_data["featured_artists"] == "in_artist"
+        assert get_data["compilation_artist_folder"] == "Compilations"
+
+    def test_put_invalid_remix_credit_returns_4xx(self, app_and_client, test_db, test_config, seeded_users):
+        _, client = app_and_client
+        admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+        resp = client.put("/api/settings/media-management", json={"remix_credit": "invalid_mode"}, headers=admin_headers)
+        assert resp.status_code in (400, 422)
+
+    def test_put_invalid_compilation_artist_folder_with_separator_returns_4xx(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
+        _, client = app_and_client
+        admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+        resp = client.put(
+            "/api/settings/media-management", json={"compilation_artist_folder": "Comp/ilations"}, headers=admin_headers
+        )
+        assert resp.status_code in (400, 422)
+
+        resp_bs = client.put(
+            "/api/settings/media-management", json={"compilation_artist_folder": "Comp\\ilations"}, headers=admin_headers
+        )
+        assert resp_bs.status_code in (400, 422)
 
     def test_live_preview_with_custom_template_overrides(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client
