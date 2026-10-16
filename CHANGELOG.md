@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- Compilation files are named after each track's own artist: `Various Artists/Saturday Night Fever (1977)/03 - Yvonne Elliman - If I Can't Have You.flac`. Media Management adds the compilation artist folder name, who a remix is credited to (original artist, remixer, or as MusicBrainz credits it) and where featured artists go; every naming preset sets them, and a new "beets / Picard" preset files compilations under Compilations.
 - The Requests page and the Activity Blocklist, Searches and Queue tabs have the fast-scroll rail used in the Library. Date rails for events (requests, history, blocklist, searches, date added) read Today, Yesterday, the last few weekdays, then months and years, in your own timezone; release-date rails group by year, month or day depending on the spread, Blocklist sorted by artist jumps by letter, and lists with nothing to group by (the Queue) are labelled by position.
 - "Library Retag" and "MusicBrainz Release Match" show how far along they are on the Tasks page.
 - Contribute to AcoustID: add your AcoustID user key in Media Management, then run "AcoustID Contribution" from the Tasks page to submit fingerprints of your files that have MusicBrainz recording IDs, credited to you. Files AcoustID already knows, files that fingerprint as a different recording, and files whose length doesn't match the track are skipped. Media Management shows how many were submitted, imported and skipped.
@@ -100,6 +101,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Retag and import wrote the album artist into every track's ARTIST tag, so compilation tracks were tagged "Various Artists" and featured credits were lost. ARTIST now holds the track's credited artist and ALBUMARTIST the album artist; run a retag to repair files already tagged.
 - History and Missing (sorted by date added) showed no fast-scroll rail when all their dates fell in the same month.
 - The "Add / monitor" button on a Discover artist page now switches to "Open in Library" as soon as the artist is added, instead of staying until the next day.
 - Albums no longer show a year of 1 (Lidarr's placeholder for "no date"); existing placeholder dates are cleared on upgrade.
