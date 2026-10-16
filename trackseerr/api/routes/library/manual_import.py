@@ -67,6 +67,7 @@ from trackseerr.library import (
 )
 from trackseerr.naming import build_track_path
 from trackseerr.artist_folders import resolve_artist_folder
+from trackseerr.track_credits import naming_credits
 from trackseerr.quality import evaluate_release, parse_release_title
 from trackseerr.recycle_bin import (
     is_system_dirname,
@@ -725,11 +726,14 @@ def _commit_one_item(run: _CommitRun, item: ManualImportItem) -> None:
     # 4. Resolve destination path
     meta = dict(inspected)
     meta["quality_full"] = quality_name  # same catalog source as rename preview/apply
+    tag_artist = inspected.get("artist")
+    tag_mbid = inspected.get("musicbrainz_artistid")
     meta["artist"] = artist["name"]
     meta["album_artist"] = artist["name"]
     meta["artist_folder"] = resolve_artist_folder(run.db, artist, run.media_settings)
     meta["album"] = album["title"]
     meta["title"] = track["title"]
+    meta["track_credits"] = naming_credits(run.db, track.get("id"), str(track["title"]), tag_artist, tag_mbid)
     meta["track_number"] = track["track_number"]
     meta["disc_number"] = track["disc_number"]
     meta["total_discs"] = _album_owned_discs(run.db, album["id"], disc)

@@ -802,6 +802,75 @@ def test_rename_preview_and_apply(
     mock_plex.refresh_music_library.assert_called_once()
 
 
+def test_rename_preview_compilation_uses_track_artist_credit(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    app, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    music_dir = tmp_path / "music"
+    music_dir.mkdir(parents=True)
+
+    test_db.update_media_management_settings({
+        "root_folder_path": str(music_dir),
+    })
+
+    legacy_dir = music_dir / "old_downloads"
+    legacy_dir.mkdir(parents=True)
+    legacy_file = legacy_dir / "snf_03.flac"
+    _create_minimal_flac(legacy_file)
+
+    test_db.upsert_library_artist({"id": "art-va", "name": "Various Artists", "monitored": True})
+    test_db.upsert_library_album({
+        "id": "alb-snf",
+        "artist_id": "art-va",
+        "title": "Saturday Night Fever",
+        "year": 1977,
+        "album_type": "compilation",
+        "monitored": True,
+    })
+    test_db.upsert_library_track({
+        "id": "trk-snf-3",
+        "album_id": "alb-snf",
+        "artist_id": "art-va",
+        "title": "If I Can't Have You",
+        "track_number": 3,
+        "disc_number": 1,
+        "monitored": True,
+    })
+    test_db.replace_track_artists(
+        "trk-snf-3",
+        [
+            {
+                "artist_name": "Yvonne Elliman",
+                "artist_mbid": "mbid-ye",
+                "role": "primary",
+                "join_phrase": "",
+                "source": "musicbrainz",
+            }
+        ],
+    )
+    test_db.upsert_library_file({
+        "id": "fl-snf-3",
+        "track_id": "trk-snf-3",
+        "file_path": str(legacy_file),
+        "relative_path": "old_downloads/snf_03.flac",
+        "codec": "FLAC",
+    })
+
+    resp_prev = client.post(
+        "/api/library/rename/preview",
+        json={"album_id": "alb-snf"},
+        headers=admin_headers,
+    )
+    assert resp_prev.status_code == 200
+    prev_body = resp_prev.json()
+    assert prev_body["total"] == 1
+    diffs = prev_body["items"]
+    assert len(diffs) == 1
+    assert diffs[0]["proposed_path"].endswith("03 - Yvonne Elliman - If I Can't Have You.flac")
+
+
 # =========================================================================
 # 7. Security: Traversal Defense & Permission Gates
 # =========================================================================

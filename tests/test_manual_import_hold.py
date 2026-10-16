@@ -647,3 +647,120 @@ def test_worker_source_preserving_mode_respects_seed_limits(tmp_path, db, mode, 
     else:
         driver.cleanup_completed.assert_not_called()
         assert db.get_active_download("dl-1")["status"] == "completed"
+
+
+def test_commit_compilation_uses_tag_artist_in_destination_path(tmp_path, db, client, headers):
+    music, staging = tmp_path / "music", tmp_path / "staging"
+    music.mkdir(exist_ok=True)
+    staging.mkdir(exist_ok=True)
+    db.update_media_management_settings(
+        {"root_folder_path": str(music), "staging_folder_path": str(staging), "library_mode": "native",
+         "enrich_mbids": False, "write_audio_tags": False}
+    )
+    db.upsert_library_artist(LibraryArtist(id="art-va", name="Various Artists", path=str(music / "Various Artists")))
+    db.upsert_library_album(LibraryAlbum(id="alb-comp", artist_id="art-va", title="Saturday Night Fever", year=1977, album_type="compilation"))
+    db.upsert_library_track(LibraryTrack(id="trk-comp-1", album_id="alb-comp", artist_id="art-va", title="If I Can't Have You", track_number=1, disc_number=1))
+
+    src_file = staging / "snf_01.flac"
+    _flac(src_file)
+
+    inspected = {
+        "artist": "Yvonne Elliman",
+        "album": "Saturday Night Fever",
+        "title": "If I Can't Have You",
+        "track_number": 1,
+        "disc_number": 1,
+        "codec": "FLAC",
+        "file_path": str(src_file),
+        "extension": ".flac",
+    }
+    item = {
+        "source_path": str(src_file),
+        "artist_id": "art-va",
+        "album_id": "alb-comp",
+        "track_id": "trk-comp-1",
+        "track_title": "If I Can't Have You",
+        "track_number": 1,
+        "mode": "move",
+        "write_tags": False,
+    }
+    with patch("trackseerr.api.routes.library.manual_import.inspect_audio_file", return_value=inspected):
+        resp = client.post("/api/library/manual-import/commit", json={"items": [item]}, headers=headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["imported_count"] == 1
+    dest = body["results"][0]["destination_path"]
+    assert "Yvonne Elliman" in dest
+    assert dest.endswith("01 - Yvonne Elliman - If I Can't Have You.flac")
+
+
+def test_worker_compilation_import_uses_tag_artist_in_destination_path(tmp_path, db):
+    music, staging = tmp_path / "music", tmp_path / "staging"
+    music.mkdir(exist_ok=True)
+    staging.mkdir(exist_ok=True)
+    db.update_media_management_settings(
+        {"root_folder_path": str(music), "staging_folder_path": str(staging), "library_mode": "native",
+         "enrich_mbids": False, "write_audio_tags": False}
+    )
+    db.upsert_library_artist(LibraryArtist(id="art-va", name="Various Artists", path=str(music / "Various Artists")))
+    db.upsert_library_album(LibraryAlbum(id="alb-comp", artist_id="art-va", title="Saturday Night Fever", year=1977, album_type="compilation"))
+    db.upsert_library_track(LibraryTrack(id="trk-comp-1", album_id="alb-comp", artist_id="art-va", title="If I Can't Have You", track_number=1, disc_number=1))
+
+    db.create_download_client(
+        DownloadClientConfig(id="c1", name="C", driver_type=DownloadDriverType.SLSKD, host_url="http://slskd:5030")
+    )
+    dl_dir = staging / "Saturday.Night.Fever.FLAC"
+    dl_file = dl_dir / "01.flac"
+    _flac(dl_file)
+
+    db.create_active_download(
+        ActiveDownload(
+            id="dl-comp",
+            client_id="c1",
+            title="Saturday.Night.Fever.FLAC",
+            artist="Various Artists",
+            item_type="album",
+            status=DownloadStatus.DOWNLOADING.value,
+            download_hash="h-comp",
+            album_id="alb-comp",
+        )
+    )
+
+    driver = MagicMock()
+    driver.get_status.return_value = {
+        "status": DownloadStatus.COMPLETED.value,
+        "progress": 100.0,
+        "size_bytes": 1,
+        "speed_bps": 0,
+        "eta_seconds": 0,
+        "source_path": str(dl_dir),
+        "error_message": None,
+    }
+
+    def inspect(path):
+        return {
+            "artist": "Yvonne Elliman",
+            "album": "Saturday Night Fever",
+            "title": "If I Can't Have You",
+            "track_number": 1,
+            "disc_number": 1,
+            "codec": "FLAC",
+            "bits_per_sample": 16,
+            "bitrate": 900,
+            "sample_rate": 44100,
+            "extension": ".flac",
+            "file_path": str(path),
+        }
+
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+        stats = AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
+
+    assert stats["imported"] == 1
+    placed = list(music.rglob("*.flac"))
+    assert len(placed) == 1
+    assert "Yvonne Elliman" in str(placed[0])
+    assert placed[0].name == "01 - Yvonne Elliman - If I Can't Have You.flac"
+

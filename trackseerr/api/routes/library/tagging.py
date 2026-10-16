@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -119,6 +120,13 @@ def _rename_meta(
     discs = caches.setdefault("discs", {})
     if alb_id not in discs:
         discs[alb_id] = _album_owned_discs(db, alb_id)
+    credits_memo = caches.setdefault("credits", {})
+    if alb_id not in credits_memo:
+        try:
+            credits_memo[alb_id] = db.list_track_artists_for_album(alb_id)
+        except sqlite3.Error as exc:
+            logger.warning("Listing artist credits for album %s failed: %s", alb_id, exc)
+            credits_memo[alb_id] = {}
     return {
         "artist": artist["name"],
         "album_artist": artist["name"],
@@ -137,6 +145,7 @@ def _rename_meta(
         "quality_full": f.get("quality_name"),
         "file_path": current_path,
         "extension": Path(current_path).suffix,
+        "track_credits": credits_memo[alb_id].get(str(track["id"]), []),
     }
 
 

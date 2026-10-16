@@ -203,3 +203,26 @@ def store_track_credits(db: Any, track_id: str, track: dict[str, Any]) -> None:
         db.replace_track_artists(track_id, credits)
     except sqlite3.Error as exc:
         logger.warning("Storing artist credits for track %s failed: %s", track_id, exc)
+
+
+def naming_credits(
+    db: Any,
+    track_id: Optional[str],
+    title: str,
+    tag_artist: Optional[str] = None,
+    tag_artist_mbid: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Stored credits for track_id when set and present; else build_track_credits from tags (empty for VA)."""
+    if db is not None and track_id:
+        try:
+            stored = db.list_track_artists(str(track_id))
+            if stored:
+                return stored
+        except sqlite3.Error as exc:
+            logger.warning("Listing artist credits for track %s failed: %s", track_id, exc)
+    from trackseerr.naming import is_various_artists_folder
+
+    if is_various_artists_folder(tag_artist):
+        return []
+    return build_track_credits(None, title, tag_artist=tag_artist, tag_artist_mbid=tag_artist_mbid)
+

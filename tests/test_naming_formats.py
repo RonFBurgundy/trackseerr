@@ -526,3 +526,11 @@ def test_every_preset_has_va_keys() -> None:
         assert preset["featured_artists"] in FEATURED_ARTIST_MODES, f"Invalid featured_artists in {name}"
         assert "compilation_artist_folder" in preset, f"Missing compilation_artist_folder in {name}"
         assert preset["compilation_artist_folder"].strip(), f"Empty compilation_artist_folder in {name}"
+
+
+def test_clean_minimal_and_audiophile_compilation_formats() -> None:
+    assert "{Track ArtistCleanName}" in PRESETS["Clean Minimal"]["compilation_track_format"]
+    assert "{Artist CleanName}" not in PRESETS["Clean Minimal"]["compilation_track_format"]
+    assert "{Track ArtistName}" in PRESETS["Audiophile / Detailed"]["compilation_track_format"]
+    assert "{Artist Name}" not in PRESETS["Audiophile / Detailed"]["compilation_track_format"]
+

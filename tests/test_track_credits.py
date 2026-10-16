@@ -6,8 +6,11 @@ from trackseerr.track_credits import (
     apply_credit_style,
     build_track_credits,
     credits_from_mb_artist_credit,
+    naming_credits,
     remixers_from_title,
 )
+
+from tests.test_library_api import test_db  # noqa: F401
 
 
 def _ac(*parts: tuple[str, str, str]) -> list[dict]:
@@ -183,3 +186,35 @@ def test_no_primary_returns_none() -> None:
     artist, title = apply_credit_style(credits, "Some Track", "original", "in_title")
     assert artist is None
     assert title == "Some Track"
+
+
+def test_naming_credits_prefers_stored_credits(test_db) -> None:
+    test_db.upsert_library_artist({"id": "art-1", "name": "Artist 1", "monitored": True})
+    test_db.upsert_library_album({"id": "alb-1", "artist_id": "art-1", "title": "Album 1", "monitored": True})
+    test_db.upsert_library_track({"id": "trk-1", "album_id": "alb-1", "artist_id": "art-1", "title": "My Title", "track_number": 1, "disc_number": 1, "monitored": True})
+    stored = [
+        {"artist_name": "Stored Artist", "artist_mbid": "mbid-stored", "role": "primary", "join_phrase": "", "source": "musicbrainz"}
+    ]
+    test_db.replace_track_artists("trk-1", stored)
+    out = naming_credits(test_db, "trk-1", "My Title", tag_artist="Tag Artist", tag_artist_mbid="mbid-tag")
+    assert [(c["artist_name"], c["role"], c["source"]) for c in out] == [("Stored Artist", "primary", "musicbrainz")]
+
+
+def test_naming_credits_falls_back_to_tag_artist(test_db) -> None:
+    out = naming_credits(test_db, "trk-empty", "My Title", tag_artist="Tag Artist", tag_artist_mbid="mbid-tag")
+    assert [(c["artist_name"], c["artist_mbid"], c["role"], c["source"]) for c in out] == [
+        ("Tag Artist", "mbid-tag", "primary", "tags")
+    ]
+
+
+def test_naming_credits_ignores_various_artists_tag(test_db) -> None:
+    for va in ("Various Artists", "Various", "VA", "various artists", "va"):
+        assert naming_credits(test_db, "trk-none", "My Title", tag_artist=va) == []
+
+
+def test_naming_credits_no_track_id_uses_tags(test_db) -> None:
+    out = naming_credits(test_db, None, "My Title", tag_artist="Tag Performer", tag_artist_mbid="mb-p")
+    assert [(c["artist_name"], c["role"], c["source"]) for c in out] == [
+        ("Tag Performer", "primary", "tags")
+    ]
+
