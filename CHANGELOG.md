@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- Library Health has a "Shorten name" button on each "Names too long" finding. It gives a library track its normal Rename name, or shortens any other file or folder in place, without deleting anything. Rename also marks these files with a "Name too long" reason and selects them by default.
 - Library Health lists file and folder names that are too long (over 200 bytes) under "Names too long". These names can make the Unraid mover and renames fail. Run Rename to shorten them. This check works even without a media server.
 - System → Status shows how many MusicBrainz requests went to the mirror and to musicbrainz.org in the last hour, the request limit, and whether TrackSeerr is pausing either one.
 - New page, External services, lists every outside server TrackSeerr talks to, when, and how much.
