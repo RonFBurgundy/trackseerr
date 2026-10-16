@@ -252,3 +252,127 @@ def test_worker_walk_prunes_excluded_dirs(tmp_path):
     custom.mkdir()
     dirs = ["ok", ".trackseerr-quarantine", "_quarantine", "custom", ".trackseerr-recycle"]
     assert rb.prune_excluded_dirs(str(root), dirs, [custom.resolve()]) == ["ok"]
+
+
+# ------------------------------------------------------------------------------------------ long names
+def test_recycle_long_file_name_is_capped(tmp_path):
+    music = tmp_path / "music"
+    rec = tmp_path / "recycle"
+    music.mkdir()
+    rec.mkdir()
+    long_name = ("a" * 225) + ".flac"  # 230 bytes
+    f = music / long_name
+    f.write_bytes(b"flac data")
+
+    res = rb.dispose_replaced_file(
+        f,
+        library_root=music,
+        recycle_root=rec,
+        client_roots=[],
+        today=TODAY,
+    )
+
+    assert res.status == "recycled"
+    assert res.dest is not None
+    assert len(res.dest.name.encode("utf-8")) <= 200
+    assert res.dest.name.endswith(".flac")
+    assert not f.exists()
+    assert res.dest.is_file()
+    assert res.dest.read_bytes() == b"flac data"
+
+
+def test_recycle_long_name_clash_counter_fits(tmp_path):
+    music = tmp_path / "music"
+    rec = tmp_path / "recycle"
+    music.mkdir()
+    rec.mkdir()
+    long_name = ("a" * 225) + ".flac"  # 230 bytes
+    f1 = music / long_name
+    f1.write_bytes(b"first")
+
+    res1 = rb.dispose_replaced_file(
+        f1,
+        library_root=music,
+        recycle_root=rec,
+        client_roots=[],
+        today=TODAY,
+    )
+    assert res1.status == "recycled"
+    assert res1.dest is not None
+
+    # Now write the file again at the original location to clash upon recycle
+    f1.write_bytes(b"second")
+    res2 = rb.dispose_replaced_file(
+        f1,
+        library_root=music,
+        recycle_root=rec,
+        client_roots=[],
+        today=TODAY,
+    )
+    assert res2.status == "recycled"
+    assert res2.dest is not None
+    assert len(res2.dest.name.encode("utf-8")) <= 200
+    assert res2.dest.name.endswith(".1.flac")
+    assert res2.dest != res1.dest
+    assert res1.dest.read_bytes() == b"first"
+    assert res2.dest.read_bytes() == b"second"
+
+
+def test_recycle_long_folder_in_path_is_capped(tmp_path):
+    music = tmp_path / "music"
+    rec = tmp_path / "recycle"
+    music.mkdir()
+    rec.mkdir()
+    long_folder = "b" * 230
+    folder = music / long_folder
+    folder.mkdir()
+    f = folder / "track.flac"
+    f.write_bytes(b"audio")
+
+    res = rb.dispose_replaced_file(
+        f,
+        library_root=music,
+        recycle_root=rec,
+        client_roots=[],
+        today=TODAY,
+    )
+    assert res.status == "recycled"
+    assert res.dest is not None
+    rel_to_rec = res.dest.relative_to(rec)
+    for part in rel_to_rec.parts:
+        assert len(part.encode("utf-8")) <= 200
+    assert not f.exists()
+    assert res.dest.is_file()
+
+
+def test_recycle_short_names_unchanged(tmp_path):
+    music = tmp_path / "music"
+    rec = tmp_path / "recycle"
+    music.mkdir()
+    rec.mkdir()
+    f = music / "Artist" / "Song.flac"
+    f.parent.mkdir(parents=True)
+    f.write_bytes(b"short 1")
+
+    res1 = rb.dispose_replaced_file(
+        f,
+        library_root=music,
+        recycle_root=rec,
+        client_roots=[],
+        today=TODAY,
+    )
+    assert res1.status == "recycled"
+    assert res1.dest == rec / TODAY.isoformat() / "Artist" / "Song.flac"
+
+    # Clash test with short name: should append .1 at the end (Song.flac.1)
+    f.write_bytes(b"short 2")
+    res2 = rb.dispose_replaced_file(
+        f,
+        library_root=music,
+        recycle_root=rec,
+        client_roots=[],
+        today=TODAY,
+    )
+    assert res2.status == "recycled"
+    assert res2.dest == rec / TODAY.isoformat() / "Artist" / "Song.flac.1"
+
