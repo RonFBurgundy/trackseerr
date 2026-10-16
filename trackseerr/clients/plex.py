@@ -10,7 +10,7 @@ from typing import Any, List, Optional, Tuple
 import requests
 import urllib.parse
 import urllib3
-from plexapi.exceptions import BadRequest, NotFound, Unauthorized
+from plexapi.exceptions import BadRequest, NotFound, PlexApiException, Unauthorized
 from plexapi.server import PlexServer
 
 from ..censored import censored_pattern, search_text
@@ -1070,6 +1070,42 @@ class PlexClient:
         except Exception as e:
             logger.warning("Could not refresh Plex library '%s': %s", sec_name or "default", safe_exc(e))
         return False
+
+    def refresh_music_paths(self, paths: list[str], section_name: Optional[str] = None) -> int:
+        """Triggers path-scoped library section refreshes on Plex Media Server."""
+        if not paths:
+            return 0
+        sec_name = section_name or getattr(self, "music_section", None)
+        secs = music_sections(self.server, sec_name)
+        if not secs:
+            return 0
+
+        def _pick_section(target_path: str) -> Any:
+            norm_target = target_path.replace("\\", "/")
+            target_parts = [c for c in norm_target.split("/") if c]
+            for s in secs:
+                for loc in getattr(s, "locations", []) or []:
+                    loc_norm = str(loc).replace("\\", "/")
+                    loc_parts = [c for c in loc_norm.split("/") if c]
+                    if len(target_parts) >= len(loc_parts) and target_parts[:len(loc_parts)] == loc_parts:
+                        return s
+            return secs[0]
+
+        sent = 0
+        for p in paths:
+            sec = _pick_section(p)
+            try:
+                sec.update(path=p)
+                sent += 1
+            except (PlexApiException, requests.RequestException) as exc:
+                logger.warning(
+                    "Could not refresh Plex path '%s' on section '%s': %s",
+                    p,
+                    getattr(sec, "title", ""),
+                    safe_exc(exc),
+                )
+        logger.info("Triggered Plex path updates for %d folder(s)", sent)
+        return sent
 
     def test_connection(self) -> tuple[bool, str]:
         """Tests connectivity and responsiveness of the Plex Media Server."""

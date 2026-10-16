@@ -486,3 +486,18 @@ def test_target_without_library_access_fails_alone_and_others_still_sync():
     results = server.sync_playlist(pl("Song A"), ["kid", "admin"], PlaylistSyncOptions())
     assert [r.success for r in results] == [False, True]
     assert results[0].error and order(fake, owner="u-admin") == ["Song A"]
+
+
+def test_jellyfin_refresh_paths_posts_media_updated():
+    server, fake, _ = make()
+    paths = ["/music/Artist/Album1", "/music/Artist/Album2"]
+    res = server.refresh_paths(paths)
+    assert res is True
+    assert fake.state.media_updates == [
+        {
+            "Updates": [
+                {"Path": "/music/Artist/Album1", "UpdateType": "Modified"},
+                {"Path": "/music/Artist/Album2", "UpdateType": "Modified"},
+            ]
+        }
+    ]

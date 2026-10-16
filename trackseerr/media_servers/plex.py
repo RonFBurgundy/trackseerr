@@ -33,7 +33,7 @@ from trackseerr.redaction import redact_text, safe_exc
 
 logger = logging.getLogger(__name__)
 
-PLEX_CAPABILITIES = ServerCapabilities(playlists=True, users=True, library_refresh=True, mixes=True, search=True, file_paths=True)
+PLEX_CAPABILITIES = ServerCapabilities(playlists=True, users=True, library_refresh=True, mixes=True, search=True, file_paths=True, folder_refresh=True)
 
 
 def translate_plex_error(exc: BaseException) -> MediaServerError:
@@ -155,6 +155,13 @@ class PlexMediaServer(MediaServer):
             return False
         with _translated():
             return bool(fn())
+
+    def refresh_paths(self, server_paths: list[str]) -> bool:
+        fn = getattr(self._client, "refresh_music_paths", None)
+        if fn is None:
+            return False
+        with _translated():
+            return self._client.refresh_music_paths(server_paths) > 0
 
     def search_tracks(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         with _translated():
