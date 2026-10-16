@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- Library Health lists file and folder names that are too long (over 200 bytes) under "Names too long". These names can make the Unraid mover and renames fail. Run Rename to shorten them. This check works even without a media server.
 - System → Status shows how many MusicBrainz requests went to the mirror and to musicbrainz.org in the last hour, the request limit, and whether TrackSeerr is pausing either one.
 - New page, External services, lists every outside server TrackSeerr talks to, when, and how much.
 - Add YouTube Music playlists by pasting their link, just like Spotify and Deezer. No account or API key is needed. The playlist must be Public or Unlisted; private playlists and Liked Music are rejected with a message saying so. Playlists up to 10,000 tracks are read, and music-video titles like "Artist - Song (Official Video)" are cleaned up before matching.
