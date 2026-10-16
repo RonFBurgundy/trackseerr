@@ -6,6 +6,8 @@ import pytest
 from trackseerr.security import (
     extract_deezer_id,
     extract_spotify_id,
+    extract_youtube_music_id,
+    is_private_youtube_list,
     is_safe_service_url,
     mask_secret,
     safe_data_path,
@@ -367,4 +369,106 @@ class TestSanitizeCsvCell:
         assert sanitize_csv_cell("12345") == "12345"
         assert sanitize_csv_cell("") == ""
         assert sanitize_csv_cell(None) == ""
+
+
+class TestExtractYoutubeMusicId:
+    def test_extract_youtube_music_id_accepts(self):
+        # music.youtube.com playlist
+        assert (
+            extract_youtube_music_id("https://music.youtube.com/playlist?list=PLrEnWoR732-DN6gk7442LupTXstgHpkoD")
+            == "PLrEnWoR732-DN6gk7442LupTXstgHpkoD"
+        )
+        # www.youtube.com playlist
+        assert (
+            extract_youtube_music_id("https://www.youtube.com/playlist?list=PLrEnWoR732-DN6gk7442LupTXstgHpkoD")
+            == "PLrEnWoR732-DN6gk7442LupTXstgHpkoD"
+        )
+        # youtube.com watch?v=..&list=
+        assert (
+            extract_youtube_music_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLrEnWoR732-DN6gk7442LupTXstgHpkoD")
+            == "PLrEnWoR732-DN6gk7442LupTXstgHpkoD"
+        )
+        # music.youtube.com/browse/VL..
+        assert (
+            extract_youtube_music_id("https://music.youtube.com/browse/VLPLrEnWoR732-DN6gk7442LupTXstgHpkoD")
+            == "PLrEnWoR732-DN6gk7442LupTXstgHpkoD"
+        )
+        # raw PL prefix
+        assert (
+            extract_youtube_music_id("PLrEnWoR732-DN6gk7442LupTXstgHpkoD")
+            == "PLrEnWoR732-DN6gk7442LupTXstgHpkoD"
+        )
+        # raw with leading VL stripped
+        assert (
+            extract_youtube_music_id("VLPLrEnWoR732-DN6gk7442LupTXstgHpkoD")
+            == "PLrEnWoR732-DN6gk7442LupTXstgHpkoD"
+        )
+        # raw OLAK5uy_ prefix
+        assert (
+            extract_youtube_music_id("OLAK5uy_kXgJ123456789")
+            == "OLAK5uy_kXgJ123456789"
+        )
+        # raw RDCLAK5uy_ prefix
+        assert (
+            extract_youtube_music_id("RDCLAK5uy_abcdef12345")
+            == "RDCLAK5uy_abcdef12345"
+        )
+
+    def test_extract_youtube_music_id_rejects(self):
+        # other hosts
+        assert extract_youtube_music_id("https://vimeo.com/playlist?list=PLrEnWoR732-DN6gk7442LupTXstgHpkoD") is None
+        # youtube.com.evil.com
+        assert (
+            extract_youtube_music_id("https://music.youtube.com.evil.com/playlist?list=PLrEnWoR732-DN6gk7442LupTXstgHpkoD")
+            is None
+        )
+        assert (
+            extract_youtube_music_id("https://youtube.com.evil.com/playlist?list=PLrEnWoR732-DN6gk7442LupTXstgHpkoD")
+            is None
+        )
+        # userinfo
+        assert (
+            extract_youtube_music_id("https://x@music.youtube.com/playlist?list=PLrEnWoR732-DN6gk7442LupTXstgHpkoD")
+            is None
+        )
+        # port 8080
+        assert (
+            extract_youtube_music_id("https://music.youtube.com:8080/playlist?list=PLrEnWoR732-DN6gk7442LupTXstgHpkoD")
+            is None
+        )
+        # LM / WL / LL
+        assert extract_youtube_music_id("LM") is None
+        assert extract_youtube_music_id("WL") is None
+        assert extract_youtube_music_id("LL") is None
+        assert extract_youtube_music_id("https://music.youtube.com/playlist?list=LM") is None
+        assert extract_youtube_music_id("https://www.youtube.com/playlist?list=WL") is None
+        assert extract_youtube_music_id("https://music.youtube.com/browse/VLLM") is None
+        # javascript:
+        assert extract_youtube_music_id("javascript:alert(1)") is None
+        # too short (under 13 chars)
+        assert extract_youtube_music_id("PL123456789") is None
+        # too long (over 64 chars)
+        assert extract_youtube_music_id("PL" + "a" * 65) is None
+        # bad chars
+        assert extract_youtube_music_id("PL1234567890123!@#") is None
+        # raw id without recognized prefix
+        assert extract_youtube_music_id("AB12345678901234") is None
+        # None / empty / wrong type
+        assert extract_youtube_music_id(None) is None
+        assert extract_youtube_music_id("") is None
+
+    def test_is_private_youtube_list(self):
+        assert is_private_youtube_list("LM") is True
+        assert is_private_youtube_list("WL") is True
+        assert is_private_youtube_list("LL") is True
+        assert is_private_youtube_list("VLLM") is True
+        assert is_private_youtube_list("https://music.youtube.com/playlist?list=LM") is True
+        assert is_private_youtube_list("https://www.youtube.com/playlist?list=WL") is True
+        assert is_private_youtube_list("https://youtube.com/watch?v=123&list=LL") is True
+        assert is_private_youtube_list("https://music.youtube.com/browse/VLLM") is True
+        # Public playlist is not private
+        assert is_private_youtube_list("PLrEnWoR732-DN6gk7442LupTXstgHpkoD") is False
+        assert is_private_youtube_list("https://music.youtube.com/playlist?list=PLrEnWoR732") is False
+        # Evil host is rejected by SSRF check
+        assert is_private_youtube_list("https://evil.com/playlist?list=LM") is False
 

@@ -23,6 +23,12 @@ _DEEZER_PATH_RE = re.compile(
     r"^(?:/[a-zA-Z]{2}(?:-[a-zA-Z]{2})?)?/playlist/([0-9]{5,15})/?$"
 )
 
+# Strict validation for YouTube Music playlist IDs and URLs
+_YOUTUBE_HOSTS = {"music.youtube.com", "www.youtube.com", "youtube.com", "m.youtube.com"}
+_YT_RAW_PREFIXES = ("PL", "OLAK5uy_", "RDCLAK5uy_")
+_YT_PRIVATE_LISTS = {"LM", "LL", "WL"}
+_YT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{13,64}$")
+
 _HTML_TAG_RE = re.compile(r"<[^>]*>", flags=re.DOTALL)
 
 
@@ -110,6 +116,112 @@ def extract_deezer_id(input_str: Optional[str]) -> Optional[str]:
                 return path_match.group(1)
 
     return None
+
+
+def is_private_youtube_list(input_str: Optional[str]) -> bool:
+    """Check if the input string or URL refers to private YouTube lists (LM, LL, WL)."""
+    if not isinstance(input_str, str):
+        return False
+    val = input_str.strip()
+    if not val:
+        return False
+
+    # Check raw value
+    raw_check = val[2:] if val.startswith("VL") else val
+    if raw_check in _YT_PRIVATE_LISTS:
+        return True
+
+    # Check URL
+    try:
+        parsed = urllib.parse.urlparse(val)
+    except ValueError:
+        return False
+
+    if parsed.scheme in ("http", "https"):
+        if (
+            parsed.hostname in _YOUTUBE_HOSTS
+            and not parsed.username
+            and not parsed.password
+            and parsed.port in (None, 80, 443)
+        ):
+            path = parsed.path.rstrip("/")
+            if path in ("/playlist", "/watch"):
+                qs = urllib.parse.parse_qs(parsed.query)
+                list_vals = qs.get("list")
+                if list_vals:
+                    list_id = list_vals[0].strip()
+                    if list_id.startswith("VL"):
+                        list_id = list_id[2:]
+                    if list_id in _YT_PRIVATE_LISTS:
+                        return True
+            elif path.startswith("/browse/"):
+                tail = path[len("/browse/") :].strip("/")
+                if tail.startswith("VL"):
+                    tail = tail[2:]
+                if tail in _YT_PRIVATE_LISTS:
+                    return True
+
+    return False
+
+
+def _extract_youtube_id_from_url(parsed: urllib.parse.ParseResult) -> Optional[str]:
+    if parsed.scheme not in ("http", "https"):
+        return None
+    if (
+        parsed.hostname not in _YOUTUBE_HOSTS
+        or parsed.username
+        or parsed.password
+        or parsed.port not in (None, 80, 443)
+    ):
+        return None
+
+    path = parsed.path.rstrip("/")
+    cand: Optional[str] = None
+    if path in ("/playlist", "/watch"):
+        qs = urllib.parse.parse_qs(parsed.query)
+        list_vals = qs.get("list")
+        if list_vals:
+            cand = list_vals[0].strip()
+    elif parsed.hostname == "music.youtube.com" and path.startswith("/browse/"):
+        cand = path[len("/browse/") :].strip("/")
+
+    if cand:
+        if cand.startswith("VL"):
+            cand = cand[2:]
+        if _YT_ID_RE.fullmatch(cand):
+            return cand
+    return None
+
+
+def extract_youtube_music_id(input_str: Optional[str]) -> Optional[str]:
+    """Strictly validate and extract a YouTube Music playlist ID.
+
+    Accepts:
+    - Raw playlist ID with prefix PL, OLAK5uy_, or RDCLAK5uy_ (strip leading VL if present)
+    - YouTube / YouTube Music playlist URL (/playlist?list=..., /watch?...&list=...)
+    - YouTube Music browse URL (music.youtube.com/browse/VL<id>)
+
+    Rejects private lists (LM, LL, WL) and all invalid or malicious URLs to prevent SSRF.
+    """
+    if not isinstance(input_str, str):
+        return None
+    val = input_str.strip()
+    if not val or is_private_youtube_list(val):
+        return None
+
+    # 1. Raw ID match (strip leading VL if present)
+    raw_val = val[2:] if val.startswith("VL") else val
+    if any(raw_val.startswith(pfx) for pfx in _YT_RAW_PREFIXES):
+        if _YT_ID_RE.fullmatch(raw_val):
+            return raw_val
+
+    # 2. YouTube URL match with SSRF prevention
+    try:
+        parsed = urllib.parse.urlparse(val)
+    except ValueError:
+        return None
+
+    return _extract_youtube_id_from_url(parsed)
 
 
 def sanitize_text(text: Optional[str]) -> str:
