@@ -16,7 +16,9 @@ from fastapi.testclient import TestClient
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db
 from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.api.schemas.library import ManualImportTags
 from trackseerr.config import Config
+from trackseerr.library import inspect_audio_file
 from trackseerr.library_scanner import library_scanner
 from trackseerr.lidarr_migration import lidarr_migration_job
 from trackseerr.storage import Database
@@ -244,6 +246,18 @@ def test_manual_import_scan_album_tracks_and_fingerprint(client, admin, seeded, 
             assert miss["success"] is False and "fingerprint" not in miss
     tracks = _ok(client.get(f"{PREFIX}/manual-import/album-tracks?album_id=alb-1", headers=admin))
     assert [t["has_file"] for t in tracks] == [True, False]
+
+
+def test_inspect_audio_file_keys_fit_manual_import_tags(tmp_path: Path):
+    audio = tmp_path / "track.flac"
+    _flac(audio)
+    meta = inspect_audio_file(str(audio))
+    assert meta is not None
+    # Ensure every key returned by inspect_audio_file is a declared field of ManualImportTags
+    assert set(meta.keys()).issubset(ManualImportTags.model_fields.keys())
+    # Instantiating the model with the inspect dictionary must not raise
+    tags_model = ManualImportTags.model_validate(meta)
+    assert tags_model.codec == "FLAC"
 
 
 def test_rename_preview_apply(client, admin, seeded):
