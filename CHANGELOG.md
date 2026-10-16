@@ -105,6 +105,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Very long track or album titles no longer make file and folder names too long to save or move. Names are shortened to 200 bytes, extension included, so imports, renames and the Unraid mover stop failing on them. Run the rename preview once to shorten files already in your library.
 - Adding a playlist that fails (bad link, unreadable playlist) now shows an error message instead of doing nothing.
 - Installs still set to the old BrainzMash address (api.brainzmash.org) move to api.brainzmash.cc automatically, and entering the old address saves the new one.
 - Retag and import wrote the album artist into every track's ARTIST tag, so compilation tracks were tagged "Various Artists" and featured credits were lost. ARTIST now holds the track's credited artist and ALBUMARTIST the album artist; run a retag to repair files already tagged.
