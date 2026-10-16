@@ -1839,6 +1839,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library-health/findings/{finding_id}/shorten": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Shorten a file or folder name exceeding the length limit */
+        post: operations["shorten_finding_api_library_health_findings__finding_id__shorten_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library-health/mapping": {
         parameters: {
             query?: never;
@@ -9358,6 +9375,15 @@ export interface components {
             file_paths: boolean;
             /** Kind */
             kind: string;
+        };
+        /** LibraryHealthShortened */
+        LibraryHealthShortened: {
+            /** Method */
+            method: string;
+            /** New Path */
+            new_path: string;
+            /** Old Path */
+            old_path: string;
         };
         /** LibraryHealthStarted */
         LibraryHealthStarted: {
@@ -17549,6 +17575,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LibraryHealthDismissed"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    shorten_finding_api_library_health_findings__finding_id__shorten_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                finding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryHealthShortened"];
                 };
             };
             /** @description Validation Error */
