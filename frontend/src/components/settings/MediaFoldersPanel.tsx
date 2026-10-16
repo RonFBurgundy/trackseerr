@@ -249,6 +249,9 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
             colon_replacement_format: settings?.colon_replacement_format,
             replace_illegal_characters: settings?.replace_illegal_characters,
             rename_artist_folders: settings?.rename_artist_folders,
+            remix_credit: settings?.remix_credit,
+            featured_artists: settings?.featured_artists,
+            compilation_artist_folder: settings?.compilation_artist_folder,
           }}
           onChange={(patch) => onChange((prev) => (prev ? { ...prev, ...patch } : null))}
         />

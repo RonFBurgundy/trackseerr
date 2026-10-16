@@ -4,13 +4,51 @@ import { NamingHelpModal } from './NamingHelpModal';
 import { getNamingPresets, previewNamingFormats } from '@/services/namingService';
 import { TactileSwitch } from '@/components/ui';
 import type {
+  FeaturedArtists,
   NamingFormatKey,
   NamingFormatPreview,
   NamingFormats,
   NamingPreset,
   NamingPresetCatalog,
   NamingPreviewContext,
+  NamingPreviewKey,
+  RemixCredit,
 } from '@/types/naming';
+
+const REMIX_CREDIT_OPTIONS: readonly RemixCredit[] = ['original', 'remixer', 'as_credited'] as const;
+const FEATURED_ARTISTS_OPTIONS: readonly FeaturedArtists[] = ['in_title', 'in_artist', 'drop'] as const;
+
+function isRemixCredit(val: string): val is RemixCredit {
+  return (REMIX_CREDIT_OPTIONS as readonly string[]).includes(val);
+}
+
+function isFeaturedArtists(val: string): val is FeaturedArtists {
+  return (FEATURED_ARTISTS_OPTIONS as readonly string[]).includes(val);
+}
+
+interface FormatPreviewSamplesProps {
+  preview?: NamingFormatPreview;
+}
+
+const FormatPreviewSamples: React.FC<FormatPreviewSamplesProps> = ({ preview }) => {
+  if (!preview) return null;
+  return (
+    <div className="rounded-[3px] border border-[#1f1f1f] bg-[#0a0a0a] p-2.5 space-y-1.5">
+      {preview.warnings.map((w) => (
+        <div key={w} className="flex items-start gap-1.5 text-[11px] text-amber-400 font-mono">
+          <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+          <span>{w}</span>
+        </div>
+      ))}
+      {preview.samples.map((s) => (
+        <div key={s.sample_id} className="text-[11px] font-mono leading-snug">
+          <span className="text-neutral-500">{s.sample_name}</span>
+          <div className="text-emerald-300 break-all">{s.output || '(empty)'}</div>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 interface FieldSpec {
   key: NamingFormatKey;
@@ -82,6 +120,9 @@ function presetPatch(preset: NamingPreset): Partial<NamingPreset> {
   if (preset.colon_replacement_format !== undefined) patch.colon_replacement_format = preset.colon_replacement_format;
   if (preset.replace_illegal_characters !== undefined) patch.replace_illegal_characters = preset.replace_illegal_characters;
   if (preset.rename_artist_folders !== undefined) patch.rename_artist_folders = preset.rename_artist_folders;
+  if (preset.remix_credit !== undefined) patch.remix_credit = preset.remix_credit;
+  if (preset.featured_artists !== undefined) patch.featured_artists = preset.featured_artists;
+  if (preset.compilation_artist_folder !== undefined) patch.compilation_artist_folder = preset.compilation_artist_folder;
   return patch;
 }
 
@@ -112,7 +153,7 @@ export const NamingFormatsEditor: React.FC<NamingFormatsEditorProps> = ({ value,
     syntaxHelp: [],
   });
   const [helpOpen, setHelpOpen] = useState(false);
-  const [previews, setPreviews] = useState<Partial<Record<NamingFormatKey, NamingFormatPreview>>>({});
+  const [previews, setPreviews] = useState<Partial<Record<NamingPreviewKey, NamingFormatPreview>>>({});
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const inputRefs = useRef<Partial<Record<NamingFormatKey, HTMLInputElement | null>>>({});
@@ -271,43 +312,99 @@ export const NamingFormatsEditor: React.FC<NamingFormatsEditorProps> = ({ value,
               </div>
             </div>
 
-            {preview && (
-              <div className="rounded-[3px] border border-[#1f1f1f] bg-[#0a0a0a] p-2.5 space-y-1.5">
-                {preview.warnings.map((w) => (
-                  <div key={w} className="flex items-start gap-1.5 text-[11px] text-amber-400 font-mono">
-                    <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
-                    <span>{w}</span>
-                  </div>
-                ))}
-                {preview.samples.map((s) => (
-                  <div key={s.sample_id} className="text-[11px] font-mono leading-snug">
-                    <span className="text-neutral-500">{s.sample_name}</span>
-                    <div className="text-emerald-300 break-all">{s.output || '(empty)'}</div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <FormatPreviewSamples preview={preview} />
           </div>
         );
       })}
 
+      <div className="space-y-2">
+        <div>
+          <label htmlFor="naming-compilation_track_format" className={LABEL_CLASS}>
+            Compilation File Name (optional)
+          </label>
+          <input
+            id="naming-compilation_track_format"
+            name="compilation_track_format"
+            type="text"
+            spellCheck={false}
+            value={compilation}
+            onChange={(e) => onChange({ compilation_track_format: e.target.value })}
+            placeholder="{track:00} - {Track ArtistName} - {Track Title}"
+            className={INPUT_CLASS}
+          />
+          <p className="text-[11px] text-neutral-500 font-mono mt-1">
+            File name for Various Artists / compilation releases; &#123;Track ArtistName&#125; is each track's own artist. Leave empty to use the track formats above.
+          </p>
+        </div>
+
+        <FormatPreviewSamples preview={previews.compilation_track_format} />
+      </div>
+
       <div>
-        <label htmlFor="naming-compilation_track_format" className={LABEL_CLASS}>
-          Compilation File Name (optional)
+        <label htmlFor="naming-compilation_artist_folder" className={LABEL_CLASS}>
+          Compilation artist folder
         </label>
         <input
-          id="naming-compilation_track_format"
-          name="compilation_track_format"
+          id="naming-compilation_artist_folder"
+          name="compilation_artist_folder"
           type="text"
           spellCheck={false}
-          value={compilation}
-          onChange={(e) => onChange({ compilation_track_format: e.target.value })}
-          placeholder="{track:00} - {Artist Name} - {Track Title}"
+          value={context?.compilation_artist_folder ?? 'Various Artists'}
+          onChange={(e) => onChange({ compilation_artist_folder: e.target.value })}
           className={INPUT_CLASS}
         />
         <p className="text-[11px] text-neutral-500 font-mono mt-1">
-          Overrides only the file name for Various Artists / compilation releases. Leave empty to use the track
-          formats above.
+          Folder that holds Various Artists albums, e.g. Various Artists, VA or Compilations.
+        </p>
+      </div>
+
+      <div>
+        <label htmlFor="naming-remix_credit" className={LABEL_CLASS}>
+          Remix credit
+        </label>
+        <select
+          id="naming-remix_credit"
+          name="remix_credit"
+          value={context?.remix_credit ?? 'original'}
+          onChange={(e) => {
+            const val = e.target.value;
+            if (isRemixCredit(val)) {
+              onChange({ remix_credit: val });
+            }
+          }}
+          className={INPUT_CLASS}
+        >
+          <option value="original">Original artist (remixer stays in the title)</option>
+          <option value="remixer">Remixer</option>
+          <option value="as_credited">As credited on MusicBrainz</option>
+        </select>
+        <p className="text-[11px] text-neutral-500 font-mono mt-1">
+          Who a remix is filed under in file names and the ARTIST tag.
+        </p>
+      </div>
+
+      <div>
+        <label htmlFor="naming-featured_artists" className={LABEL_CLASS}>
+          Featured artists
+        </label>
+        <select
+          id="naming-featured_artists"
+          name="featured_artists"
+          value={context?.featured_artists ?? 'in_title'}
+          onChange={(e) => {
+            const val = e.target.value;
+            if (isFeaturedArtists(val)) {
+              onChange({ featured_artists: val });
+            }
+          }}
+          className={INPUT_CLASS}
+        >
+          <option value="in_title">Keep in the title as MusicBrainz has it</option>
+          <option value="in_artist">Add to the artist (A feat. B)</option>
+          <option value="drop">Leave out</option>
+        </select>
+        <p className="text-[11px] text-neutral-500 font-mono mt-1">
+          Where feat. credits go in file names and the ARTIST tag.
         </p>
       </div>
 

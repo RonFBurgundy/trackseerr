@@ -1,6 +1,7 @@
 import type { Narrow, Schema } from './apiSchema';
 import type { MonitorOption } from './monitoring';
 import type { ListMonitorMode } from './importLists';
+import type { FeaturedArtists, RemixCredit } from './naming';
 /**
  * Domain & UI models for TrackSeerr React SPA.
  * Strictly typed with zero `any` / `as any`.
@@ -136,7 +137,16 @@ export type ImportBitrateCheck = 'off' | 'warn' | 'reject';
 
 export type SeedCompleteAction = 'keep' | 'remove' | 'remove_and_delete';
 
-export type MediaManagementSettings = Narrow<Schema<'MediaManagementSettingsModel'>, { add_monitor_option: MonitorOption; scan_monitor_option: MonitorOption; import_bitrate_check: ImportBitrateCheck }> & { seed_rule_conflict?: boolean };
+export type MediaManagementSettings = Narrow<
+  Schema<'MediaManagementSettingsModel'>,
+  {
+    add_monitor_option: MonitorOption;
+    scan_monitor_option: MonitorOption;
+    import_bitrate_check: ImportBitrateCheck;
+    remix_credit: RemixCredit;
+    featured_artists: FeaturedArtists;
+  }
+> & { seed_rule_conflict?: boolean };
 
 export type RecycleBinEmptyResult = Schema<'RecycleBinEmptyResponse'>;
 

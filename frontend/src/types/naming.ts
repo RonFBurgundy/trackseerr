@@ -12,20 +12,28 @@ export interface NamingFormats {
   compilation_track_format?: string;
 }
 
+export type RemixCredit = 'original' | 'remixer' | 'as_credited';
+export type FeaturedArtists = 'in_title' | 'in_artist' | 'drop';
+
 /** Fields applied together when a preset is chosen (never the library root path). */
 export interface NamingPreset extends NamingFormats {
   colon_replacement_format?: string;
   replace_illegal_characters?: boolean;
   rename_artist_folders?: boolean;
+  remix_credit?: RemixCredit;
+  featured_artists?: FeaturedArtists;
+  compilation_artist_folder?: string;
 }
 
 export type NamingFormatKey = 'artist_folder_format' | 'standard_track_format' | 'multi_disc_track_format';
+
+export type NamingPreviewKey = NamingFormatKey | 'compilation_track_format';
 
 export type NamingFormatSample = Schema<'FormatSamplePreviewModel'>;
 
 export type NamingFormatPreview = Narrow<Schema<'FormatPreviewModel'>, { samples: NamingFormatSample[]; warnings: string[] }>;
 
-export type NamingPreviewResponse = Narrow<Schema<'PreviewResponseModel'>, { format_previews: Record<NamingFormatKey, NamingFormatPreview> }>;
+export type NamingPreviewResponse = Narrow<Schema<'PreviewResponseModel'>, { format_previews: Record<NamingPreviewKey, NamingFormatPreview> }>;
 
 export interface NamingTokenHelp {
   token: string;
@@ -55,5 +63,9 @@ export interface NamingPresetCatalog {
 export interface NamingPreviewContext {
   root_folder_path?: string;
   colon_replacement_format?: string;
-  replace_illegal_characters?: boolean;  rename_artist_folders?: boolean;
+  replace_illegal_characters?: boolean;
+  rename_artist_folders?: boolean;
+  remix_credit?: RemixCredit;
+  featured_artists?: FeaturedArtists;
+  compilation_artist_folder?: string;
 }
