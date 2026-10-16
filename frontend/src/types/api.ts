@@ -10764,6 +10764,23 @@ export interface components {
             /** Secondary Types */
             secondary_types: string[];
         };
+        /** MetadataSourceStatus */
+        MetadataSourceStatus: {
+            /** Breaker State */
+            breaker_state: string;
+            /** Host */
+            host: string;
+            /** Max Concurrency */
+            max_concurrency: number;
+            /** Paused Seconds Remaining */
+            paused_seconds_remaining: number;
+            /** Rate Limit Rps */
+            rate_limit_rps: number;
+            /** Requests Last Hour */
+            requests_last_hour: number;
+            /** Role */
+            role: string;
+        };
         /** MfaSetupResponse */
         MfaSetupResponse: {
             /** Otpauth Uri */
@@ -13533,6 +13550,11 @@ export interface components {
             environment: components["schemas"]["EnvironmentStatus"];
             /** Indexers */
             indexers: components["schemas"]["ServicePingResult"][];
+            /**
+             * Metadata Sources
+             * @default []
+             */
+            metadata_sources: components["schemas"]["MetadataSourceStatus"][];
             plex: components["schemas"]["PlexStatus"];
             /** Storage */
             storage: components["schemas"]["DiskUsageItem"][];
