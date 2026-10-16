@@ -40,6 +40,7 @@ from trackseerr.library import (
     resolve_collision,
     write_audio_tags,
 )
+from trackseerr.track_credits import tag_artist_from_credits
 from trackseerr.models import (
     DownloadStatus,
     NotificationEvent,
@@ -761,10 +762,24 @@ class ImportPipelineMixin(ImportCatalogMixin):
             logger.warning("Failed to record item_available event: %s", ev_err)
 
         # Tag writing and artwork embedding
+        track_artist: Optional[str] = None
+        track_credits = metadata.get("track_credits")
+        if isinstance(track_credits, list) and track_credits:
+            track_title = str(metadata.get("title") or (job.req.get("title") if job.req else "") or "")
+            credited_artist, _ = tag_artist_from_credits(
+                track_credits,
+                track_title,
+                ctx.media_settings,
+            )
+            if credited_artist is not None:
+                track_artist = credited_artist
+
         tags_to_write: dict[str, Any] = build_tags_to_write(
             metadata,
             req=job.req,
             audio_files_count=len(job.audio_files),
+            artist=track_artist,
+            album_artist=metadata.get("album_artist") or None,
         )
 
         # Asynchronously enrich with MBIDs if enabled

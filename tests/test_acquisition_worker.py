@@ -13,6 +13,7 @@ from trackseerr.import_files import (
     place_audio_file,
     safe_atomic_move,
 )
+from trackseerr.library import build_tags_to_write
 from trackseerr.models import (
     ActiveDownload,
     DownloadClientConfig,
@@ -761,3 +762,16 @@ def test_failed_album_download_researches_album_tracks(test_db, tmp_path):
             patch.object(Database, "list_wanted_search_targets", return_value=[{"track_id": "t1"}]) as lt:
         _poll_slskd(test_db, tmp_path, {"status": "failed", "error_message": "Unpack failed"})
     lt.assert_called_once_with(track_ids=["t1", "t2"])
+
+
+def test_build_tags_to_write_with_album_artist():
+    tags = build_tags_to_write(
+        artist="Bee Gees",
+        album_artist="Various Artists",
+        album="Saturday Night Fever",
+        title="Stayin' Alive",
+    )
+    assert tags["artist"] == "Bee Gees"
+    assert tags["albumartist"] == "Various Artists"
+    assert tags["album"] == "Saturday Night Fever"
+    assert tags["title"] == "Stayin' Alive"

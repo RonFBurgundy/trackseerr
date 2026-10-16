@@ -1122,4 +1122,134 @@ def test_task_progress_reads_manual_run():
         task_manager.unregister_manual_run("library_retag", handle)
 
 
+def test_retag_compilation_track_gets_credited_artist(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    """Compilation track retags with per-track credited artist and ALBUMARTIST."""
+    app, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    music_dir = tmp_path / "music"
+
+    initial_tags = {
+        "artist": "Old Artist",
+        "album": "Old Album",
+        "title": "Old Title",
+        "date": "1999",
+        "tracknumber": 99,
+    }
+    catalog, file_path = _setup_library_track(
+        test_db,
+        music_dir,
+        artist_name="Various Artists",
+        album_title="Saturday Night Fever",
+        track_title="Stayin' Alive",
+        initial_tags=initial_tags,
+    )
+
+    test_db.replace_track_artists(
+        "trk-1",
+        [
+            {
+                "artist_name": "Bee Gees",
+                "artist_mbid": "mbid-bee-gees",
+                "role": "primary",
+                "position": 1,
+                "join_phrase": "",
+                "source": "musicbrainz",
+            }
+        ],
+    )
+
+    # 1. Preview shows differing fields including albumartist
+    p1 = client.post(
+        "/api/library/retag/preview",
+        json={"album_id": "alb-1"},
+        headers=admin_headers,
+    )
+    assert p1.status_code == 200
+    items = p1.json()
+    assert len(items) == 1
+    diffs_by_field = {d["field"]: d for d in items[0]["diffs"]}
+    assert diffs_by_field["artist"]["proposed"] == "Bee Gees"
+    assert diffs_by_field["albumartist"]["proposed"] == "Various Artists"
+    assert diffs_by_field["musicbrainz_artistid"]["proposed"] == "mbid-bee-gees"
+
+    # 2. Apply retag
+    apply_resp = client.post(
+        "/api/library/retag/apply",
+        json={"file_ids": ["fl-1"]},
+        headers=admin_headers,
+    )
+    assert apply_resp.status_code == 200
+    res = apply_resp.json()
+    assert res["retagged_count"] == 1
+    assert res["applied_count"] == 1
+
+    # 3. Verify file on disk has updated tags
+    meta = inspect_audio_file(file_path)
+    assert meta["artist"] == "Bee Gees"
+    assert meta["album_artist"] == "Various Artists"
+    assert meta["musicbrainz_artistid"] == "mbid-bee-gees"
+
+    # 4. Second preview must be empty because all tags now match
+    p2 = client.post(
+        "/api/library/retag/preview",
+        json={"album_id": "alb-1"},
+        headers=admin_headers,
+    )
+    assert p2.status_code == 200
+    assert p2.json() == []
+
+
+def test_retag_without_credits_keeps_album_artist(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    """Without per-track credits, ARTIST retains the library artist name."""
+    app, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    music_dir = tmp_path / "music"
+
+    initial_tags = {
+        "artist": "Old Artist",
+        "album": "Old Album",
+        "title": "Old Title",
+        "date": "1999",
+        "tracknumber": 99,
+    }
+    catalog, file_path = _setup_library_track(
+        test_db,
+        music_dir,
+        artist_name="Various Artists",
+        album_title="Saturday Night Fever",
+        track_title="Stayin' Alive",
+        initial_tags=initial_tags,
+    )
+
+    # 1. Preview shows proposed artist is library artist name
+    p1 = client.post(
+        "/api/library/retag/preview",
+        json={"album_id": "alb-1"},
+        headers=admin_headers,
+    )
+    assert p1.status_code == 200
+    items = p1.json()
+    assert len(items) == 1
+    diffs_by_field = {d["field"]: d for d in items[0]["diffs"]}
+    assert diffs_by_field["artist"]["proposed"] == "Various Artists"
+    assert diffs_by_field["albumartist"]["proposed"] == "Various Artists"
+
+    # 2. Apply retag
+    apply_resp = client.post(
+        "/api/library/retag/apply",
+        json={"file_ids": ["fl-1"]},
+        headers=admin_headers,
+    )
+    assert apply_resp.status_code == 200
+
+    # 3. Verify file on disk
+    meta = inspect_audio_file(file_path)
+    assert meta["artist"] == "Various Artists"
+    assert meta["album_artist"] == "Various Artists"
+
+
 

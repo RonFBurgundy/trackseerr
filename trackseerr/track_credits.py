@@ -112,6 +112,27 @@ def apply_credit_style(
     return (artist or None, out_title)
 
 
+def tag_artist_from_credits(
+    credits: list[dict[str, Any]],
+    title: str,
+    settings: dict[str, Any],
+) -> tuple[str | None, str | None]:
+    """Calculates credited track artist and primary MBID for audio tagging.
+
+    The title is NOT rewritten in tags.
+    """
+    if not credits:
+        return None, None
+
+    credits_sorted = [c for _, c in sorted(enumerate(credits), key=_credit_pos_key)]
+    primaries = [c for c in credits_sorted if c.get("role") == "primary"]
+    mbid = str(primaries[0].get("artist_mbid") or "").strip() or None if primaries else None
+
+    remix_credit = (settings or {}).get("remix_credit") or "original"
+    featured_artists = (settings or {}).get("featured_artists") or "in_title"
+    artist = apply_credit_style(credits, title, remix_credit, featured_artists)[0]
+
+    return artist, mbid
 
 
 def credits_from_mb_artist_credit(artist_credit: Any) -> list[dict[str, Any]]:

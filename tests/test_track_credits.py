@@ -7,6 +7,7 @@ from trackseerr.track_credits import (
     build_track_credits,
     credits_from_mb_artist_credit,
     remixers_from_title,
+    tag_artist_from_credits,
 )
 
 
@@ -183,3 +184,32 @@ def test_no_primary_returns_none() -> None:
     artist, title = apply_credit_style(credits, "Some Track", "original", "in_title")
     assert artist is None
     assert title == "Some Track"
+
+
+def test_tag_artist_from_credits_uses_primary_mbid() -> None:
+    credits = [
+        {"artist_name": "Bee Gees", "artist_mbid": "bg-mbid", "role": "primary", "position": 1},
+        {"artist_name": "Robin Gibb", "artist_mbid": "rg-mbid", "role": "featured", "position": 2},
+    ]
+    artist, mbid = tag_artist_from_credits(
+        credits, "Stayin' Alive", {"remix_credit": "original", "featured_artists": "in_title"}
+    )
+    assert artist == "Bee Gees"
+    assert mbid == "bg-mbid"
+
+
+def test_tag_artist_from_credits_featured_in_artist_mode() -> None:
+    credits = [
+        {"artist_name": "Main Artist", "artist_mbid": "main-mbid", "role": "primary", "position": 1},
+        {"artist_name": "Guest Artist", "artist_mbid": "guest-mbid", "role": "featured", "position": 2},
+    ]
+    artist, mbid = tag_artist_from_credits(
+        credits, "Song (feat. Guest Artist)", {"featured_artists": "in_artist"}
+    )
+    assert artist == "Main Artist feat. Guest Artist"
+    assert mbid == "main-mbid"
+
+
+def test_tag_artist_from_credits_empty() -> None:
+    assert tag_artist_from_credits([], "Song", {}) == (None, None)
+    assert tag_artist_from_credits(None, "Song", {}) == (None, None)
