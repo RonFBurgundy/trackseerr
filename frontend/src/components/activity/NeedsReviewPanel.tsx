@@ -158,7 +158,7 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
         ) : (
           <div className="space-y-4">
             {supported && regularGroups.length > 0 && (
-              <ReviewGroupList groups={regularGroups} findings={data.findings} busy={busy} onDismiss={hl.dismiss} />
+              <ReviewGroupList groups={regularGroups} findings={data.findings} busy={busy} onDismiss={hl.dismiss} onShorten={hl.shorten} />
             )}
             {weak.length > 0 && <ReviewWeakMatches findings={weak} busy={busy} onRematch={rematch} onDismiss={hl.dismiss} />}
             {orphans.length > 0 && <ReviewOrphans findings={orphans} busy={busy} onRemove={hl.removeOrphan} />}

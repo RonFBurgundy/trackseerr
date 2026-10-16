@@ -9,12 +9,13 @@ export interface ReviewGroupListProps {
   findings: readonly LibraryHealthFinding[];
   busy: boolean;
   onDismiss: (path: string, scope: 'file' | 'folder') => Promise<void>;
+  onShorten?: (findingId: string) => Promise<void>;
 }
 
 const groupId = (g: LibraryHealthGroup): string => `${g.kind}|${g.cause}|${g.group_key}`;
 
 /** Groups bucketed under a heading per cause; each row expands to its findings with dismiss actions. */
-export const ReviewGroupList: React.FC<ReviewGroupListProps> = React.memo(({ groups, findings, busy, onDismiss }) => {
+export const ReviewGroupList: React.FC<ReviewGroupListProps> = React.memo(({ groups, findings, busy, onDismiss, onShorten }) => {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
 
   const toggle = (id: string): void =>
@@ -83,6 +84,16 @@ export const ReviewGroupList: React.FC<ReviewGroupListProps> = React.memo(({ gro
                         <span className="min-w-0 flex-1 truncate text-[11px] font-mono text-[var(--text-secondary)]" title={f.path}>
                           {f.path}
                         </span>
+                        {f.kind === 'long_name' && onShorten && (
+                          <TapeDeckButton
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => void onShorten(f.id)}
+                            aria-label={`Shorten name of ${f.path}`}
+                          >
+                            Shorten name
+                          </TapeDeckButton>
+                        )}
                         <TapeDeckButton
                           size="sm"
                           disabled={busy}

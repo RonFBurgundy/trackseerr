@@ -54,6 +54,11 @@ export const RENAME_REASONS: Readonly<Record<string, RenameReasonInfo>> = {
     help: 'The track title in the file name would change, not just its formatting.',
     risky: true,
   },
+  name_too_long: {
+    label: 'Name too long',
+    help: 'A file or folder name is too long for some file systems and tools, like the Unraid mover. Renaming shortens it.',
+    risky: false,
+  },
   collision: {
     label: 'Name collision',
     help: 'Another file already maps to this name; the move may be skipped or renamed.',

@@ -7,6 +7,7 @@ import {
   getLibraryHealth,
   setLibraryHealthMapping,
   setLibraryHealthWeekly,
+  shortenLibraryHealthFinding,
   startLibraryHealthCheck,
 } from '@/services/libraryHealthService';
 import type { LibraryHealthDismissScope, LibraryHealthResponse } from '@/types/libraryHealth';
@@ -30,6 +31,7 @@ export interface UseLibraryHealthReturn {
   refresh: () => Promise<void>;
   checkNow: () => Promise<void>;
   dismiss: (path: string, scope: LibraryHealthDismissScope) => Promise<void>;
+  shorten: (findingId: string) => Promise<void>;
   saveMapping: (serverPrefix: string, localPrefix: string) => Promise<void>;
   removeMapping: () => Promise<void>;
   setWeekly: (enabled: boolean) => Promise<void>;
@@ -115,6 +117,11 @@ export function useLibraryHealth({ onChanged, onToast }: UseLibraryHealthOptions
     [mutate]
   );
 
+  const shorten = useCallback(
+    (findingId: string) => mutate(() => shortenLibraryHealthFinding(findingId), 'Name shortened', 'Failed to shorten the name'),
+    [mutate]
+  );
+
   const saveMapping = useCallback(
     (serverPrefix: string, localPrefix: string) =>
       mutate(
@@ -187,6 +194,7 @@ export function useLibraryHealth({ onChanged, onToast }: UseLibraryHealthOptions
     refresh,
     checkNow,
     dismiss,
+    shorten,
     saveMapping,
     removeMapping,
     setWeekly,
