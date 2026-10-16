@@ -3654,7 +3654,7 @@ export interface paths {
         put?: never;
         /**
          * Create Playlist
-         * @description Adds playlist via Spotify/Deezer URL or ID. Validates SSRF with extract_spotify_id / extract_deezer_id.
+         * @description Adds playlist via Spotify/Deezer/YouTube Music URL or ID. Validates SSRF.
          *
          *     Extracts metadata and sets initial targets.
          */
@@ -11288,7 +11288,7 @@ export interface components {
         PlaylistCreateRequest: {
             /**
              * Service
-             * @description Optional service hint: 'spotify' or 'deezer'
+             * @description Optional service hint: 'spotify', 'deezer' or 'youtube_music'
              */
             service?: string | null;
             /**
