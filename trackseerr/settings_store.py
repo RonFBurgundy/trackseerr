@@ -43,8 +43,8 @@ def _normalize_mb_mirror_url(raw_url: str) -> str:
         parsed = urllib.parse.urlparse(val)
         if parsed.hostname == "api.brainzmash.org":
             return "https://api.brainzmash.cc"
-    except Exception:
-        pass
+    except ValueError as exc:
+        logger.warning("Ignoring unparseable mb_mirror_url %r: %s", val, exc)
     return val
 
 

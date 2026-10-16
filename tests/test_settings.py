@@ -648,3 +648,16 @@ class TestGeneralSettingsAPI:
         assert resp.status_code == 200
         assert resp.json()["application_url"] == ""
 
+
+def test_normalize_mb_mirror_url_unparseable_is_kept_and_logged(caplog):
+    """Verify that unparseable mirror URLs return unchanged and log a warning."""
+    import logging
+    from trackseerr.settings_store import _normalize_mb_mirror_url
+
+    invalid_url = "http://[::1"
+    with caplog.at_level(logging.WARNING, logger="trackseerr.settings_store"):
+        result = _normalize_mb_mirror_url(invalid_url)
+
+    assert result == invalid_url
+    assert any("Ignoring unparseable mb_mirror_url 'http://[::1'" in record.message for record in caplog.records)
+
