@@ -1,11 +1,12 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Ban, FolderInput, RotateCcw, Trash2 } from 'lucide-react';
 import type { ActivityQueueRecord, ActivitySeeding, ListSortDir } from '@/types/activity';
-import { getActivityQueue, removeActivityQueueItem, retryActivityQueueItem } from '@/services/activityService';
+import { getActivityQueue, bulkQueueAction, retryActivityQueueItem } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
-import { pagedFetcher, useVirtualPagedList } from '@/hooks/useVirtualPagedList';
+import { pagedFetcher, useVirtualPagedList, type ListKey } from '@/hooks/useVirtualPagedList';
 import { usePolling } from '@/hooks/usePolling';
-import { ConfirmDialog, TactileSwitch, type OverflowMenuItem } from '@/components/ui';
+import { useListSelection } from '@/hooks/useListSelection';
+import { ConfirmDangerButton, ConfirmDialog, TactileSwitch, type OverflowMenuItem } from '@/components/ui';
 import { SoulseekQueueDetail } from './SoulseekQueueDetail';
 import { ManualImportModal } from '@/components/manualImport';
 import type { ManualImportScope } from '@/types/manualImport';
@@ -84,40 +85,112 @@ const StatusCell: React.FC<{ record: ActivityQueueRecord }> = ({ record }) => {
 export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) => {
   const [sortKey, setSortKey] = useState<string>('added_at');
   const [sortDir, setSortDir] = useState<ListSortDir>('desc');
-  const [removingId, setRemovingId] = useState<string | number | null>(null);
+  const [removingIds, setRemovingIds] = useState<ReadonlyArray<ListKey> | null>(null);
   const [removeFromClient, setRemoveFromClient] = useState<boolean>(true);
   const [blocklist, setBlocklist] = useState<boolean>(false);
   const [busyId, setBusyId] = useState<string | number | null>(null);
+  const [bulkBusy, setBulkBusy] = useState<boolean>(false);
   const [importScope, setImportScope] = useState<ManualImportScope | null>(null);
+  const { selected, setSelected, clear } = useListSelection();
 
   const list = useVirtualPagedList<ActivityQueueRecord>(fetchQueue, { sortKey, sortDir, getKey });
-  const { refresh, removeItems } = list;
+  const { refresh, removeItems, getLoadedItems, version } = list;
   usePolling(() => void refresh(), 5000);
+
+  // Drop selected keys that are no longer in loaded rows after each cache version change/refresh
+  useEffect(() => {
+    if (selected.size === 0) return;
+    const loaded = getLoadedItems();
+    const loadedKeys = new Set(loaded.map(getKey));
+    const nextSelected = new Set(Array.from(selected).filter((key) => loadedKeys.has(key)));
+    if (nextSelected.size !== selected.size) {
+      setSelected(nextSelected);
+    }
+  }, [version, getLoadedItems, selected, setSelected]);
 
   const onSortChange = useCallback((key: string, dir: ListSortDir) => {
     setSortKey(key);
     setSortDir(dir);
   }, []);
 
-  const doRemove = useCallback(
-    async (id: string | number) => {
-      setBusyId(id);
+  const doRemoveMany = useCallback(
+    async (ids: ReadonlyArray<ListKey>) => {
+      setBulkBusy(true);
+      const done = new Set<ListKey>();
+      let failure: string | null = null;
       try {
-        const res = await removeActivityQueueItem(id, { removeFromClient, blocklist });
-        if (!res.success) {
-          onToast(res.message || 'Failed to remove queue item', 'error');
-          return;
+        const stringIds = ids.map((id) => String(id));
+        const res = await bulkQueueAction({
+          ids: stringIds,
+          action: 'remove',
+          remove_from_client: removeFromClient,
+          blocklist,
+        });
+        for (const r of res.results) {
+          if (r.success) {
+            done.add(r.id);
+          } else if (!failure) {
+            failure = r.message || 'Failed to remove queue item';
+          }
         }
-        removeItems(new Set([id]));
-        setRemovingId(null);
-        onToast(res.message || (blocklist ? 'Removed and blocklisted' : 'Removed from queue'));
       } catch (err: unknown) {
-        onToast(errorMessage(err, 'Failed to remove queue item'), 'error');
-      } finally {
-        setBusyId(null);
+        failure = errorMessage(err, 'Failed to remove queue item');
       }
+      removeItems(done);
+      setSelected(new Set(ids.filter((id) => !done.has(id))));
+      setRemovingIds(null);
+      if (failure) {
+        onToast(`Removed ${done.size} of ${ids.length}: ${failure}`, 'error');
+      } else {
+        clear();
+        onToast(`Removed ${done.size} from the queue`);
+      }
+      setBulkBusy(false);
     },
-    [removeFromClient, blocklist, removeItems, onToast]
+    [removeFromClient, blocklist, removeItems, setSelected, clear, onToast]
+  );
+
+  const doRetryMany = useCallback(
+    async (ids: ReadonlyArray<ListKey>) => {
+      setBulkBusy(true);
+      const done = new Set<ListKey>();
+      let failure: string | null = null;
+      const chunkSize = 20;
+
+      for (let i = 0; i < ids.length; i += chunkSize) {
+        const chunk = ids.slice(i, i + chunkSize);
+        try {
+          const stringIds = chunk.map((id) => String(id));
+          const res = await bulkQueueAction({
+            ids: stringIds,
+            action: 'retry',
+            remove_from_client: false,
+            blocklist: false,
+          });
+          for (const r of res.results) {
+            if (r.success) {
+              done.add(r.id);
+            } else if (!failure) {
+              failure = r.message || 'Failed to retry';
+            }
+          }
+        } catch (err: unknown) {
+          if (!failure) failure = errorMessage(err, 'Failed to retry');
+          break;
+        }
+      }
+
+      void refresh();
+      setSelected(new Set(ids.filter((id) => !done.has(id))));
+      if (failure) {
+        onToast(`Retried ${done.size} of ${ids.length}: ${failure}`, 'error');
+      } else {
+        clear();
+        onToast(`Retried ${done.size}`);
+      }
+      setBulkBusy(false);
+    },
+    [refresh, setSelected, clear, onToast]
   );
 
   const doRetry = useCallback(
@@ -221,13 +294,13 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
         key: 'remove',
         label: 'Remove…',
         icon: <Trash2 className="h-3.5 w-3.5" />,
-        disabled: busy,
-        onSelect: () => setRemovingId(r.id),
+        disabled: busy || bulkBusy,
+        onSelect: () => setRemovingIds([r.id]),
       });
 
       return items;
     },
-    [busyId, doRetry]
+    [busyId, bulkBusy, doRetry]
   );
 
   const rowAttention = useCallback(
@@ -279,8 +352,42 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
     );
   }, []);
 
+  const toolbar =
+    selected.size > 0 ? (
+      <>
+        <span className="self-center text-[11px] font-mono text-neutral-400">{selected.size} selected</span>
+        <ConfirmDangerButton
+          icon={<RotateCcw className="h-3.5 w-3.5" />}
+          idleLabel="Retry selected"
+          collapseLabel
+          ariaLabel={`Retry ${selected.size} selected items in queue`}
+          confirmLabel={`Retry ${selected.size}`}
+          disabled={bulkBusy}
+          onConfirm={() => void doRetryMany(Array.from(selected))}
+        />
+        <ConfirmDangerButton
+          icon={<Trash2 className="h-3.5 w-3.5" />}
+          idleLabel="Remove selected"
+          collapseLabel
+          ariaLabel={`Remove ${selected.size} selected from queue`}
+          confirmLabel={`Remove ${selected.size}`}
+          disabled={bulkBusy}
+          onConfirm={() => setRemovingIds(Array.from(selected))}
+        />
+      </>
+    ) : null;
+
+  const removingCount = removingIds ? removingIds.length : 0;
+  const isSingleRemove = removingCount === 1;
+
   return (
-    <ListPanel title="Queue" description="Active and pending downloads. Refreshes every 5 seconds." mode={list.mode} total={list.total}>
+    <ListPanel
+      title="Queue"
+      description="Active and pending downloads. Refreshes every 5 seconds."
+      mode={list.mode}
+      total={list.total}
+      toolbar={toolbar}
+    >
       <FlatList
         ariaLabel="Download queue"
         columns={columns}
@@ -289,6 +396,8 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
         sortKey={sortKey}
         sortDir={sortDir}
         onSortChange={onSortChange}
+        selectedKeys={selected}
+        onSelectedKeysChange={setSelected}
         layout="card"
         rowMenu={rowMenu}
         rowMenuLabel={rowMenuLabel}
@@ -308,18 +417,20 @@ export const ActivityQueuePanel: React.FC<ActivityPanelProps> = ({ onToast }) =>
         }}
       />
       <ConfirmDialog
-        isOpen={removingId !== null}
-        title="Remove from queue"
+        isOpen={removingIds !== null}
+        title={isSingleRemove ? 'Remove from queue' : `Remove ${removingCount} from queue`}
         confirmLabel="Remove"
         onConfirm={() => {
-          if (removingId !== null) void doRemove(removingId);
+          if (removingIds !== null) void doRemoveMany(removingIds);
         }}
-        onCancel={() => setRemovingId(null)}
-        busy={removingId !== null && busyId === removingId}
+        onCancel={() => setRemovingIds(null)}
+        busy={bulkBusy && removingIds !== null}
       >
         <div className="space-y-3 py-1">
           <p className="text-xs font-mono text-neutral-300">
-            Remove this item from the download queue?
+            {isSingleRemove
+              ? 'Remove this item from the download queue?'
+              : `Remove ${removingCount} items from the download queue?`}
           </p>
           <div className="flex flex-col gap-2.5">
             <TactileSwitch

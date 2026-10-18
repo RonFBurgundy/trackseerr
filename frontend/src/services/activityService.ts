@@ -1,5 +1,6 @@
 import { apiRequest } from './apiClient';
 import { buildIndexUrl, buildListUrl } from './listUrl';
+import type { Schema } from '@/types/apiSchema';
 import type {
   ActivityActionResult,
   ActivityBlocklistRecord,
@@ -49,6 +50,13 @@ export function removeActivityQueueItem(id: string | number, opts: QueueRemoveOp
   });
 }
 
+export function bulkQueueAction(body: Schema<'QueueBulkRequest'>): Promise<Schema<'BulkActionResult'>> {
+  return apiRequest<Schema<'BulkActionResult'>>('/api/activity/queue/bulk', {
+    method: 'POST',
+    body,
+  });
+}
+
 export interface ActivitySearchQuery {
   page: number;
   pageSize: number;
@@ -82,6 +90,13 @@ export function markHistoryFailed(id: string | number): Promise<ActivityActionRe
 export function removeBlocklistItem(id: string | number): Promise<ActivityActionResult> {
   return apiRequest<ActivityActionResult>(`/api/activity/blocklist/${encodeURIComponent(String(id))}`, {
     method: 'DELETE',
+  });
+}
+
+export function bulkRemoveBlocklist(ids: ReadonlyArray<string | number>): Promise<Schema<'BulkActionResult'>> {
+  return apiRequest<Schema<'BulkActionResult'>>('/api/activity/blocklist/bulk-remove', {
+    method: 'POST',
+    body: { ids: ids.map((id) => String(id)) },
   });
 }
 
