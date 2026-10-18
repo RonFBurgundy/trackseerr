@@ -107,6 +107,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Soulseek downloads for a song must be that song. A search for "Time" no longer grabs "All of the Time", and a file from an album named like the song (Logic's "Under Pressure" album giving "Bounce") is no longer taken.
 - Songs you already own on another release ("Play in the Sunshine" when a playlist asks for "Play In The Sunshine - 2020 Remaster") count as owned, so TrackSeerr no longer searches for and downloads them again.
 - When a download replaces a track whose old file has a very long name, the old file now goes to the recycle bin under a shortened name instead of being left behind in your library.
 - TrackSeerr no longer asks your media server to rescan its whole library after every import. Like Sonarr, Radarr and Lidarr, it now asks Plex or Jellyfin to rescan only the album folders that changed, about a minute after imports, renames and retags. When it can't match a folder to the server's path, it falls back to one full music rescan at most every 10 minutes (set `MEDIA_SERVER_REFRESH_MINUTES`; `0` turns rescans off). Jellyfin full rescans now cover only music libraries. This stops large memory spikes in Plex and Jellyfin during big download batches.
