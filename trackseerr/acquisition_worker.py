@@ -38,15 +38,18 @@ from trackseerr.library import (
     AUDIO_EXTENSIONS,
     ArchiveLimitError,
     extract_archive,
+    inspect_audio_file,
     is_archive_file,
 )
 from trackseerr.models import (
     DownloadStatus,
     NotificationEvent,
+    RequestStatus,
 )
 from trackseerr.notifications import notification_dispatcher
 from trackseerr.redaction import safe_exc
 from trackseerr.storage import Database
+from trackseerr.track_matching import find_owned_equivalent
 
 from trackseerr.import_files import (
     effective_import_mode,
@@ -62,6 +65,7 @@ logger = logging.getLogger(__name__)
 from trackseerr.acquisition_import import (
     ImportPipelineMixin,
     _PollContext,
+    _download_artist_id,
 )
 
 
@@ -598,10 +602,6 @@ class AcquisitionWorker(ImportPipelineMixin):
         if lidarr_mode and not active_items:
             logger.debug("AcquisitionWorker: library manager is Lidarr; no native download polling")
 
-        if not active_items:
-            return stats
-
-
         ctx = _PollContext(
             media_settings=media_settings,
             write_tags=write_tags,
@@ -611,10 +611,140 @@ class AcquisitionWorker(ImportPipelineMixin):
             lidarr_mode=lidarr_mode,
         )
 
+        if not lidarr_mode:
+            self._resolve_parked_duplicates(db, ctx)
+
+        if not active_items:
+            return stats
+
         for item in active_items:
             self._process_item(db, ctx, item, stats)
 
         return stats
+
+    def _classify_held_path(
+        self,
+        db: Database,
+        item: dict[str, Any],
+        path_str: str,
+    ) -> str:
+        """Classify a held path as 'duplicate', 'gone_resolved', or 'still_held'."""
+        path = Path(path_str)
+        if not path.exists():
+            track_id = item.get("track_id")
+            if track_id and db.get_library_file_for_track(str(track_id)) is not None:
+                return "gone_resolved"
+            artist_id = _download_artist_id(db, item, None)
+            dl_title = item.get("title") or ""
+            if dl_title:
+                owned = find_owned_equivalent(db, artist_id, dl_title)
+                if owned and owned.get("cutoff_met"):
+                    return "gone_resolved"
+            return "still_held"
+
+        try:
+            metadata = inspect_audio_file(path)
+        except Exception as e:
+            logger.warning("Inspect failed for held file %s: %s", path, e)
+            return "still_held"
+
+        artist_id = _download_artist_id(db, item, None)
+        if not artist_id and metadata.get("artist"):
+            art = db.get_library_artist_by_name(str(metadata["artist"]))
+            if art and art.get("id"):
+                artist_id = str(art["id"])
+        title = metadata.get("title") or ""
+        duration = metadata.get("duration") or metadata.get("duration_seconds")
+        owned = find_owned_equivalent(db, artist_id, title, duration)
+        if owned and owned.get("cutoff_met"):
+            return "duplicate"
+        return "still_held"
+
+    def _clear_parked_download(
+        self,
+        db: Database,
+        item: dict[str, Any],
+        duplicate_paths: list[str],
+        driver_type: str,
+        import_mode: str,
+    ) -> None:
+        """Clears a parked download whose held files have all been resolved."""
+        if driver_type == "slskd" or import_mode == "move":
+            for p in duplicate_paths:
+                try:
+                    Path(p).unlink(missing_ok=True)
+                except OSError as e:
+                    logger.warning("Failed to delete duplicate file %s: %s", p, e)
+
+        client_id = item.get("client_id")
+        client_config = db.get_download_client(client_id) if client_id else None
+        target_lookup = item.get("download_hash") or item["id"]
+        if client_config:
+            try:
+                driver = get_acquisition_driver(client_config)
+                driver.cleanup_completed(target_lookup)
+            except Exception as e:
+                logger.warning("Driver cleanup_completed failed for %s: %s", item["id"], e)
+
+        db.set_download_unmatched_files(item["id"], [])
+        db.update_download_status(
+            item["id"],
+            status=DownloadStatus.IMPORTED.value,
+            error_message="Already in library — duplicate discarded",
+        )
+        if item.get("request_id"):
+            db.update_request_status(item["request_id"], RequestStatus.AVAILABLE.value)
+
+        track_id = item.get("track_id")
+        if track_id and db.get_library_file_for_track(str(track_id)) is None:
+            try:
+                db.set_track_monitored(str(track_id), False)
+                artist_id = _download_artist_id(db, item, None)
+                trk = db.get_library_track(str(track_id))
+                trk_title = trk.get("title") if trk else ""
+                owned = find_owned_equivalent(db, artist_id, trk_title) if trk_title else None
+                owned_title = owned.get("title") if owned else "equivalent track"
+                logger.info("Unmonitored %s: already owned as %s", track_id, owned_title)
+            except sqlite3.Error as exc:
+                logger.warning("Failed to unmonitor duplicate track %s: %s", track_id, exc)
+
+    def _resolve_parked_duplicates(self, db: Database, ctx: _PollContext) -> None:
+        """Sweeps parked WARNING downloads to auto-clear files already owned in library."""
+        warning_items = db.list_active_downloads(statuses=[DownloadStatus.WARNING.value])
+        for item in warning_items:
+            held_paths = item.get("unmatched_files") or []
+            if not held_paths:
+                continue
+
+            client_id = item.get("client_id")
+            client_config = db.get_download_client(client_id) if client_id else None
+            driver_type = str(client_config.get("driver_type") if client_config else item.get("client_driver_type") or "").lower()
+            import_mode = effective_import_mode(driver_type, ctx.media_settings)
+
+            duplicate_paths: list[str] = []
+            remaining_paths: list[str] = []
+
+            for path_str in held_paths:
+                cls = self._classify_held_path(db, item, path_str)
+                if cls == "duplicate":
+                    duplicate_paths.append(path_str)
+                elif cls == "gone_resolved":
+                    pass
+                else:
+                    remaining_paths.append(path_str)
+
+            if not remaining_paths:
+                self._clear_parked_download(db, item, duplicate_paths, driver_type, import_mode)
+            elif len(remaining_paths) < len(held_paths):
+                if driver_type == "slskd" or import_mode == "move":
+                    for p in duplicate_paths:
+                        try:
+                            Path(p).unlink(missing_ok=True)
+                        except OSError as e:
+                            logger.warning("Failed to delete duplicate file %s: %s", p, e)
+                db.set_download_unmatched_files(item["id"], remaining_paths)
+                msg = f"{len(remaining_paths)} file(s) couldn't be matched — manual import required"
+                db.update_download_status(item["id"], status=DownloadStatus.WARNING.value, error_message=msg)
 
     def _notify_download_failed(
         self,

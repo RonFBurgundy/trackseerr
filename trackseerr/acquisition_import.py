@@ -68,6 +68,7 @@ from trackseerr.seed_safety import (
 from trackseerr.track_matching import (
     MATCH_STRONG,
     _fingerprint_fallback_match,
+    find_owned_equivalent,
     reconcile_audio_file_to_track_scored,
     resolve_download_expected_tracks,
 )
@@ -196,6 +197,29 @@ def record_import_events(
         )
 
 
+def _download_artist_id(
+    db: Database,
+    item: dict[str, Any],
+    target_album: Optional[dict[str, Any]] = None,
+) -> Optional[str]:
+    """Resolves target artist ID from download track, target album, or artist name."""
+    if item.get("track_id"):
+        trk = db.get_library_track(str(item["track_id"]))
+        if trk and trk.get("artist_id"):
+            return str(trk["artist_id"])
+    if target_album and target_album.get("artist_id"):
+        return str(target_album["artist_id"])
+    if item.get("album_id"):
+        alb = db.get_library_album(str(item["album_id"]))
+        if alb and alb.get("artist_id"):
+            return str(alb["artist_id"])
+    if item.get("artist"):
+        art = db.get_library_artist_by_name(str(item["artist"]))
+        if art and art.get("id"):
+            return str(art["id"])
+    return None
+
+
 @dataclass(frozen=True)
 class _PollContext:
     """Settings and clients snapshot for a single acquisition poll pass."""
@@ -231,6 +255,7 @@ class _ImportJob:
     remaining_expected_tracks: list[dict[str, Any]] = field(default_factory=list)
     imported_paths: list[str] = field(default_factory=list)
     held_files: list[str] = field(default_factory=list)
+    duplicate_files: list[str] = field(default_factory=list)
     held_msg: Optional[str] = None
     placed_to_track: dict[str, dict[str, Any]] = field(default_factory=dict)
     recycled_in_place: dict[str, tuple[DisposeResult, dict[str, Any]]] = field(default_factory=dict)
@@ -628,6 +653,7 @@ class ImportPipelineMixin(ImportCatalogMixin):
         job.recycled_in_place = {}
         # Files with no catalog match when the release has expected tracks: left on disk for manual import.
         job.held_files = []
+        job.duplicate_files = []
 
     def _place_one_file(  # noqa: C901, PLR0915
         self,
@@ -690,6 +716,19 @@ class ImportPipelineMixin(ImportCatalogMixin):
                     )
 
         if job.expected_tracks and matched_expected_track is None:
+            artist_id = _download_artist_id(db, job.item, job.target_album)
+            title = metadata.get("title") or ""
+            duration = metadata.get("duration") or metadata.get("duration_seconds")
+            owned = find_owned_equivalent(db, artist_id, title, duration)
+            if owned and owned.get("cutoff_met"):
+                logger.info(
+                    "Download %s: %s is already in the library as %s; discarding duplicate",
+                    job.download_id,
+                    title,
+                    owned.get("title"),
+                )
+                job.duplicate_files.append(str(af))
+                return
             logger.warning(
                 "Holding unmatched file %s for download %s (manual import required)", af, job.download_id
             )
@@ -879,6 +918,10 @@ class ImportPipelineMixin(ImportCatalogMixin):
                 )
                 return False
 
+        if not job.imported_paths and not job.held_files and job.duplicate_files:
+            self._settle_duplicate(db, ctx, job)
+            return False
+
         if not job.imported_paths:
             logger.error("No audio files were successfully imported for download %s", job.download_id)
             err_msg = "Destination escaped music root or placement failed"
@@ -902,6 +945,72 @@ class ImportPipelineMixin(ImportCatalogMixin):
             stats["failed"] += 1
             return False
         return True
+
+    def _settle_duplicate(
+        self,
+        db: Database,
+        ctx: _PollContext,
+        job: _ImportJob,
+    ) -> None:
+        """Clears a completed download whose files are already owned in the library."""
+        if job.driver_type == "slskd" or job.import_mode == "move":
+            for dup in job.duplicate_files:
+                try:
+                    Path(dup).unlink(missing_ok=True)
+                except OSError as e:
+                    logger.warning("Failed to delete duplicate file %s: %s", dup, e)
+
+        active_dl = db.get_active_download(job.download_id) or job.item
+        settle_transfer_after_import(
+            job.driver,
+            job.target_lookup,
+            ctx.media_settings,
+            job.import_mode,
+            job.status_dict,
+            active_dl,
+            db,
+        )
+
+        db.update_download_status(
+            job.download_id,
+            status=DownloadStatus.IMPORTED.value,
+            error_message="Already in library — duplicate discarded",
+        )
+
+        if job.item.get("request_id"):
+            db.update_request_status(job.item["request_id"], RequestStatus.AVAILABLE.value)
+
+        download_id = str(job.download_id or "") or None
+        provenance = download_trigger_kwargs(db, download_id)
+        track_id = job.item.get("track_id")
+        common: dict[str, Any] = {
+            "track_id": str(track_id) if track_id else None,
+            "request_id": job.item.get("request_id"),
+            "download_id": download_id,
+            **provenance,
+        }
+        emit(
+            db,
+            "imported",
+            message="Already in library — duplicate discarded",
+            details={
+                "duplicate_files": job.duplicate_files,
+                "release": job.item.get("title"),
+            },
+            **common,
+        )
+
+        if track_id and db.get_library_file_for_track(str(track_id)) is None:
+            try:
+                db.set_track_monitored(str(track_id), False)
+                artist_id = _download_artist_id(db, job.item, job.target_album)
+                trk = db.get_library_track(str(track_id))
+                trk_title = trk.get("title") if trk else ""
+                owned = find_owned_equivalent(db, artist_id, trk_title) if trk_title else None
+                owned_title = owned.get("title") if owned else "equivalent track"
+                logger.info("Unmonitored %s: already owned as %s", track_id, owned_title)
+            except sqlite3.Error as exc:
+                logger.warning("Failed to unmonitor duplicate track %s: %s", track_id, exc)
 
     def _complete_request(
         self,
