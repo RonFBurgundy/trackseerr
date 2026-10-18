@@ -16,9 +16,12 @@ from trackseerr.api.dependencies import actor_id as _actor_id
 from trackseerr.api.dependencies import get_db, get_lidarr_client, require_admin, require_core_tier
 from trackseerr.api.schemas.activity import (
     ActionResult,
+    BlocklistBulkRequest,
     BlocklistPage,
+    BulkActionResult,
     HistoryIndexResponse,
     HistoryPage,
+    QueueBulkRequest,
     QueuePage,
     SearchLogPage,
 )
@@ -105,14 +108,12 @@ def list_queue(
     return svc.native_queue(db, page, page_size, key, sort_dir)
 
 
-@router.delete("/queue/{queue_id}", response_model=ActionResult, response_model_exclude_unset=True, summary="Remove a queue item, optionally blocklisting it")
-def delete_queue_item(
+def _delete_queue_one(
+    db: Database,
+    client: Optional[LidarrClient],
     queue_id: str,
-    remove_from_client: bool = Query(True),
-    blocklist: bool = Query(False),
-    db: Database = Depends(get_db),
-    client: Optional[LidarrClient] = Depends(get_lidarr_client),
-    _admin: dict[str, Any] = Depends(require_admin),
+    remove_from_client: bool,
+    blocklist: bool,
 ) -> dict[str, Any]:
     def native() -> dict[str, Any]:
         message = svc.native_delete_queue_item(db, queue_id, remove_from_client, blocklist)
@@ -128,16 +129,15 @@ def delete_queue_item(
     return run_mutation(db, native, lidarr)
 
 
-@router.post("/queue/{queue_id}/retry", response_model=ActionResult, response_model_exclude_unset=True, summary="Search again for a queue item")
-def retry_queue_item(
+def _retry_queue_one(
+    db: Database,
+    client: Optional[LidarrClient],
     queue_id: str,
-    blocklist: bool = Query(False),
-    db: Database = Depends(get_db),
-    client: Optional[LidarrClient] = Depends(get_lidarr_client),
-    _admin: dict[str, Any] = Depends(require_admin),
+    actor_id: Optional[str],
+    blocklist: bool,
 ) -> dict[str, Any]:
     def native() -> dict[str, Any]:
-        result = svc.native_retry_queue_item(db, queue_id, _actor_id(_admin), blocklist)
+        result = svc.native_retry_queue_item(db, queue_id, actor_id, blocklist)
         if result is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Queue item not found")
         return result
@@ -152,6 +152,59 @@ def retry_queue_item(
         return {"success": True, "message": "Search queued in Lidarr"}
 
     return run_mutation(db, native, lidarr)
+
+
+@router.post("/queue/bulk", response_model=BulkActionResult, summary="Bulk remove or retry queue items")
+def queue_bulk(
+    payload: QueueBulkRequest,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    actor = _actor_id(_admin)
+    for qid in payload.ids:
+        try:
+            if payload.action == "remove":
+                res = _delete_queue_one(db, client, qid, payload.remove_from_client, payload.blocklist)
+            else:
+                res = _retry_queue_one(db, client, qid, actor, payload.blocklist)
+            results.append({"id": qid, "success": bool(res.get("success", False)), "message": str(res.get("message", ""))})
+        except HTTPException as exc:
+            results.append({"id": qid, "success": False, "message": str(exc.detail)})
+        except (LidarrApiError, OSError, ValueError) as exc:
+            logger.warning("Bulk queue action '%s' failed for id '%s': %s", payload.action, redact_text(str(qid))[:64], exc, exc_info=True)
+            results.append({"id": qid, "success": False, "message": redact_text(str(exc))})
+
+    succeeded = sum(1 for r in results if r["success"])
+    return {
+        "succeeded": succeeded,
+        "failed": len(results) - succeeded,
+        "results": results,
+    }
+
+
+@router.delete("/queue/{queue_id}", response_model=ActionResult, response_model_exclude_unset=True, summary="Remove a queue item, optionally blocklisting it")
+def delete_queue_item(
+    queue_id: str,
+    remove_from_client: bool = Query(True),
+    blocklist: bool = Query(False),
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    return _delete_queue_one(db, client, queue_id, remove_from_client, blocklist)
+
+
+@router.post("/queue/{queue_id}/retry", response_model=ActionResult, response_model_exclude_unset=True, summary="Search again for a queue item")
+def retry_queue_item(
+    queue_id: str,
+    blocklist: bool = Query(False),
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    return _retry_queue_one(db, client, queue_id, _actor_id(_admin), blocklist)
 
 
 # ------------------------------------------------------------------------------------------------------ history
@@ -279,12 +332,10 @@ def searches_index(
     return {"sort_key": "date", "sort_dir": sort_dir, "total": total, "groups": groups}
 
 
-@router.delete("/blocklist/{blocklist_id}", response_model=ActionResult, response_model_exclude_unset=True, summary="Remove an entry from the blocklist")
-def delete_blocklist_item(
+def _delete_blocklist_one(
+    db: Database,
+    client: Optional[LidarrClient],
     blocklist_id: str,
-    db: Database = Depends(get_db),
-    client: Optional[LidarrClient] = Depends(get_lidarr_client),
-    _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     def native() -> dict[str, Any]:
         if not db.remove_from_blocklist(blocklist_id):
@@ -297,3 +348,39 @@ def delete_blocklist_item(
         return {"success": True, "message": "Removed from the Lidarr blocklist"}
 
     return run_mutation(db, native, lidarr)
+
+
+@router.post("/blocklist/bulk-remove", response_model=BulkActionResult, summary="Bulk remove entries from the blocklist")
+def blocklist_bulk_remove(
+    payload: BlocklistBulkRequest,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    for bid in payload.ids:
+        try:
+            res = _delete_blocklist_one(db, client, bid)
+            results.append({"id": bid, "success": bool(res.get("success", False)), "message": str(res.get("message", ""))})
+        except HTTPException as exc:
+            results.append({"id": bid, "success": False, "message": str(exc.detail)})
+        except (LidarrApiError, OSError, ValueError) as exc:
+            logger.warning("Bulk blocklist remove failed for id '%s': %s", redact_text(str(bid))[:64], exc, exc_info=True)
+            results.append({"id": bid, "success": False, "message": redact_text(str(exc))})
+
+    succeeded = sum(1 for r in results if r["success"])
+    return {
+        "succeeded": succeeded,
+        "failed": len(results) - succeeded,
+        "results": results,
+    }
+
+
+@router.delete("/blocklist/{blocklist_id}", response_model=ActionResult, response_model_exclude_unset=True, summary="Remove an entry from the blocklist")
+def delete_blocklist_item(
+    blocklist_id: str,
+    db: Database = Depends(get_db),
+    client: Optional[LidarrClient] = Depends(get_lidarr_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    return _delete_blocklist_one(db, client, blocklist_id)
