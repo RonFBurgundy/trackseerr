@@ -392,6 +392,21 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
               />
             </FormField>
           </div>
+
+          <div className="flex flex-col justify-end pt-1">
+            <div className="flex items-center justify-between pb-1">
+              <span className="text-xs font-mono text-neutral-300">Keep the same song from more than one release</span>
+              <TactileSwitch
+                name="allow_multiple_editions"
+                checked={settings?.allow_multiple_editions ?? false}
+                onChange={(val) => onChange((prev) => (prev ? { ...prev, allow_multiple_editions: val } : null))}
+                label="Keep the same song from more than one release"
+              />
+            </div>
+            <p className="text-[11px] text-neutral-400 font-mono">
+              Off: a song you already own on one release is not downloaded again for another.
+            </p>
+          </div>
         </div>
 
         <div className="pt-2 border-t border-[#1f1f1f] space-y-3">

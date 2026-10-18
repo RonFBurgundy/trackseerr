@@ -262,6 +262,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         onRetagFiles={(album) => setRetagScope({ albumId: String(album.id), albumTitle: album.title || undefined })}
         onToggleTrackMonitored={toggleTrackMonitored}
         onToast={showToast}
+        onOpenAlbum={(albumId) => onNavigate({ tab: 'library', sub: 'albums', detail: { albumId } })}
       />
       <AddToCollectionModal picker={picker} />
       <ManualImportModal

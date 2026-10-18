@@ -23,6 +23,8 @@ export interface AlbumTrackListProps {
   /** Shows "Reject current release" in a track's history (admin, native mode). Needs `onToast`. */
   canReject?: boolean;
   onToast?: (msg: string, tone?: 'ok' | 'error') => void;
+  /** Opens the specified album detail view when clicking an "On <album>" badge. */
+  onOpenAlbum?: (albumId: string) => void;
 }
 
 /** One album's tracks (from the paged endpoint) with quality badge and monitoring switch. */
@@ -39,6 +41,7 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
   albumMonitored,
   canReject = false,
   onToast,
+  onOpenAlbum,
 }) => {
   const [historyTrack, setHistoryTrack] = useState<TrackItem | null>(null);
   if (loading) {
@@ -90,7 +93,24 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
             </div>
             <div className="flex items-center gap-3 flex-shrink-0 font-mono text-xs">
               <span className="text-neutral-500 hidden sm:inline">{formatTrackDuration(trackSeconds(t))}</span>
-              <span className={`px-2 py-0.5 rounded-[2px] text-[10px] font-bold ${badge.className}`}>{badge.label}</span>
+              {t.owned_elsewhere?.album_id && onOpenAlbum ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenAlbum(t.owned_elsewhere!.album_id!)}
+                  title={`Open ${t.owned_elsewhere.album_title ?? 'another release'}`}
+                  aria-label={`Open ${t.owned_elsewhere.album_title ?? 'another release'}`}
+                  className={`px-2 py-0.5 rounded-[2px] text-[10px] font-bold truncate max-w-[10rem] ${badge.className}`}
+                >
+                  {badge.label}
+                </button>
+              ) : (
+                <span
+                  title={t.owned_elsewhere ? `Owned on ${t.owned_elsewhere.album_title ?? 'another release'}` : undefined}
+                  className={`px-2 py-0.5 rounded-[2px] text-[10px] font-bold ${badge.className}`}
+                >
+                  {badge.label}
+                </span>
+              )}
               {renderRowAction?.(t)}
               {isAdmin && canMonitorTracks && t.monitored !== null && (
                 <div className="flex items-center gap-1.5 pl-1">

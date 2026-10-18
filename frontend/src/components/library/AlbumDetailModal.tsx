@@ -33,6 +33,7 @@ export interface AlbumDetailModalProps {
   onRetagFiles?: (album: AlbumItem) => void;
   onToggleTrackMonitored: (trackId: number | string, monitored: boolean) => Promise<void>;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
+  onOpenAlbum?: (albumId: string) => void;
 }
 
 export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
@@ -49,6 +50,7 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
   onRetagFiles,
   onToggleTrackMonitored,
   onToast,
+  onOpenAlbum,
 }) => {
   const { tracks, loading, error, patchMonitored } = useAlbumTracks(album ? album.id : null);
   const mbSubmit = useMbSubmit();
@@ -247,6 +249,7 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
             canReject={isAdmin && !lidarrMode}
             onToast={onToast}
             albumMonitored={album.monitored === true}
+            onOpenAlbum={onOpenAlbum}
             renderRowAction={
               isAdmin
                 ? (t) => (
