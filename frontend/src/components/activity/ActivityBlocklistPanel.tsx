@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import type { ActivityBlocklistRecord, ListSortDir } from '@/types/activity';
-import { getActivityBlocklist, getActivityBlocklistIndex, removeBlocklistItem } from '@/services/activityService';
+import { getActivityBlocklist, getActivityBlocklistIndex, bulkRemoveBlocklist } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
 import { pagedFetcher, useVirtualPagedList, type ListKey } from '@/hooks/useVirtualPagedList';
 import { useGroupIndex } from '@/hooks/useGroupIndex';
@@ -31,24 +31,27 @@ export const ActivityBlocklistPanel: React.FC<ActivityPanelProps> = ({ onToast }
     setSortDir(dir);
   }, []);
 
-  /** Removes sequentially; on partial failure the survivors stay listed and selected. */
+  /** Removes via bulk API; on partial failure the survivors stay listed and selected. */
   const removeMany = useCallback(
     async (ids: ReadonlyArray<ListKey>) => {
       setBusy(true);
+      const byString = new Map(ids.map((id) => [String(id), id]));
       const done = new Set<ListKey>();
       let failure: string | null = null;
-      for (const id of ids) {
-        try {
-          const res = await removeBlocklistItem(id);
-          if (!res.success) {
-            failure = res.message || 'Failed to remove blocklist entry';
-            break;
+      try {
+        const res = await bulkRemoveBlocklist(ids);
+        for (const r of res.results) {
+          if (r.success) {
+            const originalId = byString.get(r.id);
+            if (originalId !== undefined) {
+              done.add(originalId);
+            }
+          } else if (!failure) {
+            failure = r.message || 'Failed to remove blocklist entry';
           }
-          done.add(id);
-        } catch (err: unknown) {
-          failure = errorMessage(err, 'Failed to remove blocklist entry');
-          break;
         }
+      } catch (err: unknown) {
+        failure = errorMessage(err, 'Failed to remove blocklist entry');
       }
       removeItems(done);
       setSelected(new Set(ids.filter((id) => !done.has(id))));
