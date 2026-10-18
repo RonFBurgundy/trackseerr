@@ -181,6 +181,10 @@ class MediaManagementSettingsModel(ApiModel):
     rename_artist_folders: bool = Field(
         False, description="Rename artist folders to the artist folder format; off keeps each artist's existing folder"
     )
+    allow_multiple_editions: bool = Field(
+        False,
+        description="Keep the same song from more than one release; off skips songs already owned on another release",
+    )
     staging_folder_path: str = Field("", description="Optional extra allowed import folder; empty means download clients' folders only")
     import_mode: Literal["move", "hardlink", "copy"] = Field(
         "move", description="Import mode: move, hardlink or copy (hardlink and copy keep the source so torrents keep seeding)"
@@ -244,6 +248,7 @@ class MediaManagementUpdateModel(BaseModel):
     colon_replacement_format: str | None = None
     replace_illegal_characters: bool | None = None
     rename_artist_folders: bool | None = None
+    allow_multiple_editions: bool | None = None
     staging_folder_path: str | None = None
     import_mode: Literal["move", "hardlink", "copy"] | None = None
     torrent_hardlink_tags: Literal["copy_and_tag", "keep_hardlink"] | None = None
@@ -296,6 +301,7 @@ class PreviewRequestModel(BaseModel):
     colon_replacement_format: str | None = None
     replace_illegal_characters: bool | None = None
     rename_artist_folders: bool | None = None
+    allow_multiple_editions: bool | None = None
     staging_folder_path: str | None = None
     import_mode: Literal["move", "hardlink", "copy"] | None = None
     torrent_hardlink_tags: Literal["copy_and_tag", "keep_hardlink"] | None = None
