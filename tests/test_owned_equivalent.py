@@ -3,8 +3,9 @@
 from pathlib import Path
 import pytest
 
+from trackseerr.models import MusicRequest
 from trackseerr.storage import Database
-from trackseerr.track_matching import find_owned_equivalent, match_owned_equivalent
+from trackseerr.track_matching import find_owned_equivalent, match_owned_equivalent, wanted_song
 
 
 @pytest.fixture
@@ -222,3 +223,92 @@ def test_match_owned_equivalent_pure() -> None:
     assert match_owned_equivalent([], "Paranoid Android") is None
     assert match_owned_equivalent(candidates, "Creep") is None
     assert match_owned_equivalent(candidates, "") is None
+
+
+def test_zero_duration_is_unknown() -> None:
+    candidates_zero = [
+        {"id": "c1", "title": "Song", "duration_seconds": 0.0, "cutoff_met": True},
+    ]
+    # Candidate with 0.0s matches wanted duration of 200.0s (treated as unknown length)
+    assert match_owned_equivalent(candidates_zero, "Song", duration_seconds=200.0) is not None
+
+    candidates_known = [
+        {"id": "c2", "title": "Song", "duration_seconds": 200.0, "cutoff_met": True},
+    ]
+    # Wanted duration of 0.0s matches candidate with 200.0s (treated as unknown length)
+    assert match_owned_equivalent(candidates_known, "Song", duration_seconds=0.0) is not None
+
+    # Candidate with None or <= 0 duration
+    candidates_neg = [
+        {"id": "c3", "title": "Song", "duration_seconds": -1.0, "cutoff_met": True},
+    ]
+    assert match_owned_equivalent(candidates_neg, "Song", duration_seconds=200.0) is not None
+
+    # Wanted duration of -5.0s matches known candidate
+    assert match_owned_equivalent(candidates_known, "Song", duration_seconds=-5.0) is not None
+
+    # Both known positive durations that differ > 5.0s do not match
+    assert match_owned_equivalent(candidates_known, "Song", duration_seconds=260.0) is None
+
+
+def test_wanted_song_prefers_track_then_request_never_release_title(test_db: Database) -> None:
+    test_db.upsert_user("u1", "user", "u@example.com", is_admin=True)
+    test_db.upsert_library_artist({"id": "art-1", "name": "Prince", "monitored": True})
+    test_db.upsert_library_album({"id": "alb-1", "artist_id": "art-1", "title": "Sign O' The Times", "monitored": True})
+    test_db.upsert_library_track({
+        "id": "trk-1",
+        "album_id": "alb-1",
+        "artist_id": "art-1",
+        "title": "Play in the Sunshine",
+        "duration_seconds": 265.0,
+        "monitored": True,
+    })
+    test_db.create_request(
+        MusicRequest(
+            id="req-1",
+            user_id="u1",
+            item_type="track",
+            title="Play In The Sunshine - 2020 Remaster",
+            artist="Prince",
+        )
+    )
+
+    # 1. Prefers track when item["track_id"] resolves via db.get_library_track
+    item_track = {
+        "title": "Prince - Play In The Sunshine (2020 Remaster) [FLAC 24bit 44.1kHz]",
+        "track_id": "trk-1",
+        "request_id": "req-1",
+    }
+    title, dur = wanted_song(test_db, item_track)
+    assert title == "Play in the Sunshine"
+    assert dur == 265.0
+
+    # 2. Falls back to request when track_id is absent or unresolvable
+    item_req = {
+        "title": "Prince - Play In The Sunshine (2020 Remaster) [FLAC 24bit 44.1kHz]",
+        "track_id": None,
+        "request_id": "req-1",
+    }
+    title, dur = wanted_song(test_db, item_req)
+    assert title == "Play In The Sunshine - 2020 Remaster"
+    assert dur is None
+
+    item_unresolved_track = {
+        "title": "Prince - Play In The Sunshine (2020 Remaster) [FLAC 24bit 44.1kHz]",
+        "track_id": "nonexistent-track-id",
+        "request_id": "req-1",
+    }
+    title, dur = wanted_song(test_db, item_unresolved_track)
+    assert title == "Play In The Sunshine - 2020 Remaster"
+    assert dur is None
+
+    # 3. Never uses item["title"] — returns (None, None) when neither track nor request resolves
+    item_neither = {
+        "title": "Prince - Play In The Sunshine (2020 Remaster) [FLAC 24bit 44.1kHz]",
+        "track_id": None,
+        "request_id": None,
+    }
+    title, dur = wanted_song(test_db, item_neither)
+    assert title is None
+    assert dur is None
+
