@@ -141,10 +141,12 @@ def replay_env(tmp_path_factory: pytest.TempPathFactory):
 
 
 ROW_OUTCOME_CASES = [
-    # Elvis "The Beat"/"You Belong to Me"/"Hand in Hand", owned under "Elvis Costello"
+    # Elvis "The Beat"/"You Belong to Me"/"Hand in Hand"/"Chelsea", owned under "Elvis Costello"
     pytest.param("dl-0d06471309b5", "imported", "Already in library — duplicate discarded", "available", False, id="dl-0d06471309b5"),
     pytest.param("dl-59b18b9ab644", "imported", "Already in library — duplicate discarded", "available", False, id="dl-59b18b9ab644"),
     pytest.param("dl-126f7af24aeb", "imported", "Already in library — duplicate discarded", "available", False, id="dl-126f7af24aeb"),
+    pytest.param("dl-9e38d608823f", "imported", "Already in library — duplicate discarded", "available", False, id="dl-9e38d608823f"),
+    pytest.param("dl-362609c24533", "imported", "Already in library — duplicate discarded", "available", False, id="dl-362609c24533"),
     # Who "Remix" request, file is original album version you own
     pytest.param("dl-29c8bfaf93e6", "imported", "Discarded a file that is a different song you already own", "processing", True, id="dl-29c8bfaf93e6"),
     # CSN request, file tagged "David Crosby", song owned under David Crosby
@@ -163,31 +165,6 @@ ROW_OUTCOME_CASES = [
     pytest.param("dl-25a242b23975", "warning", None, None, False, id="dl-25a242b23975"),
     pytest.param("dl-33ba1dfaacf6", "warning", None, None, False, id="dl-33ba1dfaacf6"),
     pytest.param("dl-c7cc25ff02eb", "warning", None, None, False, id="dl-c7cc25ff02eb"),
-    # Chelsea rows: expected held, but duplicate-cleared via primary_artist('Elvis Costello & The Attractions')
-    pytest.param(
-        "dl-9e38d608823f",
-        "warning",
-        None,
-        None,
-        False,
-        marks=pytest.mark.xfail(
-            strict=True,
-            reason="trackseerr/track_matching.py:387: (I Don't Want To Go To) Chelsea is owned in library under Elvis Costello; candidate_artist_ids matches related artist, auto-clearing duplicate",
-        ),
-        id="dl-9e38d608823f",
-    ),
-    pytest.param(
-        "dl-362609c24533",
-        "warning",
-        None,
-        None,
-        False,
-        marks=pytest.mark.xfail(
-            strict=True,
-            reason="trackseerr/track_matching.py:387: (I Don't Want To Go To) Chelsea is owned in library under Elvis Costello; candidate_artist_ids matches related artist, auto-clearing duplicate",
-        ),
-        id="dl-362609c24533",
-    ),
 ]
 
 
@@ -277,13 +254,10 @@ def test_replay_backlog_skips_owned_requests(replay_env: tuple[Database, Path, d
         jid in search_req_ids for jid in ("req-9647c5259dfd", "req-592578bd5c52")
     ), "James Brown requests not queued for search"
 
-    # Chelsea requests: handoff expects Chelsea to produce search items, but requests were satisfied
-    # under related artist Elvis Costello and marked available.
+    # Chelsea requests: owned in library under Elvis Costello; marked available and produce no search items
     chelsea_req_ids = {"req-24d1a053e177", "req-8636fe8e50e8"}
-    chelsea_searched = any(cid in search_req_ids for cid in chelsea_req_ids)
-    if not chelsea_searched:
-        pytest.xfail(
-            "trackseerr/track_matching.py:387: (I Don't Want To Go To) Chelsea is owned in library under Elvis Costello; "
-            "Chelsea requests were marked available and do not produce search items"
-        )
-    assert chelsea_searched
+    for cid in chelsea_req_ids:
+        assert cid not in search_req_ids, f"Chelsea request {cid} unexpectedly queued for search"
+        req_c = db.get_request(cid)
+        assert req_c and req_c["status"] == RequestStatus.AVAILABLE.value
+
