@@ -109,6 +109,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Playlist and list syncs no longer request a song again while its earlier request is still in progress, so the same song is no longer downloaded twice. They also skip songs you already own on another release.
 - Downloads of a song you already own are cleared on their own, as Lidarr or Sonarr would: the extra file is deleted, the transfer is removed from slskd, and the empty copy of the song is unmonitored so it leaves Missing. Downloads already stuck in the queue for this reason are cleared too. Files from torrents that are still seeding are never deleted.
 - Soulseek downloads for a song must be that song. A search for "Time" no longer grabs "All of the Time", and a file from an album named like the song (Logic's "Under Pressure" album giving "Bounce") is no longer taken.
 - Songs you already own on another release ("Play in the Sunshine" when a playlist asks for "Play In The Sunshine - 2020 Remaster") count as owned, so TrackSeerr no longer searches for and downloads them again.
