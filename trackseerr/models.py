@@ -135,7 +135,7 @@ class MusicRequest:
 @dataclass
 class DiscoveryItem:
     id: str
-    item_type: str  # "album" or "track"
+    item_type: str  # "album", "track" or "artist"
     title: str
     artist: str
     album: Optional[str] = None

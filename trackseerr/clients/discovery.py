@@ -334,7 +334,8 @@ class DiscoveryClient:
                 future.cancel()
 
         deduped = self._deduplicate_items(items, limit=limit)
-        self._set_cached(cache_key, deduped)
+        if not (clean_type == "artist" and not deduped):
+            self._set_cached(cache_key, deduped)
         return deduped
 
     def search_artist(self, artist_name: str) -> Optional[dict[str, Any]]:
@@ -927,6 +928,20 @@ class DiscoveryClient:
                                 preview_url=None,
                                 release_date=a.get("release_date") or None,
                                 artist_discovery_id=_deezer_artist_ref(art),
+                            ).to_dict()
+                        )
+            if item_type in ("artist",):
+                artists = self.search_artists(query, limit)
+                if artists:
+                    for a in artists:
+                        results.append(
+                            DiscoveryItem(
+                                id=a["id"],
+                                item_type="artist",
+                                title=a["name"],
+                                artist=a["name"],
+                                cover_url=a.get("image_url"),
+                                artist_discovery_id=a["id"],
                             ).to_dict()
                         )
         except Exception as e:
