@@ -71,10 +71,24 @@ def norm_title(text: Any) -> str:
     return _squash(folded)
 
 
+_ALBUM_VERSION_SUFFIX = re.compile(
+    r"(?:\s*[\(\[]\s*(?:original\s+)?album\s+version\s*[\)\]]|\s*[-–—]\s*(?:original\s+)?album\s+version)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_album_version(text: Any) -> Any:
+    if isinstance(text, str):
+        return _ALBUM_VERSION_SUFFIX.sub("", text).strip()
+    return text
+
+
 def titles_match(left: Any, right: Any) -> bool:
     """Exact equality of the normalised titles (two empty titles never match)."""
-    a = norm_title(left)
-    return bool(a) and a == norm_title(right)
+    left_clean = _strip_album_version(left)
+    right_clean = _strip_album_version(right)
+    a = norm_title(left_clean)
+    return bool(a) and a == norm_title(right_clean)
 
 
 def _album_type(album: dict[str, Any]) -> str:
