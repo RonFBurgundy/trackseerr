@@ -35,13 +35,17 @@ export const ActivityBlocklistPanel: React.FC<ActivityPanelProps> = ({ onToast }
   const removeMany = useCallback(
     async (ids: ReadonlyArray<ListKey>) => {
       setBusy(true);
+      const byString = new Map(ids.map((id) => [String(id), id]));
       const done = new Set<ListKey>();
       let failure: string | null = null;
       try {
         const res = await bulkRemoveBlocklist(ids);
         for (const r of res.results) {
           if (r.success) {
-            done.add(r.id);
+            const originalId = byString.get(r.id);
+            if (originalId !== undefined) {
+              done.add(originalId);
+            }
           } else if (!failure) {
             failure = r.message || 'Failed to remove blocklist entry';
           }
