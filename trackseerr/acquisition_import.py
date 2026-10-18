@@ -71,6 +71,7 @@ from trackseerr.track_matching import (
     find_owned_equivalent,
     reconcile_audio_file_to_track_scored,
     resolve_download_expected_tracks,
+    wanted_song,
 )
 
 logger = logging.getLogger(__name__)
@@ -971,18 +972,39 @@ class ImportPipelineMixin(ImportCatalogMixin):
             db,
         )
 
+        artist_id = _download_artist_id(db, job.item, job.target_album)
+        title, dur = wanted_song(db, job.item)
+        track_id = job.item.get("track_id")
+        has_file = bool(track_id and db.get_library_file_for_track(str(track_id)) is not None)
+        owned = (
+            find_owned_equivalent(
+                db,
+                artist_id,
+                title,
+                dur,
+                exclude_track_id=track_id,
+            )
+            if title
+            else None
+        )
+        satisfied = has_file or bool(owned and owned.get("cutoff_met"))
+
+        status_msg = (
+            "Already in library — duplicate discarded"
+            if satisfied
+            else "Discarded a file that is a different song you already own"
+        )
         db.update_download_status(
             job.download_id,
             status=DownloadStatus.IMPORTED.value,
-            error_message="Already in library — duplicate discarded",
+            error_message=status_msg,
         )
 
-        if job.item.get("request_id"):
+        if satisfied and job.item.get("request_id"):
             db.update_request_status(job.item["request_id"], RequestStatus.AVAILABLE.value)
 
         download_id = str(job.download_id or "") or None
         provenance = download_trigger_kwargs(db, download_id)
-        track_id = job.item.get("track_id")
         common: dict[str, Any] = {
             "track_id": str(track_id) if track_id else None,
             "request_id": job.item.get("request_id"),
@@ -992,7 +1014,7 @@ class ImportPipelineMixin(ImportCatalogMixin):
         emit(
             db,
             "imported",
-            message="Already in library — duplicate discarded",
+            message=status_msg,
             details={
                 "duplicate_files": job.duplicate_files,
                 "release": job.item.get("title"),
@@ -1000,13 +1022,9 @@ class ImportPipelineMixin(ImportCatalogMixin):
             **common,
         )
 
-        if track_id and db.get_library_file_for_track(str(track_id)) is None:
+        if satisfied and track_id and db.get_library_file_for_track(str(track_id)) is None:
             try:
                 db.set_track_monitored(str(track_id), False)
-                artist_id = _download_artist_id(db, job.item, job.target_album)
-                trk = db.get_library_track(str(track_id))
-                trk_title = trk.get("title") if trk else ""
-                owned = find_owned_equivalent(db, artist_id, trk_title) if trk_title else None
                 owned_title = owned.get("title") if owned else "equivalent track"
                 logger.info("Unmonitored %s: already owned as %s", track_id, owned_title)
             except sqlite3.Error as exc:

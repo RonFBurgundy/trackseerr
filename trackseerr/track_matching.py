@@ -264,10 +264,20 @@ def match_owned_equivalent(
         if not titles_match(track.get("title"), title):
             continue
         cand_dur = track.get("duration_seconds")
+        try:
+            cand_dur_val = float(cand_dur) if cand_dur is not None else None
+        except (ValueError, TypeError):
+            cand_dur_val = None
+        try:
+            target_dur_val = float(duration_seconds) if duration_seconds is not None else None
+        except (ValueError, TypeError):
+            target_dur_val = None
         if (
-            duration_seconds is not None
-            and cand_dur is not None
-            and abs(float(duration_seconds) - float(cand_dur)) > 5.0
+            target_dur_val is not None
+            and target_dur_val > 0
+            and cand_dur_val is not None
+            and cand_dur_val > 0
+            and abs(target_dur_val - cand_dur_val) > 5.0
         ):
             continue
         matched.append(track)
@@ -277,6 +287,31 @@ def match_owned_equivalent(
         if cand.get("cutoff_met"):
             return cand
     return matched[0]
+
+
+def wanted_song(db: Database, item: dict[str, Any]) -> tuple[Optional[str], Optional[float]]:
+    """Returns the song a download was for as (title, duration_seconds).
+
+    Resolves to (track["title"], track["duration_seconds"]) when item["track_id"]
+    resolves via db.get_library_track; else (request["title"], None) via
+    db.get_request(item["request_id"]) when set; else (None, None). Never uses item["title"].
+    """
+    track_id = item.get("track_id")
+    if track_id is not None:
+        track = db.get_library_track(str(track_id))
+        if track and track.get("title"):
+            dur = track.get("duration_seconds")
+            try:
+                dur_val = float(dur) if dur is not None else None
+            except (ValueError, TypeError):
+                dur_val = None
+            return (track["title"], dur_val)
+    req_id = item.get("request_id")
+    if req_id is not None:
+        req = db.get_request(str(req_id))
+        if req and req.get("title"):
+            return (req["title"], None)
+    return (None, None)
 
 
 def find_owned_equivalent(
@@ -298,4 +333,5 @@ def find_owned_equivalent(
         duration_seconds=duration_seconds,
         exclude_track_id=exclude_track_id,
     )
+
 

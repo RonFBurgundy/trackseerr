@@ -16,6 +16,8 @@ from trackseerr.models import (
     LibraryArtist,
     LibraryFile,
     LibraryTrack,
+    MusicRequest,
+    RequestStatus,
 )
 from trackseerr.storage import Database
 
@@ -44,6 +46,7 @@ def _seed_prince(db: Database, tmp_path: Path, *, cutoff_met: bool = True, with_
     music, staging = tmp_path / "music", tmp_path / "staging"
     music.mkdir(exist_ok=True)
     staging.mkdir(exist_ok=True)
+    db.upsert_user("u1", "user", "u@example.com", is_admin=True)
     db.update_media_management_settings(
         {
             "root_folder_path": str(music),
@@ -60,7 +63,7 @@ def _seed_prince(db: Database, tmp_path: Path, *, cutoff_met: bool = True, with_
         id="trk-live",
         album_id="alb-a",
         artist_id="art-p",
-        title="Play in the Sunshine (Live)",
+        title="Play in the Sunshine",
         track_number=1,
         disc_number=1,
         monitored=True,
@@ -308,22 +311,42 @@ def test_parked_warning_with_missing_file_and_owned_track_is_cleared(tmp_path: P
     assert dl_row["unmatched_files"] == []
 
 
-def test_parked_warning_with_missing_file_and_no_owned_track_stays(tmp_path: Path, db: Database):
+def test_gone_file_not_owned_fails_row(tmp_path: Path, db: Database):
     music, staging, artist, album_a, album_b, trk_live, trk_studio = _seed_prince(db, tmp_path, cutoff_met=True, with_download=False)
     db.create_download_client(
         DownloadClientConfig(id="c1", name="C", driver_type=DownloadDriverType.SLSKD, host_url="http://slskd:5030")
     )
+    db.create_request(
+        MusicRequest(
+            id="req-missing",
+            user_id="u1",
+            item_type="track",
+            title="Starfish and Coffee",
+            artist="Prince",
+            status=RequestStatus.PENDING,
+        )
+    )
+    trk_missing = db.upsert_library_track(LibraryTrack(
+        id="trk-missing",
+        album_id="alb-a",
+        artist_id="art-p",
+        title="Starfish and Coffee",
+        track_number=2,
+        disc_number=1,
+        monitored=True,
+    ))
     db.create_active_download(
         ActiveDownload(
             id="dl-1",
             client_id="c1",
-            title="NonExistentSong",
+            title="Prince.Sign.O.The.Times.Live.FLAC",
             artist="Prince",
-            item_type="album",
+            item_type="track",
             status=DownloadStatus.WARNING.value,
             download_hash="h1",
             album_id="alb-a",
-            track_id="trk-live",
+            track_id="trk-missing",
+            request_id="req-missing",
         )
     )
     absent = staging / "absent.flac"
@@ -336,8 +359,12 @@ def test_parked_warning_with_missing_file_and_no_owned_track_stays(tmp_path: Pat
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
-    assert dl_row["status"] == DownloadStatus.WARNING.value
-    assert str(absent) in dl_row["unmatched_files"]
+    assert dl_row["status"] == DownloadStatus.FAILED.value
+    assert dl_row["error_message"] == "The downloaded file is no longer on disk"
+    assert dl_row["unmatched_files"] == []
+    req_after = db.get_request("req-missing")
+    assert req_after["status"] == "pending"
+    assert not db.is_blocklisted(release_title="Prince.Sign.O.The.Times.Live.FLAC")
 
 
 def test_duplicate_unmonitors_fileless_target_track(tmp_path: Path, db: Database):
@@ -434,3 +461,237 @@ def test_parked_partial_resolution_updates_remaining(tmp_path: Path, db: Databas
     assert dl_row["error_message"] == "1 file(s) couldn't be matched — manual import required"
     assert not f_dup.exists()
     assert f_wrong.exists()
+
+
+def test_wrong_song_owned_elsewhere_clears_row_but_keeps_wanted_track(tmp_path: Path, db: Database):
+    music, staging, artist, album_a, album_b, trk_live, trk_studio = _seed_prince(db, tmp_path, cutoff_met=True, with_download=False)
+    db.create_download_client(
+        DownloadClientConfig(id="c1", name="C", driver_type=DownloadDriverType.SLSKD, host_url="http://slskd:5030")
+    )
+    db.create_request(
+        MusicRequest(
+            id="req-time",
+            user_id="u1",
+            item_type="track",
+            title="Time",
+            artist="Prince",
+            status=RequestStatus.PENDING,
+        )
+    )
+    trk_time = db.upsert_library_track(LibraryTrack(
+        id="trk-time",
+        album_id="alb-a",
+        artist_id="art-p",
+        title="Time",
+        track_number=2,
+        disc_number=1,
+        monitored=True,
+    ))
+    trk_all = db.upsert_library_track(LibraryTrack(
+        id="trk-all",
+        album_id="alb-b",
+        artist_id="art-p",
+        title="All of the Time",
+        track_number=2,
+        disc_number=1,
+        monitored=False,
+    ))
+    db.upsert_library_file(LibraryFile(
+        id="f-all",
+        track_id="trk-all",
+        file_path=str(music / "Prince" / "Sign O The Times" / "AllOfTheTime.flac"),
+        relative_path="AllOfTheTime.flac",
+        codec="FLAC",
+        size_bytes=1,
+        cutoff_met=True,
+    ))
+
+    dl = staging / "Prince.Time.FLAC"
+    f = dl / "held.flac"
+    _flac(f)
+
+    db.create_active_download(
+        ActiveDownload(
+            id="dl-1",
+            client_id="c1",
+            title="Prince.Time.FLAC",
+            artist="Prince",
+            item_type="track",
+            status=DownloadStatus.WARNING.value,
+            download_hash="h1",
+            album_id="alb-a",
+            track_id="trk-time",
+            request_id="req-time",
+        )
+    )
+    db.set_download_unmatched_files("dl-1", [str(f)])
+    db.update_download_status("dl-1", status=DownloadStatus.WARNING.value, error_message="1 file(s) couldn't be matched — manual import required")
+
+    driver = MagicMock()
+    metas = {"held.flac": {"artist": "Prince", "title": "All of the Time"}}
+
+    def inspect(path):
+        base = {
+            "artist": "Prince",
+            "album": "Sign O' The Times",
+            "disc_number": 1,
+            "codec": "FLAC",
+            "bits_per_sample": 16,
+            "bitrate": 900,
+            "sample_rate": 44100,
+            "extension": ".flac",
+        }
+        return {**base, **metas.get(Path(path).name, {})}
+
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+        AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
+
+    dl_row = db.get_active_download("dl-1")
+    assert dl_row["status"] == DownloadStatus.IMPORTED.value
+    assert dl_row["error_message"] == "Discarded a file that is a different song you already own"
+    assert dl_row["unmatched_files"] == []
+    assert not f.exists()
+    assert db.get_library_track("trk-time")["monitored"] is True
+    assert db.get_request("req-time")["status"] == "pending"
+
+
+def test_gone_file_resolved_by_request_title(tmp_path: Path, db: Database):
+    music, staging, artist, album_a, album_b, trk_live, trk_studio = _seed_prince(db, tmp_path, cutoff_met=True, with_download=False)
+    db.create_download_client(
+        DownloadClientConfig(id="c1", name="C", driver_type=DownloadDriverType.SLSKD, host_url="http://slskd:5030")
+    )
+    db.create_request(
+        MusicRequest(
+            id="req-prince",
+            user_id="u1",
+            item_type="track",
+            title="Play In The Sunshine - 2020 Remaster",
+            artist="Prince",
+            status=RequestStatus.PENDING,
+        )
+    )
+    absent = staging / "absent.flac"
+    db.create_active_download(
+        ActiveDownload(
+            id="dl-1",
+            client_id="c1",
+            title="Prince - Play In The Sunshine (2020 Remaster) [FLAC 24bit 44.1kHz]",
+            artist="Prince",
+            item_type="track",
+            status=DownloadStatus.WARNING.value,
+            download_hash="h1",
+            track_id=None,
+            request_id="req-prince",
+        )
+    )
+    db.set_download_unmatched_files("dl-1", [str(absent)])
+    db.update_download_status("dl-1", status=DownloadStatus.WARNING.value, error_message="1 file(s) couldn't be matched — manual import required")
+
+    driver = MagicMock()
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+        AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
+
+    dl_row = db.get_active_download("dl-1")
+    assert dl_row["status"] == DownloadStatus.IMPORTED.value
+    assert "Already in library" in (dl_row.get("error_message") or "")
+    assert dl_row["unmatched_files"] == []
+    req_after = db.get_request("req-prince")
+    assert req_after["status"] == "available"
+
+
+def test_unmonitor_respects_duration(tmp_path: Path, db: Database):
+    music, staging = tmp_path / "music", tmp_path / "staging"
+    music.mkdir(exist_ok=True)
+    staging.mkdir(exist_ok=True)
+    db.update_media_management_settings(
+        {
+            "root_folder_path": str(music),
+            "staging_folder_path": str(staging),
+            "library_mode": "native",
+            "enrich_mbids": False,
+            "write_audio_tags": False,
+        }
+    )
+    artist = db.upsert_library_artist(LibraryArtist(id="art-1", name="Artist", path=str(music / "Artist")))
+    alb_a = db.upsert_library_album(LibraryAlbum(id="alb-a", artist_id="art-1", title="Album A", year=2020))
+    alb_b = db.upsert_library_album(LibraryAlbum(id="alb-b", artist_id="art-1", title="Album B", year=2021))
+
+    trk_wanted = db.upsert_library_track(LibraryTrack(
+        id="trk-wanted",
+        album_id="alb-a",
+        artist_id="art-1",
+        title="Time",
+        duration_seconds=251.0,
+        monitored=True,
+    ))
+    trk_owned = db.upsert_library_track(LibraryTrack(
+        id="trk-owned",
+        album_id="alb-b",
+        artist_id="art-1",
+        title="Time",
+        duration_seconds=213.0,
+        monitored=True,
+    ))
+    db.upsert_library_file(LibraryFile(
+        id="f-owned",
+        track_id="trk-owned",
+        file_path=str(music / "Artist" / "Album B" / "Time.flac"),
+        relative_path="Time.flac",
+        codec="FLAC",
+        size_bytes=1,
+        cutoff_met=True,
+    ))
+
+    db.create_download_client(
+        DownloadClientConfig(id="c1", name="C", driver_type=DownloadDriverType.SLSKD, host_url="http://slskd:5030")
+    )
+    dl = staging / "Artist.Time.FLAC"
+    f = dl / "Time.flac"
+    _flac(f)
+
+    db.create_active_download(
+        ActiveDownload(
+            id="dl-1",
+            client_id="c1",
+            title="Artist.Time.FLAC",
+            artist="Artist",
+            item_type="track",
+            status=DownloadStatus.WARNING.value,
+            download_hash="h1",
+            album_id="alb-a",
+            track_id="trk-wanted",
+        )
+    )
+    db.set_download_unmatched_files("dl-1", [str(f)])
+    db.update_download_status("dl-1", status=DownloadStatus.WARNING.value, error_message="1 file(s) couldn't be matched — manual import required")
+
+    driver = MagicMock()
+    metas = {"Time.flac": {"artist": "Artist", "title": "Time", "duration_seconds": 213.0}}
+
+    def inspect(path):
+        base = {
+            "artist": "Artist",
+            "album": "Album B",
+            "codec": "FLAC",
+            "bits_per_sample": 16,
+            "bitrate": 900,
+            "sample_rate": 44100,
+            "extension": ".flac",
+        }
+        return {**base, **metas.get(Path(path).name, {})}
+
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+        AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
+
+    dl_row = db.get_active_download("dl-1")
+    assert dl_row["status"] == DownloadStatus.IMPORTED.value
+    assert dl_row["error_message"] == "Discarded a file that is a different song you already own"
+    assert db.get_library_track("trk-wanted")["monitored"] is True
+
