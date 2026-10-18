@@ -761,7 +761,22 @@ class AcquisitionWorker(ImportPipelineMixin):
         )
         return bool(owned and owned.get("cutoff_met"))
 
-    def _resolve_parked_item(self, db: Database, ctx: _PollContext, item: dict[str, Any]) -> None:
+    def _unlink_duplicate_files(self, paths: list[str], driver_type: str, import_mode: str) -> None:
+        """Removes local files for identified duplicates when under slskd or move import mode."""
+        if driver_type == "slskd" or import_mode == "move":
+            for p in paths:
+                try:
+                    Path(p).unlink(missing_ok=True)
+                except OSError as e:
+                    logger.warning("Failed to delete duplicate file %s: %s", p, e)
+
+    def _resolve_parked_item(
+        self,
+        db: Database,
+        ctx: _PollContext,
+        item: dict[str, Any],
+        requeued_paths: Optional[set[str]] = None,
+    ) -> None:
         """Processes a single parked download item during the duplicate sweep."""
         held_paths = item.get("unmatched_files") or []
         if not held_paths:
@@ -790,19 +805,25 @@ class AcquisitionWorker(ImportPipelineMixin):
             else:
                 remaining_paths.append(path_str)
 
-        if retry_import_paths and not duplicate_paths and gone_missing_count == 0:
-            if str(item.get("error_message") or "").startswith("Retried import"):
-                remaining_paths.extend(retry_import_paths)
-            else:
-                logger.info("Requeuing download %s for import retry onto matching track", item["id"])
-                db.update_download_status(
-                    item["id"],
-                    status=DownloadStatus.COMPLETED.value,
-                    error_message="Retried import onto a matching track",
-                )
-                return
-        else:
-            remaining_paths.extend(retry_import_paths)
+        can_requeue = (
+            retry_import_paths
+            and not duplicate_paths
+            and gone_missing_count == 0
+            and (requeued_paths is None or not any(p in requeued_paths for p in retry_import_paths))
+            and not str(item.get("error_message") or "").startswith("Retried import")
+        )
+        if can_requeue:
+            if requeued_paths is not None:
+                requeued_paths.update(retry_import_paths)
+            logger.info("Requeuing download %s for import retry onto matching track", item["id"])
+            db.update_download_status(
+                item["id"],
+                status=DownloadStatus.COMPLETED.value,
+                error_message="Retried import onto a matching track",
+            )
+            return
+
+        remaining_paths.extend(retry_import_paths)
 
         if not remaining_paths:
             satisfied = self._is_download_satisfied(db, item)
@@ -816,12 +837,7 @@ class AcquisitionWorker(ImportPipelineMixin):
             else:
                 self._clear_parked_download(db, item, duplicate_paths, driver_type, import_mode, satisfied=satisfied)
         elif len(remaining_paths) < len(held_paths):
-            if driver_type == "slskd" or import_mode == "move":
-                for p in duplicate_paths:
-                    try:
-                        Path(p).unlink(missing_ok=True)
-                    except OSError as e:
-                        logger.warning("Failed to delete duplicate file %s: %s", p, e)
+            self._unlink_duplicate_files(duplicate_paths, driver_type, import_mode)
             db.set_download_unmatched_files(item["id"], remaining_paths)
             msg = f"{len(remaining_paths)} file(s) couldn't be matched — manual import required"
             db.update_download_status(item["id"], status=DownloadStatus.WARNING.value, error_message=msg)
@@ -829,8 +845,9 @@ class AcquisitionWorker(ImportPipelineMixin):
     def _resolve_parked_duplicates(self, db: Database, ctx: _PollContext) -> None:
         """Sweeps parked WARNING downloads to auto-clear files already owned in library."""
         warning_items = db.list_active_downloads(statuses=[DownloadStatus.WARNING.value])
+        requeued_paths: set[str] = set()
         for item in warning_items:
-            self._resolve_parked_item(db, ctx, item)
+            self._resolve_parked_item(db, ctx, item, requeued_paths=requeued_paths)
 
     def _notify_download_failed(
         self,

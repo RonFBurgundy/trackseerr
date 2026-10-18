@@ -468,6 +468,7 @@ class ActivityStoreMixin:
             SELECT
                 t.id AS track_id,
                 t.title AS track_title,
+                t.duration_seconds AS duration_seconds,
                 t.track_number AS track_number,
                 t.disc_number AS disc_number,
                 al.id AS album_id,

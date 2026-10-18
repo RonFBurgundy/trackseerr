@@ -391,9 +391,22 @@ class ImportPipelineMixin(ImportCatalogMixin):
                 logger.warning("Rejecting source path %s from %s: %s", candidate_src, client_label, reject_reason)
                 candidate_src = None
 
-        search_term = job.item.get("title") or job.item.get("artist") or ""
-        self._archive_errors = []
-        job.audio_files = self._find_audio_files(candidate_src, search_term)
+        err_msg_orig = str(job.item.get("error_message") or "")
+        held_unmatched = job.item.get("unmatched_files") or []
+        if err_msg_orig.startswith("Retried import") and held_unmatched:
+            existing = [Path(p).resolve() for p in held_unmatched if Path(p).is_file()]
+            if not existing:
+                db.update_download_status(
+                    job.download_id,
+                    status=DownloadStatus.WARNING.value,
+                    error_message="Retried import: file no longer on disk",
+                )
+                return False
+            job.audio_files = sorted(dict.fromkeys(existing))
+        else:
+            search_term = job.item.get("title") or job.item.get("artist") or ""
+            self._archive_errors = []
+            job.audio_files = self._find_audio_files(candidate_src, search_term)
 
         if self._archive_errors and not job.audio_files:
             err_msg = "Archive rejected: " + "; ".join(self._archive_errors)
