@@ -248,6 +248,37 @@ def resolve_download_expected_tracks(
     return target_album, expected_tracks
 
 
+def match_owned_equivalent(
+    candidates: list[dict[str, Any]],
+    title: str,
+    duration_seconds: Optional[float] = None,
+    exclude_track_id: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Matches a title against candidate tracks using normalized title and duration tolerance."""
+    if not norm_title(title):
+        return None
+    matched: list[dict[str, Any]] = []
+    for track in candidates:
+        if exclude_track_id is not None and str(track.get("id")) == str(exclude_track_id):
+            continue
+        if not titles_match(track.get("title"), title):
+            continue
+        cand_dur = track.get("duration_seconds")
+        if (
+            duration_seconds is not None
+            and cand_dur is not None
+            and abs(float(duration_seconds) - float(cand_dur)) > 5.0
+        ):
+            continue
+        matched.append(track)
+    if not matched:
+        return None
+    for cand in matched:
+        if cand.get("cutoff_met"):
+            return cand
+    return matched[0]
+
+
 def find_owned_equivalent(
     db: Database,
     artist_id: Optional[str],
@@ -260,24 +291,11 @@ def find_owned_equivalent(
         return None
     if db.get_media_management_settings().get("allow_multiple_editions"):
         return None
-    candidates: list[dict[str, Any]] = []
-    for track in db.list_filed_tracks_for_artist(str(artist_id)):
-        if exclude_track_id is not None and str(track.get("id")) == str(exclude_track_id):
-            continue
-        if not titles_match(track.get("title"), title):
-            continue
-        cand_dur = track.get("duration_seconds")
-        if (
-            duration_seconds is not None
-            and cand_dur is not None
-            and abs(float(duration_seconds) - float(cand_dur)) > 5.0
-        ):
-            continue
-        candidates.append(track)
-    if not candidates:
-        return None
-    for cand in candidates:
-        if cand.get("cutoff_met"):
-            return cand
-    return candidates[0]
+    candidates = db.list_filed_tracks_for_artist(str(artist_id))
+    return match_owned_equivalent(
+        candidates=candidates,
+        title=title,
+        duration_seconds=duration_seconds,
+        exclude_track_id=exclude_track_id,
+    )
 
