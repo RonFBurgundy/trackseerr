@@ -49,7 +49,12 @@ from trackseerr.models import (
 from trackseerr.notifications import notification_dispatcher
 from trackseerr.redaction import safe_exc
 from trackseerr.storage import Database
-from trackseerr.track_matching import find_owned_equivalent, wanted_song
+from trackseerr.track_matching import (
+    candidate_artist_ids,
+    find_fileless_equivalent,
+    find_owned_equivalent,
+    wanted_song,
+)
 
 from trackseerr.import_files import (
     effective_import_mode,
@@ -664,6 +669,13 @@ class AcquisitionWorker(ImportPipelineMixin):
         owned = find_owned_equivalent(db, artist_id, title, duration)
         if owned and owned.get("cutoff_met"):
             return "duplicate"
+        if find_fileless_equivalent(
+            db,
+            candidate_artist_ids(db, item, metadata.get("artist")),
+            title,
+            duration,
+        ):
+            return "retry_import"
         return "still_held"
 
     def _clear_parked_download(
@@ -762,6 +774,7 @@ class AcquisitionWorker(ImportPipelineMixin):
 
         duplicate_paths: list[str] = []
         remaining_paths: list[str] = []
+        retry_import_paths: list[str] = []
         gone_missing_count = 0
 
         for path_str in held_paths:
@@ -772,8 +785,24 @@ class AcquisitionWorker(ImportPipelineMixin):
                 pass
             elif cls == "gone_missing":
                 gone_missing_count += 1
+            elif cls == "retry_import":
+                retry_import_paths.append(path_str)
             else:
                 remaining_paths.append(path_str)
+
+        if retry_import_paths and not duplicate_paths and gone_missing_count == 0:
+            if str(item.get("error_message") or "").startswith("Retried import"):
+                remaining_paths.extend(retry_import_paths)
+            else:
+                logger.info("Requeuing download %s for import retry onto matching track", item["id"])
+                db.update_download_status(
+                    item["id"],
+                    status=DownloadStatus.COMPLETED.value,
+                    error_message="Retried import onto a matching track",
+                )
+                return
+        else:
+            remaining_paths.extend(retry_import_paths)
 
         if not remaining_paths:
             satisfied = self._is_download_satisfied(db, item)

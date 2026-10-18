@@ -68,6 +68,9 @@ from trackseerr.seed_safety import (
 from trackseerr.track_matching import (
     MATCH_STRONG,
     _fingerprint_fallback_match,
+    candidate_artist_ids,
+    download_artist_id,
+    find_fileless_equivalent,
     find_owned_equivalent,
     reconcile_audio_file_to_track_scored,
     resolve_download_expected_tracks,
@@ -198,27 +201,7 @@ def record_import_events(
         )
 
 
-def _download_artist_id(
-    db: Database,
-    item: dict[str, Any],
-    target_album: Optional[dict[str, Any]] = None,
-) -> Optional[str]:
-    """Resolves target artist ID from download track, target album, or artist name."""
-    if item.get("track_id"):
-        trk = db.get_library_track(str(item["track_id"]))
-        if trk and trk.get("artist_id"):
-            return str(trk["artist_id"])
-    if target_album and target_album.get("artist_id"):
-        return str(target_album["artist_id"])
-    if item.get("album_id"):
-        alb = db.get_library_album(str(item["album_id"]))
-        if alb and alb.get("artist_id"):
-            return str(alb["artist_id"])
-    if item.get("artist"):
-        art = db.get_library_artist_by_name(str(item["artist"]))
-        if art and art.get("id"):
-            return str(art["id"])
-    return None
+_download_artist_id = download_artist_id
 
 
 @dataclass(frozen=True)
@@ -656,6 +639,45 @@ class ImportPipelineMixin(ImportCatalogMixin):
         job.held_files = []
         job.duplicate_files = []
 
+    def _cross_album_match(
+        self,
+        db: Database,
+        ctx: _PollContext,
+        job: _ImportJob,
+        metadata: dict[str, Any],
+        duration: Optional[float],
+    ) -> Optional[dict[str, Any]]:
+        """Matches an unplaced file to an empty track on another album of candidate artists."""
+        title = metadata.get("title") or ""
+        alt = find_fileless_equivalent(
+            db,
+            candidate_artist_ids(db, job.item, metadata.get("artist")),
+            title,
+            duration,
+        )
+        if not alt:
+            return None
+        logger.info(
+            "Download %s: %s matches %s on another album; importing there",
+            job.download_id,
+            title,
+            alt.get("title"),
+        )
+        metadata["title"] = alt["title"]
+        metadata["track_number"] = int(alt.get("track_number") or 1)
+        metadata["disc_number"] = int(alt.get("disc_number") or 1)
+        alt_album = db.get_library_album(str(alt["album_id"]))
+        alt_artist = db.get_library_artist(str(alt["artist_id"])) if alt.get("artist_id") else None
+        if alt_album:
+            _apply_catalog_album(
+                metadata,
+                alt_album,
+                alt_artist,
+                ctx.media_settings,
+                db=db,
+            )
+        return alt
+
     def _place_one_file(  # noqa: C901, PLR0915
         self,
         db: Database,
@@ -730,11 +752,13 @@ class ImportPipelineMixin(ImportCatalogMixin):
                 )
                 job.duplicate_files.append(str(af))
                 return
-            logger.warning(
-                "Holding unmatched file %s for download %s (manual import required)", af, job.download_id
-            )
-            job.held_files.append(str(af))
-            return
+            matched_expected_track = self._cross_album_match(db, ctx, job, metadata, duration)
+            if matched_expected_track is None:
+                logger.warning(
+                    "Holding unmatched file %s for download %s (manual import required)", af, job.download_id
+                )
+                job.held_files.append(str(af))
+                return
 
         # Disc 1 of a multi-disc release must use the multi-disc format only when owned files span multiple discs.
         known_discs: list[int] = [1]
@@ -747,9 +771,15 @@ class ImportPipelineMixin(ImportCatalogMixin):
                 known_discs.append(int(t.get("disc_number") or 1))
             except (TypeError, ValueError):
                 pass
-        if job.target_album and job.target_album.get("id"):
-            known_discs.append(db.max_owned_disc(str(job.target_album["id"])))
+        target_album_for_file = (
+            db.get_library_album(str(matched_expected_track["album_id"]))
+            if matched_expected_track and matched_expected_track.get("album_id")
+            else job.target_album
+        )
+        if target_album_for_file and target_album_for_file.get("id"):
+            known_discs.append(db.max_owned_disc(str(target_album_for_file["id"])))
         metadata["total_discs"] = max(known_discs)
+
 
         if not metadata.get("artist_folder"):
             existing_f = _existing_folder_for_tags(db, metadata, ctx.media_settings)
@@ -912,6 +942,8 @@ class ImportPipelineMixin(ImportCatalogMixin):
         if job.held_files:
             db.set_download_unmatched_files(job.download_id, job.held_files)
             job.held_msg = f"{len(job.held_files)} file(s) couldn't be matched — manual import required"
+            if str(job.item.get("error_message") or "").startswith("Retried import"):
+                job.held_msg = f"Retried import: {job.held_msg}"
             if not job.imported_paths:
                 # Nothing placed: park the download for manual import (not a failure, no blocklisting).
                 db.update_download_status(

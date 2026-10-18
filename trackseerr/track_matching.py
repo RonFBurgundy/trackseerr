@@ -10,6 +10,7 @@ from trackseerr.library import (
     fingerprint_audio_file,
 )
 from trackseerr.lidarr_release import norm_title, titles_match
+from trackseerr.search_terms import primary_artist
 from trackseerr.storage import Database, clean_library_name
 
 
@@ -333,5 +334,119 @@ def find_owned_equivalent(
         duration_seconds=duration_seconds,
         exclude_track_id=exclude_track_id,
     )
+
+
+def download_artist_id(
+    db: Database,
+    item: dict[str, Any],
+    target_album: Optional[dict[str, Any]] = None,
+) -> Optional[str]:
+    """Resolves target artist ID from download track, target album, or artist name."""
+    if item.get("track_id"):
+        trk = db.get_library_track(str(item["track_id"]))
+        if trk and trk.get("artist_id"):
+            return str(trk["artist_id"])
+    if target_album and target_album.get("artist_id"):
+        return str(target_album["artist_id"])
+    if item.get("album_id"):
+        alb = db.get_library_album(str(item["album_id"]))
+        if alb and alb.get("artist_id"):
+            return str(alb["artist_id"])
+    if item.get("artist"):
+        art = db.get_library_artist_by_name(str(item["artist"]))
+        if art and art.get("id"):
+            return str(art["id"])
+    return None
+
+
+def candidate_artist_ids(
+    db: Database,
+    item: dict[str, Any],
+    tag_artist: Optional[str] = None,
+) -> list[str]:
+    """De-duplicated candidate artist IDs from download item and tag artist name."""
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def _add(aid: Optional[str]) -> None:
+        if aid and aid not in seen:
+            seen.add(aid)
+            candidates.append(aid)
+
+    # 1. _download_artist_id-style resolution
+    _add(download_artist_id(db, item))
+
+    # 2. primary_artist(name) for the item's artist
+    item_artist = item.get("artist")
+    if item_artist:
+        item_artist_str = str(item_artist).strip()
+        art = db.get_library_artist_by_name(item_artist_str)
+        if art and art.get("id"):
+            _add(str(art["id"]))
+        pri = primary_artist(item_artist_str)
+        if pri and pri != item_artist_str:
+            art_pri = db.get_library_artist_by_name(pri)
+            if art_pri and art_pri.get("id"):
+                _add(str(art_pri["id"]))
+
+    # 3. tag_artist resolution (direct name and primary_artist(name))
+    if tag_artist:
+        tag_artist_str = str(tag_artist).strip()
+        if tag_artist_str:
+            art = db.get_library_artist_by_name(tag_artist_str)
+            if art and art.get("id"):
+                _add(str(art["id"]))
+            pri_tag = primary_artist(tag_artist_str)
+            if pri_tag and pri_tag != tag_artist_str:
+                art_pri = db.get_library_artist_by_name(pri_tag)
+                if art_pri and art_pri.get("id"):
+                    _add(str(art_pri["id"]))
+
+    return candidates
+
+
+def find_fileless_equivalent(
+    db: Database,
+    artist_ids: list[str],
+    title: str,
+    duration_seconds: Optional[float] = None,
+) -> Optional[dict[str, Any]]:
+    """Finds a unique file-less track across candidate artists matching title and duration within 3.0s."""
+    if not artist_ids or not norm_title(title):
+        return None
+    try:
+        target_dur = float(duration_seconds) if duration_seconds is not None else None
+    except (ValueError, TypeError):
+        target_dur = None
+    if target_dur is None or target_dur <= 0:
+        return None
+
+    matched: list[dict[str, Any]] = []
+    seen_track_ids: set[str] = set()
+
+    for artist_id in artist_ids:
+        if not artist_id:
+            continue
+        tracks = db.list_fileless_tracks_for_artist(str(artist_id))
+        for track in tracks:
+            tid = str(track.get("id") or "")
+            if not tid or tid in seen_track_ids:
+                continue
+            seen_track_ids.add(tid)
+            if not titles_match(track.get("title"), title):
+                continue
+            cand_dur = track.get("duration_seconds")
+            try:
+                cand_dur_val = float(cand_dur) if cand_dur is not None else None
+            except (ValueError, TypeError):
+                cand_dur_val = None
+            if cand_dur_val is None or cand_dur_val <= 0:
+                continue
+            if abs(cand_dur_val - target_dur) <= 3.0:
+                matched.append(track)
+
+    if len(matched) == 1:
+        return matched[0]
+    return None
 
 

@@ -191,15 +191,26 @@ class ImportCatalogMixin:
                 f_meta = {}
 
             matched_track = job.placed_to_track.get(placed_str)
-            if matched_track and job.target_album:
-                artist_id = job.target_album["artist_id"]
-                artist_row = db.get_library_artist(artist_id) or {
+            if matched_track:
+                if job.target_album and matched_track.get("album_id") == job.target_album.get("id"):
+                    album_row = job.target_album
+                else:
+                    album_row = (
+                        db.get_library_album(matched_track["album_id"])
+                        if matched_track.get("album_id")
+                        else job.target_album
+                    )
+                album_id = album_row["id"] if album_row else (job.target_album["id"] if job.target_album else None)
+                artist_id = (
+                    matched_track.get("artist_id")
+                    or (album_row.get("artist_id") if album_row else None)
+                    or (job.target_album.get("artist_id") if job.target_album else None)
+                )
+                artist_row = (db.get_library_artist(artist_id) if artist_id else None) or {
                     "id": artist_id,
                     "name": job.item.get("artist") or "Unknown Artist",
                     "quality_profile_id": None,
                 }
-                album_id = job.target_album["id"]
-                album_row = job.target_album
                 track_id = matched_track["id"]
                 track_row = matched_track
                 db.set_track_monitored(track_id, True)
