@@ -4,7 +4,9 @@ Native rows and Lidarr-proxied rows share one record shape per list. Values that
 optional. Messages and reasons are already passed through ``redact_text`` by the service.
 """
 
-from typing import Optional
+from typing import Literal, Optional
+
+from pydantic import Field
 
 from trackseerr.api.response_models import ApiModel
 from trackseerr.api.schemas.library import IndexGroup
@@ -144,3 +146,27 @@ class HistoryIndexResponse(ApiModel):
 class ActionResult(ApiModel):
     success: bool
     message: str
+
+
+class QueueBulkRequest(ApiModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    action: Literal["remove", "retry"]
+    remove_from_client: bool = True
+    blocklist: bool = False
+
+
+class BlocklistBulkRequest(ApiModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class BulkItemResult(ApiModel):
+    id: str
+    success: bool
+    message: str
+
+
+class BulkActionResult(ApiModel):
+    succeeded: int
+    failed: int
+    results: list[BulkItemResult]
+
