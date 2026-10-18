@@ -405,6 +405,40 @@ def candidate_artist_ids(
     return candidates
 
 
+def find_owned_for_item(
+    db: Database,
+    item: dict[str, Any],
+    title: str,
+    duration_seconds: Optional[float] = None,
+    exclude_track_id: Optional[str] = None,
+    tag_artist: Optional[str] = None,
+    artist_id: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Finds an already-owned track across candidate artists matching title and duration."""
+    candidates: list[str] = []
+    seen: set[str] = set()
+    if artist_id:
+        aid = str(artist_id)
+        seen.add(aid)
+        candidates.append(aid)
+    for aid in candidate_artist_ids(db, item, tag_artist):
+        if aid not in seen:
+            seen.add(aid)
+            candidates.append(aid)
+    for aid in candidates:
+        owned = find_owned_equivalent(
+            db,
+            aid,
+            title,
+            duration_seconds=duration_seconds,
+            exclude_track_id=exclude_track_id,
+        )
+        if owned is not None:
+            return owned
+    return None
+
+
+
 def find_fileless_equivalent(
     db: Database,
     artist_ids: list[str],

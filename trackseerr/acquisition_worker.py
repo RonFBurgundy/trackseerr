@@ -52,7 +52,7 @@ from trackseerr.storage import Database
 from trackseerr.track_matching import (
     candidate_artist_ids,
     find_fileless_equivalent,
-    find_owned_equivalent,
+    find_owned_for_item,
     wanted_song,
 )
 
@@ -642,12 +642,13 @@ class AcquisitionWorker(ImportPipelineMixin):
             artist_id = _download_artist_id(db, item, None)
             w_title, w_dur = wanted_song(db, item)
             if w_title:
-                owned = find_owned_equivalent(
+                owned = find_owned_for_item(
                     db,
-                    artist_id,
+                    item,
                     w_title,
                     w_dur,
                     exclude_track_id=track_id,
+                    artist_id=artist_id,
                 )
                 if owned and owned.get("cutoff_met"):
                     return "gone_resolved"
@@ -666,7 +667,14 @@ class AcquisitionWorker(ImportPipelineMixin):
                 artist_id = str(art["id"])
         title = metadata.get("title") or ""
         duration = metadata.get("duration") or metadata.get("duration_seconds")
-        owned = find_owned_equivalent(db, artist_id, title, duration)
+        owned = find_owned_for_item(
+            db,
+            item,
+            title,
+            duration,
+            tag_artist=metadata.get("artist"),
+            artist_id=artist_id,
+        )
         if owned and owned.get("cutoff_met"):
             return "duplicate"
         if find_fileless_equivalent(
@@ -728,12 +736,13 @@ class AcquisitionWorker(ImportPipelineMixin):
                 trk_title = trk.get("title") if trk else ""
                 trk_dur = trk.get("duration_seconds") if trk else None
                 owned = (
-                    find_owned_equivalent(
+                    find_owned_for_item(
                         db,
-                        artist_id,
+                        item,
                         trk_title,
                         trk_dur,
                         exclude_track_id=track_id,
+                        artist_id=artist_id,
                     )
                     if trk_title
                     else None
@@ -752,12 +761,13 @@ class AcquisitionWorker(ImportPipelineMixin):
         if not title:
             return False
         artist_id = _download_artist_id(db, item, None)
-        owned = find_owned_equivalent(
+        owned = find_owned_for_item(
             db,
-            artist_id,
+            item,
             title,
             dur,
             exclude_track_id=track_id,
+            artist_id=artist_id,
         )
         return bool(owned and owned.get("cutoff_met"))
 

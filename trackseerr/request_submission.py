@@ -28,7 +28,7 @@ from trackseerr.library_manager import ModeChanged, dispatch_to_lidarr, native_i
 from trackseerr.models import MusicRequest, NotificationEvent, RequestStatus, UserPermission
 from trackseerr.notifications import notification_dispatcher
 from trackseerr.storage import Database
-from trackseerr.track_matching import find_owned_equivalent
+from trackseerr.track_matching import find_owned_for_item
 
 logger = logging.getLogger(__name__)
 
@@ -168,11 +168,9 @@ def _library_has(
     )
     if avail.get("status") in ("available", "cutoff_unmet"):
         return "Already in your library"
-    art_cand = db.get_library_artist_by_name(artist)
-    if art_cand:
-        equiv = find_owned_equivalent(db, art_cand["id"], title)
-        if equiv and equiv.get("cutoff_met"):
-            return "Already in your library"
+    equiv = find_owned_for_item(db, {"artist": artist}, title)
+    if equiv and equiv.get("cutoff_met"):
+        return "Already in your library"
     return None
 
 
