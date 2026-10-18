@@ -458,3 +458,125 @@ def test_wrong_song_not_requeued(tmp_path: Path, db: Database):
     dl_row = db.get_active_download("dl-1")
     assert dl_row["status"] == DownloadStatus.WARNING.value
     assert "manual import required" in str(dl_row.get("error_message"))
+
+
+def test_twin_rows_requeue_only_one(tmp_path: Path, db: Database):
+    """Two WARNING rows with the same held path: exactly one is requeued to COMPLETED in one sweep pass."""
+    dl_dir = tmp_path / "staging" / "Elvis Costello & The Attractions - Armed Forces"
+    f = dl_dir / "07_Hand In Hand (2021 Remaster).flac"
+    _flac(f)
+    music, staging, _, _, _, _, _, _, _ = _seed_costello(
+        db,
+        tmp_path,
+        download_status=DownloadStatus.WARNING.value,
+        held_file_path=str(f),
+    )
+
+    # Seed the second twin active download pointing to the same held file
+    db.create_active_download(
+        ActiveDownload(
+            id="dl-2",
+            client_id="c1",
+            title="Elvis Costello & The Attractions - Armed Forces (Twin)",
+            artist="Elvis Costello & The Attractions",
+            item_type="album",
+            status=DownloadStatus.WARNING.value,
+            download_hash="h2",
+            album_id="alb-af",
+        )
+    )
+    db.set_download_unmatched_files("dl-2", [str(f)])
+    db.update_download_status(
+        "dl-2",
+        status=DownloadStatus.WARNING.value,
+        error_message="1 file(s) couldn't be matched — manual import required",
+    )
+
+    metas = {
+        "07_Hand In Hand (2021 Remaster).flac": {
+            "title": "Hand In Hand",
+            "artist": "Elvis Costello",
+            "duration": 157.0,
+            "duration_seconds": 157.0,
+            "track_number": 7,
+            "disc_number": 1,
+        }
+    }
+
+    def inspect(path):
+        base = {
+            "artist": "Elvis Costello",
+            "album": "Armed Forces",
+            "disc_number": 1,
+            "codec": "FLAC",
+            "bits_per_sample": 16,
+            "bitrate": 900,
+            "sample_rate": 44100,
+            "extension": ".flac",
+        }
+        return {**base, **metas.get(Path(path).name, {})}
+
+    driver = MagicMock()
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+        AcquisitionWorker()._resolve_parked_duplicates(
+            db=db,
+            ctx=MagicMock(media_settings=db.get_media_management_settings()),
+        )
+
+    row1 = db.get_active_download("dl-1")
+    row2 = db.get_active_download("dl-2")
+    statuses = [row1["status"], row2["status"]]
+    assert statuses.count(DownloadStatus.COMPLETED.value) == 1
+    assert statuses.count(DownloadStatus.WARNING.value) == 1
+
+
+def test_retried_import_with_missing_file_reparks_without_blocklist(tmp_path: Path, db: Database):
+    """Row with 'Retried import…' message whose held path is deleted reparks as WARNING without blocklist or fallback scan."""
+    dl_dir = tmp_path / "staging" / "Elvis Costello & The Attractions - Armed Forces"
+    f = dl_dir / "07_Hand In Hand (2021 Remaster).flac"
+    # Note: do not create f on disk, or delete it
+    music, staging, _, _, _, _, _, _, _ = _seed_costello(
+        db,
+        tmp_path,
+        download_status=DownloadStatus.COMPLETED.value,
+        held_file_path=None,
+    )
+    db.set_download_unmatched_files("dl-1", [str(f)])
+    db.update_download_status(
+        "dl-1",
+        status=DownloadStatus.COMPLETED.value,
+        error_message="Retried import onto a matching track",
+    )
+
+    worker = AcquisitionWorker()
+    stats = {"polled": 0, "completed": 0, "failed": 0, "imported": 0}
+
+    driver = MagicMock()
+    driver.get_status.return_value = {
+        "status": DownloadStatus.COMPLETED.value,
+        "progress": 100.0,
+        "size_bytes": 1,
+        "speed_bps": 0,
+        "eta_seconds": 0,
+        "source_path": str(dl_dir),
+        "error_message": None,
+    }
+
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch.object(worker, "_find_audio_files") as mock_find:
+        mock_find.side_effect = AssertionError("_find_audio_files should not be called for retried import")
+        worker._poll_once(db=db, staging_dir=str(staging))
+
+    row = db.get_active_download("dl-1")
+    assert row["status"] == DownloadStatus.WARNING.value
+    assert row["error_message"] == "Retried import: file no longer on disk"
+    assert row["unmatched_files"] == [str(f)]
+
+    # Verify no blocklist entries were created
+    blocklist = db.list_blocklist()
+    assert len(blocklist) == 0
+
