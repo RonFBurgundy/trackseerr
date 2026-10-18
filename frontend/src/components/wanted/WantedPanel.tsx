@@ -228,7 +228,7 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
         rowMenuLabel={rowMenuLabel}
         rowDetails={rowDetails}
         emptyMessage={isCutoff ? 'Nothing is below its cutoff.' : 'Nothing is missing.'}
-        rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
+        rail={<ScrubberRail groups={index.groups} pending={index.pending} ariaLabel="Jump to group" />}
       />
       <ManualSearchModal
         target={searchTarget}

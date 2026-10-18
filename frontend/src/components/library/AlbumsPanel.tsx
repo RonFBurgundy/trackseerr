@@ -170,7 +170,7 @@ export const AlbumsPanel: React.FC<AlbumsPanelProps> = ({
             : 'No albums found in library.'
         }
         ariaLabel="Albums"
-        rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
+        rail={<ScrubberRail groups={index.groups} pending={index.pending} ariaLabel="Jump to group" />}
         footer={footer}
       />
     </section>

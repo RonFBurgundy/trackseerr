@@ -273,7 +273,7 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
             ? 'No owned tracks match \u2014 turn off Owned only to include missing tracks'
             : 'No tracks found in library.'
         }
-        rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
+        rail={<ScrubberRail groups={index.groups} pending={index.pending} ariaLabel="Jump to group" />}
       />
       {footer}
     </section>

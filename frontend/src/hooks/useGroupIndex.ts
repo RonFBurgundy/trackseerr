@@ -15,6 +15,8 @@ export interface UseGroupIndexOptions {
 export interface UseGroupIndexReturn {
   groups: readonly GroupIndexGroup[];
   loading: boolean;
+  /** True while the group index for the current sort/filters is loading. Prevents flash of percent labels. */
+  pending: boolean;
   /** Index failures are non-fatal (the list still works, the scrubber just hides). */
   error: string | null;
 }
@@ -35,9 +37,12 @@ export function useGroupIndex(fetcher: IndexFetcher, options: UseGroupIndexOptio
   const [groups, setGroups] = useState<readonly GroupIndexGroup[]>(NO_GROUPS);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [settledKey, setSettledKey] = useState<string | null>(null);
   const fetcherRef = useRef<IndexFetcher>(fetcher);
   fetcherRef.current = fetcher;
   const filtersJson = JSON.stringify(filters ?? {});
+  const currentKey = `${sortKey}|${sortDir}|${filtersJson}`;
+  const pending = enabled && total > 0 && settledKey !== currentKey;
 
   useEffect(() => {
     setGroups(NO_GROUPS);
@@ -66,10 +71,13 @@ export function useGroupIndex(fetcher: IndexFetcher, options: UseGroupIndexOptio
         setError(errorMessage(err, 'Failed to load group index'));
       })
       .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+          setSettledKey(currentKey);
+        }
       });
     return () => controller.abort();
-  }, [sortKey, sortDir, filtersJson, total, enabled]);
+  }, [sortKey, sortDir, filtersJson, total, enabled, currentKey]);
 
-  return { groups, loading, error };
+  return { groups, loading, pending, error };
 }

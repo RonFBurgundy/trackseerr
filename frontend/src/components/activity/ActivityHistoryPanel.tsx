@@ -165,7 +165,7 @@ export const ActivityHistoryPanel: React.FC<ActivityPanelProps> = ({ onToast }) 
         rowMenuLabel={rowMenuLabel}
         rowDetails={rowDetails}
         emptyMessage={event ? `No ${event} events.` : 'No history yet.'}
-        rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to date" />}
+        rail={<ScrubberRail groups={index.groups} pending={index.pending} ariaLabel="Jump to date" />}
       />
       <ConfirmDialog
         isOpen={failingId !== null}
