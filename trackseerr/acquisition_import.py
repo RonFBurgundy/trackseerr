@@ -250,6 +250,7 @@ class _ImportJob:
     replacement_issue_id: Optional[str] = None
     target_summary: Optional[str] = None
     should_keep_seeding: bool = False
+    duplicate_owned_title: Optional[str] = None
 
 
 
@@ -772,6 +773,8 @@ class ImportPipelineMixin(ImportCatalogMixin):
                     owned.get("title"),
                 )
                 job.duplicate_files.append(str(af))
+                if not job.duplicate_owned_title and owned.get("title"):
+                    job.duplicate_owned_title = str(owned["title"])
                 return
             matched_expected_track = self._cross_album_match(db, ctx, job, metadata, duration)
             if matched_expected_track is None:
@@ -1056,6 +1059,25 @@ class ImportPipelineMixin(ImportCatalogMixin):
 
         if satisfied and job.item.get("request_id"):
             db.update_request_status(job.item["request_id"], RequestStatus.AVAILABLE.value)
+
+        if not satisfied:
+            owned_title = getattr(job, "duplicate_owned_title", None)
+            if not owned_title and owned and owned.get("title"):
+                owned_title = owned["title"]
+            if not owned_title:
+                owned_title = "another track"
+            try:
+                db.add_to_blocklist(
+                    source_title=job.item["title"],
+                    artist=job.item.get("artist"),
+                    release_guid=(job.item.get("download_hash") or job.download_id),
+                    info_hash=job.item.get("download_hash"),
+                    reason=f"Already own this file's song as {owned_title}",
+                    download_id=job.download_id,
+                    track_id=job.item.get("track_id"),
+                )
+            except sqlite3.Error as exc:
+                logger.warning("Failed to blocklist duplicate download %s: %s", job.download_id, exc)
 
         download_id = str(job.download_id or "") or None
         provenance = download_trigger_kwargs(db, download_id)

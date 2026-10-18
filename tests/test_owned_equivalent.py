@@ -5,7 +5,12 @@ import pytest
 
 from trackseerr.models import MusicRequest
 from trackseerr.storage import Database
-from trackseerr.track_matching import find_owned_equivalent, match_owned_equivalent, wanted_song
+from trackseerr.track_matching import (
+    find_owned_equivalent,
+    match_owned_equivalent,
+    titles_match,
+    wanted_song,
+)
 
 
 @pytest.fixture
@@ -311,4 +316,11 @@ def test_wanted_song_prefers_track_then_request_never_release_title(test_db: Dat
     title, dur = wanted_song(test_db, item_neither)
     assert title is None
     assert dur is None
+
+
+def test_album_version_matches_plain_title() -> None:
+    assert titles_match("Won't Get Fooled Again (Original Album Version)", "Won’t Get Fooled Again")
+    assert not titles_match("Beat Goes On (Extended Mix)", "Beat Goes On")
+    assert not titles_match("Mountain Sound (The Cabin Sessions)", "Mountain Sound")
+
 

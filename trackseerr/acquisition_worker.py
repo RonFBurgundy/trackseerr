@@ -686,6 +686,62 @@ class AcquisitionWorker(ImportPipelineMixin):
             return "retry_import"
         return "still_held"
 
+    @staticmethod
+    def _find_duplicate_owned_title(
+        db: Database, item: dict[str, Any], duplicate_paths: list[str]
+    ) -> str:
+        for p in duplicate_paths:
+            try:
+                path_obj = Path(p)
+                if path_obj.exists():
+                    metadata = inspect_audio_file(path_obj)
+                    artist_id = _download_artist_id(db, item, None)
+                    if not artist_id and metadata.get("artist"):
+                        art = db.get_library_artist_by_name(str(metadata["artist"]))
+                        if art and art.get("id"):
+                            artist_id = str(art["id"])
+                    title = metadata.get("title") or ""
+                    duration = metadata.get("duration") or metadata.get("duration_seconds")
+                    owned = find_owned_for_item(
+                        db,
+                        item,
+                        title,
+                        duration,
+                        tag_artist=metadata.get("artist"),
+                        artist_id=artist_id,
+                    )
+                    if owned and owned.get("title"):
+                        return str(owned["title"])
+            except (OSError, ValueError, TypeError) as e:
+                logger.debug("Failed inspecting duplicate file %s: %s", p, e)
+        return "another track"
+
+    @staticmethod
+    def _unmonitor_satisfied_track(db: Database, item: dict[str, Any], track_id: str) -> None:
+        try:
+            db.set_track_monitored(str(track_id), False)
+            artist_id = _download_artist_id(db, item, None)
+            trk = db.get_library_track(str(track_id))
+            trk_title = trk.get("title") if trk else ""
+            trk_dur = trk.get("duration_seconds") if trk else None
+            owned = (
+                find_owned_for_item(
+                    db,
+                    item,
+                    trk_title,
+                    trk_dur,
+                    exclude_track_id=track_id,
+                    artist_id=artist_id,
+                )
+                if trk_title
+                else None
+            )
+            owned_title = owned.get("title") if owned else "equivalent track"
+            logger.info("Unmonitored %s: already owned as %s", track_id, owned_title)
+        except sqlite3.Error as exc:
+            logger.warning("Failed to unmonitor duplicate track %s: %s", track_id, exc)
+
+
     def _clear_parked_download(
         self,
         db: Database,
@@ -696,6 +752,10 @@ class AcquisitionWorker(ImportPipelineMixin):
         satisfied: bool = True,
     ) -> None:
         """Clears a parked download whose held files have all been resolved."""
+        owned_title = "another track"
+        if not satisfied:
+            owned_title = self._find_duplicate_owned_title(db, item, duplicate_paths)
+
         if driver_type == "slskd" or import_mode == "move":
             for p in duplicate_paths:
                 try:
@@ -727,30 +787,23 @@ class AcquisitionWorker(ImportPipelineMixin):
         if satisfied and item.get("request_id"):
             db.update_request_status(item["request_id"], RequestStatus.AVAILABLE.value)
 
+        if not satisfied:
+            try:
+                db.add_to_blocklist(
+                    source_title=item["title"],
+                    artist=item.get("artist"),
+                    release_guid=(item.get("download_hash") or item["id"]),
+                    info_hash=item.get("download_hash"),
+                    reason=f"Already own this file's song as {owned_title}",
+                    download_id=item["id"],
+                    track_id=item.get("track_id"),
+                )
+            except sqlite3.Error as exc:
+                logger.warning("Failed to blocklist duplicate download %s: %s", item["id"], exc)
+
         track_id = item.get("track_id")
         if satisfied and track_id and db.get_library_file_for_track(str(track_id)) is None:
-            try:
-                db.set_track_monitored(str(track_id), False)
-                artist_id = _download_artist_id(db, item, None)
-                trk = db.get_library_track(str(track_id))
-                trk_title = trk.get("title") if trk else ""
-                trk_dur = trk.get("duration_seconds") if trk else None
-                owned = (
-                    find_owned_for_item(
-                        db,
-                        item,
-                        trk_title,
-                        trk_dur,
-                        exclude_track_id=track_id,
-                        artist_id=artist_id,
-                    )
-                    if trk_title
-                    else None
-                )
-                owned_title = owned.get("title") if owned else "equivalent track"
-                logger.info("Unmonitored %s: already owned as %s", track_id, owned_title)
-            except sqlite3.Error as exc:
-                logger.warning("Failed to unmonitor duplicate track %s: %s", track_id, exc)
+            self._unmonitor_satisfied_track(db, item, str(track_id))
 
     def _is_download_satisfied(self, db: Database, item: dict[str, Any]) -> bool:
         """Checks whether the wanted song of a download is already satisfied in the library."""
