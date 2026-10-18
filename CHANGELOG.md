@@ -13,6 +13,8 @@ heading becomes the version and date.
 
 ### Added
 
+- An album's track list shows "On <album>" instead of "Missing" for a song you already own on another release. Tap it to open that album.
+- Media Management → Monitoring has a "Keep the same song from more than one release" switch. It is off by default, so a song you own on one release isn't downloaded again for another; turn it on to collect every release's copy.
 - Library Health has a "Shorten name" button on each "Names too long" finding. It gives a library track its normal Rename name, or shortens any other file or folder in place, without deleting anything. Rename also marks these files with a "Name too long" reason and selects them by default.
 - Library Health lists file and folder names that are too long (over 200 bytes) under "Names too long". These names can make the Unraid mover and renames fail. Run Rename to shorten them. This check works even without a media server.
 - System → Status shows how many MusicBrainz requests went to the mirror and to musicbrainz.org in the last hour, the request limit, and whether TrackSeerr is pausing either one.
