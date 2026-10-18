@@ -569,6 +569,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/activity/blocklist/bulk-remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bulk remove entries from the blocklist */
+        post: operations["blocklist_bulk_remove_api_activity_blocklist_bulk_remove_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/activity/blocklist/index": {
         parameters: {
             query?: never;
@@ -665,6 +682,23 @@ export interface paths {
         get: operations["list_queue_api_activity_queue_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/activity/queue/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bulk remove or retry queue items */
+        post: operations["queue_bulk_api_activity_queue_bulk_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6899,6 +6933,11 @@ export interface components {
             /** Created */
             created: components["schemas"]["RequestRecord"][];
         };
+        /** BlocklistBulkRequest */
+        BlocklistBulkRequest: {
+            /** Ids */
+            ids: string[];
+        };
         /** BlocklistEntry */
         BlocklistEntry: {
             /** Album */
@@ -6973,6 +7012,15 @@ export interface components {
             /** Success */
             success: boolean;
         };
+        /** BulkActionResult */
+        BulkActionResult: {
+            /** Failed */
+            failed: number;
+            /** Results */
+            results: components["schemas"]["BulkItemResult"][];
+            /** Succeeded */
+            succeeded: number;
+        };
         /** BulkArtistsResult */
         BulkArtistsResult: {
             /** Albums Monitored */
@@ -6985,6 +7033,15 @@ export interface components {
             tags_added?: number | null;
             /** Tags Removed */
             tags_removed?: number | null;
+        };
+        /** BulkItemResult */
+        BulkItemResult: {
+            /** Id */
+            id: string;
+            /** Message */
+            message: string;
+            /** Success */
+            success: boolean;
         };
         /**
          * CalendarItem
@@ -12110,6 +12167,26 @@ export interface components {
              */
             upgrade_allowed: boolean;
         };
+        /** QueueBulkRequest */
+        QueueBulkRequest: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "remove" | "retry";
+            /**
+             * Blocklist
+             * @default false
+             */
+            blocklist: boolean;
+            /** Ids */
+            ids: string[];
+            /**
+             * Remove From Client
+             * @default true
+             */
+            remove_from_client: boolean;
+        };
         /** QueueCancelResponse */
         QueueCancelResponse: {
             /** Id */
@@ -15344,6 +15421,39 @@ export interface operations {
             };
         };
     };
+    blocklist_bulk_remove_api_activity_blocklist_bulk_remove_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlocklistBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkActionResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     blocklist_index_api_activity_blocklist_index_get: {
         parameters: {
             query?: {
@@ -15527,6 +15637,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QueuePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    queue_bulk_api_activity_queue_bulk_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QueueBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkActionResult"];
                 };
             };
             /** @description Validation Error */
