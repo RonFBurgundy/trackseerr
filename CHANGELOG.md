@@ -109,6 +109,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Add Artist finds artists again. Searching in the Library's Add Artist tool always came back empty.
 - Retrying a held download no longer searches the whole download folder when the file is already gone (which could stall all downloads for minutes and blocklist a good release), and only one of two downloads of the same file is retried.
 - A downloaded song that doesn't fit the album it was meant for is now imported onto the same song elsewhere in your library when there's exactly one match with the same title and length, including under a related artist name ("Elvis Costello & The Attractions" and "Elvis Costello"). Downloads already waiting for manual import get one automatic retry.
 - Clearing duplicate downloads now checks the song you asked for. A wrong-song file that happens to be another song you own is discarded, but the song you wanted stays monitored and requested. A download whose file has disappeared is marked failed so it is searched again.
