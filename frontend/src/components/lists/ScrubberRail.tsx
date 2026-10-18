@@ -6,6 +6,8 @@ import { useListViewport, type ListViewport } from './ListViewportContext';
 export interface ScrubberRailProps {
   /** Group index for the list (`useGroupIndex`). Only these groups are shown. */
   groups: readonly GroupIndexGroup[];
+  /** True while the list's group index is loading: the rail stays hidden instead of showing percent labels. */
+  pending?: boolean;
   ariaLabel?: string;
 }
 
@@ -500,17 +502,19 @@ const GroupRail: React.FC<RailProps> = ({ groups, viewport, touch, ariaLabel }) 
 /**
  * Right-side scrubber for virtualized lists. Mount it in the `rail` slot of FlatList / VirtualGrid; it reads the
  * list's viewport from context. When a list has no group index or fewer than two groups (e.g. Queue or Blocklist),
- * synthetic percent-labelled groups (`positionGroups`) provide a fallback scrubber. It hides when the content fits
- * or there are fewer than two effective groups, and while shown it hides the list's native scrollbar (wheel, keyboard
- * and touch scrolling keep working).
+ * synthetic percent-labelled groups (`positionGroups`) provide a fallback scrubber. When `pending` is true while
+ * the list has fewer than two groups, the rail stays hidden instead of falling back to percent labels. It hides when
+ * the content fits or there are fewer than two effective groups, and while shown it hides the list's native scrollbar
+ * (wheel, keyboard and touch scrolling keep working).
  */
-export const ScrubberRail: React.FC<ScrubberRailProps> = ({ groups, ariaLabel = 'Jump to group' }) => {
+export const ScrubberRail: React.FC<ScrubberRailProps> = ({ groups, pending = false, ariaLabel = 'Jump to group' }) => {
   const viewport = useListViewport();
   const touch = useMediaQuery('(pointer: coarse)');
-  const effective = useMemo(
-    () => (groups.length >= 2 ? groups : positionGroups(viewport?.total ?? 0)),
-    [groups, viewport?.total],
-  );
+  const effective = useMemo(() => {
+    if (groups.length >= 2) return groups;
+    if (pending) return [];
+    return positionGroups(viewport?.total ?? 0);
+  }, [groups, pending, viewport?.total]);
   const scrollElement = viewport?.scrollElement ?? null;
   const visible =
     viewport !== null &&

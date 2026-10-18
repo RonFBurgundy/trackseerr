@@ -183,7 +183,7 @@ export const ActivitySearchesPanel: React.FC<ActivityPanelProps> = () => {
         layout="card"
         rowDetails={rowDetails}
         emptyMessage="No searches logged yet."
-        rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to date" />}
+        rail={<ScrubberRail groups={index.groups} pending={index.pending} ariaLabel="Jump to date" />}
       />
     </ListPanel>
   );

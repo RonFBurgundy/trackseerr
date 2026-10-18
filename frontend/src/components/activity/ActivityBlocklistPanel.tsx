@@ -151,7 +151,7 @@ export const ActivityBlocklistPanel: React.FC<ActivityPanelProps> = ({ onToast }
         rowMenuLabel={rowMenuLabel}
         rowDetails={rowDetails}
         emptyMessage="The blocklist is empty."
-        rail={<ScrubberRail groups={index.groups} ariaLabel={sortKey === 'artist' ? 'Jump to artist' : 'Jump to date'} />}
+        rail={<ScrubberRail groups={index.groups} pending={index.pending} ariaLabel={sortKey === 'artist' ? 'Jump to artist' : 'Jump to date'} />}
       />
       <ConfirmDialog
         isOpen={removingId !== null}

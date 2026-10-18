@@ -211,7 +211,10 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
         label: 'Source',
         mobile: 'end',
         render: (r) => (
-          <span className="inline-flex items-center px-1.5 py-0.5 rounded-[2px] bg-[#181818] border border-[#2a2a2a] text-neutral-300 text-[10px] font-mono uppercase tracking-wide whitespace-nowrap">
+          <span
+            className="inline-block max-w-full truncate align-middle px-1.5 py-0.5 rounded-[2px] bg-[#181818] border border-[#2a2a2a] text-neutral-300 text-[10px] font-mono uppercase tracking-wide whitespace-nowrap"
+            title={formatRequestSourceBadge(r)}
+          >
             {formatRequestSourceBadge(r)}
           </span>
         ),
@@ -536,7 +539,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
             rowDetails={rowDetails}
             rowTone={rowTone}
             emptyMessage="No requests in this queue."
-            rail={<ScrubberRail groups={requestsHook.index.groups} ariaLabel="Jump to date" />}
+            rail={<ScrubberRail groups={requestsHook.index.groups} pending={requestsHook.index.pending} ariaLabel="Jump to date" />}
           />
         </div>
       )}

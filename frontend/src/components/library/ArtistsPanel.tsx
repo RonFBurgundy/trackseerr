@@ -166,7 +166,7 @@ export const ArtistsPanel: React.FC<ArtistsPanelProps> = ({
           ) : undefined
         }
         ariaLabel="Artists"
-        rail={<ScrubberRail groups={index.groups} ariaLabel="Jump to group" />}
+        rail={<ScrubberRail groups={index.groups} pending={index.pending} ariaLabel="Jump to group" />}
         footer={
           <>
             {isAdmin && query && list.total > 0 && list.total < 3 && onAddArtist && (
