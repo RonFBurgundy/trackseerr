@@ -55,7 +55,7 @@ from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.request_catalog import seed_pending_request_catalog
 from trackseerr.seed_rules import apply_seed_rules_at_grab
 from trackseerr.storage import Database
-from trackseerr.track_matching import find_owned_equivalent
+from trackseerr.track_matching import find_owned_for_item
 
 logger = logging.getLogger(__name__)
 
@@ -621,6 +621,23 @@ class WantedBacklogWorker:
         """Convert unfulfilled requests into search tuples and append to items_to_search."""
         for r in unfulfilled_requests:
             is_upgrade = (r.get("status") == "available" or r.get("cutoff_met") == 0)
+            if r.get("item_type", "track") == "track" and not is_upgrade:
+                owned = find_owned_for_item(
+                    ctx.db,
+                    {"artist": r.get("artist")},
+                    r.get("title") or "",
+                )
+                if owned and owned.get("cutoff_met"):
+                    logger.info(
+                        "Request %s already satisfied by owned %s; marking available",
+                        r.get("id"),
+                        owned.get("title"),
+                    )
+                    try:
+                        ctx.db.update_request_status(r["id"], RequestStatus.AVAILABLE)
+                    except sqlite3.Error as exc:
+                        logger.warning("Failed to mark request %s available: %s", r["id"], exc)
+                    continue
             min_score = None
             qp_id = r.get("quality_profile_id")
             if is_upgrade:
@@ -689,12 +706,13 @@ class WantedBacklogWorker:
                 if not artist_id:
                     trk = ctx.db.get_library_track(t_id)
                     artist_id = trk["artist_id"] if trk else None
-                owned = find_owned_equivalent(
+                owned = find_owned_for_item(
                     ctx.db,
-                    artist_id,
+                    {"artist": t.get("artist_name"), "track_id": t_id},
                     t["track_title"],
                     t.get("duration_seconds"),
                     exclude_track_id=t_id,
+                    artist_id=artist_id,
                 )
                 if owned is not None:
                     logger.info(

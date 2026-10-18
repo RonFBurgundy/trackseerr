@@ -72,6 +72,7 @@ from trackseerr.track_matching import (
     download_artist_id,
     find_fileless_equivalent,
     find_owned_equivalent,
+    find_owned_for_item,
     reconcile_audio_file_to_track_scored,
     resolve_download_expected_tracks,
     wanted_song,
@@ -755,7 +756,14 @@ class ImportPipelineMixin(ImportCatalogMixin):
             artist_id = _download_artist_id(db, job.item, job.target_album)
             title = metadata.get("title") or ""
             duration = metadata.get("duration") or metadata.get("duration_seconds")
-            owned = find_owned_equivalent(db, artist_id, title, duration)
+            owned = find_owned_for_item(
+                db,
+                job.item,
+                title,
+                duration,
+                tag_artist=metadata.get("artist"),
+                artist_id=artist_id,
+            )
             if owned and owned.get("cutoff_met"):
                 logger.info(
                     "Download %s: %s is already in the library as %s; discarding duplicate",
@@ -1022,12 +1030,13 @@ class ImportPipelineMixin(ImportCatalogMixin):
         track_id = job.item.get("track_id")
         has_file = bool(track_id and db.get_library_file_for_track(str(track_id)) is not None)
         owned = (
-            find_owned_equivalent(
+            find_owned_for_item(
                 db,
-                artist_id,
+                job.item,
                 title,
                 dur,
                 exclude_track_id=track_id,
+                artist_id=artist_id,
             )
             if title
             else None
