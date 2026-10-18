@@ -28,6 +28,7 @@ from trackseerr.library_manager import ModeChanged, dispatch_to_lidarr, native_i
 from trackseerr.models import MusicRequest, NotificationEvent, RequestStatus, UserPermission
 from trackseerr.notifications import notification_dispatcher
 from trackseerr.storage import Database
+from trackseerr.track_matching import find_owned_equivalent
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +166,14 @@ def _library_has(
     avail = get_item_availability(
         db, artist_name=artist, album_title=album, track_title=title, foreign_id=foreign_id
     )
-    return "Already in your library" if avail.get("status") in ("available", "cutoff_unmet") else None
+    if avail.get("status") in ("available", "cutoff_unmet"):
+        return "Already in your library"
+    art_cand = db.get_library_artist_by_name(artist)
+    if art_cand:
+        equiv = find_owned_equivalent(db, art_cand["id"], title)
+        if equiv and equiv.get("cutoff_met"):
+            return "Already in your library"
+    return None
 
 
 def submit_track_request(
@@ -210,14 +218,22 @@ def submit_track_request(
     with user_request_lock(user["id"]):
         if not is_admin:
             _enforce_quota(db, user, {kind: 1})
+        if not is_admin or trigger is not None:
             for r in db.list_requests(user_id=user["id"]):
-                if r.get("status") in ("pending", "processing", "approved") and (
-                    r.get("artist", "").lower() == clean_artist.lower()
-                    and r.get("title", "").lower() == clean_title.lower()
-                ):
-                    raise RequestRejected(
-                        "duplicate", 409, "You have already submitted an active request for this item"
+                if r.get("status") in ("pending", "processing", "approved"):
+                    match_title = (
+                        r.get("artist", "").lower() == clean_artist.lower()
+                        and r.get("title", "").lower() == clean_title.lower()
                     )
+                    match_fid = (
+                        bool(foreign_id)
+                        and bool(r.get("foreign_id"))
+                        and r.get("foreign_id") == foreign_id
+                    )
+                    if match_title or match_fid:
+                        raise RequestRejected(
+                            "duplicate", 409, "You have already submitted an active request for this item"
+                        )
 
         initial_status = RequestStatus.PROCESSING if is_auto_approved(user, config, kind) else RequestStatus.PENDING
 
