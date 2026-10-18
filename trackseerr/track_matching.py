@@ -9,6 +9,7 @@ from typing import Any, Optional
 from trackseerr.library import (
     fingerprint_audio_file,
 )
+from trackseerr.lidarr_release import norm_title, titles_match
 from trackseerr.storage import Database, clean_library_name
 
 
@@ -245,4 +246,36 @@ def resolve_download_expected_tracks(
     if target_album:
         expected_tracks = db.list_library_tracks(album_id=target_album["id"], limit=1000)
     return target_album, expected_tracks
+
+
+def find_owned_equivalent(
+    db: Database,
+    artist_id: Optional[str],
+    title: str,
+    duration_seconds: Optional[float] = None,
+    exclude_track_id: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Finds an already-owned track by the same artist with matching normalized title and duration."""
+    if not artist_id or not norm_title(title):
+        return None
+    candidates: list[dict[str, Any]] = []
+    for track in db.list_filed_tracks_for_artist(str(artist_id)):
+        if exclude_track_id is not None and str(track.get("id")) == str(exclude_track_id):
+            continue
+        if not titles_match(track.get("title"), title):
+            continue
+        cand_dur = track.get("duration_seconds")
+        if (
+            duration_seconds is not None
+            and cand_dur is not None
+            and abs(float(duration_seconds) - float(cand_dur)) > 5.0
+        ):
+            continue
+        candidates.append(track)
+    if not candidates:
+        return None
+    for cand in candidates:
+        if cand.get("cutoff_met"):
+            return cand
+    return candidates[0]
 

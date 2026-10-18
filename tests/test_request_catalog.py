@@ -16,6 +16,7 @@ from trackseerr.models import (
     RequestStatus,
 )
 from trackseerr.request_catalog import (
+    _seed_track_request,
     seed_pending_request_catalog,
     seed_request_catalog,
 )
@@ -238,6 +239,56 @@ def test_track_request_new_artist_monitors_only_that_track(test_db: Database, mo
     # Verify tracks on other album are NOT monitored
     ram_tracks = test_db.list_library_tracks(album_id=ram["id"])
     assert all(t["monitored"] == 0 for t in ram_tracks)
+
+
+def test_track_request_resolves_to_owned_edition(test_db: Database, mock_discovery) -> None:
+    # Seed artist and two albums
+    test_db.upsert_library_artist({"id": "art-prince", "name": "Prince", "monitored": True})
+    test_db.upsert_library_album({"id": "alb-orig", "artist_id": "art-prince", "title": "Sign O' The Times", "monitored": True})
+    test_db.upsert_library_album({"id": "alb-deluxe", "artist_id": "art-prince", "title": "Sign O' The Times (Deluxe)", "monitored": False})
+
+    # Owned track with file on original album
+    test_db.upsert_library_track({
+        "id": "trk-it-owned",
+        "album_id": "alb-orig",
+        "artist_id": "art-prince",
+        "title": "It",
+        "monitored": True,
+    })
+    test_db.upsert_library_file({
+        "track_id": "trk-it-owned",
+        "file_path": "/music/Prince/Sign O The Times/It.flac",
+        "cutoff_met": True,
+    })
+
+    # File-less track on deluxe album, initially unmonitored
+    test_db.upsert_library_track({
+        "id": "trk-it-remaster",
+        "album_id": "alb-deluxe",
+        "artist_id": "art-prince",
+        "title": "It - 2020 Remaster",
+        "monitored": False,
+    })
+
+    req = _create_req(
+        test_db,
+        req_id="req-it",
+        artist="Prince",
+        title="It - 2020 Remaster",
+        album="Sign O' The Times (Deluxe)",
+        item_type="track",
+    )
+
+    status, track_id, album_id = _seed_track_request(test_db, req, "art-prince", mock_discovery)
+
+    assert status == "seeded"
+    assert track_id == "trk-it-owned"
+    assert album_id == "alb-orig"
+
+    # The file-less track must not be monitored
+    remaster_track = test_db.get_library_track("trk-it-remaster")
+    assert remaster_track is not None
+    assert remaster_track["monitored"] == 0
 
 
 def test_track_request_counts_in_wanted_missing(test_db: Database, mock_discovery, mock_enricher) -> None:

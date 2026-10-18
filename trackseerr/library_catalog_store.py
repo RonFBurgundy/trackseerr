@@ -631,6 +631,28 @@ class LibraryCatalogStoreMixin:
                 out.append(track)
             return out
 
+    def list_filed_tracks_for_artist(
+        self, artist_id: str, limit: int = 5000
+    ) -> list[dict[str, Any]]:
+        """Library tracks owned by ``artist_id`` that have a file on disk."""
+        if not artist_id:
+            return []
+        met = "EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id AND f.cutoff_met = 1)"
+        query = (
+            f"SELECT t.*, {met} AS cutoff_met FROM library_tracks t "
+            "WHERE t.artist_id = ? AND EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) "
+            "ORDER BY t.id LIMIT ?"
+        )
+        with self._lock:
+            rows = self.conn.execute(query, (str(artist_id), int(limit))).fetchall()
+            out: list[dict[str, Any]] = []
+            for row in rows:
+                track = self._map_library_track(row)
+                track["has_file"] = True
+                track["cutoff_met"] = bool(row["cutoff_met"])
+                out.append(track)
+            return out
+
     def get_library_track_by_title(
         self,
         album_id: str,

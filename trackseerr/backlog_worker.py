@@ -55,6 +55,7 @@ from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.request_catalog import seed_pending_request_catalog
 from trackseerr.seed_rules import apply_seed_rules_at_grab
 from trackseerr.storage import Database
+from trackseerr.track_matching import find_owned_equivalent
 
 logger = logging.getLogger(__name__)
 
@@ -683,6 +684,25 @@ class WantedBacklogWorker:
                     (t.get("track_title") or "").strip().lower(),
                 )
                 if t_id in ctx.active_track_ids or t_pair in ctx.active_artist_titles:
+                    continue
+                artist_id = t.get("artist_id")
+                if not artist_id:
+                    trk = ctx.db.get_library_track(t_id)
+                    artist_id = trk["artist_id"] if trk else None
+                owned = find_owned_equivalent(
+                    ctx.db,
+                    artist_id,
+                    t["track_title"],
+                    t.get("duration_seconds"),
+                    exclude_track_id=t_id,
+                )
+                if owned is not None:
+                    logger.info(
+                        "Skipping wanted track %s - %s: already owned as %s",
+                        t.get("artist_name"),
+                        t["track_title"],
+                        owned.get("title"),
+                    )
                     continue
                 ctx.items_to_search.append(
                     (
