@@ -109,6 +109,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- A downloaded song that doesn't fit the album it was meant for is now imported onto the same song elsewhere in your library when there's exactly one match with the same title and length, including under a related artist name ("Elvis Costello & The Attractions" and "Elvis Costello"). Downloads already waiting for manual import get one automatic retry.
 - Clearing duplicate downloads now checks the song you asked for. A wrong-song file that happens to be another song you own is discarded, but the song you wanted stays monitored and requested. A download whose file has disappeared is marked failed so it is searched again.
 - Playlist and list syncs no longer request a song again while its earlier request is still in progress, so the same song is no longer downloaded twice. They also skip songs you already own on another release.
 - Downloads of a song you already own are cleared on their own, as Lidarr or Sonarr would: the extra file is deleted, the transfer is removed from slskd, and the empty copy of the song is unmonitored so it leaves Missing. Downloads already stuck in the queue for this reason are cleared too. Files from torrents that are still seeding are never deleted.
