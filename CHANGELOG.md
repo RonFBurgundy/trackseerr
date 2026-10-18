@@ -109,8 +109,8 @@ heading becomes the version and date.
 - Deezer requests are paced to stay under Deezer's rate limit, and a "quota exceeded" reply is retried instead of being treated as missing data.
 
 ### Fixed
-- A download that turns out to be a different song you already own is now blocklisted when it is cleared, so the same file isn't downloaded again. Titles marked "(Album Version)" count as the plain song.
 
+- A download that turns out to be a different song you already own is now blocklisted when it is cleared, so the same file isn't downloaded again. Titles marked "(Album Version)" count as the plain song.
 - A song you already own under a related artist name (for example "Elvis Costello" when the request says "Elvis Costello & The Attractions") counts as owned everywhere: it isn't requested or downloaded again, a fresh copy is discarded instead of waiting for manual import, and the request is marked available.
 - The Library fast-scroll rail no longer shows percentages for a moment before switching to letters; it appears once the letters are ready.
 - A long playlist name on a request card is shortened with "…" (tap or hover to see it all) instead of pushing the status badge off the card.
