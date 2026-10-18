@@ -258,6 +258,8 @@ def find_owned_equivalent(
     """Finds an already-owned track by the same artist with matching normalized title and duration."""
     if not artist_id or not norm_title(title):
         return None
+    if db.get_media_management_settings().get("allow_multiple_editions"):
+        return None
     candidates: list[dict[str, Any]] = []
     for track in db.list_filed_tracks_for_artist(str(artist_id)):
         if exclude_track_id is not None and str(track.get("id")) == str(exclude_track_id):

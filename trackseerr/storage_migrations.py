@@ -75,6 +75,7 @@ class MigrationsMixin:
                 (86, self._migration_v86),
                 (87, self._migration_v87),
                 (88, self._migration_v88),
+                (89, self._migration_v89),
             ]
 
             applied = 0
@@ -208,6 +209,14 @@ class MigrationsMixin:
             "SET mb_mirror_url = 'https://api.brainzmash.cc' "
             "WHERE mb_mirror_url LIKE 'http%://api.brainzmash.org%'"
         )
+
+    def _migration_v89(self, cur: sqlite3.Cursor) -> None:
+        """v89: Add media_management_settings.allow_multiple_editions (off: a song owned on one release is not fetched again for another)."""
+        cur.execute("PRAGMA table_info(media_management_settings)")
+        if "allow_multiple_editions" not in {row[1] for row in cur.fetchall()}:
+            cur.execute(
+                "ALTER TABLE media_management_settings ADD COLUMN allow_multiple_editions INTEGER NOT NULL DEFAULT 0"
+            )
 
     def _migration_v88(self, cur: sqlite3.Cursor) -> None:
         """v88: library_health_findings accepts kind 'long_name' (table rebuild; SQLite cannot alter a CHECK)."""
