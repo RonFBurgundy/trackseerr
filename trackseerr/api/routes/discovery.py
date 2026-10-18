@@ -170,6 +170,9 @@ def annotate_item_statuses(  # noqa: C901, PLR0915
         if core_avail is not None or library_mode == "native":
             if core_avail is not None:
                 avail = core_avail[index]
+            elif it.get("item_type") == "artist" or it.get("type") == "artist":
+                lib_art = db.get_library_artist_by_foreign_id(foreign_id) if foreign_id else None
+                avail = {"in_library": True, "status": "in_library"} if lib_art else {"in_library": False}
             else:
                 is_album = (it.get("type") == "album") or (it.get("item_type") == "album")
                 avail = get_item_availability(
