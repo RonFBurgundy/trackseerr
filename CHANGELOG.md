@@ -109,6 +109,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- The Library fast-scroll rail no longer shows percentages for a moment before switching to letters; it appears once the letters are ready.
+- A long playlist name on a request card is shortened with "…" (tap or hover to see it all) instead of pushing the status badge off the card.
 - Add Artist finds artists again. Searching in the Library's Add Artist tool always came back empty.
 - Retrying a held download no longer searches the whole download folder when the file is already gone (which could stall all downloads for minutes and blocklist a good release), and only one of two downloads of the same file is retried.
 - A downloaded song that doesn't fit the album it was meant for is now imported onto the same song elsewhere in your library when there's exactly one match with the same title and length, including under a related artist name ("Elvis Costello & The Attractions" and "Elvis Costello"). Downloads already waiting for manual import get one automatic retry.
