@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from trackseerr.storage import Database
-from trackseerr.track_matching import find_owned_equivalent
+from trackseerr.track_matching import find_owned_equivalent, match_owned_equivalent
 
 
 @pytest.fixture
@@ -190,3 +190,35 @@ def test_excluded_track_and_other_artist_ignored(test_db: Database) -> None:
 
     # Empty title
     assert find_owned_equivalent(test_db, "art-1", "") is None
+
+
+def test_match_owned_equivalent_pure() -> None:
+    candidates = [
+        {"id": "c1", "title": "Paranoid Android (Remastered)", "duration_seconds": 387.0, "cutoff_met": False},
+        {"id": "c2", "title": "Paranoid Android", "duration_seconds": 386.0, "cutoff_met": True},
+        {"id": "c3", "title": "Karma Police", "duration_seconds": 264.0, "cutoff_met": True},
+    ]
+
+    # Matches Paranoid Android and prefers cutoff_met (c2 over c1)
+    res = match_owned_equivalent(candidates, "Paranoid Android - 2017 Remaster", duration_seconds=385.0)
+    assert res is not None
+    assert res["id"] == "c2"
+
+    # When c2 is excluded, matches c1
+    res_ex = match_owned_equivalent(candidates, "Paranoid Android", duration_seconds=387.0, exclude_track_id="c2")
+    assert res_ex is not None
+    assert res_ex["id"] == "c1"
+
+    # Duration mismatch (> 5.0 s)
+    res_dur = match_owned_equivalent(candidates, "Paranoid Android", duration_seconds=400.0)
+    assert res_dur is None
+
+    # Unknown duration matches candidate
+    res_no_dur = match_owned_equivalent(candidates, "Karma Police")
+    assert res_no_dur is not None
+    assert res_no_dur["id"] == "c3"
+
+    # Empty candidate list or unmatching title
+    assert match_owned_equivalent([], "Paranoid Android") is None
+    assert match_owned_equivalent(candidates, "Creep") is None
+    assert match_owned_equivalent(candidates, "") is None

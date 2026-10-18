@@ -38,6 +38,7 @@ from trackseerr.clients.lidarr import (
 from trackseerr.library_manager import MODE_LIDARR, ModeChanged, get_library_mode, work_guard
 from trackseerr.mediacover import mediacover_service
 from trackseerr.storage import Database
+from trackseerr.track_matching import match_owned_equivalent
 
 
 logger = logging.getLogger(__name__)
@@ -634,6 +635,7 @@ def _enrich_tracks(db: Database, tracks: list[dict[str, Any]]) -> list[dict[str,
     """Attaches artist name, album title and the linked library file to library tracks."""
     artist_cache: dict[str, str] = {}
     album_cache: dict[str, str] = {}
+    filed_tracks_cache: dict[str, list[dict[str, Any]]] = {}
     for t in tracks:
         art_id = t.get("artist_id")
         if art_id:
@@ -654,6 +656,28 @@ def _enrich_tracks(db: Database, tracks: list[dict[str, Any]]) -> list[dict[str,
             t["album_title"] = "Unknown Album"
 
         t["file"] = db.get_library_file_for_track(t["id"])
+        if t["file"] is None and art_id:
+            if art_id not in filed_tracks_cache:
+                filed_tracks_cache[art_id] = db.list_filed_tracks_for_artist(str(art_id))
+            equiv = match_owned_equivalent(
+                candidates=filed_tracks_cache[art_id],
+                title=t.get("title") or "",
+                duration_seconds=t.get("duration_seconds"),
+                exclude_track_id=t["id"],
+            )
+            if equiv:
+                eq_alb_id = equiv.get("album_id")
+                eq_alb_title: Optional[str] = None
+                if eq_alb_id:
+                    if eq_alb_id not in album_cache:
+                        alb = db.get_library_album(eq_alb_id)
+                        album_cache[eq_alb_id] = alb["title"] if alb else "Unknown Album"
+                    eq_alb_title = album_cache[eq_alb_id]
+                t["owned_elsewhere"] = {
+                    "track_id": equiv["id"],
+                    "album_id": eq_alb_id,
+                    "album_title": eq_alb_title,
+                }
     return tracks
 
 def _album_total_discs(db: Database, album_id: str, *extra: Any) -> int:

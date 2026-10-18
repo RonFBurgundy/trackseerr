@@ -37,6 +37,14 @@ class LibraryFileRecord(ApiModel):
     quality: Optional[str] = None  # Lidarr mode only: the quality name of the track file
 
 
+class OwnedElsewhere(ApiModel):
+    """Reference to an equivalent track owned on another release."""
+
+    track_id: str
+    album_id: Optional[str] = None
+    album_title: Optional[str] = None
+
+
 class LibraryTrackRecord(ApiModel):
     """A library track (native row plus the list/detail enrichments, or Lidarr's mapped track)."""
 
@@ -59,6 +67,7 @@ class LibraryTrackRecord(ApiModel):
     artist_name: Optional[str] = None
     album_title: Optional[str] = None
     file: Optional[LibraryFileRecord] = None
+    owned_elsewhere: Optional[OwnedElsewhere] = None
     has_file: Optional[bool] = None  # Lidarr mode only
     source: Optional[str] = None  # "lidarr" in Lidarr mode
 
