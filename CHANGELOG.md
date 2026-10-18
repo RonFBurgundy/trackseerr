@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- Activity → Queue has checkboxes: select several downloads and remove them (optionally blocklisting them and removing them from the download client) or search for all of them again in one go.
 - An album's track list shows "On <album>" instead of "Missing" for a song you already own on another release. Tap it to open that album.
 - Media Management → Monitoring has a "Keep the same song from more than one release" switch. It is off by default, so a song you own on one release isn't downloaded again for another; turn it on to collect every release's copy.
 - Library Health has a "Shorten name" button on each "Names too long" finding. It gives a library track its normal Rename name, or shortens any other file or folder in place, without deleting anything. Rename also marks these files with a "Name too long" reason and selects them by default.
