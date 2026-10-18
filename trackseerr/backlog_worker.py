@@ -703,6 +703,10 @@ class WantedBacklogWorker:
                         t["track_title"],
                         owned.get("title"),
                     )
+                    try:
+                        ctx.db.set_track_monitored(t_id, False)
+                    except sqlite3.Error as exc:
+                        logger.warning("Failed to unmonitor duplicate track %s: %s", t_id, exc)
                     continue
                 ctx.items_to_search.append(
                     (
