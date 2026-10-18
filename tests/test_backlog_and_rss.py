@@ -223,6 +223,71 @@ class TestWantedBacklogWorker:
         worker.stop(timeout=2.0)
         assert worker.is_running() is False
 
+    def test_missing_sweep_skips_track_owned_under_other_edition(self, test_db, seeded_users):
+        """Monitored missing tracks owned under another album edition are skipped in the sweep."""
+        worker = WantedBacklogWorker()
+        worker.pace_delay = 0.01
+
+        # Seed enabled indexer and download client so search gate passes
+        test_db.create_indexer(
+            {
+                "id": "idx-sweep-1",
+                "name": "Prowlarr",
+                "indexer_type": "torznab",
+                "host_url": "http://127.0.0.1:9696/1",
+                "api_key": "key",
+                "enabled": True,
+            }
+        )
+        test_db.create_download_client(
+            {
+                "id": "c-sweep-1",
+                "name": "qBit",
+                "driver_type": "qbittorrent",
+                "host_url": "http://127.0.0.1:8080",
+                "enabled": True,
+            }
+        )
+
+        # Seed artist, two albums, one owned track with a file, one monitored file-less remaster
+        test_db.upsert_library_artist({"id": "art-prince", "name": "Prince", "monitored": True})
+        test_db.upsert_library_album({"id": "alb-orig", "artist_id": "art-prince", "title": "Sign O' The Times", "monitored": True})
+        test_db.upsert_library_album({"id": "alb-deluxe", "artist_id": "art-prince", "title": "Sign O' The Times (Super Deluxe Edition)", "monitored": True})
+
+        # Owned track with file on original album
+        test_db.upsert_library_track({
+            "id": "trk-owned",
+            "album_id": "alb-orig",
+            "artist_id": "art-prince",
+            "title": "U Got the Look",
+            "monitored": True,
+        })
+        test_db.upsert_library_file({
+            "track_id": "trk-owned",
+            "file_path": "/music/Prince/Sign O The Times/U Got the Look.flac",
+            "cutoff_met": True,
+        })
+
+        # Monitored file-less track on deluxe album
+        test_db.upsert_library_track({
+            "id": "trk-remaster",
+            "album_id": "alb-deluxe",
+            "artist_id": "art-prince",
+            "title": "U Got The Look - 2020 Remaster",
+            "monitored": True,
+        })
+
+        mock_grab = MagicMock(return_value={"success": True, "download_id": "dl-auto-1"})
+
+        with patch.object(acquisition_coordinator, "search_and_grab", mock_grab):
+            items = worker._collect_sweep_items(test_db)
+            assert items is not None
+            assert all(item[8] != "trk-remaster" for item in items)
+
+            stats = worker.poll_once(test_db)
+            assert mock_grab.call_count == 0
+            assert stats["items_grabbed"] == 0
+
     def test_backlog_worker_poll_once_finds_unfulfilled_and_executes_search(self, test_db, seeded_users):
         """Validates poll_once finds unfulfilled requests and missing tracks, updating statuses."""
         worker = WantedBacklogWorker()

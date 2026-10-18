@@ -22,6 +22,7 @@ from trackseerr.mb_metadata_store import (
 )
 from trackseerr.models import LibraryTrack
 from trackseerr.storage import Database, clean_library_name
+from trackseerr.track_matching import find_owned_equivalent
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +285,19 @@ def _seed_track_request(
 
     track_id = str(trk["id"])
     album_id = str(trk["album_id"]) if trk.get("album_id") else None
+
+    if db.get_library_file_for_track(track_id) is None:
+        owned = find_owned_equivalent(
+            db,
+            artist_id,
+            req.get("title", ""),
+            trk.get("duration_seconds"),
+            exclude_track_id=track_id,
+        )
+        if owned:
+            owned_id = str(owned["id"])
+            owned_album_id = str(owned["album_id"]) if owned.get("album_id") else None
+            return "seeded", owned_id, owned_album_id
 
     db.set_track_monitored(track_id, True)
     if album_id:
