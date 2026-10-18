@@ -26,7 +26,12 @@ from trackseerr.clients.acquisition.base import AcquisitionRetryableError, Acqui
 from trackseerr.item_history import GrabTrigger, emit, emit_named, trigger_kwargs
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.redaction import redact_text
-from trackseerr.search_terms import build_query_ladder, matches_request, title_core
+from trackseerr.search_terms import (
+    build_query_ladder,
+    matches_request,
+    soulseek_file_matches_track,
+    title_core,
+)
 from trackseerr.models import (
     AcquisitionSearchResult,
     ActiveDownload,
@@ -554,8 +559,18 @@ class AcquisitionCoordinator:
             slskd_file = self._is_slskd_file(r)
             if number == 1 and not slskd_file:
                 kept.append(r)
-            elif matches_request(self._candidate_text(r), artist, title, album, title_text=r.title if slskd_file else None):
-                kept.append(r)
+                continue
+            if not matches_request(
+                self._candidate_text(r),
+                artist,
+                title,
+                album,
+                title_text=r.title if slskd_file else None,
+            ):
+                continue
+            if slskd_file and title and not soulseek_file_matches_track(r.title, title):
+                continue
+            kept.append(r)
         return kept
 
     def search_with_fallback(

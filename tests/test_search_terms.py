@@ -1,9 +1,11 @@
-"""Tests for trackseerr.search_terms query simplification and relevance gating."""
+import pytest
 
 from trackseerr.search_terms import (
     build_query_ladder,
     matches_request,
     primary_artist,
+    soulseek_file_matches_track,
+    soulseek_file_titles,
     strip_featuring,
     title_core,
     version_descriptor,
@@ -97,3 +99,34 @@ def test_matches_request_title_text_accepts_real_track():
 
 def test_matches_request_empty_artist_skips_artist_check():
     assert matches_request("Taylor Swift - September (2023) FLAC", "", "September", None)
+
+
+@pytest.mark.parametrize(
+    ("wanted_title", "file_name", "expected"),
+    [
+        # Rejects from Context
+        ("Time", "03 - All of the Time.flac", False),
+        ("Under Pressure", "Logic - Under Pressure - 06 - Bounce", False),
+        ("Copperhead Road", "Steve Earle - Copperhead Road - 10 - Nothing but a Child", False),
+        ("Overload", "Kayzo - Overload - 06 - Feel the Power", False),
+        ("Wait", "12 - Wait It Out", False),
+        ("Down (instrumental)", "07 Run The Jewels - No Come Down (Instrumental)", False),
+        ("Everything Has Changed", "14 - Everything Has Changed (Taylor’s version)", False),
+        ("Beat Goes On", "Beat Goes On (Extended Mix)", False),
+        ("Mountain Sound", "Of Monsters and Men - My Head Is An Animal (The Cabin Sessions) - 04 - Mountain Sound (The Cabin Sessions)", False),
+        # Accepts from Context
+        ("Lipstick Vogue - 2021 Remaster", "Elvis-Costello-This-Year’s-Model-11-Lipstick-Vogue", True),
+        ("Pump It Up - 2021 Remaster", "04-elvis_costello-pump_it_up_(2021_remaster)-0d2e49e8", True),
+        ("Life on Mars? - 2015 Remaster", "04 - Life on Mars？ (2015 Remaster)", True),
+        ("There's a World - 2009 Remaster", "Neil Young - Harvest (2009 Remaster) - There's a World - 2009 Remaster", True),
+        ("It's Gonna Be A Beautiful Night - 2020 Remaster", "15 - It’s Gonna Be a Beautiful Night (2020 remaster)", True),
+        ("Play In The Sunshine - 2020 Remaster", "Prince - Play In The Sunshine (2020 Remaster)", True),
+        ("Lean Woman Blues - 2003 Remaster", "05-Lean_Woman_Blues", True),
+        ("Monolith - 2003 Remaster", "1-04 - Monolith", True),
+    ],
+)
+def test_soulseek_file_titles_and_match(wanted_title: str, file_name: str, expected: bool):
+    titles = soulseek_file_titles(file_name)
+    assert len(titles) > 0
+    assert soulseek_file_matches_track(file_name, wanted_title) is expected
+

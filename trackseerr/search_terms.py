@@ -10,6 +10,7 @@ import re
 from typing import Optional
 
 from trackseerr.decision_engine import phrase_score
+from trackseerr.lidarr_release import _fold, _is_noise, norm_title
 
 _VERSION_KEYWORDS = (
     "remix", "mix", "edit", "version", "rework", "bootleg", "vip", "dub", "live", "acoustic", "remaster",
@@ -131,3 +132,75 @@ def matches_request(
         cand_words = set(_WORD_RE.findall(candidate_lower))
         return all(w in cand_words for w in words)
     return not any("remix" in g.lower() for g in _version_groups(candidate_title))
+
+
+_DIR_SPLIT_RE = re.compile(r"[/\\]")
+_QUALITY_BRACKET_RE = re.compile(r"\s*\[[^\]]+\]\s*$")
+_EXT_RE = re.compile(r"\.[a-zA-Z0-9]{2,5}$")
+_TRACK_NO_RE = re.compile(r"(?:^|(?<=[\s\-_.]))(?:\d{1,2}-\d{1,2}|\d{1,2}(?:[._-](?!\d))?|\d{1,2}\b)")
+_HEX_HASH_RE = re.compile(r"-[0-9a-fA-F]{6,}$")
+
+
+def soulseek_file_titles(file_name: str) -> list[str]:
+    """Candidate track titles extracted from a Soulseek file result name or path."""
+    base = _DIR_SPLIT_RE.split(file_name)[-1].strip()
+    base = _QUALITY_BRACKET_RE.sub("", base)
+    base = _EXT_RE.sub("", base)
+    base = _QUALITY_BRACKET_RE.sub("", base)
+
+    name = base.replace("_", " ")
+    if " " not in name:
+        name = name.replace("-", " ")
+
+    candidates: list[str] = []
+    name_no_hash = _HEX_HASH_RE.sub("", name).strip()
+    for s in (name, name_no_hash):
+        if " - " in s:
+            parts = s.split(" - ")
+            candidates.append(parts[-1].strip())
+            if len(parts) > 1 and _is_noise(_fold(parts[-1])):
+                candidates.append(parts[-2].strip())
+                candidates.append(" - ".join(parts[-2:]).strip())
+        elif "-" in s:
+            parts = s.split("-")
+            candidates.append(parts[-1].strip())
+        else:
+            candidates.append(s.strip())
+
+    m = _TRACK_NO_RE.search(name)
+    if m:
+        after = name[m.end():].lstrip(" ._–-").strip()
+        if after:
+            candidates.append(after)
+            after_no_hash = _HEX_HASH_RE.sub("", after).strip()
+            if after_no_hash != after:
+                candidates.append(after_no_hash)
+            if " - " in after_no_hash:
+                parts = after_no_hash.split(" - ")
+                candidates.append(parts[-1].strip())
+                if len(parts) > 1 and _is_noise(_fold(parts[-1])):
+                    candidates.append(parts[-2].strip())
+                    candidates.append(" - ".join(parts[-2:]).strip())
+            elif "-" in after_no_hash:
+                candidates.append(after_no_hash.split("-")[-1].strip())
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for c in candidates:
+        c_clean = c.strip()
+        if c_clean and c_clean not in seen:
+            seen.add(c_clean)
+            result.append(c_clean)
+    return result
+
+
+def soulseek_file_matches_track(file_name: str, wanted_title: str) -> bool:
+    """True when any candidate from ``soulseek_file_titles`` normalises to ``wanted_title``."""
+    wanted_norm = norm_title(wanted_title)
+    if not wanted_norm:
+        return False
+    for candidate in soulseek_file_titles(file_name):
+        c_norm = norm_title(candidate)
+        if c_norm and c_norm == wanted_norm:
+            return True
+    return False
