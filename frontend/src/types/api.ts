@@ -9504,6 +9504,7 @@ export interface components {
             mb_recording_id?: string | null;
             /** Monitored */
             monitored?: boolean | null;
+            owned_elsewhere?: components["schemas"]["OwnedElsewhere"] | null;
             /** Sort Title */
             sort_title?: string | null;
             /** Source */
@@ -10335,6 +10336,12 @@ export interface components {
              */
             album_folder_format: string;
             /**
+             * Allow Multiple Editions
+             * @description Keep the same song from more than one release; off skips songs already owned on another release
+             * @default false
+             */
+            allow_multiple_editions: boolean;
+            /**
              * Artist Folder Format
              * @description Format for artist directory
              */
@@ -10559,6 +10566,8 @@ export interface components {
             add_monitor_option?: string | null;
             /** Album Folder Format */
             album_folder_format?: string | null;
+            /** Allow Multiple Editions */
+            allow_multiple_editions?: boolean | null;
             /** Artist Folder Format */
             artist_folder_format?: string | null;
             /** Colon Replacement Format */
@@ -11228,6 +11237,18 @@ export interface components {
             /** Push */
             push: boolean;
         };
+        /**
+         * OwnedElsewhere
+         * @description Reference to an equivalent track owned on another release.
+         */
+        OwnedElsewhere: {
+            /** Album Id */
+            album_id?: string | null;
+            /** Album Title */
+            album_title?: string | null;
+            /** Track Id */
+            track_id: string;
+        };
         /** PasswordAndCodeRequest */
         PasswordAndCodeRequest: {
             /** Code */
@@ -11678,6 +11699,8 @@ export interface components {
         PreviewRequestModel: {
             /** Album Folder Format */
             album_folder_format?: string | null;
+            /** Allow Multiple Editions */
+            allow_multiple_editions?: boolean | null;
             /** Artist Folder Format */
             artist_folder_format?: string | null;
             /** Colon Replacement Format */
