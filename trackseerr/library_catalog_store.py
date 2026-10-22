@@ -26,6 +26,7 @@ from trackseerr.models import (
 )
 from trackseerr.storage_common import (
     _TRACK_DURATION_TOLERANCE,
+    _merge_track_rows,
     _has_extra_bracket_suffix,
     _titles_near_equal,
     clean_library_name,
@@ -733,6 +734,95 @@ class LibraryCatalogStoreMixin:
                     ):
                         return self._map_library_track(cand)
             return None
+
+    def find_owned_title_twin(
+        self,
+        album_id: str,
+        title: str,
+        duration_seconds: Optional[float],
+        mb_recording_id: Optional[str],
+    ) -> Optional[dict[str, Any]]:
+        """The single filed track on the album with this clean title and a matching duration, else None.
+
+        Candidates need at least one library file, an empty or equal ``mb_recording_id`` and a known duration within
+        ``_TRACK_DURATION_TOLERANCE`` of ``duration_seconds`` (unknown duration never matches). Several candidates
+        are ambiguous and yield None.
+        """
+        clean = clean_library_name(title)
+        if not clean or duration_seconds is None:
+            return None
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT t.* FROM library_tracks t WHERE t.album_id = ? AND t.clean_title = ? "
+                "AND EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) "
+                "AND t.duration_seconds IS NOT NULL",
+                (str(album_id), clean),
+            ).fetchall()
+        wanted = str(mb_recording_id or "")
+        found = [
+            r
+            for r in rows
+            if str(r["mb_recording_id"] or "") in ("", wanted)
+            and abs(float(r["duration_seconds"]) - float(duration_seconds)) <= _TRACK_DURATION_TOLERANCE
+        ]
+        return self._map_library_track(found[0]) if len(found) == 1 else None
+
+    def merge_album_track_twins(self, album_id: str) -> int:
+        """Merges fileless renumbered twins into the one filed track of the same title; returns rows removed.
+
+        Within a clean-title group a fileless row is a twin of a filed row when both durations are known and within
+        ``_TRACK_DURATION_TOLERANCE`` and their non-empty ``mb_recording_id`` values do not conflict. Groups without
+        exactly one filed row are skipped.
+        """
+        removed = 0
+        with self._lock:
+            try:
+                rows = self.conn.execute(
+                    "SELECT t.id, t.clean_title, t.duration_seconds, t.mb_recording_id, "
+                    "EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) AS has_file "
+                    "FROM library_tracks t WHERE t.album_id = ? AND t.clean_title != '' "
+                    "ORDER BY t.created_at, t.rowid",
+                    (str(album_id),),
+                ).fetchall()
+                groups: dict[str, list[Any]] = {}
+                for r in rows:
+                    groups.setdefault(str(r["clean_title"]), []).append(r)
+                cur = self.conn.cursor()
+                for clean, members in groups.items():
+                    filed = [m for m in members if m["has_file"]]
+                    if len(filed) != 1 or len(members) < 2:
+                        continue
+                    keep = filed[0]
+                    if keep["duration_seconds"] is None:
+                        continue
+                    twins = [
+                        m
+                        for m in members
+                        if not m["has_file"]
+                        and m["duration_seconds"] is not None
+                        and abs(float(m["duration_seconds"]) - float(keep["duration_seconds"]))
+                        <= _TRACK_DURATION_TOLERANCE
+                        and (
+                            not keep["mb_recording_id"]
+                            or not m["mb_recording_id"]
+                            or keep["mb_recording_id"] == m["mb_recording_id"]
+                        )
+                    ]
+                    if not twins:
+                        continue
+                    twin_ids = [str(m["id"]) for m in twins]
+                    _merge_track_rows(cur, str(keep["id"]), twin_ids)
+                    removed += len(twin_ids)
+                    logger.info(
+                        "Merged track twins on album %s (%s): kept %s, removed %s",
+                        album_id, clean, keep["id"], ", ".join(twin_ids),
+                    )
+                self.conn.commit()
+            except sqlite3.Error as err:
+                self.conn.rollback()
+                logger.warning("merge_album_track_twins failed for album %s: %s", album_id, err)
+                return 0
+        return removed
 
     @staticmethod
     def _pick_title_match(

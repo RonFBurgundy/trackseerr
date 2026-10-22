@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import logging
 import re
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -165,3 +166,41 @@ def lidarr_item_due(row: dict[str, Any], now: Optional[datetime] = None) -> bool
 # ``download_history.message`` of a ``grabbed`` row made by an issue replacement search (followed by the issue id).
 REPLACEMENT_MESSAGE_PREFIX = "Replacement search for issue "
 
+
+
+def _merge_track_rows(cur: sqlite3.Cursor, keep_id: str, dupe_ids: list[str]) -> None:
+    """Merges ``dupe_ids`` track rows into ``keep_id`` without committing.
+
+    ``library_files`` / ``active_downloads`` / ``download_history`` are repointed first so nothing cascades away; a
+    monitored duplicate keeps the survivor monitored, the survivor's missing foreign_track_id / mb_recording_id /
+    isrc are backfilled from the duplicates (in the order given), then the duplicates are deleted.
+    """
+    if not dupe_ids:
+        return
+    dmarks = ",".join("?" for _ in dupe_ids)
+    cur.execute(
+        f"SELECT id, monitored, foreign_track_id, mb_recording_id, isrc FROM library_tracks "
+        f"WHERE id IN ({dmarks})",
+        dupe_ids,
+    )
+    dupe_rows = {str(r[0]): r for r in cur.fetchall()}
+    cur.execute(
+        "SELECT id, monitored, foreign_track_id, mb_recording_id, isrc FROM library_tracks WHERE id = ?",
+        (keep_id,),
+    )
+    keep_row = cur.fetchone()
+    rows = ([keep_row] if keep_row else []) + [dupe_rows[i] for i in dupe_ids if i in dupe_rows]
+    any_monitored = any(int(r[1] or 0) for r in rows)
+    for table in ("library_files", "active_downloads", "download_history"):
+        cur.execute(f"UPDATE {table} SET track_id = ? WHERE track_id IN ({dmarks})", [keep_id, *dupe_ids])
+    if any_monitored:
+        cur.execute("UPDATE library_tracks SET monitored = 1 WHERE id = ?", (keep_id,))
+    # Survivor keeps its own identifiers; any it lacks come from the first duplicate that has one.
+    for offset, column in enumerate(("foreign_track_id", "mb_recording_id", "isrc"), start=2):
+        value = next((r[offset] for r in rows if r[offset] not in (None, "")), None)
+        if value is not None:
+            cur.execute(
+                f"UPDATE library_tracks SET {column} = ? WHERE id = ? AND COALESCE({column}, '') = ''",
+                (value, keep_id),
+            )
+    cur.execute(f"DELETE FROM library_tracks WHERE id IN ({dmarks})", dupe_ids)

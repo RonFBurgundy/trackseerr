@@ -17,6 +17,7 @@ from trackseerr.storage_common import (
     BASELINE_VERSION,
     _TRACK_DURATION_TOLERANCE,
     SCHEMA_VERSION,
+    _merge_track_rows,
 )
 
 logger = logging.getLogger("trackseerr.storage")
@@ -597,7 +598,7 @@ class MigrationsMixin:
                 continue
             marks = ",".join("?" for _ in ids)
             cur.execute(
-                f"SELECT t.id, t.monitored, t.foreign_track_id, t.mb_recording_id, t.isrc, "
+                f"SELECT t.id, "
                 f"(SELECT COUNT(*) FROM library_files f WHERE f.track_id = t.id) AS nfiles "
                 f"FROM library_tracks t WHERE t.id IN ({marks}) ORDER BY nfiles DESC, t.created_at ASC, t.rowid ASC",
                 ids,
@@ -605,21 +606,7 @@ class MigrationsMixin:
             rows = cur.fetchall()
             keep = str(rows[0][0])
             dupes = [str(r[0]) for r in rows[1:]]
-            any_monitored = any(int(r[1] or 0) for r in rows)
-            dmarks = ",".join("?" for _ in dupes)
-            for table in ("library_files", "active_downloads", "download_history"):
-                cur.execute(f"UPDATE {table} SET track_id = ? WHERE track_id IN ({dmarks})", [keep, *dupes])
-            if any_monitored:
-                cur.execute("UPDATE library_tracks SET monitored = 1 WHERE id = ?", (keep,))
-            # Survivor keeps its own identifiers; any it lacks come from the first duplicate that has one.
-            for offset, column in enumerate(("foreign_track_id", "mb_recording_id", "isrc"), start=2):
-                value = next((r[offset] for r in rows if r[offset] not in (None, "")), None)
-                if value is not None:
-                    cur.execute(
-                        f"UPDATE library_tracks SET {column} = ? WHERE id = ? AND COALESCE({column}, '') = ''",
-                        (value, keep),
-                    )
-            cur.execute(f"DELETE FROM library_tracks WHERE id IN ({dmarks})", dupes)
+            _merge_track_rows(cur, keep, dupes)
             gone.update(dupes)
             removed += len(dupes)
         return removed
