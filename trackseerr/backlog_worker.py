@@ -613,7 +613,24 @@ class WantedBacklogWorker:
             )
             not in ctx.active_artist_titles
         ]
-        return unfulfilled_missing
+        return self._drop_owned_missing(ctx, unfulfilled_missing)
+
+    def _drop_owned_missing(self, ctx: _SweepCollect, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Drop Missing rows whose song is already filed in the library (matched like requests are)."""
+        kept: list[dict[str, Any]] = []
+        for t in rows:
+            try:
+                owned = find_owned_for_item(ctx.db, {"artist": t.get("artist")}, t.get("title") or "")
+            except sqlite3.Error as exc:
+                logger.warning("Owned check failed for Missing track %s: %s", t.get("title"), exc)
+                owned = None
+            if owned and owned.get("cutoff_met"):
+                logger.info(
+                    "Missing track %s already owned as %s; skipping", t.get("title"), owned.get("title")
+                )
+                continue
+            kept.append(t)
+        return kept
 
     def _append_request_items(
         self, ctx: _SweepCollect, unfulfilled_requests: list[dict[str, Any]]
