@@ -88,6 +88,16 @@ router = APIRouter()
 from ._shared import (validate_media_path, native_only, _album_total_discs, _album_owned_discs)
 from .models import (ManualImportScanRequest, ManualImportCommitRequest, FingerprintRequest, ManualImportItem)
 
+def _audio_suffix(path: Path) -> str:
+    """Return the audio extension of path, looking through a legacy recycle counter (X.flac.1)."""
+    if path.suffix in AUDIO_EXTENSIONS:
+        return path.suffix
+    inner = Path(path.stem).suffix
+    if inner in AUDIO_EXTENSIONS:
+        return inner
+    return path.suffix
+
+
 def _scan_fallback_tags(p: Path) -> dict[str, Any]:
     return {
         "title": p.stem,
@@ -238,7 +248,7 @@ def _walk_audio_files(folder: Path) -> list[Path]:
             if is_system_filename(f):
                 continue
             p = Path(root) / f
-            if p.suffix.lower() in AUDIO_EXTENSIONS:
+            if _audio_suffix(p).lower() in AUDIO_EXTENSIONS:
                 found.append(p)
     return found
 
@@ -491,7 +501,7 @@ def _evaluate_commit_quality(
             quality_input = (
                 inspected.get("quality_full")
                 or inspected.get("codec")
-                or source_path.suffix.lstrip(".").upper()
+                or _audio_suffix(source_path).lstrip(".").upper()
             )
             parsed = parse_release_title(str(quality_input))
             if parsed.quality == "Unknown" and quality_input:
@@ -717,7 +727,7 @@ def _commit_one_item(run: _CommitRun, item: ManualImportItem) -> None:
             "year": None,
             "track_number": None,
             "disc_number": 1,
-            "codec": source_path.suffix.lstrip(".").upper(),
+            "codec": _audio_suffix(source_path).lstrip(".").upper(),
             "file_path": str(source_path),
         }
 
@@ -741,7 +751,7 @@ def _commit_one_item(run: _CommitRun, item: ManualImportItem) -> None:
     if album.get("year"):
         meta["year"] = album["year"]
         meta["release_year"] = album["year"]
-    meta["extension"] = source_path.suffix
+    meta["extension"] = _audio_suffix(source_path)
 
     target_proposed = build_track_path(meta, run.media_settings)
     validate_media_path(target_proposed, db=run.db)

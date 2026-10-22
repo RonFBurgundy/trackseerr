@@ -270,3 +270,12 @@ def test_scanner_never_lists_excluded_dirs_and_finds_same_files(tmp_path, db):
     assert not any(RECYCLE_DIRNAME in r or "_quarantine" in r or "quarantine" in r for r in listed)
     assert not any("elsewhere" in r or "linkdir" in r for r in listed)
     assert {Path(f["file_path"]) for f in db.list_library_files(limit=100)} == {p.resolve() for p in keep}
+
+
+def test_commit_from_legacy_bin_name_keeps_flac_extension(tmp_path, db, client, headers):
+    music, staging = _seed(db, tmp_path)
+    src = _write(staging / "01 - Song.flac.1", flac_bytes())
+    out = _commit(client, headers, [_item(src)])
+    assert out["imported_count"] == 1, out
+    dest = out["results"][0]["destination_path"]
+    assert dest.endswith(".flac") and not dest.endswith(".1")

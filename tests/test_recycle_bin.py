@@ -374,5 +374,22 @@ def test_recycle_short_names_unchanged(tmp_path):
         today=TODAY,
     )
     assert res2.status == "recycled"
-    assert res2.dest == rec / TODAY.isoformat() / "Artist" / "Song.flac.1"
+    assert res2.dest == rec / TODAY.isoformat() / "Artist" / "Song.1.flac"
 
+
+
+def test_recycle_clash_counter_goes_before_extension(tmp_path):
+    music = tmp_path / "music"
+    rec = tmp_path / "recycle"
+    (music / "Album").mkdir(parents=True)
+    rec.mkdir()
+    results = []
+    for payload in (b"one", b"two"):
+        f = music / "Album" / "03 - Legend Has It.flac"
+        f.write_bytes(payload)
+        results.append(
+            rb.dispose_replaced_file(f, library_root=music, recycle_root=rec, client_roots=[], today=TODAY)
+        )
+    assert results[0].dest.name == "03 - Legend Has It.flac"
+    assert results[1].dest.name == "03 - Legend Has It.1.flac"
+    assert results[1].dest.read_bytes() == b"two"
