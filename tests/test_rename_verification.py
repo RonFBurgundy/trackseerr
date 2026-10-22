@@ -190,6 +190,20 @@ def test_verdict_unknown_when_same_title_on_other_album_without_target(lib: Data
     assert v is not None and v["status"] == rv.MISMATCH and other["id"] == v["actual_track_id"]
 
 
+def test_verdict_unknown_when_other_album_title_differs_only_by_feat(lib: Database) -> None:
+    trk = _track(lib, "t1", "al1", None, title="Cinderella (feat. Ty Dolla $ign)")
+    _track(lib, "t2", "al2", R2, title="Cinderella")
+    v = rv.verdict_for(lib, _fp(matches=[_m(R2)]), trk, "/m/a.flac")
+    assert v is not None and v["status"] == rv.UNKNOWN
+
+
+def test_verdict_mismatch_when_other_album_title_is_instrumental(lib: Database) -> None:
+    trk = _track(lib, "t1", "al1", None, title="Legend Has It")
+    _track(lib, "t2", "al2", R2, title="Legend Has It (instrumental)")
+    v = rv.verdict_for(lib, _fp(matches=[_m(R2)]), trk, "/m/a.flac")
+    assert v is not None and v["status"] == rv.MISMATCH
+
+
 def test_verdict_verified_when_hit_is_the_linked_track(lib: Database) -> None:
     trk = _track(lib, "t1", "al1", None)
     # linked track has no recording id of its own, but the matched id resolves to this very track
