@@ -110,6 +110,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Rename no longer skips a song as "the audio is …" when the only difference is a featured artist in the title, for example "Cinderella (feat. Ty Dolla $ign)" on a deluxe edition and "Cinderella" on the original album.
 - Refreshing an artist no longer adds a second copy of a song you own when MusicBrainz numbers it differently (for example "Butterflies" as track 3 instead of 11). Albums that already have these extra copies are cleaned up on their next refresh.
 - Recycle bin copies keep their file type when a name is already taken ("Song.1.flac", not "Song.flac.1"), and importing an older "Song.flac.1" file from the bin gives it a normal ".flac" name.
 - A playlist song downloaded as a remaster now goes onto the matching song you already have in the library, even when the remaster is a few seconds shorter or longer. Before, it waited in the queue for a manual import.
