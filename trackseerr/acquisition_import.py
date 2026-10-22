@@ -52,6 +52,7 @@ from trackseerr.artist_folders import resolve_artist_folder
 from trackseerr.track_credits import naming_credits
 from trackseerr.notifications import notification_dispatcher
 from trackseerr.redaction import safe_exc
+from trackseerr.lidarr_release import titles_match
 from trackseerr.quality import evaluate_release, parse_release_title
 from trackseerr.storage import Database
 
@@ -67,6 +68,7 @@ from trackseerr.seed_safety import (
 )
 from trackseerr.track_matching import (
     MATCH_STRONG,
+    _effective_file_title,
     _fingerprint_fallback_match,
     candidate_artist_ids,
     download_artist_id,
@@ -693,6 +695,68 @@ class ImportPipelineMixin(ImportCatalogMixin):
             )
         return alt
 
+    @staticmethod
+    def _prefer_wanted_track(
+        job: _ImportJob,
+        metadata: dict[str, Any],
+        matched: Optional[dict[str, Any]],
+        strength: str,
+    ) -> tuple[Optional[dict[str, Any]], str]:
+        """A single-track grab whose file is titled like the wanted track lands on the wanted track, not a neighbour."""
+        wanted_id = str(job.item.get("track_id") or "")
+        if not wanted_id or (matched is not None and str(matched.get("id") or "") == wanted_id):
+            return matched, strength
+        file_title = _effective_file_title(metadata)
+        for t in job.remaining_expected_tracks:
+            if str(t.get("id") or "") == wanted_id and titles_match(t.get("title") or "", file_title):
+                return t, MATCH_STRONG
+        return matched, strength
+
+    @staticmethod
+    def _is_strict_upgrade(
+        db: Database, job: _ImportJob, existing: dict[str, Any], metadata: dict[str, Any]
+    ) -> bool:
+        """True when the new file ranks strictly better than the file on disk under the request's quality profile."""
+        new_quality = _quality_from_codec(metadata)
+        old_quality = str(existing.get("quality_name") or "")
+        if not new_quality:
+            return False
+        profile_dict = None
+        if job.req and job.req.get("quality_profile_id"):
+            profile_dict = db.get_quality_profile(job.req["quality_profile_id"])
+        profile_dict = profile_dict or db.get_default_quality_profile()
+        if not profile_dict:
+            return False
+        profile = _to_quality_profile(profile_dict)
+        new_res = evaluate_release(parse_release_title(new_quality), profile)
+        if new_res.tier is None or not new_res.is_acceptable:
+            return False
+        old_res = evaluate_release(parse_release_title(old_quality), profile)
+        return old_res.tier is None or new_res.tier < old_res.tier
+
+    def _existing_file_blocks_placement(
+        self, db: Database, job: _ImportJob, af: Path, metadata: dict[str, Any], matched: dict[str, Any]
+    ) -> bool:
+        """True (and the file is booked as a duplicate) when ``matched`` already has a file this one must not replace."""
+        track_id = str(matched.get("id") or "")
+        existing = db.get_library_file_for_track(track_id) if track_id else None
+        if existing is None:
+            return False
+        wanted_id = str(job.item.get("track_id") or "")
+        own_track = not wanted_id or track_id == wanted_id
+        if own_track and self._is_strict_upgrade(db, job, existing, metadata):
+            return False
+        logger.info(
+            "Download %s: %s would replace the file already on '%s'; discarding as duplicate",
+            job.download_id,
+            af.name,
+            matched.get("title"),
+        )
+        job.duplicate_files.append(str(af))
+        if not job.duplicate_owned_title and matched.get("title"):
+            job.duplicate_owned_title = str(matched["title"])
+        return True
+
     def _place_one_file(  # noqa: C901, PLR0915
         self,
         db: Database,
@@ -733,12 +797,19 @@ class ImportPipelineMixin(ImportCatalogMixin):
             matched_expected_track, match_strength = reconcile_audio_file_to_track_scored(
                 metadata, job.remaining_expected_tracks
             )
+            matched_expected_track, match_strength = self._prefer_wanted_track(
+                job, metadata, matched_expected_track, match_strength
+            )
             tag_track = matched_expected_track
             matched_expected_track = _fingerprint_fallback_match(
                 af, ctx.media_settings, job.remaining_expected_tracks, matched_expected_track, match_strength
             )
             if matched_expected_track is not None and matched_expected_track is tag_track and match_strength != MATCH_STRONG:
                 file_weak_strength = match_strength
+            if matched_expected_track and self._existing_file_blocks_placement(
+                db, job, af, metadata, matched_expected_track
+            ):
+                return
             if matched_expected_track:
                 job.remaining_expected_tracks.remove(matched_expected_track)
                 metadata["title"] = matched_expected_track["title"]
@@ -1060,7 +1131,8 @@ class ImportPipelineMixin(ImportCatalogMixin):
         if satisfied and job.item.get("request_id"):
             db.update_request_status(job.item["request_id"], RequestStatus.AVAILABLE.value)
 
-        if not satisfied:
+        owned_elsewhere = bool(track_id and not has_file and owned and owned.get("cutoff_met"))
+        if not satisfied or owned_elsewhere:
             owned_title = getattr(job, "duplicate_owned_title", None)
             if not owned_title and owned and owned.get("title"):
                 owned_title = owned["title"]
@@ -1072,7 +1144,11 @@ class ImportPipelineMixin(ImportCatalogMixin):
                     artist=job.item.get("artist"),
                     release_guid=(job.item.get("download_hash") or job.download_id),
                     info_hash=job.item.get("download_hash"),
-                    reason=f"Already own this file's song as {owned_title}",
+                    reason=(
+                        f"Already own this song as {owned_title}"
+                        if satisfied
+                        else f"Already own this file's song as {owned_title}"
+                    ),
                     download_id=job.download_id,
                     track_id=job.item.get("track_id"),
                 )

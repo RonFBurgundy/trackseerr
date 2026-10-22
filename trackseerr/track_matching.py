@@ -9,7 +9,7 @@ from typing import Any, Optional
 from trackseerr.library import (
     fingerprint_audio_file,
 )
-from trackseerr.lidarr_release import norm_title, titles_match
+from trackseerr.lidarr_release import _BRACKETED, _DASH_SPLIT, _fold, _is_noise, _squash, norm_title, titles_match
 from trackseerr.search_terms import primary_artist
 from trackseerr.storage import Database, clean_library_name
 
@@ -27,6 +27,49 @@ def reconcile_audio_file_to_track(
     """
     return reconcile_audio_file_to_track_scored(meta, candidate_tracks)[0]
 
+
+
+def _title_qualifiers(title: str) -> frozenset[str]:
+    """The identity-changing qualifiers of a title (instrumental, live, remix...); noise like "remastered" is ignored."""
+    folded = _fold(title)
+    found = {_squash(m.group(1)) for m in _BRACKETED.finditer(folded) if not _is_noise(m.group(1))}
+    parts = _DASH_SPLIT.split(_BRACKETED.sub(" ", folded))
+    found.update(_squash(p) for p in parts[1:] if not _is_noise(p))
+    return frozenset(q for q in found if q)
+
+
+def _effective_file_title(meta: dict[str, Any]) -> str:
+    """The file's tag title, upgraded to the file-name title when the name carries a version qualifier the tag lacks."""
+    tag_title = meta.get("title") or ""
+    file_path = meta.get("file_path")
+    if not file_path:
+        return tag_title
+    stem = Path(file_path).stem
+    stem_title = stem.lstrip("0123456789 ._-)") or stem
+    if not tag_title:
+        return stem_title
+    # Only a bracketed qualifier in the file name counts: a "Artist - Title" stem would otherwise read as a dash suffix.
+    known = _title_qualifiers(tag_title)
+    extra = [
+        q
+        for q in (_squash(m.group(1)) for m in _BRACKETED.finditer(_fold(stem_title)) if not _is_noise(m.group(1)))
+        if q and q not in known
+    ]
+    return f"{tag_title} ({' '.join(extra)})" if extra else tag_title
+
+
+def _number_match_title_ok(track_title: str, file_title: str) -> bool:
+    """A disc+track number match only counts when the titles are compatible (same song, same version)."""
+    if not clean_library_name(file_title):
+        return True
+    if titles_match(track_title, file_title):
+        return True
+    if _title_qualifiers(track_title) != _title_qualifiers(file_title):
+        return False
+    ratio = difflib.SequenceMatcher(
+        None, clean_library_name(track_title), clean_library_name(file_title)
+    ).ratio()
+    return ratio >= 0.85
 
 
 MATCH_STRONG = "strong"
@@ -62,6 +105,7 @@ def reconcile_audio_file_to_track_scored(  # noqa: C901
     file_track = meta.get("track_number")
     file_disc = meta.get("disc_number") or 1
     has_valid_track_num = isinstance(file_track, int) and file_track > 0
+    file_title = _effective_file_title(meta)
 
     # 1. Exact match on disc_number and track_number (if mutagen extracted valid track number)
     if has_valid_track_num:
@@ -70,11 +114,12 @@ def reconcile_audio_file_to_track_scored(  # noqa: C901
             for t in candidate_tracks
             if int(t.get("track_number") or 1) == file_track
             and int(t.get("disc_number") or 1) == int(file_disc)
+            and _number_match_title_ok(t.get("title") or "", file_title)
         ]
         if len(num_matches) == 1:
             return num_matches[0], MATCH_STRONG
         elif len(num_matches) > 1:
-            clean_title = clean_library_name(meta.get("title") or "")
+            clean_title = clean_library_name(file_title)
             title_matches = [
                 t
                 for t in num_matches
@@ -98,7 +143,7 @@ def reconcile_audio_file_to_track_scored(  # noqa: C901
             return num_matches[0], MATCH_WEAK
 
     # 2. Clean title similarity match
-    meta_title = meta.get("title") or ""
+    meta_title = file_title
     clean_meta = clean_library_name(meta_title)
     if not clean_meta and meta.get("file_path"):
         clean_meta = clean_library_name(Path(meta["file_path"]).stem)

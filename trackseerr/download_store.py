@@ -663,7 +663,7 @@ class DownloadStoreMixin:
                     self.record_download_event(
                         "failed" if new_status == "failed" else "imported",
                         download_id=str(download_id),
-                        message=error_message if new_status == "failed" else None,
+                        message=error_message,
                     )
                 except sqlite3.Error as exc:
                     logger.warning("Failed to record download history for %s: %s", download_id, type(exc).__name__)
