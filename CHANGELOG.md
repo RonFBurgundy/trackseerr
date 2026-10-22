@@ -110,6 +110,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Refreshing an artist no longer adds a second copy of a song you own when MusicBrainz numbers it differently (for example "Butterflies" as track 3 instead of 11). Albums that already have these extra copies are cleaned up on their next refresh.
+- Recycle bin copies keep their file type when a name is already taken ("Song.1.flac", not "Song.flac.1"), and importing an older "Song.flac.1" file from the bin gives it a normal ".flac" name.
 - A playlist song downloaded as a remaster now goes onto the matching song you already have in the library, even when the remaster is a few seconds shorter or longer. Before, it waited in the queue for a manual import.
 - Soulseek downloads from a user's top shared folder are found and imported. Before, they failed with "No audio files found".
 - A downloaded file no longer replaces a different song on the same album just because it has the same track number. For example, an instrumental no longer overwrites the vocal version, and "Grand" no longer overwrites "Butterflies". An existing file is only replaced by a better-quality copy of the same song.
