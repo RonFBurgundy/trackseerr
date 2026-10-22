@@ -110,6 +110,9 @@ heading becomes the version and date.
 
 ### Fixed
 
+- A downloaded file no longer replaces a different song on the same album just because it has the same track number. For example, an instrumental no longer overwrites the vocal version, and "Grand" no longer overwrites "Butterflies". An existing file is only replaced by a better-quality copy of the same song.
+- Songs from a playlist that you already own under a slightly different title (for example "Heart It Races - Cover Version") are no longer downloaded again every few hours.
+- Download history shows why a download was thrown away (for example "Already in library — duplicate discarded") instead of just "Imported".
 - A download that turns out to be a different song you already own is now blocklisted when it is cleared, so the same file isn't downloaded again. Titles marked "(Album Version)" count as the plain song.
 - A song you already own under a related artist name (for example "Elvis Costello" when the request says "Elvis Costello & The Attractions") counts as owned everywhere: it isn't requested or downloaded again, a fresh copy is discarded instead of waiting for manual import, and the request is marked available.
 - The Library fast-scroll rail no longer shows percentages for a moment before switching to letters; it appears once the letters are ready.
