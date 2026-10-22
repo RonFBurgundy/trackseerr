@@ -121,14 +121,17 @@ class DisposeResult:
 def _cap_component(name: str, suffix: str = "") -> str:
     """Caps a path component (file or folder name) to MAX_NAME_BYTES UTF-8 encoded bytes.
 
-    If name + suffix fits within MAX_NAME_BYTES, returns name + suffix unchanged.
-    Otherwise, splits name into stem and ext via os.path.splitext, truncates stem to fit
-    (MAX_NAME_BYTES - len((ext + suffix).encode())), strips trailing spaces and dots,
-    falls back to 'file' if empty, and returns stem + suffix + ext.
+    With an empty suffix and a name that fits, returns name unchanged. A non-empty suffix is
+    always inserted between stem and extension (stem + suffix + ext), even when the name fits.
+    If too long, the stem is truncated to fit (MAX_NAME_BYTES - len((ext + suffix).encode())),
+    trailing spaces and dots are stripped, and 'file' is used if the stem ends up empty.
     """
-    if len((name + suffix).encode("utf-8", "surrogateescape")) <= MAX_NAME_BYTES:
-        return name + suffix
+    if not suffix:
+        if len(name.encode("utf-8", "surrogateescape")) <= MAX_NAME_BYTES:
+            return name
     stem, ext = os.path.splitext(name)
+    if len((stem + suffix + ext).encode("utf-8", "surrogateescape")) <= MAX_NAME_BYTES:
+        return f"{stem}{suffix}{ext}"
     max_stem_bytes = max(0, MAX_NAME_BYTES - len((ext + suffix).encode("utf-8", "surrogateescape")))
     truncated_stem = truncate_utf8_bytes(stem, max_stem_bytes).rstrip(" .")
     if not truncated_stem:
@@ -142,14 +145,10 @@ def _recycle_destination(recycle_root: Path, rel: Path, today: date) -> Path:
     base = recycle_root / today.isoformat() / capped_rel
     dest = base
     original_name = rel.name
-    is_over_limit = len(original_name.encode("utf-8", "surrogateescape")) > MAX_NAME_BYTES
     i = 0
     while os.path.lexists(dest):
         i += 1
-        if is_over_limit:
-            dest = base.with_name(_cap_component(original_name, f".{i}"))
-        else:
-            dest = base.with_name(f"{base.name}.{i}")
+        dest = base.with_name(_cap_component(original_name, f".{i}"))
     return dest
 
 
