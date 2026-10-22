@@ -110,6 +110,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- A playlist song downloaded as a remaster now goes onto the matching song you already have in the library, even when the remaster is a few seconds shorter or longer. Before, it waited in the queue for a manual import.
+- Soulseek downloads from a user's top shared folder are found and imported. Before, they failed with "No audio files found".
 - A downloaded file no longer replaces a different song on the same album just because it has the same track number. For example, an instrumental no longer overwrites the vocal version, and "Grand" no longer overwrites "Butterflies". An existing file is only replaced by a better-quality copy of the same song.
 - Songs from a playlist that you already own under a slightly different title (for example "Heart It Races - Cover Version") are no longer downloaded again every few hours.
 - Download history shows why a download was thrown away (for example "Already in library — duplicate discarded") instead of just "Imported".
