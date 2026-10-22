@@ -452,6 +452,64 @@ def test_slskd_status_completed_succeeded():
     assert status["progress"] == 100.0
 
 
+def test_slskd_status_share_alias_root_file_has_no_alias_folder():
+    from urllib.parse import quote
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey", download_dir="/downloads")
+    filename = "@@lusox\\Rafael - Song.flac"
+    f = {
+        "id": "abc",
+        "filename": filename,
+        "state": "Completed, Succeeded",
+        "size": 1000,
+        "bytesTransferred": 1000,
+    }
+    payload = [{"username": "user1", "directories": [{"directory": "@@lusox", "files": [f]}]}]
+    dl_id = f"user1::{quote(filename)}"
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, payload)):
+        status = driver.get_status(dl_id)
+    assert status["status"] == DownloadStatus.COMPLETED.value
+    assert status["source_path"] == "/downloads/Rafael - Song.flac"
+
+
+def test_slskd_status_nested_under_alias_keeps_album_folder():
+    from urllib.parse import quote
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey", download_dir="/downloads")
+    filename = "@@lusox\\Music\\Album\\01 - X.flac"
+    f = {
+        "id": "abc",
+        "filename": filename,
+        "state": "Completed, Succeeded",
+        "size": 1000,
+        "bytesTransferred": 1000,
+    }
+    payload = [{"username": "user1", "directories": [{"directory": "@@lusox\\Music\\Album", "files": [f]}]}]
+    dl_id = f"user1::{quote(filename)}"
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, payload)):
+        status = driver.get_status(dl_id)
+    assert status["status"] == DownloadStatus.COMPLETED.value
+    assert status["source_path"] == "/downloads/Album/01 - X.flac"
+
+
+def test_slskd_status_reported_local_filename_wins():
+    from urllib.parse import quote
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey", download_dir="/downloads")
+    filename = "@@lusox\\Rafael - Song.flac"
+    f = {
+        "id": "abc",
+        "filename": filename,
+        "localFilename": "/custom/path/Song.flac",
+        "state": "Completed, Succeeded",
+        "size": 1000,
+        "bytesTransferred": 1000,
+    }
+    payload = [{"username": "user1", "directories": [{"directory": "@@lusox", "files": [f]}]}]
+    dl_id = f"user1::{quote(filename)}"
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, payload)):
+        status = driver.get_status(dl_id)
+    assert status["status"] == DownloadStatus.COMPLETED.value
+    assert status["source_path"] == "/custom/path/Song.flac"
+
+
 @pytest.mark.parametrize("suffix", ["Errored", "Rejected", "TimedOut"])
 def test_slskd_status_completed_errored_is_failed(suffix):
     status = _slskd_status(f"Completed, {suffix}")
@@ -573,6 +631,21 @@ def test_slskd_folder_status_all_succeeded_gives_folder_path():
     assert st["status"] == DownloadStatus.COMPLETED.value
     assert st["progress"] == 100.0
     assert st["source_path"] == "/downloads/Album (2011)"
+
+
+def test_slskd_folder_status_share_alias_dir_is_root():
+    alias_dir = "@@lusox"
+    files = [
+        {"id": "t1", "filename": f"{alias_dir}\\01.flac", "state": "Completed, Succeeded", "size": 1000, "bytesTransferred": 1000},
+        {"id": "t2", "filename": f"{alias_dir}\\02.flac", "state": "Completed, Succeeded", "size": 1000, "bytesTransferred": 1000},
+    ]
+    driver = SlskdDriver("http://slskd.local:5030", api_key="k", download_dir="/downloads")
+    payload = [{"username": "user1", "directories": [{"directory": alias_dir, "files": files}]}]
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, payload)):
+        st = driver.get_status(_folder_id(alias_dir))
+    assert st["status"] == DownloadStatus.COMPLETED.value
+    assert st["progress"] == 100.0
+    assert st["source_path"] == "/downloads"
 
 
 def test_slskd_folder_status_partial_progress():
