@@ -459,6 +459,12 @@ def _hydrate_release_group_tracks(
                         track_number=trk_num,
                         disc_number=disc_num,
                     )
+                if not existing_trk:
+                    existing_trk = st.db.find_owned_title_twin(album_id, trk_title, dur, mb_rec_id)
+                    if existing_trk:
+                        # A filed track is never renumbered by the catalog.
+                        trk_num = int(existing_trk["track_number"] or trk_num)
+                        disc_num = int(existing_trk["disc_number"] or disc_num)
                 if existing_trk:
                     trk_id = existing_trk["id"]
                     t_monitored = bool(existing_trk["monitored"])
@@ -481,6 +487,7 @@ def _hydrate_release_group_tracks(
                     )
                 )
                 store_track_credits(st.db, str(saved["id"]), trk)
+            st.db.merge_album_track_twins(album_id)
 
 
 def _sync_mb_discography(st: _RefreshState) -> None:

@@ -238,3 +238,45 @@ def test_bulk_edit_partial_batch_failure_is_logged_and_raised(monkeypatch, caplo
         with pytest.raises(LidarrApiError, match="2 of 5 albums were updated"):
             lidarr_library.bulk_edit_artists(c, [1], False, None, None, apply_to_albums=True)
     assert any("batch 2 of 3" in r.getMessage() and "2 of 5" in r.getMessage() for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------------------------- track twins
+
+
+def _add_file(db, track_id):
+    db.upsert_library_file(
+        {
+            "id": f"f-{track_id}", "track_id": track_id, "file_path": f"/m/{track_id}.flac",
+            "relative_path": f"{track_id}.flac", "codec": "FLAC", "quality_name": "FLAC", "size_bytes": 1,
+        }
+    )
+
+
+def _twin_ids(db):
+    return _track_ids(db)
+
+
+def test_merge_album_track_twins_merges_fileless_twin(seeded):
+    _insert(seeded, "filed", title="Butterflies", num=11, dur=193.97)
+    _add_file(seeded, "filed")
+    _insert(seeded, "twin", title="Butterflies", num=3, dur=194.0, mb="X", created="2021-01-01")
+    assert seeded.merge_album_track_twins("al") == 1
+    assert _twin_ids(seeded) == {"filed"}
+    row = seeded.conn.execute("SELECT mb_recording_id, monitored FROM library_tracks WHERE id='filed'").fetchone()
+    assert row["mb_recording_id"] == "X" and row["monitored"] == 1
+
+
+def test_merge_album_track_twins_skips_different_duration(seeded):
+    _insert(seeded, "filed", title="Butterflies", num=11, dur=164.0)
+    _add_file(seeded, "filed")
+    _insert(seeded, "twin", title="Butterflies", num=3, dur=194.0)
+    assert seeded.merge_album_track_twins("al") == 0
+    assert _twin_ids(seeded) == {"filed", "twin"}
+
+
+def test_merge_album_track_twins_skips_conflicting_mbids(seeded):
+    _insert(seeded, "filed", title="Butterflies", num=11, dur=194.0, mb="A")
+    _add_file(seeded, "filed")
+    _insert(seeded, "twin", title="Butterflies", num=3, dur=194.0, mb="B")
+    assert seeded.merge_album_track_twins("al") == 0
+    assert _twin_ids(seeded) == {"filed", "twin"}

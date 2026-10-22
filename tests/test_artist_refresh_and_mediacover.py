@@ -809,3 +809,60 @@ def test_refresh_repairs_lidarr_local_artist_image(test_db: Database):
     )
     _apply_deezer_artist_art(st, {"image_url": "https://cdn.deezer.test/radiohead.jpg"})
     assert test_db.get_library_artist("art-mc")["image_url"] == "https://cdn.deezer.test/radiohead.jpg"
+
+
+def _twin_refresh(test_db: Database, mb_tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Seeds an owned 'Butterflies' (1-11, 194 s, no mbid) and refreshes with ``mb_tracks``; returns album tracks."""
+    test_db.upsert_library_artist(
+        LibraryArtist(id="art-tw", name="Mac", mbid="mbid-mac", monitored=True, monitor_option="all")
+    )
+    test_db.upsert_library_album(
+        {"id": "alb-tw", "artist_id": "art-tw", "title": "Divine", "mb_release_group_id": "rg-tw", "monitored": True}
+    )
+    test_db.upsert_library_track(
+        {
+            "id": "trk-owned", "album_id": "alb-tw", "artist_id": "art-tw", "title": "Butterflies",
+            "clean_title": "butterflies", "track_number": 11, "disc_number": 1,
+            "duration_seconds": 194.0, "monitored": True,
+        }
+    )
+    test_db.upsert_library_file(
+        {
+            "id": "f-owned", "track_id": "trk-owned", "file_path": "/m/b.flac", "relative_path": "b.flac",
+            "codec": "FLAC", "quality_name": "FLAC", "size_bytes": 1,
+        }
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    enricher.get_artist_details.return_value = {"id": "mbid-mac"}
+    disco = [{"id": "rg-tw", "title": "Divine", "album_type": "album", "year": 2016}]
+    enricher.get_artist_discography.return_value = disco
+    enricher.get_artist_discography_result.return_value = (disco, True)
+    enricher.source_available.return_value = True
+    enricher.stats.return_value = {"network_requests": 0, "cache_hits": 0}
+    enricher.get_release_group_tracks.return_value = mb_tracks
+    with patch.object(mediacover_service, "ensure_artwork", return_value=Path("/tmp/cover.jpg")):
+        assert refresh_single_artist(artist_id="art-tw", db=test_db, enricher=enricher)["success"] is True
+    return test_db.list_library_tracks(album_id="alb-tw", limit=100)
+
+
+def test_hydration_reuses_owned_track_with_other_number(test_db: Database):
+    tracks = _twin_refresh(
+        test_db,
+        [{"track_number": 3, "disc_number": 1, "title": "Butterflies", "duration_seconds": 194.0,
+          "mb_recording_id": "rec-X"}],
+    )
+    rows = [t for t in tracks if t["title"] == "Butterflies"]
+    assert len(rows) == 1
+    assert rows[0]["id"] == "trk-owned"
+    assert rows[0]["track_number"] == 11
+    assert rows[0]["mb_recording_id"] == "rec-X"
+
+
+def test_hydration_new_title_still_added(test_db: Database):
+    tracks = _twin_refresh(
+        test_db,
+        [{"track_number": 4, "disc_number": 1, "title": "Brand New", "duration_seconds": 100.0,
+          "mb_recording_id": "rec-new"}],
+    )
+    assert {t["title"] for t in tracks} >= {"Butterflies", "Brand New"}
+    assert len([t for t in tracks if t["title"] == "Brand New"]) == 1
