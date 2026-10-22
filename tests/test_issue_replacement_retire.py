@@ -162,7 +162,7 @@ def test_name_clash_in_recycle_bin_gets_numeric_suffix(db, tmp_path):
         res = dispose_replaced_file(f, library_root=music, recycle_root=music / RECYCLE_DIRNAME, client_roots=[], today=d)
         assert res.status == "recycled"
     names = sorted(p.name for p in (music / RECYCLE_DIRNAME / "2026-01-02" / "A").iterdir())
-    assert names == ["b.mp3", "b.mp3.1", "b.mp3.2"]
+    assert names == ["b.1.mp3", "b.2.mp3", "b.mp3"]
 
 
 def test_custom_recycle_path_is_used(db, tmp_path):
