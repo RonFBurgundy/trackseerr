@@ -97,12 +97,20 @@ class SlskdDriver(AcquisitionDriver):
         return roots
 
     @staticmethod
+    def _is_share_alias(component: str) -> bool:
+        """Returns True if a path component is a Soulseek virtual share alias root (e.g. ``@@alias``)."""
+        return component.startswith("@@")
+
+    @staticmethod
     def _last_component(remote_path: str) -> str:
         """Last path component of a remote (possibly Windows ``\\``-separated) path."""
         return remote_path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
 
     def _local_source_path(self, transfer: dict[str, Any], remote_dir: Optional[str]) -> Optional[str]:
-        """Where slskd stored a completed transfer: ``<downloads>/<last remote directory component>/<file name>``."""
+        """Where slskd stored a completed transfer: ``<downloads>/<last remote directory component>/<file name>``.
+
+        If the remote directory component is a share alias (``@@...``), it is omitted because slskd writes directly to root.
+        """
         reported = str(transfer.get("localFilename") or "").strip()
         if reported and posixpath.isabs(reported.replace("\\", "/")):
             return reported
@@ -116,7 +124,7 @@ class SlskdDriver(AcquisitionDriver):
         if not name or name in (".", ".."):
             return None
         parts = [base.rstrip("/") or "/"]
-        if folder and folder not in (".", ".."):
+        if folder and folder not in (".", "..") and not self._is_share_alias(folder):
             parts.append(folder)
         parts.append(name)
         return posixpath.join(*parts)
@@ -520,7 +528,10 @@ class SlskdDriver(AcquisitionDriver):
         return None
 
     def _folder_local_path(self, dir_obj: dict[str, Any], files: list[dict[str, Any]]) -> Optional[str]:
-        """Local folder holding a completed directory transfer."""
+        """Local folder holding a completed directory transfer.
+
+        A share-alias directory (``@@...``) has no folder of its own on disk, so ``None`` is returned.
+        """
         for f in files:
             reported = str(f.get("localFilename") or "").strip()
             if reported and posixpath.isabs(reported.replace("\\", "/")):
@@ -529,6 +540,8 @@ class SlskdDriver(AcquisitionDriver):
         base = self.download_dir or self._read_downloads_root()
         folder = self._last_component(str(dir_obj.get("directory") or ""))
         if not base or not folder or folder in (".", ".."):
+            return None
+        if self._is_share_alias(folder):
             return None
         return posixpath.join(base.rstrip("/") or "/", folder)
 
