@@ -23,7 +23,7 @@ from trackseerr.rename_reasons import (
     FILE_TITLE,
     TRACK_NUMBER,
 )
-from trackseerr.storage_common import clean_library_name
+from trackseerr.lidarr_release import titles_match
 from trackseerr.task_manager import TRIGGER_MANUAL, record_task_run
 
 logger = logging.getLogger(__name__)
@@ -67,10 +67,10 @@ def _find_library_hit(db: Any, ids: list[str], album_id: Optional[str]) -> Optio
 
 
 def _same_recording_other_album(hit: dict[str, Any], track: dict[str, Any]) -> bool:
-    """True when the library hit is on another album but carries the linked track's (cleaned) title."""
+    """True when the library hit is on another album but carries the linked track's title, ignoring featured-artist and remaster suffixes."""
     if hit.get("album_id") == track.get("album_id"):
         return False
-    return clean_library_name(str(hit.get("title") or "")) == clean_library_name(str(track.get("title") or ""))
+    return titles_match(str(hit.get("title") or ""), str(track.get("title") or ""))
 
 
 def verdict_for(db: Any, fp_row: Optional[dict[str, Any]], track: dict[str, Any], current_path: str) -> Optional[dict[str, Any]]:
