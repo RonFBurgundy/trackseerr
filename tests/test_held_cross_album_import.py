@@ -239,8 +239,68 @@ def test_file_imported_onto_matching_track_of_related_artist(tmp_path: Path, db:
     assert "Elvis Costello" in str(placed_path)
 
 
+def test_remaster_four_seconds_longer_imports_onto_owned_edition(tmp_path: Path, db: Database):
+    """4.5 s longer remaster of Hand In Hand, 161.5s placed under Elvis Costello / This Year's Model."""
+    music, staging, art_ec, alb_tym, trk_hih, art_ecta, alb_af, _, _ = _seed_costello(db, tmp_path)
+    dl = staging / "Elvis Costello & The Attractions - Armed Forces"
+    f = dl / "07_Hand In Hand (2021 Remaster).flac"
+    _flac(f)
+    metas = {
+        "07_Hand In Hand (2021 Remaster).flac": {
+            "title": "Hand In Hand (2021 Remaster)",
+            "artist": "Elvis Costello & The Attractions",
+            "duration": 161.5,
+            "duration_seconds": 161.5,
+            "track_number": 7,
+            "disc_number": 1,
+        }
+    }
+
+    stats, driver = _run_worker(db, dl, staging, metas)
+
+    dl_row = db.get_active_download("dl-1")
+    assert dl_row["status"] == DownloadStatus.IMPORTED.value
+    assert dl_row["unmatched_files"] == []
+
+    # File must be linked to trk-hih on alb-tym (Elvis Costello), not alb-af
+    files = db.list_library_files_for_track("trk-hih")
+    assert len(files) == 1
+    placed_file = files[0]
+    assert placed_file["track_id"] == "trk-hih"
+    placed_path = Path(placed_file["file_path"])
+    assert placed_path.exists()
+    assert "This Year's Model" in str(placed_path)
+    assert "Elvis Costello" in str(placed_path)
+
+
+def test_six_seconds_off_still_holds(tmp_path: Path, db: Database):
+    """A file 6 s longer than trk-hih (157 s) exceeds the 5.0 s tolerance and stays held."""
+    music, staging, _, _, _, _, _, _, _ = _seed_costello(db, tmp_path)
+    dl = staging / "Elvis Costello & The Attractions - Armed Forces"
+    f = dl / "07_Hand In Hand (2021 Remaster).flac"
+    _flac(f)
+    metas = {
+        "07_Hand In Hand (2021 Remaster).flac": {
+            "title": "Hand In Hand (2021 Remaster)",
+            "artist": "Elvis Costello & The Attractions",
+            "duration": 163.0,
+            "duration_seconds": 163.0,
+            "track_number": 7,
+            "disc_number": 1,
+        }
+    }
+
+    stats, driver = _run_worker(db, dl, staging, metas)
+
+    dl_row = db.get_active_download("dl-1")
+    assert dl_row["status"] == DownloadStatus.WARNING.value
+    assert str(f) in dl_row["unmatched_files"]
+    assert f.exists()
+    assert db.list_library_files_for_track("trk-hih") == []
+
+
 def test_duration_mismatch_still_holds(tmp_path: Path, db: Database):
-    """200 s vs 157 s exceeds 3.0 s tolerance and leaves file held."""
+    """200 s vs 157 s exceeds 5.0 s tolerance and leaves file held."""
     music, staging, _, _, _, _, _, _, _ = _seed_costello(db, tmp_path)
     dl = staging / "Elvis Costello & The Attractions - Armed Forces"
     f = dl / "07_Hand In Hand (2021 Remaster).flac"

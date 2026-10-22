@@ -671,6 +671,7 @@ class ImportPipelineMixin(ImportCatalogMixin):
             candidate_artist_ids(db, job.item, metadata.get("artist")),
             title,
             duration,
+            isrc=metadata.get("isrc"),
         )
         if not alt:
             return None

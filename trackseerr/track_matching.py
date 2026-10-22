@@ -483,21 +483,28 @@ def find_owned_for_item(
     return None
 
 
+_CROSS_ALBUM_DURATION_TOLERANCE = 5.0  # seconds; remasters of the same recording often differ by 3-5 s
+
 
 def find_fileless_equivalent(
     db: Database,
     artist_ids: list[str],
     title: str,
     duration_seconds: Optional[float] = None,
+    isrc: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
-    """Finds a unique file-less track across candidate artists matching title and duration within 3.0s."""
+    """Finds a unique file-less track across candidate artists matching title and duration within 5.0s.
+
+    A title-matching candidate whose ISRC equals ``isrc`` (case-insensitive) matches regardless of duration.
+    """
     if not artist_ids or not norm_title(title):
         return None
     try:
         target_dur = float(duration_seconds) if duration_seconds is not None else None
     except (ValueError, TypeError):
         target_dur = None
-    if target_dur is None or target_dur <= 0:
+    want_isrc = str(isrc or "").strip().upper()
+    if (target_dur is None or target_dur <= 0) and not want_isrc:
         return None
 
     matched: list[dict[str, Any]] = []
@@ -514,6 +521,11 @@ def find_fileless_equivalent(
             seen_track_ids.add(tid)
             if not titles_match(track.get("title"), title):
                 continue
+            if want_isrc and str(track.get("isrc") or "").strip().upper() == want_isrc:
+                matched.append(track)
+                continue
+            if target_dur is None or target_dur <= 0:
+                continue
             cand_dur = track.get("duration_seconds")
             try:
                 cand_dur_val = float(cand_dur) if cand_dur is not None else None
@@ -521,7 +533,7 @@ def find_fileless_equivalent(
                 cand_dur_val = None
             if cand_dur_val is None or cand_dur_val <= 0:
                 continue
-            if abs(cand_dur_val - target_dur) <= 3.0:
+            if abs(cand_dur_val - target_dur) <= _CROSS_ALBUM_DURATION_TOLERANCE:
                 matched.append(track)
 
     if len(matched) == 1:
