@@ -80,7 +80,8 @@ CANDS = [
 
 
 def test_scored_unique_number_match_is_strong():
-    t, s = reconcile_audio_file_to_track_scored({"track_number": 2, "disc_number": 1, "title": "zzz"}, CANDS)
+    # A number match needs a compatible title; an untitled file (no tag, no name) still matches by number alone.
+    t, s = reconcile_audio_file_to_track_scored({"track_number": 2, "disc_number": 1, "title": ""}, CANDS)
     assert (t["id"], s) == ("b", "strong")
 
 
