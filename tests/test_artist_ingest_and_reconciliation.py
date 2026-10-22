@@ -492,8 +492,8 @@ def test_reconciliation_hierarchy_direct():
         {"id": "trk-3", "disc_number": 1, "track_number": 3, "title": "Around the World (Radio Edit)", "duration_seconds": 240.0},
     ]
 
-    # Rule 1: Exact match on disc & track number
-    meta_num = {"track_number": 2, "disc_number": 1, "title": "Wrong Tag Title", "duration": 430.0}
+    # Rule 1: Exact match on disc & track number (an untitled file; a conflicting title no longer matches by number)
+    meta_num = {"track_number": 2, "disc_number": 1, "title": "", "duration": 430.0}
     matched = reconcile_audio_file_to_track(meta_num, candidates)
     assert matched is not None and matched["id"] == "trk-2"
 

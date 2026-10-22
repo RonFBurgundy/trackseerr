@@ -702,9 +702,12 @@ class ImportPipelineMixin(ImportCatalogMixin):
         matched: Optional[dict[str, Any]],
         strength: str,
     ) -> tuple[Optional[dict[str, Any]], str]:
-        """A single-track grab whose file is titled like the wanted track lands on the wanted track, not a neighbour."""
+        """A single-track grab whose file is titled like the wanted track lands on the wanted track, not a neighbour.
+
+        An unmatched file stays unmatched: it goes through the owned-elsewhere / hold rules, never onto the wanted row.
+        """
         wanted_id = str(job.item.get("track_id") or "")
-        if not wanted_id or (matched is not None and str(matched.get("id") or "") == wanted_id):
+        if not wanted_id or matched is None or str(matched.get("id") or "") == wanted_id:
             return matched, strength
         file_title = _effective_file_title(metadata)
         for t in job.remaining_expected_tracks:
@@ -716,17 +719,27 @@ class ImportPipelineMixin(ImportCatalogMixin):
     def _is_strict_upgrade(
         db: Database, job: _ImportJob, existing: dict[str, Any], metadata: dict[str, Any]
     ) -> bool:
-        """True when the new file ranks strictly better than the file on disk under the request's quality profile."""
+        """True when the new file may replace the one on disk for the download's own track.
+
+        An explicit issue replacement always may. When the new file's quality or the quality profile cannot be
+        evaluated there is nothing to compare, so the grab replaces as it always did; otherwise the new file must
+        rank strictly better than the old one.
+        """
+        try:
+            if db.get_download_replacement_issue(str(job.download_id)):
+                return True
+        except sqlite3.Error as exc:
+            logger.warning("Could not look up replacement issue for %s: %s", job.download_id, safe_exc(exc))
         new_quality = _quality_from_codec(metadata)
         old_quality = str(existing.get("quality_name") or "")
         if not new_quality:
-            return False
+            return True
         profile_dict = None
         if job.req and job.req.get("quality_profile_id"):
             profile_dict = db.get_quality_profile(job.req["quality_profile_id"])
         profile_dict = profile_dict or db.get_default_quality_profile()
         if not profile_dict:
-            return False
+            return True
         profile = _to_quality_profile(profile_dict)
         new_res = evaluate_release(parse_release_title(new_quality), profile)
         if new_res.tier is None or not new_res.is_acceptable:
