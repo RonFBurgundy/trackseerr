@@ -530,7 +530,7 @@ class SlskdDriver(AcquisitionDriver):
     def _folder_local_path(self, dir_obj: dict[str, Any], files: list[dict[str, Any]]) -> Optional[str]:
         """Local folder holding a completed directory transfer.
 
-        If the directory component is a share alias (``@@...``), returns the download root directly.
+        A share-alias directory (``@@...``) has no folder of its own on disk, so ``None`` is returned.
         """
         for f in files:
             reported = str(f.get("localFilename") or "").strip()
@@ -542,7 +542,7 @@ class SlskdDriver(AcquisitionDriver):
         if not base or not folder or folder in (".", ".."):
             return None
         if self._is_share_alias(folder):
-            return base.rstrip("/") or "/"
+            return None
         return posixpath.join(base.rstrip("/") or "/", folder)
 
     def _folder_status(self, dir_obj: dict[str, Any]) -> dict[str, Any]:

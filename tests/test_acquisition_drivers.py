@@ -633,7 +633,7 @@ def test_slskd_folder_status_all_succeeded_gives_folder_path():
     assert st["source_path"] == "/downloads/Album (2011)"
 
 
-def test_slskd_folder_status_share_alias_dir_is_root():
+def test_slskd_folder_status_share_alias_dir_has_no_folder_path():
     alias_dir = "@@lusox"
     files = [
         {"id": "t1", "filename": f"{alias_dir}\\01.flac", "state": "Completed, Succeeded", "size": 1000, "bytesTransferred": 1000},
@@ -645,7 +645,7 @@ def test_slskd_folder_status_share_alias_dir_is_root():
         st = driver.get_status(_folder_id(alias_dir))
     assert st["status"] == DownloadStatus.COMPLETED.value
     assert st["progress"] == 100.0
-    assert st["source_path"] == "/downloads"
+    assert st["source_path"] is None
 
 
 def test_slskd_folder_status_partial_progress():
