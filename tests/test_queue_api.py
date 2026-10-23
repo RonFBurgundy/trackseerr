@@ -412,3 +412,22 @@ def test_priority_validation_range(app_and_client, test_db, test_config, seeded_
     assert resp.status_code == 200 and resp.json()["priority"] == 50
     resp = client.post("/api/settings/indexers", json=indexer_body, headers=admin_headers)
     assert resp.json()["priority"] == 25
+
+
+def test_cancel_finished_torrent_leaves_client_alone(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    test_db.create_download_client(
+        DownloadClientConfig(id="client-qb-1", name="QB", driver_type=DownloadDriverType.QBITTORRENT,
+                             host_url="http://qb:8080")
+    )
+    test_db.create_active_download(
+        ActiveDownload(id="dl-seed-1", title="Seeding", artist="A", client_id="client-qb-1",
+                       download_hash="abc", status=DownloadStatus.COMPLETED.value)
+    )
+    test_db.set_download_release_meta("dl-seed-1", indexer="Prowlarr", quality="FLAC", protocol="torrent")
+    with patch("trackseerr.api.routes.queue.get_acquisition_driver") as mock_factory:
+        resp = client.delete("/api/queue/dl-seed-1", headers=admin_headers)
+    assert resp.status_code == 200
+    mock_factory.return_value.cancel.assert_not_called()
+    assert test_db.get_active_download("dl-seed-1") is None

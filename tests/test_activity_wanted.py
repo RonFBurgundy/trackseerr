@@ -321,6 +321,28 @@ class TestNativeQueue:
         events = {r["event"] for r in test_db.conn.execute("SELECT event FROM download_history")}
         assert {"deleted", "blocklisted"} <= events
 
+    @pytest.mark.parametrize("status", ["completed", "imported"])
+    def test_delete_finished_torrent_keeps_it_seeding(self, api, test_db, admin_h, status):
+        _dl(test_db, "dl-s", download_hash="HS")
+        test_db.set_download_release_meta("dl-s", indexer="Prowlarr", quality="FLAC", protocol="torrent")
+        test_db.update_download_status("dl-s", status=status)
+        driver = MagicMock()
+        with patch.object(activity_service, "get_acquisition_driver", return_value=driver):
+            res = api.delete("/api/activity/queue/dl-s?remove_from_client=true", headers=admin_h)
+        assert res.status_code == 200
+        assert test_db.get_active_download("dl-s") is None
+        driver.cancel.assert_not_called()
+
+    def test_delete_finished_usenet_still_cancels(self, api, test_db, admin_h):
+        _dl(test_db, "dl-u", download_hash="HU")
+        test_db.set_download_release_meta("dl-u", indexer="Prowlarr", quality="FLAC", protocol="usenet")
+        test_db.update_download_status("dl-u", status="completed")
+        driver = MagicMock()
+        with patch.object(activity_service, "get_acquisition_driver", return_value=driver):
+            res = api.delete("/api/activity/queue/dl-u?remove_from_client=true", headers=admin_h)
+        assert res.status_code == 200
+        driver.cancel.assert_called_once_with("HU")
+
     def test_delete_without_blocklist_or_client_removal(self, api, test_db, admin_h):
         _dl(test_db, "dl-y")
         driver = MagicMock()
