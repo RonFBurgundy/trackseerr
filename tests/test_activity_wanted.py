@@ -330,8 +330,39 @@ class TestNativeQueue:
         with patch.object(activity_service, "get_acquisition_driver", return_value=driver):
             res = api.delete("/api/activity/queue/dl-s?remove_from_client=true", headers=admin_h)
         assert res.status_code == 200
-        assert test_db.get_active_download("dl-s") is None
         driver.cancel.assert_not_called()
+        if status == "completed":
+            assert test_db.get_active_download("dl-s")["hidden_from_queue"] is True
+            queue = api.get("/api/activity/queue", headers=admin_h).json()["records"]
+            assert all(r["id"] != "dl-s" for r in queue)
+        else:
+            assert test_db.get_active_download("dl-s") is None
+
+    def test_delete_hidden_row_again_is_404(self, api, test_db, admin_h):
+        _dl(test_db, "dl-h", download_hash="HH")
+        test_db.set_download_release_meta("dl-h", indexer="Prowlarr", quality="FLAC", protocol="torrent")
+        test_db.update_download_status("dl-h", status="completed")
+        with patch.object(activity_service, "get_acquisition_driver", return_value=MagicMock()):
+            first = api.delete("/api/activity/queue/dl-h", headers=admin_h)
+            second = api.delete("/api/activity/queue/dl-h", headers=admin_h)
+        assert first.status_code == 200 and "keeps seeding" in first.json()["message"]
+        assert second.status_code == 404
+        assert test_db.get_active_download("dl-h")["hidden_from_queue"] is True
+
+    def test_retry_on_seeding_torrent_hides_row(self, api, test_db, admin_h):
+        _dl(test_db, "dl-rs", artist="Art", title="Art - Rel [FLAC]", download_hash="HRS")
+        test_db.set_download_release_meta("dl-rs", indexer="Prowlarr", quality="FLAC", protocol="torrent")
+        test_db.update_download_status("dl-rs", status="completed")
+        driver = MagicMock()
+        with patch.object(activity_service, "get_acquisition_driver", return_value=driver), patch(
+            "trackseerr.acquisition_coordinator.acquisition_coordinator.search_and_grab",
+            return_value={"success": False, "message": "No acceptable releases found"},
+        ):
+            res = api.post("/api/activity/queue/dl-rs/retry?blocklist=true", headers=admin_h)
+        assert res.status_code == 200
+        driver.cancel.assert_not_called()
+        assert test_db.get_active_download("dl-rs")["hidden_from_queue"] is True
+        assert test_db.is_blocklisted(release_title="Art - Rel [FLAC]")
 
     def test_delete_finished_usenet_still_cancels(self, api, test_db, admin_h):
         _dl(test_db, "dl-u", download_hash="HU")

@@ -430,4 +430,4 @@ def test_cancel_finished_torrent_leaves_client_alone(app_and_client, test_db, te
         resp = client.delete("/api/queue/dl-seed-1", headers=admin_headers)
     assert resp.status_code == 200
     mock_factory.return_value.cancel.assert_not_called()
-    assert test_db.get_active_download("dl-seed-1") is None
+    assert test_db.get_active_download("dl-seed-1")["hidden_from_queue"] is True

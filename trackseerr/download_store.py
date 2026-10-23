@@ -362,6 +362,7 @@ class DownloadStoreMixin:
         res["unmatched_files"] = self._parse_unmatched_files(res.get("unmatched_files"))
         res["placed_files"], res["placed_mode"] = self._parse_placed_files(res.get("placed_files"))
         res["cleanup_attempts"] = int(res.get("cleanup_attempts") or 0)
+        res["hidden_from_queue"] = bool(res.get("hidden_from_queue"))
         return res
 
     @staticmethod
@@ -678,6 +679,16 @@ class DownloadStoreMixin:
         with self._lock:
             cur = self.conn.execute(
                 "DELETE FROM active_downloads WHERE id = ?", (str(download_id),)
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def hide_active_download_from_queue(self, download_id: str) -> bool:
+        """Hides a download from the queue while keeping its row (seed snapshot, placed files) for seed cleanup."""
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE active_downloads SET hidden_from_queue = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (str(download_id),),
             )
             self.conn.commit()
             return cur.rowcount > 0

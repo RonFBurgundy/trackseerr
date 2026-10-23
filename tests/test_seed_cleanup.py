@@ -805,3 +805,18 @@ def test_run_seed_cleanup_task_refused_in_lidarr_mode(client, db, config):
     db.conn.execute("UPDATE media_management_settings SET library_mode = 'lidarr'")
     db.conn.commit()
     assert client.post("/api/system/tasks/seed_cleanup/run", headers=h).status_code == 409
+
+
+def test_hidden_seeding_row_still_swept_with_indexer_rule(db, tmp_path):
+    w = World(db, tmp_path)
+    w.download(rule=("indexer", 2.0, None))
+    assert db.hide_active_download_from_queue("dl-1") is True
+    assert db.get_native_queue_item("dl-1") is None
+
+    unmet = FakeDriver(torrents=[w.torrent(ratio=1.0)], statuses={"abc": w.status(ratio=1.0)})
+    run(db, unmet)
+    assert unmet.removed == []
+
+    met = FakeDriver(torrents=[w.torrent(ratio=2.5)], statuses={"abc": w.status(ratio=2.5)})
+    run(db, met)
+    assert [h for h, _ in met.removed] == ["abc"]
