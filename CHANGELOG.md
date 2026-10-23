@@ -110,6 +110,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Deleting an artist, album, track or file from the Library with "delete files" now moves the files to the recycle bin (or deletes them if you turned on permanent delete) instead of erasing them, and removes every file of a track, not just the first. Files outside your music folder or inside a download folder are left alone.
+- Removing a finished torrent from the Queue no longer deletes it and its files from the download client while it is still seeding. It keeps seeding, and Seed cleanup lists it so you can remove it once its seed goal is met.
 - Rename no longer skips a song as "the audio is …" when the only difference is a featured artist in the title, for example "Cinderella (feat. Ty Dolla $ign)" on a deluxe edition and "Cinderella" on the original album.
 - Refreshing an artist no longer adds a second copy of a song you own when MusicBrainz numbers it differently (for example "Butterflies" as track 3 instead of 11). Albums that already have these extra copies are cleaned up on their next refresh.
 - Recycle bin copies keep their file type when a name is already taken ("Song.1.flac", not "Song.flac.1"), and importing an older "Song.flac.1" file from the bin gives it a normal ".flac" name.
