@@ -606,7 +606,7 @@ def delete_artist(
     db: Database = Depends(get_db),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
-    """Deletes an artist and cascades to child albums, tracks, and files. Optionally unlinks files on disk."""
+    """Deletes an artist and cascades to child albums, tracks, and files. Optionally moves their files to the recycle bin."""
     artist = db.get_library_artist(artist_id)
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
@@ -614,9 +614,9 @@ def delete_artist(
     if delete_files:
         tracks = db.list_library_tracks(artist_id=artist_id, limit=10000)
         for t in tracks:
-            f = db.get_library_file_for_track(t["id"])
-            if f and f.get("file_path"):
-                _unlink_library_file(db, f)
+            for f in db.list_library_files_for_track(t["id"]):
+                if f.get("file_path"):
+                    _unlink_library_file(db, f)
 
     success = db.delete_library_artist(artist_id)
     return {"success": success}

@@ -398,6 +398,9 @@ def test_library_delete_endpoints(
 ):
     _, client = app_and_client
     admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    test_db.update_media_management_settings(
+        {"root_folder_path": str(tmp_path), "recycle_bin_path": str(tmp_path / "bin")}
+    )
 
     # 1. Test DELETE /api/library/tracks/{id} with delete_files=False
     dummy_file = tmp_path / "song.flac"
@@ -424,6 +427,7 @@ def test_library_delete_endpoints(
     assert resp_del_file.json() == {"success": True}
     assert test_db.get_library_file("fl-2") is None
     assert not dummy_file.exists()
+    assert any((tmp_path / "bin").rglob(dummy_file.name))
 
     # 3. Test DELETE /api/library/albums/{id} with delete_files=True
     dummy_file_album = tmp_path / "album_song.flac"
@@ -437,6 +441,7 @@ def test_library_delete_endpoints(
     assert resp_del_alb.json() == {"success": True}
     assert test_db.get_library_album("alb-1") is None
     assert not dummy_file_album.exists()
+    assert any((tmp_path / "bin").rglob(dummy_file_album.name))
 
     # 4. Test DELETE /api/library/artists/{id} with delete_files=True
     dummy_file_art = tmp_path / "artist_song.flac"
@@ -451,6 +456,7 @@ def test_library_delete_endpoints(
     assert resp_del_art.json() == {"success": True}
     assert test_db.get_library_artist("art-1") is None
     assert not dummy_file_art.exists()
+    assert any((tmp_path / "bin").rglob(dummy_file_art.name))
 
 
 # =========================================================================
