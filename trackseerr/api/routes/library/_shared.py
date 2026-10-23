@@ -3,6 +3,7 @@
 import sqlite3
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -16,6 +17,7 @@ from trackseerr import art_thumbs
 from trackseerr import lidarr_library
 from trackseerr.download_roots import allowed_roots_for_all_clients
 from trackseerr.item_history import emit
+from trackseerr.recycle_bin import _client_roots, _library_root, dispose_for_settings
 from trackseerr.redaction import redact_text
 from trackseerr.api.dependencies import (
     get_db,
@@ -591,20 +593,37 @@ def _enrich_artists(db: Database, artists: list[dict[str, Any]]) -> list[dict[st
     return _with_discovery_ids(db, results)
 
 def _unlink_library_file(db: Database, file_row: dict[str, Any]) -> None:
-    """Unlinks a library file's bytes on an admin's request; a failure is logged, and a success lands in item history."""
+    """Disposes of a library file's bytes on an admin's request through the recycle bin (or a permanent delete when that setting is on).
+
+    A file outside the library root or inside a download client's folder is kept; a failure is logged, and a
+    recycle/delete lands in item history.
+    """
     path = Path(file_row["file_path"])
     try:
-        if not path.exists():
+        if not os.path.lexists(path):
             return
-        path.unlink(missing_ok=True)
+        mm = db.get_media_management_settings()
+        library_root = _library_root(mm)
+        if library_root is None:
+            logger.warning("No library root folder is configured; %s was left on disk", path)
+            return
+        result = dispose_for_settings(mm, library_root, path, _client_roots(db, mm))
     except OSError as exc:
         logger.warning("Failed to delete file %s from disk: %s", path, exc)
         return
-    if file_row.get("track_id"):
-        emit(
-            db, "file_deleted", track_id=str(file_row["track_id"]), message=f"Deleted {path.name} from disk",
-            details={"path": str(path), "quality": file_row.get("quality_name"), "codec": file_row.get("codec")},
-        )
+    if result.status == "kept":
+        logger.warning("Kept %s on disk: %s", path, result.reason)
+        return
+    if result.status not in ("recycled", "deleted") or not file_row.get("track_id"):
+        return
+    message = f"Moved {path.name} to the recycle bin" if result.status == "recycled" else f"Deleted {path.name} from disk"
+    emit(
+        db, "file_deleted", track_id=str(file_row["track_id"]), message=message,
+        details={
+            "path": str(path), "quality": file_row.get("quality_name"), "codec": file_row.get("codec"),
+            "recycled_to": str(result.dest) if result.dest else None,
+        },
+    )
 
 def _enrich_albums(db: Database, albums: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Attaches the artist name and track count to library albums."""

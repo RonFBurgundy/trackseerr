@@ -207,7 +207,7 @@ def delete_album(
     db: Database = Depends(get_db),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
-    """Deletes an album and cascades to child tracks and files. Optionally unlinks files on disk."""
+    """Deletes an album and cascades to child tracks and files. Optionally moves their files to the recycle bin."""
     album = db.get_library_album(album_id)
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
@@ -215,9 +215,9 @@ def delete_album(
     if delete_files:
         tracks = db.list_library_tracks(album_id=album_id, limit=10000)
         for t in tracks:
-            f = db.get_library_file_for_track(t["id"])
-            if f and f.get("file_path"):
-                _unlink_library_file(db, f)
+            for f in db.list_library_files_for_track(t["id"]):
+                if f.get("file_path"):
+                    _unlink_library_file(db, f)
 
     success = db.delete_library_album(album_id)
     return {"success": success}

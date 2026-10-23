@@ -101,15 +101,15 @@ def delete_track(
     db: Database = Depends(get_db),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
-    """Deletes a library track and cascades to child files. Optionally unlinks files on disk."""
+    """Deletes a library track and cascades to child files. Optionally moves its files to the recycle bin."""
     track = db.get_library_track(track_id)
     if track is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
 
     if delete_files:
-        f = db.get_library_file_for_track(track_id)
-        if f and f.get("file_path"):
-            _unlink_library_file(db, f)
+        for f in db.list_library_files_for_track(track_id):
+            if f.get("file_path"):
+                _unlink_library_file(db, f)
 
     success = db.delete_library_track(track_id)
     return {"success": success}
@@ -121,7 +121,7 @@ def delete_file(
     db: Database = Depends(get_db),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
-    """Deletes a library file record and optionally unlinks the physical file from disk."""
+    """Deletes a library file record and optionally moves the file to the recycle bin."""
     row = db.get_library_file(file_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
