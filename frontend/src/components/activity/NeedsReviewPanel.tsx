@@ -14,6 +14,7 @@ import { ReviewMappingCard } from './ReviewMappingCard';
 import { ReviewGroupList } from './ReviewGroupList';
 import { ReviewWeakMatches } from './ReviewWeakMatches';
 import { ReviewOrphans } from './ReviewOrphans';
+import { ReviewSeeding } from './ReviewSeeding';
 import { ReviewCleanupFailed } from './ReviewCleanupFailed';
 import { SeedCleanupStrip } from './SeedCleanupStrip';
 import { fileName, weakMatchInfo } from './reviewCauses';
@@ -46,6 +47,7 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
   // Seed cleanup only applies when Trackseerr drives its own download clients.
   const seedCleanupApplies = useHasDownloadClients() !== false;
   const sc = useSeedCleanup({ onFinished: handleCleanupFinished, onToast });
+  const seeding = seedCleanupApplies ? sc.seeding : [];
 
   const rematch = useCallback((f: LibraryHealthFinding): void => {
     const info = weakMatchInfo(f);
@@ -81,7 +83,7 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
   const { server, last_run: run, mapping } = data;
   const supported = server != null && server.file_paths;
   const serverName = server ? serverLabel(server.kind) : 'server';
-  const empty = regularGroups.length === 0 && weak.length === 0 && orphans.length === 0 && failed.length === 0;
+  const empty = regularGroups.length === 0 && weak.length === 0 && orphans.length === 0 && failed.length === 0 && seeding.length === 0;
 
   return (
     <section className="flex flex-col gap-3 min-h-0">
@@ -162,6 +164,7 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
             )}
             {weak.length > 0 && <ReviewWeakMatches findings={weak} busy={busy} onRematch={rematch} onDismiss={hl.dismiss} />}
             {orphans.length > 0 && <ReviewOrphans findings={orphans} busy={busy} onRemove={hl.removeOrphan} />}
+            {seeding.length > 0 && <ReviewSeeding items={seeding} />}
             {failed.length > 0 && <ReviewCleanupFailed findings={failed} busy={busy} onRetry={hl.retryFailed} />}
           </div>
         )}

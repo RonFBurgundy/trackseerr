@@ -7,6 +7,10 @@ export type SeedCleanupStatus = Schema<'SeedCleanupStatus'>;
 
 export type SeedCleanupStarted = Schema<'SeedCleanupStarted'>;
 
+export type SeedingItem = Schema<'SeedingItem'>;
+
+export type SeedingList = Schema<'SeedingList'>;
+
 export interface OrphanRemoveRequest {
   delete_files: boolean;
 }

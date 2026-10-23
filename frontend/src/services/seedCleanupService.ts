@@ -5,6 +5,7 @@ import type {
   OrphanRemoveResponse,
   SeedCleanupStarted,
   SeedCleanupStatus,
+  SeedingList,
 } from '@/types/seedCleanup';
 
 const BASE = '/api/seed-cleanup';
@@ -16,6 +17,11 @@ export function runSeedCleanup(): Promise<SeedCleanupStarted> {
 
 export function getSeedCleanupStatus(signal?: AbortSignal): Promise<SeedCleanupStatus> {
   return apiRequest<SeedCleanupStatus>(`${BASE}/status`, { signal });
+}
+
+/** Torrents removed from the Queue that still seed until their seed goal is met. */
+export function getSeedingList(signal?: AbortSignal): Promise<SeedingList> {
+  return apiRequest<SeedingList>(`${BASE}/seeding`, { signal });
 }
 
 export function removeOrphanTorrent(findingId: string, body: OrphanRemoveRequest): Promise<OrphanRemoveResponse> {
