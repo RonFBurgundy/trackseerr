@@ -2041,7 +2041,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Album
-         * @description Deletes an album and cascades to child tracks and files. Optionally unlinks files on disk.
+         * @description Deletes an album and cascades to child tracks and files. Optionally moves their files to the recycle bin.
          */
         delete: operations["delete_album_api_library_albums__album_id__delete"];
         options?: never;
@@ -2274,7 +2274,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Artist
-         * @description Deletes an artist and cascades to child albums, tracks, and files. Optionally unlinks files on disk.
+         * @description Deletes an artist and cascades to child albums, tracks, and files. Optionally moves their files to the recycle bin.
          */
         delete: operations["delete_artist_api_library_artists__artist_id__delete"];
         options?: never;
@@ -2591,7 +2591,7 @@ export interface paths {
         post?: never;
         /**
          * Delete File
-         * @description Deletes a library file record and optionally unlinks the physical file from disk.
+         * @description Deletes a library file record and optionally moves the file to the recycle bin.
          */
         delete: operations["delete_file_api_library_files__file_id__delete"];
         options?: never;
@@ -3262,7 +3262,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Track
-         * @description Deletes a library track and cascades to child files. Optionally unlinks files on disk.
+         * @description Deletes a library track and cascades to child files. Optionally moves its files to the recycle bin.
          */
         delete: operations["delete_track_api_library_tracks__track_id__delete"];
         options?: never;
