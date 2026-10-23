@@ -258,6 +258,7 @@ class ActivityStoreMixin:
         order = self._order_clause(self.QUEUE_SORT_KEYS, sort_key, sort_dir, "d.id")
         where = (
             " WHERE d.status IN ({}) AND COALESCE(c.driver_type, '') <> 'lidarr'"
+            " AND COALESCE(d.hidden_from_queue, 0) = 0"
         ).format(", ".join("?" for _ in self.NATIVE_QUEUE_STATUSES))
         params = list(self.NATIVE_QUEUE_STATUSES)
         with self._lock:
@@ -272,7 +273,8 @@ class ActivityStoreMixin:
         """A single queue row with its resolved item/album titles, or None."""
         with self._lock:
             row = self.conn.execute(
-                self._QUEUE_SELECT + self._QUEUE_FROM + " WHERE d.id = ?", (str(download_id),)
+                self._QUEUE_SELECT + self._QUEUE_FROM + " WHERE d.id = ? AND COALESCE(d.hidden_from_queue, 0) = 0",
+                (str(download_id),),
             ).fetchone()
             return self._map_active_download(row) if row else None
 

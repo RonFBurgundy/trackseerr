@@ -77,6 +77,7 @@ class MigrationsMixin:
                 (87, self._migration_v87),
                 (88, self._migration_v88),
                 (89, self._migration_v89),
+                (90, self._migration_v90),
             ]
 
             applied = 0
@@ -210,6 +211,14 @@ class MigrationsMixin:
             "SET mb_mirror_url = 'https://api.brainzmash.cc' "
             "WHERE mb_mirror_url LIKE 'http%://api.brainzmash.org%'"
         )
+
+    def _migration_v90(self, cur: sqlite3.Cursor) -> None:
+        """v90: Add active_downloads.hidden_from_queue (a seeding torrent removed from the queue keeps its row for seed cleanup)."""
+        cur.execute("PRAGMA table_info(active_downloads)")
+        if "hidden_from_queue" not in {row[1] for row in cur.fetchall()}:
+            cur.execute(
+                "ALTER TABLE active_downloads ADD COLUMN hidden_from_queue INTEGER NOT NULL DEFAULT 0"
+            )
 
     def _migration_v89(self, cur: sqlite3.Cursor) -> None:
         """v89: Add media_management_settings.allow_multiple_editions (off: a song owned on one release is not fetched again for another)."""

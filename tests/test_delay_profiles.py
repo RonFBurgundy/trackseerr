@@ -18,6 +18,7 @@ from trackseerr.backlog_worker import RSSSyncWorker
 from trackseerr.config import Config
 from trackseerr.decision_engine import PROTOCOL_PREFERENCE, rank_key
 from trackseerr.models import (
+    ActiveDownload,
     AcquisitionSearchResult,
     EvaluationResult,
     MusicRequest,
@@ -554,3 +555,16 @@ def test_manual_grab_endpoint_bypasses_delay_and_clears_pending(api, db, clients
     assert r.status_code == 200 and r.json()["success"] is True
     driver.download.assert_called_once()
     assert db.list_pending_releases() == []
+
+
+def test_hidden_completed_row_does_not_block_pending_release(db, clients, clock):
+    db.upsert_user("u1", "bob", "b@x.tv", is_admin=False)
+    db.create_request(MusicRequest(id="req-h", user_id="u1", item_type="album", title="Nevermind", artist="Nirvana"))
+    row = _park(db, clients, clock, request_id="req-h")
+    db.create_active_download(
+        ActiveDownload(id="dl-hid", client_id="c-qbit", title="Other", artist="Nirvana", request_id="req-h",
+                       status="completed")
+    )
+    assert pending_worker.stale_reason(db, row, clock.now) == "item already has an active download"
+    assert db.hide_active_download_from_queue("dl-hid") is True
+    assert pending_worker.stale_reason(db, row, clock.now) is None

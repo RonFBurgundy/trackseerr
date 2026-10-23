@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from trackseerr.api.response_models import ApiModel
 
 from trackseerr.api.dependencies import get_db, require_admin
-from trackseerr.activity_service import _finished_torrent
+from trackseerr.activity_service import _finished_torrent, _seeding_torrent
 from trackseerr.api.schemas.queue import QueueCancelResponse
 from trackseerr.clients.acquisition import get_acquisition_driver
 from trackseerr.models import DownloadStatus
@@ -78,7 +78,8 @@ def get_queue(
                 DownloadStatus.IMPORTING.value,
             ]
         )
-    return items
+    # A seeding torrent removed from the queue keeps its row for seed cleanup; it is not listed here.
+    return [{k: v for k, v in i.items() if k != "hidden_from_queue"} for i in items if not i.get("hidden_from_queue")]
 
 
 @router.delete("/{download_id}", response_model=QueueCancelResponse, response_model_exclude_unset=True, summary="Cancel and remove download from queue")
@@ -98,7 +99,7 @@ def cancel_download(
     # Cancel in download client if possible
     client_id = item.get("client_id")
     if _finished_torrent(item):
-        logger.info("Left finished torrent %s seeding in its client; seed cleanup lists it once it has no queue row",
+        logger.info("Left finished torrent %s seeding in its client; seed cleanup removes it when its seed goal is met",
                     download_id)
     elif client_id:
         client_cfg = db.get_download_client(client_id)
@@ -110,5 +111,8 @@ def cancel_download(
             except Exception as e:
                 logger.warning("Could not signal cancel to download client %s: %s", client_id, e)
 
-    db.delete_active_download(download_id)
+    if _seeding_torrent(item):
+        db.hide_active_download_from_queue(download_id)
+    else:
+        db.delete_active_download(download_id)
     return {"status": "cancelled", "id": download_id}

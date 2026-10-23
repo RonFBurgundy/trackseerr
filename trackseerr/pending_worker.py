@@ -89,6 +89,8 @@ def stale_reason(db: Database, row: dict[str, Any], now: datetime) -> Optional[s
     release_title = str(row.get("title") or "").strip().casefold()
     cand = payload.get("candidate") or {}
     for dl in db.list_active_downloads(_LIVE_DOWNLOAD_STATUSES):
+        if dl.get("hidden_from_queue"):
+            continue
         if (request_id and dl.get("request_id") == request_id) or (
             release_title and str(dl.get("title") or "").strip().casefold() == release_title
         ):

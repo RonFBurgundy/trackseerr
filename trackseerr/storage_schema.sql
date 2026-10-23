@@ -652,7 +652,7 @@ CREATE TABLE active_downloads (
                 target_path TEXT,
                 error_message TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, track_id TEXT REFERENCES library_tracks(id), album_id TEXT REFERENCES library_albums(id), progress_updated_at TEXT, indexer TEXT, quality TEXT, protocol TEXT, unmatched_files TEXT, indexer_id TEXT, seed_ratio_target REAL, seed_time_target_minutes INTEGER, seed_rule_source TEXT, seed_ratio_current REAL, seeding_seconds INTEGER, cleanup_attempts INTEGER NOT NULL DEFAULT 0, cleanup_error TEXT, placed_files TEXT, remote_state TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, track_id TEXT REFERENCES library_tracks(id), album_id TEXT REFERENCES library_albums(id), progress_updated_at TEXT, indexer TEXT, quality TEXT, protocol TEXT, unmatched_files TEXT, indexer_id TEXT, seed_ratio_target REAL, seed_time_target_minutes INTEGER, seed_rule_source TEXT, seed_ratio_current REAL, seeding_seconds INTEGER, cleanup_attempts INTEGER NOT NULL DEFAULT 0, cleanup_error TEXT, placed_files TEXT, remote_state TEXT, hidden_from_queue INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (client_id) REFERENCES download_clients(id) ON DELETE CASCADE,
                 FOREIGN KEY (request_id) REFERENCES music_requests(id) ON DELETE SET NULL
             );

@@ -337,10 +337,24 @@ def _finished_torrent(row: dict[str, Any]) -> bool:
             and str(row.get("status") or "").lower() in {DownloadStatus.COMPLETED.value, DownloadStatus.IMPORTED.value})
 
 
+def _seeding_torrent(row: dict[str, Any]) -> bool:
+    """True for a torrent in status ``completed``: still seeding and tracked by seed cleanup, so its row is hidden, not deleted."""
+    return (str(row.get("protocol") or "").lower() == "torrent"
+            and str(row.get("status") or "").lower() == DownloadStatus.COMPLETED.value)
+
+
+def _retire_queue_row(db: Database, row: dict[str, Any]) -> None:
+    """Takes a row off the queue: a seeding torrent is hidden (seed cleanup still needs it), any other row is deleted."""
+    if _seeding_torrent(row):
+        db.hide_active_download_from_queue(str(row["id"]))
+    else:
+        db.delete_active_download(str(row["id"]))
+
+
 def _stop_at_client(db: Database, row: dict[str, Any]) -> None:
     """Best-effort cancel of a download at its client; a missing/unreachable client is logged, never fatal."""
     if _finished_torrent(row):
-        logger.info("Left finished torrent %s seeding in its client; seed cleanup lists it once it has no queue row",
+        logger.info("Left finished torrent %s seeding in its client; seed cleanup removes it when its seed goal is met",
                     row.get("id"))
         return
     client_id = row.get("client_id")
@@ -395,8 +409,12 @@ def native_delete_queue_item(db: Database, download_id: str, remove_from_client:
         download_id=str(row["id"]),
         message="Removed from the queue" + (" and blocklisted" if blocklist else ""),
     )
-    db.delete_active_download(str(row["id"]))
-    return "Removed from the queue" + (" and blocklisted" if blocklist else "")
+    seeding = _seeding_torrent(row)
+    _retire_queue_row(db, row)
+    suffix = " and blocklisted" if blocklist else ""
+    if seeding:
+        return "Removed from the queue; it keeps seeding until its seed goal is met" + suffix
+    return "Removed from the queue" + suffix
 
 
 class HistoryConflict(Exception):
@@ -456,7 +474,7 @@ def _blocklist_and_search_again(
     db.record_download_event(
         "deleted", download_id=str(row["id"]), message="Blocklisted; searching for another release"
     )
-    db.delete_active_download(str(row["id"]))
+    _retire_queue_row(db, row)
     grabbed, message, _res = _search_again(
         db,
         artist=row.get("artist"),
