@@ -420,7 +420,12 @@ def test_library_routes_record_user_provenance_for_monitoring_and_removal(db, ap
 def test_deleting_a_file_from_disk_records_who_deleted_it(db, app_client, tmp_path):
     _, client, cfg = app_client
     h = _h(db, cfg, "admin-1")
-    f = tmp_path / "x.flac"
+    mm = db.get_media_management_settings()
+    mm["root_folder_path"] = str(tmp_path / "music")
+    mm["recycle_bin_path"] = str(tmp_path / "bin")
+    db.update_media_management_settings(mm)
+    f = tmp_path / "music" / "x.flac"
+    f.parent.mkdir(parents=True)
     f.write_bytes(b"x")
     db.upsert_library_file(
         {"id": "fil-x", "track_id": "trk-1", "file_path": str(f), "relative_path": "x.flac", "codec": "FLAC",
@@ -430,6 +435,8 @@ def test_deleting_a_file_from_disk_records_who_deleted_it(db, app_client, tmp_pa
     assert not f.exists()
     (ev,) = events(db, "file_deleted")
     assert ev["trigger"] == "user" and ev["actor_user_id"] == "admin-1" and ev["details"]["path"] == str(f)
+    assert ev["details"]["recycled_to"]
+    assert any((tmp_path / "bin").rglob("x.flac"))
 
 
 def test_rename_apply_records_a_move(db, app_client, tmp_path):
