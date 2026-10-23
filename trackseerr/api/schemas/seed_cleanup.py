@@ -3,6 +3,7 @@
 from typing import Optional
 
 from trackseerr.api.response_models import ApiModel
+from trackseerr.api.schemas.activity import Seeding
 
 
 class SeedCleanupStarted(ApiModel):
@@ -40,3 +41,18 @@ class RetryFailedResponse(ApiModel):
     status: Optional[str] = None
     attempts: int
     error: Optional[str] = None
+
+
+class SeedingItem(ApiModel):
+    id: str
+    title: str
+    artist: Optional[str] = None
+    client: Optional[str] = None
+    indexer: Optional[str] = None
+    rule_source: Optional[str] = None
+    removed_at: Optional[str] = None
+    seeding: Seeding
+
+
+class SeedingList(ApiModel):
+    items: list[SeedingItem]

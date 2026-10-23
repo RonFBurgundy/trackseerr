@@ -4661,6 +4661,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/seed-cleanup/seeding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Torrents removed from the queue that are still seeding */
+        get: operations["list_seeding_api_seed_cleanup_seeding_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/seed-cleanup/status": {
         parameters: {
             query?: never;
@@ -13343,6 +13360,29 @@ export interface components {
             seeding_minutes: number;
             /** Time Target Minutes */
             time_target_minutes?: number | null;
+        };
+        /** SeedingItem */
+        SeedingItem: {
+            /** Artist */
+            artist?: string | null;
+            /** Client */
+            client?: string | null;
+            /** Id */
+            id: string;
+            /** Indexer */
+            indexer?: string | null;
+            /** Removed At */
+            removed_at?: string | null;
+            /** Rule Source */
+            rule_source?: string | null;
+            seeding: components["schemas"]["Seeding"];
+            /** Title */
+            title: string;
+        };
+        /** SeedingList */
+        SeedingList: {
+            /** Items */
+            items: components["schemas"]["SeedingItem"][];
         };
         /** ServerConfig */
         ServerConfig: {
@@ -22741,6 +22781,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SeedCleanupStarted"];
+                };
+            };
+        };
+    };
+    list_seeding_api_seed_cleanup_seeding_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeedingList"];
                 };
             };
         };

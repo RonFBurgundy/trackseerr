@@ -513,7 +513,31 @@ def test_routes_require_admin(client, db, config):
     h = _headers(db, config, admin=False)
     assert client.post("/api/seed-cleanup/run", headers=h).status_code == 403
     assert client.get("/api/seed-cleanup/status", headers=h).status_code == 403
+    assert client.get("/api/seed-cleanup/seeding", headers=h).status_code == 403
     assert client.post("/api/seed-cleanup/orphans/x/remove", json={}, headers=h).status_code == 403
+
+
+def test_seeding_list_shows_only_hidden_completed_torrents(client, db, config):
+    h = _headers(db, config)
+    for did, status, hidden in (("hid", COMPLETED, 1), ("vis", COMPLETED, 0), ("imp", IMPORTED, 1)):
+        db.create_active_download(
+            ActiveDownload(id=did, client_id="c1", title=f"T {did}", artist="Artist", download_hash=did, status=status)
+        )
+        db.set_download_seed_rule(did, None, 2.0, None, "indexer")
+        with db._lock:
+            db.conn.execute(
+                "UPDATE active_downloads SET hidden_from_queue = ?, protocol = 'torrent', seed_ratio_current = 1.2,"
+                " seeding_seconds = 3600 WHERE id = ?",
+                (hidden, did),
+            )
+            db.conn.commit()
+    body = client.get("/api/seed-cleanup/seeding", headers=h).json()
+    assert [i["id"] for i in body["items"]] == ["hid"]
+    item = body["items"][0]
+    assert item["rule_source"] == "indexer"
+    assert item["seeding"]["ratio"] == 1.2
+    assert item["seeding"]["ratio_target"] == 2.0
+    assert item["seeding"]["seeding_minutes"] == 60
 
 
 def test_run_route_202_then_409_and_status_shape(client, db, config):
