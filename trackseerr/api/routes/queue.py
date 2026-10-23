@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from trackseerr.api.response_models import ApiModel
 
 from trackseerr.api.dependencies import get_db, require_admin
+from trackseerr.activity_service import _finished_torrent
 from trackseerr.api.schemas.queue import QueueCancelResponse
 from trackseerr.clients.acquisition import get_acquisition_driver
 from trackseerr.models import DownloadStatus
@@ -96,7 +97,10 @@ def cancel_download(
 
     # Cancel in download client if possible
     client_id = item.get("client_id")
-    if client_id:
+    if _finished_torrent(item):
+        logger.info("Left finished torrent %s seeding in its client; seed cleanup lists it once it has no queue row",
+                    download_id)
+    elif client_id:
         client_cfg = db.get_download_client(client_id)
         if client_cfg:
             try:

@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from trackseerr.clients.acquisition import get_acquisition_driver
 from trackseerr.clients.lidarr import LidarrClient
+from trackseerr.models import DownloadStatus
 from trackseerr.item_history import TRIGGER_RETRY, GrabTrigger, emit
 from trackseerr.redaction import redact_text
 from trackseerr.storage import Database
@@ -330,8 +331,18 @@ def native_wanted(db: Database, kind: str, page: int, page_size: int, sort_key: 
 # --------------------------------------------------------------------------------------- native: mutating actions
 
 
+def _finished_torrent(row: dict[str, Any]) -> bool:
+    """True for a torrent whose download finished: it is seeding and must only leave via seed cleanup."""
+    return (str(row.get("protocol") or "").lower() == "torrent"
+            and str(row.get("status") or "").lower() in {DownloadStatus.COMPLETED.value, DownloadStatus.IMPORTED.value})
+
+
 def _stop_at_client(db: Database, row: dict[str, Any]) -> None:
     """Best-effort cancel of a download at its client; a missing/unreachable client is logged, never fatal."""
+    if _finished_torrent(row):
+        logger.info("Left finished torrent %s seeding in its client; seed cleanup lists it once it has no queue row",
+                    row.get("id"))
+        return
     client_id = row.get("client_id")
     client_cfg = db.get_download_client(client_id) if client_id else None
     if not client_cfg:
