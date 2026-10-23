@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Ban, FolderInput, RotateCcw, Trash2 } from 'lucide-react';
-import type { ActivityQueueRecord, ActivitySeeding, ListSortDir } from '@/types/activity';
+import type { ActivityQueueRecord, ListSortDir } from '@/types/activity';
 import { getActivityQueue, bulkQueueAction, retryActivityQueueItem } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
 import { pagedFetcher, useVirtualPagedList, type ListKey } from '@/hooks/useVirtualPagedList';
 import { usePolling } from '@/hooks/usePolling';
 import { useListSelection } from '@/hooks/useListSelection';
 import { ConfirmDangerButton, ConfirmDialog, TactileSwitch, TapeDeckButton, type OverflowMenuItem } from '@/components/ui';
+import { SeedingLine } from './SeedingLine';
 import { SoulseekQueueDetail } from './SoulseekQueueDetail';
 import { ManualImportModal } from '@/components/manualImport';
 import type { ManualImportScope } from '@/types/manualImport';
@@ -18,7 +19,6 @@ import {
   formatBytes,
   formatDateTime,
   formatEta,
-  formatMinutes,
   orDash,
   type FlatListColumn,
   type RowTone,
@@ -32,28 +32,6 @@ const fetchQueue = pagedFetcher(getActivityQueue);
 const getKey = (r: ActivityQueueRecord): string | number => r.id;
 const rowTone = (r: ActivityQueueRecord): RowTone => (r.stalled ? 'warning' : null);
 const NO_GROUPS = [] as const;
-
-const SeedingLine: React.FC<{ seeding: ActivitySeeding }> = ({ seeding }) => {
-  const ratio =
-    seeding.ratio_target == null ? seeding.ratio.toFixed(2) : `${seeding.ratio.toFixed(2)} / ${parseFloat(seeding.ratio_target.toFixed(2))}`;
-  const time =
-    seeding.time_target_minutes == null
-      ? formatMinutes(seeding.seeding_minutes)
-      : `${formatMinutes(seeding.seeding_minutes)} / ${formatMinutes(seeding.time_target_minutes)}`;
-  const mins = seeding.removes_in_minutes;
-  const removes =
-    mins === null || mins === undefined || !seeding.action || seeding.action === 'keep'
-      ? null
-      : mins <= 0
-        ? 'removes on next check'
-        : `removes in ~${formatMinutes(mins)}`;
-  return (
-    <span className="basis-full text-[10px] font-mono text-[#e5a00d] break-words" title="Seeding ratio and time versus targets">
-      Seeding &middot; {ratio} &middot; {time}
-      {removes && <> &middot; {removes}</>}
-    </span>
-  );
-};
 
 const TitleCell: React.FC<{ record: ActivityQueueRecord }> = ({ record }) => (
   <span className="flex flex-col min-w-0">

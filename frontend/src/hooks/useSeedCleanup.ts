@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, errorMessage } from '@/services/apiClient';
-import { getSeedCleanupStatus, runSeedCleanup } from '@/services/seedCleanupService';
-import type { SeedCleanupStatus } from '@/types/seedCleanup';
+import { getSeedCleanupStatus, getSeedingList, runSeedCleanup } from '@/services/seedCleanupService';
+import type { SeedCleanupStatus, SeedingItem, SeedingList } from '@/types/seedCleanup';
 import { usePolling } from './usePolling';
 
 const RUNNING_POLL_MS = 5_000;
@@ -14,6 +14,7 @@ export interface UseSeedCleanupOptions {
 
 export interface UseSeedCleanupReturn {
   status: SeedCleanupStatus | null;
+  seeding: SeedingItem[];
   running: boolean;
   run: () => Promise<void>;
 }
@@ -21,6 +22,7 @@ export interface UseSeedCleanupReturn {
 /** Loads /api/seed-cleanup/status, polls every 5 s only while a run is active, and starts runs. */
 export function useSeedCleanup({ onFinished, onToast }: UseSeedCleanupOptions): UseSeedCleanupReturn {
   const [status, setStatus] = useState<SeedCleanupStatus | null>(null);
+  const [seeding, setSeeding] = useState<SeedingItem[]>([]);
   const [starting, setStarting] = useState<boolean>(false);
   const controllerRef = useRef<AbortController | null>(null);
   const wasRunningRef = useRef<boolean>(false);
@@ -34,9 +36,16 @@ export function useSeedCleanup({ onFinished, onToast }: UseSeedCleanupOptions): 
     const controller = new AbortController();
     controllerRef.current = controller;
     try {
-      const res = await getSeedCleanupStatus(controller.signal);
+      const listPromise: Promise<SeedingList | null> = getSeedingList(controller.signal).catch((err: unknown) => {
+        if (!controller.signal.aborted && !(err instanceof DOMException && err.name === 'AbortError')) {
+          console.warn('Seeding list failed', err);
+        }
+        return null;
+      });
+      const [res, list] = await Promise.all([getSeedCleanupStatus(controller.signal), listPromise]);
       if (controller.signal.aborted) return;
       setStatus(res);
+      if (list) setSeeding(list.items);
       if (wasRunningRef.current && !res.running) {
         const err = res.last_run?.error;
         if (err) onToastRef.current(`Seed cleanup failed: ${err}`, 'error');
@@ -72,5 +81,5 @@ export function useSeedCleanup({ onFinished, onToast }: UseSeedCleanupOptions): 
     await refresh();
   }, [refresh]);
 
-  return { status, running: (status?.running ?? false) || starting, run };
+  return { status, seeding, running: (status?.running ?? false) || starting, run };
 }
