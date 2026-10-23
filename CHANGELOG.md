@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- Activity → Needs review has a "Still seeding" list: torrents you removed from the Queue that keep seeding until their seed goal is met, with their ratio and seed time against the goal, the client, the indexer and whether an indexer rule or your global limits apply.
 - Activity → Queue has checkboxes: select several downloads and remove them (optionally blocklisting them and removing them from the download client) or search for all of them again in one go.
 - An album's track list shows "On <album>" instead of "Missing" for a song you already own on another release. Tap it to open that album.
 - Media Management → Monitoring has a "Keep the same song from more than one release" switch. It is off by default, so a song you own on one release isn't downloaded again for another; turn it on to collect every release's copy.
