@@ -791,3 +791,95 @@ class SlskdDriver(AcquisitionDriver):
             logger.warning("Error cleaning up slskd transfer %s: %s: %s", download_id, type(e).__name__, e)
             return False
         return result is not False
+
+    def _conversations_url(self) -> str:
+        return f"{self.host_url.rstrip('/')}/api/v0/conversations"
+
+    def list_conversations(self) -> list[dict[str, Any]]:
+        """Open private-message conversations on slskd; ``[]`` on any failure."""
+        if not is_safe_service_url(self.host_url):
+            return []
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                r = client.get(self._conversations_url(), headers=self._headers())
+                if r.status_code != 200:
+                    logger.warning("slskd list conversations returned HTTP %s", r.status_code)
+                    return []
+                data = r.json()
+        except (httpx.HTTPError, ValueError) as e:
+            logger.warning("Failed to list slskd conversations: %s: %s", type(e).__name__, e)
+            return []
+        return [c for c in data if isinstance(c, dict)] if isinstance(data, list) else []
+
+    @staticmethod
+    def _normalize_chat_message(raw: Any) -> Optional[dict[str, Any]]:
+        if not isinstance(raw, dict):
+            return None
+        msg_id, username, text = raw.get("id"), raw.get("username"), raw.get("message")
+        if msg_id is None or not isinstance(username, str) or not isinstance(text, str):
+            return None
+        direction = str(raw.get("direction") or "").strip().lower()
+        if direction not in ("in", "out"):
+            return None
+        return {
+            "id": str(msg_id),
+            "username": username,
+            "message": text,
+            "direction": direction,
+            "timestamp": str(raw.get("timestamp") or ""),
+            "acknowledged": bool(raw.get("isAcknowledged", False)),
+        }
+
+    def get_conversation_messages(self, username: str) -> list[dict[str, Any]]:
+        """Normalized messages of one conversation; ``[]`` on any failure or malformed payload."""
+        if not is_safe_service_url(self.host_url):
+            return []
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                r = client.get(
+                    f"{self._conversations_url()}/{quote(username, safe='')}",
+                    headers=self._headers(),
+                    params={"includeMessages": "true"},
+                )
+                if r.status_code != 200:
+                    logger.warning("slskd get conversation returned HTTP %s", r.status_code)
+                    return []
+                data = r.json()
+        except (httpx.HTTPError, ValueError) as e:
+            logger.warning("Failed to read slskd conversation: %s: %s", type(e).__name__, e)
+            return []
+        raw_messages = data.get("messages") if isinstance(data, dict) else None
+        if not isinstance(raw_messages, list):
+            return []
+        out = (self._normalize_chat_message(m) for m in raw_messages)
+        return [m for m in out if m is not None]
+
+    def acknowledge_conversation(self, username: str) -> bool:
+        """Marks a conversation's messages as read in slskd; True on 200/204."""
+        if not is_safe_service_url(self.host_url):
+            return False
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                r = client.put(f"{self._conversations_url()}/{quote(username, safe='')}", headers=self._headers())
+                return r.status_code in (200, 204)
+        except (httpx.HTTPError, ValueError) as e:
+            logger.warning("Failed to acknowledge slskd conversation: %s: %s", type(e).__name__, e)
+            return False
+
+    def send_private_message(self, username: str, text: str) -> bool:
+        """Sends ``text`` verbatim as a private message; refuses empty or >200-char text. Callers supply the text."""
+        if not text.strip() or len(text) > 200:
+            return False
+        if not is_safe_service_url(self.host_url):
+            return False
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                r = client.post(
+                    f"{self._conversations_url()}/{quote(username, safe='')}",
+                    headers=self._headers(),
+                    json=text,
+                )
+                return r.status_code in (200, 201, 204)
+        except (httpx.HTTPError, ValueError) as e:
+            logger.warning("Failed to send slskd private message: %s: %s", type(e).__name__, e)
+            return False

@@ -1160,3 +1160,89 @@ def test_slskd_get_incomplete_root_none_when_absent():
     unreadable = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
     with patch("httpx.Client.get", return_value=_slskd_resp(500, text="boom")):
         assert unreadable.get_incomplete_root() is None
+
+
+# ---------------------------------------------------------------------------
+# slskd chat (private message) methods
+# ---------------------------------------------------------------------------
+_CHAT_URL = "http://slskd.local:5030/api/v0/conversations/Bob%20X"
+
+
+def test_slskd_get_conversation_messages_normalizes():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    payload = {
+        "username": "Bob X",
+        "messages": [
+            {"id": 7, "username": "Bob X", "message": "hi", "direction": "In", "timestamp": "2026-01-01T00:00:00Z", "isAcknowledged": True},
+            {"id": 8, "username": "me", "message": "yo", "direction": "OUT", "timestamp": "2026-01-01T00:01:00Z"},
+            {"id": 9, "username": "Bob X", "message": "bad direction", "direction": "sideways"},
+            {"username": "Bob X", "message": "no id", "direction": "In"},
+            "garbage",
+        ],
+    }
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, payload)) as get:
+        msgs = driver.get_conversation_messages("Bob X")
+    assert get.call_args.args[0] == _CHAT_URL
+    assert get.call_args.kwargs["params"] == {"includeMessages": "true"}
+    assert msgs == [
+        {"id": "7", "username": "Bob X", "message": "hi", "direction": "in", "timestamp": "2026-01-01T00:00:00Z", "acknowledged": True},
+        {"id": "8", "username": "me", "message": "yo", "direction": "out", "timestamp": "2026-01-01T00:01:00Z", "acknowledged": False},
+    ]
+
+
+def test_slskd_get_conversation_messages_bad_payload_empty():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    for payload in ({"messages": "nope"}, ["x"], None):
+        with patch("httpx.Client.get", return_value=_slskd_resp(200, payload)):
+            assert driver.get_conversation_messages("Bob X") == []
+    with patch("httpx.Client.get", return_value=_slskd_resp(404, text="nf")):
+        assert driver.get_conversation_messages("Bob X") == []
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, ["a", {"u": 1}])):
+        assert driver.list_conversations() == [{"u": 1}]
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, {"x": 1})):
+        assert driver.list_conversations() == []
+
+
+def test_slskd_send_private_message_posts_json_string():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with patch("httpx.Client.post", return_value=_slskd_resp(201)) as post:
+        assert driver.send_private_message("Bob X", "hello") is True
+    assert post.call_args.args[0] == _CHAT_URL
+    assert post.call_args.kwargs["json"] == "hello"
+    assert post.call_args.kwargs["headers"]["X-API-KEY"] == "secretkey"
+    with patch("httpx.Client.post", return_value=_slskd_resp(500)):
+        assert driver.send_private_message("Bob X", "hello") is False
+
+
+def test_slskd_send_private_message_refuses_empty_or_long():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with patch("httpx.Client.post") as post:
+        assert driver.send_private_message("Bob X", "   ") is False
+        assert driver.send_private_message("Bob X", "x" * 201) is False
+    post.assert_not_called()
+    with patch("httpx.Client.post", return_value=_slskd_resp(200)):
+        assert driver.send_private_message("Bob X", "x" * 200) is True
+
+
+def test_slskd_acknowledge_conversation():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with patch("httpx.Client.put", return_value=_slskd_resp(204)) as put:
+        assert driver.acknowledge_conversation("Bob X") is True
+    assert put.call_args.args[0] == _CHAT_URL
+    with patch("httpx.Client.put", return_value=_slskd_resp(404)):
+        assert driver.acknowledge_conversation("Bob X") is False
+
+
+def test_slskd_chat_http_error_returns_empty(caplog):
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    err = httpx.ConnectError("refused")
+    with caplog.at_level("WARNING", logger="trackseerr.clients.acquisition.slskd"):
+        with patch("httpx.Client.get", side_effect=err):
+            assert driver.list_conversations() == []
+            assert driver.get_conversation_messages("Bob X") == []
+        with patch("httpx.Client.put", side_effect=err):
+            assert driver.acknowledge_conversation("Bob X") is False
+        with patch("httpx.Client.post", side_effect=err):
+            assert driver.send_private_message("Bob X", "hi") is False
+    assert len([r for r in caplog.records if "ConnectError" in r.getMessage()]) == 4
+    assert all("secretkey" not in r.getMessage() for r in caplog.records)
