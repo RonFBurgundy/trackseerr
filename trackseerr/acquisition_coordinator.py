@@ -14,6 +14,7 @@ import threading
 import time
 from typing import Any, Callable, Optional, Union
 import uuid
+from datetime import datetime, timezone
 
 import httpx
 
@@ -511,6 +512,11 @@ class AcquisitionCoordinator:
             started = time.monotonic()
             try:
                 driver = get_acquisition_driver(s_cfg)
+                try:
+                    gated = db.excluded_slskd_peers(str(s_cfg.get("id")), datetime.now(timezone.utc).isoformat())
+                    driver.ignored_users = set(driver.ignored_users) | gated
+                except sqlite3.Error as exc:
+                    logger.warning("Could not read gated slskd peers for '%s': %s", s_name, redact_text(str(exc)))
                 started = time.monotonic()
                 res = driver.search(artist=artist, title=title, album=album)
                 _log_source_search(s_name, "slskd", artist, title, album, res, started)

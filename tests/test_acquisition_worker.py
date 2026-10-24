@@ -885,3 +885,15 @@ def test_slskd_sweep_throttled_and_skips_library_overlap(test_db, workspace_dirs
     swept = sorted(call.args[0] for call in sweep.call_args_list)
     assert swept == sorted([downloads_dir.resolve(), incomplete.resolve()])
     assert all(Path(p) != music_dir.resolve() for p in swept)
+
+
+def test_challenge_scan_throttled(test_db):
+    test_db.create_download_client(
+        DownloadClientConfig(id="cl-1", name="slskd", driver_type=DownloadDriverType.SLSKD, host_url="http://slskd:5030")
+    )
+    worker = AcquisitionWorker()
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=MagicMock()), \
+            patch("trackseerr.acquisition_worker.slskd_challenges.scan_client", return_value=0) as scan:
+        worker._scan_slskd_challenges(test_db)
+        worker._scan_slskd_challenges(test_db)
+    assert scan.call_count == 1
