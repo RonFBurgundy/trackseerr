@@ -438,6 +438,15 @@ def _log_source_search(
     )
 
 
+def _exclude_gated_slskd_peers(db: Database, driver: Any, s_cfg: dict, s_name: str) -> None:
+    """Add gated slskd peers to the driver's ignored users; log on DB errors."""
+    try:
+        gated = db.excluded_slskd_peers(str(s_cfg.get("id")), datetime.now(timezone.utc).isoformat())
+        driver.ignored_users = set(driver.ignored_users) | gated
+    except sqlite3.Error as exc:
+        logger.warning("Could not read gated slskd peers for '%s': %s", s_name, redact_text(str(exc)))
+
+
 class AcquisitionCoordinator:
     """Coordinates search, quality evaluation, client dispatch, and active transfer records."""
 
@@ -512,11 +521,7 @@ class AcquisitionCoordinator:
             started = time.monotonic()
             try:
                 driver = get_acquisition_driver(s_cfg)
-                try:
-                    gated = db.excluded_slskd_peers(str(s_cfg.get("id")), datetime.now(timezone.utc).isoformat())
-                    driver.ignored_users = set(driver.ignored_users) | gated
-                except sqlite3.Error as exc:
-                    logger.warning("Could not read gated slskd peers for '%s': %s", s_name, redact_text(str(exc)))
+                _exclude_gated_slskd_peers(db, driver, s_cfg, s_name)
                 started = time.monotonic()
                 res = driver.search(artist=artist, title=title, album=album)
                 _log_source_search(s_name, "slskd", artist, title, album, res, started)
