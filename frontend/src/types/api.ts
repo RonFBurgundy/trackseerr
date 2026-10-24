@@ -5521,6 +5521,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/slskd-challenges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sharers asking for a chat reply */
+        get: operations["list_challenges_api_slskd_challenges_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/slskd-challenges/{challenge_id}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Dismiss a sharer's chat request */
+        post: operations["dismiss_challenge_api_slskd_challenges__challenge_id__dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/slskd-challenges/{challenge_id}/reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send the admin's reply to a sharer */
+        post: operations["reply_challenge_api_slskd_challenges__challenge_id__reply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/smart-collections": {
         parameters: {
             query?: never;
@@ -13443,6 +13494,39 @@ export interface components {
             reason?: string | null;
             /** Valid */
             valid: boolean;
+        };
+        /** SlskdChallenge */
+        SlskdChallenge: {
+            /** Client Id */
+            client_id: string;
+            /** Download Id */
+            download_id?: string | null;
+            /** Download Title */
+            download_title?: string | null;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Id */
+            id: string;
+            /** Message */
+            message: string;
+            /** Received At */
+            received_at: string;
+            /** Replied At */
+            replied_at?: string | null;
+            /** Status */
+            status: string;
+            /** Username */
+            username: string;
+        };
+        /** SlskdChallengeList */
+        SlskdChallengeList: {
+            /** Items */
+            items: components["schemas"]["SlskdChallenge"][];
+        };
+        /** SlskdChallengeReply */
+        SlskdChallengeReply: {
+            /** Text */
+            text: string;
         };
         /** SmartCollectionCreateRequest */
         SmartCollectionCreateRequest: {
@@ -24547,6 +24631,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FormatDeletedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_challenges_api_slskd_challenges_get: {
+        parameters: {
+            query?: {
+                status?: "open" | "replied" | "dismissed" | "expired" | "all";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlskdChallengeList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_challenge_api_slskd_challenges__challenge_id__dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                challenge_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlskdChallenge"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reply_challenge_api_slskd_challenges__challenge_id__reply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                challenge_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SlskdChallengeReply"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlskdChallenge"];
                 };
             };
             /** @description Validation Error */
