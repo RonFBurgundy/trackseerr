@@ -78,6 +78,7 @@ class MigrationsMixin:
                 (88, self._migration_v88),
                 (89, self._migration_v89),
                 (90, self._migration_v90),
+                (91, self._migration_v91),
             ]
 
             applied = 0
@@ -210,6 +211,41 @@ class MigrationsMixin:
             "UPDATE media_management_settings "
             "SET mb_mirror_url = 'https://api.brainzmash.cc' "
             "WHERE mb_mirror_url LIKE 'http%://api.brainzmash.org%'"
+        )
+
+    def _migration_v91(self, cur: sqlite3.Cursor) -> None:
+        """v91: Add slskd_challenges (sharers' "human check" chat messages) and slskd_gated_peers (peers to avoid until answered)."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS slskd_challenges (
+                id TEXT PRIMARY KEY,
+                client_id TEXT NOT NULL,
+                username TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                message TEXT NOT NULL,
+                download_id TEXT,
+                download_title TEXT,
+                status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','replied','dismissed','expired')),
+                received_at TEXT NOT NULL,
+                expires_at TEXT,
+                replied_at TEXT,
+                reply_text TEXT,
+                UNIQUE (client_id, username, message_id)
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_slskd_challenges_status ON slskd_challenges(status)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS slskd_gated_peers (
+                client_id TEXT NOT NULL,
+                username_lower TEXT NOT NULL,
+                state TEXT NOT NULL CHECK (state IN ('gated','unlocked')),
+                until TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (client_id, username_lower)
+            )
+            """
         )
 
     def _migration_v90(self, cur: sqlite3.Cursor) -> None:

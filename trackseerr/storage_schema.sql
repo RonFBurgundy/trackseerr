@@ -756,6 +756,32 @@ CREATE TABLE acoustid_submissions (
 );
 CREATE INDEX idx_acoustid_submissions_status ON acoustid_submissions(status);
 
+CREATE TABLE slskd_challenges (
+    id TEXT PRIMARY KEY,                 -- "chal-" + uuid4 hex[:12]
+    client_id TEXT NOT NULL,
+    username TEXT NOT NULL,              -- sharer's Soulseek name as slskd reports it
+    message_id TEXT NOT NULL,            -- slskd message id (str)
+    message TEXT NOT NULL,
+    download_id TEXT,                    -- active_downloads.id it blocked, if linked
+    download_title TEXT,
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','replied','dismissed','expired')),
+    received_at TEXT NOT NULL,           -- ISO-8601 UTC
+    expires_at TEXT,                     -- ISO-8601 UTC, NULL = unknown
+    replied_at TEXT,
+    reply_text TEXT,
+    UNIQUE (client_id, username, message_id)
+);
+CREATE INDEX idx_slskd_challenges_status ON slskd_challenges(status);
+
+CREATE TABLE slskd_gated_peers (
+    client_id TEXT NOT NULL,
+    username_lower TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('gated','unlocked')),
+    until TEXT NOT NULL,                 -- ISO-8601 UTC; the state lapses after this
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (client_id, username_lower)
+);
+
 CREATE INDEX idx_blocklist_hash ON download_blocklist(info_hash);
 CREATE INDEX idx_blocklist_title ON download_blocklist(source_title);
 CREATE INDEX idx_blocklist_guid ON download_blocklist(release_guid);
