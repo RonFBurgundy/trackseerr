@@ -1140,3 +1140,23 @@ def test_sabnzbd_bad_api_key_fails_test():
         ok, msg = driver.test_connection()
     assert ok is False
     assert "API key" in msg
+
+
+def test_slskd_get_incomplete_root_reads_options():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    payload = {"directories": {"downloads": " /data/downloads ", "incomplete": " /data/incomplete "}}
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, payload)) as get:
+        assert driver.get_incomplete_root() == "/data/incomplete"
+        assert driver.get_download_roots() == ["/data/downloads"]
+        assert driver.get_incomplete_root() == "/data/incomplete"
+    assert get.call_count == 1
+
+
+def test_slskd_get_incomplete_root_none_when_absent():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, {"directories": {"downloads": "/d"}})):
+        assert driver.get_incomplete_root() is None
+        assert driver.get_download_roots() == ["/d"]
+    unreadable = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with patch("httpx.Client.get", return_value=_slskd_resp(500, text="boom")):
+        assert unreadable.get_incomplete_root() is None

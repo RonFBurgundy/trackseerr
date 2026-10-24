@@ -16,12 +16,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+import httpx
+
 
 from trackseerr.clients.acquisition import get_acquisition_driver, is_torrent_driver_type
 from trackseerr.clients.plex import PlexClient
 from trackseerr.job_tracker import job_tracker, summarize_result
 from trackseerr.task_manager import TRIGGER_SCHEDULED, record_finished_run
-from trackseerr.download_roots import AllowedRoots, allowed_roots_for_all_clients
+from trackseerr.download_folder_cleanup import prune_empty_parents, sweep_empty_dirs
+from trackseerr.download_roots import (
+    AllowedRoots,
+    allowed_roots_for_all_clients,
+    allowed_roots_for_client,
+    build_allowed_roots,
+    client_mappings,
+    fetch_client_roots,
+)
 from trackseerr.recycle_bin import (
     is_system_dirname,
     is_system_filename,
@@ -57,6 +67,7 @@ from trackseerr.track_matching import (
 )
 
 from trackseerr.import_files import (
+    translate_remote_path,
     effective_import_mode,
 )
 from trackseerr.seed_safety import (
@@ -283,6 +294,21 @@ def _research_if_failed(db: Database, item: dict[str, Any], err_msg: str) -> Non
     _research_after_failure(db, item, err_msg)
 
 
+def _clear_failed_slskd_transfer(driver: Any, target_lookup: str, status_dict: dict[str, Any]) -> None:
+    """Cancels a failed slskd download's live transfers, or removes its already-cancelled entries from slskd."""
+    if status_dict.get("cancelled"):
+        if not driver.cleanup_completed(target_lookup):
+            logger.warning("Could not remove cancelled slskd transfers for failed download %s", target_lookup)
+    elif not driver.cancel(target_lookup):
+        logger.warning("Could not cancel remaining slskd transfers for failed download %s", target_lookup)
+
+
+#: Minimum gap between empty-folder sweeps of slskd's download/incomplete folders.
+SLSKD_SWEEP_INTERVAL_SECONDS = 3600
+#: A folder must have been untouched this long before the sweep may remove it (slskd may just have created it).
+SLSKD_SWEEP_MIN_AGE_SECONDS = 3600
+
+
 class AcquisitionWorker(ImportPipelineMixin):
     """Thread-safe background runner monitoring active downloads and organizing media."""
 
@@ -295,6 +321,7 @@ class AcquisitionWorker(ImportPipelineMixin):
         self.staging_dir: str = ""
         self.allowed_roots: Optional[AllowedRoots] = None
         self._archive_errors: list[str] = []
+        self._last_slskd_sweep: Optional[float] = None  # time.monotonic() of the last sweep; None = never ran
         self._excluded_paths: list[Path] = []  # effective recycle + quarantine folders, skipped by download-root walks
 
     def is_running(self) -> bool:
@@ -619,13 +646,54 @@ class AcquisitionWorker(ImportPipelineMixin):
         if not lidarr_mode:
             self._resolve_parked_duplicates(db, ctx)
 
-        if not active_items:
-            return stats
-
         for item in active_items:
             self._process_item(db, ctx, item, stats)
 
+        self._sweep_slskd_folders(db, media_settings)
         return stats
+
+    def _sweep_slskd_folders(self, db: Database, media_settings: dict[str, Any]) -> None:
+        """Hourly: removes old empty folders slskd leaves in its incomplete and completed-downloads folders."""
+        now = time.monotonic()
+        last = self._last_slskd_sweep
+        if last is not None and now - last < SLSKD_SWEEP_INTERVAL_SECONDS:
+            return
+        self._last_slskd_sweep = now
+        try:
+            clients = db.list_download_clients(enabled_only=True)
+        except sqlite3.Error as exc:
+            logger.warning("Could not list download clients for slskd folder sweep: %s", safe_exc(exc))
+            return
+        for cfg in clients:
+            if str(cfg.get("driver_type") or "").lower() != "slskd":
+                continue
+            try:
+                self._sweep_slskd_client(cfg, media_settings)
+            except (sqlite3.Error, httpx.HTTPError, OSError, ValueError, TypeError, AttributeError) as exc:
+                logger.warning("slskd folder sweep failed for client %s: %s", cfg.get("name") or cfg.get("id"), safe_exc(exc))
+
+    @staticmethod
+    def _sweep_slskd_client(cfg: dict[str, Any], media_settings: dict[str, Any]) -> None:
+        driver = get_acquisition_driver(cfg)
+        local_roots, _error = fetch_client_roots(cfg)
+        incomplete = driver.get_incomplete_root()
+        if isinstance(incomplete, str) and incomplete:
+            translated = translate_remote_path(incomplete, client_mappings(cfg))
+            if translated and translated not in local_roots:
+                local_roots.append(translated)
+        if not local_roots:
+            return
+        guard = build_allowed_roots(media_settings, [], extra_roots=local_roots)
+        for raw in local_roots:
+            root = Path(raw)
+            if not root.is_dir():
+                continue
+            resolved = root.resolve()
+            overlaps_config = any(c == resolved or c in resolved.parents or resolved in c.parents for c in guard.config_dirs)
+            if overlaps_config or not guard.check(resolved)[0]:
+                logger.debug("Skipping slskd folder sweep of %s: overlaps the library or config directory", resolved)
+                continue
+            sweep_empty_dirs(resolved, min_age_seconds=SLSKD_SWEEP_MIN_AGE_SECONDS)
 
     def _classify_held_path(
         self,
@@ -765,6 +833,8 @@ class AcquisitionWorker(ImportPipelineMixin):
 
         client_id = item.get("client_id")
         client_config = db.get_download_client(client_id) if client_id else None
+        if (driver_type == "slskd" or import_mode == "move") and client_config:
+            self._prune_client_dirs(db, db.get_media_management_settings(), client_config, duplicate_paths)
         target_lookup = item.get("download_hash") or item["id"]
         if client_config:
             try:
@@ -824,7 +894,35 @@ class AcquisitionWorker(ImportPipelineMixin):
         )
         return bool(owned and owned.get("cutoff_met"))
 
-    def _unlink_duplicate_files(self, paths: list[str], driver_type: str, import_mode: str) -> None:
+    @staticmethod
+    def _prune_client_dirs(
+        db: Database, media_settings: dict[str, Any], client_config: dict[str, Any], paths: list[str]
+    ) -> None:
+        """Removes folders emptied by deleting ``paths``, bounded to the client's allowed download roots."""
+        if not paths:
+            return
+        try:
+            roots = allowed_roots_for_client(db, media_settings, client_config)
+            grouped: dict[Path, list[str]] = {}
+            for p in paths:
+                root = roots.matching_root(Path(p).resolve())
+                if root is not None:
+                    grouped.setdefault(root, []).append(p)
+        except (sqlite3.Error, OSError, RuntimeError, ValueError) as exc:
+            logger.debug("Skipping empty-folder pruning: %s", safe_exc(exc))
+            return
+        for root, group in grouped.items():
+            prune_empty_parents(group, root)
+
+    def _unlink_duplicate_files(
+        self,
+        paths: list[str],
+        driver_type: str,
+        import_mode: str,
+        db: Optional[Database] = None,
+        media_settings: Optional[dict[str, Any]] = None,
+        client_config: Optional[dict[str, Any]] = None,
+    ) -> None:
         """Removes local files for identified duplicates when under slskd or move import mode."""
         if driver_type == "slskd" or import_mode == "move":
             for p in paths:
@@ -832,6 +930,8 @@ class AcquisitionWorker(ImportPipelineMixin):
                     Path(p).unlink(missing_ok=True)
                 except OSError as e:
                     logger.warning("Failed to delete duplicate file %s: %s", p, e)
+            if db is not None and client_config and media_settings is not None:
+                self._prune_client_dirs(db, media_settings, client_config, paths)
 
     def _resolve_parked_item(
         self,
@@ -900,7 +1000,9 @@ class AcquisitionWorker(ImportPipelineMixin):
             else:
                 self._clear_parked_download(db, item, duplicate_paths, driver_type, import_mode, satisfied=satisfied)
         elif len(remaining_paths) < len(held_paths):
-            self._unlink_duplicate_files(duplicate_paths, driver_type, import_mode)
+            self._unlink_duplicate_files(
+                duplicate_paths, driver_type, import_mode, db, ctx.media_settings, client_config
+            )
             db.set_download_unmatched_files(item["id"], remaining_paths)
             msg = f"{len(remaining_paths)} file(s) couldn't be matched — manual import required"
             db.update_download_status(item["id"], status=DownloadStatus.WARNING.value, error_message=msg)
@@ -1034,8 +1136,8 @@ class AcquisitionWorker(ImportPipelineMixin):
             err_msg = status_dict.get("error_message") or "Download failed"
             db.update_download_status(download_id, status=DownloadStatus.FAILED.value, error_message=err_msg)
             self._notify_download_failed(db, item, err_msg)
-            if is_slskd and not status_dict.get("cancelled") and not driver.cancel(target_lookup):
-                logger.warning("Could not cancel remaining slskd transfers for failed download %s", target_lookup)
+            if is_slskd:
+                _clear_failed_slskd_transfer(driver, target_lookup, status_dict)
             try:
                 db.add_to_blocklist(
                     source_title=item.get("title", ""),

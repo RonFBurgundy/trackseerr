@@ -111,6 +111,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Soulseek downloads no longer leave empty artist and album folders behind. Folders are removed once their files are imported, and once an hour any empty folder over an hour old in the slskd downloads and incomplete folders is removed. Only empty folders are ever removed.
+- Soulseek downloads that were cancelled are now removed from slskd's transfer list, the same way finished and failed ones already were.
 - Deleting an artist, album, track or file from the Library with "delete files" now moves the files to the recycle bin (or deletes them if you turned on permanent delete) instead of erasing them, and removes every file of a track, not just the first. Files outside your music folder or inside a download folder are left alone.
 - Removing a finished torrent from the Queue no longer deletes it and its files from the download client while it is still seeding. It disappears from the Queue but keeps seeding, and Seed cleanup still removes it (and, with "remove and delete", its download copy) once its own seed goal, including the indexer's seed rule, is met.
 - Rename no longer skips a song as "the audio is …" when the only difference is a featured artist in the title, for example "Cinderella (feat. Ty Dolla $ign)" on a deluxe edition and "Cinderella" on the original album.

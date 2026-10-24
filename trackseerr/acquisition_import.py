@@ -19,6 +19,7 @@ from trackseerr.mb_metadata_store import get_shared_enricher
 from trackseerr.clients.plex import PlexClient
 from trackseerr.media_servers import as_media_server
 from trackseerr.media_servers.refresh_scheduler import request_library_refresh
+from trackseerr.download_folder_cleanup import prune_empty_parents
 from trackseerr.download_roots import allowed_roots_for_client
 from trackseerr.import_security import (
     clear_exec_bits,
@@ -1101,6 +1102,7 @@ class ImportPipelineMixin(ImportCatalogMixin):
                     Path(dup).unlink(missing_ok=True)
                 except OSError as e:
                     logger.warning("Failed to delete duplicate file %s: %s", dup, e)
+            self._prune_source_dirs(job, job.duplicate_files)
 
         active_dl = db.get_active_download(job.download_id) or job.item
         settle_transfer_after_import(
@@ -1236,6 +1238,22 @@ class ImportPipelineMixin(ImportCatalogMixin):
             except Exception as ex:
                 logger.warning("Error evaluating release quality for request %s: %s", job.item.get("request_id"), ex)
 
+    def _prune_source_dirs(self, job: _ImportJob, files: Optional[list[str]] = None) -> int:
+        """Removes empty folders left in the client's download root after files were moved or deleted."""
+        roots = getattr(self, "allowed_roots", None)
+        if job.held_files or roots is None:
+            return 0
+        grouped: dict[Path, list[str]] = {}
+        for raw in files if files is not None else job.audio_files:
+            try:
+                root = roots.matching_root(Path(raw).resolve())
+            except (OSError, RuntimeError, ValueError) as exc:
+                logger.debug("Could not resolve %s for source pruning: %s", raw, exc)
+                continue
+            if root is not None:
+                grouped.setdefault(root, []).append(str(raw))
+        return sum(prune_empty_parents(paths, root) for root, paths in grouped.items())
+
     def _settle_download(
         self,
         db: Database,
@@ -1269,6 +1287,8 @@ class ImportPipelineMixin(ImportCatalogMixin):
                 )
                 == DownloadStatus.COMPLETED.value
             )
+            if job.import_mode == "move":
+                self._prune_source_dirs(job)
 
         if job.held_files:
             db.update_download_status(

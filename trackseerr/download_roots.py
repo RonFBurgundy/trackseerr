@@ -54,7 +54,7 @@ def _client_extra(cfg: dict[str, Any]) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _client_mappings(cfg: dict[str, Any]) -> list[dict[str, str]]:
+def client_mappings(cfg: dict[str, Any]) -> list[dict[str, str]]:
     maps = _client_extra(cfg).get("remote_path_mappings", [])
     return [m for m in maps if isinstance(m, dict)] if isinstance(maps, list) else []
 
@@ -104,7 +104,7 @@ def fetch_client_roots(
             with _cache_lock:
                 _cache[client_id] = (now + ttl, fp, raw_roots, error)
 
-    mappings = _client_mappings(cfg)
+    mappings = client_mappings(cfg)
     mapped: list[str] = []
     for root in raw_roots:
         local = translate_remote_path(root, mappings)
