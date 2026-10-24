@@ -6,6 +6,7 @@ import { ManualImportModal } from '@/components/manualImport';
 import { formatDateTime } from '@/components/lists';
 import { useLibraryHealth } from '@/hooks/useLibraryHealth';
 import { useSeedCleanup } from '@/hooks/useSeedCleanup';
+import { useSlskdChallenges } from '@/hooks/useSlskdChallenges';
 import { useHasDownloadClients } from '@/hooks/useHasDownloadClients';
 import type { ManualImportScope } from '@/types/manualImport';
 import type { LibraryHealthFinding, LibraryHealthRun } from '@/types/libraryHealth';
@@ -15,6 +16,7 @@ import { ReviewGroupList } from './ReviewGroupList';
 import { ReviewWeakMatches } from './ReviewWeakMatches';
 import { ReviewOrphans } from './ReviewOrphans';
 import { ReviewSeeding } from './ReviewSeeding';
+import { ReviewSlskdChallenges } from './ReviewSlskdChallenges';
 import { ReviewCleanupFailed } from './ReviewCleanupFailed';
 import { SeedCleanupStrip } from './SeedCleanupStrip';
 import { fileName, weakMatchInfo } from './reviewCauses';
@@ -48,6 +50,8 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
   const seedCleanupApplies = useHasDownloadClients() !== false;
   const sc = useSeedCleanup({ onFinished: handleCleanupFinished, onToast });
   const seeding = seedCleanupApplies ? sc.seeding : [];
+  const ch = useSlskdChallenges({ onToast });
+  const challenges = seedCleanupApplies ? ch.items : [];
 
   const rematch = useCallback((f: LibraryHealthFinding): void => {
     const info = weakMatchInfo(f);
@@ -83,7 +87,7 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
   const { server, last_run: run, mapping } = data;
   const supported = server != null && server.file_paths;
   const serverName = server ? serverLabel(server.kind) : 'server';
-  const empty = regularGroups.length === 0 && weak.length === 0 && orphans.length === 0 && failed.length === 0 && seeding.length === 0;
+  const empty = regularGroups.length === 0 && weak.length === 0 && orphans.length === 0 && failed.length === 0 && seeding.length === 0 && challenges.length === 0;
 
   return (
     <section className="flex flex-col gap-3 min-h-0">
@@ -164,6 +168,9 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
             )}
             {weak.length > 0 && <ReviewWeakMatches findings={weak} busy={busy} onRematch={rematch} onDismiss={hl.dismiss} />}
             {orphans.length > 0 && <ReviewOrphans findings={orphans} busy={busy} onRemove={hl.removeOrphan} />}
+            {challenges.length > 0 && (
+              <ReviewSlskdChallenges items={challenges} busyId={ch.busyId} onReply={ch.reply} onDismiss={ch.dismiss} />
+            )}
             {seeding.length > 0 && <ReviewSeeding items={seeding} />}
             {failed.length > 0 && <ReviewCleanupFailed findings={failed} busy={busy} onRetry={hl.retryFailed} />}
           </div>

@@ -29,6 +29,7 @@ export * from './delayProfileService';
 export * from './manualImportService';
 export * from './libraryHealthService';
 export * from './seedCleanupService';
+export * from './slskdChallengeService';
 export * from './itemHistoryService';
 export * from './tagService';
 export * from './notificationsService';

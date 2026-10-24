@@ -81,6 +81,7 @@ export * from './useClientDraft';
 export * from './useLibraryHealth';
 export * from './useLibraryHealthCount';
 export * from './useSeedCleanup';
+export * from './useSlskdChallenges';
 export * from './useCollapsibleChrome';
 export * from './useModalHistory';
 export * from './useSearchShortcut';
