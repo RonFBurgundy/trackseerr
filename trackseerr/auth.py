@@ -294,12 +294,15 @@ def get_or_create_secret_key(data_dir: str = "/data") -> bytes:
     return new_key
 
 
+SESSION_TTL_SECONDS = 86400 * 7
+
+
 def create_session_token(
     user_id: str,
     username: str,
     is_admin: bool,
     secret_key: bytes,
-    expires_in_seconds: int = 86400 * 7,
+    expires_in_seconds: int = SESSION_TTL_SECONDS,
 ) -> str:
     """Create HMAC-SHA256 signed session token.
 

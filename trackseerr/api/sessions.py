@@ -8,7 +8,8 @@ from typing import Any, Optional
 from starlette.requests import Request
 from starlette.responses import Response
 
-from trackseerr.auth import create_session_token, get_or_create_secret_key
+from trackseerr.api.dependencies import HEADER_SIGNATURE
+from trackseerr.auth import SESSION_TTL_SECONDS, create_session_token, get_or_create_secret_key
 from trackseerr.config import Config
 from trackseerr.storage import Database
 
@@ -17,6 +18,28 @@ COOKIE_NAME = "session_token"
 
 def cookie_is_secure(request: Request) -> bool:
     return (request.url.scheme == "https") or (request.headers.get("x-forwarded-proto", "").lower() == "https")
+
+
+def set_session_cookie(request: Request, response: Response, token: str) -> None:
+    """Sets the persistent HttpOnly session cookie, expiring with the session token."""
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        max_age=SESSION_TTL_SECONDS,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=cookie_is_secure(request),
+    )
+
+
+def resync_session_cookie(request: Request, response: Response, token: Optional[str]) -> None:
+    """Re-issues the cookie when a validated Bearer token arrives without a matching cookie."""
+    if not token or request.headers.get(HEADER_SIGNATURE):
+        return
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer ") and request.cookies.get(COOKIE_NAME) != token:
+        set_session_cookie(request, response, token)
 
 
 def start_session(
@@ -42,13 +65,7 @@ def start_session(
     )
     issued_us = max(int(time.time() * 1_000_000), int(floor_us) + 1) if floor_us else None
     db.create_session(session_id=token, user_id=user["id"], issued_at_us=issued_us)
-    response.set_cookie(
-        key=COOKIE_NAME,
-        value=token,
-        httponly=True,
-        samesite="lax",
-        secure=cookie_is_secure(request),
-    )
+    set_session_cookie(request, response, token)
     return token
 
 

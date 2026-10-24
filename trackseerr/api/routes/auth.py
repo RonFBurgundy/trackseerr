@@ -32,7 +32,7 @@ from trackseerr.api.schemas.auth import (
     PlexPinResponse,
     PlexVerifyResponse,
 )
-from trackseerr.api.sessions import start_session
+from trackseerr.api.sessions import request_session_token, resync_session_cookie, start_session
 from trackseerr.clients.core_client import CoreClient
 from trackseerr.local_login import (
     DETAIL_INVALID,
@@ -343,6 +343,7 @@ def logout(
     is_secure = (request.url.scheme == "https") or (request.headers.get("x-forwarded-proto", "").lower() == "https")
     response.delete_cookie(
         key="session_token",
+        path="/",
         httponly=True,
         samesite="lax",
         secure=is_secure,
@@ -352,10 +353,13 @@ def logout(
 
 @router.get("/me", response_model=MeResponse, response_model_exclude_unset=True)
 def get_me(
+    request: Request,
+    response: Response,
     current_user: dict[str, Any] = Depends(get_current_user),
     config: Config = Depends(get_config),
 ) -> dict[str, Any]:
     """Returns current user info, role and the deployment tier."""
+    resync_session_cookie(request, response, request_session_token(request))
     public = {k: v for k, v in current_user.items() if not str(k).startswith("_")}
     return {"user": public, "tier": tier_of(config)}
 
