@@ -18,6 +18,7 @@ export * from './delayProfiles';
 export * from './manualImport';
 export * from './libraryHealth';
 export * from './seedCleanup';
+export * from './slskdChallenges';
 export * from './itemHistory';
 export * from './tags';
 export * from './notifications';

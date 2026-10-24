@@ -5,3 +5,4 @@ export * from './ActivityHistoryPanel';
 export * from './ActivityBlocklistPanel';
 export * from './ActivitySearchesPanel';
 export * from './NeedsReviewPanel';
+export * from './ReviewSlskdChallenges';
