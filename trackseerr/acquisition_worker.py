@@ -58,6 +58,7 @@ from trackseerr.models import (
 )
 from trackseerr.notifications import notification_dispatcher
 from trackseerr.redaction import safe_exc
+from trackseerr import slskd_challenges
 from trackseerr.storage import Database
 from trackseerr.track_matching import (
     candidate_artist_ids,
@@ -321,6 +322,7 @@ class AcquisitionWorker(ImportPipelineMixin):
         self.staging_dir: str = ""
         self.allowed_roots: Optional[AllowedRoots] = None
         self._archive_errors: list[str] = []
+        self._last_challenge_scan: Optional[float] = None  # time.monotonic() of the last chat-challenge scan
         self._last_slskd_sweep: Optional[float] = None  # time.monotonic() of the last sweep; None = never ran
         self._excluded_paths: list[Path] = []  # effective recycle + quarantine folders, skipped by download-root walks
 
@@ -649,8 +651,30 @@ class AcquisitionWorker(ImportPipelineMixin):
         for item in active_items:
             self._process_item(db, ctx, item, stats)
 
+        self._scan_slskd_challenges(db)
         self._sweep_slskd_folders(db, media_settings)
         return stats
+
+    def _scan_slskd_challenges(self, db: Database) -> None:
+        """Every minute: looks for sharer chat challenges on enabled slskd clients and routes around them."""
+        now = time.monotonic()
+        last = self._last_challenge_scan
+        if last is not None and now - last < slskd_challenges.SCAN_INTERVAL_SECONDS:
+            return
+        self._last_challenge_scan = now
+        try:
+            clients = db.list_download_clients(enabled_only=True)
+        except sqlite3.Error as exc:
+            logger.warning("Could not list download clients for slskd challenge scan: %s", safe_exc(exc))
+            return
+        for cfg in clients:
+            if str(cfg.get("driver_type") or "").lower() != "slskd":
+                continue
+            try:
+                driver = get_acquisition_driver(cfg)
+                slskd_challenges.scan_client(db, cfg, driver, datetime.now(timezone.utc), _research_after_failure)
+            except (sqlite3.Error, httpx.HTTPError, OSError, ValueError, TypeError, AttributeError) as exc:
+                logger.warning("slskd challenge scan failed for client %s: %s", cfg.get("name") or cfg.get("id"), safe_exc(exc))
 
     def _sweep_slskd_folders(self, db: Database, media_settings: dict[str, Any]) -> None:
         """Hourly: removes old empty folders slskd leaves in its incomplete and completed-downloads folders."""

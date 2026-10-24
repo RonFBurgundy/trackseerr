@@ -1461,3 +1461,30 @@ def test_search_recording_failure_does_not_break_search(test_db, caplog):
             results = AcquisitionCoordinator().search_all_indexers("A", "T", db=test_db)
     assert len(results) == 2
     assert any("Could not record search" in r.getMessage() for r in caplog.records)
+
+
+def test_slskd_search_skips_gated_peer(test_db):
+    from datetime import datetime, timedelta, timezone
+    from trackseerr.clients.acquisition.slskd import SlskdDriver
+
+    test_db.create_download_client(
+        DownloadClientConfig(id="cli-slskd", name="slskd", driver_type="slskd", host_url="http://slskd:5030", enabled=True)
+    )
+    until = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    test_db.set_slskd_peer_state("cli-slskd", "GatedGuy", "gated", until)
+    test_db.set_slskd_peer_state("cli-slskd", "FriendlyGuy", "unlocked", until)
+    driver = SlskdDriver(host_url="http://slskd:5030", api_key="k")
+    seen = []
+
+    def fake_search(artist=None, title=None, album=None):
+        for name in ("GatedGuy", "FriendlyGuy"):
+            if not driver._peer_rejected({"username": name}):
+                seen.append(name)
+        return [AcquisitionSearchResult(download_id=n, title=f"{n} - Song.flac", artist="A", item_type="track",
+                                        source="slskd", protocol="slskd") for n in seen]
+
+    with patch.object(driver, "search", side_effect=fake_search), patch(
+        "trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=driver
+    ):
+        AcquisitionCoordinator().search_all_indexers("A", "Song", db=test_db)
+    assert seen == ["FriendlyGuy"]
