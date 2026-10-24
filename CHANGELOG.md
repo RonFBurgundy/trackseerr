@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- Activity → Needs review has a "Sharers asking for a reply" list. Some Soulseek users only share after you answer a chat message ("Human check… reply only with this word"). TrackSeerr shows the message there and notifies admins, so you can type the answer and send it. TrackSeerr never answers on its own. It tries another source straight away, and skips that user in searches until you reply or 7 days pass.
 - Activity → Needs review has a "Still seeding" list: torrents you removed from the Queue that keep seeding until their seed goal is met, with their ratio and seed time against the goal, the client, the indexer and whether an indexer rule or your global limits apply.
 - Activity → Queue has checkboxes: select several downloads and remove them (optionally blocklisting them and removing them from the download client) or search for all of them again in one go.
 - An album's track list shows "On <album>" instead of "Missing" for a song you already own on another release. Tap it to open that album.
@@ -111,6 +112,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Album and artist art no longer stops loading ("Authentication required") after the app or browser is closed and reopened. The sign-in cookie now lasts as long as your 7-day session and is restored automatically if the browser drops it.
 - Soulseek downloads no longer leave empty artist and album folders behind. Folders are removed once their files are imported, and once an hour any empty folder over an hour old in the slskd downloads and incomplete folders is removed. Only empty folders are ever removed.
 - Soulseek downloads that were cancelled are now removed from slskd's transfer list, the same way finished and failed ones already were.
 - Deleting an artist, album, track or file from the Library with "delete files" now moves the files to the recycle bin (or deletes them if you turned on permanent delete) instead of erasing them, and removes every file of a track, not just the first. Files outside your music folder or inside a download folder are left alone.
