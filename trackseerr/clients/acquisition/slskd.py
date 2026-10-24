@@ -48,6 +48,7 @@ class SlskdDriver(AcquisitionDriver):
         self.download_dir = (download_dir or "").strip() or None
         self.timeout = timeout
         self._downloads_root: Optional[str] = None
+        self._directories: Optional[dict[str, Any]] = None
         self.peers_filtered = 0
 
     def _headers(self) -> dict[str, str]:
@@ -59,13 +60,13 @@ class SlskdDriver(AcquisitionDriver):
             headers["X-API-KEY"] = self.api_key
         return headers
 
-    def _read_downloads_root(self) -> Optional[str]:
-        """slskd's completed-downloads folder (``directories.downloads``), cached on the driver.
+    def _read_directories(self) -> Optional[dict[str, Any]]:
+        """slskd's ``directories`` options block, fetched once from ``/api/v0/options`` and cached on the driver.
 
-        ``directories.incomplete`` is never used. Returns None (and sets ``last_roots_error``) when unreadable.
+        Returns None (and sets ``last_roots_error``) when unreadable.
         """
-        if self._downloads_root:
-            return self._downloads_root
+        if self._directories is not None:
+            return self._directories
         self.last_roots_error = None
         if not is_safe_service_url(self.host_url):
             self.last_roots_error = "Prohibited host URL"
@@ -81,15 +82,39 @@ class SlskdDriver(AcquisitionDriver):
             self.last_roots_error = str(e) or type(e).__name__
             return None
         dirs = data.get("directories") if isinstance(data, dict) else None
-        downloads = str(dirs.get("downloads") or "").strip() if isinstance(dirs, dict) else ""
+        self._directories = dirs if isinstance(dirs, dict) else {}
+        return self._directories
+
+    def _read_downloads_root(self) -> Optional[str]:
+        """slskd's completed-downloads folder (``directories.downloads``), cached on the driver.
+
+        ``directories.incomplete`` is never used for imports (see ``get_incomplete_root`` for cleanup only).
+        Returns None (and sets ``last_roots_error``) when unreadable.
+        """
+        if self._downloads_root:
+            return self._downloads_root
+        dirs = self._read_directories()
+        if dirs is None:
+            return None
+        downloads = str(dirs.get("downloads") or "").strip()
         if not downloads:
             self.last_roots_error = "slskd reported no directories.downloads"
             return None
         self._downloads_root = downloads
         return downloads
 
+    def get_incomplete_root(self) -> Optional[str]:
+        """slskd's incomplete folder (``directories.incomplete``), used only for empty-folder cleanup."""
+        dirs = self._read_directories()
+        if not dirs:
+            return None
+        return str(dirs.get("incomplete") or "").strip() or None
+
     def get_download_roots(self) -> list[str]:
-        """slskd's completed-downloads directory (``directories.downloads``); the incomplete folder is never returned."""
+        """slskd's completed-downloads directory (``directories.downloads``).
+
+        The incomplete folder is never returned: imports never read from it.
+        """
         root = self._read_downloads_root()
         roots = [root] if root else []
         if self.download_dir and self.download_dir not in roots:

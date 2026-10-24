@@ -790,3 +790,98 @@ def test_build_tags_to_write_with_album_artist():
     assert tags["albumartist"] == "Various Artists"
     assert tags["album"] == "Saturday Night Fever"
     assert tags["title"] == "Stayin' Alive"
+
+
+# ---------------------------------------------------------------------------
+# slskd folder cleanup
+# ---------------------------------------------------------------------------
+def test_cancelled_slskd_failure_removes_transfer(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.SLSKD, 5, progress=30.0, status="downloading")
+    driver = MagicMock()
+    driver.get_status.return_value = {
+        "size_bytes": 1000, "status": "failed", "progress": 30.0, "cancelled": True, "error_message": "cancelled",
+    }
+    driver.cleanup_completed.return_value = True
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver):
+        AcquisitionWorker().poll_once(db=test_db, staging_dir=str(tmp_path))
+    assert test_db.get_active_download("dl-s1")["status"] == DownloadStatus.FAILED.value
+    driver.cleanup_completed.assert_called_once_with("user1::Music%2Fsong.flac")
+    driver.cancel.assert_not_called()
+
+
+def test_move_import_prunes_emptied_source_dirs(test_db, workspace_dirs):
+    from trackseerr import download_roots
+
+    download_roots.clear_roots_cache()
+    downloads_dir, music_dir = workspace_dirs
+    test_db.create_download_client(
+        DownloadClientConfig(
+            id="client-slskd-1", name="slskd", driver_type=DownloadDriverType.SLSKD, host_url="http://slskd:5030"
+        )
+    )
+    test_db.upsert_user("user-1", "dj_bob", "bob@example.com")
+    test_db.create_request(
+        MusicRequest(
+            id="req-101", user_id="user-1", item_type="track", title="Get Lucky", artist="Daft Punk",
+            album="Random Access Memories", status=RequestStatus.PROCESSING,
+        )
+    )
+    test_db.create_active_download(
+        ActiveDownload(
+            id="dl-1", title="Get Lucky", artist="Daft Punk", client_id="client-slskd-1",
+            download_hash="user1::Album", status=DownloadStatus.DOWNLOADING.value, request_id="req-101",
+        )
+    )
+    album_dir = downloads_dir / "Album"
+    album_dir.mkdir()
+    dl_file = album_dir / "03 - Get Lucky.mp3"
+    write_mp3(dl_file)
+    driver = MagicMock()
+    driver.get_download_roots.return_value = [str(downloads_dir)]
+    driver.get_status.return_value = {
+        "status": DownloadStatus.COMPLETED.value, "progress": 100.0, "size_bytes": dl_file.stat().st_size,
+        "source_path": str(dl_file), "error_message": None,
+    }
+    meta = {
+        "artist": "Daft Punk", "title": "Get Lucky", "album": "Random Access Memories",
+        "file_path": str(dl_file), "extension": ".mp3", "track_number": 3, "year": 2013,
+        "disc_number": 1, "total_discs": 1,
+    }
+    settings = test_db.get_media_management_settings()
+    settings["root_folder_path"] = str(music_dir)
+    test_db.update_media_management_settings(settings)
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+            patch("trackseerr.acquisition_import.inspect_audio_file", return_value=meta), \
+            patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=meta):
+        stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(downloads_dir))
+    download_roots.clear_roots_cache()
+    assert stats["imported"] == 1
+    row = test_db.get_active_download("dl-1")
+    assert row["status"] == DownloadStatus.IMPORTED.value
+    assert os.path.exists(row["target_path"])
+    assert not dl_file.exists()
+    assert not album_dir.exists()
+    assert downloads_dir.is_dir()
+
+
+def test_slskd_sweep_throttled_and_skips_library_overlap(test_db, workspace_dirs, tmp_path):
+    downloads_dir, music_dir = workspace_dirs
+    incomplete = tmp_path / "incomplete"
+    incomplete.mkdir()
+    test_db.create_download_client(
+        DownloadClientConfig(id="cl-1", name="slskd", driver_type=DownloadDriverType.SLSKD, host_url="http://slskd:5030")
+    )
+    settings = test_db.get_media_management_settings()
+    settings["root_folder_path"] = str(music_dir)
+    test_db.update_media_management_settings(settings)
+    driver = MagicMock()
+    driver.get_incomplete_root.return_value = str(incomplete)
+    worker = AcquisitionWorker()
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+            patch("trackseerr.acquisition_worker.fetch_client_roots", return_value=([str(downloads_dir), str(music_dir)], None)), \
+            patch("trackseerr.acquisition_worker.sweep_empty_dirs", return_value=0) as sweep:
+        worker._poll_once(test_db)
+        worker._poll_once(test_db)
+    swept = sorted(call.args[0] for call in sweep.call_args_list)
+    assert swept == sorted([downloads_dir.resolve(), incomplete.resolve()])
+    assert all(Path(p) != music_dir.resolve() for p in swept)
