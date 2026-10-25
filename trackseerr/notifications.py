@@ -83,6 +83,15 @@ def format_notification(event: str, data: dict[str, Any]) -> tuple[str, str]:
         outcome = "closed as won't fix" if data.get("status") == "wont_fix" else "resolved"
         subj = f"Issue {outcome.capitalize()}: {artist} - {title} ({issue_type})"
         body = f"The {issue_type} issue for '{artist} - {title}' was {outcome}."
+    elif event == NotificationEvent.QUALITY_UNAVAILABLE.value:
+        searches = data.get("searches")
+        qualities = data.get("qualities")
+        profile = data.get("profile")
+        subj = f"Only lower quality found: {artist} - {title}"
+        body = (
+            f"Searched {searches} times. Only {qualities} found, which the '{profile}' profile does not allow. "
+            f"Keep waiting, or allow these formats in the profile."
+        )
     else:
         subj = f"TrackSeerr Notification: {event}"
         body = f"Notification event '{event}' for '{artist} - {title}'."

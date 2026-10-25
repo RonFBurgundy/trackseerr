@@ -238,6 +238,22 @@ class TestNotificationDispatcherSenders:
         assert "Download Failed: Daft Punk - Discovery" in t6
         assert "Timeout" in m6
 
+        t7, m7 = format_notification(
+            "quality_unavailable",
+            {
+                "artist": "Daft Punk",
+                "title": "Discovery",
+                "searches": 5,
+                "qualities": "MP3 320",
+                "profile": "Lossless (FLAC)",
+            },
+        )
+        assert t7 == "Only lower quality found: Daft Punk - Discovery"
+        assert m7 == (
+            "Searched 5 times. Only MP3 320 found, which the 'Lossless (FLAC)' profile does not allow. "
+            "Keep waiting, or allow these formats in the profile."
+        )
+
     @patch("httpx.Client.post")
     def test_send_discord_payload_structure(self, mock_post):
         mock_resp = MagicMock()

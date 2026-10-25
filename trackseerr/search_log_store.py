@@ -62,6 +62,28 @@ class SearchLogStoreMixin:
             ).fetchall()
         return [dict(r) for r in rows], int(total)
 
+    def count_item_searches(
+        self,
+        *,
+        track_id: str | None = None,
+        album_id: str | None = None,
+        request_id: str | None = None,
+    ) -> int:
+        if track_id:
+            col, val = "track_id", track_id
+        elif album_id:
+            col, val = "album_id", album_id
+        elif request_id:
+            col, val = "request_id", request_id
+        else:
+            return 0
+        with self._lock:
+            row = self.conn.execute(
+                f"SELECT COUNT(*) FROM search_log WHERE rung = 1 AND {col} = ?",
+                (str(val),),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
     def search_log_index(
         self,
         sort_dir: str = "desc",

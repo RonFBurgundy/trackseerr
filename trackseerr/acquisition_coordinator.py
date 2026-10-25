@@ -54,7 +54,7 @@ from trackseerr.decision_engine import (
     rank_key,
     resolve_durations,
 )
-from trackseerr import delay_gate
+from trackseerr import delay_gate, quality_unavailable
 from trackseerr.quality import evaluate_release, parse_release_title
 from trackseerr.quality_defaults import entry_qualities, is_v2_items, normalize_entries
 from trackseerr.seed_rules import apply_seed_rules_at_grab
@@ -888,6 +888,18 @@ class AcquisitionCoordinator:
         if min_score is not None:
             ranked = [item for item in ranked if item[1].score > min_score]
         if not ranked:
+            if min_score is None and candidates:
+                quality_unavailable.maybe_notify(
+                    db,
+                    candidates=candidates,
+                    profile=profile,
+                    profile_name=profile_dict.get("name") or "default",
+                    artist=artist,
+                    title=title or album,
+                    track_id=track_id,
+                    album_id=album_id,
+                    request_id=request_id,
+                )
             reason = (
                 "No acceptable releases found meeting quality profile criteria"
                 if min_score is None
