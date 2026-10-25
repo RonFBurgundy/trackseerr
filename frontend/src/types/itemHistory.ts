@@ -24,6 +24,7 @@ export type ItemEventName =
   | 'issue_opened'
   | 'issue_resolved'
   | 'health_finding'
+  | 'quality_unavailable'
   | 'renamed'
   | 'moved'
   | 'removed_from_library';
