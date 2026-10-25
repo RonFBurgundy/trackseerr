@@ -76,6 +76,63 @@ def _core_with_descriptor(text: str) -> str:
     return _simplify(f"{core} {descriptor}" if descriptor else core)
 
 
+def wildcard_word(text: str) -> Optional[str]:
+    """Replace the first letter of the longest word (>= 4 letters, ties -> first) with '*'."""
+    if not text:
+        return None
+    candidates = [m for m in re.finditer(r"[^\W_]+", text) if len(m.group(0)) >= 4]
+    if not candidates:
+        return None
+    longest = max(candidates, key=lambda m: len(m.group(0)))
+    start = longest.start()
+    return f"{text[:start]}*{text[start + 1:]}"
+
+
+def banned_term_queries(artist: str, title: Optional[str], album: Optional[str]) -> list[str]:
+    """Ordered, case-insensitively de-duplicated query texts (max 3) for Soulseek banned terms."""
+    lead = primary_artist(artist)
+    effective_title = (title or "").strip()
+    effective_album = (album or "").strip()
+
+    first_source = effective_title if effective_title else effective_album
+    first_text = title_core(first_source) if first_source else ""
+
+    target_text = title_core(effective_title or effective_album)
+
+    candidates: list[str] = []
+    if len(first_text) >= 4:
+        candidates.append(first_text)
+
+    wild_lead = wildcard_word(lead)
+    if wild_lead is not None:
+        if target_text:
+            candidates.append(f"{wild_lead} {target_text}")
+        else:
+            candidates.append(wild_lead)
+
+    wild_target = wildcard_word(target_text) if target_text else None
+    if wild_target is not None:
+        if lead:
+            candidates.append(f"{lead} {wild_target}")
+        else:
+            candidates.append(wild_target)
+
+    queries: list[str] = []
+    seen: set[str] = set()
+    for q in candidates:
+        clean = q.strip()
+        if not clean:
+            continue
+        key = clean.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        queries.append(clean)
+        if len(queries) == 3:
+            break
+    return queries
+
+
 def build_query_ladder(artist: str, title: Optional[str], album: Optional[str]) -> list[Rung]:
     """Ordered, case-insensitively de-duplicated ``(artist, title, album)`` rungs (max 3), raw query first."""
     lead = primary_artist(artist)

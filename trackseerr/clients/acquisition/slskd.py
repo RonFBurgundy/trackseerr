@@ -50,6 +50,7 @@ class SlskdDriver(AcquisitionDriver):
         self._downloads_root: Optional[str] = None
         self._directories: Optional[dict[str, Any]] = None
         self.peers_filtered = 0
+        self.last_response_count = 0
 
     def _headers(self) -> dict[str, str]:
         headers = {
@@ -203,19 +204,25 @@ class SlskdDriver(AcquisitionDriver):
         artist: str,
         title: Optional[str] = None,
         album: Optional[str] = None,
+        query_text: Optional[str] = None,
     ) -> list[AcquisitionSearchResult]:
         """Executes a search query against slskd and formats results."""
+        self.last_response_count = 0
         if not is_safe_service_url(self.host_url):
             logger.error("Prohibited slskd host URL: %s", self.host_url)
             return []
         self._pace_search()
 
-        query_parts = [artist.strip()]
-        if title:
-            query_parts.append(title.strip())
-        elif album:
-            query_parts.append(album.strip())
-        query = " ".join(query_parts)
+        cleaned_query_text = (query_text or "").strip()
+        if cleaned_query_text:
+            query = cleaned_query_text
+        else:
+            query_parts = [artist.strip()]
+            if title:
+                query_parts.append(title.strip())
+            elif album:
+                query_parts.append(album.strip())
+            query = " ".join(query_parts)
 
         init_url = f"{self.host_url}/api/v0/searches"
         search_id = None
@@ -248,6 +255,7 @@ class SlskdDriver(AcquisitionDriver):
                     user_responses = resp.json()
                     if not isinstance(user_responses, list):
                         return []
+                    self.last_response_count = len(user_responses)
                     self.peers_filtered = 0
                     results = self._parse_responses(user_responses, artist, title, album)
                     files = sum(len(u.get("files", [])) for u in user_responses if isinstance(u, dict))

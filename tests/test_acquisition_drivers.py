@@ -224,6 +224,37 @@ def test_slskd_search_sends_timeout_and_filter():
     assert body["filterResponses"] is True
 
 
+def test_query_text_overrides_search_text():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    _, p, _, _, _ = _slskd_search(
+        driver,
+        [_slskd_resp(200, _SLSKD_DONE), _slskd_resp(200, _SLSKD_RESPONSES)],
+        query_text="Darts of Pleasure",
+    )
+    body = p.call_args.kwargs["json"]
+    assert body["searchText"] == "Darts of Pleasure"
+
+
+def test_last_response_count_set():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    two_responses = [
+        {"username": "user1", "files": []},
+        {"username": "user2", "files": []},
+    ]
+    _slskd_search(
+        driver,
+        [_slskd_resp(200, _SLSKD_DONE), _slskd_resp(200, two_responses)],
+    )
+    assert driver.last_response_count == 2
+
+    _slskd_search(
+        driver,
+        [],
+        post=_slskd_resp(500, text="Internal Server Error"),
+    )
+    assert driver.last_response_count == 0
+
+
 def test_slskd_search_deletes_search_after():
     driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
     _, _, _, d, _ = _slskd_search(

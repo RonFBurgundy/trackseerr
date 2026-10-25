@@ -28,8 +28,10 @@ from trackseerr.item_history import GrabTrigger, emit, emit_named, trigger_kwarg
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.redaction import redact_text
 from trackseerr.search_terms import (
+    banned_term_queries,
     build_query_ladder,
     matches_request,
+    primary_artist,
     soulseek_file_matches_track,
     title_core,
 )
@@ -387,6 +389,14 @@ class SearchContext:
     rung: int = 1
 
 
+@dataclass
+class SearchStats:
+    """Accumulates indexer search counts for fallback tier decisions."""
+
+    slskd_searched: int = 0
+    slskd_responses: int = 0
+
+
 def _record_search(
     db: Database,
     context: Optional[SearchContext],
@@ -447,6 +457,151 @@ def _exclude_gated_slskd_peers(db: Database, driver: Any, s_cfg: dict, s_name: s
         logger.warning("Could not read gated slskd peers for '%s': %s", s_name, redact_text(str(exc)))
 
 
+_BANNED_ARTIST_TTL = 7 * 86400.0
+_BANNED_TIER_MISS_TTL = 24 * 3600.0
+
+_BANNED_CACHE_LOCK = threading.Lock()
+_BANNED_ARTISTS: dict[str, float] = {}
+_BANNED_TIER_MISSES: dict[tuple[str, str], float] = {}
+
+
+def _artist_banned(artist: str) -> bool:
+    key = primary_artist(artist).strip().lower()
+    if not key:
+        return False
+    now = time.monotonic()
+    with _BANNED_CACHE_LOCK:
+        expiry = _BANNED_ARTISTS.get(key)
+        if expiry is not None:
+            if now < expiry:
+                return True
+            del _BANNED_ARTISTS[key]
+        return False
+
+
+def _mark_artist_banned(artist: str) -> None:
+    key = primary_artist(artist).strip().lower()
+    if key:
+        with _BANNED_CACHE_LOCK:
+            _BANNED_ARTISTS[key] = time.monotonic() + _BANNED_ARTIST_TTL
+
+
+def _tier_recently_missed(key: tuple[str, str]) -> bool:
+    norm_key = (key[0].strip().lower(), key[1].strip().lower())
+    now = time.monotonic()
+    with _BANNED_CACHE_LOCK:
+        expiry = _BANNED_TIER_MISSES.get(norm_key)
+        if expiry is not None:
+            if now < expiry:
+                return True
+            del _BANNED_TIER_MISSES[norm_key]
+        return False
+
+
+def _mark_tier_missed(key: tuple[str, str]) -> None:
+    norm_key = (key[0].strip().lower(), key[1].strip().lower())
+    with _BANNED_CACHE_LOCK:
+        _BANNED_TIER_MISSES[norm_key] = time.monotonic() + _BANNED_TIER_MISS_TTL
+
+
+def _search_indexers(
+    db: Database,
+    artist: str,
+    title: Optional[str],
+    album: Optional[str],
+    context: Optional[SearchContext],
+    errors: Optional[list[dict[str, str]]],
+) -> list[AcquisitionSearchResult]:
+    try:
+        indexers = db.list_indexers(enabled_only=True)
+    except Exception as e:
+        logger.error("Failed to query enabled indexers from database: %s", e)
+        indexers = []
+
+    results: list[AcquisitionSearchResult] = []
+    for idx_cfg in indexers:
+        idx_name = idx_cfg.get("name", "unknown")
+        idx_type = idx_cfg.get("indexer_type")
+        started = time.monotonic()
+        try:
+            driver = get_indexer_driver(idx_cfg)
+            started = time.monotonic()
+            res = driver.search(artist=artist, title=title, album=album)
+            _log_source_search(idx_name, idx_type, artist, title, album, res, started)
+            _record_search(db, context, idx_name, idx_type, artist, title, album, len(res or []), started)
+            if res:
+                for r in res:
+                    if isinstance(r.extra, dict) or r.extra is None:
+                        extra = dict(r.extra or {})
+                        extra.setdefault("indexer_id", idx_cfg.get("id"))
+                        extra.setdefault("indexer_name", idx_name)
+                        extra.setdefault("indexer_priority", _indexer_priority(idx_cfg))
+                        extra.setdefault("indexer_minimum_seeders", idx_cfg.get("minimum_seeders"))
+                        r.extra = extra
+                results.extend(res)
+        except Exception as e:
+            logger.warning("Error searching indexer '%s' (%s): %s", idx_name, idx_cfg.get("host_url"), e)
+            _record_search(db, context, idx_name, idx_type, artist, title, album, 0, started, redact_text(str(e)))
+            if errors is not None:
+                errors.append({"source": str(idx_name), "error": redact_text(str(e))})
+    return results
+
+
+def _search_slskd(
+    db: Database,
+    artist: str,
+    title: Optional[str],
+    album: Optional[str],
+    context: Optional[SearchContext],
+    errors: Optional[list[dict[str, str]]],
+    slskd_query_text: Optional[str],
+    stats: Optional[SearchStats],
+) -> list[AcquisitionSearchResult]:
+    try:
+        download_clients = db.list_download_clients(enabled_only=True)
+    except Exception as e:
+        logger.error("Failed to query download clients from database: %s", e)
+        download_clients = []
+
+    slskd_clients = [
+        c for c in download_clients
+        if str(c.get("driver_type", "")).lower() == "slskd"
+    ]
+    results: list[AcquisitionSearchResult] = []
+    for s_cfg in slskd_clients:
+        s_name = s_cfg.get("name", "slskd")
+        started = time.monotonic()
+        log_artist = "" if slskd_query_text else artist
+        log_title = slskd_query_text if slskd_query_text else title
+        log_album = None if slskd_query_text else album
+        try:
+            driver = get_acquisition_driver(s_cfg)
+            _exclude_gated_slskd_peers(db, driver, s_cfg, s_name)
+            started = time.monotonic()
+            if slskd_query_text:
+                res = driver.search(artist=artist, title=title, album=album, query_text=slskd_query_text)
+            else:
+                res = driver.search(artist=artist, title=title, album=album)
+            if stats is not None:
+                stats.slskd_searched += 1
+                stats.slskd_responses += getattr(driver, "last_response_count", 0)
+            _log_source_search(s_name, "slskd", log_artist, log_title, log_album, res, started)
+            _record_search(db, context, s_name, "slskd", log_artist, log_title, log_album, len(res or []), started)
+            if res:
+                for r in res:
+                    extra = dict(r.extra or {})
+                    extra["indexer_priority"] = _indexer_priority(s_cfg)
+                    extra.setdefault("indexer_name", s_name)
+                    r.extra = extra
+                results.extend(res)
+        except Exception as e:
+            logger.warning("Error searching slskd client '%s' (%s): %s", s_name, s_cfg.get("host_url"), e)
+            _record_search(db, context, s_name, "slskd", log_artist, log_title, log_album, 0, started, redact_text(str(e)))
+            if errors is not None:
+                errors.append({"source": str(s_name), "error": redact_text(str(e))})
+    return results
+
+
 class AcquisitionCoordinator:
     """Coordinates search, quality evaluation, client dispatch, and active transfer records."""
 
@@ -459,6 +614,9 @@ class AcquisitionCoordinator:
         include_blocklisted: bool = False,
         errors: Optional[list[dict[str, str]]] = None,
         context: Optional[SearchContext] = None,
+        slskd_only: bool = False,
+        slskd_query_text: Optional[str] = None,
+        stats: Optional[SearchStats] = None,
     ) -> list[AcquisitionSearchResult]:
         """Queries all enabled Torznab/Newznab indexers and slskd clients.
 
@@ -471,74 +629,9 @@ class AcquisitionCoordinator:
             return []
 
         all_results: list[AcquisitionSearchResult] = []
-
-        # 1. Query enabled indexers (Torznab / Newznab)
-        try:
-            indexers = db.list_indexers(enabled_only=True)
-        except Exception as e:
-            logger.error("Failed to query enabled indexers from database: %s", e)
-            indexers = []
-
-        for idx_cfg in indexers:
-            idx_name = idx_cfg.get("name", "unknown")
-            idx_type = idx_cfg.get("indexer_type")
-            started = time.monotonic()
-            try:
-                driver = get_indexer_driver(idx_cfg)
-                started = time.monotonic()
-                res = driver.search(artist=artist, title=title, album=album)
-                _log_source_search(idx_name, idx_type, artist, title, album, res, started)
-                _record_search(db, context, idx_name, idx_type, artist, title, album, len(res or []), started)
-                if res:
-                    for r in res:
-                        if isinstance(r.extra, dict) or r.extra is None:
-                            extra = dict(r.extra or {})
-                            extra.setdefault("indexer_id", idx_cfg.get("id"))
-                            extra.setdefault("indexer_name", idx_name)
-                            extra.setdefault("indexer_priority", _indexer_priority(idx_cfg))
-                            extra.setdefault("indexer_minimum_seeders", idx_cfg.get("minimum_seeders"))
-                            r.extra = extra
-                    all_results.extend(res)
-            except Exception as e:
-                logger.warning("Error searching indexer '%s' (%s): %s", idx_name, idx_cfg.get("host_url"), e)
-                _record_search(db, context, idx_name, idx_type, artist, title, album, 0, started, redact_text(str(e)))
-                if errors is not None:
-                    errors.append({"source": str(idx_name), "error": redact_text(str(e))})
-
-        # 2. Query enabled slskd download clients if present
-        try:
-            download_clients = db.list_download_clients(enabled_only=True)
-        except Exception as e:
-            logger.error("Failed to query download clients from database: %s", e)
-            download_clients = []
-
-        slskd_clients = [
-            c for c in download_clients
-            if str(c.get("driver_type", "")).lower() == "slskd"
-        ]
-        for s_cfg in slskd_clients:
-            s_name = s_cfg.get("name", "slskd")
-            started = time.monotonic()
-            try:
-                driver = get_acquisition_driver(s_cfg)
-                _exclude_gated_slskd_peers(db, driver, s_cfg, s_name)
-                started = time.monotonic()
-                res = driver.search(artist=artist, title=title, album=album)
-                _log_source_search(s_name, "slskd", artist, title, album, res, started)
-                _record_search(db, context, s_name, "slskd", artist, title, album, len(res or []), started)
-                if res:
-                    for r in res:
-                        extra = dict(r.extra or {})
-                        extra["indexer_priority"] = _indexer_priority(s_cfg)
-                        extra.setdefault("indexer_name", s_name)
-                        r.extra = extra
-                    all_results.extend(res)
-            except Exception as e:
-                logger.warning("Error searching slskd client '%s' (%s): %s", s_name, s_cfg.get("host_url"), e)
-                _record_search(db, context, s_name, "slskd", artist, title, album, 0, started, redact_text(str(e)))
-                if errors is not None:
-                    errors.append({"source": str(s_name), "error": redact_text(str(e))})
-
+        if not slskd_only:
+            all_results.extend(_search_indexers(db, artist, title, album, context, errors))
+        all_results.extend(_search_slskd(db, artist, title, album, context, errors, slskd_query_text, stats))
         return _apply_blocklist(db, all_results, include_blocklisted)
 
     @staticmethod
@@ -584,6 +677,46 @@ class AcquisitionCoordinator:
             kept.append(r)
         return kept
 
+    def _banned_term_tier(
+        self,
+        artist: str,
+        title: Optional[str],
+        album: Optional[str],
+        db: Optional[Database],
+        context: Optional[SearchContext] = None,
+        start_rung: int = 4,
+    ) -> list[AcquisitionSearchResult]:
+        miss_key = (artist, title or album or "")
+        if _tier_recently_missed(miss_key):
+            return []
+
+        queries = banned_term_queries(artist, title, album)
+        for i, text in enumerate(queries):
+            ctx = dataclasses.replace(context or SearchContext(), rung=start_rung + i)
+            results = self.search_all_indexers(
+                artist=artist,
+                title=title,
+                album=album,
+                db=db,
+                context=ctx,
+                slskd_only=True,
+                slskd_query_text=text,
+            )
+            kept = self._relevant(results, 2, artist, title, album)
+            if kept:
+                _mark_artist_banned(artist)
+                logger.info(
+                    "Soulseek banned-term search found %d results for %r - %r via %r",
+                    len(kept),
+                    artist,
+                    title or album,
+                    text,
+                )
+                return kept
+
+        _mark_tier_missed(miss_key)
+        return []
+
     def search_with_fallback(
         self,
         artist: str,
@@ -597,12 +730,23 @@ class AcquisitionCoordinator:
         Rung 1 is unfiltered except Soulseek files of a track request (matched by file name); later rungs keep only results that pass ``matches_request``
         against the ORIGINAL title/album so a loose query cannot grab the wrong release.
         """
+        if _artist_banned(artist):
+            tier_results = self._banned_term_tier(artist, title, album, db, context, start_rung=1)
+            if tier_results:
+                return tier_results
+
         rungs = build_query_ladder(artist, title, album)
+        rung1_stats = SearchStats()
         for number, (r_artist, r_title, r_album) in enumerate(rungs, start=1):
             started = time.monotonic()
+            stats_arg = rung1_stats if number == 1 else None
             results = self.search_all_indexers(
-                artist=r_artist, title=r_title, album=r_album, db=db,
+                artist=r_artist,
+                title=r_title,
+                album=r_album,
+                db=db,
                 context=dataclasses.replace(context or SearchContext(), rung=number),
+                stats=stats_arg,
             )
             found = len(results)
             results = self._relevant(results, number, artist, title, album)
@@ -612,6 +756,12 @@ class AcquisitionCoordinator:
             )
             if results:
                 return results
+
+        if rung1_stats.slskd_searched > 0 and rung1_stats.slskd_responses == 0:
+            tier_results = self._banned_term_tier(artist, title, album, db, context, start_rung=len(rungs) + 1)
+            if tier_results:
+                return tier_results
+
         logger.info("Search exhausted %d rungs for %r - %r with no results", len(rungs), artist, title or album)
         return []
 
