@@ -49,6 +49,7 @@ ITEM_EVENTS: frozenset[str] = frozenset(
         "tags_changed",
         "retagged",
         "relinked",
+        "quality_unavailable",
     }
 )
 
@@ -717,10 +718,22 @@ class ItemHistoryMixin:
                 candidate = candidate.rpartition("/")[0]
         return matched
 
-    def item_event_count(self, event: str, *, track_id: Optional[str] = None, album_id: Optional[str] = None) -> int:
-        """How many times ``event`` happened to a track (or album): used for running failure counts."""
-        column, value = ("track_id", track_id) if track_id else ("album_id", album_id)
-        if not value:
+    def item_event_count(
+        self,
+        event: str,
+        *,
+        track_id: Optional[str] = None,
+        album_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> int:
+        """How many times ``event`` happened to a track (or album or request): used for running failure counts."""
+        if track_id:
+            column, value = "track_id", track_id
+        elif album_id:
+            column, value = "album_id", album_id
+        elif request_id:
+            column, value = "request_id", request_id
+        else:
             return 0
         with self._lock:
             row = self.conn.execute(
@@ -911,6 +924,7 @@ _PLAIN_MESSAGES: dict[str, str] = {
     "tags_changed": "Tags changed",
     "retagged": "Files retagged",
     "relinked": "File relinked to another track",
+    "quality_unavailable": "Only lower quality found",
 }
 
 

@@ -619,6 +619,7 @@ class NotificationEvent(str, Enum):
     ISSUE_REPORTED = "issue_reported"
     ISSUE_UPDATED = "issue_updated"
     ISSUE_RESOLVED = "issue_resolved"
+    QUALITY_UNAVAILABLE = "quality_unavailable"
 
 
 @dataclass
@@ -639,6 +640,7 @@ class NotificationChannel:
             "issue_reported",
             "issue_updated",
             "issue_resolved",
+            "quality_unavailable",
         ]
     )
     created_at: Optional[str] = None
