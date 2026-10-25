@@ -396,7 +396,7 @@ class PlexClient:
                     album_ratio = SequenceMatcher(None, norm_cand_album, norm_target_album).quick_ratio()
                     if album_ratio >= threshold:
                         return candidate
-            except (AttributeError, IndexError, NotFound, BadRequest) as e:
+            except (AttributeError, IndexError, PlexApiException, requests.exceptions.RequestException) as e:
                 logger.debug("Candidate comparison error for track '%s': %s", track.title, safe_exc(e))
                 continue
 

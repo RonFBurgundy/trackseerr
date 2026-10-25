@@ -359,3 +359,23 @@ def test_match_track_wrong_artist_still_missing(mock_server):
     t = Track(title="TiK ToK", artist="Kesha", album="Animal")
     matched = client.match_track(t)
     assert matched is None
+
+
+@patch("trackseerr.clients.plex.PlexServer")
+def test_match_track_candidate_fetch_error_skipped(mock_server):
+    import requests
+
+    client = PlexClient("http://localhost:32400", "token")
+    bad_cand = MockPlexTrack("TiK ToK", "Kesha", "Animal")
+    bad_cand.originalTitle = None
+    bad_cand.grandparentTitle = None
+    bad_cand.artist = MagicMock(side_effect=requests.exceptions.ConnectionError("reset"))
+
+    good_cand = MockPlexTrack("TiK ToK", "Kesha", "Animal")
+
+    client.server.search.return_value = [bad_cand, good_cand]
+
+    t = Track(title="TiK ToK", artist="Kesha", album="Animal")
+    matched = client.match_track(t)
+    assert matched is good_cand
+
