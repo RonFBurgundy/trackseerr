@@ -29,10 +29,12 @@ class MockAlbum:
 
 
 class MockPlexTrack:
-    def __init__(self, title, artist, album):
+    def __init__(self, title, artist, album, original_title=None, grandparent_title=None):
         self.title = title
         self._artist = MockArtist(artist)
         self._album = MockAlbum(album)
+        self.originalTitle = original_title
+        self.grandparentTitle = grandparent_title
 
     def artist(self):
         return self._artist
@@ -296,3 +298,64 @@ def test_match_track_censored_title(mock_server):
     t = Track(title="F**k You", artist="Lily Allen", album="Alright, Still")
     assert client.match_track(t) is real
     assert client.match_track(Track(title="F**k Off", artist="Lily Allen", album="Alright, Still")) is None
+
+
+@patch("trackseerr.clients.plex.PlexServer")
+def test_match_track_dollar_sign_artist(mock_server):
+    client = PlexClient("http://localhost:32400", "token")
+    mock_track = MockPlexTrack("TiK ToK", "Ke$ha", "Animal")
+    client.server.search.return_value = [mock_track]
+
+    t = Track(title="TiK ToK", artist="Kesha", album="Animal")
+    matched = client.match_track(t)
+    assert matched is mock_track
+
+
+@patch("trackseerr.clients.plex.PlexServer")
+def test_match_track_multi_artist_credit(mock_server):
+    client = PlexClient("http://localhost:32400", "token")
+    mock_track = MockPlexTrack("Tataki", "Argy", "Tataki", grandparent_title="Argy;Alok;Adam Beyer")
+    client.server.search.return_value = [mock_track]
+
+    t = Track(title="Tataki", artist="Argy", album="Tataki")
+    matched = client.match_track(t)
+    assert matched is mock_track
+
+
+@patch("trackseerr.clients.plex.PlexServer")
+def test_match_track_prefers_exact_title(mock_server):
+    client = PlexClient("http://localhost:32400", "token")
+    remix = MockPlexTrack("TiK ToK (Fred Falke club remix)", "Kesha", "Animal")
+    plain = MockPlexTrack("TiK ToK", "Kesha", "Animal")
+    client.server.search.return_value = [remix, plain]
+
+    t = Track(title="TiK ToK", artist="Kesha", album="Animal")
+    matched = client.match_track(t)
+    assert matched is plain
+
+
+@patch("trackseerr.clients.plex.PlexServer")
+def test_match_track_uses_attrs_without_fetch(mock_server):
+    client = PlexClient("http://localhost:32400", "token")
+    mock_track = MockPlexTrack("TiK ToK", "Ignored", "Animal", original_title="Kesha")
+
+    def failing_artist():
+        raise AssertionError("artist() should not be called when originalTitle is present")
+
+    mock_track.artist = failing_artist
+    client.server.search.return_value = [mock_track]
+
+    t = Track(title="TiK ToK", artist="Kesha", album="Animal")
+    matched = client.match_track(t)
+    assert matched is mock_track
+
+
+@patch("trackseerr.clients.plex.PlexServer")
+def test_match_track_wrong_artist_still_missing(mock_server):
+    client = PlexClient("http://localhost:32400", "token")
+    mock_track = MockPlexTrack("TiK ToK", "HappyHappy", "Other Album")
+    client.server.search.return_value = [mock_track]
+
+    t = Track(title="TiK ToK", artist="Kesha", album="Animal")
+    matched = client.match_track(t)
+    assert matched is None

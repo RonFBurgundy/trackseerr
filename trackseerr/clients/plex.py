@@ -16,6 +16,7 @@ from plexapi.server import PlexServer
 from ..censored import censored_pattern, search_text
 from ..models import Playlist, SyncResult, Track
 from ..security import is_safe_image_url, safe_data_path
+from ..media_match import artist_matches, norm_name, title_rank
 from ..missing_csv import delete_missing_csv, write_missing_csv
 from ..redaction import redact_text, safe_exc
 from ..storage_common import clean_library_name
@@ -360,21 +361,42 @@ class PlexClient:
         return self._eval_candidates(kept, track, threshold)
 
     def _eval_candidates(self, candidates: List[object], track: Track, threshold: float) -> Optional[object]:
-        target_artist = track.artist.lower().strip()
-        target_album = track.album.lower().strip()
+        sorted_candidates = sorted(
+            candidates,
+            key=lambda c: title_rank(str(getattr(c, "title", "") or ""), track.title),
+        )
+        norm_target_album = norm_name(track.album)
 
-        for candidate in candidates:
+        for candidate in sorted_candidates:
             try:
-                cand_artist = candidate.artist().title.lower().strip() if candidate.artist() else ""
-                artist_ratio = SequenceMatcher(None, cand_artist, target_artist).quick_ratio()
-                if artist_ratio >= threshold:
+                cand_orig = getattr(candidate, "originalTitle", None)
+                cand_grand = getattr(candidate, "grandparentTitle", None)
+                cand_artists: list[str] = []
+                if cand_orig:
+                    cand_artists.append(str(cand_orig))
+                if cand_grand:
+                    cand_artists.append(str(cand_grand))
+
+                if not cand_artists:
+                    cand_artist_obj = candidate.artist() if callable(getattr(candidate, "artist", None)) else None
+                    if cand_artist_obj and getattr(cand_artist_obj, "title", None):
+                        cand_artists.append(str(cand_artist_obj.title))
+
+                matched_artist = any(
+                    artist_matches(cand_art, track.artist, threshold=threshold)
+                    for cand_art in cand_artists
+                )
+                if matched_artist:
                     return candidate
 
-                cand_album = candidate.album().title.lower().strip() if candidate.album() else ""
-                album_ratio = SequenceMatcher(None, cand_album, target_album).quick_ratio()
-                if album_ratio >= threshold:
-                    return candidate
-            except (AttributeError, IndexError, Exception) as e:
+                cand_album_obj = candidate.album() if callable(getattr(candidate, "album", None)) else None
+                cand_album = cand_album_obj.title if cand_album_obj and getattr(cand_album_obj, "title", None) else ""
+                norm_cand_album = norm_name(cand_album)
+                if norm_cand_album and norm_target_album:
+                    album_ratio = SequenceMatcher(None, norm_cand_album, norm_target_album).quick_ratio()
+                    if album_ratio >= threshold:
+                        return candidate
+            except (AttributeError, IndexError, NotFound, BadRequest) as e:
                 logger.debug("Candidate comparison error for track '%s': %s", track.title, safe_exc(e))
                 continue
 
