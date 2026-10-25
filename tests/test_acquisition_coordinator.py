@@ -23,6 +23,12 @@ from trackseerr.item_history import GrabTrigger
 from trackseerr.acquisition_coordinator import (
     AcquisitionCoordinator,
     NoClientAvailable,
+    SearchStats,
+    _BANNED_ARTISTS,
+    _BANNED_CACHE_LOCK,
+    _BANNED_TIER_MISSES,
+    _artist_banned,
+    _mark_artist_banned,
     acquisition_coordinator,
 )
 from trackseerr.import_files import translate_remote_path
@@ -42,6 +48,17 @@ from trackseerr.models import (
     RequestStatus,
 )
 from trackseerr.storage import Database
+
+
+@pytest.fixture(autouse=True)
+def _clear_banned_term_caches():
+    with _BANNED_CACHE_LOCK:
+        _BANNED_ARTISTS.clear()
+        _BANNED_TIER_MISSES.clear()
+    yield
+    with _BANNED_CACHE_LOCK:
+        _BANNED_ARTISTS.clear()
+        _BANNED_TIER_MISSES.clear()
 
 
 @pytest.fixture
@@ -288,6 +305,128 @@ def test_search_with_fallback_exhausted_returns_empty():
         out = AcquisitionCoordinator().search_with_fallback(_MP_ARTIST, _MP_TITLE, None, MagicMock())
     assert out == []
     assert m.call_count == 3
+
+
+def test_banned_tier_runs_on_zero_responses():
+    target_file = AcquisitionSearchResult(
+        download_id="slskd-darts-1",
+        title="01 Darts of Pleasure.flac",
+        artist="",
+        item_type="track",
+        source="slskd",
+        protocol="slskd",
+        extra={"filename": r"Music\Franz Ferdinand\Hits\01 Darts of Pleasure.flac"},
+    )
+
+    calls = []
+
+    def fake_search_all_indexers(*args, **kwargs):
+        calls.append(kwargs)
+        stats = kwargs.get("stats")
+        if stats is not None:
+            stats.slskd_searched = 1
+            stats.slskd_responses = 0
+        if kwargs.get("slskd_query_text") == "Darts of Pleasure":
+            return [target_file]
+        return []
+
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", side_effect=fake_search_all_indexers):
+        out = AcquisitionCoordinator().search_with_fallback("Franz Ferdinand", "Darts of Pleasure", None, MagicMock())
+
+    assert out == [target_file]
+    assert _artist_banned("Franz Ferdinand") is True
+    tier_calls = [c for c in calls if c.get("slskd_only") is True]
+    assert len(tier_calls) == 1
+    assert tier_calls[0].get("slskd_query_text") == "Darts of Pleasure"
+
+
+def test_banned_tier_skipped_when_peers_responded():
+    calls = []
+
+    def fake_search_all_indexers(*args, **kwargs):
+        calls.append(kwargs)
+        stats = kwargs.get("stats")
+        if stats is not None:
+            stats.slskd_searched = 1
+            stats.slskd_responses = 5
+        return []
+
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", side_effect=fake_search_all_indexers):
+        out = AcquisitionCoordinator().search_with_fallback("Franz Ferdinand", "Darts of Pleasure", None, MagicMock())
+
+    assert out == []
+    assert not any(c.get("slskd_only") is True for c in calls)
+    assert _artist_banned("Franz Ferdinand") is False
+
+
+def test_banned_tier_filters_wrong_artist():
+    wrong_artist_file = AcquisitionSearchResult(
+        download_id="slskd-wrong-1",
+        title="01 Darts of Pleasure.flac",
+        artist="",
+        item_type="track",
+        source="slskd",
+        protocol="slskd",
+        extra={"filename": r"Music\Different Artist\Hits\01 Darts of Pleasure.flac"},
+    )
+
+    def fake_search_all_indexers(*args, **kwargs):
+        stats = kwargs.get("stats")
+        if stats is not None:
+            stats.slskd_searched = 1
+            stats.slskd_responses = 0
+        if kwargs.get("slskd_only") is True:
+            return [wrong_artist_file]
+        return []
+
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", side_effect=fake_search_all_indexers):
+        out = AcquisitionCoordinator().search_with_fallback("Franz Ferdinand", "Darts of Pleasure", None, MagicMock())
+
+    assert out == []
+
+
+def test_banned_artist_runs_tier_first():
+    _mark_artist_banned("Franz Ferdinand")
+    calls = []
+
+    def fake_search_all_indexers(*args, **kwargs):
+        calls.append(kwargs)
+        return []
+
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", side_effect=fake_search_all_indexers):
+        out = AcquisitionCoordinator().search_with_fallback("Franz Ferdinand", "Darts of Pleasure", None, MagicMock())
+
+    assert out == []
+    assert len(calls) > 0
+    assert calls[0].get("slskd_only") is True
+
+
+def test_banned_tier_miss_cached():
+    calls = []
+
+    def fake_search_all_indexers(*args, **kwargs):
+        calls.append(kwargs)
+        stats = kwargs.get("stats")
+        if stats is not None:
+            stats.slskd_searched = 1
+            stats.slskd_responses = 0
+        return []
+
+    coord = AcquisitionCoordinator()
+    db = MagicMock()
+
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", side_effect=fake_search_all_indexers):
+        out1 = coord.search_with_fallback("Franz Ferdinand", "Darts of Pleasure", None, db)
+    assert out1 == []
+    tier_calls_1 = [c for c in calls if c.get("slskd_only") is True]
+    assert len(tier_calls_1) > 0
+
+    calls.clear()
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", side_effect=fake_search_all_indexers):
+        out2 = coord.search_with_fallback("Franz Ferdinand", "Darts of Pleasure", None, db)
+    assert out2 == []
+    tier_calls_2 = [c for c in calls if c.get("slskd_only") is True]
+    assert len(tier_calls_2) == 0
 
 
 def test_search_and_grab_uses_fallback(test_db):

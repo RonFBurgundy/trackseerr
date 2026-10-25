@@ -1,6 +1,7 @@
 import pytest
 
 from trackseerr.search_terms import (
+    banned_term_queries,
     build_query_ladder,
     matches_request,
     primary_artist,
@@ -9,6 +10,7 @@ from trackseerr.search_terms import (
     strip_featuring,
     title_core,
     version_descriptor,
+    wildcard_word,
 )
 
 MP_ARTIST = "Morgan Page, BT, Ned Shepard & Sultan"
@@ -129,4 +131,29 @@ def test_soulseek_file_titles_and_match(wanted_title: str, file_name: str, expec
     titles = soulseek_file_titles(file_name)
     assert len(titles) > 0
     assert soulseek_file_matches_track(file_name, wanted_title) is expected
+
+
+def test_wildcard_word_longest_word():
+    assert wildcard_word("Franz Ferdinand") == "Franz *erdinand"
+    assert wildcard_word("Coexist") == "*oexist"
+    assert wildcard_word("XO") is None
+
+
+def test_banned_term_queries_order():
+    queries = banned_term_queries("Franz Ferdinand", "Darts of Pleasure", None)
+    assert queries == [
+        "Darts of Pleasure",
+        "Franz *erdinand Darts of Pleasure",
+        "Franz Ferdinand Darts of *leasure",
+    ]
+
+
+def test_banned_term_queries_album_only_and_short_title():
+    album_queries = banned_term_queries("The xx", None, "Coexist")
+    assert album_queries == ["Coexist", "The xx *oexist"]
+
+    short_title_queries = banned_term_queries("The Beatles", "XO", None)
+    assert "XO" not in short_title_queries
+    assert short_title_queries == ["The *eatles XO"]
+
 
