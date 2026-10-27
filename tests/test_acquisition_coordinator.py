@@ -436,6 +436,49 @@ def test_soulseek_offline_reason_tries_reconnect_once_then_reports(test_db):
         assert mock_driver.reconnect.call_count == 1
 
 
+def test_reconnect_not_throttled_on_first_attempt_with_low_monotonic(test_db):
+    test_db.create_download_client(
+        {
+            "id": "c-slskd-1",
+            "name": "slskd",
+            "driver_type": "slskd",
+            "host_url": "http://127.0.0.1:5030",
+            "enabled": True,
+        }
+    )
+    mock_driver = MagicMock()
+    mock_driver.server_logged_in.return_value = False
+    mock_driver.reconnect.return_value = True
+
+    with patch("trackseerr.acquisition_coordinator.time.monotonic", return_value=5.0), \
+         patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=mock_driver):
+        r1 = soulseek_offline_reason(test_db)
+        assert r1 == "Soulseek is not connected (slskd is not logged in)"
+        assert mock_driver.reconnect.call_count == 1
+
+
+def test_soulseek_offline_reason_clears_stale_flag_when_logged_in(test_db):
+    test_db.create_download_client(
+        {
+            "id": "c-slskd-1",
+            "name": "slskd",
+            "driver_type": "slskd",
+            "host_url": "http://127.0.0.1:5030",
+            "enabled": True,
+        }
+    )
+    mock_driver = MagicMock()
+    mock_driver.server_logged_in.return_value = True
+
+    _set_soulseek_offline(True)
+    assert soulseek_offline_flagged() is True
+
+    with patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=mock_driver):
+        r = soulseek_offline_reason(test_db)
+        assert r is None
+        assert soulseek_offline_flagged() is False
+
+
 def test_soulseek_offline_reason_fails_open_on_unknown_state(test_db):
     test_db.create_download_client(
         {

@@ -78,6 +78,16 @@ def _reset_mb_governors_between_tests():
 
 
 @pytest.fixture(autouse=True)
+def _reset_soulseek_state_between_tests():
+    """Resets module-level Soulseek connection and outage state between tests."""
+    from trackseerr.acquisition_coordinator import reset_soulseek_state
+
+    reset_soulseek_state()
+    yield
+    reset_soulseek_state()
+
+
+@pytest.fixture(autouse=True)
 def _download_client_connection_ok(monkeypatch, request):
     """Saving an enabled download client now requires a passing connection test; existing tests create clients
     against unreachable hosts, so the verification seam reports success. Tests asserting rejection override it;

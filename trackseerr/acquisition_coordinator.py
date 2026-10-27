@@ -291,8 +291,8 @@ def _reconnect_slskd_clients(drivers: list[tuple[dict[str, Any], Any]]) -> None:
     for s_cfg, driver in drivers:
         name = str(s_cfg.get("name") or s_cfg.get("id") or "slskd")
         with _SOULSEEK_LOCK:
-            last_reconn = _SOULSEEK_RECONNECT_TIMESTAMPS.get(name, 0.0)
-            can_reconn = (now - last_reconn) >= 600.0
+            last_reconn = _SOULSEEK_RECONNECT_TIMESTAMPS.get(name)
+            can_reconn = last_reconn is None or (now - last_reconn) >= 600.0
             if can_reconn:
                 _SOULSEEK_RECONNECT_TIMESTAMPS[name] = now
         if can_reconn:
@@ -322,6 +322,7 @@ def soulseek_offline_reason(db: Any) -> Optional[str]:
         if status is None:
             return None
         if status is True:
+            _set_soulseek_offline(False)
             _notify_soulseek_reconnected(db)
             return None
         drivers.append((s_cfg, driver))
@@ -329,6 +330,7 @@ def soulseek_offline_reason(db: Any) -> Optional[str]:
     _reconnect_slskd_clients(drivers)
 
     if any(driver.server_logged_in() is True for _, driver in drivers):
+        _set_soulseek_offline(False)
         _notify_soulseek_reconnected(db)
         return None
 
@@ -576,9 +578,23 @@ def _set_soulseek_offline(value: bool) -> None:
         _SOULSEEK_OFFLINE = value
 
 
+def clear_soulseek_offline_flag() -> None:
+    """Public helper to clear the soulseek offline flag, e.g. after a gate confirms sources are viable."""
+    _set_soulseek_offline(False)
+
+
 def soulseek_offline_flagged() -> bool:
     with _SOULSEEK_LOCK:
         return _SOULSEEK_OFFLINE
+
+
+def reset_soulseek_state() -> None:
+    """Test and process helper to reset all module-level Soulseek connection and outage state."""
+    global _SOULSEEK_OFFLINE, _OUTAGE_NOTIFIED
+    with _SOULSEEK_LOCK:
+        _SOULSEEK_OFFLINE = False
+        _OUTAGE_NOTIFIED = False
+        _SOULSEEK_RECONNECT_TIMESTAMPS.clear()
 
 
 def _artist_banned(artist: str) -> bool:
@@ -738,6 +754,14 @@ class AcquisitionCoordinator:
     @staticmethod
     def soulseek_offline_flagged() -> bool:
         return soulseek_offline_flagged()
+
+    @staticmethod
+    def clear_soulseek_offline_flag() -> None:
+        clear_soulseek_offline_flag()
+
+    @staticmethod
+    def reset_soulseek_state() -> None:
+        reset_soulseek_state()
 
     def search_all_indexers(
         self,
