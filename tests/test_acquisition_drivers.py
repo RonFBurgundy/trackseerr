@@ -16,7 +16,7 @@ import pytest
 import httpx
 
 from trackseerr.clients.acquisition.base import AcquisitionDriver
-from trackseerr.clients.acquisition.slskd import SlskdDriver
+from trackseerr.clients.acquisition.slskd import SlskdDriver, SlskdNotLoggedInError
 from trackseerr.clients.acquisition.sabnzbd import SabnzbdDriver
 from trackseerr.clients.acquisition.qbittorrent import QbittorrentDriver
 from trackseerr.clients.acquisition.torznab import TorznabDriver
@@ -247,12 +247,73 @@ def test_last_response_count_set():
     )
     assert driver.last_response_count == 2
 
-    _slskd_search(
-        driver,
-        [],
-        post=_slskd_resp(500, text="Internal Server Error"),
-    )
+    with pytest.raises(RuntimeError):
+        _slskd_search(
+            driver,
+            [],
+            post=_slskd_resp(500, text="Internal Server Error"),
+        )
     assert driver.last_response_count == 0
+
+
+def test_slskd_search_409_raises_not_logged_in():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with pytest.raises(SlskdNotLoggedInError) as exc_info:
+        _slskd_search(
+            driver,
+            [],
+            post=_slskd_resp(
+                409,
+                text="The server connection must be connected and logged in to perform a search (currently: Disconnecting)",
+            ),
+        )
+    assert "Soulseek is not connected" in str(exc_info.value)
+    assert "Disconnecting" in str(exc_info.value)
+
+
+def test_slskd_search_500_raises_runtime_error():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    with pytest.raises(RuntimeError) as exc_info:
+        _slskd_search(
+            driver,
+            [],
+            post=_slskd_resp(500, text="Internal Server Error"),
+        )
+    assert "slskd search failed: HTTP 500" in str(exc_info.value)
+
+
+def test_slskd_server_logged_in_true_false_none():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    # 200 True
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, {"isLoggedIn": True})):
+        assert driver.server_logged_in() is True
+
+    # 200 False
+    with patch("httpx.Client.get", return_value=_slskd_resp(200, {"isLoggedIn": False})):
+        assert driver.server_logged_in() is False
+
+    # connect error -> None
+    with patch("httpx.Client.get", side_effect=httpx.ConnectError("boom")):
+        assert driver.server_logged_in() is None
+
+    # non-200 -> None
+    with patch("httpx.Client.get", return_value=_slskd_resp(500, text="Error")):
+        assert driver.server_logged_in() is None
+
+
+def test_slskd_reconnect_put_success_and_forbidden():
+    driver = SlskdDriver("http://slskd.local:5030", api_key="secretkey")
+    # 200 -> True
+    with patch("httpx.Client.put", return_value=_slskd_resp(200, {})):
+        assert driver.reconnect() is True
+
+    # 403 Forbidden -> False
+    with patch("httpx.Client.put", return_value=_slskd_resp(403, text="Forbidden")):
+        assert driver.reconnect() is False
+
+    # 500 Error -> False
+    with patch("httpx.Client.put", return_value=_slskd_resp(500, text="Error")):
+        assert driver.reconnect() is False
 
 
 def test_slskd_search_deletes_search_after():

@@ -24,6 +24,7 @@ from trackseerr.clients.acquisition import (
     is_torrent_driver_type,
 )
 from trackseerr.clients.acquisition.base import AcquisitionRetryableError, AcquisitionUnavailableError
+from trackseerr.clients.acquisition.slskd import SlskdNotLoggedInError
 from trackseerr.item_history import GrabTrigger, emit, emit_named, trigger_kwargs
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.redaction import redact_text
@@ -237,6 +238,104 @@ def search_unavailable_reason(db: Any) -> Optional[str]:
     return "no indexers or Soulseek client configured"
 
 
+def _has_viable_indexer(indexers: list[dict[str, Any]], clients: list[dict[str, Any]]) -> bool:
+    groups = {grp for idx in indexers if (grp := _protocol_group(idx.get("indexer_type") or "torznab"))}
+    return any(any(_client_serves(grp, c) for c in clients) for grp in groups)
+
+
+def _notify_soulseek_reconnected(db: Any) -> None:
+    global _OUTAGE_NOTIFIED
+    with _SOULSEEK_LOCK:
+        if not _OUTAGE_NOTIFIED:
+            return
+        _OUTAGE_NOTIFIED = False
+    try:
+        db.record_event(
+            "soulseek_reconnected",
+            "Soulseek is connected again. Searches resumed.",
+            severity="info",
+            source="AcquisitionCoordinator",
+        )
+    except (sqlite3.Error, ValueError) as ev_err:
+        logger.warning("Failed to record soulseek_reconnected event: %s", ev_err)
+
+
+def _notify_soulseek_disconnected(db: Any) -> None:
+    global _OUTAGE_NOTIFIED
+    with _SOULSEEK_LOCK:
+        if _OUTAGE_NOTIFIED:
+            return
+        _OUTAGE_NOTIFIED = True
+    try:
+        db.record_event(
+            "soulseek_disconnected",
+            "Soulseek is not connected. Searches are paused until slskd logs back in.",
+            source="AcquisitionCoordinator",
+            severity="warning",
+        )
+    except (sqlite3.Error, ValueError) as ev_err:
+        logger.warning("Failed to record soulseek_disconnected event: %s", ev_err)
+
+    try:
+        notification_dispatcher.dispatch(
+            NotificationEvent.SOURCE_UNAVAILABLE,
+            data={"source": "Soulseek", "reason": "slskd is not logged in"},
+            db=db,
+        )
+    except (sqlite3.Error, ValueError) as ev_err:
+        logger.warning("Failed to dispatch source_unavailable notification: %s", ev_err)
+
+
+def _reconnect_slskd_clients(drivers: list[tuple[dict[str, Any], Any]]) -> None:
+    now = time.monotonic()
+    for s_cfg, driver in drivers:
+        name = str(s_cfg.get("name") or s_cfg.get("id") or "slskd")
+        with _SOULSEEK_LOCK:
+            last_reconn = _SOULSEEK_RECONNECT_TIMESTAMPS.get(name, 0.0)
+            can_reconn = (now - last_reconn) >= 600.0
+            if can_reconn:
+                _SOULSEEK_RECONNECT_TIMESTAMPS[name] = now
+        if can_reconn:
+            driver.reconnect()
+
+
+def soulseek_offline_reason(db: Any) -> Optional[str]:
+    """Returns a reason string if Soulseek is disconnected and no indexer alternatives exist, else None."""
+    try:
+        indexers = db.list_indexers(enabled_only=True)
+        clients = db.list_download_clients(enabled_only=True)
+    except sqlite3.Error as e:
+        logger.warning("soulseek_offline_reason: DB error querying indexers/clients, failing open: %s", e)
+        return None
+
+    if _has_viable_indexer(indexers, clients):
+        return None
+
+    slskd_clients = [c for c in clients if _client_serves("slskd", c)]
+    if not slskd_clients:
+        return None
+
+    drivers = []
+    for s_cfg in slskd_clients:
+        driver = get_acquisition_driver(s_cfg)
+        status = driver.server_logged_in()
+        if status is None:
+            return None
+        if status is True:
+            _notify_soulseek_reconnected(db)
+            return None
+        drivers.append((s_cfg, driver))
+
+    _reconnect_slskd_clients(drivers)
+
+    if any(driver.server_logged_in() is True for _, driver in drivers):
+        _notify_soulseek_reconnected(db)
+        return None
+
+    _notify_soulseek_disconnected(db)
+    return "Soulseek is not connected (slskd is not logged in)"
+
+
 def _client_priority(client: dict[str, Any]) -> int:
     try:
         return int(client.get("priority") or 1)
@@ -395,6 +494,7 @@ class SearchStats:
 
     slskd_searched: int = 0
     slskd_responses: int = 0
+    slskd_offline: bool = False
 
 
 def _record_search(
@@ -463,6 +563,22 @@ _BANNED_TIER_MISS_TTL = 24 * 3600.0
 _BANNED_CACHE_LOCK = threading.Lock()
 _BANNED_ARTISTS: dict[str, float] = {}
 _BANNED_TIER_MISSES: dict[tuple[str, str], float] = {}
+
+_SOULSEEK_LOCK = threading.RLock()
+_SOULSEEK_OFFLINE: bool = False
+_OUTAGE_NOTIFIED: bool = False
+_SOULSEEK_RECONNECT_TIMESTAMPS: dict[str, float] = {}
+
+
+def _set_soulseek_offline(value: bool) -> None:
+    global _SOULSEEK_OFFLINE
+    with _SOULSEEK_LOCK:
+        _SOULSEEK_OFFLINE = value
+
+
+def soulseek_offline_flagged() -> bool:
+    with _SOULSEEK_LOCK:
+        return _SOULSEEK_OFFLINE
 
 
 def _artist_banned(artist: str) -> bool:
@@ -582,6 +698,7 @@ def _search_slskd(
                 res = driver.search(artist=artist, title=title, album=album, query_text=slskd_query_text)
             else:
                 res = driver.search(artist=artist, title=title, album=album)
+            _set_soulseek_offline(False)
             if stats is not None:
                 stats.slskd_searched += 1
                 stats.slskd_responses += getattr(driver, "last_response_count", 0)
@@ -594,6 +711,15 @@ def _search_slskd(
                     extra.setdefault("indexer_name", s_name)
                     r.extra = extra
                 results.extend(res)
+        except SlskdNotLoggedInError as e:
+            if not soulseek_offline_flagged():
+                logger.warning("Soulseek is offline / not logged in on '%s': %s", s_name, e)
+            _set_soulseek_offline(True)
+            if stats is not None:
+                stats.slskd_offline = True
+            _record_search(db, context, s_name, "slskd", log_artist, log_title, log_album, 0, started, redact_text(str(e)))
+            if errors is not None:
+                errors.append({"source": str(s_name), "error": redact_text(str(e))})
         except Exception as e:
             logger.warning("Error searching slskd client '%s' (%s): %s", s_name, s_cfg.get("host_url"), e)
             _record_search(db, context, s_name, "slskd", log_artist, log_title, log_album, 0, started, redact_text(str(e)))
@@ -604,6 +730,14 @@ def _search_slskd(
 
 class AcquisitionCoordinator:
     """Coordinates search, quality evaluation, client dispatch, and active transfer records."""
+
+    @staticmethod
+    def soulseek_offline_reason(db: Any) -> Optional[str]:
+        return soulseek_offline_reason(db)
+
+    @staticmethod
+    def soulseek_offline_flagged() -> bool:
+        return soulseek_offline_flagged()
 
     def search_all_indexers(
         self,
@@ -693,6 +827,7 @@ class AcquisitionCoordinator:
         queries = banned_term_queries(artist, title, album)
         for i, text in enumerate(queries):
             ctx = dataclasses.replace(context or SearchContext(), rung=start_rung + i)
+            stats = SearchStats()
             results = self.search_all_indexers(
                 artist=artist,
                 title=title,
@@ -701,7 +836,10 @@ class AcquisitionCoordinator:
                 context=ctx,
                 slskd_only=True,
                 slskd_query_text=text,
+                stats=stats,
             )
+            if stats.slskd_offline:
+                return []
             kept = self._relevant(results, 2, artist, title, album)
             if kept:
                 _mark_artist_banned(artist)
@@ -739,7 +877,7 @@ class AcquisitionCoordinator:
         rung1_stats = SearchStats()
         for number, (r_artist, r_title, r_album) in enumerate(rungs, start=1):
             started = time.monotonic()
-            stats_arg = rung1_stats if number == 1 else None
+            stats_arg = rung1_stats if number == 1 else SearchStats()
             results = self.search_all_indexers(
                 artist=r_artist,
                 title=r_title,
@@ -756,6 +894,9 @@ class AcquisitionCoordinator:
             )
             if results:
                 return results
+            if stats_arg.slskd_offline:
+                logger.info("Search stopped for %r - %r: Soulseek is not connected", artist, title or album)
+                return []
 
         if rung1_stats.slskd_searched > 0 and rung1_stats.slskd_responses == 0:
             tier_results = self._banned_term_tier(artist, title, album, db, context, start_rung=len(rungs) + 1)

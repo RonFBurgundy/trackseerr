@@ -254,6 +254,16 @@ class TestNotificationDispatcherSenders:
             "Keep waiting, or allow these formats in the profile."
         )
 
+        t8, m8 = format_notification(
+            "source_unavailable",
+            {
+                "source": "Soulseek",
+                "reason": "slskd is not logged in",
+            },
+        )
+        assert t8 == "Soulseek is not connected"
+        assert m8 == "Searches are paused until it connects again. Check slskd. Reason: slskd is not logged in"
+
     @patch("httpx.Client.post")
     def test_send_discord_payload_structure(self, mock_post):
         mock_resp = MagicMock()

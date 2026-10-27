@@ -19,7 +19,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from trackseerr.clients.acquisition.base import AcquisitionUnavailableError
+from trackseerr.clients.acquisition.slskd import SlskdNotLoggedInError
 from trackseerr.item_history import GrabTrigger
+import trackseerr.acquisition_coordinator as ac_mod
 from trackseerr.acquisition_coordinator import (
     AcquisitionCoordinator,
     NoClientAvailable,
@@ -27,9 +29,15 @@ from trackseerr.acquisition_coordinator import (
     _BANNED_ARTISTS,
     _BANNED_CACHE_LOCK,
     _BANNED_TIER_MISSES,
+    _SOULSEEK_LOCK,
+    _SOULSEEK_RECONNECT_TIMESTAMPS,
     _artist_banned,
     _mark_artist_banned,
+    _set_soulseek_offline,
+    _tier_recently_missed,
     acquisition_coordinator,
+    soulseek_offline_flagged,
+    soulseek_offline_reason,
 )
 from trackseerr.import_files import translate_remote_path
 from trackseerr.api.app import create_app
@@ -55,10 +63,18 @@ def _clear_banned_term_caches():
     with _BANNED_CACHE_LOCK:
         _BANNED_ARTISTS.clear()
         _BANNED_TIER_MISSES.clear()
+    _set_soulseek_offline(False)
+    with _SOULSEEK_LOCK:
+        _SOULSEEK_RECONNECT_TIMESTAMPS.clear()
+        ac_mod._OUTAGE_NOTIFIED = False
     yield
     with _BANNED_CACHE_LOCK:
         _BANNED_ARTISTS.clear()
         _BANNED_TIER_MISSES.clear()
+    _set_soulseek_offline(False)
+    with _SOULSEEK_LOCK:
+        _SOULSEEK_RECONNECT_TIMESTAMPS.clear()
+        ac_mod._OUTAGE_NOTIFIED = False
 
 
 @pytest.fixture
@@ -338,6 +354,146 @@ def test_banned_tier_runs_on_zero_responses():
     tier_calls = [c for c in calls if c.get("slskd_only") is True]
     assert len(tier_calls) == 1
     assert tier_calls[0].get("slskd_query_text") == "Darts of Pleasure"
+
+
+def test_offline_slskd_records_error_in_search_log(test_db):
+    test_db.create_download_client(
+        {
+            "id": "c-slskd-1",
+            "name": "slskd",
+            "driver_type": "slskd",
+            "host_url": "http://127.0.0.1:5030",
+            "enabled": True,
+        }
+    )
+    mock_driver = MagicMock()
+    mock_driver.search.side_effect = SlskdNotLoggedInError("Soulseek is not connected: 409")
+    with patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=mock_driver):
+        results = AcquisitionCoordinator().search_all_indexers("Radiohead", "Kid A", db=test_db)
+    assert results == []
+    rows, total = test_db.list_search_log(1, 10)
+    assert total == 1
+    assert rows[0]["error"] is not None
+    assert "Soulseek is not connected" in rows[0]["error"]
+
+
+def test_search_with_fallback_stops_after_offline_rung():
+    calls = []
+
+    def fake_search_all_indexers(*args, **kwargs):
+        calls.append(kwargs)
+        stats = kwargs.get("stats")
+        if stats is not None:
+            stats.slskd_offline = True
+        return []
+
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", side_effect=fake_search_all_indexers):
+        out = AcquisitionCoordinator().search_with_fallback("Radiohead", "Kid A", None, MagicMock())
+
+    assert out == []
+    assert len(calls) == 1
+
+
+def test_banned_tier_not_marked_missed_when_offline():
+    miss_key = ("Radiohead", "Kid A")
+    assert _tier_recently_missed(miss_key) is False
+
+    def fake_search_all_indexers(*args, **kwargs):
+        stats = kwargs.get("stats")
+        if stats is not None:
+            stats.slskd_offline = True
+        return []
+
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", side_effect=fake_search_all_indexers):
+        out = AcquisitionCoordinator()._banned_term_tier("Radiohead", "Kid A", None, MagicMock())
+
+    assert out == []
+    assert _tier_recently_missed(miss_key) is False
+
+
+def test_soulseek_offline_reason_tries_reconnect_once_then_reports(test_db):
+    test_db.create_download_client(
+        {
+            "id": "c-slskd-1",
+            "name": "slskd",
+            "driver_type": "slskd",
+            "host_url": "http://127.0.0.1:5030",
+            "enabled": True,
+        }
+    )
+    mock_driver = MagicMock()
+    mock_driver.server_logged_in.return_value = False
+    mock_driver.reconnect.return_value = True
+
+    with patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=mock_driver):
+        r1 = soulseek_offline_reason(test_db)
+        assert r1 == "Soulseek is not connected (slskd is not logged in)"
+        assert mock_driver.reconnect.call_count == 1
+
+        # Second call immediately after (within 10 minutes) -> reconnect not called again
+        r2 = soulseek_offline_reason(test_db)
+        assert r2 == "Soulseek is not connected (slskd is not logged in)"
+        assert mock_driver.reconnect.call_count == 1
+
+
+def test_soulseek_offline_reason_fails_open_on_unknown_state(test_db):
+    test_db.create_download_client(
+        {
+            "id": "c-slskd-1",
+            "name": "slskd",
+            "driver_type": "slskd",
+            "host_url": "http://127.0.0.1:5030",
+            "enabled": True,
+        }
+    )
+    mock_driver = MagicMock()
+    mock_driver.server_logged_in.return_value = None
+
+    with patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=mock_driver):
+        res = soulseek_offline_reason(test_db)
+        assert res is None
+        assert mock_driver.reconnect.call_count == 0
+
+
+def test_soulseek_outage_event_and_notification_once(test_db):
+    test_db.create_download_client(
+        {
+            "id": "c-slskd-1",
+            "name": "slskd",
+            "driver_type": "slskd",
+            "host_url": "http://127.0.0.1:5030",
+            "enabled": True,
+        }
+    )
+    mock_driver = MagicMock()
+    mock_driver.server_logged_in.return_value = False
+    mock_driver.reconnect.return_value = True
+
+    with patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=mock_driver), \
+         patch("trackseerr.acquisition_coordinator.notification_dispatcher.dispatch") as mock_dispatch:
+        r1 = soulseek_offline_reason(test_db)
+        assert r1 is not None
+        assert mock_dispatch.call_count == 1
+
+        # Second offline check -> no second event or dispatch
+        r2 = soulseek_offline_reason(test_db)
+        assert r2 is not None
+        assert mock_dispatch.call_count == 1
+
+        events = test_db.conn.execute("SELECT * FROM system_events WHERE event_type LIKE 'soulseek_%'").fetchall()
+        assert len(events) == 1
+        assert events[0]["event_type"] == "soulseek_disconnected"
+
+        # Recovery -> reconnected event
+        mock_driver.server_logged_in.return_value = True
+        r3 = soulseek_offline_reason(test_db)
+        assert r3 is None
+
+        events_after = test_db.conn.execute(
+            "SELECT * FROM system_events WHERE event_type LIKE 'soulseek_%' ORDER BY id ASC"
+        ).fetchall()
+        assert len(events_after) == 2
+        assert events_after[1]["event_type"] == "soulseek_reconnected"
 
 
 def test_banned_tier_skipped_when_peers_responded():

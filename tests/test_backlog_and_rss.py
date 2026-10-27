@@ -16,6 +16,7 @@ import httpx
 from trackseerr.acquisition_coordinator import (
     acquisition_coordinator,
     search_unavailable_reason,
+    _set_soulseek_offline,
 )
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db, get_lidarr_client, get_plex_client
@@ -498,6 +499,78 @@ class TestWantedBacklogWorker:
             assert status_dict["items_checked"] == 2
             assert status_dict["items_grabbed"] == 2
             assert status_dict["last_run_at"] is not None
+
+    def test_backlog_sweep_stops_when_soulseek_goes_offline(self, test_db, seeded_users):
+        worker = WantedBacklogWorker()
+        worker.pace_delay = 0.0
+
+        for i in range(1, 4):
+            req = MusicRequest(
+                id=f"req-sweep-offline-{i}",
+                user_id=seeded_users["alice"]["id"],
+                item_type="track",
+                title=f"Track {i}",
+                artist="Artist",
+                status=RequestStatus.PENDING,
+            )
+            test_db.create_request(req)
+
+        test_db.create_download_client(
+            {
+                "id": "c-slskd",
+                "name": "slskd",
+                "driver_type": "slskd",
+                "host_url": "http://127.0.0.1:5030",
+                "enabled": True,
+            }
+        )
+
+        _set_soulseek_offline(False)
+
+        def mock_search_and_grab(*args, **kwargs):
+            _set_soulseek_offline(True)
+            return {"success": False}
+
+        with patch.object(acquisition_coordinator, "search_and_grab", side_effect=mock_search_and_grab) as mock_grab, \
+             patch("trackseerr.acquisition_coordinator.soulseek_offline_reason", return_value=None):
+            stats = worker.poll_once(test_db)
+            assert mock_grab.call_count == 1
+            assert stats["items_checked"] == 1
+
+        events = test_db.conn.execute("SELECT * FROM system_events WHERE event_type = 'backlog_sweep'").fetchall()
+        assert len(events) >= 1
+        assert "stopped: Soulseek is not connected" in events[-1]["message"]
+        assert events[-1]["severity"] == "warning"
+
+    def test_backlog_poll_skips_when_soulseek_offline(self, test_db, seeded_users):
+        worker = WantedBacklogWorker()
+        worker.pace_delay = 0.0
+
+        req = MusicRequest(
+            id="req-sweep-gate-1",
+            user_id=seeded_users["alice"]["id"],
+            item_type="track",
+            title="Track 1",
+            artist="Artist",
+            status=RequestStatus.PENDING,
+        )
+        test_db.create_request(req)
+
+        test_db.create_download_client(
+            {
+                "id": "c-slskd",
+                "name": "slskd",
+                "driver_type": "slskd",
+                "host_url": "http://127.0.0.1:5030",
+                "enabled": True,
+            }
+        )
+
+        with patch("trackseerr.acquisition_coordinator.soulseek_offline_reason", return_value="Soulseek is not connected (slskd is not logged in)"), \
+             patch.object(acquisition_coordinator, "search_and_grab") as mock_grab:
+            res = worker.poll_once(test_db)
+            assert res.get("skipped") == "Soulseek is not connected (slskd is not logged in)"
+            assert mock_grab.call_count == 0
 
     def test_backlog_worker_poll_once_skips_active_downloads(self, test_db, seeded_users):
         """Validates poll_once skips requests and tracks that already have active transfers."""

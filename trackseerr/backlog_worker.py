@@ -68,6 +68,8 @@ def _gate_search(db: Database, worker_name: str, state: Any) -> Optional[str]:
     when it clears. Tracks last_reason on state (a worker instance or dict).
     """
     reason = search_unavailable_reason(db)
+    if reason is None:
+        reason = acquisition_coordinator.soulseek_offline_reason(db)
     last_reason = getattr(state, "last_reason", None) if not isinstance(state, dict) else state.get("last_reason")
 
     if reason:
@@ -272,6 +274,26 @@ class _SweepCollect:
             Optional[str],
         ]
     ] = field(default_factory=list)
+
+
+def _record_sweep_event(db: Database, stats: dict[str, int], stopped_offline: bool) -> None:
+    checked = stats.get("items_checked", 0)
+    grabbed = stats.get("items_grabbed", 0)
+    if stopped_offline:
+        msg = f"Backlog sweep stopped: Soulseek is not connected ({checked} items checked, {grabbed} grabbed)"
+        sev = "warning"
+    else:
+        msg = f"Backlog sweep completed: {checked} items checked, {grabbed} grabbed"
+        sev = "info"
+    try:
+        db.record_event(
+            "backlog_sweep",
+            msg,
+            source="BacklogWorker",
+            severity=sev,
+        )
+    except Exception as ev_err:
+        logger.warning("Failed to record backlog_sweep event: %s", ev_err)
 
 
 class WantedBacklogWorker:
@@ -504,6 +526,9 @@ class WantedBacklogWorker:
                     logger.error(
                         "Manual wanted search failed for '%s - %s': %s", t.get("artist"), t.get("title"), redact_text(str(e))
                     )
+                if acquisition_coordinator.soulseek_offline_flagged():
+                    logger.info("Manual wanted search stopped: Soulseek is not connected")
+                    return
                 if self.pace_delay > 0:
                     time.sleep(min(float(self.pace_delay), 5.0))
 
@@ -858,7 +883,7 @@ class WantedBacklogWorker:
                 album_id=album_id,
                 trigger=_search_trigger(None, min_score),
             )
-            if track_id:
+            if track_id and not acquisition_coordinator.soulseek_offline_flagged():
                 db.mark_tracks_searched([str(track_id)])
             if res.get("success"):
                 stats["items_grabbed"] += 1
@@ -901,6 +926,7 @@ class WantedBacklogWorker:
                 self.errors += stats["errors"]
             return stats
 
+        stopped_offline = False
         for item in items:
             if self._stop_event.is_set():
                 logger.info("WantedBacklogWorker sweep interrupted by stop event")
@@ -911,21 +937,17 @@ class WantedBacklogWorker:
                 continue
 
             self._search_sweep_item(db, item, stats)
+            if acquisition_coordinator.soulseek_offline_flagged():
+                logger.info("WantedBacklogWorker sweep stopped: Soulseek is not connected")
+                stopped_offline = True
+                break
 
         with self._lock:
             self.items_checked += stats["items_checked"]
             self.items_grabbed += stats["items_grabbed"]
             self.errors += stats["errors"]
 
-        try:
-            db.record_event(
-                "backlog_sweep",
-                f"Backlog sweep completed: {stats['items_checked']} items checked, {stats['items_grabbed']} grabbed",
-                source="BacklogWorker",
-                severity="info",
-            )
-        except Exception as ev_err:
-            logger.warning("Failed to record backlog_sweep event: %s", ev_err)
+        _record_sweep_event(db, stats, stopped_offline)
 
         return stats
 

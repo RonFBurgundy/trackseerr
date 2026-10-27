@@ -101,3 +101,18 @@ def test_activity_searches_endpoint_admin_only_and_paged(test_db, tmp_path):
     only = api.get("/api/activity/searches?source_type=slskd", headers=headers(admin)).json()
     assert only["total"] == 1
     assert api.get("/api/activity/searches?source_type=bogus", headers=headers(admin)).status_code == 422
+
+
+def test_count_item_searches_ignores_errored_rows(test_db):
+    _rec(test_db, track_id="trk-1", rung=1, error=None)
+    _rec(test_db, track_id="trk-1", rung=1, error="Soulseek is not connected: 409")
+    _rec(test_db, track_id="trk-1", rung=2, error=None)
+    assert test_db.count_item_searches(track_id="trk-1") == 1
+
+    _rec(test_db, album_id="alb-1", rung=1, error=None)
+    _rec(test_db, album_id="alb-1", rung=1, error="slskd search failed: HTTP 500")
+    assert test_db.count_item_searches(album_id="alb-1") == 1
+
+    _rec(test_db, request_id="req-1", rung=1, error=None)
+    _rec(test_db, request_id="req-1", rung=1, error="error")
+    assert test_db.count_item_searches(request_id="req-1") == 1
