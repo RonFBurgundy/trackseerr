@@ -79,7 +79,7 @@ class SearchLogStoreMixin:
             return 0
         with self._lock:
             row = self.conn.execute(
-                f"SELECT COUNT(*) FROM search_log WHERE rung = 1 AND {col} = ?",
+                f"SELECT COUNT(*) FROM search_log WHERE rung = 1 AND error IS NULL AND {col} = ?",
                 (str(val),),
             ).fetchone()
         return int(row[0]) if row else 0

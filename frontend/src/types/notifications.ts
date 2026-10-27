@@ -36,7 +36,8 @@ export type NotificationEventId =
   | 'issue_reported'
   | 'issue_updated'
   | 'issue_resolved'
-  | 'quality_unavailable';
+  | 'quality_unavailable'
+  | 'source_unavailable';
 
 export const NOTIFICATION_EVENTS: ReadonlyArray<{ id: NotificationEventId; label: string }> = [
   { id: 'request_created', label: 'Request created' },
@@ -49,6 +50,7 @@ export const NOTIFICATION_EVENTS: ReadonlyArray<{ id: NotificationEventId; label
   { id: 'issue_updated', label: 'Issue updated' },
   { id: 'issue_resolved', label: 'Issue resolved' },
   { id: 'quality_unavailable', label: 'Only lower quality found' },
+  { id: 'source_unavailable', label: 'Search source disconnected' },
 ];
 
 export const NOTIFICATION_EVENT_LABELS: Record<string, string> = Object.fromEntries(

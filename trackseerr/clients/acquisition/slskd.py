@@ -22,6 +22,10 @@ _SEARCH_OVERRUN_SECONDS = 20.0  # extra polling past the soft deadline while sls
 _last_search_at: float = 0.0
 
 
+class SlskdNotLoggedInError(RuntimeError):
+    """slskd is up but not logged in to the Soulseek network."""
+
+
 class SlskdDriver(AcquisitionDriver):
     """Driver for slskd (Soulseek REST API daemon)."""
 
@@ -199,6 +203,49 @@ class SlskdDriver(AcquisitionDriver):
             return True, f"slskd {version} (connected; not logged in to the Soulseek network yet)"
         return True, f"slskd {version}"
 
+    def server_logged_in(self) -> Optional[bool]:
+        """Checks whether slskd is connected and logged in to the Soulseek network."""
+        if not is_safe_service_url(self.host_url):
+            return None
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                resp = client.get(f"{self.host_url}/api/v0/server", headers=self._headers())
+                if resp.status_code != 200:
+                    logger.warning("slskd server_logged_in check failed: HTTP %d: %s", resp.status_code, resp.text[:120])
+                    return None
+                data = resp.json() if resp.text else {}
+                if isinstance(data, dict) and "isLoggedIn" in data:
+                    return bool(data["isLoggedIn"])
+                logger.warning("slskd server_logged_in returned unexpected format: %s", data)
+                return None
+        except (httpx.HTTPError, ValueError) as e:
+            logger.warning("slskd server_logged_in error: %s: %s", type(e).__name__, e)
+            return None
+
+    def reconnect(self) -> bool:
+        """Connects slskd to the Soulseek server."""
+        if not is_safe_service_url(self.host_url):
+            return False
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.put(f"{self.host_url}/api/v0/server", headers=self._headers())
+                if 200 <= resp.status_code < 300:
+                    return True
+                if resp.status_code in (401, 403):
+                    logger.warning(
+                        "slskd reconnect failed (HTTP %d): slskd API key needs write access to reconnect",
+                        resp.status_code,
+                    )
+                    return False
+                logger.warning("slskd reconnect failed: HTTP %d: %s", resp.status_code, resp.text[:120])
+                return False
+        except (httpx.HTTPError, ValueError) as e:
+            logger.warning("slskd reconnect error: %s: %s", type(e).__name__, e)
+            return False
+        except Exception as e:
+            logger.warning("slskd reconnect unexpected error: %s: %s", type(e).__name__, e)
+            return False
+
     def search(
         self,
         artist: str,
@@ -240,7 +287,11 @@ class SlskdDriver(AcquisitionDriver):
                 )
                 if init_resp.status_code not in (200, 201, 202):
                     logger.warning("slskd search initiation failed (%d): %s", init_resp.status_code, init_resp.text[:100])
-                    return []
+                    if init_resp.status_code == 409:
+                        raise SlskdNotLoggedInError(f"Soulseek is not connected: {init_resp.text[:160]}")
+                    raise RuntimeError(
+                        f"slskd search failed: HTTP {init_resp.status_code}: {init_resp.text[:120]}"
+                    )
 
                 search_id = init_resp.json().get("id")
                 if not search_id:

@@ -92,6 +92,11 @@ def format_notification(event: str, data: dict[str, Any]) -> tuple[str, str]:
             f"Searched {searches} times. Only {qualities} found, which the '{profile}' profile does not allow. "
             f"Keep waiting, or allow these formats in the profile."
         )
+    elif event == NotificationEvent.SOURCE_UNAVAILABLE.value:
+        source = str(data.get("source") or "Soulseek")
+        reason = str(data.get("reason") or "unknown")
+        subj = f"{source} is not connected"
+        body = f"Searches are paused until it connects again. Check slskd. Reason: {reason}"
     else:
         subj = f"TrackSeerr Notification: {event}"
         body = f"Notification event '{event}' for '{artist} - {title}'."

@@ -114,6 +114,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- When slskd loses its connection to the Soulseek network, searches no longer quietly report "0 results" for hours. TrackSeerr pauses searching, asks slskd to reconnect every 10 minutes, shows the failure in the search log, and tells you through System events and any notification channel with "Search source disconnected" ticked (existing channels need it ticked in Settings → Notifications). Failed searches no longer count toward the "Only lower quality found" notice.
 - Playlist sync finds songs you already have in Plex when the artist is spelled or credited differently, such as "Ke$ha" for "Kesha", "The Black Eyed Peas" for "Black Eyed Peas", or "Argy;Alok;Adam Beyer" for "Argy". These no longer show as missing. When Plex has both the original and a remix, the playlist gets the version it asked for.
 - Album and artist art no longer stops loading ("Authentication required") after the app or browser is closed and reopened. The sign-in cookie now lasts as long as your 7-day session and is restored automatically if the browser drops it.
 - Soulseek downloads no longer leave empty artist and album folders behind. Folders are removed once their files are imported, and once an hour any empty folder over an hour old in the slskd downloads and incomplete folders is removed. Only empty folders are ever removed.
