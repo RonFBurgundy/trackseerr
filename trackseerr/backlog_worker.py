@@ -415,6 +415,7 @@ class WantedBacklogWorker:
                         "skipped": reason,
                         "catalog_seeded": catalog_seeded,
                     }
+                acquisition_coordinator.clear_soulseek_offline_flag()
                 res = self._sweep(db)
                 res["catalog_seeded"] = catalog_seeded
                 return res
@@ -480,6 +481,7 @@ class WantedBacklogWorker:
         reason = _gate_search(db, "WantedBacklogWorker", self)
         if reason:
             return 0
+        acquisition_coordinator.clear_soulseek_offline_flag()
         runnable = [t for t in targets if (t.get("artist") or "").strip() and (t.get("title") or "").strip()]
         if not runnable:
             return 0
