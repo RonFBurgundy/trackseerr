@@ -830,11 +830,17 @@ class ImportPipelineMixin(ImportCatalogMixin):
                 metadata["title"] = matched_expected_track["title"]
                 metadata["track_number"] = int(matched_expected_track.get("track_number") or 1)
                 metadata["disc_number"] = int(matched_expected_track.get("disc_number") or 1)
-                if job.target_album:
+                matched_album = (
+                    db.get_library_album(str(matched_expected_track["album_id"]))
+                    if matched_expected_track.get("album_id")
+                    and (not job.target_album or str(matched_expected_track["album_id"]) != str(job.target_album.get("id")))
+                    else job.target_album
+                )
+                if matched_album:
                     _apply_catalog_album(
                         metadata,
-                        job.target_album,
-                        db.get_library_artist(job.target_album["artist_id"]),
+                        matched_album,
+                        db.get_library_artist(matched_album["artist_id"]) if matched_album.get("artist_id") else None,
                         ctx.media_settings,
                         db=db,
                     )
