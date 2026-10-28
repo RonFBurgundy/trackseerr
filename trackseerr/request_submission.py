@@ -10,10 +10,12 @@ consumes one discography unit and no album units). Each type has its own quota a
 discographies). Admins are unlimited and always auto-approved.
 """
 
+from dataclasses import dataclass
+from datetime import datetime, timezone
 import logging
+import sqlite3
 import threading
 import uuid
-from dataclasses import dataclass
 from typing import Any, Optional
 
 from trackseerr.acquisition_coordinator import acquisition_coordinator
@@ -142,7 +144,21 @@ def _enforce_quota(db: Database, user: dict[str, Any], needs: dict[str, int]) ->
         limit = int(snap[label])
         if snap["used"][label] + need > limit:
             unit = "day" if window == 1 else "days"
-            raise RequestRejected("quota", 400, f"Request quota reached for {label} ({limit} per {window} {unit})")
+            rejection_text = f"Request quota reached for {label} ({limit} per {window} {unit})"
+            user_id = str(user.get("id"))
+            today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            kv_key = f"quota_notified:{user_id}:{label}"
+            try:
+                if db.get_kv(kv_key) != today_utc:
+                    notification_dispatcher.dispatch(
+                        NotificationEvent.REQUEST_QUOTA_REACHED,
+                        {"username": user.get("username"), "message": rejection_text},
+                        db=db,
+                    )
+                    db.set_kv(kv_key, today_utc)
+            except (sqlite3.Error, ValueError) as exc:
+                logger.warning("Failed to dispatch request_quota_reached notification: %s", exc)
+            raise RequestRejected("quota", 400, rejection_text)
 
 
 def _library_has(

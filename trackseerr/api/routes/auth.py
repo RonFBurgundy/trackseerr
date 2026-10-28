@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sqlite3
 import time
 from typing import Any, NoReturn, Optional
 
@@ -313,6 +314,19 @@ def verify_pin(
         email=email,
         is_admin=is_admin,
     )
+
+    if existing_user is None:
+        try:
+            from trackseerr.models import NotificationEvent
+            from trackseerr.notifications import notification_dispatcher
+
+            notification_dispatcher.dispatch(
+                NotificationEvent.USER_JOINED,
+                {"username": username},
+                db=db,
+            )
+        except (sqlite3.Error, ValueError) as exc:
+            logger.warning("Failed to dispatch user_joined notification for '%s': %s", username, exc)
 
     # 5b. Stamp last_login_at once per successful sign-in (on a gateway, core was told via session-status above).
     db.record_successful_login(user["id"])

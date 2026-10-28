@@ -10,6 +10,7 @@ import html
 import json
 import logging
 import smtplib
+import sqlite3
 import ssl
 import threading
 from typing import Any, Optional, Union
@@ -31,6 +32,47 @@ USER_FACING_EVENTS: frozenset[str] = frozenset({
     NotificationEvent.ISSUE_UPDATED.value,
     NotificationEvent.ISSUE_RESOLVED.value,
 })
+
+ADMIN_DEFAULT_OFF: frozenset[str] = frozenset({
+    NotificationEvent.DOWNLOAD_STARTED.value,
+    NotificationEvent.ITEM_AVAILABLE.value,
+    NotificationEvent.REQUEST_APPROVED.value,
+    NotificationEvent.REQUEST_REJECTED.value,
+    NotificationEvent.ISSUE_UPDATED.value,
+    NotificationEvent.ISSUE_RESOLVED.value,
+})
+
+ADMIN_EVENT_LINKS: dict[str, str] = {
+    NotificationEvent.HEALTH_ISSUE.value: "#/settings/system/status",
+    NotificationEvent.HEALTH_RECOVERED.value: "#/settings/system/status",
+    NotificationEvent.DOWNLOAD_STALLED.value: "#/activity/queue",
+    NotificationEvent.IMPORT_NEEDS_ATTENTION.value: "#/activity/queue",
+    NotificationEvent.DOWNLOAD_FAILED.value: "#/activity/queue",
+    NotificationEvent.DOWNLOAD_STARTED.value: "#/activity/queue",
+    NotificationEvent.TASK_FAILED.value: "#/settings/system/tasks",
+    NotificationEvent.UPDATE_AVAILABLE.value: "#/settings/system/status",
+    NotificationEvent.USER_JOINED.value: "#/settings/requests/users",
+    NotificationEvent.REQUEST_CREATED.value: "#/requests/pending",
+    NotificationEvent.REQUEST_QUOTA_REACHED.value: "#/requests/pending",
+    NotificationEvent.SLSKD_CHALLENGE.value: "#/activity/review",
+}
+
+
+def admin_pref_default(event: str) -> tuple[bool, bool]:
+    """Default (in_app, push) preferences for admins when no preference row exists."""
+    if event in ADMIN_DEFAULT_OFF:
+        return False, False
+    return True, False
+
+
+def get_admin_event_link(event: str, data: dict[str, Any]) -> str:
+    """Resolves target URL for an admin event notification."""
+    if data.get("link"):
+        return str(data["link"])
+    if event.startswith("issue_"):
+        issue_id = data.get("issue_id") or data.get("id")
+        return f"#/requests/issues/{issue_id}" if issue_id else "#/requests/issues"
+    return ADMIN_EVENT_LINKS.get(event, "#/activity/history")
 
 
 def _format_health_notification(
@@ -55,6 +97,62 @@ def _format_health_notification(
     return None
 
 
+def _format_admin_notification(event: str, data: dict[str, Any]) -> Optional[tuple[str, str]]:
+    """Formats admin task, update, user, quota, and challenge notifications."""
+    if event == NotificationEvent.TASK_FAILED.value:
+        label = data.get("label") or data.get("task_id") or "Task"
+        message = str(data.get("message") or "")
+        return f"Task failed: {label}", message
+    if event == NotificationEvent.UPDATE_AVAILABLE.value:
+        version = data.get("version")
+        current = data.get("current")
+        release_url = data.get("release_url")
+        return f"TrackSeerr {version} is available", f"You are on {current}. Release notes: {release_url}"
+    if event == NotificationEvent.USER_JOINED.value:
+        username = data.get("username") or "A user"
+        return f"New user: {username}", f"{username} signed in for the first time."
+    if event == NotificationEvent.REQUEST_QUOTA_REACHED.value:
+        username = data.get("username") or "A user"
+        message = str(data.get("message") or "")
+        return f"{username} hit their request limit", message
+    if event == NotificationEvent.SLSKD_CHALLENGE.value:
+        username = data.get("username") or "A user"
+        download_title = data.get("download_title") or "a download"
+        return (
+            "A Soulseek sharer asked for a reply",
+            f'{username} wants a chat reply before sharing "{download_title}". Answer it in Activity → Needs review.',
+        )
+    return None
+
+
+def _format_issue_notification(
+    event: str, data: dict[str, Any], artist: str, title: str, username: Optional[str]
+) -> Optional[tuple[str, str]]:
+    """Formats issue reported, updated, and resolved notifications."""
+    if event == NotificationEvent.ISSUE_REPORTED.value:
+        issue_type = data.get("issue_type") or "Issue"
+        details = data.get("problem_details") or ""
+        return (
+            f"Issue Reported: {artist} - {title} ({issue_type})",
+            f"{username or 'A user'} reported an issue ({issue_type}) for '{artist} - {title}': {details}",
+        )
+    if event == NotificationEvent.ISSUE_UPDATED.value:
+        issue_type = data.get("issue_type") or "Issue"
+        update = data.get("update") or "Issue updated"
+        return (
+            f"Issue Updated: {artist} - {title} ({issue_type})",
+            f"{update} on the {issue_type} issue for '{artist} - {title}' (status: {data.get('status') or 'unknown'}).",
+        )
+    if event == NotificationEvent.ISSUE_RESOLVED.value:
+        issue_type = data.get("issue_type") or "Issue"
+        outcome = "closed as won't fix" if data.get("status") == "wont_fix" else "resolved"
+        return (
+            f"Issue {outcome.capitalize()}: {artist} - {title} ({issue_type})",
+            f"The {issue_type} issue for '{artist} - {title}' was {outcome}.",
+        )
+    return None
+
+
 def format_notification(event: str, data: dict[str, Any]) -> tuple[str, str]:
     """Generates user-friendly title and message for a given notification event."""
     artist = str(data.get("artist") or "Unknown Artist")
@@ -66,6 +164,14 @@ def format_notification(event: str, data: dict[str, Any]) -> tuple[str, str]:
     health_res = _format_health_notification(event, data, artist, title)
     if health_res is not None:
         return health_res
+
+    admin_res = _format_admin_notification(event, data)
+    if admin_res is not None:
+        return admin_res
+
+    issue_res = _format_issue_notification(event, data, artist, title, username)
+    if issue_res is not None:
+        return issue_res
 
     if event == NotificationEvent.REQUEST_CREATED.value:
         subj = f"Music Requested: {artist} - {title}"
@@ -94,21 +200,6 @@ def format_notification(event: str, data: dict[str, Any]) -> tuple[str, str]:
         err = data.get("error_message") or data.get("error") or "Unknown error"
         subj = f"Download Failed: {artist} - {title}"
         body = f"Failed to download/import '{artist} - {title}': {err}."
-    elif event == NotificationEvent.ISSUE_REPORTED.value:
-        issue_type = data.get("issue_type") or "Issue"
-        details = data.get("problem_details") or ""
-        subj = f"Issue Reported: {artist} - {title} ({issue_type})"
-        body = f"{username or 'A user'} reported an issue ({issue_type}) for '{artist} - {title}': {details}"
-    elif event == NotificationEvent.ISSUE_UPDATED.value:
-        issue_type = data.get("issue_type") or "Issue"
-        update = data.get("update") or "Issue updated"
-        subj = f"Issue Updated: {artist} - {title} ({issue_type})"
-        body = f"{update} on the {issue_type} issue for '{artist} - {title}' (status: {data.get('status') or 'unknown'})."
-    elif event == NotificationEvent.ISSUE_RESOLVED.value:
-        issue_type = data.get("issue_type") or "Issue"
-        outcome = "closed as won't fix" if data.get("status") == "wont_fix" else "resolved"
-        subj = f"Issue {outcome.capitalize()}: {artist} - {title} ({issue_type})"
-        body = f"The {issue_type} issue for '{artist} - {title}' was {outcome}."
     elif event == NotificationEvent.QUALITY_UNAVAILABLE.value:
         searches = data.get("searches")
         qualities = data.get("qualities")
@@ -128,6 +219,27 @@ def format_notification(event: str, data: dict[str, Any]) -> tuple[str, str]:
         body = f"Notification event '{event}' for '{artist} - {title}'."
 
     return subj, body
+
+
+def _owner_user_id(database: Optional[Database], data: dict[str, Any]) -> Optional[str]:
+    """Resolves owning user ID for notification dispatch."""
+    owner_user_id = data.get("user_id") or data.get("requested_by") or data.get("reporter_id")
+    if not owner_user_id and database is not None:
+        if data.get("request_id"):
+            try:
+                req_row = database.get_request(data["request_id"])
+                if req_row:
+                    owner_user_id = req_row.get("user_id")
+            except Exception as e:
+                logger.debug("Could not lookup request owner for notification dispatch: %s", e)
+        elif data.get("issue_id"):
+            try:
+                issue_row = database.get_issue(data["issue_id"])
+                if issue_row:
+                    owner_user_id = issue_row.get("user_id")
+            except Exception as e:
+                logger.debug("Could not lookup issue owner for notification dispatch: %s", e)
+    return str(owner_user_id) if owner_user_id is not None else None
 
 
 class NotificationDispatcher:
@@ -576,43 +688,165 @@ class NotificationDispatcher:
             return True, f"Test notification sent to {delivered} active subscription(s)"
         return False, last_error or "Failed to deliver push notification"
 
-    def _run_dispatch(  # noqa: C901, PLR0915
+    def _deliver_admin_tray(
         self,
+        database: Database,
         event: str,
         data: dict[str, Any],
-        db: Optional[Database] = None,
+        skip_user_ids: set[str],
     ) -> None:
-        """Worker task executing channel sends in an isolated background thread."""
+        """Delivers notification to admin trays and web push."""
         try:
-            database = db
-            if database is None:
-                try:
-                    from trackseerr.api.dependencies import get_db
-
-                    database = get_db()
-                except Exception as e:
-                    logger.warning("Could not resolve database instance for notification dispatch: %s", e)
-                    return
-
-            if not data.get("application_url"):
-                try:
-                    if database is not None:
-                        gen_cfg = database.get_general_settings()
-                        if gen_cfg.get("application_url"):
-                            data["application_url"] = gen_cfg["application_url"]
-                except Exception as e:
-                    logger.debug("Could not resolve application_url for notification: %s", e)
-            if not data.get("application_url"):
-                import os
-                env_url = (os.getenv("APPLICATION_URL") or os.getenv("APP_URL") or "").strip().rstrip("/")
-                if env_url:
-                    data["application_url"] = env_url
-
-            channels = database.list_notification_channels(enabled_only=True, global_only=True)
-        except Exception as e:
-            logger.warning("Failed to query notification channels for event '%s': %s", event, e)
+            users = database.list_users()
+        except sqlite3.Error as e:
+            logger.warning("Failed to list users for admin tray delivery on '%s': %s", event, e)
             return
 
+        title, message = self.format_notification(event, data)
+        link = get_admin_event_link(event, data)
+        default_pref = admin_pref_default(event)
+
+        for u in users:
+            uid = str(u.get("id"))
+            if not u.get("is_admin") or u.get("disabled") or uid in skip_user_ids:
+                continue
+            try:
+                in_app, push = database.get_user_notification_pref(
+                    uid, event, default=default_pref
+                )
+                if in_app:
+                    database.create_user_notification(
+                        user_id=uid,
+                        event=event,
+                        title=title,
+                        message=message,
+                        link=link,
+                    )
+                    logger.info("Delivered admin notification '%s' to user '%s'", event, uid)
+                if push:
+                    self._send_web_push(database, uid, event, data)
+            except sqlite3.Error as e:
+                logger.warning(
+                    "Database error delivering admin notification '%s' to user '%s': %s",
+                    event,
+                    uid,
+                    e,
+                )
+
+    def _deliver_user_facing(
+        self,
+        database: Database,
+        owner_user_id: str,
+        event: str,
+        data: dict[str, Any],
+    ) -> None:
+        """Delivers user-facing notification to the resource owner."""
+        in_app, push = database.get_user_notification_pref(owner_user_id, event)
+
+        # In-app inbox
+        if in_app:
+            title, message = self.format_notification(event, data)
+            link = data.get("link")
+            if not link:
+                if "issue" in event or data.get("issue_id"):
+                    iid = data.get("issue_id") or data.get("id")
+                    link = f"#/requests/issues/{iid}" if iid else "#/requests"
+                else:
+                    link = "#/requests"
+            try:
+                database.create_user_notification(
+                    user_id=owner_user_id,
+                    event=event,
+                    title=title,
+                    message=message,
+                    link=link,
+                )
+                logger.info("Created in-app notification '%s' for user '%s'", event, owner_user_id)
+            except Exception as e:
+                logger.warning(
+                    "Failed to create in-app notification for user '%s' on '%s': %s",
+                    owner_user_id,
+                    event,
+                    e,
+                )
+
+        # User's own notification channels
+        try:
+            user_channels = database.list_notification_channels(
+                enabled_only=True, owner_user_id=owner_user_id
+            )
+        except Exception as e:
+            logger.warning("Failed to query user channels for '%s': %s", owner_user_id, e)
+            user_channels = []
+
+        for uch in user_channels:
+            try:
+                ch_events = uch.get("events") or []
+                if event not in ch_events:
+                    continue
+                self._send_to_channel(uch, event, data, allow_lan=False)
+                logger.info(
+                    "Delivered user notification '%s' to user channel '%s' for user '%s'",
+                    event,
+                    uch.get("name"),
+                    owner_user_id,
+                )
+            except (httpx.HTTPError, httpx.TimeoutException, smtplib.SMTPException, ValueError) as e:
+                logger.warning(
+                    "Delivery failed for user channel '%s' (%s) on event '%s': %s",
+                    uch.get("name"),
+                    uch.get("channel_type"),
+                    event,
+                    e,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Unexpected error delivering to user channel '%s' on event '%s': %s",
+                    uch.get("name"),
+                    event,
+                    e,
+                )
+
+        # Web Push
+        if push:
+            self._send_web_push(database, owner_user_id, event, data)
+
+    def _resolve_database(self, db: Optional[Database]) -> Optional[Database]:
+        """Resolves database instance if not explicitly provided."""
+        if db is not None:
+            return db
+        try:
+            from trackseerr.api.dependencies import get_db
+
+            return get_db()
+        except Exception as e:
+            logger.warning("Could not resolve database instance for notification dispatch: %s", e)
+            return None
+
+    def _ensure_application_url(self, data: dict[str, Any], database: Database) -> None:
+        """Fills application_url from settings or environment if absent."""
+        if data.get("application_url"):
+            return
+        try:
+            gen_cfg = database.get_general_settings()
+            if gen_cfg.get("application_url"):
+                data["application_url"] = gen_cfg["application_url"]
+                return
+        except Exception as e:
+            logger.debug("Could not resolve application_url for notification: %s", e)
+        import os
+
+        env_url = (os.getenv("APPLICATION_URL") or os.getenv("APP_URL") or "").strip().rstrip("/")
+        if env_url:
+            data["application_url"] = env_url
+
+    def _deliver_global_channels(
+        self,
+        channels: list[dict[str, Any]],
+        event: str,
+        data: dict[str, Any],
+    ) -> None:
+        """Delivers notification to global channels."""
         for ch in channels:
             try:
                 events = ch.get("events") or []
@@ -641,23 +875,36 @@ class NotificationDispatcher:
                     e,
                 )
 
-        # Resolve owning user id
-        owner_user_id = data.get("user_id") or data.get("requested_by") or data.get("reporter_id")
-        if not owner_user_id and database is not None:
-            if data.get("request_id"):
-                try:
-                    req_row = database.get_request(data["request_id"])
-                    if req_row:
-                        owner_user_id = req_row.get("user_id")
-                except Exception as e:
-                    logger.debug("Could not lookup request owner for notification dispatch: %s", e)
-            elif data.get("issue_id"):
-                try:
-                    issue_row = database.get_issue(data["issue_id"])
-                    if issue_row:
-                        owner_user_id = issue_row.get("user_id")
-                except Exception as e:
-                    logger.debug("Could not lookup issue owner for notification dispatch: %s", e)
+    def _run_dispatch(
+        self,
+        event: str,
+        data: dict[str, Any],
+        db: Optional[Database] = None,
+    ) -> None:
+        """Worker task executing channel sends in an isolated background thread."""
+        database = self._resolve_database(db)
+        if database is None:
+            return
+
+        self._ensure_application_url(data, database)
+
+        try:
+            channels = database.list_notification_channels(enabled_only=True, global_only=True)
+        except Exception as e:
+            logger.warning("Failed to query notification channels for event '%s': %s", event, e)
+            channels = []
+
+        self._deliver_global_channels(channels, event, data)
+
+        # Admin tray delivery: delivered to admins before owner check
+        owner_user_id = _owner_user_id(database, data)
+        skip_user_ids: set[str] = set()
+        if event in USER_FACING_EVENTS and owner_user_id:
+            skip_user_ids.add(str(owner_user_id))
+        if data.get("actor_user_id"):
+            skip_user_ids.add(str(data["actor_user_id"]))
+
+        self._deliver_admin_tray(database, event, data, skip_user_ids)
 
         # Skip per-user delivery if the actor who caused the event is the owner
         actor_user_id = data.get("actor_user_id")
@@ -670,71 +917,8 @@ class NotificationDispatcher:
             return
 
         # User-facing events delivery (isolated strictly to owning user)
-        if event in USER_FACING_EVENTS and owner_user_id and database is not None:
-            in_app, push = database.get_user_notification_pref(owner_user_id, event)
-
-            # In-app inbox
-            if in_app:
-                title, message = self.format_notification(event, data)
-                link = data.get("link")
-                if not link:
-                    if "issue" in event or data.get("issue_id"):
-                        iid = data.get("issue_id") or data.get("id")
-                        link = f"#/requests/issues/{iid}" if iid else "#/requests"
-                    else:
-                        link = "#/requests"
-                try:
-                    database.create_user_notification(
-                        user_id=owner_user_id,
-                        event=event,
-                        title=title,
-                        message=message,
-                        link=link,
-                    )
-                    logger.info("Created in-app notification '%s' for user '%s'", event, owner_user_id)
-                except Exception as e:
-                    logger.warning("Failed to create in-app notification for user '%s' on '%s': %s", owner_user_id, event, e)
-
-            # User's own notification channels
-            try:
-                user_channels = database.list_notification_channels(
-                    enabled_only=True, owner_user_id=owner_user_id
-                )
-            except Exception as e:
-                logger.warning("Failed to query user channels for '%s': %s", owner_user_id, e)
-                user_channels = []
-
-            for uch in user_channels:
-                try:
-                    ch_events = uch.get("events") or []
-                    if event not in ch_events:
-                        continue
-                    self._send_to_channel(uch, event, data, allow_lan=False)
-                    logger.info(
-                        "Delivered user notification '%s' to user channel '%s' for user '%s'",
-                        event,
-                        uch.get("name"),
-                        owner_user_id,
-                    )
-                except (httpx.HTTPError, httpx.TimeoutException, smtplib.SMTPException, ValueError) as e:
-                    logger.warning(
-                        "Delivery failed for user channel '%s' (%s) on event '%s': %s",
-                        uch.get("name"),
-                        uch.get("channel_type"),
-                        event,
-                        e,
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "Unexpected error delivering to user channel '%s' on event '%s': %s",
-                        uch.get("name"),
-                        event,
-                        e,
-                    )
-
-            # Web Push
-            if push:
-                self._send_web_push(database, owner_user_id, event, data)
+        if event in USER_FACING_EVENTS and owner_user_id:
+            self._deliver_user_facing(database, owner_user_id, event, data)
 
     def dispatch(
         self,

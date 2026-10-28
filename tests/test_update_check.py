@@ -18,6 +18,7 @@ from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db, require_core_tier
 from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.config import Config
+from trackseerr.models import NotificationEvent
 from trackseerr.storage import SCHEMA_VERSION, Database
 from trackseerr.task_manager import TASKS, WORKER_THREAD_TASKS
 from trackseerr.update_check import (
@@ -348,6 +349,29 @@ class TestRunUpdateCheck:
             assert state["latest_version"] == "9.9.0"
             assert state["release_url"] == "https://github.com/RonFBurgundy/trackseerr/releases/tag/v9.9.0"
             assert state["error"] is None
+
+    def test_update_available_notifies_once_per_version(self, test_db, test_config):
+        mock_data = {
+            "tag_name": "v9.9.0",
+            "html_url": "https://github.com/RonFBurgundy/trackseerr/releases/tag/v9.9.0",
+            "published_at": "2026-10-05T00:00:00Z",
+        }
+        with patch("trackseerr.update_check.fetch_latest_release", return_value=(mock_data, None)), patch(
+            "trackseerr.notifications.notification_dispatcher.dispatch"
+        ) as mock_dispatch:
+            res = run_update_check(test_db, test_config)
+            assert res["update_available"] is True
+            assert mock_dispatch.call_count == 1
+            args, kwargs = mock_dispatch.call_args
+            assert args[0] == NotificationEvent.UPDATE_AVAILABLE
+            assert args[1]["version"] == "9.9.0"
+            assert test_db.get_kv("update_notified_version") == "9.9.0"
+
+            # Running a second time with the same version does not dispatch again
+            mock_dispatch.reset_mock()
+            res2 = run_update_check(test_db, test_config)
+            assert res2["update_available"] is True
+            mock_dispatch.assert_not_called()
 
     def test_run_404_no_releases_persists_clean_state(self, test_db, test_config):
         with patch("trackseerr.update_check.fetch_latest_release", return_value=(None, None)):

@@ -557,6 +557,26 @@ def _begin(db: Any, task_id: str, trigger: str) -> Optional[int]:
         return None
 
 
+def _notify_task_failed(db: Any, task_id: str, message: Optional[str]) -> None:
+    try:
+        from trackseerr.models import NotificationEvent
+        from trackseerr.notifications import notification_dispatcher
+
+        spec = TASKS.get(task_id)
+        label = spec.name if spec else task_id
+        notification_dispatcher.dispatch(
+            NotificationEvent.TASK_FAILED,
+            {
+                "task_id": task_id,
+                "label": label,
+                "message": message or "Task failed",
+            },
+            db=db,
+        )
+    except (sqlite3.Error, ValueError) as exc:
+        logger.warning("Failed to dispatch task_failed notification for '%s': %s", task_id, safe_exc(exc))
+
+
 def _end(db: Any, run_id: Optional[int], task_id: str, status: str, message: Optional[str], t0: float) -> None:
     if run_id is None:
         return
@@ -564,6 +584,8 @@ def _end(db: Any, run_id: Optional[int], task_id: str, status: str, message: Opt
         db.finish_task_run(run_id, status, _now_iso(), _clip(message), int((time.monotonic() - t0) * 1000))
     except sqlite3.Error as exc:
         logger.warning("Could not record the end of task '%s': %s", task_id, safe_exc(exc))
+    if status == STATUS_FAILED:
+        _notify_task_failed(db, task_id, message)
 
 
 @contextmanager
@@ -619,6 +641,8 @@ def record_finished_run(
         db.finish_task_run(run_id, status, finished.isoformat(), _clip(message), duration_ms)
     except (sqlite3.Error, TypeError, ValueError) as exc:
         logger.warning("Could not record a run of task '%s': %s", task_id, safe_exc(exc))
+    if status == STATUS_FAILED:
+        _notify_task_failed(db, task_id, message)
 
 
 # ---------------------------------------------------------------------------------------------------------------

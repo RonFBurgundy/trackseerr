@@ -3,6 +3,7 @@
 import logging
 import os
 import re
+import sqlite3
 import threading
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional, Tuple
@@ -207,6 +208,23 @@ def run_update_check(db: Database, config: Optional[Config] = None) -> dict[str,
             error=None,
         )
         update_available = is_newer_version(latest_version, current_version)
+        if update_available and db.get_kv("update_notified_version") != latest_version:
+            try:
+                from trackseerr.models import NotificationEvent
+                from trackseerr.notifications import notification_dispatcher
+
+                notification_dispatcher.dispatch(
+                    NotificationEvent.UPDATE_AVAILABLE,
+                    {
+                        "version": latest_version,
+                        "current": current_version,
+                        "release_url": release_url or "",
+                    },
+                    db=db,
+                )
+                db.set_kv("update_notified_version", latest_version)
+            except (sqlite3.Error, ValueError) as exc:
+                logger.warning("Failed to dispatch update_available notification: %s", safe_exc(exc))
         return {
             "current_version": current_version,
             "current_commit": current_commit,

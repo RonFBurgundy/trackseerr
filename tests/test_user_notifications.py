@@ -848,3 +848,53 @@ class TestSelfActionNotificationSuppression:
         alice_inbox, _, _ = test_db.list_user_notifications(alice_id)
         assert len(alice_inbox) == 1
 
+
+def test_admin_prefs_list_all_events_with_admin_only_flag(app_and_client, seeded_users, test_db, test_config):
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    res = client.get("/api/account/notifications/prefs", headers=admin_headers)
+    assert res.status_code == status.HTTP_200_OK
+    items = res.json()
+    all_events = {e.value for e in NotificationEvent}
+    returned_events = {item["event"] for item in items}
+    assert returned_events == all_events
+
+    for item in items:
+        ev = item["event"]
+        if ev in USER_FACING_EVENTS:
+            assert item["admin_only"] is False
+        else:
+            assert item["admin_only"] is True
+
+
+def test_non_admin_prefs_only_user_events(app_and_client, seeded_users, test_db, test_config):
+    _, client = app_and_client
+    alice_headers = _auth_headers(seeded_users["alice"], test_db, test_config)
+    res = client.get("/api/account/notifications/prefs", headers=alice_headers)
+    assert res.status_code == status.HTTP_200_OK
+    items = res.json()
+    returned_events = {item["event"] for item in items}
+    assert returned_events == USER_FACING_EVENTS
+
+    for item in items:
+        assert item["admin_only"] is False
+
+
+def test_non_admin_cannot_set_admin_event(app_and_client, seeded_users, test_db, test_config):
+    _, client = app_and_client
+    alice_headers = _auth_headers(seeded_users["alice"], test_db, test_config)
+    # Attempt to update preference for an admin-only event
+    res = client.put(
+        "/api/account/notifications/prefs/health_issue",
+        json={"in_app": True, "push": True},
+        headers=alice_headers,
+    )
+    assert res.status_code == status.HTTP_400_BAD_REQUEST
+
+    # Non-admin attempting to get preference for an admin-only event also gets 400
+    res_get = client.get(
+        "/api/account/notifications/prefs/health_issue",
+        headers=alice_headers,
+    )
+    assert res_get.status_code == status.HTTP_400_BAD_REQUEST
+

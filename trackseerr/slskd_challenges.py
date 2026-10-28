@@ -142,20 +142,20 @@ def _route_around(db: Database, driver: Any, item: dict[str, Any], username: str
 
 
 def _notify_admins(db: Database, row: dict[str, Any]) -> None:
-    for user in db.list_users():
-        if not user.get("is_admin") or user.get("disabled"):
-            continue
-        try:
-            db.create_user_notification(
-                user["id"],
-                "slskd_challenge",
-                "A Soulseek sharer asked for a reply",
-                f"{row['username']} wants a chat reply before sharing \"{row['download_title'] or 'a download'}\". "
-                "Answer it in Activity → Needs review.",
-                link="#/activity/review",
-            )
-        except sqlite3.Error as exc:
-            logger.warning("Could not notify admin %s of a slskd challenge: %s", user.get("id"), safe_exc(exc))
+    try:
+        from trackseerr.models import NotificationEvent
+        from trackseerr.notifications import notification_dispatcher
+
+        notification_dispatcher.dispatch(
+            NotificationEvent.SLSKD_CHALLENGE,
+            {
+                "username": row.get("username"),
+                "download_title": row.get("download_title") or "a download",
+            },
+            db=db,
+        )
+    except (sqlite3.Error, ValueError) as exc:
+        logger.warning("Could not dispatch slskd_challenge notification: %s", safe_exc(exc))
 
 
 def reply_to_challenge(
