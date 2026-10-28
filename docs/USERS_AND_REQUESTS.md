@@ -9,6 +9,7 @@
 - [Issues](#issues)
 - [Account security](#account-security)
 - [User notifications](#user-notifications)
+- [Admin alerts](#admin-alerts)
 
 ## Signing in
 
@@ -147,3 +148,23 @@ Configure notifications in **Settings > Account**.
 
 In the two-container setup, user notifications work through the gateway. Requests and settings forward to the core automatically.
 
+## Admin alerts
+
+Admins can also get alerts about the server itself. Each alert can go to the bell inbox, to browser push, and to any channel in **Settings > Requests > Notifications**. Turn each one on or off per channel, and for yourself in **Settings > Account**.
+
+Alerts you can turn on:
+
+- an indexer, download client or media server stops working, and when it works again
+- free disk space on the library or download folder drops below your limit
+- a download stops making progress
+- a finished download needs a manual import
+- a scheduled task fails (at most once an hour per task)
+- a new version of TrackSeerr is out
+- a new user signs in for the first time
+- a user reaches their request limit
+- a Soulseek sharer asks for a chat reply
+- new requests and issue reports
+
+TrackSeerr checks its services every 5 minutes. **Settings > System > Status** shows each check under **Health**, with a **Check now** button. Under **Alert thresholds** you set how long a service must be down before you are told, the free-space limit, when a download counts as stalled, and how often an unresolved problem is repeated. You get one alert when something breaks and one when it recovers, not one every 5 minutes.
+
+New alerts start off on existing channels. Open each channel and turn on the ones you want. Busy alerts such as "download started" start off in the admin inbox too.
