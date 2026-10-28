@@ -147,6 +147,47 @@ def test_failed_run_dispatches_task_failed(db):
         assert args[1]["message"] == "poll failed"
 
 
+def test_task_failed_alert_throttled_within_hour(db):
+    with patch("trackseerr.notifications.notification_dispatcher.dispatch") as mock_dispatch:
+        task_manager.record_finished_run(
+            db, "download_queue_monitor", "scheduled", time.monotonic() - 0.1, "fail 1", status=task_manager.STATUS_FAILED
+        )
+        task_manager.record_finished_run(
+            db, "download_queue_monitor", "scheduled", time.monotonic() - 0.1, "fail 2", status=task_manager.STATUS_FAILED
+        )
+        assert mock_dispatch.call_count == 1
+        args, _ = mock_dispatch.call_args
+        assert args[0] == NotificationEvent.TASK_FAILED
+        assert args[1]["task_id"] == "download_queue_monitor"
+
+
+def test_task_failed_alert_again_after_cooldown(db):
+    old_timestamp = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    db.set_kv("task_failed_notified:download_queue_monitor", old_timestamp)
+
+    with patch("trackseerr.notifications.notification_dispatcher.dispatch") as mock_dispatch:
+        task_manager.record_finished_run(
+            db, "download_queue_monitor", "scheduled", time.monotonic() - 0.1, "fail again", status=task_manager.STATUS_FAILED
+        )
+        assert mock_dispatch.call_count == 1
+        args, _ = mock_dispatch.call_args
+        assert args[0] == NotificationEvent.TASK_FAILED
+        assert args[1]["task_id"] == "download_queue_monitor"
+
+
+def test_task_failed_throttle_is_per_task(db):
+    with patch("trackseerr.notifications.notification_dispatcher.dispatch") as mock_dispatch:
+        task_manager.record_finished_run(
+            db, "download_queue_monitor", "scheduled", time.monotonic() - 0.1, "poll failed", status=task_manager.STATUS_FAILED
+        )
+        task_manager.record_finished_run(
+            db, "seed_cleanup", "scheduled", time.monotonic() - 0.1, "cleanup failed", status=task_manager.STATUS_FAILED
+        )
+        assert mock_dispatch.call_count == 2
+        calls = [c[0][1]["task_id"] for c in mock_dispatch.call_args_list]
+        assert calls == ["download_queue_monitor", "seed_cleanup"]
+
+
 def test_success_does_not_dispatch(db):
     with patch("trackseerr.notifications.notification_dispatcher.dispatch") as mock_dispatch:
         with task_manager.record_task_run(db, "seed_cleanup", "manual") as run:
