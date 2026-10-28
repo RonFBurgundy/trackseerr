@@ -21,10 +21,10 @@ import { useUserWebPush } from '@/hooks/useUserWebPush';
 import { useUserNotificationPrefs } from '@/hooks/useUserNotificationPrefs';
 import { useUserChannels } from '@/hooks/useUserChannels';
 import { useUserChannelEditor } from '@/hooks/useUserChannelEditor';
-import { USER_NOTIFICATION_EVENTS } from '@/types/userNotifications';
 import {
   NOTIFICATION_CHANNEL_TYPE_LABELS,
   NOTIFICATION_EVENT_LABELS,
+  NOTIFICATION_EVENT_GROUPS,
 } from '@/types/notifications';
 import { UserChannelModal } from '@/components/notifications/UserChannelModal';
 
@@ -164,55 +164,127 @@ export const UserNotificationsSection: React.FC<UserNotificationsSectionProps> =
             <CassetteLoader size="sm" />
           </div>
         ) : (
-          <div className="divide-y divide-[#1f1f1f] border-t border-b border-[#1f1f1f]">
-            <div className="grid grid-cols-[1fr_80px_80px] sm:grid-cols-[1fr_100px_100px] gap-2 py-2 text-[11px] font-mono uppercase text-neutral-400 font-bold">
-              <span>Event</span>
-              <span className="text-center">Inbox</span>
-              <span className="text-center">Push</span>
+          <div className="space-y-6">
+            <div className="divide-y divide-[#1f1f1f] border-t border-b border-[#1f1f1f]">
+              <div className="grid grid-cols-[1fr_80px_80px] sm:grid-cols-[1fr_100px_100px] gap-2 py-2 text-[11px] font-mono uppercase text-neutral-400 font-bold">
+                <span>Event</span>
+                <span className="text-center">Inbox</span>
+                <span className="text-center">Push</span>
+              </div>
+
+              {prefsHook.prefs
+                .filter((p) => !p.admin_only)
+                .map((pref) => {
+                  const label = NOTIFICATION_EVENT_LABELS[pref.event] || pref.event;
+                  const inAppSaving = prefsHook.savingKey === `${pref.event}:in_app`;
+                  const pushSaving = prefsHook.savingKey === `${pref.event}:push`;
+
+                  return (
+                    <div
+                      key={pref.event}
+                      className="grid grid-cols-[1fr_80px_80px] sm:grid-cols-[1fr_100px_100px] gap-2 py-2.5 items-center"
+                    >
+                      <span className="text-xs font-mono text-neutral-200 truncate">
+                        {label}
+                      </span>
+
+                      <div className="flex justify-center">
+                        <TactileSwitch
+                          id={`pref-${pref.event}-in-app`}
+                          name={`pref_${pref.event}_in_app`}
+                          checked={pref.in_app}
+                          disabled={inAppSaving}
+                          onChange={() => void prefsHook.togglePref(pref.event, 'in_app')}
+                          ariaLabel={`Toggle inbox notification for ${label}`}
+                        />
+                      </div>
+
+                      <div className="flex justify-center">
+                        <TactileSwitch
+                          id={`pref-${pref.event}-push`}
+                          name={`pref_${pref.event}_push`}
+                          checked={pref.push}
+                          disabled={pushSaving}
+                          onChange={() => void prefsHook.togglePref(pref.event, 'push')}
+                          ariaLabel={`Toggle push notification for ${label}`}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
 
-            {USER_NOTIFICATION_EVENTS.map((event) => {
-              const pref = prefsHook.prefs.find((p) => p.event === event.id) || {
-                event: event.id,
-                in_app: true,
-                push: true,
-              };
-              const inAppSaving = prefsHook.savingKey === `${event.id}:in_app`;
-              const pushSaving = prefsHook.savingKey === `${event.id}:push`;
-
-              return (
-                <div
-                  key={event.id}
-                  className="grid grid-cols-[1fr_80px_80px] sm:grid-cols-[1fr_100px_100px] gap-2 py-2.5 items-center"
-                >
-                  <span className="text-xs font-mono text-neutral-200 truncate">
-                    {event.label}
-                  </span>
-
-                  <div className="flex justify-center">
-                    <TactileSwitch
-                      id={`pref-${event.id}-in-app`}
-                      name={`pref_${event.id}_in_app`}
-                      checked={pref.in_app}
-                      disabled={inAppSaving}
-                      onChange={() => void prefsHook.togglePref(event.id, 'in_app')}
-                      ariaLabel={`Toggle inbox notification for ${event.label}`}
-                    />
-                  </div>
-
-                  <div className="flex justify-center">
-                    <TactileSwitch
-                      id={`pref-${event.id}-push`}
-                      name={`pref_${event.id}_push`}
-                      checked={pref.push}
-                      disabled={pushSaving}
-                      onChange={() => void prefsHook.togglePref(event.id, 'push')}
-                      ariaLabel={`Toggle push notification for ${event.label}`}
-                    />
-                  </div>
+            {prefsHook.prefs.some((p) => p.admin_only) && (
+              <div className="space-y-4 pt-2">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-white">
+                    Server alerts (admins)
+                  </h4>
                 </div>
-              );
-            })}
+
+                {NOTIFICATION_EVENT_GROUPS.map((group) => {
+                  const adminPrefs = prefsHook.prefs.filter((p) => p.admin_only);
+                  const groupPrefs = group.events
+                    .map((evId) => adminPrefs.find((p) => p.event === evId))
+                    .filter((p): p is typeof adminPrefs[number] => Boolean(p));
+
+                  if (groupPrefs.length === 0) return null;
+
+                  return (
+                    <div key={group.title} className="space-y-2">
+                      <h5 className="text-[11px] font-mono uppercase tracking-wider text-[var(--accent-amber)] font-bold">
+                        {group.title}
+                      </h5>
+                      <div className="divide-y divide-[#1f1f1f] border-t border-b border-[#1f1f1f]">
+                        <div className="grid grid-cols-[1fr_80px_80px] sm:grid-cols-[1fr_100px_100px] gap-2 py-2 text-[11px] font-mono uppercase text-neutral-400 font-bold">
+                          <span>Event</span>
+                          <span className="text-center">Inbox</span>
+                          <span className="text-center">Push</span>
+                        </div>
+                        {groupPrefs.map((pref) => {
+                          const label = NOTIFICATION_EVENT_LABELS[pref.event] || pref.event;
+                          const inAppSaving = prefsHook.savingKey === `${pref.event}:in_app`;
+                          const pushSaving = prefsHook.savingKey === `${pref.event}:push`;
+
+                          return (
+                            <div
+                              key={pref.event}
+                              className="grid grid-cols-[1fr_80px_80px] sm:grid-cols-[1fr_100px_100px] gap-2 py-2.5 items-center"
+                            >
+                              <span className="text-xs font-mono text-neutral-200 truncate">
+                                {label}
+                              </span>
+
+                              <div className="flex justify-center">
+                                <TactileSwitch
+                                  id={`pref-${pref.event}-in-app`}
+                                  name={`pref_${pref.event}_in_app`}
+                                  checked={pref.in_app}
+                                  disabled={inAppSaving}
+                                  onChange={() => void prefsHook.togglePref(pref.event, 'in_app')}
+                                  ariaLabel={`Toggle inbox notification for ${label}`}
+                                />
+                              </div>
+
+                              <div className="flex justify-center">
+                                <TactileSwitch
+                                  id={`pref-${pref.event}-push`}
+                                  name={`pref_${pref.event}_push`}
+                                  checked={pref.push}
+                                  disabled={pushSaving}
+                                  onChange={() => void prefsHook.togglePref(pref.event, 'push')}
+                                  ariaLabel={`Toggle push notification for ${label}`}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </MachinedCard>

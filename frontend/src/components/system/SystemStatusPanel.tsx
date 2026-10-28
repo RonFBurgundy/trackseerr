@@ -10,6 +10,7 @@ import type { LibraryManagerMode, LidarrHealthItem } from '@/types/models';
 import { formatDuration, formatPauseSeconds } from './formatters';
 import { ChangelogModal } from './ChangelogModal';
 import { UpdatesCard } from './UpdatesCard';
+import { SystemHealthCard } from './SystemHealthCard';
 import { useUpdateCheck, type UseUpdateCheckReturn } from '@/hooks';
 
 export interface SystemStatusPanelProps {
@@ -60,6 +61,7 @@ export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, li
   return (
     <div className="space-y-6">
       {isCore && <RequestPortalCard />}
+      {isCore && <SystemHealthCard />}
 
       <MachinedCard className="p-3 sm:p-6 max-w-2xl space-y-4">
         <h4 className="text-sm font-bold uppercase font-mono text-white">System Diagnostics</h4>

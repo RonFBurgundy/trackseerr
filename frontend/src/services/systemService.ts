@@ -157,3 +157,20 @@ export async function updateSystemUpdateSettings(enabled: boolean): Promise<Sche
   });
 }
 
+export async function getSystemHealth(): Promise<Schema<'SystemHealthResponse'>> {
+  return await apiRequest<Schema<'SystemHealthResponse'>>('/api/system/health');
+}
+
+export async function getHealthSettings(): Promise<Schema<'HealthSettings'>> {
+  return await apiRequest<Schema<'HealthSettings'>>('/api/system/health/settings');
+}
+
+export async function updateHealthSettings(
+  body: Schema<'HealthSettings'>
+): Promise<Schema<'HealthSettings'>> {
+  return await apiRequest<Schema<'HealthSettings'>>('/api/system/health/settings', {
+    method: 'PUT',
+    body,
+  });
+}
+

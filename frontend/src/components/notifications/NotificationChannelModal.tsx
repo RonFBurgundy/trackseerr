@@ -8,6 +8,7 @@ import {
   NOTIFICATION_CHANNEL_TYPES,
   NOTIFICATION_CHANNEL_TYPE_LABELS,
   NOTIFICATION_EVENTS,
+  NOTIFICATION_EVENT_GROUPS,
   NOTIFICATION_FIELDS,
   hasStoredSecret,
   isNotificationChannelType,
@@ -127,25 +128,69 @@ export const NotificationChannelModal: React.FC<NotificationChannelModalProps> =
           />
         ))}
 
-        <fieldset className="space-y-2">
-          <legend className="block text-xs uppercase font-mono tracking-wider text-neutral-300 mb-1">Events</legend>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
-            {NOTIFICATION_EVENTS.map((ev) => {
-              const id = `nc-event-${ev.id}`;
-              return (
-                <div key={ev.id} className="flex items-center min-h-[36px]">
-                  <TactileSwitch
-                    id={id}
-                    name="events"
-                    label={ev.label}
-                    checked={draft.events.includes(ev.id)}
-                    onChange={() => editor.toggleEvent(ev.id)}
-                  />
+        {NOTIFICATION_EVENT_GROUPS.map((group) => {
+          const allSelected = group.events.every((e) => draft.events.includes(e));
+          const noneSelected = group.events.every((e) => !draft.events.includes(e));
+
+          const selectAll = () => {
+            const next = Array.from(new Set([...draft.events, ...group.events]));
+            editor.setEvents(next);
+          };
+
+          const selectNone = () => {
+            const next = draft.events.filter((e) => !group.events.includes(e));
+            editor.setEvents(next);
+          };
+
+          return (
+            <fieldset key={group.title} className="space-y-2">
+              <legend className="w-full">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="block text-xs uppercase font-mono tracking-wider text-neutral-300">
+                    {group.title}
+                  </span>
+                  <div className="flex items-center gap-2 text-[11px] font-mono">
+                    <button
+                      type="button"
+                      onClick={selectAll}
+                      disabled={allSelected}
+                      className="text-neutral-400 hover:text-white disabled:opacity-40 disabled:hover:text-neutral-400 uppercase tracking-wider"
+                    >
+                      All
+                    </button>
+                    <span className="text-neutral-600">/</span>
+                    <button
+                      type="button"
+                      onClick={selectNone}
+                      disabled={noneSelected}
+                      className="text-neutral-400 hover:text-white disabled:opacity-40 disabled:hover:text-neutral-400 uppercase tracking-wider"
+                    >
+                      None
+                    </button>
+                  </div>
                 </div>
-              );
-            })}
-          </div>
-        </fieldset>
+              </legend>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+                {group.events.map((eventId) => {
+                  const ev = NOTIFICATION_EVENTS.find((e) => e.id === eventId);
+                  const label = ev ? ev.label : eventId;
+                  const id = `nc-event-${eventId}`;
+                  return (
+                    <div key={eventId} className="flex items-center min-h-[36px]">
+                      <TactileSwitch
+                        id={id}
+                        name="events"
+                        label={label}
+                        checked={draft.events.includes(eventId)}
+                        onChange={() => editor.toggleEvent(eventId)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </fieldset>
+          );
+        })}
 
         <TactileSwitch
           id="nc-enabled"

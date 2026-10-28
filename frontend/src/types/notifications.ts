@@ -37,7 +37,16 @@ export type NotificationEventId =
   | 'issue_updated'
   | 'issue_resolved'
   | 'quality_unavailable'
-  | 'source_unavailable';
+  | 'source_unavailable'
+  | 'health_issue'
+  | 'health_recovered'
+  | 'download_stalled'
+  | 'import_needs_attention'
+  | 'task_failed'
+  | 'update_available'
+  | 'user_joined'
+  | 'request_quota_reached'
+  | 'slskd_challenge';
 
 export const NOTIFICATION_EVENTS: ReadonlyArray<{ id: NotificationEventId; label: string }> = [
   { id: 'request_created', label: 'Request created' },
@@ -51,11 +60,63 @@ export const NOTIFICATION_EVENTS: ReadonlyArray<{ id: NotificationEventId; label
   { id: 'issue_resolved', label: 'Issue resolved' },
   { id: 'quality_unavailable', label: 'Only lower quality found' },
   { id: 'source_unavailable', label: 'Search source disconnected' },
+  { id: 'health_issue', label: 'Service problem' },
+  { id: 'health_recovered', label: 'Service recovered' },
+  { id: 'download_stalled', label: 'Download stalled' },
+  { id: 'import_needs_attention', label: 'Import needs attention' },
+  { id: 'task_failed', label: 'Task failed' },
+  { id: 'update_available', label: 'Update available' },
+  { id: 'user_joined', label: 'New user' },
+  { id: 'request_quota_reached', label: 'Request limit reached' },
+  { id: 'slskd_challenge', label: 'Soulseek chat request' },
 ];
 
 export const NOTIFICATION_EVENT_LABELS: Record<string, string> = Object.fromEntries(
   NOTIFICATION_EVENTS.map((e) => [e.id, e.label])
 );
+
+export interface NotificationEventGroup {
+  title: string;
+  events: NotificationEventId[];
+}
+
+export const NOTIFICATION_EVENT_GROUPS: ReadonlyArray<{ title: string; events: NotificationEventId[] }> = [
+  {
+    title: 'Requests and issues',
+    events: [
+      'request_created',
+      'request_approved',
+      'request_rejected',
+      'request_quota_reached',
+      'issue_reported',
+      'issue_updated',
+      'issue_resolved',
+      'user_joined',
+    ],
+  },
+  {
+    title: 'Downloads and imports',
+    events: [
+      'download_started',
+      'download_failed',
+      'download_stalled',
+      'import_needs_attention',
+      'item_available',
+      'quality_unavailable',
+      'slskd_challenge',
+    ],
+  },
+  {
+    title: 'Server health',
+    events: [
+      'health_issue',
+      'health_recovered',
+      'source_unavailable',
+      'task_failed',
+      'update_available',
+    ],
+  },
+];
 
 export type NotificationFieldKind = 'text' | 'secret' | 'number' | 'boolean';
 
