@@ -230,3 +230,16 @@ def test_number_match_unaffected_by_duration() -> None:
     assert track["id"] == "t1"
     assert strength == "strong"
 
+
+def test_duplicate_title_disambiguated_by_duration_is_weak() -> None:
+    candidates = [
+        {"id": "t1", "title": "Partition", "duration_seconds": 229.0},
+        {"id": "t2", "title": "Partition", "duration_seconds": 138.0},
+    ]
+    meta = {"title": "Partition", "duration_seconds": 227.0}
+    track, strength = reconcile_audio_file_to_track_scored(meta, candidates)
+    assert track is not None
+    assert track["id"] == "t1"
+    assert strength == "weak"
+
+
