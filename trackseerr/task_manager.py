@@ -568,7 +568,30 @@ def _begin(db: Any, task_id: str, trigger: str) -> Optional[int]:
         return None
 
 
+TASK_FAILED_NOTIFY_COOLDOWN_SECONDS = 3600
+
+
 def _notify_task_failed(db: Any, task_id: str, message: Optional[str]) -> None:
+    get_kv = getattr(db, "get_kv", None)
+    if callable(get_kv):
+        key = f"task_failed_notified:{task_id}"
+        try:
+            raw = get_kv(key)
+            if isinstance(raw, str):
+                last_dt = datetime.fromisoformat(raw)
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                age = (datetime.now(timezone.utc) - last_dt).total_seconds()
+                if 0 <= age < TASK_FAILED_NOTIFY_COOLDOWN_SECONDS:
+                    logger.debug(
+                        "Throttling task_failed notification for '%s' (last sent %.1fs ago)",
+                        task_id,
+                        age,
+                    )
+                    return
+        except (sqlite3.Error, ValueError) as exc:
+            logger.debug("Could not read task_failed throttle key for '%s': %s", task_id, safe_exc(exc))
+
     try:
         from trackseerr.models import NotificationEvent
         from trackseerr.notifications import notification_dispatcher
@@ -586,6 +609,14 @@ def _notify_task_failed(db: Any, task_id: str, message: Optional[str]) -> None:
         )
     except (sqlite3.Error, ValueError) as exc:
         logger.warning("Failed to dispatch task_failed notification for '%s': %s", task_id, safe_exc(exc))
+        return
+
+    set_kv = getattr(db, "set_kv", None)
+    if callable(set_kv):
+        try:
+            set_kv(f"task_failed_notified:{task_id}", datetime.now(timezone.utc).isoformat())
+        except (sqlite3.Error, ValueError) as exc:
+            logger.warning("Could not record task_failed notification timestamp for '%s': %s", task_id, safe_exc(exc))
 
 
 def _end(db: Any, run_id: Optional[int], task_id: str, status: str, message: Optional[str], t0: float) -> None:

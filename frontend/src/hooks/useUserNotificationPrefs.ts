@@ -36,6 +36,7 @@ export function useUserNotificationPrefs(
         event: e.id,
         in_app: existing ? existing.in_app : true,
         push: existing ? existing.push : true,
+        admin_only: existing ? existing.admin_only : false,
       };
     });
   }, []);
