@@ -114,6 +114,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Songs requested from a playlist now import into the right album when the playlist names a special edition (for example "BEYONCÉ [Platinum Edition]" lands on "BEYONCÉ"). Before, these downloads waited in the Queue for a manual import. A file whose length is clearly different from the song (such as a live recording of a studio track) is no longer matched by title alone.
 - When slskd loses its connection to the Soulseek network, searches no longer quietly report "0 results" for hours. TrackSeerr pauses searching, asks slskd to reconnect every 10 minutes, shows the failure in the search log, and tells you through System events and any notification channel with "Search source disconnected" ticked (existing channels need it ticked in Settings → Notifications). Failed searches no longer count toward the "Only lower quality found" notice.
 - Playlist sync finds songs you already have in Plex when the artist is spelled or credited differently, such as "Ke$ha" for "Kesha", "The Black Eyed Peas" for "Black Eyed Peas", or "Argy;Alok;Adam Beyer" for "Argy". These no longer show as missing. When Plex has both the original and a remix, the playlist gets the version it asked for.
 - Album and artist art no longer stops loading ("Authentication required") after the app or browser is closed and reopened. The sign-in cookie now lasts as long as your 7-day session and is restored automatically if the browser drops it.
