@@ -279,7 +279,7 @@ export interface paths {
         };
         /**
          * Get user notification preferences
-         * @description Returns notification delivery preferences for all user-facing events.
+         * @description Returns notification delivery preferences for all user-facing or admin events.
          */
         get: operations["get_user_prefs_api_account_notifications_prefs_get"];
         /**
@@ -303,12 +303,12 @@ export interface paths {
         };
         /**
          * Get user notification preference for event
-         * @description Returns notification preference for a specific user-facing event.
+         * @description Returns notification preference for a specific event.
          */
         get: operations["get_user_pref_for_event_api_account_notifications_prefs__event__get"];
         /**
          * Update user notification preference for event
-         * @description Updates notification preference for a specific user-facing event.
+         * @description Updates notification preference for a specific event.
          */
         put: operations["update_user_pref_for_event_api_account_notifications_prefs__event__put"];
         post?: never;
@@ -5976,6 +5976,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/system/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List all system health check states
+         * @description Returns all system health check probe states and latest run timestamp (admin only).
+         */
+        get: operations["get_system_health_api_system_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/health/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get system health check settings
+         * @description Returns current health check thresholds and settings (admin only).
+         */
+        get: operations["get_health_settings_api_system_health_settings_get"];
+        /**
+         * Update system health check settings
+         * @description Updates health check thresholds and settings (admin only).
+         */
+        put: operations["put_health_settings_api_system_health_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/system/lidarr-health": {
         parameters: {
             query?: never;
@@ -8211,6 +8255,56 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HealthCheckItem */
+        HealthCheckItem: {
+            /** Failing Since */
+            failing_since?: string | null;
+            /** Key */
+            key: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Last Checked At */
+            last_checked_at: string;
+            /** Message */
+            message?: string | null;
+            /** State */
+            state: string;
+        };
+        /** HealthSettings */
+        HealthSettings: {
+            /**
+             * Client Fail Minutes
+             * @default 5
+             */
+            client_fail_minutes: number;
+            /**
+             * Disk Free Min Gb
+             * @default 20
+             */
+            disk_free_min_gb: number;
+            /**
+             * Download Stall Minutes
+             * @default 60
+             */
+            download_stall_minutes: number;
+            /**
+             * Indexer Fail Minutes
+             * @default 15
+             */
+            indexer_fail_minutes: number;
+            /**
+             * Media Server Fail Minutes
+             * @default 10
+             */
+            media_server_fail_minutes: number;
+            /**
+             * Renotify Hours
+             * @default 24
+             */
+            renotify_hours: number;
         };
         /** HeartbeatResponse */
         HeartbeatResponse: {
@@ -11348,6 +11442,11 @@ export interface components {
         };
         /** NotificationPrefItem */
         NotificationPrefItem: {
+            /**
+             * Admin Only
+             * @default false
+             */
+            admin_only: boolean;
             /** Event */
             event: string;
             /** In App */
@@ -13791,6 +13890,13 @@ export interface components {
             page_size: number;
             /** Total */
             total: number;
+        };
+        /** SystemHealthResponse */
+        SystemHealthResponse: {
+            /** Checked At */
+            checked_at?: string | null;
+            /** Checks */
+            checks: components["schemas"]["HealthCheckItem"][];
         };
         /** SystemStatusResponse */
         SystemStatusResponse: {
@@ -25355,6 +25461,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SuccessFlag"];
+                };
+            };
+        };
+    };
+    get_system_health_api_system_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemHealthResponse"];
+                };
+            };
+        };
+    };
+    get_health_settings_api_system_health_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthSettings"];
+                };
+            };
+        };
+    };
+    put_health_settings_api_system_health_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HealthSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthSettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
