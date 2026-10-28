@@ -33,6 +33,28 @@ USER_FACING_EVENTS: frozenset[str] = frozenset({
 })
 
 
+def _format_health_notification(
+    event: str, data: dict[str, Any], artist: str, title: str
+) -> Optional[tuple[str, str]]:
+    """Formats system health and download alert notifications."""
+    if event == NotificationEvent.HEALTH_ISSUE.value:
+        label = str(data.get("label") or "System")
+        message = str(data.get("message") or "Problem detected")
+        since = str(data.get("since") or "recently")
+        return f"{label}: problem", f"{message} (failing since {since})."
+    if event == NotificationEvent.HEALTH_RECOVERED.value:
+        label = str(data.get("label") or "System")
+        return f"{label}: back to normal", f"{label} is working again."
+    if event == NotificationEvent.DOWNLOAD_STALLED.value:
+        minutes = data.get("minutes") or 0
+        client = str(data.get("client") or "client")
+        return f"Download stalled: {artist} - {title}", f"No progress for {minutes} minutes on {client}."
+    if event == NotificationEvent.IMPORT_NEEDS_ATTENTION.value:
+        reason = str(data.get("reason") or "Import requires manual attention.")
+        return f"Import needs attention: {artist} - {title}", f"{reason} Open the queue to import it by hand."
+    return None
+
+
 def format_notification(event: str, data: dict[str, Any]) -> tuple[str, str]:
     """Generates user-friendly title and message for a given notification event."""
     artist = str(data.get("artist") or "Unknown Artist")
@@ -40,6 +62,10 @@ def format_notification(event: str, data: dict[str, Any]) -> tuple[str, str]:
     item_type = str(data.get("item_type") or "music")
     username = data.get("username")
     album = data.get("album")
+
+    health_res = _format_health_notification(event, data, artist, title)
+    if health_res is not None:
+        return health_res
 
     if event == NotificationEvent.REQUEST_CREATED.value:
         subj = f"Music Requested: {artist} - {title}"

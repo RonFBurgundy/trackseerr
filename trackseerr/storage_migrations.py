@@ -79,6 +79,7 @@ class MigrationsMixin:
                 (89, self._migration_v89),
                 (90, self._migration_v90),
                 (91, self._migration_v91),
+                (92, self._migration_v92),
             ]
 
             applied = 0
@@ -244,6 +245,34 @@ class MigrationsMixin:
                 until TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (client_id, username_lower)
+            )
+            """
+        )
+
+    def _migration_v92(self, cur: sqlite3.Cursor) -> None:
+        """v92: Add health_checks and health_item_alerts tables."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS health_checks (
+                check_key TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                label TEXT NOT NULL,
+                state TEXT NOT NULL DEFAULT 'ok' CHECK (state IN ('ok','warning','error')),
+                message TEXT,
+                failing_since TEXT,
+                last_checked_at TEXT NOT NULL,
+                notified_state TEXT,
+                notified_at TEXT
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS health_item_alerts (
+                event TEXT NOT NULL,
+                ref TEXT NOT NULL,
+                notified_at TEXT NOT NULL,
+                PRIMARY KEY (event, ref)
             )
             """
         )
