@@ -142,6 +142,7 @@ _MANUAL_RUNNABLE = {
     "mix_generation",
     "backup",
     "update_check",
+    "health_check",
     "track_credits_backfill",
     "acoustid_contribute",
     "mb_release_match",
@@ -855,6 +856,18 @@ def run_scheduled_task(  # noqa: C901, PLR0915
                 run.message = "no releases found"
 
         _run_manual(db, task_id, "ManualUpdateCheckTask", _update)
+
+    elif task_id == "health_check":
+        from trackseerr.system_health import run_health_checks
+
+        def _health(run: RunHandle) -> None:
+            outcome = run_health_checks(db, config)
+            checked = outcome.get("checked", 0)
+            errors = outcome.get("errors", 0)
+            alerts = outcome.get("alerts", 0)
+            run.message = f"{checked} checked, {errors} failing, {alerts} alerts"
+
+        _run_manual(db, task_id, "ManualHealthCheckTask", _health)
 
     elif task_id == "track_credits_backfill":
         def _credits(run: RunHandle) -> None:

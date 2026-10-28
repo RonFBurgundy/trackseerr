@@ -269,6 +269,15 @@ TASKS: dict[str, TaskSpec] = {
             group=GROUP_MAINTENANCE,
         ),
         TaskSpec(
+            "health_check",
+            "Health Checks",
+            "Tests indexers, download clients, the media server and free disk space, and watches for stalled downloads. Sends a notification when something breaks or recovers.",
+            KIND_INTERVAL,
+            5 * _MIN,
+            _presets(_MIN, _HOUR),
+            group=GROUP_MAINTENANCE,
+        ),
+        TaskSpec(
             "track_credits_backfill",
             "Track Artist Credits Backfill",
             "Fills per-track artist credits (performer, featured, remixer) from MusicBrainz and file tags for "
@@ -391,6 +400,8 @@ WORKER_THREAD_TASKS: dict[str, str] = {
     "ManualBackupTask": "backup",
     "UpdateCheckWorkerThread": "update_check",
     "ManualUpdateCheckTask": "update_check",
+    "HealthCheckWorkerThread": "health_check",
+    "ManualHealthCheckTask": "health_check",
     "ManualTrackCreditsTask": "track_credits_backfill",
     "ManualAcoustidContributeTask": "acoustid_contribute",
     "ManualMbReleaseMatchTask": "mb_release_match",
@@ -637,6 +648,7 @@ PAUSABLE_TASKS: frozenset[str] = frozenset({
     "recycle_bin_cleanup",
     "backup",
     "update_check",
+    "health_check",
 })
 
 for _pausable_id in PAUSABLE_TASKS:

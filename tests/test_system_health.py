@@ -453,3 +453,91 @@ def test_health_settings_defaults_and_merge(test_db):
 
     current = test_db.get_health_settings()
     assert current == updated
+
+
+def test_unexpected_probe_error_does_not_stop_other_checks(test_db, test_config):
+    test_db.create_indexer(
+        {
+            "id": "idx-broken",
+            "name": "Exploding Indexer",
+            "host_url": "http://broken.example.com",
+            "indexer_type": "torznab",
+            "api_key": "k1",
+            "enabled": True,
+        }
+    )
+    test_db.create_indexer(
+        {
+            "id": "idx-healthy",
+            "name": "Healthy Indexer",
+            "host_url": "http://healthy.example.com",
+            "indexer_type": "torznab",
+            "api_key": "k2",
+            "enabled": True,
+        }
+    )
+
+    def _make_driver(cfg):
+        driver = MagicMock()
+        if cfg["id"] == "idx-broken":
+            driver.test_connection.side_effect = RuntimeError("Driver exploded")
+        else:
+            driver.test_connection.return_value = (True, "OK")
+        return driver
+
+    usage_ok = MagicMock(total=100 * (1024**3), used=10 * (1024**3), free=90 * (1024**3))
+    with patch("shutil.disk_usage", return_value=usage_ok), patch(
+        "trackseerr.system_health.get_indexer_driver", side_effect=_make_driver
+    ):
+        res = run_health_checks(test_db, test_config)
+        assert res["checked"] >= 2
+        chk1 = test_db.get_health_check("indexer:idx-broken")
+        assert chk1 is not None
+        assert chk1["state"] in ("warning", "error")
+        assert "Driver exploded" in chk1["message"] or "RuntimeError" in chk1["message"]
+
+        chk2 = test_db.get_health_check("indexer:idx-healthy")
+        assert chk2 is not None
+        assert chk2["state"] == "ok"
+
+
+def test_stall_alert_names_client(test_db, test_config):
+    test_db.create_download_client(
+        {
+            "id": "c1",
+            "name": "Deluge Downloader",
+            "driver_type": "deluge",
+            "host_url": "http://127.0.0.1:8112",
+            "enabled": False,
+        }
+    )
+
+    now0 = datetime.now(timezone.utc)
+    past = (now0 - timedelta(minutes=120)).strftime("%Y-%m-%d %H:%M:%S")
+    test_db.create_active_download(
+        {
+            "id": "dl-stalled",
+            "client_id": "c1",
+            "title": "Around the World",
+            "artist": "Daft Punk",
+            "status": DownloadStatus.DOWNLOADING.value,
+        }
+    )
+    with test_db._lock:
+        test_db.conn.execute(
+            "UPDATE active_downloads SET progress_updated_at = ? WHERE id = 'dl-stalled'",
+            (past,),
+        )
+        test_db.conn.commit()
+
+    usage_ok = MagicMock(total=100 * (1024**3), used=10 * (1024**3), free=90 * (1024**3))
+    with patch("shutil.disk_usage", return_value=usage_ok), patch(
+        "trackseerr.system_health.notification_dispatcher.dispatch"
+    ) as mock_dispatch:
+        res = run_health_checks(test_db, test_config, now=now0)
+        assert res["alerts"] == 1
+        assert mock_dispatch.call_count == 1
+        args, _ = mock_dispatch.call_args
+        assert args[0] == NotificationEvent.DOWNLOAD_STALLED
+        assert args[1]["client"] == "Deluge Downloader"
+

@@ -6,6 +6,8 @@ derive from ``ApiModel`` there. The SSE stream and the log download are not mode
 
 from typing import Any, Optional
 
+from pydantic import Field
+
 from trackseerr.api.response_models import ApiModel
 
 
@@ -151,4 +153,29 @@ class SystemUpdateResponse(ApiModel):
 
 class UpdateSettingsPayload(ApiModel):
     enabled: bool
+
+
+class HealthCheckItem(ApiModel):
+    key: str
+    kind: str
+    label: str
+    state: str
+    message: Optional[str] = None
+    failing_since: Optional[str] = None
+    last_checked_at: str
+
+
+class SystemHealthResponse(ApiModel):
+    checks: list[HealthCheckItem]
+    checked_at: Optional[str] = None
+
+
+class HealthSettings(ApiModel):
+    indexer_fail_minutes: int = Field(default=15, ge=0, le=10080)
+    client_fail_minutes: int = Field(default=5, ge=0, le=10080)
+    media_server_fail_minutes: int = Field(default=10, ge=0, le=10080)
+    disk_free_min_gb: int = Field(default=20, ge=0, le=100000)
+    download_stall_minutes: int = Field(default=60, ge=0, le=10080)
+    renotify_hours: int = Field(default=24, ge=0, le=10080)
+
 

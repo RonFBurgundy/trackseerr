@@ -205,11 +205,28 @@ def test_pausable_tasks_are_interval_tasks():
         "recycle_bin_cleanup",
         "backup",
         "update_check",
+        "health_check",
     }
     assert task_manager.PAUSABLE_TASKS == expected
     for tid in task_manager.PAUSABLE_TASKS:
         assert tid in task_manager.TASKS
         assert task_manager.TASKS[tid].kind == task_manager.KIND_INTERVAL
+
+
+def test_health_check_task_registered_and_pausable(db):
+    spec = task_manager.TASKS.get("health_check")
+    assert spec is not None
+    assert spec.name == "Health Checks"
+    assert spec.kind == task_manager.KIND_INTERVAL
+    assert spec.default_interval_seconds == 300
+    assert spec.group == task_manager.GROUP_MAINTENANCE
+    assert "health_check" in task_manager.PAUSABLE_TASKS
+
+    assert task_manager.is_paused(db, "health_check") is False
+    task_manager.set_paused(db, "health_check", True)
+    assert task_manager.is_paused(db, "health_check") is True
+    task_manager.set_paused(db, "health_check", False)
+    assert task_manager.is_paused(db, "health_check") is False
 
 
 def test_set_paused_round_trip_and_rejects_non_pausable(db):
