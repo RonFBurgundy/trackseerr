@@ -11,8 +11,9 @@ import logging
 import os
 import shutil
 import sqlite3
+import threading
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable, Optional
 
 import httpx
 
@@ -23,6 +24,11 @@ from trackseerr.media_servers import get_media_server
 from trackseerr.models import DownloadStatus, NotificationEvent
 from trackseerr.notifications import notification_dispatcher
 from trackseerr.redaction import redact_text, safe_exc
+from trackseerr.task_manager import (
+    TRIGGER_SCHEDULED,
+    record_task_run,
+    wait_for_next_cycle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +206,10 @@ def _check_indexers(
             logger.warning("Indexer probe exception for %s: %s", key, safe_exc(exc))
             ok = False
             msg = redact_text(str(exc)) or type(exc).__name__
+        except Exception as exc:  # a third-party driver error must not stop the other checks
+            logger.warning("Indexer probe failed: %s", safe_exc(exc))
+            ok = False
+            msg = redact_text(str(exc)) or type(exc).__name__
 
         state = observe(
             db,
@@ -257,6 +267,10 @@ def _check_download_clients(
             logger.warning("Download client probe exception for %s: %s", key, safe_exc(exc))
             ok = False
             msg = redact_text(str(exc)) or type(exc).__name__
+        except Exception as exc:  # a third-party driver error must not stop the other checks
+            logger.warning("Download client probe failed: %s", safe_exc(exc))
+            ok = False
+            msg = redact_text(str(exc)) or type(exc).__name__
 
         state = observe(
             db,
@@ -309,6 +323,10 @@ def _check_media_server(
             msg = conn_test.message or ("Connected" if ok else "cannot be reached")
     except (httpx.HTTPError, OSError, ValueError, TypeError, sqlite3.Error) as exc:
         logger.warning("Media server probe exception: %s", safe_exc(exc))
+        ok = False
+        msg = redact_text(str(exc)) or type(exc).__name__
+    except Exception as exc:  # a third-party driver error must not stop the other checks
+        logger.warning("Media server probe failed: %s", safe_exc(exc))
         ok = False
         msg = redact_text(str(exc)) or type(exc).__name__
 
@@ -433,6 +451,7 @@ def _check_stalled_downloads(
         logger.warning("Failed to list active downloads for stall check: %s", safe_exc(exc))
         return 0
 
+    client_cache: dict[str, str] = {}
     for dl in downloads:
         dl_id = str(dl.get("id") or "")
         if not dl_id:
@@ -448,7 +467,19 @@ def _check_stalled_downloads(
         ):
             artist = dl.get("artist") or "Unknown Artist"
             title = dl.get("title") or "Unknown Title"
-            client = dl.get("client_name") or "client"
+            client_id = dl.get("client_id")
+            if client_id:
+                cid_str = str(client_id)
+                if cid_str not in client_cache:
+                    try:
+                        c_row = db.get_download_client(cid_str)
+                        client_cache[cid_str] = (c_row.get("name") if c_row else None) or "the download client"
+                    except (sqlite3.Error, AttributeError, ValueError) as exc:
+                        logger.warning("Failed to resolve client name for %s: %s", cid_str, safe_exc(exc))
+                        client_cache[cid_str] = "the download client"
+                client = client_cache[cid_str]
+            else:
+                client = "the download client"
             notification_dispatcher.dispatch(
                 NotificationEvent.DOWNLOAD_STALLED,
                 {
@@ -563,3 +594,71 @@ def run_health_checks(
         "warnings": warnings,
         "alerts": alerts,
     }
+
+
+class HealthCheckWorker:
+    """Background worker for periodic system health checks."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._is_running = False
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def start(
+        self,
+        db: Any,
+        config: Any,
+        initial_delay: float = 90.0,
+        interval_seconds: float = 300.0,
+        interval_fn: Optional[Callable[[], float]] = None,
+    ) -> bool:
+        with self._lock:
+            if self._is_running:
+                return False
+            self._stop_event.clear()
+            self._is_running = True
+
+        cycle_interval = interval_fn or (lambda: float(interval_seconds))
+
+        def _loop() -> None:
+            if not self._stop_event.wait(initial_delay):
+                while not self._stop_event.is_set():
+                    self.run_once(db, config)
+                    if wait_for_next_cycle(self._stop_event, cycle_interval):
+                        break
+            with self._lock:
+                self._is_running = False
+
+        self._thread = threading.Thread(target=_loop, daemon=True, name="HealthCheckWorkerThread")
+        self._thread.start()
+        return True
+
+    def run_once(self, db: Any, config: Any) -> bool:
+        """Runs one scheduled health check under record_task_run."""
+        try:
+            with record_task_run(db, "health_check", TRIGGER_SCHEDULED) as run:
+                result = run_health_checks(db, config)
+                checked = result.get("checked", 0)
+                errors = result.get("errors", 0)
+                alerts = result.get("alerts", 0)
+                if checked == 0 and alerts == 0:
+                    run.discard = True
+                else:
+                    run.message = f"{checked} checked, {errors} failing, {alerts} alerts"
+            return True
+        except Exception as exc:
+            logger.error("HealthCheckWorker: check failed: %s", safe_exc(exc))
+            return False
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread() and thread.is_alive():
+            thread.join(timeout=5.0)
+        with self._lock:
+            self._is_running = False
+
+
+health_check_worker = HealthCheckWorker()
+

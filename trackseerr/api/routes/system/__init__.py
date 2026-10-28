@@ -2,10 +2,10 @@
 
 from fastapi import APIRouter
 
-from . import logs, status, tasks, updates
+from . import health, logs, status, tasks, updates
 
 router = APIRouter()
-for _module in (status, logs, tasks, updates):
+for _module in (status, logs, tasks, updates, health):
     router.routes.extend(_module.router.routes)
 
 __all__ = ["router"]
