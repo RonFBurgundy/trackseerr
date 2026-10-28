@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { NotificationPrefItem } from '@/types/userNotifications';
-import { USER_NOTIFICATION_EVENTS } from '@/types/userNotifications';
 import {
   getUserPrefs,
   updateUserPref,
@@ -25,34 +24,18 @@ export function useUserNotificationPrefs(
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const normalizePrefs = useCallback((stored: NotificationPrefItem[]): NotificationPrefItem[] => {
-    const map = new Map<string, NotificationPrefItem>();
-    for (const p of stored) {
-      map.set(p.event, p);
-    }
-    return USER_NOTIFICATION_EVENTS.map((e) => {
-      const existing = map.get(e.id);
-      return {
-        event: e.id,
-        in_app: existing ? existing.in_app : true,
-        push: existing ? existing.push : true,
-        admin_only: existing ? existing.admin_only : false,
-      };
-    });
-  }, []);
-
   const refresh = useCallback(async (): Promise<void> => {
     if (!enabled) return;
     try {
       const data = await getUserPrefs();
-      setPrefs(normalizePrefs(data));
+      setPrefs(data);
       setError(null);
     } catch (err: unknown) {
       const msg = errorMessage(err, 'Failed to load notification preferences');
       setError(msg);
       onToast?.(msg, 'error');
     }
-  }, [enabled, normalizePrefs, onToast]);
+  }, [enabled, onToast]);
 
   useEffect(() => {
     if (!enabled) {
@@ -64,7 +47,7 @@ export function useUserNotificationPrefs(
     getUserPrefs()
       .then((data) => {
         if (!cancelled) {
-          setPrefs(normalizePrefs(data));
+          setPrefs(data);
           setError(null);
         }
       })
@@ -84,7 +67,7 @@ export function useUserNotificationPrefs(
     return () => {
       cancelled = true;
     };
-  }, [enabled, normalizePrefs, onToast]);
+  }, [enabled, onToast]);
 
   const togglePref = useCallback(
     async (event: string, kind: 'in_app' | 'push'): Promise<void> => {

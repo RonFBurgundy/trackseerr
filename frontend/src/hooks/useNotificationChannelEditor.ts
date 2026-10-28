@@ -35,6 +35,7 @@ export interface UseNotificationChannelEditorReturn {
   setType: (type: NotificationChannelType) => void;
   setValue: (key: string, value: string | boolean) => void;
   toggleEvent: (event: NotificationEventId) => void;
+  setEvents: (events: NotificationEventId[]) => void;
   save: () => Promise<void>;
   runTest: () => Promise<void>;
 }
@@ -94,6 +95,11 @@ export function useNotificationChannelEditor(
       })),
     []
   );
+  const setEvents = useCallback(
+    (events: NotificationEventId[]): void =>
+      setDraft((p) => ({ ...p, events })),
+    []
+  );
 
   const save = useCallback(async (): Promise<void> => {
     const invalid = validateNotificationDraft(draft, editing);
@@ -141,6 +147,6 @@ export function useNotificationChannelEditor(
 
   return {
     isOpen, editing, draft, saving, testing, error,
-    openNew, openEdit, close, setName, setEnabled, setType, setValue, toggleEvent, save, runTest,
+    openNew, openEdit, close, setName, setEnabled, setType, setValue, toggleEvent, setEvents, save, runTest,
   };
 }
