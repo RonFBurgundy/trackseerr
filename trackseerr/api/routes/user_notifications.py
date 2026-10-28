@@ -17,8 +17,13 @@ from trackseerr.api.routes.notifications import (
     _reject_placeholders,
 )
 from trackseerr.api.schemas.notifications import DeletedResponse
-from trackseerr.models import NotificationChannel, NotificationChannelType
-from trackseerr.notifications import USER_FACING_EVENTS, notification_dispatcher
+from trackseerr.models import NotificationChannel, NotificationChannelType, NotificationEvent, UserPermission
+from trackseerr.notifications import (
+    ADMIN_DEFAULT_OFF,
+    USER_FACING_EVENTS,
+    admin_pref_default,
+    notification_dispatcher,
+)
 from trackseerr.security import is_safe_service_url
 from trackseerr.storage import Database
 
@@ -84,6 +89,7 @@ class NotificationPrefItem(ApiModel):
     event: str
     in_app: bool
     push: bool
+    admin_only: bool = False
 
 
 class NotificationPrefUpdatePayload(BaseModel):
@@ -259,6 +265,21 @@ def delete_notification(
 # Preferences Endpoints
 # -----------------------------------------------------------------------------
 
+def _is_admin(user: dict[str, Any]) -> bool:
+    """True only for a real admin session or API key; gateway-forwarded principals never qualify."""
+    if user.get("forwarded"):
+        return False
+    user_perms = int(user.get("permissions") if user.get("permissions") is not None else 0)
+    return bool(user.get("is_admin") or (user_perms & int(UserPermission.ADMIN)))
+
+
+def _events_for(user: dict[str, Any]) -> list[str]:
+    """Returns all eligible notification event keys for a user."""
+    if _is_admin(user):
+        return [e.value for e in NotificationEvent]
+    return list(USER_FACING_EVENTS)
+
+
 @router.get(
     "/prefs",
     response_model=list[NotificationPrefItem],
@@ -268,12 +289,24 @@ def get_user_prefs(
     db: Database = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_session_user),
 ) -> list[NotificationPrefItem]:
-    """Returns notification delivery preferences for all user-facing events."""
+    """Returns notification delivery preferences for all user-facing or admin events."""
+    is_admin = _is_admin(current_user)
+    events = _events_for(current_user)
     stored = db.get_all_user_notification_prefs(current_user["id"])
     res: list[NotificationPrefItem] = []
-    for ev in sorted(USER_FACING_EVENTS):
-        pref = stored.get(ev, {"in_app": True, "push": True})
-        res.append(NotificationPrefItem(event=ev, in_app=pref["in_app"], push=pref["push"]))
+    for ev in sorted(events):
+        def_in_app, def_push = admin_pref_default(ev) if is_admin else (True, True)
+        pref = stored.get(ev)
+        in_app = pref["in_app"] if pref is not None else def_in_app
+        push = pref["push"] if pref is not None else def_push
+        res.append(
+            NotificationPrefItem(
+                event=ev,
+                in_app=in_app,
+                push=push,
+                admin_only=(ev not in USER_FACING_EVENTS),
+            )
+        )
     return res
 
 
@@ -287,14 +320,22 @@ def get_user_pref_for_event(
     db: Database = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_session_user),
 ) -> NotificationPrefItem:
-    """Returns notification preference for a specific user-facing event."""
-    if event not in USER_FACING_EVENTS:
+    """Returns notification preference for a specific event."""
+    allowed = _events_for(current_user)
+    if event not in allowed:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid user event '{event}'. Supported: {', '.join(sorted(USER_FACING_EVENTS))}",
+            detail=f"Invalid user event '{event}'. Supported: {', '.join(sorted(allowed))}",
         )
-    in_app, push = db.get_user_notification_pref(current_user["id"], event)
-    return NotificationPrefItem(event=event, in_app=in_app, push=push)
+    is_admin = _is_admin(current_user)
+    def_pref = admin_pref_default(event) if is_admin else (True, True)
+    in_app, push = db.get_user_notification_pref(current_user["id"], event, default=def_pref)
+    return NotificationPrefItem(
+        event=event,
+        in_app=in_app,
+        push=push,
+        admin_only=(event not in USER_FACING_EVENTS),
+    )
 
 
 @router.put(
@@ -308,14 +349,20 @@ def update_user_pref_for_event(
     db: Database = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_session_user),
 ) -> NotificationPrefItem:
-    """Updates notification preference for a specific user-facing event."""
-    if event not in USER_FACING_EVENTS:
+    """Updates notification preference for a specific event."""
+    allowed = _events_for(current_user)
+    if event not in allowed:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid user event '{event}'. Supported: {', '.join(sorted(USER_FACING_EVENTS))}",
+            detail=f"Invalid user event '{event}'. Supported: {', '.join(sorted(allowed))}",
         )
     db.set_user_notification_pref(current_user["id"], event, payload.in_app, payload.push)
-    return NotificationPrefItem(event=event, in_app=payload.in_app, push=payload.push)
+    return NotificationPrefItem(
+        event=event,
+        in_app=payload.in_app,
+        push=payload.push,
+        admin_only=(event not in USER_FACING_EVENTS),
+    )
 
 
 @router.put(
@@ -329,8 +376,9 @@ def update_user_prefs_bulk(
     current_user: dict[str, Any] = Depends(require_session_user),
 ) -> list[NotificationPrefItem]:
     """Updates multiple notification preferences at once."""
+    allowed = set(_events_for(current_user))
     for item in payload.prefs:
-        if item.event in USER_FACING_EVENTS:
+        if item.event in allowed:
             db.set_user_notification_pref(current_user["id"], item.event, item.in_app, item.push)
     return get_user_prefs(db, current_user)
 

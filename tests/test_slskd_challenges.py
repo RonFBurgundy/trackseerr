@@ -6,7 +6,13 @@ from unittest.mock import patch
 import pytest
 
 from trackseerr import slskd_challenges as sc
-from trackseerr.models import ActiveDownload, DownloadClientConfig, DownloadDriverType, DownloadStatus
+from trackseerr.models import (
+    ActiveDownload,
+    DownloadClientConfig,
+    DownloadDriverType,
+    DownloadStatus,
+    NotificationEvent,
+)
 from trackseerr.storage import Database
 
 REAL = (
@@ -103,7 +109,13 @@ def test_scan_records_challenge_gates_peer_and_routes_around(test_db):
     test_db.conn.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (admin["id"],))
     test_db.conn.commit()
     driver, research = FakeDriver({"Sharer": [_msg()]}), Research()
-    assert sc.scan_client(test_db, cfg, driver, NOW, research) == 1
+    with patch("trackseerr.notifications.notification_dispatcher.dispatch") as mock_dispatch:
+        assert sc.scan_client(test_db, cfg, driver, NOW, research) == 1
+        mock_dispatch.assert_called_once_with(
+            NotificationEvent.SLSKD_CHALLENGE,
+            {"username": "Sharer", "download_title": "Artist - X"},
+            db=test_db,
+        )
     row = test_db.get_active_download("dl-1")
     assert row["status"] == DownloadStatus.FAILED.value
     assert row["error_message"] == "Sharer asked for a chat reply before sharing. Trying another source."
@@ -113,9 +125,6 @@ def test_scan_records_challenge_gates_peer_and_routes_around(test_db):
     assert "sharer" in test_db.excluded_slskd_peers("cl-1", NOW.isoformat())
     chal = test_db.list_slskd_challenges()[0]
     assert chal["download_id"] == "dl-1" and chal["expires_at"] is not None
-    notes = test_db.list_user_notifications(admin["id"])[0]
-    assert [n["link"] for n in notes] == ["#/activity/review"]
-    assert test_db.list_user_notifications(other["id"])[0] == []
 
 
 def test_scan_is_idempotent(test_db):

@@ -307,6 +307,41 @@ class TestNotificationDispatcherSenders:
         assert t12 == "Import needs attention: Daft Punk - Discovery"
         assert m12 == "2 unmatched files held. Open the queue to import it by hand."
 
+        t13, m13 = format_notification(
+            "task_failed",
+            {"task_id": "seed_cleanup", "label": "Seed Cleanup", "message": "Disk error"},
+        )
+        assert t13 == "Task failed: Seed Cleanup"
+        assert m13 == "Disk error"
+
+        t14, m14 = format_notification(
+            "update_available",
+            {"version": "1.2.0", "current": "1.1.0", "release_url": "https://github.com/RonFBurgundy/trackseerr/releases/tag/v1.2.0"},
+        )
+        assert t14 == "TrackSeerr 1.2.0 is available"
+        assert m14 == "You are on 1.1.0. Release notes: https://github.com/RonFBurgundy/trackseerr/releases/tag/v1.2.0"
+
+        t15, m15 = format_notification(
+            "user_joined",
+            {"username": "charlie"},
+        )
+        assert t15 == "New user: charlie"
+        assert m15 == "charlie signed in for the first time."
+
+        t16, m16 = format_notification(
+            "request_quota_reached",
+            {"username": "charlie", "message": "Request quota reached for tracks (5 per 1 day)"},
+        )
+        assert t16 == "charlie hit their request limit"
+        assert m16 == "Request quota reached for tracks (5 per 1 day)"
+
+        t17, m17 = format_notification(
+            "slskd_challenge",
+            {"username": "Sharer123", "download_title": "Daft Punk - Discovery"},
+        )
+        assert t17 == "A Soulseek sharer asked for a reply"
+        assert m17 == 'Sharer123 wants a chat reply before sharing "Daft Punk - Discovery". Answer it in Activity → Needs review.'
+
     @patch("httpx.Client.post")
     def test_send_discord_payload_structure(self, mock_post):
         mock_resp = MagicMock()

@@ -18,6 +18,7 @@ from trackseerr.clients.lidarr import LidarrClient
 from trackseerr.config import Config
 from trackseerr.lidarr_migration import LidarrMigrationJob
 from trackseerr.library_scanner import LibraryScanner
+from trackseerr.models import NotificationEvent
 from trackseerr.storage import SCHEMA_VERSION, Database
 from tests.test_system_status import (  # noqa: F401
     app_and_client,
@@ -120,6 +121,40 @@ def test_record_finished_run_writes_a_complete_row(db):
     row = db.list_task_runs("download_queue_monitor", _iso(timedelta(days=-1)))[0]
     assert row["status"] == "success" and row["message"] == "polled=2"
     assert row["duration_ms"] >= 250
+
+
+def test_failed_run_dispatches_task_failed(db):
+    with patch("trackseerr.notifications.notification_dispatcher.dispatch") as mock_dispatch:
+        with pytest.raises(ValueError):
+            with task_manager.record_task_run(db, "seed_cleanup", "manual"):
+                raise ValueError("boom")
+        assert mock_dispatch.call_count == 1
+        args, kwargs = mock_dispatch.call_args
+        assert args[0] == NotificationEvent.TASK_FAILED
+        assert args[1]["task_id"] == "seed_cleanup"
+        assert args[1]["label"] == task_manager.TASKS["seed_cleanup"].name
+        assert "ValueError" in args[1]["message"]
+
+    with patch("trackseerr.notifications.notification_dispatcher.dispatch") as mock_dispatch:
+        task_manager.record_finished_run(
+            db, "download_queue_monitor", "scheduled", time.monotonic() - 0.1, "poll failed", status=task_manager.STATUS_FAILED
+        )
+        assert mock_dispatch.call_count == 1
+        args, kwargs = mock_dispatch.call_args
+        assert args[0] == NotificationEvent.TASK_FAILED
+        assert args[1]["task_id"] == "download_queue_monitor"
+        assert args[1]["label"] == task_manager.TASKS["download_queue_monitor"].name
+        assert args[1]["message"] == "poll failed"
+
+
+def test_success_does_not_dispatch(db):
+    with patch("trackseerr.notifications.notification_dispatcher.dispatch") as mock_dispatch:
+        with task_manager.record_task_run(db, "seed_cleanup", "manual") as run:
+            run.message = "cleaned=1"
+        task_manager.record_finished_run(
+            db, "download_queue_monitor", "scheduled", time.monotonic() - 0.1, "polled=0", status=task_manager.STATUS_SUCCESS
+        )
+        mock_dispatch.assert_not_called()
 
 
 def test_startup_housekeeping_fails_leftover_running_rows(db):

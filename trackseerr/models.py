@@ -625,6 +625,11 @@ class NotificationEvent(str, Enum):
     HEALTH_RECOVERED = "health_recovered"
     DOWNLOAD_STALLED = "download_stalled"
     IMPORT_NEEDS_ATTENTION = "import_needs_attention"
+    TASK_FAILED = "task_failed"
+    UPDATE_AVAILABLE = "update_available"
+    USER_JOINED = "user_joined"
+    REQUEST_QUOTA_REACHED = "request_quota_reached"
+    SLSKD_CHALLENGE = "slskd_challenge"
 
 
 @dataclass

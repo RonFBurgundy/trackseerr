@@ -436,15 +436,17 @@ class NotificationStoreMixin:
             )
             self.conn.commit()
 
-    def get_user_notification_pref(self, user_id: str, event: str) -> tuple[bool, bool]:
-        """Returns (in_app, push) for (user_id, event). Missing row defaults to (True, True)."""
+    def get_user_notification_pref(
+        self, user_id: str, event: str, default: tuple[bool, bool] = (True, True)
+    ) -> tuple[bool, bool]:
+        """Returns (in_app, push) for (user_id, event). Missing row defaults to default."""
         with self._lock:
             row = self.conn.execute(
                 "SELECT in_app, push FROM user_notification_prefs WHERE user_id = ? AND event = ?",
                 (str(user_id), str(event)),
             ).fetchone()
             if not row:
-                return True, True
+                return default
             return bool(row["in_app"]), bool(row["push"])
 
     def get_all_user_notification_prefs(self, user_id: str) -> dict[str, dict[str, bool]]:
