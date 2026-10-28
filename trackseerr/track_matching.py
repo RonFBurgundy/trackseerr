@@ -166,14 +166,20 @@ def reconcile_audio_file_to_track_scored(  # noqa: C901
     if clean_meta:
         file_dur = meta.get("duration") or meta.get("duration_seconds")
         # Exact clean title match
-        exact_title_matches = [
+        title_hits = [
             t
             for t in candidate_tracks
             if clean_library_name(t.get("title") or "") == clean_meta
-            and not _durations_conflict(file_dur, t.get("duration_seconds"))
+        ]
+        exact_title_matches = [
+            t
+            for t in title_hits
+            if not _durations_conflict(file_dur, t.get("duration_seconds"))
         ]
         if len(exact_title_matches) == 1:
-            return exact_title_matches[0], MATCH_STRONG
+            if len(title_hits) == 1:
+                return exact_title_matches[0], MATCH_STRONG
+            return exact_title_matches[0], MATCH_WEAK
         elif len(exact_title_matches) > 1:
             # 3. Duration tolerance match (within 5 seconds) if multiple candidates match title
             if file_dur is not None:
