@@ -782,6 +782,25 @@ CREATE TABLE slskd_gated_peers (
     PRIMARY KEY (client_id, username_lower)
 );
 
+CREATE TABLE health_checks (
+    check_key TEXT PRIMARY KEY,          -- e.g. 'indexer:<id>', 'client:<id>', 'media_server', 'disk:<path>'
+    kind TEXT NOT NULL,                  -- indexer | download_client | media_server | disk
+    label TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'ok' CHECK (state IN ('ok','warning','error')),
+    message TEXT,
+    failing_since TEXT,
+    last_checked_at TEXT NOT NULL,
+    notified_state TEXT,                 -- last state a notification went out for: 'error' | 'ok' | NULL
+    notified_at TEXT
+);
+
+CREATE TABLE health_item_alerts (
+    event TEXT NOT NULL,
+    ref TEXT NOT NULL,                   -- active_downloads.id
+    notified_at TEXT NOT NULL,
+    PRIMARY KEY (event, ref)
+);
+
 CREATE INDEX idx_blocklist_hash ON download_blocklist(info_hash);
 CREATE INDEX idx_blocklist_title ON download_blocklist(source_title);
 CREATE INDEX idx_blocklist_guid ON download_blocklist(release_guid);

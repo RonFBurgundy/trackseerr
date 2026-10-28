@@ -264,6 +264,49 @@ class TestNotificationDispatcherSenders:
         assert t8 == "Soulseek is not connected"
         assert m8 == "Searches are paused until it connects again. Check slskd. Reason: slskd is not logged in"
 
+        t9, m9 = format_notification(
+            "health_issue",
+            {
+                "label": "Indexer Prowlarr",
+                "message": "Connection refused",
+                "since": "2026-10-28 12:00:00",
+            },
+        )
+        assert t9 == "Indexer Prowlarr: problem"
+        assert m9 == "Connection refused (failing since 2026-10-28 12:00:00)."
+
+        t10, m10 = format_notification(
+            "health_recovered",
+            {
+                "label": "Indexer Prowlarr",
+            },
+        )
+        assert t10 == "Indexer Prowlarr: back to normal"
+        assert m10 == "Indexer Prowlarr is working again."
+
+        t11, m11 = format_notification(
+            "download_stalled",
+            {
+                "artist": "Daft Punk",
+                "title": "Discovery",
+                "minutes": 65,
+                "client": "qBittorrent",
+            },
+        )
+        assert t11 == "Download stalled: Daft Punk - Discovery"
+        assert m11 == "No progress for 65 minutes on qBittorrent."
+
+        t12, m12 = format_notification(
+            "import_needs_attention",
+            {
+                "artist": "Daft Punk",
+                "title": "Discovery",
+                "reason": "2 unmatched files held.",
+            },
+        )
+        assert t12 == "Import needs attention: Daft Punk - Discovery"
+        assert m12 == "2 unmatched files held. Open the queue to import it by hand."
+
     @patch("httpx.Client.post")
     def test_send_discord_payload_structure(self, mock_post):
         mock_resp = MagicMock()

@@ -621,6 +621,10 @@ class NotificationEvent(str, Enum):
     ISSUE_RESOLVED = "issue_resolved"
     QUALITY_UNAVAILABLE = "quality_unavailable"
     SOURCE_UNAVAILABLE = "source_unavailable"
+    HEALTH_ISSUE = "health_issue"
+    HEALTH_RECOVERED = "health_recovered"
+    DOWNLOAD_STALLED = "download_stalled"
+    IMPORT_NEEDS_ATTENTION = "import_needs_attention"
 
 
 @dataclass
