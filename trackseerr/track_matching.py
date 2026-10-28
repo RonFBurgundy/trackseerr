@@ -83,6 +83,21 @@ MATCH_WEAK = "weak"
 MATCH_NONE = "none"
 
 
+def _durations_conflict(file_seconds: Any, track_seconds: Any) -> bool:
+    """True only when both are numbers > 0 and abs(a - b) > max(30.0, 0.15 * max(a, b))."""
+    if file_seconds is None or track_seconds is None:
+        return False
+    try:
+        a = float(file_seconds)
+        b = float(track_seconds)
+    except (TypeError, ValueError):
+        return False
+    if a <= 0 or b <= 0:
+        return False
+    return abs(a - b) > max(30.0, 0.15 * max(a, b))
+
+
+
 
 def reconcile_audio_file_to_track_scored(  # noqa: C901
     meta: dict[str, Any],
@@ -149,17 +164,18 @@ def reconcile_audio_file_to_track_scored(  # noqa: C901
         clean_meta = clean_library_name(Path(meta["file_path"]).stem)
 
     if clean_meta:
+        file_dur = meta.get("duration") or meta.get("duration_seconds")
         # Exact clean title match
         exact_title_matches = [
             t
             for t in candidate_tracks
             if clean_library_name(t.get("title") or "") == clean_meta
+            and not _durations_conflict(file_dur, t.get("duration_seconds"))
         ]
         if len(exact_title_matches) == 1:
             return exact_title_matches[0], MATCH_STRONG
         elif len(exact_title_matches) > 1:
             # 3. Duration tolerance match (within 5 seconds) if multiple candidates match title
-            file_dur = meta.get("duration") or meta.get("duration_seconds")
             if file_dur is not None:
                 dur_matches = [
                     t
@@ -179,6 +195,8 @@ def reconcile_audio_file_to_track_scored(  # noqa: C901
         # Fuzzy title match with ratio >= 0.85
         fuzzy_candidates: list[tuple[float, dict[str, Any]]] = []
         for t in candidate_tracks:
+            if _durations_conflict(file_dur, t.get("duration_seconds")):
+                continue
             clean_t = clean_library_name(t.get("title") or "")
             if not clean_t:
                 continue
@@ -194,7 +212,6 @@ def reconcile_audio_file_to_track_scored(  # noqa: C901
                 return top_matches[0], MATCH_WEAK
 
             # 3. Duration tolerance match if multiple fuzzy candidates
-            file_dur = meta.get("duration") or meta.get("duration_seconds")
             if file_dur is not None:
                 dur_matches = [
                     t
@@ -258,6 +275,78 @@ def _fingerprint_fallback_match(
 
 
 
+def _album_sort_preference(db: Database, alb: dict[str, Any]) -> tuple[int, int]:
+    is_album = 1 if alb.get("album_type") == "album" else 0
+    track_count = 0
+    total = alb.get("total_tracks")
+    if total is not None:
+        try:
+            track_count = int(total)
+        except (TypeError, ValueError):
+            track_count = 0
+    if track_count <= 0 and alb.get("id"):
+        track_count = len(db.list_library_tracks(album_id=str(alb["id"]), limit=1000))
+    return (is_album, track_count)
+
+
+def _resolve_candidate_artist_id(
+    db: Database,
+    target_album: Optional[dict[str, Any]],
+    art_cand: Optional[dict[str, Any]],
+    art_name_cand: Optional[str],
+) -> Optional[str]:
+    if target_album:
+        return str(target_album.get("artist_id") or "")
+    if art_cand:
+        return str(art_cand.get("id") or "")
+    if art_name_cand:
+        artist_row = db.get_library_artist_by_name(art_name_cand)
+        if artist_row:
+            return str(artist_row.get("id") or "")
+    return None
+
+
+def _find_sibling_albums(
+    db: Database,
+    artist_id: str,
+    lookup_title: str,
+    target_album: Optional[dict[str, Any]],
+) -> tuple[Optional[dict[str, Any]], list[dict[str, Any]]]:
+    norm_lookup = norm_title(lookup_title)
+    if not norm_lookup:
+        return target_album, []
+    candidates = [
+        a
+        for a in db.list_library_albums(artist_id=artist_id, limit=1000)
+        if norm_title(a.get("title") or "") == norm_lookup
+    ]
+    if not target_album and candidates:
+        candidates.sort(key=lambda a: _album_sort_preference(db, a), reverse=True)
+        return candidates[0], candidates[1:]
+    if target_album:
+        target_id = str(target_album.get("id") or "")
+        return target_album, [a for a in candidates if str(a.get("id") or "") != target_id]
+    return None, []
+
+
+def _collect_tracks_deduped(
+    db: Database,
+    target_album: Optional[dict[str, Any]],
+    siblings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    expected_tracks: list[dict[str, Any]] = []
+    seen_track_ids: set[str] = set()
+    albums = ([target_album] if target_album else []) + siblings
+    for alb in albums:
+        for t in db.list_library_tracks(album_id=str(alb["id"]), limit=1000):
+            tid = str(t.get("id") or "")
+            if not tid or tid not in seen_track_ids:
+                if tid:
+                    seen_track_ids.add(tid)
+                expected_tracks.append(t)
+    return expected_tracks
+
+
 def resolve_download_expected_tracks(
     db: Database,
     item: dict[str, Any],
@@ -276,21 +365,27 @@ def resolve_download_expected_tracks(
         if req_track:
             target_album = db.get_library_album(req_track["album_id"])
 
-    if not target_album:
-        art_name_cand = item.get("artist") or (req.get("artist") if req else None)
-        alb_title_cand = (
-            (item.get("title") if item.get("item_type") == "album" else None)
-            or (req.get("album") or req.get("title") if req else None)
-            or item.get("title")
-        )
-        if art_name_cand and alb_title_cand:
-            art_cand = db.get_library_artist_by_name(art_name_cand)
-            if art_cand:
-                target_album = db.get_library_album_by_title(art_cand["id"], alb_title_cand)
+    art_name_cand = item.get("artist") or (req.get("artist") if req else None)
+    alb_title_cand = (
+        (item.get("title") if item.get("item_type") == "album" else None)
+        or (req.get("album") if req else None)
+        or (target_album.get("title") if target_album else None)
+        or (req.get("title") if req else None)
+        or item.get("title")
+    )
+    art_cand = None
+    if not target_album and art_name_cand and alb_title_cand:
+        art_cand = db.get_library_artist_by_name(art_name_cand)
+        if art_cand:
+            target_album = db.get_library_album_by_title(art_cand["id"], alb_title_cand)
 
-    expected_tracks: list[dict[str, Any]] = []
-    if target_album:
-        expected_tracks = db.list_library_tracks(album_id=target_album["id"], limit=1000)
+    siblings: list[dict[str, Any]] = []
+    if not item.get("album_id") and alb_title_cand:
+        artist_id = _resolve_candidate_artist_id(db, target_album, art_cand, art_name_cand)
+        if artist_id:
+            target_album, siblings = _find_sibling_albums(db, artist_id, alb_title_cand, target_album)
+
+    expected_tracks = _collect_tracks_deduped(db, target_album, siblings)
     return target_album, expected_tracks
 
 

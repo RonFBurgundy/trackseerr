@@ -29,6 +29,8 @@ _NOISE = re.compile(
     r"|album\s+version"
     r"|(?:mono|stereo|explicit|clean|bonus\s+track)(?:\s+version)?"
     r"|deluxe(?:\s+(?:edition|version))?"
+    r"|(?:platinum|expanded|special|limited|collector'?s|anniversary|super\s+deluxe|remastered|(?:\d+(?:st|nd|rd|th)\s+)?anniversary)\s+edition"
+    r"|\d{4}\s+edition"
     r")$"
 )
 
