@@ -78,6 +78,7 @@ from trackseerr.track_matching import (
     find_owned_for_item,
     reconcile_audio_file_to_track_scored,
     resolve_download_expected_tracks,
+    same_song_title,
     wanted_song,
 )
 
@@ -254,6 +255,7 @@ class _ImportJob:
     target_summary: Optional[str] = None
     should_keep_seeding: bool = False
     duplicate_owned_title: Optional[str] = None
+    duplicate_owned_track_id: Optional[str] = None
 
 
 
@@ -770,6 +772,8 @@ class ImportPipelineMixin(ImportCatalogMixin):
         job.duplicate_files.append(str(af))
         if not job.duplicate_owned_title and matched.get("title"):
             job.duplicate_owned_title = str(matched["title"])
+        if not job.duplicate_owned_track_id and matched.get("id"):
+            job.duplicate_owned_track_id = str(matched["id"])
         return True
 
     def _place_one_file(  # noqa: C901, PLR0915
@@ -867,6 +871,8 @@ class ImportPipelineMixin(ImportCatalogMixin):
                 job.duplicate_files.append(str(af))
                 if not job.duplicate_owned_title and owned.get("title"):
                     job.duplicate_owned_title = str(owned["title"])
+                if not job.duplicate_owned_track_id and owned.get("id"):
+                    job.duplicate_owned_track_id = str(owned["id"])
                 return
             matched_expected_track = self._cross_album_match(db, ctx, job, metadata, duration)
             if matched_expected_track is None:
@@ -1095,6 +1101,52 @@ class ImportPipelineMixin(ImportCatalogMixin):
             return False
         return True
 
+    def _owned_alias_for_wanted(
+        self,
+        db: Database,
+        job: _ImportJob,
+        title: str,
+        dur: Optional[float],
+    ) -> Optional[dict[str, Any]]:
+        """Finds an owned duplicate track alias for a wanted song when titles match and durations don't conflict."""
+        track_id = job.duplicate_owned_track_id
+        if not track_id:
+            return None
+        try:
+            trk = db.get_library_track(track_id)
+            f = db.get_library_file_for_track(track_id)
+        except sqlite3.Error as exc:
+            logger.warning("Failed to lookup duplicate owned track %s: %s", track_id, exc)
+            return None
+        if not trk or not f:
+            return None
+        if not same_song_title(trk.get("title"), title):
+            return None
+        trk_dur = trk.get("duration_seconds")
+        try:
+            trk_dur_val = float(trk_dur) if trk_dur is not None else None
+        except (ValueError, TypeError):
+            trk_dur_val = None
+        try:
+            dur_val = float(dur) if dur is not None else None
+        except (ValueError, TypeError):
+            dur_val = None
+        if (
+            dur_val is not None
+            and dur_val > 0
+            and trk_dur_val is not None
+            and trk_dur_val > 0
+            and abs(dur_val - trk_dur_val) > 5.0
+        ):
+            return None
+        logger.info(
+            "Download %s: wanted '%s' is owned as '%s'",
+            job.download_id,
+            title,
+            trk.get("title"),
+        )
+        return {**trk, "cutoff_met": bool(f.get("cutoff_met"))}
+
     def _settle_duplicate(
         self,
         db: Database,
@@ -1137,6 +1189,10 @@ class ImportPipelineMixin(ImportCatalogMixin):
             if title
             else None
         )
+        if title and not has_file and not (owned and owned.get("cutoff_met")):
+            alias_owned = self._owned_alias_for_wanted(db, job, title, dur)
+            if alias_owned:
+                owned = alias_owned
         satisfied = has_file or bool(owned and owned.get("cutoff_met"))
 
         status_msg = (

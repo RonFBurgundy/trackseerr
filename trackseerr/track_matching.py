@@ -63,7 +63,11 @@ def _number_match_title_ok(track_title: str, file_title: str) -> bool:
     """A disc+track number match only counts when the titles are compatible (same song, same version)."""
     if not clean_library_name(file_title):
         return True
-    if titles_match(track_title, file_title):
+    if (
+        titles_match(track_title, file_title)
+        or same_song_title(track_title, file_title)
+        or same_song_title(file_title, track_title)
+    ):
         return True
     if _title_qualifiers(track_title) != _title_qualifiers(file_title):
         return False
