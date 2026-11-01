@@ -18,7 +18,7 @@ const Gauge: React.FC<GaugeProps> = ({ label, value }) => (
 export const TaskResourceStrip: React.FC = React.memo(() => {
   const { resources, error } = useSystemResources();
   return (
-    <section aria-label="Process resources">
+    <section id="task-resources-strip" aria-label="Process resources">
       <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <Gauge label="CPU" value={formatPercent(resources?.cpu_percent)} />
         <Gauge label="Memory (RSS)" value={formatRss(resources?.rss_bytes)} />

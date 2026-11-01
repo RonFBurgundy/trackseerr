@@ -30,7 +30,7 @@ export const CustomFormatsPage: React.FC<CustomFormatsPageProps> = ({ enabled, o
 
   return (
     <div className="flex min-h-0 flex-col gap-3">
-      <MachinedCard className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+      <MachinedCard id="custom-formats-overview" className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs font-mono text-neutral-400">
           Custom formats tag releases by title, group, size, source and more. Give them scores in a quality profile; they import from Lidarr/Servarr
           JSON.
