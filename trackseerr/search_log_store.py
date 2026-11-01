@@ -84,6 +84,19 @@ class SearchLogStoreMixin:
             ).fetchone()
         return int(row[0]) if row else 0
 
+    def recent_search_stats(self, days: int = 14) -> dict[str, tuple[int, str]]:
+        """Grouped search counts and latest search time for items searched within the last N days."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT COALESCE(track_id, album_id, request_id) AS k, COUNT(*), MAX(created_at) "
+                "FROM search_log "
+                "WHERE rung = 1 AND error IS NULL AND created_at >= datetime('now', ?) "
+                "AND COALESCE(track_id, album_id, request_id) IS NOT NULL "
+                "GROUP BY k",
+                (f"-{int(days)} days",),
+            ).fetchall()
+        return {str(row[0]): (int(row[1]), str(row[2])) for row in rows}
+
     def search_log_index(
         self,
         sort_dir: str = "desc",

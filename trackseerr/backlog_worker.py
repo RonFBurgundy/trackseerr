@@ -207,6 +207,12 @@ def _matches_request(candidate: AcquisitionSearchResult, req: dict[str, Any]) ->
 
 # A track searched this recently is not searched again by a manual Wanted search.
 RECENT_SEARCH_WINDOW = timedelta(minutes=10)
+BACKOFF_WINDOW_DAYS = 14
+BACKOFF_STEPS: tuple[tuple[int, timedelta], ...] = (
+    (24, timedelta(hours=24)),
+    (16, timedelta(hours=12)),
+    (8, timedelta(hours=6)),
+)
 
 
 @dataclass(frozen=True)
@@ -248,6 +254,38 @@ def _searched_since(value: Any, cutoff: datetime) -> bool:
     return parsed >= cutoff
 
 
+def backoff_wait(count: int) -> Optional[timedelta]:
+    """First step whose threshold <= count, else None."""
+    for threshold, wait in BACKOFF_STEPS:
+        if count >= threshold:
+            return wait
+    return None
+
+
+def is_backed_off(
+    stats: dict[str, tuple[int, str]],
+    key: Optional[str],
+    now: datetime,
+) -> bool:
+    """True if key has reached backoff search counts and last search is within the backoff wait window."""
+    if not key or key not in stats:
+        return False
+    count, last_str = stats[key]
+    wait = backoff_wait(count)
+    if wait is None:
+        return False
+    try:
+        last = datetime.fromisoformat(str(last_str).strip().replace("Z", "+00:00"))
+    except (ValueError, TypeError) as exc:
+        logger.debug("Unparseable created_at in search backoff stats for key %s (%r): %s", key, last_str, exc)
+        return False
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return (now - last) < wait
+
+
 @dataclass
 class _SweepCollect:
     """Encapsulates cross-phase state during backlog sweep collection."""
@@ -279,11 +317,14 @@ class _SweepCollect:
 def _record_sweep_event(db: Database, stats: dict[str, int], stopped_offline: bool) -> None:
     checked = stats.get("items_checked", 0)
     grabbed = stats.get("items_grabbed", 0)
+    skipped = stats.get("items_backed_off", 0)
     if stopped_offline:
         msg = f"Backlog sweep stopped: Soulseek is not connected ({checked} items checked, {grabbed} grabbed)"
         sev = "warning"
     else:
         msg = f"Backlog sweep completed: {checked} items checked, {grabbed} grabbed"
+        if skipped > 0:
+            msg += f", {skipped} skipped (searched often with no luck)"
         sev = "info"
     try:
         db.record_event(
@@ -919,6 +960,7 @@ class WantedBacklogWorker:
             "items_checked": 0,
             "items_grabbed": 0,
             "errors": 0,
+            "items_backed_off": 0,
         }
         items = self._collect_sweep_items(db, stats)
         if items is None:
@@ -928,6 +970,13 @@ class WantedBacklogWorker:
                 self.errors += stats["errors"]
             return stats
 
+        try:
+            search_stats = db.recent_search_stats(BACKOFF_WINDOW_DAYS)
+        except sqlite3.Error as exc:
+            logger.warning("Failed to query recent search stats for backoff: %s", exc)
+            search_stats = {}
+
+        now = datetime.now(timezone.utc)
         stopped_offline = False
         for item in items:
             if self._stop_event.is_set():
@@ -936,6 +985,12 @@ class WantedBacklogWorker:
 
             artist, title = item[0], item[1]
             if not artist or not title:
+                continue
+
+            raw_key = item[8] if item[8] is not None else (item[9] if item[9] is not None else item[4])
+            key = str(raw_key) if raw_key is not None else None
+            if is_backed_off(search_stats, key, now):
+                stats["items_backed_off"] += 1
                 continue
 
             self._search_sweep_item(db, item, stats)
@@ -1485,4 +1540,8 @@ __all__ = [
     "backlog_worker",
     "rss_worker",
     "_matches_request",
+    "BACKOFF_WINDOW_DAYS",
+    "BACKOFF_STEPS",
+    "backoff_wait",
+    "is_backed_off",
 ]
