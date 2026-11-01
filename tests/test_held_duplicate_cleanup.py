@@ -695,3 +695,219 @@ def test_unmonitor_respects_duration(tmp_path: Path, db: Database):
     assert dl_row["error_message"] == "Discarded a file that is a different song you already own"
     assert db.get_library_track("trk-wanted")["monitored"] is True
 
+
+def test_combined_title_owned_satisfies_wanted_track(tmp_path: Path, db: Database):
+    music, staging, _, _, _, _, _ = _seed_prince(db, tmp_path, cutoff_met=True, with_download=False)
+    db.create_download_client(
+        DownloadClientConfig(id="c1", name="C", driver_type=DownloadDriverType.SLSKD, host_url="http://slskd:5030")
+    )
+    db.upsert_library_artist(LibraryArtist(id="art-dm", name="Depeche Mode", path=str(music / "Depeche Mode")))
+    db.upsert_library_album(LibraryAlbum(id="alb-a", artist_id="art-dm", title="Violator", year=1990))
+    db.upsert_library_album(LibraryAlbum(id="alb-b", artist_id="art-dm", title="Violator (2006 Remaster)", year=2006))
+
+    trk_owned = db.upsert_library_track(LibraryTrack(
+        id="trk-owned",
+        album_id="alb-a",
+        artist_id="art-dm",
+        title="Blue Dress / Interlude #3",
+        track_number=8,
+        disc_number=1,
+        duration_seconds=341.0,
+        monitored=True,
+    ))
+    db.upsert_library_file(LibraryFile(
+        id="f-owned",
+        track_id="trk-owned",
+        file_path=str(music / "Depeche Mode" / "Violator" / "08.flac"),
+        relative_path="08.flac",
+        codec="FLAC",
+        size_bytes=1,
+        cutoff_met=True,
+    ))
+
+    db.upsert_library_track(LibraryTrack(
+        id="trk-wanted",
+        album_id="alb-b",
+        artist_id="art-dm",
+        title="Blue Dress - 2006 Remaster",
+        track_number=8,
+        disc_number=1,
+        duration_seconds=341.0,
+        monitored=True,
+    ))
+    db.create_request(
+        MusicRequest(
+            id="req-wanted",
+            user_id="u1",
+            item_type="track",
+            title="Blue Dress - 2006 Remaster",
+            artist="Depeche Mode",
+            status=RequestStatus.PENDING,
+        )
+    )
+
+    dl = staging / "Depeche.Mode.Blue.Dress.FLAC"
+    f = dl / "08.flac"
+    _flac(f)
+
+    db.create_active_download(
+        ActiveDownload(
+            id="dl-1",
+            client_id="c1",
+            title="Depeche.Mode.Blue.Dress.FLAC",
+            artist="Depeche Mode",
+            item_type="track",
+            status=DownloadStatus.DOWNLOADING.value,
+            download_hash="h1",
+            album_id="alb-b",
+            track_id="trk-wanted",
+            request_id="req-wanted",
+        )
+    )
+
+    driver = MagicMock()
+    driver.get_status.return_value = {
+        "status": DownloadStatus.COMPLETED.value,
+        "progress": 100.0,
+        "size_bytes": 1,
+        "speed_bps": 0,
+        "eta_seconds": 0,
+        "source_path": str(dl),
+        "error_message": None,
+    }
+    metas = {"08.flac": {"artist": "Depeche Mode", "title": "Blue Dress", "duration_seconds": 341.0}}
+
+    def inspect(path):
+        base = {
+            "artist": "Depeche Mode",
+            "album": "Violator (2006 Remaster)",
+            "disc_number": 1,
+            "codec": "FLAC",
+            "bits_per_sample": 16,
+            "bitrate": 900,
+            "sample_rate": 44100,
+            "extension": ".flac",
+        }
+        return {**base, **metas.get(Path(path).name, {})}
+
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+        AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
+
+    dl_row = db.get_active_download("dl-1")
+    assert dl_row["status"] == DownloadStatus.IMPORTED.value
+    assert "Already in library — duplicate discarded" in (dl_row.get("error_message") or "")
+    assert db.get_library_track("trk-wanted")["monitored"] is False
+    assert db.get_request("req-wanted")["status"] == "available"
+
+
+def test_article_less_owned_satisfies_wanted_track(tmp_path: Path, db: Database):
+    music, staging, _, _, _, _, _ = _seed_prince(db, tmp_path, cutoff_met=True, with_download=False)
+    db.create_download_client(
+        DownloadClientConfig(id="c1", name="C", driver_type=DownloadDriverType.SLSKD, host_url="http://slskd:5030")
+    )
+    db.upsert_library_artist(LibraryArtist(id="art-jm", name="Joni Mitchell", path=str(music / "Joni Mitchell")))
+    db.upsert_library_album(LibraryAlbum(id="alb-a", artist_id="art-jm", title="Court and Spark", year=1974))
+    db.upsert_library_album(LibraryAlbum(id="alb-b", artist_id="art-jm", title="Court and Spark", year=2022))
+
+    trk_owned = db.upsert_library_track(LibraryTrack(
+        id="trk-owned",
+        album_id="alb-a",
+        artist_id="art-jm",
+        title="Same Situation",
+        track_number=6,
+        disc_number=1,
+        duration_seconds=177.0,
+        monitored=True,
+    ))
+    db.upsert_library_file(LibraryFile(
+        id="f-owned",
+        track_id="trk-owned",
+        file_path=str(music / "Joni Mitchell" / "Court and Spark" / "06.flac"),
+        relative_path="06.flac",
+        codec="FLAC",
+        size_bytes=1,
+        cutoff_met=True,
+    ))
+
+    db.upsert_library_track(LibraryTrack(
+        id="trk-wanted",
+        album_id="alb-b",
+        artist_id="art-jm",
+        title="The Same Situation",
+        track_number=6,
+        disc_number=1,
+        duration_seconds=178.0,
+        monitored=True,
+    ))
+    db.create_request(
+        MusicRequest(
+            id="req-wanted",
+            user_id="u1",
+            item_type="track",
+            title="The Same Situation",
+            artist="Joni Mitchell",
+            status=RequestStatus.PENDING,
+        )
+    )
+
+    dl = staging / "Joni.Mitchell.The.Same.Situation.FLAC"
+    f = dl / "06.flac"
+    _flac(f)
+
+    db.create_active_download(
+        ActiveDownload(
+            id="dl-1",
+            client_id="c1",
+            title="Joni Mitchell - The Same Situation",
+            artist="Joni Mitchell",
+            item_type="track",
+            status=DownloadStatus.DOWNLOADING.value,
+            download_hash="h1",
+            album_id=None,
+            track_id="trk-wanted",
+            request_id="req-wanted",
+        )
+    )
+
+    driver = MagicMock()
+    driver.get_status.return_value = {
+        "status": DownloadStatus.COMPLETED.value,
+        "progress": 100.0,
+        "size_bytes": 1,
+        "speed_bps": 0,
+        "eta_seconds": 0,
+        "source_path": str(dl),
+        "error_message": None,
+    }
+    metas = {"06.flac": {"artist": "Joni Mitchell", "title": "Same Situation", "duration_seconds": 177.0}}
+
+    def inspect(path):
+        base = {
+            "artist": "Joni Mitchell",
+            "album": "Court and Spark",
+            "disc_number": 1,
+            "codec": "FLAC",
+            "bits_per_sample": 16,
+            "bitrate": 900,
+            "sample_rate": 44100,
+            "extension": ".flac",
+        }
+        return {**base, **metas.get(Path(path).name, {})}
+
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
+         patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+        AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
+
+    dl_row = db.get_active_download("dl-1")
+    assert dl_row["status"] == DownloadStatus.IMPORTED.value
+    assert "Already in library — duplicate discarded" in (dl_row.get("error_message") or "")
+    assert db.get_library_track("trk-wanted")["monitored"] is False
+    assert db.get_request("req-wanted")["status"] == "available"
+
