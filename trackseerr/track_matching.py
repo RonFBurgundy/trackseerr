@@ -3,6 +3,7 @@
 import difflib
 import logging
 from pathlib import Path
+import re
 from typing import Any, Optional
 
 
@@ -395,6 +396,36 @@ def resolve_download_expected_tracks(
     return target_album, expected_tracks
 
 
+_LEADING_ARTICLE_RE = re.compile(r"^(?:the|a|an)\s+", re.IGNORECASE)
+
+
+def _strip_leading_article(text: str) -> str:
+    return _LEADING_ARTICLE_RE.sub("", text).strip()
+
+
+def same_song_title(owned_title: Any, wanted_title: Any) -> bool:
+    """Returns True when owned_title and wanted_title refer to the same song."""
+    if titles_match(owned_title, wanted_title):
+        return True
+
+    norm_owned = norm_title(owned_title)
+    norm_wanted = norm_title(wanted_title)
+    if norm_owned and norm_wanted:
+        art_owned = _strip_leading_article(norm_owned)
+        art_wanted = _strip_leading_article(norm_wanted)
+        if art_owned and art_owned == art_wanted:
+            return True
+
+    owned_raw = str(owned_title or "")
+    wanted_raw = str(wanted_title or "")
+    if " / " in owned_raw and " / " not in wanted_raw:
+        first_segment = owned_raw.split(" / ", 1)[0].strip()
+        if titles_match(first_segment, wanted_title):
+            return True
+
+    return False
+
+
 def match_owned_equivalent(
     candidates: list[dict[str, Any]],
     title: str,
@@ -404,11 +435,10 @@ def match_owned_equivalent(
     """Matches a title against candidate tracks using normalized title and duration tolerance."""
     if not norm_title(title):
         return None
-    matched: list[dict[str, Any]] = []
+    exact_matched: list[dict[str, Any]] = []
+    loose_matched: list[dict[str, Any]] = []
     for track in candidates:
         if exclude_track_id is not None and str(track.get("id")) == str(exclude_track_id):
-            continue
-        if not titles_match(track.get("title"), title):
             continue
         cand_dur = track.get("duration_seconds")
         try:
@@ -419,21 +449,34 @@ def match_owned_equivalent(
             target_dur_val = float(duration_seconds) if duration_seconds is not None else None
         except (ValueError, TypeError):
             target_dur_val = None
-        if (
-            target_dur_val is not None
-            and target_dur_val > 0
-            and cand_dur_val is not None
-            and cand_dur_val > 0
-            and abs(target_dur_val - cand_dur_val) > 5.0
-        ):
-            continue
-        matched.append(track)
-    if not matched:
-        return None
-    for cand in matched:
-        if cand.get("cutoff_met"):
-            return cand
-    return matched[0]
+
+        if titles_match(track.get("title"), title):
+            if (
+                target_dur_val is not None
+                and target_dur_val > 0
+                and cand_dur_val is not None
+                and cand_dur_val > 0
+                and abs(target_dur_val - cand_dur_val) > 5.0
+            ):
+                continue
+            exact_matched.append(track)
+        elif same_song_title(track.get("title"), title):
+            if (
+                target_dur_val is not None
+                and target_dur_val > 0
+                and cand_dur_val is not None
+                and cand_dur_val > 0
+                and abs(target_dur_val - cand_dur_val) <= 5.0
+            ):
+                loose_matched.append(track)
+
+    for pool in (exact_matched, loose_matched):
+        if pool:
+            for cand in pool:
+                if cand.get("cutoff_met"):
+                    return cand
+            return pool[0]
+    return None
 
 
 def wanted_song(db: Database, item: dict[str, Any]) -> tuple[Optional[str], Optional[float]]:
