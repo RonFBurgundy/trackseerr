@@ -554,6 +554,11 @@ class TestCalendarLidarrMode:
 # 5. RFC 5545 iCal Feed Tests
 # =========================================================================
 
+def _feed_date(offset_days: int) -> str:
+    """Return an ISO-8601 date string relative to today inside the feed window."""
+    return (date.today() + timedelta(days=offset_days)).isoformat()
+
+
 class TestCalendarIcsFeed:
     def test_feed_auth_mechanisms(self, app_and_client, test_db, admin_headers, alice_headers):
         _, client = app_and_client
@@ -589,6 +594,10 @@ class TestCalendarIcsFeed:
         _, client = app_and_client
 
         # Seed an album with characters needing RFC 5545 escaping: commas, semicolons, backslashes, newlines
+        release_dt = _feed_date(14)
+        expected_dtstart = release_dt.replace("-", "")
+        end_dt = (date.fromisoformat(release_dt) + timedelta(days=1)).strftime("%Y%m%d")
+
         test_db.upsert_library_artist(
             LibraryArtist(
                 id="art-special",
@@ -603,7 +612,7 @@ class TestCalendarIcsFeed:
                 artist_id="art-special",
                 title="A Very Long Album Title: Commas, Semicolons; And Extra Text That Easily Exceeds Seventy-Five Octets For Testing Line Folding",
                 clean_title="a very long album title",
-                release_date="2026-11-15",
+                release_date=release_dt,
                 monitored=True,
                 total_tracks=12,
             )
@@ -629,8 +638,8 @@ class TestCalendarIcsFeed:
         # Event fields
         assert "BEGIN:VEVENT\r\n" in body
         assert "UID:album-alb-special-1@trackseerr\r\n" in body
-        assert "DTSTART;VALUE=DATE:20261115\r\n" in body
-        assert "DTEND;VALUE=DATE:20261116\r\n" in body
+        assert f"DTSTART;VALUE=DATE:{expected_dtstart}\r\n" in body
+        assert f"DTEND;VALUE=DATE:{end_dt}\r\n" in body
         assert "END:VEVENT\r\n" in body
 
         # Check line length constraint: RFC 5545 requires lines <= 75 octets (excluding CRLF)
@@ -656,7 +665,7 @@ class TestCalendarIcsFeed:
                 artist_id="art-m",
                 title="Mon Album",
                 clean_title="mon album",
-                release_date="2026-10-01",
+                release_date=_feed_date(14),
                 monitored=True,
             )
         )
@@ -666,7 +675,7 @@ class TestCalendarIcsFeed:
                 artist_id="art-u",
                 title="Unmon Album",
                 clean_title="unmon album",
-                release_date="2026-10-02",
+                release_date=_feed_date(15),
                 monitored=False,
             )
         )
