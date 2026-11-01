@@ -1,6 +1,7 @@
 import { settingsRouteFor } from '@/hooks/useAppRoute';
 import type { AppRoute, SettingsSection } from '@/hooks/useAppRoute';
 import { resolveSettingsRoute } from '@/components/settings/settingsTabs';
+import { NOTIFICATION_EVENTS } from '@/types/notifications';
 import { buildNavTree, routesEqual } from './navTree';
 import type { NavNode, RouteAccess } from './navTree';
 
@@ -296,5 +297,26 @@ export function buildNavSearchIndex(access: RouteAccess): NavSearchEntry[] {
       target: { elementId: def.elementId, anchor: def.anchor ?? def.label },
     });
   }
+
+  if (access.isAdmin) {
+    const notifRoute = settingsRouteFor('requests', 'notifications');
+    const visible = resolveSettingsRoute(notifRoute, access.isAdmin, access.mfaEnrollmentRequired);
+    if (routesEqual(visible, notifRoute)) {
+      const crumbs = pageLabel(notifRoute, tree);
+      if (crumbs) {
+        for (const event of NOTIFICATION_EVENTS) {
+          entries.push({
+            key: `notify:${event.id}`,
+            label: `${event.label} notification`,
+            breadcrumb: [...crumbs, event.label],
+            route: notifRoute,
+            keywords: ['notification', 'notify', 'alert', 'event', 'channel', ...event.label.toLowerCase().split(' ')],
+            target: { anchor: 'Add channel' },
+          });
+        }
+      }
+    }
+  }
+
   return entries;
 }
