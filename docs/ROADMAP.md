@@ -8,12 +8,12 @@ To ask for something, [open a feature request](https://github.com/RonFBurgundy/t
 
 - **First tagged release.** Stable settings, a stable API, and versioned images.
 - **Spotify account sign-in.** With your own Spotify API keys, sign in to Spotify to sync your private and collaborative playlists and Liked Songs. Public playlists already work with or without keys.
-- **Emby.** Emby shares most of its API with Jellyfin, so support will reuse the Jellyfin adapter: per-user playlists, user import, rescans, and library health.
 
 ## Being considered
 
 - **Tidal playlists.** Import Tidal playlists by link, like Spotify and Deezer.
-- **More playlist sources.** Apple Music and YouTube Music playlist links.
+- **Emby.** Emby shares most of its API with Jellyfin, so support could reuse the Jellyfin adapter. On hold until someone asks for it.
+- **Apple Music playlists.** Import Apple Music playlists by link.
 
 ## Not planned
 
@@ -21,6 +21,8 @@ To ask for something, [open a feature request](https://github.com/RonFBurgundy/t
 
 ## Recently done
 
+- YouTube Music playlists by link.
+- Health checks with admin alerts, and a navigation search that finds every settings card.
 - Add and monitor artists straight from the Library or a Discover artist page.
 - Approved requests show up as Missing right away; the Requests page is paged and shows where each request came from (manual, playlist, discography, and so on).
 - MusicBrainz release matching and library-wide retagging with MusicBrainz IDs.
