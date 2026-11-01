@@ -666,6 +666,136 @@ class TestWantedBacklogWorker:
             assert stats["items_grabbed"] == 0
             mock_grab.assert_not_called()
 
+    def test_sweep_skips_backed_off_item(self, test_db, seeded_users):
+        worker = WantedBacklogWorker()
+        worker.pace_delay = 0.0
+
+        test_db.create_indexer(
+            {
+                "id": "idx-sweep-bo",
+                "name": "Prowlarr",
+                "indexer_type": "torznab",
+                "host_url": "http://127.0.0.1:9696/1",
+                "api_key": "key",
+                "enabled": True,
+            }
+        )
+        test_db.create_download_client(
+            {
+                "id": "c-sweep-bo",
+                "name": "qBit",
+                "driver_type": "qbittorrent",
+                "host_url": "http://127.0.0.1:8080",
+                "enabled": True,
+            }
+        )
+
+        req_a = MusicRequest(
+            id="req-bo-a",
+            user_id=seeded_users["alice"]["id"],
+            item_type="track",
+            title="Track A",
+            artist="Artist A",
+            status=RequestStatus.PENDING,
+        )
+        req_b = MusicRequest(
+            id="req-bo-b",
+            user_id=seeded_users["alice"]["id"],
+            item_type="track",
+            title="Track B",
+            artist="Artist B",
+            status=RequestStatus.PENDING,
+        )
+        test_db.create_request(req_a)
+        test_db.create_request(req_b)
+
+        # Seed 10 recent search_log rows for item A (last one 1 h ago)
+        for _ in range(10):
+            test_db.record_search(
+                source_name="slskd",
+                source_type="slskd",
+                query_artist="Artist A",
+                query_title="Track A",
+                rung=1,
+                request_id="req-bo-a",
+            )
+        test_db.conn.execute("UPDATE search_log SET created_at = datetime('now', '-1 hour') WHERE request_id = 'req-bo-a'")
+        test_db.conn.commit()
+
+        mock_grab = MagicMock(return_value={"success": True, "download_id": "dl-auto-1"})
+        with patch.object(acquisition_coordinator, "search_and_grab", mock_grab):
+            stats = worker.poll_once(test_db)
+            assert mock_grab.call_count == 1
+            assert mock_grab.call_args[1]["title"] == "Track B"
+            assert stats["items_backed_off"] == 1
+            assert stats["items_checked"] == 1
+
+        events = test_db.conn.execute("SELECT * FROM system_events WHERE event_type = 'backlog_sweep'").fetchall()
+        assert len(events) >= 1
+        assert "1 skipped (searched often with no luck)" in events[-1]["message"]
+
+    def test_sweep_backoff_does_not_affect_manual_search(self, test_db, seeded_users):
+        worker = WantedBacklogWorker()
+        worker.pace_delay = 0.0
+
+        test_db.create_indexer(
+            {
+                "id": "idx-sweep-bo-man",
+                "name": "Prowlarr",
+                "indexer_type": "torznab",
+                "host_url": "http://127.0.0.1:9696/1",
+                "api_key": "key",
+                "enabled": True,
+            }
+        )
+        test_db.create_download_client(
+            {
+                "id": "c-sweep-bo-man",
+                "name": "qBit",
+                "driver_type": "qbittorrent",
+                "host_url": "http://127.0.0.1:8080",
+                "enabled": True,
+            }
+        )
+
+        req_a = MusicRequest(
+            id="req-bo-man-a",
+            user_id=seeded_users["alice"]["id"],
+            item_type="track",
+            title="Track A",
+            artist="Artist A",
+            status=RequestStatus.PENDING,
+        )
+        test_db.create_request(req_a)
+
+        # Seed 10 recent search_log rows for item A (last one 1 h ago)
+        for _ in range(10):
+            test_db.record_search(
+                source_name="slskd",
+                source_type="slskd",
+                query_artist="Artist A",
+                query_title="Track A",
+                rung=1,
+                request_id="req-bo-man-a",
+            )
+        test_db.conn.execute("UPDATE search_log SET created_at = datetime('now', '-1 hour') WHERE request_id = 'req-bo-man-a'")
+        test_db.conn.commit()
+
+        target_a = {
+            "artist": "Artist A",
+            "title": "Track A",
+            "request_id": "req-bo-man-a",
+        }
+
+        mock_grab = MagicMock(return_value={"success": True, "download_id": "dl-man-1"})
+        with patch.object(acquisition_coordinator, "search_and_grab", mock_grab):
+            queued = worker.search_wanted_tracks(test_db, [target_a])
+            assert queued == 1
+            if worker.last_search_thread:
+                worker.last_search_thread.join(timeout=5.0)
+            mock_grab.assert_called_once()
+            assert mock_grab.call_args[1]["title"] == "Track A"
+
 
 # =============================================================================
 # 3. RSSSyncWorker Tests
