@@ -7,6 +7,7 @@
 """
 
 from difflib import SequenceMatcher
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import logging
@@ -226,6 +227,20 @@ class ReplacementSpec:
 
     issue_id: Optional[str] = None
     require_better: bool = False
+
+
+def _missing_ref(missing_id: Optional[int]) -> Optional[str]:
+    return f"missing:{missing_id}" if missing_id is not None else None
+
+
+def _backoff_key(item: tuple) -> Optional[str]:
+    if item[8] is not None:
+        return str(item[8])
+    if item[9] is not None:
+        return str(item[9])
+    if item[4] is not None:
+        return str(item[4])
+    return _missing_ref(item[5])
 
 
 def _search_trigger(
@@ -912,6 +927,9 @@ class WantedBacklogWorker:
         ) = item
 
         stats["items_checked"] += 1
+        trigger = _search_trigger(None, min_score)
+        if missing_id is not None and req_id is None and track_id is None and album_id is None:
+            trigger = dataclasses.replace(trigger, ref=_missing_ref(missing_id))
         try:
             res = acquisition_coordinator.search_and_grab(
                 artist=artist,
@@ -924,7 +942,7 @@ class WantedBacklogWorker:
                 min_score=min_score,
                 track_id=track_id,
                 album_id=album_id,
-                trigger=_search_trigger(None, min_score),
+                trigger=trigger,
             )
             if track_id and not acquisition_coordinator.soulseek_offline_flagged():
                 db.mark_tracks_searched([str(track_id)])
@@ -987,8 +1005,7 @@ class WantedBacklogWorker:
             if not artist or not title:
                 continue
 
-            raw_key = item[8] if item[8] is not None else (item[9] if item[9] is not None else item[4])
-            key = str(raw_key) if raw_key is not None else None
+            key = _backoff_key(item)
             if is_backed_off(search_stats, key, now):
                 stats["items_backed_off"] += 1
                 continue
@@ -1544,4 +1561,5 @@ __all__ = [
     "BACKOFF_STEPS",
     "backoff_wait",
     "is_backed_off",
+    "_backoff_key",
 ]

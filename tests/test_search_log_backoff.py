@@ -44,6 +44,18 @@ def test_recent_search_stats_groups_by_item(test_db):
     assert isinstance(stats["r1"][1], str)
 
 
+def test_recent_search_stats_keys_missing_trigger_ref(test_db):
+    for _ in range(3):
+        _rec(test_db, trigger_ref="missing:7")
+    for _ in range(2):
+        _rec(test_db, trigger_ref="issue-abc")
+
+    stats = test_db.recent_search_stats(days=14)
+    assert set(stats.keys()) == {"missing:7"}
+    assert stats["missing:7"][0] == 3
+    assert isinstance(stats["missing:7"][1], str)
+
+
 def test_recent_search_stats_ignores_old_rows(test_db):
     _rec(test_db, track_id="t1")
     _rec(test_db, track_id="t2")

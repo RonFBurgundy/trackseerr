@@ -734,6 +734,126 @@ class TestWantedBacklogWorker:
         assert len(events) >= 1
         assert "1 skipped (searched often with no luck)" in events[-1]["message"]
 
+    def test_sweep_backs_off_playlist_missing_track(self, test_db):
+        worker = WantedBacklogWorker()
+        worker.pace_delay = 0.0
+
+        test_db.create_indexer(
+            {
+                "id": "idx-sweep-pl-bo",
+                "name": "Prowlarr",
+                "indexer_type": "torznab",
+                "host_url": "http://127.0.0.1:9696/1",
+                "api_key": "key",
+                "enabled": True,
+            }
+        )
+        test_db.create_download_client(
+            {
+                "id": "c-sweep-pl-bo",
+                "name": "qBit",
+                "driver_type": "qbittorrent",
+                "host_url": "http://127.0.0.1:8080",
+                "enabled": True,
+            }
+        )
+
+        test_db.upsert_playlist("pl-bo-1", "Playlist Backoff", "spotify")
+        test_db.record_sync_result(
+            playlist_id="pl-bo-1",
+            status="success",
+            missing_tracks=[
+                {
+                    "title": "Track A",
+                    "artist": "Artist A",
+                    "album": "Album A",
+                    "url": "http://spotify/track/a",
+                },
+                {
+                    "title": "Track B",
+                    "artist": "Artist B",
+                    "album": "Album B",
+                    "url": "http://spotify/track/b",
+                },
+            ],
+        )
+        missing_tracks = test_db.get_missing_tracks()
+        missing_a = next(t for t in missing_tracks if t["title"] == "Track A")
+        id_a = missing_a["id"]
+
+        for _ in range(10):
+            test_db.record_search(
+                source_name="slskd",
+                source_type="slskd",
+                query_artist="Artist A",
+                query_title="Track A",
+                rung=1,
+                trigger_ref=f"missing:{id_a}",
+            )
+        test_db.conn.execute(
+            "UPDATE search_log SET created_at = datetime('now', '-1 hour') WHERE trigger_ref = ?",
+            (f"missing:{id_a}",),
+        )
+        test_db.conn.commit()
+
+        mock_grab = MagicMock(return_value={"success": True, "download_id": "dl-auto-1"})
+        with patch.object(acquisition_coordinator, "search_and_grab", mock_grab):
+            stats = worker._sweep(test_db)
+            assert mock_grab.call_count == 1
+            assert mock_grab.call_args[1]["title"] == "Track B"
+            assert stats["items_backed_off"] == 1
+            assert stats["items_checked"] == 1
+
+    def test_sweep_tags_missing_search_with_trigger_ref(self, test_db):
+        worker = WantedBacklogWorker()
+        worker.pace_delay = 0.0
+
+        test_db.create_indexer(
+            {
+                "id": "idx-sweep-pl-tag",
+                "name": "Prowlarr",
+                "indexer_type": "torznab",
+                "host_url": "http://127.0.0.1:9696/1",
+                "api_key": "key",
+                "enabled": True,
+            }
+        )
+        test_db.create_download_client(
+            {
+                "id": "c-sweep-pl-tag",
+                "name": "qBit",
+                "driver_type": "qbittorrent",
+                "host_url": "http://127.0.0.1:8080",
+                "enabled": True,
+            }
+        )
+
+        test_db.upsert_playlist("pl-tag-1", "Playlist Tag", "spotify")
+        test_db.record_sync_result(
+            playlist_id="pl-tag-1",
+            status="success",
+            missing_tracks=[
+                {
+                    "title": "Track Missing",
+                    "artist": "Artist Missing",
+                    "album": "Album Missing",
+                    "url": "http://spotify/track/missing",
+                },
+            ],
+        )
+        missing_tracks = test_db.get_missing_tracks()
+        missing_track = missing_tracks[0]
+        missing_id = missing_track["id"]
+
+        mock_grab = MagicMock(return_value={"success": True, "download_id": "dl-auto-2"})
+        with patch.object(acquisition_coordinator, "search_and_grab", mock_grab):
+            stats = worker._sweep(test_db)
+            assert mock_grab.call_count == 1
+            trigger = mock_grab.call_args[1]["trigger"]
+            assert trigger.ref == f"missing:{missing_id}"
+            assert trigger.kind == "wanted"
+            assert trigger.label == "Wanted search"
+
     def test_sweep_backoff_does_not_affect_manual_search(self, test_db, seeded_users):
         worker = WantedBacklogWorker()
         worker.pace_delay = 0.0

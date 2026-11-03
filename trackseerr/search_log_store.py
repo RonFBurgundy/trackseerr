@@ -88,10 +88,10 @@ class SearchLogStoreMixin:
         """Grouped search counts and latest search time for items searched within the last N days."""
         with self._lock:
             rows = self.conn.execute(
-                "SELECT COALESCE(track_id, album_id, request_id) AS k, COUNT(*), MAX(created_at) "
+                "SELECT COALESCE(track_id, album_id, request_id, CASE WHEN trigger_ref LIKE 'missing:%' THEN trigger_ref END) AS k, COUNT(*), MAX(created_at) "
                 "FROM search_log "
                 "WHERE rung = 1 AND error IS NULL AND created_at >= datetime('now', ?) "
-                "AND COALESCE(track_id, album_id, request_id) IS NOT NULL "
+                "AND COALESCE(track_id, album_id, request_id, CASE WHEN trigger_ref LIKE 'missing:%' THEN trigger_ref END) IS NOT NULL "
                 "GROUP BY k",
                 (f"-{int(days)} days",),
             ).fetchall()
