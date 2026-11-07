@@ -229,3 +229,25 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     (backend `feat/list-date-indexes`), then rails in the UI; Queue gets a position-only rail.
 34. **DONE 2026-10-15 · P3 · Library Retag and MusicBrainz Release Match report no progress** (`progress: null` while running,
     so the bar is indeterminate for a 70-minute task). Add current/total via `job_tracker` and `_task_progress`.
+
+## Post-1.0 features
+
+35. **P2 · Collect your way: ripping and buying, not only downloading** (requested 2026-11-07). Help users get music
+    through their own physical media and legitimate purchases, alongside indexers and Soulseek. Pieces, roughly in order:
+    - **"Getting it myself" state** on a wanted album/track: stops automatic searching (like an exclusion, but temporary)
+      and shows it on a "Collecting" list, so a planned rip or purchase doesn't race a download.
+    - **Rip and purchase inbox**: a watched folder per source (CD rips, store downloads). Files there go through the normal
+      manual-import path (AcoustID, MusicBrainz match, naming, quarantine) and are tagged with where they came from
+      (`rip`, `purchase:<store>`) in item history. Lossless rips/purchases count as the profile's top tier.
+    - **CD rips**: read EAC / XLD / whipper / dBpoweramp rip logs and CUE files next to the audio. Show AccurateRip /
+      CUETools verification, flag rips with errors, and use the disc ID (TOC) to pick the exact MusicBrainz release.
+    - **Where to buy**: "Buy" links on wanted albums and missing playlist songs, built from MusicBrainz URL relationships
+      (Bandcamp, Qobuz, 7digital, HDtracks, Beatport, Apple/Amazon) plus a search link for stores MusicBrainz doesn't list.
+      Links only: no store accounts, no scraping, no affiliate tracking.
+    - **Discogs**: import a user's Discogs collection (owned physical copies → "owned on vinyl/CD, not ripped yet") and
+      wantlist (→ wanted, optionally "getting it myself"); export TrackSeerr's wanted albums to the Discogs wantlist;
+      link wanted albums to their Discogs marketplace page. Uses the user's own Discogs token.
+    - **Bandcamp collection sync** (later): match purchases in the user's Bandcamp collection and offer to import the
+      downloaded files from the inbox.
+    Open questions: per-user or admin-only? Should owned physical copies count as "in library" for requests and
+    playlists? Store links need a UI pass under the no-new-elements rule (reuse the overflow menu).

@@ -11,6 +11,7 @@ To ask for something, [open a feature request](https://github.com/RonFBurgundy/t
 
 ## Being considered
 
+- **Collect your way.** Help you get music by ripping your CDs and buying from stores, not only downloading: a "getting it myself" state that pauses searching, an inbox folder for rips and purchases, CD rip log checks, "Buy" links on wanted albums, and Discogs collection and wantlist sync.
 - **Tidal playlists.** Import Tidal playlists by link, like Spotify and Deezer.
 - **Emby.** Emby shares most of its API with Jellyfin, so support could reuse the Jellyfin adapter. On hold until someone asks for it.
 - **Apple Music playlists.** Import Apple Music playlists by link.
